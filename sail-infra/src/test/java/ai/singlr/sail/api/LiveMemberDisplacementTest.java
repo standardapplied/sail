@@ -409,7 +409,7 @@ class LiveMemberDisplacementTest {
         refused.getMessage());
     assertEquals(
         "Check the sail-pty-host service on this box; the room's next message tries again.",
-        refused.failure().action());
+        refused.failure().remedy().plain());
     assertEquals("the host refused the dispatch credential", refused.getCause().getMessage());
 
     asked.set(0);

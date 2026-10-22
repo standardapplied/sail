@@ -15,7 +15,6 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostAccess;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -101,14 +100,7 @@ class NodeWritesTest {
     room("rajs", "raj");
     room("adas", "ada");
     operations =
-        OperationsFactory.create(
-                db,
-                SHELL,
-                null,
-                null,
-                SyncScheduler.disabled(),
-                SessionYield.NONE,
-                OperatorCommand.PLAIN)
+        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
             .useControlPlane(
                 db,
                 tempDir,
@@ -119,8 +111,7 @@ class NodeWritesTest {
                     () -> ADAS_NODE,
                     target -> {
                       throw new IOException("main unavailable");
-                    },
-                    OperatorCommand.PLAIN));
+                    }));
     server =
         new SailApiServer(
             "127.0.0.1",
@@ -172,7 +163,7 @@ class NodeWritesTest {
     var roomRun = socket("POST", "/v1/specs", reserveRun("ada", "room"), form());
     assertEquals(403, roomRun.status(), roomRun.body().toString());
     assertEquals(READ_ONLY, roomRun.body().get("error"), "and for a room run of the box's own FDE");
-    var access = new HostAccess(db, TestAuth.roles(db, ADAS_NODE), OperatorCommand.PLAIN);
+    var access = new HostAccess(db, TestAuth.roles(db, ADAS_NODE));
     var identity = access.identity(session, null);
     assertFalse(identity.admin(), "the terminal names no admin");
     var terminal = assertThrows(IOException.class, () -> access.admit("rajs", "acme", identity));
@@ -195,7 +186,7 @@ class NodeWritesTest {
         201,
         socket("POST", "/v1/specs", new BoxCredentialStore(db).replace("ada"), form()).status());
     assertEquals(201, socket("POST", "/v1/specs", reserveRun("ada", "build"), form()).status());
-    var access = new HostAccess(db, TestAuth.roles(db, ADAS_NODE), OperatorCommand.PLAIN);
+    var access = new HostAccess(db, TestAuth.roles(db, ADAS_NODE));
     access.admit("adas", "acme", access.identity(null, "ada"));
     assertEquals(5, count());
   }

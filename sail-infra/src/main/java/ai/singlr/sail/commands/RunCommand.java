@@ -16,7 +16,7 @@ import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
@@ -112,7 +112,7 @@ public final class RunCommand implements Runnable {
 
   public RunCommand() {
     this(
-        OperationsFactory::open,
+        operator -> OperationsFactory.open(operator::warn),
         LocalIdentity::detect,
         ShellExecutor::new,
         DispatchOperations.terminalLauncher());
@@ -141,7 +141,7 @@ public final class RunCommand implements Runnable {
 
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
-    name = CurrentProject.require(name, operator);
+    name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
 
     if (!json) {
@@ -159,7 +159,7 @@ public final class RunCommand implements Runnable {
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
 
-    ContainerStateGuard.requireRunning(state, name, operator);
+    ContainerStateGuard.requireRunning(state, name);
 
     if (!path.isBlank()) {
       validateSafePath(path, "--path");
@@ -335,9 +335,7 @@ public final class RunCommand implements Runnable {
           System.err.println(Banner.errorLine(e.getMessage(), Ansi.AUTO));
           autoRollback(shell, snapshotLabel, 1);
         }
-        var action = e.failure().action();
-        throw new IllegalStateException(
-            Strings.isBlank(action) ? e.getMessage() : e.getMessage() + " " + action, e);
+        throw Remedied.state(e.getMessage(), e.remedy(), e);
       }
       render(session, launchCommand.get(), branchName, operator);
     }
@@ -401,8 +399,7 @@ public final class RunCommand implements Runnable {
             terminal,
             listener,
             StopOperations.Listener.NONE),
-        new PtyHostYield(),
-        operator);
+        new PtyHostYield());
   }
 
   private void render(

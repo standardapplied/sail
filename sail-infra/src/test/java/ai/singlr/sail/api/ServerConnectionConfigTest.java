@@ -9,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.ClientConfig;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -39,8 +41,12 @@ class ServerConnectionConfigTest {
         assertThrows(
             IOException.class,
             () -> ServerConnectionConfig.resolve("http://localhost:7070", null, missingConfig()));
-    assertTrue(error.getMessage().contains("host service install"));
-    assertTrue(error.getMessage().contains("sail login"));
+    assertEquals(
+        "No API token configured — sail-api may not be installed or started on this box. On a dev"
+            + " box: sudo sail host service install (installs and starts the control plane).\n"
+            + "  On a thin client: sail login.\n"
+            + "  Or set SAIL_TOKEN, or pass --token-file.",
+        OperatorCommand.SUDO.render((Remedied) error));
   }
 
   @Test

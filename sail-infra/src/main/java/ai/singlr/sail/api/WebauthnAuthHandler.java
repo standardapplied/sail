@@ -8,9 +8,9 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.PasskeyCeremonies;
 import ai.singlr.sail.auth.PasskeyException;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Capability;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -50,15 +50,12 @@ public final class WebauthnAuthHandler implements HttpHandler {
   private final ApiAuth auth;
   private final List<String> origins;
   private final String enrollOrigin;
-  private final OperatorCommand operator;
 
   public WebauthnAuthHandler(
       PasskeyCeremonies ceremonies,
       EnrollmentTickets enrollment,
       ApiAuth auth,
-      List<String> origins,
-      OperatorCommand operator) {
-    this.operator = Objects.requireNonNull(operator, "operator");
+      List<String> origins) {
     this.ceremonies = ceremonies;
     this.enrollment = enrollment;
     this.auth = Objects.requireNonNull(auth, "auth");
@@ -82,7 +79,11 @@ public final class WebauthnAuthHandler implements HttpHandler {
           exchange,
           ApiResponse.error(
               new Result.Failure<>(
-                  ErrorCode.INTERNAL, "Passkey request failed.", "Check sail API logs.", null, e)));
+                  ErrorCode.INTERNAL,
+                  "Passkey request failed.",
+                  Remedy.of("Check sail API logs."),
+                  null,
+                  e)));
     } finally {
       exchange.close();
     }
@@ -96,9 +97,10 @@ public final class WebauthnAuthHandler implements HttpHandler {
       throw new ApiException(
           ErrorCode.PASSKEY_NOT_CONFIGURED,
           "Passkey login is not configured on this server.",
-          "Set the webauthn block in host.yaml or pass --origin to '"
-              + operator.sail("server start")
-              + "'.");
+          Remedy.of(
+              "Set the webauthn block in host.yaml or pass --origin to '",
+              Remedy.sail("server start"),
+              "'."));
     }
     var path = exchange.getRequestURI().getPath();
     try {

@@ -6,6 +6,8 @@
 package ai.singlr.sail.pty;
 
 import ai.singlr.sail.common.Ids;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.NameValidator;
 import java.io.IOException;
 import java.net.StandardProtocolFamily;
@@ -473,7 +475,7 @@ public final class PtySessionHost implements AutoCloseable {
           try {
             who = identify(token);
           } catch (IOException refused) {
-            reply(channel, new PtyMessage.Err(refused.getMessage()));
+            reply(channel, new PtyMessage.Err(Remedied.whole(refused)));
             return;
           }
           principal = who.fde();
@@ -668,7 +670,7 @@ public final class PtySessionHost implements AutoCloseable {
       cwd = requireValidCwd(m.cwd());
     } catch (IllegalArgumentException bad) {
       log("refused", who.fde(), m.session(), bad.getMessage());
-      return new PtyMessage.Err(bad.getMessage());
+      return new PtyMessage.Err(Remedied.whole(bad));
     }
     var existing = sessions.get(m.session());
     if (existing != null && !admitted(who, existing)) {
@@ -708,7 +710,8 @@ public final class PtySessionHost implements AutoCloseable {
         rooms.admit(room, m.project(), who);
       } catch (IllegalArgumentException | IOException refused) {
         return new PtyMessage.Err(
-            "Refusing room for session '" + m.session() + "': " + refused.getMessage());
+            Remedy.of("Refusing room for session '" + m.session() + "': ")
+                .then(Remedied.whole(refused)));
       }
     }
     if (existing != null) {
@@ -745,7 +748,8 @@ public final class PtySessionHost implements AutoCloseable {
       return new PtyMessage.Ok();
     } catch (IOException e) {
       deleteFiles(files, who.fde(), m.session());
-      return new PtyMessage.Err("Could not start session '" + m.session() + "': " + e.getMessage());
+      return new PtyMessage.Err(
+          Remedy.of("Could not start session '" + m.session() + "': ").then(Remedied.whole(e)));
     }
   }
 

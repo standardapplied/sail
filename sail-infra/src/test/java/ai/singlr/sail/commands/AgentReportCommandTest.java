@@ -39,9 +39,9 @@ class AgentReportCommandTest {
       Acting.system(
           () -> new ProjectStore(db).upsert("acme", "name: acme\nagent:\n  type: codex\n"));
     }
-    var acme = new AgentReportCommand(operator -> OperationsFactory.open(dbPath, operator));
+    var acme = new AgentReportCommand(operator -> OperationsFactory.open(dbPath));
     new CommandLine(acme).parseArgs("acme", "-f", "/abs/sail.yaml");
-    var absent = new AgentReportCommand(operator -> OperationsFactory.open(dbPath, operator));
+    var absent = new AgentReportCommand(operator -> OperationsFactory.open(dbPath));
     new CommandLine(absent).parseArgs("absent");
 
     assertEquals("codex", acme.definition(OperatorCommand.PLAIN).agent().type());
@@ -77,7 +77,7 @@ class AgentReportCommandTest {
       Acting.system(() -> new SpecStore(db).create(specRow("auth", "acme", "Add auth")));
       Acting.system(() -> new SpecStore(db).create(specRow("other", "elsewhere", "Unrelated")));
     }
-    var command = new AgentReportCommand(operator -> OperationsFactory.open(dbPath, operator));
+    var command = new AgentReportCommand(operator -> OperationsFactory.open(dbPath));
 
     var specs = command.projectSpecs("acme", OperatorCommand.PLAIN);
 

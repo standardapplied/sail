@@ -15,7 +15,6 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.HostAccess;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -118,14 +117,7 @@ class OneDecisionTest {
     agentRun = reserve("mine", null, "build");
     roomRun = reserve(null, "den", DispatchGate.ROOM_ROLE);
     operations =
-        OperationsFactory.create(
-                db,
-                SHELL,
-                null,
-                null,
-                SyncScheduler.disabled(),
-                SessionYield.NONE,
-                OperatorCommand.PLAIN)
+        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
             .useControlPlane(
                 db,
                 tempDir,
@@ -136,8 +128,7 @@ class OneDecisionTest {
                     () -> MAIN,
                     target -> {
                       throw new IOException("main unavailable");
-                    },
-                    OperatorCommand.PLAIN));
+                    }));
     server =
         new SailApiServer(
             "127.0.0.1",
@@ -190,7 +181,7 @@ class OneDecisionTest {
         http("PUT", "/v1/specs/theirs", session, "{\"title\":\"x\"}"), NOT_ADAS_SPEC);
     var cli =
         Actor.call(
-            CliOperator.of(ADAS_NODE, new FdeStore(db), OperatorCommand.PLAIN),
+            CliOperator.of(ADAS_NODE, new FdeStore(db)),
             () -> operations.updateGlobalSpec("theirs", retitle()));
     var failure = assertInstanceOf(Result.Failure.class, cli, "the host CLI");
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, failure.errorCode());
@@ -245,7 +236,7 @@ class OneDecisionTest {
         http("POST", "/v1/rooms/den/messages", session, "{\"body\":\"hi\"}"), NOT_ADAS_ROOM);
     var cli =
         Actor.call(
-            CliOperator.of(ADAS_NODE, new FdeStore(db), OperatorCommand.PLAIN),
+            CliOperator.of(ADAS_NODE, new FdeStore(db)),
             () ->
                 operations.postRoomMessage(
                     "den", new SpecMessageRequest("hi", null, false), "ada"));
@@ -258,7 +249,7 @@ class OneDecisionTest {
           "forbidden_not_assignee",
           NOT_ADAS_ROOM);
     }
-    var access = new HostAccess(db, TestAuth.roles(db, MAIN), OperatorCommand.PLAIN);
+    var access = new HostAccess(db, TestAuth.roles(db, MAIN));
     var terminal =
         assertThrows(
             IOException.class, () -> access.admit("den", "acme", access.identity(session, null)));

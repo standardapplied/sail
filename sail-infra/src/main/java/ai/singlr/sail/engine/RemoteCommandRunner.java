@@ -135,9 +135,9 @@ public final class RemoteCommandRunner {
         + config.user()
         + "' user. If access was denied:"
         + "\n    - not registered yet? an admin runs: "
-        + OperatorCommand.elsewhere("fde add <handle> --key \"<your pubkey>\"")
+        + OperatorCommand.SUDO.sail("fde add <handle> --key \"<your pubkey>\"")
         + "\n    - registered before the host ran 0.13.53+? upgrade the host, or run: "
-        + OperatorCommand.elsewhere("host keys sync");
+        + OperatorCommand.SUDO.sail("host keys sync");
   }
 
   List<String> buildSshCommand(String[] args, boolean interactive) {

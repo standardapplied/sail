@@ -102,8 +102,8 @@ class PtySessionHostHandoffTest {
     PtyWire.handshake(channel, channel);
     PtyWire.write(channel, new PtyMessage.Hello(token));
     var reply = PtyWire.read(channel);
-    if (reply instanceof PtyMessage.Err(var message)) {
-      throw new IOException(message);
+    if (reply instanceof PtyMessage.Err err) {
+      throw new IOException(err.message());
     }
     return channel;
   }

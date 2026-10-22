@@ -11,7 +11,7 @@ import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationHooks;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.StopOperations;
-import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.CliOperator;
@@ -84,14 +84,14 @@ public final class AgentSweepCommand implements Runnable {
 
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
-    name = CurrentProject.require(name, operator);
+    name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
 
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
 
-    ContainerStateGuard.requireRunning(state, name, operator);
+    ContainerStateGuard.requireRunning(state, name);
 
     var handle = Objects.toString(HostSync.handle(), "");
     var describeOnly = json || dryRun;
@@ -107,9 +107,7 @@ public final class AgentSweepCommand implements Runnable {
                 operations.identity()::operator,
                 () -> operations.dispatching().startAdhoc(name, request, handle));
       } catch (ApiException e) {
-        var action = e.failure().action();
-        throw new IllegalStateException(
-            Strings.isBlank(action) ? e.getMessage() : e.getMessage() + " " + action, e);
+        throw Remedied.state(e.getMessage(), e.remedy(), e);
       }
       render(session, launchCommand.get());
     }
@@ -143,8 +141,7 @@ public final class AgentSweepCommand implements Runnable {
             DispatchOperations.terminalLauncher(),
             listener,
             StopOperations.Listener.NONE),
-        new PtyHostYield(),
-        operator);
+        new PtyHostYield());
   }
 
   private void render(DispatchOperations.AdhocSession session, List<String> command) {

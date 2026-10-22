@@ -608,7 +608,7 @@ public final class UpgradeCommand implements Runnable {
   private void bootstrapAdminToken(Path dbPath, OperatorCommand operator) {
     try {
       SailPaths.ensureDataDir(dbPath.getParent());
-      try (var operations = OperationsFactory.open(dbPath, operator)) {
+      try (var operations = OperationsFactory.open(dbPath)) {
         if (operations.schema().version() == 0) {
           operations.schema().initialize();
         }

@@ -55,7 +55,7 @@ public final class AgentReviewCommand implements Runnable {
   @SuppressWarnings("unchecked")
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
-    project = CurrentProject.require(project, operator);
+    project = CurrentProject.require(project);
     NameValidator.requireValidProjectName(project);
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {

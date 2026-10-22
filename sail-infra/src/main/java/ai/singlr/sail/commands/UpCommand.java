@@ -83,8 +83,7 @@ public final class UpCommand implements Runnable {
         printTunnelHints(shell);
         printOvercommitHints(mgr, operator);
       }
-      case ContainerState.NotCreated ignored ->
-          throw new IllegalStateException(ContainerStateGuard.notCreated(name, operator));
+      case ContainerState.NotCreated ignored -> throw ContainerStateGuard.notCreated(name);
       case ContainerState.Error e ->
           throw new IllegalStateException("Container error: " + e.message());
     }

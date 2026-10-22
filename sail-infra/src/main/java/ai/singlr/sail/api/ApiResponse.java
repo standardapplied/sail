@@ -5,6 +5,10 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.YamlUtil;
+import com.sun.net.httpserver.HttpExchange;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -83,5 +87,17 @@ public record ApiResponse(
     return new ApiResponse(
         failure.errorCode().httpCode(),
         ApiJson.withSchema(new ErrorResponse(ApiError.from(failure))));
+  }
+
+  /** Answers {@code exchange} with {@code error} alone: its status and its error envelope. */
+  static void sendError(HttpExchange exchange, ApiException error) throws IOException {
+    var response = error(error.failure());
+    var body =
+        YamlUtil.dumpJson(new LinkedHashMap<>(response.body())).getBytes(StandardCharsets.UTF_8);
+    exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+    exchange.sendResponseHeaders(response.status(), body.length);
+    try (var output = exchange.getResponseBody()) {
+      output.write(body);
+    }
   }
 }

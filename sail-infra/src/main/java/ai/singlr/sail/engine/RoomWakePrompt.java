@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SpecStore;
@@ -175,8 +176,10 @@ public final class RoomWakePrompt {
         """
         .formatted(
             specId,
-            OperatorCommand.elsewhere(
-                "spec dispatch --project " + project + " --spec " + specId + " --restart"),
+            Remedy.of(
+                    Remedy.sail(
+                        "spec dispatch", "--project", project, "--spec", specId, "--restart"))
+                .plain(),
             specId);
   }
 

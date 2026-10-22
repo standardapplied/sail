@@ -14,7 +14,6 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.gen.SpecSkillGenerator;
@@ -69,7 +68,7 @@ class ProjectSkillsCommandTest {
   }
 
   private HostOperations operations() {
-    return OperationsFactory.open(database, OperatorCommand.PLAIN);
+    return OperationsFactory.open(database);
   }
 
   private void share(String path, String content) {

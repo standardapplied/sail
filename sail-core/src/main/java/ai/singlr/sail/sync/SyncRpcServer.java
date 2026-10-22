@@ -8,8 +8,9 @@ package ai.singlr.sail.sync;
 import ai.singlr.sail.authority.EraseAuthority;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.ScopeRule;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.FileLimits;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -208,10 +209,11 @@ public final class SyncRpcServer {
       blobs.gc(BlobStore.Compaction.NONE, true);
     } catch (RuntimeException e) {
       System.err.println(
-          "  [sync] could not collect content a denial or erasure left; '"
-              + OperatorCommand.elsewhere("sync gc")
-              + "' frees it: "
-              + rootMessage(e));
+          Remedy.of(
+                  "  [sync] could not collect content a denial or erasure left; '",
+                  Remedy.sail("sync gc"),
+                  "' frees it: " + rootMessage(e))
+              .plain());
     }
   }
 
@@ -226,13 +228,7 @@ public final class SyncRpcServer {
         request = SyncWire.decodeRequest(line);
         context = SyncWire.context(request);
       } catch (RuntimeException e) {
-        reply(
-            out,
-            welcomed
-                ? new SyncWire.Failed(
-                    context + ": " + e.getMessage(),
-                    e instanceof SyncTransportException transport ? transport.kind() : "protocol")
-                : new SyncWire.Refuse(upgradeRemedy()));
+        reply(out, welcomed ? failed(context, e) : new SyncWire.Refuse(upgradeRemedy()));
         return;
       }
       if (request instanceof SyncWire.Bye) return;
@@ -240,11 +236,7 @@ public final class SyncRpcServer {
         try {
           serveContent(content, in, out, frame);
         } catch (RuntimeException e) {
-          reply(
-              out,
-              new SyncWire.Failed(
-                  context + ": " + e.getMessage(),
-                  e instanceof SyncTransportException transport ? transport.kind() : "protocol"));
+          reply(out, failed(context, e));
           return;
         }
       } else reply(out, respondTo(request, frame));
@@ -468,20 +460,35 @@ public final class SyncRpcServer {
             case SyncWire.Bye ignored -> throw new IllegalStateException("Bye ends the session");
           };
       return response instanceof SyncWire.Failed failure
-          ? new SyncWire.Failed(context + ": " + failure.message(), failure.kind())
+          ? new SyncWire.Failed(Remedy.of(context + ": ", failure.detail()), failure.kind())
           : response;
     } catch (RuntimeException e) {
-      System.err.println("  [sync] " + context + ": " + rootMessage(e));
-      return new SyncWire.Failed(context + ": " + rootMessage(e), "store");
+      var detail = rootDetail(e);
+      System.err.println("  [sync] " + context + ": " + detail.plain());
+      return new SyncWire.Failed(Remedy.of(context + ": ", detail), "store");
     }
   }
 
+  private static SyncWire.Failed failed(String context, RuntimeException e) {
+    return new SyncWire.Failed(
+        Remedy.of(context + ": ", Remedied.whole(e)),
+        e instanceof SyncTransportException transport ? transport.kind() : "protocol");
+  }
+
   private static String rootMessage(Throwable t) {
+    return rootDetail(t).plain();
+  }
+
+  /**
+   * What a failure says, read at the first cause that names a remedy as data, else at its root, the
+   * store's own words beneath whatever wrapped them.
+   */
+  private static Remedy rootDetail(Throwable t) {
     var root = t;
-    while (root.getCause() != null && root.getCause() != root) {
+    while (!(root instanceof Remedied) && root.getCause() != null && root.getCause() != root) {
       root = root.getCause();
     }
-    return Objects.toString(root.getMessage(), root.getClass().getSimpleName());
+    return Remedied.whole(root);
   }
 
   private static void reply(OutputStream out, SyncWire.Response response) throws IOException {
@@ -490,8 +497,8 @@ public final class SyncRpcServer {
     out.flush();
   }
 
-  private String upgradeRemedy() {
-    return "upgrade to " + version + ": " + OperatorCommand.elsewhere("upgrade");
+  private Remedy upgradeRemedy() {
+    return Remedy.of("upgrade to " + version + ": ", Remedy.sail("upgrade"));
   }
 
   private static SyncWire.Refuse helloRequired() {
@@ -513,16 +520,18 @@ public final class SyncRpcServer {
     }
     if (hello.protocol() != SyncWire.PROTOCOL) {
       return new SyncWire.Refuse(
-          "this main speaks sync protocol "
-              + SyncWire.PROTOCOL
-              + ", not "
-              + hello.protocol()
-              + ": "
-              + upgradeRemedy());
+          Remedy.of(
+                  "this main speaks sync protocol "
+                      + SyncWire.PROTOCOL
+                      + ", not "
+                      + hello.protocol()
+                      + ": ")
+              .then(upgradeRemedy()));
     }
     var nodeFloor = SemVer.tryParse(hello.floor());
     if (nodeFloor.isEmpty()) {
-      return new SyncWire.Refuse("malformed floor '" + hello.floor() + "': " + upgradeRemedy());
+      return new SyncWire.Refuse(
+          Remedy.of("malformed floor '" + hello.floor() + "': ").then(upgradeRemedy()));
     }
     var order = nodeFloor.get().compareTo(SemVer.parse(SyncWire.UPGRADE_FLOOR));
     if (order < 0) {
@@ -533,7 +542,7 @@ public final class SyncRpcServer {
           "main is " + version + ", this node is " + hello.version() + ": upgrade main first");
     }
     if (hello.box() == null || hello.box().isBlank()) {
-      return new SyncWire.Refuse("hello names no box id: " + upgradeRemedy());
+      return new SyncWire.Refuse(Remedy.of("hello names no box id: ").then(upgradeRemedy()));
     }
     var otherBox = boxRefusal(hello.box());
     if (otherBox.isPresent()) {
@@ -556,7 +565,7 @@ public final class SyncRpcServer {
    * FDE from the first box that synced as it, recorded now when none has, until an admin releases
    * it. A session naming no FDE claims nothing.
    */
-  private Optional<String> boxRefusal(String box) {
+  private Optional<Remedy> boxRefusal(String box) {
     var handle = principal.handle();
     if (mainBox == null || handle == null || handle.isBlank()) {
       return Optional.empty();
@@ -565,29 +574,31 @@ public final class SyncRpcServer {
       return mainBox.box().equals(box)
           ? Optional.empty()
           : Optional.of(
-              "FDE '"
-                  + handle
-                  + "' is main's own FDE, so it syncs from main ('"
-                  + mainBox.box()
-                  + "') and no other box, not this box '"
-                  + box
-                  + "'. Sync this box as an FDE of its own: have an admin tie its sync key to that"
-                  + " FDE on main, then set this box's sync handle to it.");
+              Remedy.of(
+                  "FDE '"
+                      + handle
+                      + "' is main's own FDE, so it syncs from main ('"
+                      + mainBox.box()
+                      + "') and no other box, not this box '"
+                      + box
+                      + "'. Sync this box as an FDE of its own: have an admin tie its sync key to"
+                      + " that FDE on main, then set this box's sync handle to it."));
     }
     return new FdeBoxes(db)
         .claim(handle, box)
         .map(
             recorded ->
-                "FDE '"
-                    + handle
-                    + "' syncs from box '"
-                    + recorded
-                    + "', not this box '"
-                    + box
-                    + "': one box syncs as each FDE. After retiring the old box, an admin runs"
-                    + " '"
-                    + OperatorCommand.elsewhere("fde release-box " + handle)
-                    + "' on main, and the next box to sync as it is recorded.");
+                Remedy.of(
+                    "FDE '"
+                        + handle
+                        + "' syncs from box '"
+                        + recorded
+                        + "', not this box '"
+                        + box
+                        + "': one box syncs as each FDE. After retiring the old box, an admin runs"
+                        + " '",
+                    Remedy.sail("fde release-box", handle),
+                    "' on main, and the next box to sync as it is recorded."));
   }
 
   private String mainId() {
@@ -822,8 +833,9 @@ public final class SyncRpcServer {
           Actor.call(
               principal, () -> main.commit(offer.id(), offer.snapshot(), offer.expectedRev()));
     } catch (RuntimeException e) {
-      System.err.println("  [sync] " + type + " " + offer.id() + ": " + rootMessage(e));
-      return new SyncWire.Refused(offer.id(), rootMessage(e));
+      var detail = rootDetail(e);
+      System.err.println("  [sync] " + type + " " + offer.id() + ": " + detail.plain());
+      return new SyncWire.Refused(offer.id(), detail);
     }
     return switch (outcome) {
       case CommitOutcome.Accepted accepted -> {

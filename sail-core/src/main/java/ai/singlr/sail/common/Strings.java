@@ -53,6 +53,6 @@ public final class Strings {
 
   /** {@code word} as one shell word to paste back: bare when that is safe, else single-quoted. */
   public static String shellWord(String word) {
-    return word.matches("[A-Za-z0-9._/=:-]+") ? word : "'" + word.replace("'", "'\\''") + "'";
+    return word.matches("[A-Za-z0-9._/=:@,+-]+") ? word : "'" + word.replace("'", "'\\''") + "'";
   }
 }

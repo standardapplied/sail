@@ -883,7 +883,7 @@ class SailYamlTest {
 
     assertEquals(
         "agent_context is no longer read: sail writes no context file. Put what it said in the"
-            + " repo's AGENTS.md, and a rule in a project skill (sudo sail project skills add). Then"
+            + " repo's AGENTS.md, and a rule in a project skill (sail project skills add). Then"
             + " remove `agent_context` from acme/sail.yaml.",
         refusal(agent + "agent_context:\n  tech_stack: Java\n"));
     assertEquals(
@@ -893,21 +893,21 @@ class SailYamlTest {
         refusal(agent + "  methodology:\n    verify: mvn verify\n"));
     assertEquals(
         "agent.build_skill is no longer read: sail's work prompt says how a build runs. Put what"
-            + " the skill said in the repo's AGENTS.md, or keep it as a project skill (sudo sail"
+            + " the skill said in the repo's AGENTS.md, or keep it as a project skill (sail"
             + " project skills add) the agent invokes when relevant. Then remove `agent.build_skill` from"
             + " acme/sail.yaml.",
         refusal(agent + "  build_skill: acme-build\n"));
     assertEquals(
         "agent.review_pipeline.fix_skill is no longer read: a fix run reads the build's work"
             + " prompt. Put what the skill said in the repo's AGENTS.md, or keep it as a project"
-            + " skill (sudo sail project skills add). Then remove `agent.review_pipeline.fix_skill`"
+            + " skill (sail project skills add). Then remove `agent.review_pipeline.fix_skill`"
             + " from acme/sail.yaml.",
         refusal(agent + "  review_pipeline:\n    fix_skill: acme-fix\n"));
     assertEquals(
         "agent.review_pipeline.stages[security].skill is no longer read: a stage judges under its"
             + " brief. Put what the skill said in the stage's brief"
             + " (agent.review_pipeline.stages[security].brief), or keep it as a project skill"
-            + " (sudo sail project skills add) the brief tells the stage to run.",
+            + " (sail project skills add) the brief tells the stage to run.",
         refusal(
             agent + "  review_pipeline:\n    stages:\n      - name: security\n        skill: x\n"));
     assertEquals(

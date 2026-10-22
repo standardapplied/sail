@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BlobStore;
@@ -90,6 +91,7 @@ public final class SyncWire {
   private static final String STALE = "stale";
   private static final String REFUSED = "refused";
   private static final String REASON = "reason";
+  private static final String REMEDY = "remedy";
   private static final String DENIED = "denied";
   private static final String PROTOCOL_KEY = "protocol";
   private static final String VERSION = "version";
@@ -403,8 +405,15 @@ public final class SyncWire {
     }
   }
 
-  /** Main refused the session before serving anything, naming the remedy. */
-  public record Refuse(String reason) implements Response {}
+  /**
+   * Main refused the session before serving anything, naming the remedy as data. On the wire its
+   * plain reading rides beside it, the reason a node that predates remedies reads.
+   */
+  public record Refuse(Remedy reason) implements Response {
+    public Refuse(String reason) {
+      this(Remedy.of(reason));
+    }
+  }
 
   /** Main's high-water per entity type. */
   public record Tips(Map<String, Long> tips) implements Response {}
@@ -523,7 +532,11 @@ public final class SyncWire {
    * Main could not take the offer on integrity grounds — content it does not hold, a pruned id, a
    * run pushed with no node handle. Not a decision about who may write: that is {@link Denied}.
    */
-  public record Refused(String id, String reason) implements Result {}
+  public record Refused(String id, Remedy reason) implements Result {
+    public Refused(String id, String reason) {
+      this(id, Remedy.of(reason));
+    }
+  }
 
   /**
    * Main decided this principal may not make this change, naming why, and answers with its current
@@ -570,10 +583,22 @@ public final class SyncWire {
   /** Main's FDE roster — one map of identity fields per FDE. */
   public record Fdes(List<Map<String, Object>> fdes) implements Response {}
 
-  /** Main could not serve a request: a store failure, a malformed frame, an unknown type. */
-  public record Failed(String message, String kind) implements Response {
+  /**
+   * Main could not serve a request: a store failure, a malformed frame, an unknown type. Its {@code
+   * detail} keeps any command it names as data; on the wire its plain reading rides beside it, the
+   * message a node that predates remedies reads.
+   */
+  public record Failed(Remedy detail, String kind) implements Response {
+    public Failed(String message, String kind) {
+      this(Remedy.of(message), kind);
+    }
+
     public Failed(String message) {
       this(message, "refused");
+    }
+
+    public String message() {
+      return detail.plain();
     }
   }
 
@@ -726,7 +751,8 @@ public final class SyncWire {
       }
       case Refuse refuse -> {
         map.put(OP, OP_REFUSE);
-        map.put(REASON, refuse.reason());
+        map.put(REASON, refuse.reason().plain());
+        putRemedy(map, refuse.reason());
       }
       case Tips tips -> {
         map.put(OP, OP_TIPS);
@@ -755,6 +781,7 @@ public final class SyncWire {
         map.put(OP, OP_FAILED);
         map.put(MESSAGE, failed.message());
         map.put(KIND, failed.kind());
+        putRemedy(map, failed.detail());
       }
     }
     return YamlUtil.dumpJson(map);
@@ -814,7 +841,7 @@ public final class SyncWire {
               longValue(map, FILE_MAX),
               map.containsKey(SCOPE) ? ProjectScope.of(strings(map, SCOPE)) : ProjectScope.all(),
               string(map, CATALOG));
-      case OP_REFUSE -> new Refuse(string(map, REASON));
+      case OP_REFUSE -> new Refuse(remedy(map, REASON));
       case OP_TIPS -> new Tips(tips(map));
       case OP_PAGE ->
           new Page(
@@ -827,7 +854,7 @@ public final class SyncWire {
           new Results(
               maps(map, RESULTS).stream().map(SyncWire::result).toList(), longValue(map, MAX_SEQ));
       case OP_FDES -> new Fdes(maps(map, FDES));
-      case OP_FAILED -> new Failed(string(map, MESSAGE), string(map, KIND));
+      case OP_FAILED -> new Failed(remedy(map, MESSAGE), string(map, KIND));
       case "fetch", "fetch_chunks", "announce", "lack", "manifest", "chunk", "done" ->
           content(op, map);
       case null, default -> throw new IllegalArgumentException("Unknown sync op: " + op);
@@ -899,7 +926,12 @@ public final class SyncWire {
         map.put(ACCEPTED, verdict);
       }
       case Stale _ -> map.put(STALE, true);
-      case Refused refused -> map.put(REFUSED, Map.of(REASON, refused.reason()));
+      case Refused refused -> {
+        var verdict = new LinkedHashMap<String, Object>();
+        verdict.put(REASON, refused.reason().plain());
+        putRemedy(verdict, refused.reason());
+        map.put(REFUSED, verdict);
+      }
       case Denied denied -> {
         var refused = new LinkedHashMap<String, Object>();
         refused.put(REASON, denied.reason());
@@ -948,7 +980,7 @@ public final class SyncWire {
           bool(refused, GONE));
     }
     if (refused != null) {
-      return new Refused(id, string(refused, REASON));
+      return new Refused(id, remedy(refused, REASON));
     }
     throw new IllegalArgumentException("Result for " + id + " carries no verdict");
   }
@@ -996,6 +1028,19 @@ public final class SyncWire {
   private static String string(Map<String, Object> map, String key) {
     var value = map.get(key);
     return value == null ? null : value.toString();
+  }
+
+  private static void putRemedy(Map<String, Object> map, Remedy remedy) {
+    if (!remedy.commands().isEmpty()) {
+      map.put(REMEDY, remedy.toMaps());
+    }
+  }
+
+  /** The remedy a frame carries, or its plain {@code key} as words when it carries none. */
+  private static Remedy remedy(Map<String, Object> map, String key) {
+    return map.get(REMEDY) instanceof List<?> remedy
+        ? Remedy.fromMaps(remedy)
+        : Remedy.of(Objects.toString(string(map, key), ""));
   }
 
   @SuppressWarnings("unchecked")

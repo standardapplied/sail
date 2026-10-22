@@ -15,7 +15,6 @@ import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.IncusDeviceManager;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Actor;
@@ -77,8 +76,7 @@ class ScopeTeardownIT extends AbstractIncusIT {
   private void roundScopedTo(String project) throws Exception {
     var mainPath = tempDir.resolve("main.db");
     try (var db = Sqlite.open(mainPath)) {
-      MigrationRunner.applyAll(
-          db, DataMigrations.all(OperatorCommand.PLAIN), DataMigration.Prompter.NON_INTERACTIVE);
+      MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
     }
     try (var main = SyncDatabase.converge(mainPath, "main");
         var nodeDb = Sqlite.open(tempDir.resolve("node.db"))) {
@@ -86,7 +84,7 @@ class ScopeTeardownIT extends AbstractIncusIT {
       fdes.add("ada", null, null, "admin");
       var nia = fdes.add("nia", null, null, "member");
       fdes.restrict("nia");
-      fdes.grant("nia", project, OperatorCommand.PLAIN);
+      fdes.grant("nia", project);
       var token = new AuthSessionStore(main.db()).create(nia.id(), Duration.ofHours(1)).token();
       new SchemaManager(nodeDb).migrate();
       var node =
@@ -107,7 +105,7 @@ class ScopeTeardownIT extends AbstractIncusIT {
                               SyncTransitionSink.NONE,
                               () -> new SyncConfig(SyncConfig.ROLE_MAIN, null, "ada", "main"))),
               event -> {},
-              OperatorCommand.PLAIN,
+              SyncOperations.PLAIN_NOTICES,
               shell);
       node.prepare();
       Actor.call(

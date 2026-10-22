@@ -82,7 +82,7 @@ public final class HomeRoom {
     }
     var unread = (Result.Failure<RoomDetailResponse>) held;
     if (unread.errorCode() != ErrorCode.ROOM_NOT_FOUND) {
-      throw refusal(unread);
+      throw ApiException.of(unread);
     }
     var seat = new EngageRequest(member.agent(), member.mode(), member.model(), false);
     refuse(operations.createRoom(new RoomCreateRequest(id, project, project, null, seat), handle));
@@ -124,17 +124,13 @@ public final class HomeRoom {
     }
     var missing = (Result.Failure<GlobalSpecDetailResponse>) spec;
     if (missing.errorCode() != ErrorCode.SPEC_NOT_FOUND) {
-      throw refusal(missing);
+      throw ApiException.of(missing);
     }
   }
 
   private static void refuse(Result<?> result) {
     if (result instanceof Result.Failure<?> failure) {
-      throw refusal(failure);
+      throw ApiException.of(failure);
     }
-  }
-
-  private static ApiException refusal(Result.Failure<?> failure) {
-    return new ApiException(failure.errorCode(), failure.errorMessage(), failure.action());
   }
 }

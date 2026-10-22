@@ -149,14 +149,14 @@ public final class EnrollCommand implements Runnable {
         + ")."
         + (stderr.isEmpty() ? "" : "\n  ssh said: " + stderr)
         + "\n  Not registered yet? An admin runs: "
-        + OperatorCommand.elsewhere("fde add <handle> --key \"<your pubkey>\"");
+        + OperatorCommand.SUDO.sail("fde add <handle> --key \"<your pubkey>\"");
   }
 
   private static String unexpectedTicket(String stdout) {
     return "The box returned an unexpected enrollment ticket response:\n"
         + stdout.strip()
         + "\n  The box may be running an older sail — upgrade it with: "
-        + OperatorCommand.elsewhere("upgrade");
+        + OperatorCommand.SUDO.sail("upgrade");
   }
 
   private static ClientConfig requireThinClient() throws Exception {
@@ -166,7 +166,7 @@ public final class EnrollCommand implements Runnable {
               + OperatorCommand.client("enroll")
               + "' is the thin-client flow, and this box is not configured as one."
               + "\n  On the box itself, mint a ticket with: "
-              + OperatorCommand.elsewhere("fde enroll <handle>")
+              + OperatorCommand.SUDO.sail("fde enroll <handle>")
               + "\n  On your laptop, point the CLI at the box first: "
               + OperatorCommand.client("client <host>"));
     }

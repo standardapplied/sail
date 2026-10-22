@@ -18,14 +18,14 @@ import java.util.function.Supplier;
  */
 public record ConnectEnvironment(String serverIp, String serverUser, boolean workstationKeySet) {
 
-  /** Reads the live environment each time it is asked, for {@code operator}'s remedies. */
-  public static Supplier<ConnectEnvironment> detector(OperatorCommand operator) {
-    return () -> detect(operator);
+  /** Reads the live environment each time it is asked. */
+  public static Supplier<ConnectEnvironment> detector() {
+    return ConnectEnvironment::detect;
   }
 
   /** Detects the live environment from {@code host.yaml} and the registered workstation key. */
-  private static ConnectEnvironment detect(OperatorCommand operator) {
-    return detect(SailPaths.hostConfigPath(), WorkstationIdentity.registered(operator).isPresent());
+  private static ConnectEnvironment detect() {
+    return detect(SailPaths.hostConfigPath(), WorkstationIdentity.registered().isPresent());
   }
 
   static ConnectEnvironment detect(Path hostYaml, boolean workstationKeySet) {

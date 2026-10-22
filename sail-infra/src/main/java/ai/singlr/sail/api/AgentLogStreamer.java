@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.NodeIdentity;
@@ -131,7 +132,7 @@ public final class AgentLogStreamer implements HttpHandler {
       try {
         auth.require(exchange);
       } catch (ApiException e) {
-        sendError(exchange, e.status(), "unauthorized", e.getMessage(), null);
+        send(exchange, e.status(), YamlUtil.dumpJson(e.error().toMap()));
         return;
       }
 
@@ -189,9 +190,9 @@ public final class AgentLogStreamer implements HttpHandler {
       var refused = refusal.get();
       var code = Refusals.code(refused.kind());
       var fix =
-          Strings.isBlank(refused.fix())
+          refused.fix().isEmpty()
               ? null
-              : ", \"fix\": \"" + jsonEscape(refused.fix()) + "\"";
+              : ", \"fix\": \"" + jsonEscape(refused.fix().described()) + "\"";
       return new Refused(code.httpCode(), code.code(), refused.message(), fix);
     }
     return new Admitted(run);
@@ -386,15 +387,20 @@ public final class AgentLogStreamer implements HttpHandler {
   private static void sendError(
       HttpExchange exchange, int code, String errorCode, String message, String extra)
       throws IOException {
-    var body =
-        ("{\"code\": \""
-                + errorCode
-                + "\", \"message\": \""
-                + jsonEscape(message)
-                + "\""
-                + Objects.toString(extra, "")
-                + "}")
-            .getBytes(StandardCharsets.UTF_8);
+    send(
+        exchange,
+        code,
+        "{\"code\": \""
+            + errorCode
+            + "\", \"message\": \""
+            + jsonEscape(message)
+            + "\""
+            + Objects.toString(extra, "")
+            + "}");
+  }
+
+  private static void send(HttpExchange exchange, int code, String json) throws IOException {
+    var body = json.getBytes(StandardCharsets.UTF_8);
     exchange.getResponseHeaders().set("Content-Type", "application/json");
     exchange.sendResponseHeaders(code, body.length);
     try (var out = exchange.getResponseBody()) {

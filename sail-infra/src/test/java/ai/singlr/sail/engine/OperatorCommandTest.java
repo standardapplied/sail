@@ -8,6 +8,8 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import org.junit.jupiter.api.Test;
 
 class OperatorCommandTest {
@@ -76,12 +78,48 @@ class OperatorCommandTest {
   }
 
   @Test
-  void aProcessThatCannotSeeItsReaderAnswersTheReadmesFormAsRoot() {
-    assertEquals(OperatorCommand.SUDO, OperatorCommand.unknownReader(true));
-    assertEquals(OperatorCommand.UNPRIVILEGED, OperatorCommand.unknownReader(false));
+  void aRemedyIsRenderedForTheReaderOfTheDoorThatPrintsIt() {
+    var remedy =
+        Remedy.of(
+            "Run '",
+            Remedy.sail("upgrade"),
+            "', then ",
+            Remedy.sail("fde update", "ada", "--scoped"),
+            "; or '",
+            Remedy.program("ssh-keygen", "-R", "main"),
+            "'; from a Mac '",
+            Remedy.client("login"),
+            "', then '",
+            Remedy.sail("project apply", "gamma"),
+            "'.");
+
     assertEquals(
-        OperatorCommand.elsewhere("spec update auth"),
-        OperatorCommand.unknownReader(true).sail("spec update auth"));
+        "Run 'sudo sail upgrade', then sudo sail fde update ada --scoped; or 'sudo ssh-keygen -R"
+            + " main'; from a Mac 'sail login', then 'sudo sail project apply gamma'.",
+        OperatorCommand.SUDO.render(remedy));
+    assertEquals(
+        "Run 'sail upgrade', then sail fde update ada --scoped; or 'ssh-keygen -R main'; from a"
+            + " Mac 'sail login', then 'sail project apply gamma'.",
+        OperatorCommand.PLAIN.render(remedy));
+    assertEquals(
+        "Run 'sail upgrade', then sail fde update ada --scoped; or 'ssh-keygen -R main'; from a"
+            + " Mac 'sail login', then 'sudo sail project apply gamma'.",
+        OperatorCommand.UNPRIVILEGED.render(remedy));
+  }
+
+  @Test
+  void aRemediedFailureIsItsReasonAndItsRenderedRemedy() {
+    var failure =
+        Remedied.state(
+            "FDE 'ada' sees every project.",
+            Remedy.of("Scope it first with '", Remedy.sail("fde update", "ada", "--scoped"), "'."));
+
+    assertEquals(
+        "FDE 'ada' sees every project. Scope it first with 'sudo sail fde update ada --scoped'.",
+        OperatorCommand.SUDO.render((Remedied) failure));
+    assertEquals(
+        "FDE 'ada' sees every project. Scope it first with 'sail fde update ada --scoped'.",
+        failure.getMessage());
   }
 
   @Test
@@ -96,7 +134,5 @@ class OperatorCommandTest {
   void thisProcessReadsItsOwnAccountAndItsPrivilege() {
     assertEquals(
         OperatorCommand.of(SailPaths.isRoot(), System.getenv("SUDO_USER")), OperatorCommand.here());
-    assertEquals(
-        OperatorCommand.unknownReader(SailPaths.isRoot()), OperatorCommand.unknownReader());
   }
 }

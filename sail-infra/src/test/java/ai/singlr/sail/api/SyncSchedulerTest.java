@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -181,7 +182,7 @@ class SyncSchedulerTest {
                 null,
                 5,
                 "unreachable",
-                "offline",
+                Remedy.of("offline"),
                 java.time.Instant.EPOCH));
     scheduler.useHealth(current::get);
     scheduler.freshenRead();

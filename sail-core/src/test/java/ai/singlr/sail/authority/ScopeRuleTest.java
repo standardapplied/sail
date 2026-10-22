@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -44,8 +45,11 @@ class ScopeRuleTest {
 
   private static final ProjectScope ONLY_A = ProjectScope.of(List.of("alpha"));
   private static final Actor NIA = new Actor("nia", Role.MEMBER, Actor.Lane.API).withScope(ONLY_A);
-  private static final String GRANT =
-      "Ask an admin on main for the project: sudo sail fde grant <handle> <project>.";
+  private static final Remedy GRANT =
+      Remedy.of(
+          "Ask an admin on main for the project: ",
+          Remedy.sail("fde grant", "<handle>", "<project>"),
+          ".");
 
   private Sqlite db;
   private SpecStore specs;
@@ -362,7 +366,7 @@ class ScopeRuleTest {
     var admin = new Actor("nia", Role.ADMIN, Actor.Lane.API).withScope(ONLY_A);
 
     assertEquals(
-        Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Spec 'beta-work' was not found.", null),
+        Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Spec 'beta-work' was not found.", Remedy.NONE),
         erase.spec(admin, specs.lastKnown("beta-work").orElseThrow()));
     assertEquals(Optional.empty(), erase.spec(admin, specs.lastKnown("alpha-work").orElseThrow()));
     assertEquals(

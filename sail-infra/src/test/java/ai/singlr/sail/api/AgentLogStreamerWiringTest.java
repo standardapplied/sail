@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.engine.OperatorCommand;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -45,7 +44,7 @@ class AgentLogStreamerWiringTest {
     return new SailApiServer(
         "127.0.0.1",
         0,
-        new SailOperations(OperatorCommand.PLAIN),
+        new SailOperations(),
         new FixedTokenTestAuth("tok"),
         new EventBus(),
         new AuditPersister(tmp.resolve("events.jsonl"), 8),

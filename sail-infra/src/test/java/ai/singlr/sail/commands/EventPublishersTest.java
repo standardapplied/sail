@@ -223,7 +223,7 @@ class EventPublishersTest {
                           () -> SyncServerCommand.roster(main.db, Actor.main()),
                           SyncTransitionSink.NONE,
                           SyncWire.UPGRADE_FLOOR)),
-              OperatorCommand.PLAIN);
+              SyncOperations.PLAIN_NOTICES);
 
       Acting.by(new Actor(ME, Role.MEMBER, Actor.Lane.CLI), () -> sync.sync(new SyncRequest(null)));
 
@@ -325,13 +325,7 @@ class EventPublishersTest {
     serverOperations =
         TestControlPlane.on(
             OperationsFactory.create(
-                box.db,
-                shell(),
-                bus,
-                null,
-                SyncScheduler.disabled(),
-                SessionYield.NONE,
-                OperatorCommand.PLAIN),
+                box.db, shell(), bus, null, SyncScheduler.disabled(), SessionYield.NONE),
             box.db,
             tempDir,
             config);

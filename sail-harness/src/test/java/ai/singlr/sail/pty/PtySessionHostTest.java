@@ -119,8 +119,8 @@ class PtySessionHostTest {
     var channel = SocketChannel.open(StandardProtocolFamily.UNIX);
     channel.connect(UnixDomainSocketAddress.of(dir.resolve("host.sock")));
     var reply = hello(channel, token);
-    if (reply instanceof PtyMessage.Err(var message)) {
-      throw new IOException(message);
+    if (reply instanceof PtyMessage.Err err) {
+      throw new IOException(err.message());
     }
     return channel;
   }

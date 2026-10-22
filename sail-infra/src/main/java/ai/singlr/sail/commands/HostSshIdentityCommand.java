@@ -15,7 +15,9 @@ import java.nio.file.Files;
 import java.util.List;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
+import picocli.CommandLine.Spec;
 
 /**
  * Provisions a host for SSH-key FDE login: the locked-down {@code sail} user, the shared {@code
@@ -29,6 +31,8 @@ import picocli.CommandLine.Option;
     description = "Enable SSH-key login for FDEs (provision the sail user + shared data dir).",
     mixinStandardHelpOptions = true)
 public final class HostSshIdentityCommand implements Runnable {
+
+  @Spec private CommandSpec spec;
 
   @Option(names = "--dry-run", description = "Print the plan instead of executing it.")
   private boolean dryRun;
@@ -108,7 +112,7 @@ public final class HostSshIdentityCommand implements Runnable {
    * instead of letting the operator believe SSH login works.
    */
   private static void syncKeys(OperatorCommand operator) throws Exception {
-    try (var operations = OperationsFactory.open(operator)) {
+    try (var operations = OperationsFactory.open()) {
       switch (new AuthorizedKeysSync().sync(operations.identity()::sshKeys)) {
         case AuthorizedKeysSync.Synced synced ->
             System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + synced.describe()));
@@ -125,11 +129,12 @@ public final class HostSshIdentityCommand implements Runnable {
     }
   }
 
-  private static void requireRoot() {
+  private void requireRoot() {
     if (!SailPaths.isRoot()) {
-      throw new IllegalStateException(
+      throw RootRequired.refusal(
           "This command must run as root: it creates a system user, relocates the database, and"
-              + " edits a systemd unit. Preview with --dry-run, or re-run with sudo.");
+              + " edits a systemd unit (preview it with --dry-run).",
+          spec);
     }
   }
 }

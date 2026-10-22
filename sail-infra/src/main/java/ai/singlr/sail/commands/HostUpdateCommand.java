@@ -18,13 +18,17 @@ import java.util.List;
 import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
+import picocli.CommandLine.Spec;
 
 @Command(
     name = "update",
     description = "Update system packages and Incus.",
     mixinStandardHelpOptions = true)
 public final class HostUpdateCommand implements Runnable {
+
+  @Spec private CommandSpec spec;
 
   private static final Duration APT_TIMEOUT = Duration.ofMinutes(5);
 
@@ -41,16 +45,14 @@ public final class HostUpdateCommand implements Runnable {
 
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
+    if (!dryRun && !ConsoleHelper.isRoot()) {
+      throw RootRequired.refusal(spec);
+    }
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
       throw HostInitCommand.notInitialized(operator);
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
-
-    if (!dryRun && !ConsoleHelper.isRoot()) {
-      throw new IllegalStateException(
-          "Root privileges required. Run with: " + OperatorCommand.SUDO.sail("host update"));
-    }
 
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);

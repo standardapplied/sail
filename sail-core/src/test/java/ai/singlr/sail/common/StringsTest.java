@@ -64,6 +64,7 @@ class StringsTest {
   void shellWordLeavesASafeWordBareAndQuotesAnyOtherToPasteBack() {
     assertEquals("--title", Strings.shellWord("--title"));
     assertEquals("/var/lib/sail=a:b.c", Strings.shellWord("/var/lib/sail=a:b.c"));
+    assertEquals("sail@main,a+b", Strings.shellWord("sail@main,a+b"));
     assertEquals("'b c'", Strings.shellWord("b c"));
     assertEquals("'it'\\''s'", Strings.shellWord("it's"));
     assertEquals("''", Strings.shellWord(""));

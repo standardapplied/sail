@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.Resolution;
+import ai.singlr.sail.commands.CliCommand;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
@@ -73,7 +74,7 @@ class ConflictOperationsTest {
     node = new SyncBox(tempDir, "node");
     new FdeStore(main.db).add("node", null, null, "admin");
     replicas = SyncedEntities.replicas(node.db, node.id, node.id);
-    operations = new ConflictOperations(node.db, OperatorCommand.PLAIN);
+    operations = new ConflictOperations(node.db);
   }
 
   @AfterEach
@@ -152,7 +153,7 @@ class ConflictOperationsTest {
         'auth' changed on this box after this conflict was recorded (body).
         Run 'sail sync' to refresh it, then %s."""
             .formatted(strategy == Resolution.Strategy.MERGE ? "start the merge again" : "resolve"),
-        refused.getMessage());
+        printed(refused));
     assertEquals("written after the conflict was recorded", bodyOf(node));
     assertEquals("node title", titleOf(node));
     assertEquals(rev, node.specs.revOf("auth"));
@@ -242,8 +243,7 @@ class ConflictOperationsTest {
     var refused = assertThrows(ApiException.class, () -> operations.mergeTemplate("spec", "auth"));
 
     assertEquals(409, refused.status());
-    assertTrue(
-        refused.getMessage().contains("Run 'sail sync' to refresh it"), refused.getMessage());
+    assertTrue(printed(refused).contains("Run 'sail sync' to refresh it"), printed(refused));
   }
 
   @Test
@@ -326,8 +326,15 @@ class ConflictOperationsTest {
     assertEquals("merged title", titleOf(node));
   }
 
+  /** A refusal as the terminal of an account whose own plain sail runs prints it. */
+  private static String printed(ApiException refusal) {
+    return String.join("\n", CliCommand.lines(refusal, OperatorCommand.PLAIN));
+  }
+
   static Stream<Arguments> unboundMerges() {
-    var unnamed = "A merged record must start from 'sail conflicts show auth --template'.";
+    var unnamed =
+        "A merged record does not name the version it was made from.\nStart it from 'sail"
+            + " conflicts show auth --template'.";
     return Stream.of(
         Arguments.of(null, 400, unnamed),
         Arguments.of(" ", 400, unnamed),
@@ -361,7 +368,7 @@ class ConflictOperationsTest {
                     new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpJson(merged))));
 
     assertEquals(status, refused.status());
-    assertEquals(message, refused.getMessage());
+    assertEquals(message, printed(refused));
     assertEquals("node title", titleOf(node));
     assertEquals(rev, node.specs.revOf("auth"));
     assertEquals(parked, node.conflicts.pendingFor("spec", "auth").orElseThrow());
@@ -597,7 +604,7 @@ class ConflictOperationsTest {
         'auth' was recorded before conflicts kept main's revision, so main's side cannot be \
         adopted as main made it.
         Run 'sail sync' to re-record it, then resolve.""",
-        refused.getMessage());
+        printed(refused));
     assertEquals(rev, node.specs.revOf("auth"));
     round();
     var reRecorded = node.conflicts.pendingFor("spec", "auth").orElseThrow();

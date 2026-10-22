@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import ai.singlr.sail.Sail;
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.CliOperator;
@@ -54,11 +55,11 @@ class OperatorHintsTest {
         Ansi.OFF.string(HostInitCommand.nextStep(true, true, operator).orElseThrow()),
         ProjectApplyCommand.descriptorNotFound(Path.of("/srv/gamma/sail.yaml"), operator),
         HostInitCommand.notInitialized(operator).getMessage(),
-        ContainerStateGuard.notCreated("gamma", operator),
+        operator.render((Remedied) ContainerStateGuard.notCreated("gamma")),
         launched.toString(StandardCharsets.UTF_8),
-        CliOperator.unplaced(null, operator).failure().action(),
+        operator.render(CliOperator.unplaced(null).remedy()),
         Ansi.OFF.string(ConnectCommand.noWorkstationKey("gamma", operator)),
-        MainHostKey.rebuiltRecovery("sail@main", operator));
+        operator.render(MainHostKey.rebuiltRecovery("sail@main")));
   }
 
   @Test
@@ -244,7 +245,7 @@ class OperatorHintsTest {
    */
   @Test
   void everyRenderedCommandIsOneSailHas() throws Exception {
-    var rendered = Pattern.compile("\\.(?:sail|root|elsewhere|client)\\(\\s*(?=\")");
+    var rendered = Pattern.compile("\\.(?:sail|root|client)\\(\\s*(?=\")");
     var unknown = new ArrayList<String>();
     for (var root :
         List.of(
@@ -273,10 +274,41 @@ class OperatorHintsTest {
 
   private static List<String> rendered(Path file, String call) {
     try {
-      return renderedArgs(call);
+      return renderedArgs(spaced(call));
     } catch (IllegalStateException unsplit) {
       throw new IllegalStateException(file.getFileName() + ": " + unsplit.getMessage(), unsplit);
     }
+  }
+
+  /**
+   * A remedy's verb and arguments, {@code Remedy.sail("spec update", id)}, as one expression: each
+   * top-level comma stands for the space the rendering puts between its words.
+   */
+  private static String spaced(String call) {
+    var spaced = new StringBuilder();
+    var depth = 0;
+    for (var i = 0; i < call.length(); i++) {
+      var c = call.charAt(i);
+      if (c == '"') {
+        var end = i + 1;
+        while (call.charAt(end) != '"') {
+          end += call.charAt(end) == '\\' ? 2 : 1;
+        }
+        spaced.append(call, i, end + 1);
+        i = end;
+      } else if (c == '(') {
+        depth++;
+        spaced.append(c);
+      } else if (c == ')') {
+        depth--;
+        spaced.append(c);
+      } else if (c == ',' && depth == 0) {
+        spaced.append(" + \" \" + ");
+      } else {
+        spaced.append(c);
+      }
+    }
+    return spaced.toString();
   }
 
   /** The index of the {@code )} closing the call whose arguments start at {@code from}. */
@@ -376,7 +408,6 @@ class OperatorHintsTest {
             + " AAAA\" --main-host-key SHA256:abc",
         JoinCommand.authorizeLine(
             "ada", null, "ada@example.com", "ssh-ed25519 AAAA", "SHA256:abc"));
-    assertEquals("sudo sail spec prune", OperatorCommand.elsewhere("spec prune"));
     assertEquals("sail login", OperatorCommand.client("login"));
   }
 
@@ -390,9 +421,7 @@ class OperatorHintsTest {
 
   @Test
   void theOperatorIsResolvedOnceAtEachCommandsDoorAndNowhereBelow() throws Exception {
-    var seam =
-        Pattern.compile(
-            "OperatorCommand(?:\\.here\\(\\)|::here|\\.unknownReader\\(\\)|::unknownReader)");
+    var seam = Pattern.compile("OperatorCommand(?:\\.here\\(\\)|::here)");
     var below = new ArrayList<String>();
     var twice = new ArrayList<String>();
     for (var root :
@@ -418,6 +447,51 @@ class OperatorHintsTest {
 
     assertEquals(List.of(), below, "the operator is asked below a command's door");
     assertEquals(List.of(), twice, "a command asks who its operator is more than once");
+  }
+
+  /**
+   * The stores, the sync lane, the harness, sail-api and the daemons cannot see who reads what they
+   * say, so none renders a command: each hands its remedy on as data, and the door that prints it
+   * renders it for its reader.
+   */
+  @Test
+  void codeThatCannotSeeItsReaderNeverRendersACommand() throws Exception {
+    var daemons =
+        List.of(
+            Path.of("src/main/java/ai/singlr/sail/commands/ServerStartCommand.java"),
+            Path.of("src/main/java/ai/singlr/sail/commands/AgentWatchCommand.java"),
+            Path.of("src/main/java/ai/singlr/sail/commands/PtyHostCommand.java"),
+            Path.of("src/main/java/ai/singlr/sail/commands/PtyHostEvents.java"),
+            Path.of("src/main/java/ai/singlr/sail/commands/PtyHostIdentity.java"),
+            Path.of("src/main/java/ai/singlr/sail/commands/PtyHostRooms.java"),
+            Path.of("src/main/java/ai/singlr/sail/commands/SyncServerCommand.java"),
+            Path.of("src/main/java/ai/singlr/sail/commands/GatewayCommand.java"),
+            Path.of("src/main/java/ai/singlr/sail/engine/SyncOperations.java"),
+            Path.of("src/main/java/ai/singlr/sail/engine/MainHostKey.java"),
+            Path.of("src/main/java/ai/singlr/sail/engine/ConflictOperations.java"),
+            Path.of("src/main/java/ai/singlr/sail/engine/HostAccess.java"),
+            Path.of("src/main/java/ai/singlr/sail/engine/CliOperator.java"),
+            Path.of("src/main/java/ai/singlr/sail/engine/ConnectEnvironment.java"),
+            Path.of("src/main/java/ai/singlr/sail/engine/WorkstationIdentity.java"),
+            Path.of("src/main/java/ai/singlr/sail/engine/RoomWakePrompt.java"));
+    var sources = new ArrayList<Path>(daemons);
+    for (var root :
+        List.of(
+            Path.of("..", "sail-core", "src", "main"),
+            Path.of("..", "sail-harness", "src", "main"),
+            Path.of("src", "main", "java", "ai", "singlr", "sail", "api"))) {
+      try (var walk = Files.walk(root)) {
+        walk.filter(path -> path.toString().endsWith(".java")).forEach(sources::add);
+      }
+    }
+    var rendering = new ArrayList<String>();
+    for (var file : sources) {
+      if (read(file).contains("OperatorCommand")) {
+        rendering.add(file.toString());
+      }
+    }
+
+    assertEquals(List.of(), rendering, "code that cannot see its reader renders a command");
   }
 
   @Test

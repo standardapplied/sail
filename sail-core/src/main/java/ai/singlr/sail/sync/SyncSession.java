@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.sync;
 
-import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.Sqlite;
 import java.io.InputStream;
@@ -56,13 +56,13 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
     }
 
     /** The denial as the FDE reads it: what main refused, why, and where their version is kept. */
-    public String describe(OperatorCommand operator) {
+    public Remedy describe() {
       var kept =
           "spec".equals(type)
-              ? "Yours is in its history: " + operator.sail("spec history " + id) + "."
-              : "Yours stays in this box's change log.";
+              ? Remedy.of("Yours is in its history: ", Remedy.sail("spec history", id), ".")
+              : Remedy.of("Yours stays in this box's change log.");
       var why = reason.endsWith(".") ? reason : reason + ".";
-      return type + " " + id + ": main denied this change — " + why + " " + kept;
+      return Remedy.of(type + " " + id + ": main denied this change — " + why + " ").then(kept);
     }
   }
 
@@ -71,25 +71,35 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
    * offers it again next round. One that repeats round after round is the sign of a dependency that
    * will never arrive.
    */
-  record Refusal(String type, String id, String reason) {
+  record Refusal(String type, String id, Remedy reason) {
     public Refusal {
       Objects.requireNonNull(type, "type");
       Objects.requireNonNull(id, "id");
-      reason = Objects.requireNonNullElse(reason, "");
+      reason = Objects.requireNonNullElse(reason, Remedy.NONE);
     }
 
-    /** The refusal as {@code sail sync --json} and the API report it. */
+    public Refusal(String type, String id, String reason) {
+      this(type, id, Remedy.of(Objects.requireNonNullElse(reason, "")));
+    }
+
+    /**
+     * The refusal as {@code sail sync --json} and the API report it: its plain reason, and the
+     * reason as data when it names a command.
+     */
     public Map<String, Object> toMap() {
       var map = new LinkedHashMap<String, Object>();
       map.put("type", type);
       map.put("id", id);
-      map.put("reason", reason);
+      map.put("reason", reason.plain());
+      if (!reason.commands().isEmpty()) {
+        map.put("remedy", reason.toMaps());
+      }
       return map;
     }
 
     /** The refusal as the FDE reads it: what main did not take yet, and why. */
-    public String describe() {
-      return type + " " + id + ": main did not take this yet — " + reason;
+    public Remedy describe() {
+      return Remedy.of(type + " " + id + ": main did not take this yet — ", reason);
     }
   }
 
@@ -259,29 +269,25 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
       InputStream in,
       OutputStream out,
       SyncWire.Hello hello,
-      Consumer<String> notice,
+      Consumer<Remedy> notice,
       Consumer<Denial> denied,
-      OperatorCommand operator,
       Sqlite db) {
-    return ((PagedSyncSession) open(in, out, hello, notice, denied, operator)).content(db);
+    return ((PagedSyncSession) open(in, out, hello, notice, denied)).content(db);
   }
 
   static SyncSession open(
       InputStream in,
       OutputStream out,
       SyncWire.Hello hello,
-      Consumer<String> notice,
-      Consumer<Denial> denied,
-      OperatorCommand operator) {
+      Consumer<Remedy> notice,
+      Consumer<Denial> denied) {
     var context = SyncWire.context(hello);
     var line = Rpc.exchange(in, out, SyncWire.encode(hello), context);
     if (SyncWire.predatesOps(line)) {
       throw new SyncTransportException(
           "refused",
-          context
-              + ": main is on a sync protocol this node cannot speak: upgrade main ('"
-              + OperatorCommand.elsewhere("upgrade")
-              + "' on main), then sync again",
+          context + ": main is on a sync protocol this node cannot speak:",
+          Remedy.of("upgrade main ('", Remedy.sail("upgrade"), "' on main), then sync again"),
           null);
     }
     SyncWire.Response response;
@@ -293,11 +299,11 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
     }
     return switch (response) {
       case SyncWire.Welcome welcome ->
-          PagedSyncSession.open(in, out, hello, welcome, notice, denied, operator);
+          PagedSyncSession.open(in, out, hello, welcome, notice, denied);
       case SyncWire.Refuse refuse ->
-          throw new SyncTransportException("refused", context + ": " + refuse.reason(), null);
+          throw new SyncTransportException("refused", context + ":", refuse.reason(), null);
       case SyncWire.Failed failed ->
-          throw new SyncTransportException(failed.kind(), context + ": " + failed.message(), null);
+          throw new SyncTransportException(failed.kind(), context + ":", failed.detail(), null);
       default ->
           throw new SyncTransportException(context + ": Expected a welcome, got: " + response);
     };

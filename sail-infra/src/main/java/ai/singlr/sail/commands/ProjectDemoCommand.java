@@ -41,13 +41,17 @@ import java.util.Map;
 import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
+import picocli.CommandLine.Spec;
 
 @Command(
     name = "demo",
     description = "Set up a demo project with zero configuration.",
     mixinStandardHelpOptions = true)
 public final class ProjectDemoCommand implements Runnable {
+
+  @Spec private CommandSpec spec;
 
   static final String DEMO_PROJECT = DemoProject.NAME;
 
@@ -73,7 +77,7 @@ public final class ProjectDemoCommand implements Runnable {
   static void provisionTrusting(Path database, OperatorCommand operator, Provisioning provisioning)
       throws Exception {
     try (var held = PairingTrust.hold(database)) {
-      provisioning.provision(WorkstationIdentity.registered(operator));
+      provisioning.provision(WorkstationIdentity.registered());
     }
   }
 
@@ -88,8 +92,7 @@ public final class ProjectDemoCommand implements Runnable {
     var out = System.out;
 
     if (!dryRun && !ConsoleHelper.isRoot()) {
-      throw new IllegalStateException(
-          "Root privileges required. Run with: " + OperatorCommand.SUDO.sail("project demo"));
+      throw RootRequired.refusal(spec);
     }
 
     var hostYamlPath = SailPaths.hostConfigPath();
@@ -127,7 +130,7 @@ public final class ProjectDemoCommand implements Runnable {
     }
 
     var yamlContent = loadDemoDefinition(out, ansi, operator);
-    var registered = WorkstationIdentity.registered(operator);
+    var registered = WorkstationIdentity.registered();
     var config = resolveAutoDetected(yamlContent, registered.isPresent(), out, ansi, operator);
 
     var outputDir = Path.of(DEMO_PROJECT);
@@ -215,7 +218,7 @@ public final class ProjectDemoCommand implements Runnable {
   }
 
   private String loadDemoDefinition(PrintStream out, Ansi ansi, OperatorCommand operator) {
-    try (var operations = OperationsFactory.open(operator)) {
+    try (var operations = OperationsFactory.open()) {
       var definition = operations.catalog().demoDefinition();
       if (!json) {
         out.println(ansi.string("  @|green \u2713|@ demo project loaded from the catalog"));

@@ -15,6 +15,7 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
@@ -197,7 +198,7 @@ class SyncCliTest {
 
   public static void main(String[] args) throws Exception {
     try (var db = Sqlite.open(SailPaths.controlPlaneDb());
-        var operations = OperationsFactory.open(OperatorCommand.PLAIN)) {
+        var operations = OperationsFactory.open()) {
       var schema = new SchemaManager(db);
       schema.migrate();
       if (args[0].startsWith("upgrade-")) {
@@ -241,7 +242,7 @@ class SyncCliTest {
         assertEquals(previous, status.lastSuccessAt());
         assertTrue(status.lastAttemptAt().isAfter(previous));
         assertEquals("store", status.lastErrorKind());
-        assertTrue(status.lastError().contains("newer than this Sail binary supports"));
+        assertTrue(status.lastError().plain().contains("newer than this Sail binary supports"));
         assertThrows(IllegalStateException.class, () -> NodeSync.syncOnce(OperatorCommand.PLAIN));
         assertEquals(2, operations.syncStatus().consecutiveFailures());
         assertEquals(
@@ -250,7 +251,7 @@ class SyncCliTest {
       } else {
         var failures = Integer.parseInt(args[0]);
         for (var i = 0; i < failures; i++) {
-          health.failed(peer, previous, "unreachable", "offline");
+          health.failed(peer, previous, "unreachable", Remedy.of("offline"));
         }
         for (var invocation = 0; invocation < 2; invocation++) {
           try (var scheduler =
@@ -299,8 +300,7 @@ class SyncCliTest {
     if (scenario.startsWith("scope-migrate-")) {
       MigrateCommand.runMigrations(true, true, OperatorCommand.PLAIN);
     } else {
-      MigrationRunner.applyAll(
-          db, DataMigrations.all(OperatorCommand.PLAIN), DataMigration.Prompter.NON_INTERACTIVE);
+      MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
     }
 
     var projects = new ProjectStore(db);
@@ -351,8 +351,7 @@ class SyncCliTest {
                     }));
     Thread.ofPlatform().start(rewrite);
     assertTrue(truncated.await(10, TimeUnit.SECONDS), "the rewrite never truncated host.yaml");
-    MigrationRunner.applyAll(
-        db, DataMigrations.all(OperatorCommand.PLAIN), DataMigration.Prompter.NON_INTERACTIVE);
+    MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
     assertEquals(granted, new SyncScope(db).held(), "the empty file decided nothing");
     resume.countDown();
     rewrite.get();

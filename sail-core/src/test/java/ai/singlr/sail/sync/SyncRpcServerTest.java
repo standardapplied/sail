@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -193,7 +194,7 @@ class SyncRpcServerTest {
       var results = assertInstanceOf(SyncWire.Results.class, response);
       assertEquals(
           "blob " + hash + " not held",
-          assertInstanceOf(SyncWire.Refused.class, results.results().getFirst()).reason());
+          assertInstanceOf(SyncWire.Refused.class, results.results().getFirst()).reason().plain());
       assertTrue(new FileStore(main.db).list("project").isEmpty());
       assertANodeConverges(main, Actor.sync("node", Role.MEMBER));
     }
@@ -246,7 +247,7 @@ class SyncRpcServerTest {
           assertInstanceOf(
               SyncWire.Refuse.class,
               serve(new SyncRpcServer(new FakeMain(), true), first).getFirst());
-      assertEquals("hello required", refusal.reason());
+      assertEquals(Remedy.of("hello required"), refusal.reason());
     }
   }
 
@@ -257,7 +258,9 @@ class SyncRpcServerTest {
     new SyncRpcServer(new FakeMain(), true).serve(new ByteStreams.Input(fetch + "\n"), out);
     var line = out.toString().strip();
     var refusal = assertInstanceOf(SyncWire.Refuse.class, SyncWire.decodeResponse(line));
-    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sudo sail upgrade", refusal.reason());
+    assertEquals(
+        Remedy.of("upgrade to " + SyncWire.UPGRADE_FLOOR + ": ", Remedy.sail("upgrade")),
+        refusal.reason());
   }
 
   @Test
@@ -269,7 +272,9 @@ class SyncRpcServerTest {
                     new SyncRpcServer(new FakeMain(), true),
                     new SyncWire.Hello(4, "0.43.3", "0.34.0", "b"))
                 .getFirst());
-    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sudo sail upgrade", refusal.reason());
+    assertEquals(
+        Remedy.of("upgrade to " + SyncWire.UPGRADE_FLOOR + ": ", Remedy.sail("upgrade")),
+        refusal.reason());
   }
 
   @Test
@@ -281,7 +286,9 @@ class SyncRpcServerTest {
                     new SyncRpcServer(new FakeMain(), true),
                     new SyncWire.Hello(4, "0.46.1", "0.46.0", "b"))
                 .getFirst());
-    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sudo sail upgrade", refusal.reason());
+    assertEquals(
+        Remedy.of("upgrade to " + SyncWire.UPGRADE_FLOOR + ": ", Remedy.sail("upgrade")),
+        refusal.reason());
   }
 
   @Test
@@ -298,7 +305,8 @@ class SyncRpcServerTest {
         assertInstanceOf(
             SyncWire.Refuse.class,
             serve(server, new SyncWire.Hello(4, "0.51.0", "0.50.0", "b")).getFirst());
-    assertEquals("main is 0.44.2, this node is 0.51.0: upgrade main first", refusal.reason());
+    assertEquals(
+        Remedy.of("main is 0.44.2, this node is 0.51.0: upgrade main first"), refusal.reason());
   }
 
   @Test
@@ -310,7 +318,9 @@ class SyncRpcServerTest {
                     new SyncRpcServer(new FakeMain(), true),
                     new SyncWire.Hello(4, "0.46.2", "0.46.2", "b"))
                 .getFirst());
-    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sudo sail upgrade", refusal.reason());
+    assertEquals(
+        Remedy.of("upgrade to " + SyncWire.UPGRADE_FLOOR + ": ", Remedy.sail("upgrade")),
+        refusal.reason());
   }
 
   @Test
@@ -323,7 +333,9 @@ class SyncRpcServerTest {
                     new SyncRpcServer(new FakeMain(), true),
                     new SyncWire.Hello(4, "0.46.3", "0.46.3", "b"))
                 .getFirst());
-    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sudo sail upgrade", refusal.reason());
+    assertEquals(
+        Remedy.of("upgrade to " + SyncWire.UPGRADE_FLOOR + ": ", Remedy.sail("upgrade")),
+        refusal.reason());
   }
 
   @Test
@@ -355,7 +367,7 @@ class SyncRpcServerTest {
           assertInstanceOf(
               SyncWire.Refuse.class,
               serve(new SyncRpcServer(new FakeMain(), true), hello).getFirst());
-      assertTrue(refusal.reason().contains("sail upgrade"), refusal.reason());
+      assertEquals(List.of(Remedy.sail("upgrade")), refusal.reason().commands(), hello.toString());
     }
   }
 
@@ -760,7 +772,7 @@ class SyncRpcServerTest {
 
     var refused = assertInstanceOf(SyncWire.Refused.class, results.results().get(0));
     assertEquals("bad", refused.id());
-    assertEquals("disk full", refused.reason());
+    assertEquals("disk full", refused.reason().plain());
     assertEquals("good", assertInstanceOf(SyncWire.Accepted.class, results.results().get(1)).id());
     assertTrue(
         captured.toString(StandardCharsets.UTF_8).contains("disk full"),
@@ -897,7 +909,7 @@ class SyncRpcServerTest {
             SyncWire.Refused.class,
             serveRun(null, new MainReplica.Offer("r1", Map.of("node", "ada"), null)));
     assertEquals("r1", refused.id());
-    assertTrue(refused.reason().contains("handle"), refused.reason());
+    assertTrue(refused.reason().plain().contains("handle"), refused.reason().plain());
   }
 
   private static FakeMain remembering() {

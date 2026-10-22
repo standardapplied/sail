@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.SyncConfig;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
@@ -38,7 +37,6 @@ public final class TestControlPlane {
             () -> box,
             target -> {
               throw new IOException("main unavailable");
-            },
-            OperatorCommand.PLAIN));
+            }));
   }
 }

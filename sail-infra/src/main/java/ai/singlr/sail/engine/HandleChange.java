@@ -199,7 +199,8 @@ public final class HandleChange {
       return Set.of();
     }
     try {
-      return SyncOperations.acknowledgeHeld(db, BoxIdentity.resolved(before), channels, operator);
+      return SyncOperations.acknowledgeHeld(
+          db, BoxIdentity.resolved(before), channels, operator::warn);
     } catch (Exception e) {
       throw new IllegalStateException(
           "Cannot change this box's sync handle from '"

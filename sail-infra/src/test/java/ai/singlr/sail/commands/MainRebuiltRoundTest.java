@@ -99,7 +99,7 @@ class MainRebuiltRoundTest {
                           () -> new SyncConfig(SyncConfig.ROLE_MAIN, null, "ada", main.id())));
             },
             event -> {},
-            OperatorCommand.PLAIN,
+            SyncOperations.PLAIN_NOTICES,
             new NoContainers());
     node.prepare();
   }
@@ -114,8 +114,7 @@ class MainRebuiltRoundTest {
   private Main main(String file, String id, String project) {
     var path = tempDir.resolve(file);
     try (var db = Sqlite.open(path)) {
-      MigrationRunner.applyAll(
-          db, DataMigrations.all(OperatorCommand.PLAIN), DataMigration.Prompter.NON_INTERACTIVE);
+      MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
     }
     var database = SyncDatabase.converge(path, id);
     mains.add(database);
@@ -152,7 +151,7 @@ class MainRebuiltRoundTest {
   }
 
   private static String rendered(SyncReport round) {
-    return SyncCommand.render(round, false, OperatorCommand.PLAIN);
+    return SyncCommand.render(round, false, OperatorCommand.PLAIN::render);
   }
 
   private void write(String id) {
@@ -348,7 +347,13 @@ class MainRebuiltRoundTest {
         "Main at sail@main names no database catalog, so this box cannot tell whether it is the"
             + " database it synced with: upgrade main ('sudo sail upgrade' on main), then sync"
             + " again.",
-        refused.getMessage());
+        OperatorCommand.SUDO.render(refused),
+        "read through sudo on a system box");
+    assertEquals(
+        "Main at sail@main names no database catalog, so this box cannot tell whether it is the"
+            + " database it synced with: upgrade main ('sail upgrade' on main), then sync again.",
+        OperatorCommand.PLAIN.render(refused),
+        "read by root logged in directly");
     assertEquals(before, held(nodeDb));
   }
 

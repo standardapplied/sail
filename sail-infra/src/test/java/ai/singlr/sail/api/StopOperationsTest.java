@@ -16,7 +16,6 @@ import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
@@ -1508,14 +1507,7 @@ class StopOperationsTest {
     specStore = new SpecStore(db);
     runStore = new RunStore(db);
     return new StopOperations(
-        shell,
-        TestProjects.reading(yaml),
-        specStore,
-        runStore,
-        sink,
-        halter,
-        listener,
-        OperatorCommand.PLAIN);
+        shell, TestProjects.reading(yaml), specStore, runStore, sink, halter, listener);
   }
 
   private void seedSpec(String id, SpecStatus status, String assignee) {

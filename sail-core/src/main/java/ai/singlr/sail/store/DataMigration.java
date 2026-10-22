@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectRegistry;
 import java.util.List;
 import java.util.Optional;
@@ -42,9 +43,15 @@ public interface DataMigration {
   Report apply(Sqlite db, ProjectRegistry projects, Prompter prompter);
 
   /** Per-migration outcome surfaced back to the CLI for printing. */
-  record Report(int applied, int ambiguous, int skipped, List<String> notes) {
+  record Report(int applied, int ambiguous, int skipped, List<Remedy> notes) {
     public static Report empty() {
       return new Report(0, 0, 0, List.of());
+    }
+
+    /** A report whose notes name no command. */
+    public static Report of(int applied, int ambiguous, int skipped, List<String> notes) {
+      return new Report(
+          applied, ambiguous, skipped, notes.stream().map(note -> Remedy.of(note)).toList());
     }
   }
 

@@ -78,7 +78,7 @@ public final class OrphanErasure implements DataMigration {
   @Override
   public Report apply(Sqlite db, ProjectRegistry projects, Prompter prompter) {
     if (!authoritative.getAsBoolean()) {
-      return new Report(
+      return Report.of(
           0, 0, 0, List.of("Orphans are erased by main; this node adopts main's erasures."));
     }
     var erasure = new Erasure(db);
@@ -96,7 +96,7 @@ public final class OrphanErasure implements DataMigration {
       }
     }
     var result = new Erasure.Result(erased, 0);
-    return new Report(
+    return Report.of(
         erased.size(),
         0,
         0,

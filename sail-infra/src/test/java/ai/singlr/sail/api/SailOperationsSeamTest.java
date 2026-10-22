@@ -15,11 +15,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ProjectFileFixtures;
 import ai.singlr.sail.engine.ShellExec;
@@ -110,13 +110,7 @@ class SailOperationsSeamTest {
 
   private SailOperations operations(Sqlite db) {
     return OperationsFactory.create(
-            db,
-            shell,
-            null,
-            null,
-            SyncScheduler.disabled(),
-            SessionYield.NONE,
-            OperatorCommand.PLAIN)
+            db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
         .useControlPlane(
             db,
             tempDir,
@@ -127,8 +121,7 @@ class SailOperationsSeamTest {
                 SyncConfig::unset,
                 target -> {
                   throw new IOException("main unavailable");
-                },
-                OperatorCommand.PLAIN));
+                }));
   }
 
   @Test
@@ -152,14 +145,13 @@ class SailOperationsSeamTest {
                   throw new IOException("connection refused");
                 }
                 return channel(main);
-              },
-              OperatorCommand.PLAIN);
+              });
       operations.useControlPlane(node.db, tempDir, sync);
       assertThrows(IOException.class, () -> operations.sync(new SyncRequest(null)));
       var first = operations.syncStatus();
       assertEquals("stale", first.state());
       assertEquals("unreachable", first.lastErrorKind());
-      assertEquals("connection refused", first.lastError());
+      assertEquals(Remedy.of("connection refused"), first.lastError());
       assertEquals(1, first.consecutiveFailures());
       assertEquals(
           clock.instant(), first.lastAttemptAt(), "backoff starts after the failure completes");
@@ -188,13 +180,7 @@ class SailOperationsSeamTest {
         var bus = new EventBus();
         var operations =
             OperationsFactory.create(
-                node.db,
-                shell,
-                bus,
-                null,
-                SyncScheduler.disabled(),
-                SessionYield.NONE,
-                OperatorCommand.PLAIN);
+                node.db, shell, bus, null, SyncScheduler.disabled(), SessionYield.NONE);
         var server = server(operations, node.db)) {
       var clock = new BackoffTest.TestClock();
       var nanos = new AtomicLong();
@@ -229,8 +215,7 @@ class SailOperationsSeamTest {
                     attempts.incrementAndGet();
                     if (offline.get()) throw new IOException("main port blocked");
                     return channel(main, "owner");
-                  },
-                  OperatorCommand.PLAIN));
+                  }));
       Consumer<Duration> advance =
           duration -> {
             clock.advance(duration);
@@ -315,7 +300,7 @@ class SailOperationsSeamTest {
                   tempDir,
                   () -> new SyncConfig("node", "main", "node", "node-box"),
                   target -> channel(main),
-                  OperatorCommand.PLAIN));
+                  SyncOperations.PLAIN_NOTICES));
       if (previouslySynced) operations.sync(new SyncRequest(null));
       var lastSuccess = operations.syncStatus().lastSuccessAt();
       var newerVersion = new SchemaManager(node.db).currentVersion() + 1;
@@ -342,7 +327,7 @@ class SailOperationsSeamTest {
           var status = operations.syncStatus();
           assertEquals("stale", status.state());
           assertEquals("store", status.lastErrorKind());
-          assertTrue(status.lastError().contains("newer than this Sail binary supports"));
+          assertTrue(status.lastError().plain().contains("newer than this Sail binary supports"));
           assertEquals(lastSuccess, status.lastSuccessAt());
           assertEquals(clock.instant(), status.lastAttemptAt());
           assertEquals(count, status.consecutiveFailures());
@@ -393,8 +378,7 @@ class SailOperationsSeamTest {
         var operations = operations(db)) {
       var refused =
           assertThrows(
-              ApiException.class,
-              () -> operations.catalog().definitions().require("acme", OperatorCommand.PLAIN));
+              ApiException.class, () -> operations.catalog().definitions().require("acme"));
 
       assertEquals("Project 'acme' is not in the catalog.", refused.getMessage());
       assertTrue(new SchemaManager(db).currentVersion() > 0, "the read prepared the database");
@@ -415,7 +399,7 @@ class SailOperationsSeamTest {
               tempDir,
               () -> new SyncConfig("node", "main", "node", "node-box"),
               target -> channel(main),
-              OperatorCommand.PLAIN));
+              SyncOperations.PLAIN_NOTICES));
 
       operations.sync(new SyncRequest(null));
 
@@ -440,11 +424,10 @@ class SailOperationsSeamTest {
               () -> new SyncConfig("node", "main", "node", "node-box"),
               target -> {
                 throw new SyncTransportException(kind, "message m1: failure cause", null);
-              },
-              OperatorCommand.PLAIN));
+              }));
       assertThrows(SyncTransportException.class, () -> operations.sync(new SyncRequest(null)));
       assertEquals(kind, operations.syncStatus().lastErrorKind());
-      assertEquals("message m1: failure cause", operations.syncStatus().lastError());
+      assertEquals(Remedy.of("message m1: failure cause"), operations.syncStatus().lastError());
     }
   }
 
@@ -537,8 +520,7 @@ class SailOperationsSeamTest {
               () -> new SyncConfig("node", "main", "owner", "node-box"),
               target -> {
                 throw new IOException("unused");
-              },
-              OperatorCommand.PLAIN));
+              }));
       new FdeStore(box.db).add(handle, null, null, role);
       var token = new BoxCredentialStore(box.db).replace(handle);
       parkRetitle(box, "owner");
@@ -659,8 +641,7 @@ class SailOperationsSeamTest {
               target -> {
                 targets.add(target);
                 return channel(main);
-              },
-              OperatorCommand.PLAIN));
+              }));
       knownToMain(main, "member", "member");
       knownToMain(main, "admin", "admin");
       var member = credential(node.db, "member", "member", lane);
@@ -994,8 +975,7 @@ class SailOperationsSeamTest {
               target -> {
                 targets.add(target);
                 return channel(main);
-              },
-              OperatorCommand.PLAIN));
+              }));
       operations.schema().prepareSync();
       assertNull(operations.syncStatus().lastReport());
       var expected = new SyncEngine.Report(2, 0, 0, 0);
@@ -1026,7 +1006,7 @@ class SailOperationsSeamTest {
                     FdeRoster.EMPTY,
                     SyncTransitionSink.NONE,
                     SyncWire.UPGRADE_FLOOR)),
-        OperatorCommand.PLAIN);
+        SyncOperations.PLAIN_NOTICES);
   }
 
   private static String finishedRunStampedFor(SyncBox box, String handle) {
@@ -1110,7 +1090,7 @@ class SailOperationsSeamTest {
                                   Map.of("handle", "node", "role", "viewer", "status", "active")),
                           SyncTransitionSink.NONE,
                           SyncWire.UPGRADE_FLOOR)),
-              OperatorCommand.PLAIN));
+              SyncOperations.PLAIN_NOTICES));
       operations.schema().prepareSync();
 
       operations.sync(new SyncRequest(null));
@@ -1151,7 +1131,7 @@ class SailOperationsSeamTest {
                               SyncWire.UPGRADE_FLOOR)
                           .content(main.db, FileLimits.defaults())),
               events::add,
-              OperatorCommand.PLAIN));
+              SyncOperations.PLAIN_NOTICES));
       operations.schema().prepareSync();
       Supplier<List<String>> posted =
           () ->
@@ -1201,7 +1181,7 @@ class SailOperationsSeamTest {
                               new ChangeLog(main.db)::headsAfter,
                               SyncWire.UPGRADE_FLOOR)
                           .content(main.db, FileLimits.defaults())),
-              OperatorCommand.SUDO));
+              SyncOperations.PLAIN_NOTICES));
       operations.schema().prepareSync();
       assertThrows(Exception.class, () -> operations.sync(new SyncRequest(null)));
       Acting.system(() -> node.specs.update(SyncBox.spec("auth", "Viewer edit", "pending")));
@@ -1219,7 +1199,7 @@ class SailOperationsSeamTest {
           err.toString(StandardCharsets.UTF_8)
               .contains(
                   "spec auth: main denied this change — Your credential is read-only and cannot"
-                      + " change specs. Yours is in its history: sudo sail spec history auth."),
+                      + " change specs. Yours is in its history: sail spec history auth."),
           err.toString(StandardCharsets.UTF_8));
       assertEquals("Auth", node.specs.findById("auth").orElseThrow().title());
     }
@@ -1234,7 +1214,8 @@ class SailOperationsSeamTest {
     try (var db = Sqlite.openMemory();
         var operations = operations(db)) {
       new SchemaManager(db).migrate();
-      assertTrue(operations.sync(new SyncRequest(null)).message().startsWith("Single devbox"));
+      assertTrue(
+          operations.sync(new SyncRequest(null)).message().plain().startsWith("Single devbox"));
       assertThrows(IOException.class, () -> operations.sync(new SyncRequest("offline")));
       assertNull(operations.syncStatus().lastReport());
       operations.useControlPlane(
@@ -1247,10 +1228,13 @@ class SailOperationsSeamTest {
               () -> new SyncConfig("main", null, "owner", "main-box"),
               target -> {
                 throw new IOException("unexpected connection");
-              },
-              OperatorCommand.PLAIN));
+              }));
       assertTrue(
-          operations.sync(new SyncRequest(null)).message().startsWith("This box is the main"));
+          operations
+              .sync(new SyncRequest(null))
+              .message()
+              .plain()
+              .startsWith("This box is the main"));
       assertThrows(IllegalArgumentException.class, () -> new SyncRequest("-oProxyCommand=bad"));
       assertThrows(IllegalArgumentException.class, () -> new SyncRequest("bad\u0000host"));
     }
@@ -1293,13 +1277,7 @@ class SailOperationsSeamTest {
       new FdeStore(db).add("node", "Node", "node@example.com", "admin");
       try (var operations =
           OperationsFactory.create(
-                  db,
-                  shell,
-                  null,
-                  null,
-                  SyncScheduler.disabled(),
-                  SessionYield.NONE,
-                  OperatorCommand.PLAIN)
+                  db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   tempDir,
@@ -1310,8 +1288,7 @@ class SailOperationsSeamTest {
                       () -> new SyncConfig("node", "main", "node", "node-box"),
                       target -> {
                         throw new IOException("main unavailable");
-                      },
-                      OperatorCommand.PLAIN))) {
+                      }))) {
         var destroyed = operations.catalog().destroy("old", true);
 
         assertTrue(destroyed.purged());
@@ -1330,13 +1307,7 @@ class SailOperationsSeamTest {
       Acting.system(() -> new ProjectStore(db).upsert("old", "name: old\n"));
       try (var operations =
           OperationsFactory.create(
-                  db,
-                  shell,
-                  null,
-                  null,
-                  SyncScheduler.disabled(),
-                  SessionYield.NONE,
-                  OperatorCommand.PLAIN)
+                  db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   tempDir,
@@ -1347,8 +1318,7 @@ class SailOperationsSeamTest {
                       () -> new SyncConfig("node", "main", "node", "node-box"),
                       target -> {
                         throw new IOException("main unavailable");
-                      },
-                      OperatorCommand.PLAIN))) {
+                      }))) {
         var refused =
             assertThrows(ApiException.class, () -> operations.catalog().purgeSummary("old"));
 
@@ -1366,13 +1336,7 @@ class SailOperationsSeamTest {
       new FdeStore(db).add("node", "Node", "node@example.com", "member");
       try (var operations =
           OperationsFactory.create(
-                  db,
-                  shell,
-                  null,
-                  null,
-                  SyncScheduler.disabled(),
-                  SessionYield.NONE,
-                  OperatorCommand.PLAIN)
+                  db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   tempDir,
@@ -1383,8 +1347,7 @@ class SailOperationsSeamTest {
                       () -> new SyncConfig("node", "main", "node", "node-box"),
                       target -> {
                         throw new IOException("main unavailable");
-                      },
-                      OperatorCommand.PLAIN))) {
+                      }))) {
         var refused =
             assertThrows(ApiException.class, () -> operations.catalog().purgeSummary("old"));
 
@@ -1479,15 +1442,14 @@ class SailOperationsSeamTest {
       assertEquals(
           1L, box.db.queryOne("SELECT count(*) FROM events", row -> row.integer(0)).orElseThrow());
       assertTrue(operations.catalog().demoDefinition().contains("demo"));
-      assertEquals(
-          "demo", operations.catalog().definitions().require("demo", OperatorCommand.PLAIN).name());
+      assertEquals("demo", operations.catalog().definitions().require("demo").name());
       assertTrue(operations.catalog().destroy("demo", true).purged());
       assertTrue(operations.catalog().definitions().read("demo").isEmpty());
       var missing =
           assertThrows(IllegalStateException.class, () -> operations.catalog().demoDefinition());
       assertEquals(
-          "The demo project isn't on this box. On main or a standalone box, 'sudo sail migrate'"
-              + " seeds it; a node gets it from main once an admin grants it there: sudo sail fde"
+          "The demo project isn't on this box. On main or a standalone box, 'sail migrate'"
+              + " seeds it; a node gets it from main once an admin grants it there: sail fde"
               + " grant <handle> demo.",
           missing.getMessage(),
           "a purged demo is not resurrected");

@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
@@ -107,7 +106,7 @@ class LaunchAdmissionTest {
         () ->
             Actor.run(
                 Actor.cliOperator("uday"),
-                () -> LaunchAdmission.requireAllowed(spec("uday"), "uday", OperatorCommand.PLAIN)));
+                () -> LaunchAdmission.requireAllowed(spec("uday"), "uday")));
   }
 
   @Test
@@ -118,28 +117,26 @@ class LaunchAdmissionTest {
             () ->
                 Actor.run(
                     new Actor("mady", Role.MEMBER, Actor.Lane.API),
-                    () ->
-                        LaunchAdmission.requireAllowed(
-                            spec("uday"), "uday", OperatorCommand.PLAIN)));
+                    () -> LaunchAdmission.requireAllowed(spec("uday"), "uday")));
     assertEquals(ErrorCode.NOT_YOUR_SPEC, ex.failure().errorCode());
   }
 
   @Test
   void requireTrustedRosterSkipsWhenTheBoxKeepsNoRoster() {
-    var admission = new LaunchAdmission(shellExiting(0), null, OperatorCommand.PLAIN);
+    var admission = new LaunchAdmission(shellExiting(0), null);
     assertDoesNotThrow(() -> admission.requireTrustedRoster("anyone"));
   }
 
   @Test
   void requireTrustedRosterAdmitsARosteredHandle() {
     fdeStore.add("uday", "Uday", "uday@x");
-    var admission = new LaunchAdmission(shellExiting(0), fdeStore, OperatorCommand.PLAIN);
+    var admission = new LaunchAdmission(shellExiting(0), fdeStore);
     assertDoesNotThrow(() -> admission.requireTrustedRoster("uday"));
   }
 
   @Test
   void requireTrustedRosterRefusesAnUnrosteredHandle() {
-    var admission = new LaunchAdmission(shellExiting(0), fdeStore, OperatorCommand.PLAIN);
+    var admission = new LaunchAdmission(shellExiting(0), fdeStore);
     var ex = assertThrows(ApiException.class, () -> admission.requireTrustedRoster("ghost"));
     assertEquals(ErrorCode.FDE_NOT_IN_ROSTER, ex.failure().errorCode());
   }
@@ -148,7 +145,7 @@ class LaunchAdmissionTest {
   void requireTrustedRosterRefusesADisabledHandle() {
     fdeStore.add("uday", "Uday", "uday@x");
     fdeStore.disableUnlisted(List.of());
-    var admission = new LaunchAdmission(shellExiting(0), fdeStore, OperatorCommand.PLAIN);
+    var admission = new LaunchAdmission(shellExiting(0), fdeStore);
 
     var ex = assertThrows(ApiException.class, () -> admission.requireTrustedRoster("uday"));
 
@@ -157,13 +154,13 @@ class LaunchAdmissionTest {
 
   @Test
   void requireInstalledAdmitsWhenTheBinaryIsOnThePath() {
-    var admission = new LaunchAdmission(shellExiting(0), fdeStore, OperatorCommand.PLAIN);
+    var admission = new LaunchAdmission(shellExiting(0), fdeStore);
     assertDoesNotThrow(() -> admission.requireInstalled(Harnesses.of("claude-code"), "acme"));
   }
 
   @Test
   void requireInstalledRefusesWhenTheBinaryIsMissing() {
-    var admission = new LaunchAdmission(shellExiting(1), fdeStore, OperatorCommand.PLAIN);
+    var admission = new LaunchAdmission(shellExiting(1), fdeStore);
     var ex =
         assertThrows(
             ApiException.class,
@@ -173,7 +170,7 @@ class LaunchAdmissionTest {
 
   @Test
   void requireInstalledWrapsAShellFailure() {
-    var admission = new LaunchAdmission(throwingShell(), fdeStore, OperatorCommand.PLAIN);
+    var admission = new LaunchAdmission(throwingShell(), fdeStore);
     var ex =
         assertThrows(
             ApiException.class,
@@ -190,7 +187,7 @@ class LaunchAdmissionTest {
   void resolveAgentRejectsABlankName() {
     var ex = assertThrows(ApiException.class, () -> LaunchAdmission.resolveAgent("  "));
     assertEquals(ErrorCode.BAD_REQUEST, ex.failure().errorCode());
-    assertEquals("Pass agent: claude-code or codex.", ex.failure().action());
+    assertEquals("Pass agent: claude-code or codex.", ex.failure().remedy().plain());
   }
 
   @Test
@@ -218,9 +215,7 @@ class LaunchAdmissionTest {
             () ->
                 Actor.run(
                     Actor.agentPrincipal("claude/x", "uday"),
-                    () ->
-                        LaunchAdmission.requireAllowedForRoom(
-                            "chat", "uday", "uday", OperatorCommand.PLAIN)));
+                    () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday")));
     assertEquals(ErrorCode.FORBIDDEN, agent.failure().errorCode());
 
     var noHandle =
@@ -229,9 +224,7 @@ class LaunchAdmissionTest {
             () ->
                 Actor.run(
                     Actor.cliOperator("uday"),
-                    () ->
-                        LaunchAdmission.requireAllowedForRoom(
-                            "chat", "uday", " ", OperatorCommand.PLAIN)));
+                    () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", " ")));
     assertEquals(ErrorCode.COMMAND_FAILED, noHandle.failure().errorCode());
 
     var foreign =
@@ -240,16 +233,14 @@ class LaunchAdmissionTest {
             () ->
                 Actor.run(
                     Actor.cliOperator("uday"),
-                    () ->
-                        LaunchAdmission.requireAllowedForRoom(
-                            "chat", "ada", "uday", OperatorCommand.PLAIN)));
+                    () -> LaunchAdmission.requireAllowedForRoom("chat", "ada", "uday")));
     assertEquals(ErrorCode.NOT_YOUR_SPEC, foreign.failure().errorCode());
 
     Actor.run(
         new Actor("sam", Role.VIEWER, Actor.Lane.API, null),
-        () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday", OperatorCommand.PLAIN));
+        () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday"));
     Actor.run(
         Actor.cliOperator("uday"),
-        () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday", OperatorCommand.PLAIN));
+        () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday"));
   }
 }

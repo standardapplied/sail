@@ -31,6 +31,7 @@ import static ai.singlr.sail.authority.Actors.with;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.authority.Refusal.Kind;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -372,7 +373,7 @@ class RunAuthorityTest {
             new Refusal(
                 Kind.NOT_OWNER,
                 "Run '" + RUN + "' was deleted, and a deleted run cannot be brought back.",
-                null)),
+                Remedy.NONE)),
         rule.decide(OWNER_SYNC, RUN, held, held));
   }
 

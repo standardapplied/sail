@@ -20,6 +20,7 @@ import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestAuth;
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostToken;
@@ -155,7 +156,9 @@ class HostCliIdentityTest {
     var refused = assertThrows(IOException.class, () -> whoami(savedToken()));
 
     assertTrue(refused.getMessage().contains("HTTP 409"), refused.getMessage());
-    assertTrue(refused.getMessage().contains("sudo sail sync"), refused.getMessage());
+    assertTrue(
+        OperatorCommand.SUDO.render((Remedied) refused).contains("Run 'sudo sail sync' first."),
+        refused.getMessage());
     fdes.add("uday", null, null, "member");
     assertEquals("uday", whoami(savedToken()).get("fde"));
   }
@@ -232,14 +235,7 @@ class HostCliIdentityTest {
   private void serve(SyncConfig config) throws IOException {
     box.set(config);
     operations =
-        OperationsFactory.create(
-                db,
-                SHELL,
-                null,
-                null,
-                SyncScheduler.disabled(),
-                SessionYield.NONE,
-                OperatorCommand.PLAIN)
+        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
             .useControlPlane(
                 db,
                 tempDir,
@@ -251,7 +247,7 @@ class HostCliIdentityTest {
                     target -> {
                       throw new IOException("main unavailable");
                     },
-                    OperatorCommand.PLAIN));
+                    SyncOperations.PLAIN_NOTICES));
     server =
         new SailApiServer(
             "127.0.0.1",

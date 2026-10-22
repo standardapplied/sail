@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.sync.StoreReplica;
@@ -226,7 +225,7 @@ class SyncSchemaConvergenceTest {
           converged
               .db()
               .query("SELECT name FROM data_migrations ORDER BY name", row -> row.text(0));
-      for (var migration : DataMigrations.all(OperatorCommand.PLAIN)) {
+      for (var migration : DataMigrations.all()) {
         assertEquals(
             !migration.readsBoxFiles(),
             applied.contains(migration.name()),
@@ -234,16 +233,11 @@ class SyncSchemaConvergenceTest {
                 + ": the lane converges the shared database as another user, whose home holds"
                 + " none of this box's files, so it leaves such a migration to sail migrate");
       }
+      assertTrue(DataMigrations.anyPending(converged.db(), DataMigrations.all()));
+      assertTrue(!DataMigrations.anyPending(converged.db(), DataMigrations.databaseOnly()));
       assertTrue(
-          DataMigrations.anyPending(converged.db(), DataMigrations.all(OperatorCommand.PLAIN)));
-      assertTrue(
-          !DataMigrations.anyPending(
-              converged.db(), DataMigrations.databaseOnly(OperatorCommand.PLAIN)));
-      assertTrue(
-          DataMigrations.databaseOnly(OperatorCommand.PLAIN).stream()
-                  .noneMatch(DataMigration::readsBoxFiles)
-              && DataMigrations.all(OperatorCommand.PLAIN).stream()
-                  .anyMatch(DataMigration::readsBoxFiles));
+          DataMigrations.databaseOnly().stream().noneMatch(DataMigration::readsBoxFiles)
+              && DataMigrations.all().stream().anyMatch(DataMigration::readsBoxFiles));
     }
   }
 }

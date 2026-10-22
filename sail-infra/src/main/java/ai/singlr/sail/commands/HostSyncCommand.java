@@ -22,7 +22,9 @@ import java.util.LinkedHashMap;
 import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
+import picocli.CommandLine.Spec;
 
 /**
  * Designates this box's place in the db-sync star in one step. {@code --as-main} makes it the
@@ -37,6 +39,8 @@ import picocli.CommandLine.Option;
         "Designate this box's sync role: --as-main, or --main <target> to make it a node.",
     mixinStandardHelpOptions = true)
 public final class HostSyncCommand implements Runnable {
+
+  @Spec private CommandSpec spec;
 
   @Option(names = "--as-main", description = "Make this box the main devbox (the sync authority).")
   private boolean asMain;
@@ -71,24 +75,22 @@ public final class HostSyncCommand implements Runnable {
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
     validateOwnFde(operator);
+    var changing = asMain || mainTarget != null;
+    if (asMain && mainTarget != null) {
+      throw new IllegalArgumentException("Choose either --as-main or --main <target>, not both.");
+    }
+    if (changing && !ConsoleHelper.isRoot()) {
+      throw RootRequired.refusal(spec);
+    }
     var path = SailPaths.hostConfigPath();
     if (!Files.exists(path)) {
       throw HostInitCommand.notInitialized(operator);
     }
     var host = HostYaml.fromMap(YamlUtil.parseFile(path));
 
-    if (!asMain && mainTarget == null) {
+    if (!changing) {
       printRole(host.sync(), operator);
       return;
-    }
-    if (asMain && mainTarget != null) {
-      throw new IllegalArgumentException("Choose either --as-main or --main <target>, not both.");
-    }
-    if (!ConsoleHelper.isRoot()) {
-      throw new IllegalStateException(
-          "Root privileges required. Run with: "
-              + OperatorCommand.SUDO.sail(
-                  "host sync " + (asMain ? "--as-main" : "--main " + mainTarget)));
     }
 
     var taken =

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.Pipe;
@@ -26,6 +27,72 @@ class PtyWireTest {
     return PtyWire.read(
         java.nio.channels.Channels.newChannel(
             new java.io.ByteArrayInputStream(bytes.toByteArray())));
+  }
+
+  @Test
+  void aRefusalKeepsItsCommandsAsDataAndLeadsWithThePlainMessageAnOlderPeerReads()
+      throws Exception {
+    var detail =
+        Remedy.of(
+            "This box has no FDE identity. Set one with '",
+            Remedy.sail("host config set sync-handle", "<handle>"),
+            "' or run '",
+            Remedy.program("ssh-keygen", "-R", "main"),
+            "'.");
+    var bytes = new java.io.ByteArrayOutputStream();
+    PtyWire.write(java.nio.channels.Channels.newChannel(bytes), new PtyMessage.Err(detail));
+
+    assertEquals(
+        new PtyMessage.Err(detail),
+        PtyWire.read(
+            java.nio.channels.Channels.newChannel(
+                new java.io.ByteArrayInputStream(bytes.toByteArray()))));
+    var frame = ByteBuffer.wrap(bytes.toByteArray(), 5, bytes.size() - 5);
+    var message = new byte[frame.getInt()];
+    frame.get(message);
+    assertEquals(
+        "This box has no FDE identity. Set one with 'sail host config set sync-handle <handle>'"
+            + " or run 'ssh-keygen -R main'.",
+        new String(message, StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void anOlderHostsRefusalIsReadAsWords() throws Exception {
+    assertEquals(
+        new PtyMessage.Err(Remedy.of("No live session.")), readPayload(err("No live session.")));
+  }
+
+  @Test
+  void aRefusalWhoseRemedyIsCorruptIsRefusedLoudly() {
+    var unknownKind = err("m").putInt(1).put((byte) 7);
+    var unknownRunner =
+        err("m")
+            .putInt(1)
+            .put((byte) 1)
+            .putInt(1)
+            .put((byte) 'X')
+            .putInt(1)
+            .put((byte) 'v')
+            .putInt(0);
+
+    for (var payload : List.of(unknownKind, unknownRunner)) {
+      var refused = assertThrows(IOException.class, () -> readPayload(payload));
+      assertTrue(
+          refused.getMessage().startsWith("Corrupt pty frame: a refusal"), refused.getMessage());
+    }
+  }
+
+  private static ByteBuffer err(String message) {
+    var text = message.getBytes(StandardCharsets.UTF_8);
+    return ByteBuffer.allocate(64).put((byte) 31).putInt(text.length).put(text);
+  }
+
+  private static PtyMessage readPayload(ByteBuffer payload) throws IOException {
+    var body = new byte[payload.flip().remaining()];
+    payload.get(body);
+    var frame = ByteBuffer.allocate(4 + body.length).putInt(body.length).put(body).array();
+    return PtyWire.read(
+        java.nio.channels.Channels.newChannel(new java.io.ByteArrayInputStream(frame)));
   }
 
   @Test

@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -149,8 +148,7 @@ class DispatchLaunchCancelRaceTest {
               return 0;
             },
             DispatchOperations.Listener.NONE,
-            SessionYield.NONE,
-            OperatorCommand.PLAIN);
+            SessionYield.NONE);
 
     var conflict =
         assertThrows(

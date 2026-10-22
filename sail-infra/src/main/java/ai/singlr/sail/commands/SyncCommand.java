@@ -12,6 +12,9 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SyncReport;
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.api.SyncViews;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
@@ -68,7 +71,7 @@ public final class SyncCommand implements Callable<Integer> {
     private final Function<OperatorCommand, HostOperations> operations;
 
     Gc() {
-      this(OperationsFactory::open);
+      this(operator -> OperationsFactory.open(operator::warn));
     }
 
     Gc(Function<OperatorCommand, HostOperations> operations) {
@@ -102,7 +105,7 @@ public final class SyncCommand implements Callable<Integer> {
     private final Function<OperatorCommand, HostOperations> operations;
 
     Status() {
-      this(OperationsFactory::open);
+      this(operator -> OperationsFactory.open(operator::warn));
     }
 
     Status(Function<OperatorCommand, HostOperations> operations) {
@@ -121,13 +124,23 @@ public final class SyncCommand implements Callable<Integer> {
     }
   }
 
+  /**
+   * The stored failure as {@code operator} reads it: a remedy is kept as data, so the reader of
+   * {@code sync status} is told the commands as they type them, whoever stored it.
+   */
+  private static String lastError(Map<String, Object> status, OperatorCommand operator) {
+    return status.get("last_error_remedy") instanceof List<?> remedy
+        ? operator.render(Remedy.fromMaps(remedy))
+        : Objects.toString(status.get("last_error"), "");
+  }
+
   static String renderStatus(Map<String, Object> status, OperatorCommand operator) {
     var main = status.get("main");
     var health =
         switch (Objects.toString(status.get("state"), "")) {
           case "syncing" -> "Syncing with " + main;
           case "stale" ->
-              "Stale since " + status.get("stale_since") + " — " + status.get("last_error");
+              "Stale since " + status.get("stale_since") + " — " + lastError(status, operator);
           case "in_sync" -> "In sync with " + main;
           default ->
               main == null ? "Not a node: nothing to sync with." : "No sync round yet with " + main;
@@ -188,16 +201,17 @@ public final class SyncCommand implements Callable<Integer> {
     var sync = HostSync.config();
     var resolution = resolveMain(main, sync, operator);
     if (resolution.target() == null) {
-      System.out.println(Ansi.AUTO.string("  @|faint " + resolution.message() + "|@"));
+      System.out.println(
+          Ansi.AUTO.string("  @|faint " + operator.render(resolution.message()) + "|@"));
       return 0;
     }
     var target = resolution.target();
-    try (var operations = OperationsFactory.open(operator)) {
+    try (var operations = OperationsFactory.open(operator::warn)) {
       return watch
           ? watchLoop(operations, target, operator)
           : runOnce(operations, target, operator);
     } catch (RuntimeException e) {
-      System.err.println(Banner.errorLine(reason(e), Ansi.AUTO));
+      System.err.println(Banner.errorLine(reason(e, operator), Ansi.AUTO));
       return 1;
     }
   }
@@ -207,32 +221,31 @@ public final class SyncCommand implements Callable<Integer> {
    * null target with a {@link MainTarget#message()} means there is nothing to sync — a single box,
    * or the main hub itself — which the caller reports as friendly info, not an error.
    */
-  record MainTarget(String target, String message) {}
+  record MainTarget(String target, Remedy message) {}
 
   static MainTarget resolveMain(String flag, SyncConfig sync, OperatorCommand operator) {
-    var target = SyncOperations.resolveMain(flag, sync, operator);
+    var target = SyncOperations.resolveMain(flag, sync);
     return new MainTarget(target.target(), target.message());
   }
 
   private int runOnce(Operations operations, String target, OperatorCommand operator) {
     try {
       var round = operations.sync(new SyncRequest(target));
-      System.out.println(render(round, json, operator));
+      System.out.println(render(round, json, operator::render));
       return 0;
     } catch (Exception e) {
       System.err.println(
-          Banner.errorLine("Sync with " + target + " failed: " + reason(e), Ansi.AUTO));
+          Banner.errorLine("Sync with " + target + " failed: " + reason(e, operator), Ansi.AUTO));
       return 1;
     }
   }
 
-  /** A human-readable reason for a failed round, falling back to the exception type. */
-  static String reason(Exception e) {
-    var message = e.getMessage();
-    if (message == null || message.isBlank()) {
+  /** Why a round failed, as {@code operator} reads it. */
+  static String reason(Exception e, OperatorCommand operator) {
+    if (!(e instanceof Remedied) && Strings.isBlank(e.getMessage())) {
       return e.getClass().getSimpleName();
     }
-    return message;
+    return String.join(" ", CliCommand.lines(e, operator));
   }
 
   private int watchLoop(Operations operations, String target, OperatorCommand operator)
@@ -240,13 +253,17 @@ public final class SyncCommand implements Callable<Integer> {
     while (true) {
       try {
         var round = operations.sync(new SyncRequest(target));
-        System.out.println(render(round, json, operator));
+        System.out.println(render(round, json, operator::render));
       } catch (InterruptedException e) {
         throw e;
       } catch (Exception e) {
         System.err.println(
             Banner.errorLine(
-                "Sync round failed (" + reason(e) + "); retrying in " + intervalSeconds + "s.",
+                "Sync round failed ("
+                    + reason(e, operator)
+                    + "); retrying in "
+                    + intervalSeconds
+                    + "s.",
                 Ansi.AUTO));
       }
       Thread.sleep(intervalSeconds * 1000L);
@@ -266,7 +283,8 @@ public final class SyncCommand implements Callable<Integer> {
     return SyncOperations.boardUpdatedEvent(host, report);
   }
 
-  static String render(SyncReport round, boolean json, OperatorCommand operator) {
+  /** {@code round} as its reader reads it, each command written by {@code rendered}. */
+  static String render(SyncReport round, boolean json, Function<Remedy, String> rendered) {
     var report = round.report();
     if (json) {
       return YamlUtil.dumpJson(SyncViews.round(round));
@@ -294,10 +312,11 @@ public final class SyncCommand implements Callable<Integer> {
     if (report.conflicts() > 0) {
       lines.add(
           Banner.warnLine(
-              report.conflicts()
-                  + " conflict(s) need your decision. Run '"
-                  + operator.sail("conflicts")
-                  + "' to resolve.",
+              rendered.apply(
+                  Remedy.of(
+                      report.conflicts() + " conflict(s) need your decision. Run '",
+                      Remedy.sail("conflicts"),
+                      "' to resolve.")),
               Ansi.AUTO));
     }
     return String.join("\n", lines);

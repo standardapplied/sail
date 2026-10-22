@@ -12,11 +12,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.CliOperator;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -55,7 +57,7 @@ class EventStreamClientTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(OperatorCommand.PLAIN),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,
@@ -94,7 +96,7 @@ class EventStreamClientTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(OperatorCommand.PLAIN),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,
@@ -159,7 +161,7 @@ class EventStreamClientTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(OperatorCommand.PLAIN),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,
@@ -182,18 +184,38 @@ class EventStreamClientTest {
   }
 
   @Test
-  void processLineIgnoresNonDataLines() {
+  void readIgnoresNonDataLines() throws Exception {
     var queue = new LinkedBlockingQueue<Event>();
 
-    assertTrue(EventStreamClient.processLine(null, queue));
-    assertTrue(EventStreamClient.processLine("", queue));
-    assertTrue(EventStreamClient.processLine(": subscribed", queue));
-    assertTrue(EventStreamClient.processLine("event: ping", queue));
+    EventStreamClient.read(List.of("", ": subscribed", "event: ping", "").iterator(), queue);
+
     assertTrue(queue.isEmpty(), "no event should be queued for non-data lines");
   }
 
   @Test
-  void processLineDeliversWellFormedEvent() throws Exception {
+  void aStreamTheServerEndsEndsInTheRefusalItNamesReadPlain() {
+    var queue = new LinkedBlockingQueue<Event>();
+    var frames =
+        List.of(
+            ": subscribed",
+            "",
+            "event: error",
+            "data: " + YamlUtil.dumpJson(CliOperator.unplaced("ada").error().toMap()),
+            "");
+
+    var refused =
+        assertThrows(
+            SailApiClient.Refused.class, () -> EventStreamClient.read(frames.iterator(), queue));
+
+    assertTrue(queue.isEmpty(), "a refusal is not an event");
+    assertEquals(
+        "This box does not know its FDE's role ('ada'), so it cannot tell what you may do. Run"
+            + " 'sail sync' first. If it still refuses, ask an admin whether 'ada' is disabled.",
+        refused.getMessage());
+  }
+
+  @Test
+  void deliverQueuesAWellFormedEvent() throws Exception {
     var queue = new LinkedBlockingQueue<Event>();
     var ts = "2026-05-21T12:34:56Z";
     var json =
@@ -201,7 +223,7 @@ class EventStreamClientTest {
             + ts
             + "\",\"project\":\"p\",\"type\":\"t\",\"agent\":\"a\",\"host\":\"h\"}";
 
-    var ok = EventStreamClient.processLine("data: " + json, queue);
+    var ok = EventStreamClient.deliver(json, queue);
 
     assertTrue(ok);
     var event = queue.poll(100, TimeUnit.MILLISECONDS);
@@ -210,17 +232,17 @@ class EventStreamClientTest {
   }
 
   @Test
-  void processLineDropsMalformedPayloadButKeepsReading() {
+  void deliverDropsAMalformedPayloadButKeepsReading() {
     var queue = new LinkedBlockingQueue<Event>();
 
-    var ok = EventStreamClient.processLine("data: {not-json", queue);
+    var ok = EventStreamClient.deliver("{not-json", queue);
 
     assertTrue(ok, "parse failure must not stop the reader");
     assertTrue(queue.isEmpty());
   }
 
   @Test
-  void processLineReturnsFalseWhenInterrupted() throws Exception {
+  void deliverReturnsFalseWhenInterrupted() throws Exception {
     var queue = new java.util.concurrent.ArrayBlockingQueue<Event>(1);
     queue.put(Event.of("p", null, "t", "a", "h"));
     var ts = "2026-05-21T12:34:56Z";
@@ -230,8 +252,7 @@ class EventStreamClientTest {
             + "\",\"project\":\"p\",\"type\":\"t\",\"agent\":\"a\",\"host\":\"h\"}";
 
     var task =
-        new java.util.concurrent.FutureTask<Boolean>(
-            () -> EventStreamClient.processLine("data: " + json, queue));
+        new java.util.concurrent.FutureTask<Boolean>(() -> EventStreamClient.deliver(json, queue));
     var thread = new Thread(task);
     thread.start();
     while (thread.getState() != Thread.State.WAITING
@@ -241,7 +262,7 @@ class EventStreamClientTest {
     thread.interrupt();
 
     var result = task.get(2, TimeUnit.SECONDS);
-    assertFalse(result, "interrupt should make processLine return false");
+    assertFalse(result, "interrupt should make deliver return false");
   }
 
   @Test
@@ -252,7 +273,7 @@ class EventStreamClientTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(OperatorCommand.PLAIN),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,

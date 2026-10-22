@@ -27,7 +27,9 @@ import java.util.Optional;
 import java.util.Set;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
+import picocli.CommandLine.Spec;
 
 @Command(
     name = "init",
@@ -35,6 +37,8 @@ import picocli.CommandLine.Option;
         "Provision the bare-metal host: install Incus, create storage pool, cache base image.",
     mixinStandardHelpOptions = true)
 public final class HostInitCommand implements Runnable {
+
+  @Spec private CommandSpec spec;
 
   private static final Set<String> VALID_BACKENDS =
       Set.of(HostYaml.BACKEND_DIR, HostYaml.BACKEND_ZFS);
@@ -117,8 +121,7 @@ public final class HostInitCommand implements Runnable {
     }
 
     if (!dryRun && !ConsoleHelper.isRoot()) {
-      throw new IllegalStateException(
-          "Root privileges required. Run with: " + OperatorCommand.SUDO.sail("host init"));
+      throw RootRequired.refusal(spec);
     }
 
     if (Strings.isNotBlank(sshPublicKey) && !dryRun) {

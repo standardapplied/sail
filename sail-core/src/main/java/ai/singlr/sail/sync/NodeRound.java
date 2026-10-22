@@ -5,8 +5,8 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -60,9 +60,8 @@ public final class NodeRound {
           "Main at "
               + target
               + " names no database catalog, so this box cannot tell whether it is the database"
-              + " it synced with: upgrade main ('"
-              + OperatorCommand.elsewhere("upgrade")
-              + "' on main), then sync again.",
+              + " it synced with:",
+          Remedy.of("upgrade main ('", Remedy.sail("upgrade"), "' on main), then sync again."),
           null);
     }
     if (synced.equals(offered)) {
@@ -94,9 +93,8 @@ public final class NodeRound {
    * brought in line with the scope main named ({@link #rescope}). Returns what was settled and what
    * was dropped, for the round's notices.
    */
-  public static List<Settlement.Settled> begin(
-      SyncSession session, Sqlite db, String handle, OperatorCommand operator) {
-    requireAgreed(session.handle(), handle, operator);
+  public static List<Settlement.Settled> begin(SyncSession session, Sqlite db, String handle) {
+    requireAgreed(session.handle(), handle);
     var settled = new ArrayList<>(rescope(session, db, handle));
     stampUnheld(db, handle, acknowledgeHeld(session, db));
     var runs = new RunStore(db);
@@ -270,8 +268,7 @@ public final class NodeRound {
    * Fails naming both handles and the fix unless {@code configured} is the handle main
    * authenticated the session as, when main said.
    */
-  static void requireAgreed(
-      Optional<String> authenticated, String configured, OperatorCommand operator) {
+  static void requireAgreed(Optional<String> authenticated, String configured) {
     if (authenticated.isEmpty()
         || (Strings.isNotBlank(configured) && configured.equals(authenticated.get()))) {
       return;
@@ -288,13 +285,15 @@ public final class NodeRound {
                 : "main knows this box as FDE '" + main + "'")
             + ", but "
             + mine
-            + ", so this round offers and adopts nothing. Set the sync handle to the one main knows"
-            + (Strings.isBlank(main)
-                ? ""
-                : " ('" + operator.sail("host config set sync-handle " + main) + "')")
-            + ", or have an admin tie this box's sync key to "
-            + (Strings.isBlank(configured) ? "its FDE" : "FDE '" + configured + "'")
-            + " on main.",
+            + ", so this round offers and adopts nothing.",
+        Remedy.of(
+            "Set the sync handle to the one main knows",
+            Strings.isBlank(main)
+                ? Remedy.NONE
+                : Remedy.of(" ('", Remedy.sail("host config set sync-handle", main), "')"),
+            ", or have an admin tie this box's sync key to "
+                + (Strings.isBlank(configured) ? "its FDE" : "FDE '" + configured + "'")
+                + " on main."),
         null);
   }
 }

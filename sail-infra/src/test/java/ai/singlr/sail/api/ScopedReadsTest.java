@@ -16,7 +16,6 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.HostAccess;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -300,7 +299,7 @@ class ScopedReadsTest {
                       "sam-laptop", "member", fdes.add("sam", "Sam", "sam@x", "member").id(), null)
                   .token();
           fdes.restrict("sam");
-          fdes.grant("sam", "alpha", OperatorCommand.PLAIN);
+          fdes.grant("sam", "alpha");
           alphaReview = arrive("alpha", A_RUN, A_FILE, "main", "sam", 1);
         });
     var specs = new SpecStore(db);
@@ -320,8 +319,7 @@ class ScopedReadsTest {
                     () -> new ConnectEnvironment("203.0.113.7", "ops", true),
                     SyncScheduler.disabled(),
                     new FdeStore(db),
-                    SessionYield.NONE,
-                    OperatorCommand.PLAIN)
+                    SessionYield.NONE)
                 .useMessages(new MessageStore(db))
                 .useRooms(new RoomStore(db))
                 .useEvents(new EventStore(db)),
@@ -414,7 +412,7 @@ class ScopedReadsTest {
 
     assertEquals(
         """
-        404 {"schema_version": 1, "error": {"code": "not_found", "message": "Project 'bravo' was not found.", "action": "Ask an admin on main for the project: sudo sail fde grant <handle> <project>.", "field_errors": []}}""",
+        404 {"schema_version": 1, "error": {"code": "not_found", "message": "Project 'bravo' was not found.", "action": "Ask an admin on main for the project: fde grant <handle> <project>.", "remedy": [{"text": "Ask an admin on main for the project: "}, {"run": "sail", "verb": "fde grant", "args": ["<handle>", "<project>"]}, {"text": "."}], "field_errors": []}}""",
         send(
             sam,
             "POST",
@@ -422,7 +420,7 @@ class ScopedReadsTest {
             "{\"id\": \"sneak\", \"project\": \"bravo\", \"title\": \"t\"}"));
     assertEquals(
         """
-        409 {"schema_version": 1, "error": {"code": "conflict", "message": "Spec 'bravo-spec' already exists.", "action": "Pick another spec id, or edit it with: sail spec update bravo-spec", "field_errors": []}}""",
+        409 {"schema_version": 1, "error": {"code": "conflict", "message": "Spec 'bravo-spec' already exists.", "action": "Pick another spec id, or edit it with: spec update bravo-spec", "remedy": [{"text": "Pick another spec id, or edit it with: "}, {"run": "sail", "verb": "spec update", "args": ["bravo-spec"]}], "field_errors": []}}""",
         send(
             sam,
             "POST",
@@ -463,7 +461,7 @@ class ScopedReadsTest {
         "a message in bravo's room is announced as one nobody holds");
     assertEquals(
         """
-        404 {"schema_version": 1, "error": {"code": "not_found", "message": "Project 'bravo' was not found.", "action": "Ask an admin on main for the project: sudo sail fde grant <handle> <project>.", "field_errors": []}}""",
+        404 {"schema_version": 1, "error": {"code": "not_found", "message": "Project 'bravo' was not found.", "action": "Ask an admin on main for the project: fde grant <handle> <project>.", "remedy": [{"text": "Ask an admin on main for the project: "}, {"run": "sail", "verb": "fde grant", "args": ["<handle>", "<project>"]}, {"text": "."}], "field_errors": []}}""",
         send(
             sam,
             "POST",
@@ -899,7 +897,7 @@ class ScopedReadsTest {
     assertEquals(200, held.status());
     assertEquals(true, held.body().toString().contains("Talk in the alpha spec"), "" + held.body());
 
-    Acting.system(() -> new FdeStore(db).revoke("sam", "alpha", OperatorCommand.PLAIN));
+    Acting.system(() -> new FdeStore(db).revoke("sam", "alpha"));
 
     var gone =
         "404 {schema_version=1, error={code=run_not_found, message=Run '"
@@ -924,7 +922,7 @@ class ScopedReadsTest {
     assertEquals(Set.of(), runs.deliveredMessageIds(run));
     assertEquals(null, runs.findById(run).orElseThrow().sessionId());
 
-    Acting.system(() -> new FdeStore(db).grant("sam", "alpha", OperatorCommand.PLAIN));
+    Acting.system(() -> new FdeStore(db).grant("sam", "alpha"));
     assertEquals(held.body(), local.handle(inbox).body(), "granted again, it is delivered again");
   }
 
@@ -1089,8 +1087,7 @@ class ScopedReadsTest {
             new ProjectStore(db),
             null,
             new FdeStore(db),
-            SessionYield.NONE,
-            OperatorCommand.PLAIN);
+            SessionYield.NONE);
 
     var run = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     Acting.system(
@@ -1280,7 +1277,7 @@ class ScopedReadsTest {
   @Test
   void theTerminalDoorRefusesARoomOutsideTheFdesScopeAsOneThatDoesNotExist() throws Exception {
     Acting.system(this::bravoArrives);
-    var door = new HostAccess(db, TestAuth.roles(db), OperatorCommand.PLAIN);
+    var door = new HostAccess(db, TestAuth.roles(db));
 
     var outside =
         assertThrows(
@@ -1405,7 +1402,7 @@ class ScopedReadsTest {
     var fdes = new FdeStore(db);
     fdes.add("bea", "Bea", "bea@x", "member");
     fdes.restrict("bea");
-    fdes.grant("bea", "bravo", OperatorCommand.PLAIN);
+    fdes.grant("bea", "bravo");
     recent.onEvent(SyncTransitionEvents.health("main@unplaced", false, "unreachable", "x", "main"));
     new EventStore(db)
         .insert(

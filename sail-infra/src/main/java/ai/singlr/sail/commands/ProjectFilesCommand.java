@@ -112,7 +112,7 @@ public final class ProjectFilesCommand implements Runnable {
     @Override
     public Integer call() throws Exception {
       var operator = operator();
-      project = CurrentProject.require(project, operator);
+      project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
       if (source != null) {
         return addOne(operator);
@@ -136,7 +136,7 @@ public final class ProjectFilesCommand implements Runnable {
         System.err.println(Banner.errorLine("Unsafe share path: '" + path + "'.", Ansi.AUTO));
         return 1;
       }
-      try (var operations = OperationsFactory.open(operator)) {
+      try (var operations = OperationsFactory.open()) {
         var files = operations.projectFiles(project);
         var problem = files.limits().problem(Files.size(source));
         if (problem.isPresent()) {
@@ -246,7 +246,7 @@ public final class ProjectFilesCommand implements Runnable {
         return 0;
       }
       Shared shared;
-      try (var operations = OperationsFactory.open(operator)) {
+      try (var operations = OperationsFactory.open()) {
         shared =
             Actor.call(
                 operations.identity().operator(),
@@ -330,9 +330,9 @@ public final class ProjectFilesCommand implements Runnable {
     @Override
     public Integer call() {
       var operator = operator();
-      project = CurrentProject.require(project, operator);
+      project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
-      try (var operations = OperationsFactory.open(operator)) {
+      try (var operations = OperationsFactory.open()) {
         var rows = operations.projectFiles(project).list();
         if (json || rows.isEmpty()) {
           System.out.println(render(rows, project, json));
@@ -382,9 +382,9 @@ public final class ProjectFilesCommand implements Runnable {
     @Override
     public Integer call() throws Exception {
       var operator = operator();
-      project = CurrentProject.require(project, operator);
+      project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
-      try (var operations = OperationsFactory.open(operator)) {
+      try (var operations = OperationsFactory.open()) {
         var bytes = operations.projectFiles(project).get(path).orElse(null);
         if (bytes == null) {
           System.err.println(
@@ -422,9 +422,9 @@ public final class ProjectFilesCommand implements Runnable {
     @Override
     public Integer call() throws Exception {
       var operator = operator();
-      project = CurrentProject.require(project, operator);
+      project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
-      try (var operations = OperationsFactory.open(operator)) {
+      try (var operations = OperationsFactory.open()) {
         if (!Actor.call(
             operations.identity().operator(),
             () -> operations.projectFiles(project).remove(path))) {
@@ -472,11 +472,11 @@ public final class ProjectFilesCommand implements Runnable {
         return 1;
       }
       var operator = operator();
-      try (var operations = OperationsFactory.open(operator)) {
+      try (var operations = OperationsFactory.open()) {
         var targets =
             all
                 ? operations.catalog().projectsWithFiles()
-                : List.of(CurrentProject.require(project, operator));
+                : List.of(CurrentProject.require(project));
         var report = export(operations::projectFiles, targets);
         print(report, operator);
         System.out.println(
@@ -524,7 +524,7 @@ public final class ProjectFilesCommand implements Runnable {
                 "  @|yellow ⚠|@ kept "
                     + copy
                     + ": the upgrade could not tell it from your edit ("
-                    + MaterializedFiles.undecidedRemedy(operator)
+                    + operator.render(MaterializedFiles.UNDECIDED_REMEDY)
                     + ")"));
       }
     }

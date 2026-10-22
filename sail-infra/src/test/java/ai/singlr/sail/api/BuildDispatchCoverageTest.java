@@ -14,7 +14,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -266,7 +265,7 @@ class BuildDispatchCoverageTest {
     assertEquals(
         "Dispatching spec 'auth' would close a review outside your project scope.",
         thrown.getMessage());
-    assertEquals("Ask an admin to dispatch it.", thrown.failure().action());
+    assertEquals("Ask an admin to dispatch it.", thrown.failure().remedy().plain());
     assertFalse(reviews.findReview(left).orElseThrow().superseded());
     assertEquals(SpecStatus.PENDING, specs.findById("auth").orElseThrow().status(), "no claim");
     assertEquals(List.of(), new RunStore(db).listForProject("acme"), "no reservation");
@@ -412,8 +411,7 @@ class BuildDispatchCoverageTest {
         (project, config) -> "",
         command -> 0,
         DispatchOperations.Listener.NONE,
-        SessionYield.NONE,
-        OperatorCommand.PLAIN);
+        SessionYield.NONE);
   }
 
   private static DispatchOperations.Outcome dispatch(DispatchOperations ops) {

@@ -296,7 +296,7 @@ public final class MigrateCommand implements Runnable {
           Ansi.AUTO.string(
               "  @|yellow ⚠|@ pty host restarted: the host could not be asked which sessions were"
                   + " live ("
-                  + unreachable.getMessage()
+                  + CliCommand.describe(unreachable)
                   + "); this host predates live handoff; from the next upgrade on, sessions"
                   + " survive"));
     }
@@ -617,9 +617,10 @@ public final class MigrateCommand implements Runnable {
         phase(
             animate,
             "Migrating database schema",
-            () -> MigrationRunner.applyAll(db, DataMigrations.all(operator), prompter));
+            () -> MigrationRunner.applyAll(db, DataMigrations.all(), prompter));
     if (!jsonOutput) {
-      printSummary(dbPath, result.schemaBefore(), result.schemaAfter(), result.dataRuns());
+      printSummary(
+          dbPath, result.schemaBefore(), result.schemaAfter(), result.dataRuns(), operator);
     }
     return result.dataRuns();
   }
@@ -633,8 +634,12 @@ public final class MigrateCommand implements Runnable {
     }
   }
 
-  private static void printSummary(
-      String dbPath, int beforeSchema, int afterSchema, List<DataMigrator.Run> runs) {
+  static void printSummary(
+      String dbPath,
+      int beforeSchema,
+      int afterSchema,
+      List<DataMigrator.Run> runs,
+      OperatorCommand operator) {
     System.out.println(Ansi.AUTO.string("  @|green ✓|@ Database: " + dbPath));
     if (afterSchema > beforeSchema) {
       System.out.println(
@@ -662,7 +667,7 @@ public final class MigrateCommand implements Runnable {
                   + report.skipped()
                   + " skipped"));
       for (var note : report.notes()) {
-        System.out.println(note);
+        System.out.println(operator.render(note));
       }
     }
   }

@@ -319,10 +319,10 @@ public final class FdeCommand implements Runnable {
               + ", which sees every project here. Pair "
               + handle
               + " on its own box instead: set it up with '"
-              + OperatorCommand.elsewhere(
+              + OperatorCommand.SUDO.sail(
                   "init --main " + Objects.requireNonNullElse(box.main(), host))
               + "', then run '"
-              + OperatorCommand.elsewhere("fde pair " + handle + " --host <its address>")
+              + OperatorCommand.SUDO.sail("fde pair " + handle + " --host <its address>")
               + "' there.");
     }
   }
@@ -492,7 +492,7 @@ public final class FdeCommand implements Runnable {
                 + own
                 + ": something between that node and this box answered for it. Do not add this"
                 + " key; ask the engineer to re-run '"
-                + OperatorCommand.elsewhere("init --main <this box>")
+                + OperatorCommand.SUDO.sail("init --main <this box>")
                 + "' on a network path you trust.");
       }
     }
@@ -646,7 +646,7 @@ public final class FdeCommand implements Runnable {
         new ChangeLog(db).backfillProjects();
       }
       fdes.restrict(handle);
-      grants.forEach(project -> fdes.grant(handle, project, operator));
+      grants.forEach(project -> fdes.grant(handle, project));
     }
   }
 
@@ -700,7 +700,7 @@ public final class FdeCommand implements Runnable {
             + (dryRun ? " would see" : " sees")
             + " every project again. Its box holds them after its next sync; provision a"
             + " container with '"
-            + OperatorCommand.elsewhere("project apply <name>")
+            + OperatorCommand.SUDO.sail("project apply <name>")
             + "'.";
       }
       var to =
@@ -824,13 +824,13 @@ public final class FdeCommand implements Runnable {
     if (grant && new ProjectStore(db).findByName(project).isEmpty()) {
       throw new IllegalArgumentException(unknownProject(project, operator));
     }
-    var changed = fdes.grantsOf(handle, operator).admits(project) != grant;
+    var changed = fdes.grantsOf(handle).admits(project) != grant;
     if (changed && !dryRun) {
       if (grant) {
         new ChangeLog(db).backfillProjects();
-        fdes.grant(handle, project, operator);
+        fdes.grant(handle, project);
       } else {
-        fdes.revoke(handle, project, operator);
+        fdes.revoke(handle, project);
       }
     }
     var projects = List.copyOf(fdes.scopeOf(handle).projects());
@@ -887,7 +887,7 @@ public final class FdeCommand implements Runnable {
             if (command.box.get().node()) {
               throw new IllegalStateException(
                   "Main records the box each FDE syncs from, and a node records none. Run '"
-                      + OperatorCommand.elsewhere("fde release-box " + handle)
+                      + OperatorCommand.SUDO.sail("fde release-box " + handle)
                       + "' on main.");
             }
             try (var db = Sqlite.open(command.database())) {
@@ -959,15 +959,15 @@ public final class FdeCommand implements Runnable {
                           () -> new IllegalArgumentException("Unknown FDE '" + handle + "'."));
               var pairing = new FdePairingStore(db).find(fde.id());
               if (pairing.isPresent()) {
-                requireOperator(box, OperatorCommand.elsewhere("fde rm " + handle));
+                requireOperator(box, OperatorCommand.SUDO.sail("fde rm " + handle));
               }
               var hadSshKeys = !new FdeSshKeyStore(db).listForFde(fde.id()).isEmpty();
-              fdeStore.requireRemovable(fde, operator);
+              fdeStore.requireRemovable(fde);
               var revoked =
                   box.gateway()
                       ? Optional.<String>empty()
                       : PairingRevocation.revoke(box, db, fde.handle(), pairing);
-              fdeStore.remove(fde.id(), operator);
+              fdeStore.remove(fde.id());
               System.out.println(Ansi.AUTO.string("  @|green ✓|@ FDE removed: " + fde.handle()));
               System.out.println(
                   Ansi.AUTO.string(
@@ -1057,7 +1057,7 @@ public final class FdeCommand implements Runnable {
         throw new IllegalStateException(
             rosterEditOnNodeMessage("Changing an FDE's name, email or role"));
       }
-      requireOperator(box, OperatorCommand.elsewhere("fde pair " + handle));
+      requireOperator(box, OperatorCommand.SUDO.sail("fde pair " + handle));
       var ttl = ServerTokenCommand.Create.resolveTtl(noExpiry, ttlDays, PAIRING_TTL);
       try (var held = PairingTrust.hold(box.database());
           var db = Sqlite.open(box.database())) {
@@ -1166,7 +1166,7 @@ public final class FdeCommand implements Runnable {
                 + "', and a connect code names one. "
                 + (box.node()
                     ? "Set it on main with '"
-                        + OperatorCommand.elsewhere("fde update " + handle + " --email <email>")
+                        + OperatorCommand.SUDO.sail("fde update " + handle + " --email <email>")
                         + "', run '"
                         + operator.sail("sync")
                         + "' here, then pair again."
@@ -1204,7 +1204,7 @@ public final class FdeCommand implements Runnable {
      */
     private static Optional<SshPublicKey> heldKey(Path file, OperatorCommand operator) {
       try {
-        return WorkstationIdentity.registeredAt(file, operator);
+        return WorkstationIdentity.registeredAt(file);
       } catch (IllegalStateException refused) {
         if (refused.getCause() instanceof IllegalArgumentException) {
           return Optional.empty();
@@ -1287,7 +1287,7 @@ public final class FdeCommand implements Runnable {
           () -> {
             NameValidator.requireValidFdeHandle(handle);
             var box = command.box.get();
-            requireOperator(box, OperatorCommand.elsewhere("fde unpair " + handle));
+            requireOperator(box, OperatorCommand.SUDO.sail("fde unpair " + handle));
             try (var held = PairingTrust.hold(box.database());
                 var db = Sqlite.open(box.database())) {
               System.out.println(

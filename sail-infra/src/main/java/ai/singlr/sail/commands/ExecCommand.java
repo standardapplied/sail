@@ -50,7 +50,7 @@ public final class ExecCommand implements Runnable {
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name, operator);
+    ContainerStateGuard.requireRunning(state, name);
 
     var fullCmd = ContainerExec.asDevUser(name, command);
 

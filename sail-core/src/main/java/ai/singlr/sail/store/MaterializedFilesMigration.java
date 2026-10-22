@@ -5,11 +5,11 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectRegistry;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -42,15 +42,10 @@ public final class MaterializedFilesMigration implements DataMigration {
   public static final String NAME = "materialized-files-v1";
 
   private final Path projectsDir;
-  private final OperatorCommand operator;
 
-  /**
-   * Seeding from the copies under {@code projectsDir}, each at {@code <project>/files/<path>}, with
-   * the remedy for an undecided copy worded for {@code operator}.
-   */
-  public MaterializedFilesMigration(Path projectsDir, OperatorCommand operator) {
+  /** Seeding from the copies under {@code projectsDir}, each at {@code <project>/files/<path>}. */
+  public MaterializedFilesMigration(Path projectsDir) {
     this.projectsDir = Objects.requireNonNull(projectsDir, "projectsDir");
-    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   @Override
@@ -74,7 +69,7 @@ public final class MaterializedFilesMigration implements DataMigration {
     var recorded = 0;
     var undecided = 0;
     var skipped = 0;
-    var notes = new ArrayList<String>();
+    var notes = new ArrayList<Remedy>();
     for (var project : files.projectsWithFiles()) {
       var filesDir = projectsDir.resolve(project).resolve("files").normalize();
       for (var id : files.idsForProject(project)) {
@@ -85,14 +80,15 @@ public final class MaterializedFilesMigration implements DataMigration {
             || files.recordedMaterialization(id)) {
           continue;
         }
-        switch (seed(db, files, id, project, path, copy, notes, operator)) {
+        switch (seed(db, files, id, project, path, copy, notes)) {
           case OURS -> recorded++;
           case UNDECIDED -> undecided++;
           default -> skipped++;
         }
       }
     }
-    notes.addFirst("Recorded the copy this box wrote of " + recorded + " shared file(s)");
+    notes.addFirst(
+        Remedy.of("Recorded the copy this box wrote of " + recorded + " shared file(s)"));
     return new Report(recorded, undecided, skipped, notes);
   }
 
@@ -107,21 +103,16 @@ public final class MaterializedFilesMigration implements DataMigration {
       String project,
       String path,
       Path copy,
-      List<String> notes,
-      OperatorCommand operator) {
+      List<Remedy> notes) {
     String hash;
     int mode;
     try (var input = Files.newInputStream(copy)) {
       hash = BlobStore.hash(input);
       mode = WorkspaceFiles.mode(copy);
     } catch (IOException e) {
-      throw new UncheckedIOException(
-          "Cannot seed what this box wrote of "
-              + id
-              + ": could not read "
-              + copy
-              + "; restore access and rerun "
-              + operator.sail("migrate"),
+      throw Remedied.state(
+          "Cannot seed what this box wrote of " + id + ": could not read " + copy + ";",
+          Remedy.of("restore access and rerun ", Remedy.sail("migrate")),
           e);
     }
     var row = files.find(project, path).orElse(null);
@@ -130,19 +121,22 @@ public final class MaterializedFilesMigration implements DataMigration {
       case OURS -> db.transaction(() -> files.recordMaterialized(id, hash, mode));
       case PERSONS ->
           notes.add(
-              "Left "
-                  + id
-                  + " unrecorded: its copy on disk carries an execute bit no version of it had, put"
-                  + " there on purpose, so it is a person's edit and the import publishes it");
+              Remedy.of(
+                  "Left "
+                      + id
+                      + " unrecorded: its copy on disk carries an execute bit no version of it had,"
+                      + " put there on purpose, so it is a person's edit and the import publishes"
+                      + " it"));
       default -> {
         db.transaction(() -> files.recordUndecided(id, hash, mode));
         notes.add(
-            "Left "
-                + id
-                + " undecided: its copy on disk matches no version this box still holds, so it may"
-                + " be your unpublished edit or a version this box wrote before history was"
-                + " compacted. It is kept and not published; "
-                + MaterializedFiles.undecidedRemedy(operator));
+            Remedy.of(
+                    "Left "
+                        + id
+                        + " undecided: its copy on disk matches no version this box still holds,"
+                        + " so it may be your unpublished edit or a version this box wrote before"
+                        + " history was compacted. It is kept and not published; ")
+                .then(MaterializedFiles.UNDECIDED_REMEDY));
       }
     }
     return copyIs;

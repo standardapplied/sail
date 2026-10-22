@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.pty;
 
+import ai.singlr.sail.common.Remedy;
 import java.util.List;
 
 /**
@@ -115,5 +116,18 @@ public sealed interface PtyMessage {
 
   record Ok() implements PtyMessage {}
 
-  record Err(String message) implements PtyMessage {}
+  /**
+   * A refusal: what happened and what to do about it, each command kept as data so the client that
+   * prints it renders it for its own reader.
+   */
+  record Err(Remedy detail) implements PtyMessage {
+    public Err(String message) {
+      this(Remedy.of(message));
+    }
+
+    /** The refusal as an account whose own plain {@code sail} runs reads it. */
+    public String message() {
+      return detail.plain();
+    }
+  }
 }

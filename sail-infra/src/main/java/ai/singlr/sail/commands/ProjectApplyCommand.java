@@ -56,8 +56,10 @@ import java.util.Optional;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
+import picocli.CommandLine.Spec;
 
 /**
  * The one verb that makes a project container match intent, from any starting state. Desired state
@@ -74,6 +76,8 @@ import picocli.CommandLine.Parameters;
             + " converge services, repos, files, agent context, and the sail machinery.",
     mixinStandardHelpOptions = true)
 public final class ProjectApplyCommand implements Runnable {
+
+  @Spec private CommandSpec spec;
 
   @Parameters(
       index = "0",
@@ -208,7 +212,7 @@ public final class ProjectApplyCommand implements Runnable {
       mgr.waitUntilReady(config.name());
     }
 
-    var workstationKey = WorkstationIdentity.registered(operator);
+    var workstationKey = WorkstationIdentity.registered();
     var recorded = ProjectProvisioner.provisionedInputs(observer, config.name());
     if (!ProjectProvisioner.provisionedFrom(recorded, config, workstationKey)) {
       provision(
@@ -272,7 +276,7 @@ public final class ProjectApplyCommand implements Runnable {
       System.out.println();
     }
 
-    var workstationKey = WorkstationIdentity.registered(operator);
+    var workstationKey = WorkstationIdentity.registered();
     var rows = new ArrayList<LinkedHashMap<String, Object>>();
     var applied = 0;
     var failed = 0;
@@ -491,15 +495,14 @@ public final class ProjectApplyCommand implements Runnable {
     results.add(applier.applyAgentTools(project, agentInstall));
     results.add(applier.applyGitConfig(project, config.git(), sshUser));
     HomeRoom.Outcome homeRoom;
-    try (var operations = OperationsFactory.open(operator)) {
+    try (var operations = OperationsFactory.open()) {
       results.add(
           applier.applySkills(project, config, new ProjectSkills(operations::projectFiles)));
       results.add(applier.applyCleanupCron(project, sshUser));
       homeRoom =
           dryRun
               ? null
-              : ensureHomeRoom(
-                  operations, config, HostSync.handle(), () -> CliOperator.current(operator));
+              : ensureHomeRoom(operations, config, HostSync.handle(), () -> CliOperator.current());
     }
 
     var added = results.stream().mapToInt(ProjectApplier.ApplyResult::added).sum();
@@ -606,13 +609,10 @@ public final class ProjectApplyCommand implements Runnable {
   }
 
   /** Only provisioning needs root; converging a live container does not. */
-  static void requireRootToProvision(String name, boolean dryRun, boolean isRoot) {
+  static void requireRootToProvision(
+      String name, boolean dryRun, boolean isRoot, CommandSpec spec) {
     if (!dryRun && !isRoot) {
-      throw new IllegalStateException(
-          "Root privileges required to provision '"
-              + name
-              + "'. Run with: "
-              + OperatorCommand.SUDO.sail("project apply " + name));
+      throw RootRequired.refusal("Root privileges required to provision '" + name + "'.", spec);
     }
   }
 
@@ -633,7 +633,7 @@ public final class ProjectApplyCommand implements Runnable {
       Optional<SshPublicKey> workstationKey,
       OperatorCommand operator)
       throws Exception {
-    requireRootToProvision(config.name(), dryRun, ConsoleHelper.isRoot());
+    requireRootToProvision(config.name(), dryRun, ConsoleHelper.isRoot(), spec);
     ProjectCatalog.requireUnpruned(config.name());
     persistCanonicalBundle(config.name(), sailYamlPath, dryRun, operator);
 
@@ -682,7 +682,7 @@ public final class ProjectApplyCommand implements Runnable {
 
     var gitTokens = resolveGitTokens(config, operator);
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
-    try (var operations = OperationsFactory.open(operator)) {
+    try (var operations = OperationsFactory.open()) {
       var provisioner =
           new ProjectProvisioner(
               shell,
@@ -716,7 +716,7 @@ public final class ProjectApplyCommand implements Runnable {
           serverIp,
           System.getProperty("user.name"),
           r.ipv4(),
-          WorkstationIdentity.identityFile(operator),
+          WorkstationIdentity.identityFile(),
           operator,
           System.out,
           Ansi.AUTO);
@@ -880,7 +880,7 @@ public final class ProjectApplyCommand implements Runnable {
     if (dryRun) {
       return;
     }
-    var actor = CliOperator.current(operator);
+    var actor = CliOperator.current();
     ProjectDefinitions.persist(name, null, Files.readString(sailYamlPath), actor);
     syncFilesDirectory(
         sailYamlPath.toAbsolutePath().getParent().resolve("files"),

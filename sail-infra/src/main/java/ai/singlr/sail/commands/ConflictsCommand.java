@@ -53,7 +53,7 @@ public final class ConflictsCommand implements Callable<Integer> {
   private final Function<OperatorCommand, HostOperations> operations;
 
   public ConflictsCommand() {
-    this(OperationsFactory::open);
+    this(operator -> OperationsFactory.open(operator::warn));
   }
 
   ConflictsCommand(Function<OperatorCommand, HostOperations> operations) {
@@ -147,7 +147,7 @@ public final class ConflictsCommand implements Callable<Integer> {
     private final Function<OperatorCommand, HostOperations> operations;
 
     Show() {
-      this(OperationsFactory::open);
+      this(operator -> OperationsFactory.open(operator::warn));
     }
 
     Show(Function<OperatorCommand, HostOperations> operations) {
@@ -218,7 +218,7 @@ public final class ConflictsCommand implements Callable<Integer> {
     private final Editor editor;
 
     Resolve() {
-      this(OperationsFactory::open, Editor.fromEnvironment());
+      this(operator -> OperationsFactory.open(operator::warn), Editor.fromEnvironment());
     }
 
     Resolve(Function<OperatorCommand, HostOperations> operations, Editor editor) {

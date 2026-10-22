@@ -44,7 +44,7 @@ final class Rpc {
     } catch (IOException | UncheckedIOException e) {
       throw new UncheckedIOException(new IOException(context + ": " + e.getMessage(), e));
     } catch (SyncTransportException e) {
-      throw new SyncTransportException(e.kind(), context + ": " + e.getMessage(), e);
+      throw new SyncTransportException(e.kind(), context + ": " + e.reason(), e.remedy(), e);
     }
   }
 

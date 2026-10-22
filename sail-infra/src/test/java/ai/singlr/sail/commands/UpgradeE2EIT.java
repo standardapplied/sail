@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.AbstractIncusIT;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SshdKeepalive;
@@ -321,7 +320,7 @@ class UpgradeE2EIT extends AbstractIncusIT {
     assertEquals(
         Integer.toString(candidateSchema()), query("SELECT max(version) FROM schema_version"));
     var recorded = query("SELECT name FROM data_migrations").lines().toList();
-    for (var migration : DataMigrations.all(OperatorCommand.PLAIN)) {
+    for (var migration : DataMigrations.all()) {
       assertTrue(recorded.contains(migration.name()), migration.name() + " not in " + recorded);
     }
     assertEquals("1", query(ORPHANS_ERASED), "the candidate ran its data migrations");

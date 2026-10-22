@@ -5,16 +5,17 @@
 
 package ai.singlr.sail;
 
-import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.commands.CliCommand;
+import ai.singlr.sail.commands.RootRequired;
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.AutoUpgrader;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.RemoteCommandRunner;
 import ai.singlr.sail.engine.RuntimeMode;
 import java.util.Arrays;
-import java.util.stream.Collectors;
+import java.util.List;
 import picocli.CommandLine;
 
 public final class Main {
@@ -59,11 +60,10 @@ public final class Main {
 
   /** What an account that does not own this box is told, with its command to paste back. */
   static String refusal(String user, String[] args) {
-    var words = Arrays.stream(args).map(Strings::shellWord).collect(Collectors.joining(" "));
     return "sail-api on this box runs as root, so "
         + user
         + "'s sail would see none of its specs, projects or FDEs. Run it with sudo: "
-        + OperatorCommand.SUDO.sail(words).strip();
+        + RootRequired.rerun(Arrays.asList(args));
   }
 
   /**
@@ -78,13 +78,13 @@ public final class Main {
       return 1;
     }
     var ex = Refusals.translated(thrown);
-    var message = ex.getMessage();
+    var lines =
+        Strings.isBlank(ex.getMessage()) && !(ex instanceof Remedied)
+            ? List.of(ex.toString())
+            : CliCommand.lines(ex, OperatorCommand.here());
     var err = commandLine.getErr();
-    err.println(
-        commandLine.getColorScheme().errorText(Strings.isBlank(message) ? ex.toString() : message));
-    if (ex instanceof ApiException refusal && Strings.isNotBlank(refusal.failure().action())) {
-      err.println(refusal.failure().action());
-    }
+    err.println(commandLine.getColorScheme().errorText(lines.getFirst()));
+    lines.stream().skip(1).forEach(err::println);
     return 1;
   }
 }

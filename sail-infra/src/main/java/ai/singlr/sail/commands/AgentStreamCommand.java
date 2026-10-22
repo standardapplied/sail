@@ -5,16 +5,21 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.SailApiClient;
+import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.PrintStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import picocli.CommandLine.Command;
@@ -55,7 +60,7 @@ public final class AgentStreamCommand implements Runnable {
   private String runId;
 
   private void execute() throws Exception {
-    project = CurrentProject.require(project, OperatorCommand.here());
+    project = CurrentProject.require(project);
     var config = connection.resolve();
     if (runId == null) {
       runId = latestRunId(config);
@@ -81,32 +86,36 @@ public final class AgentStreamCommand implements Runnable {
       var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
       if (response.statusCode() != 200) {
         try (var body = response.body()) {
-          System.err.println(
+          throw new IllegalStateException(
               formatHttpError(
-                  response.statusCode(), new String(body.readAllBytes(), StandardCharsets.UTF_8)));
+                  response.statusCode(),
+                  new String(body.readAllBytes(), StandardCharsets.UTF_8),
+                  OperatorCommand.here()));
         }
-        return;
       }
 
       try (var reader =
           new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
-        String line;
-        while ((line = reader.readLine()) != null) {
-          if (line.startsWith("data: ")) {
-            System.out.println(line.substring(6));
-          }
-        }
+        print(reader.lines().iterator(), System.out);
       }
     }
   }
 
   /**
-   * A human-readable line for a non-200 stream response: the server's structured {@code message}
-   * (and, for a {@code run_on_other_node} refusal, the box its logs live on) instead of a bare HTTP
-   * status. So "logs live on sumesh's box" survives to the terminal rather than being swallowed as
-   * "HTTP 409".
+   * Prints each log line the stream sends until it ends; a stream the server ended with an {@code
+   * error} event ends in the refusal it names, for the door to render for its reader.
    */
-  static String formatHttpError(int status, String body) {
+  static void print(Iterator<String> lines, PrintStream out) throws SailApiClient.Refused {
+    SailApiClient.readStream(lines, out::println);
+  }
+
+  /**
+   * A human-readable line for a non-200 stream response, as {@code reader} reads it: the server's
+   * structured {@code message} and its remedy (and, for a {@code run_on_other_node} refusal, the
+   * box its logs live on) instead of a bare HTTP status. So "logs live on sumesh's box" survives to
+   * the terminal rather than being swallowed as "HTTP 409".
+   */
+  static String formatHttpError(int status, String body, OperatorCommand reader) {
     Map<String, Object> parsed;
     try {
       parsed = YamlUtil.parseMap(body);
@@ -117,19 +126,18 @@ public final class AgentStreamCommand implements Runnable {
     if (Strings.isBlank(message)) {
       return "Server returned HTTP " + status + ".";
     }
+    var rendered = String.join(" ", CliCommand.lines(SailApiClient.Refused.of(parsed), reader));
     var node = Objects.toString(parsed.get("node"), "");
     if (Strings.isNotBlank(node)) {
-      return message + " Connect to " + node + "'s box to stream it there.";
+      return rendered + " Connect to " + node + "'s box to stream it there.";
     }
-    return message;
+    return rendered;
   }
 
   @SuppressWarnings("unchecked")
-  private String latestRunId(ai.singlr.sail.api.ServerConnectionConfig config) throws Exception {
-    try (var client = new ai.singlr.sail.api.SailApiClient(config.serverUrl(), config.token())) {
-      var runs =
-          (java.util.List<java.util.Map<String, Object>>)
-              client.get("/v1/runs?project=" + project).get("runs");
+  private String latestRunId(ServerConnectionConfig config) throws Exception {
+    try (var client = new SailApiClient(config.serverUrl(), config.token())) {
+      var runs = (List<Map<String, Object>>) client.get("/v1/runs?project=" + project).get("runs");
       if (runs == null || runs.isEmpty()) {
         return null;
       }

@@ -8,7 +8,6 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
@@ -55,9 +54,9 @@ class ScopedRosterApiTest {
       fdes.add(scoped, scoped, scoped + "@x.dev", "member");
       fdes.restrict(scoped);
     }
-    fdes.grant("nia", "alpha", OperatorCommand.PLAIN);
-    fdes.grant("sam", "alpha", OperatorCommand.PLAIN);
-    fdes.grant("zed", "beta", OperatorCommand.PLAIN);
+    fdes.grant("nia", "alpha");
+    fdes.grant("sam", "alpha");
+    fdes.grant("zed", "beta");
     var operations =
         new SailOperations(
             new ScriptedShellExecutor(),
@@ -70,8 +69,7 @@ class ScopedRosterApiTest {
             new ProjectStore(db),
             null,
             fdes,
-            SessionYield.NONE,
-            OperatorCommand.PLAIN);
+            SessionYield.NONE);
     server =
         new SailApiServer(
             "127.0.0.1", 0, operations, TestAuth.sessions(db), new EventBus(), null, null, null);

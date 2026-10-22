@@ -10,13 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.identity.ActingAs;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -54,11 +53,7 @@ class MaterializedFilesMigrationTest {
   }
 
   private List<DataMigrator.Run> migrate() {
-    return migrate(OperatorCommand.PLAIN);
-  }
-
-  private List<DataMigrator.Run> migrate(OperatorCommand operator) {
-    return new DataMigrator(db, List.of(new MaterializedFilesMigration(projectsDir, operator)))
+    return new DataMigrator(db, List.of(new MaterializedFilesMigration(projectsDir)))
         .run(
             ProjectRegistry.loadFromDisk(tempDir.resolve("no-projects")),
             DataMigration.Prompter.NON_INTERACTIVE);
@@ -95,20 +90,23 @@ class MaterializedFilesMigrationTest {
   }
 
   @Test
-  void anUndecidedCopysRemedyIsWordedForTheOperator() throws IOException {
+  void anUndecidedCopysRemedyNamesItsCommandAsData() throws IOException {
     ContentFixtures.put(files, "acme", "edited.txt", "v1");
     copy("acme", "edited.txt", "mine");
 
     beforeUpgrade();
-    var run = migrate(OperatorCommand.SUDO).getFirst();
+    var run = migrate().getFirst();
 
     assertEquals(
         List.of(
-            "Recorded the copy this box wrote of 0 shared file(s)",
-            "Left acme/edited.txt undecided: its copy on disk matches no version this box still"
-                + " holds, so it may be your unpublished edit or a version this box wrote before"
-                + " history was compacted. It is kept and not published; delete to take main's, or"
-                + " capture with 'sudo sail project files add' if yours"),
+            Remedy.of("Recorded the copy this box wrote of 0 shared file(s)"),
+            Remedy.of(
+                "Left acme/edited.txt undecided: its copy on disk matches no version this box still"
+                    + " holds, so it may be your unpublished edit or a version this box wrote"
+                    + " before history was compacted. It is kept and not published; delete to take"
+                    + " main's, or capture with '",
+                Remedy.sail("project files add"),
+                "' if yours")),
         run.report().notes());
   }
 
@@ -134,7 +132,9 @@ class MaterializedFilesMigrationTest {
     assertEquals(1, first.report().ambiguous());
     assertTrue(
         first.report().notes().stream()
-            .anyMatch(note -> note.contains("acme/edited.txt") && note.contains("undecided")),
+            .anyMatch(
+                note ->
+                    note.plain().contains("acme/edited.txt") && note.plain().contains("undecided")),
         first.report().notes().toString());
     assertTrue(second.alreadyApplied());
     assertTrue(files.copyOf("acme/current.txt", hashOf("v1"), 0644).ours());
@@ -170,7 +170,7 @@ class MaterializedFilesMigrationTest {
     Files.setPosixFilePermissions(copy, PosixFilePermissions.fromString("---------"));
     beforeUpgrade();
 
-    var failure = assertThrows(UncheckedIOException.class, this::migrate);
+    var failure = assertThrows(IllegalStateException.class, this::migrate);
     Files.setPosixFilePermissions(copy, PosixFilePermissions.fromString("rw-r--r--"));
     var rerun = migrate().getFirst();
 
@@ -200,7 +200,7 @@ class MaterializedFilesMigrationTest {
         files.copyOf("acme/bin/setup", hashOf("bin/setup"), 0755).ours(),
         "an execute bit the old materializer never wrote was put there on purpose");
     assertTrue(
-        run.report().notes().stream().anyMatch(note -> note.contains("acme/bin/setup")),
+        run.report().notes().stream().anyMatch(note -> note.plain().contains("acme/bin/setup")),
         run.report().notes().toString());
     assertTrue(
         files.copyOf("acme/bin/gone", hashOf("bin/gone"), 0755).ours(),
@@ -255,9 +255,9 @@ class MaterializedFilesMigrationTest {
         run.report().notes().stream()
             .anyMatch(
                 note ->
-                    note.contains("acme/stale.conf")
-                        && note.contains("undecided")
-                        && note.contains("sail project files add")),
+                    note.plain().contains("acme/stale.conf")
+                        && note.plain().contains("undecided")
+                        && note.plain().contains("sail project files add")),
         run.report().notes().toString());
     assertTrue(migrate().getFirst().alreadyApplied());
     files.recordMaterialized("acme/stale.conf", hashOf("v9"), 0644);

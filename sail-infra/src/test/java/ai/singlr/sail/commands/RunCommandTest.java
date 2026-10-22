@@ -177,7 +177,7 @@ class RunCommandTest {
     var noGit = new ScriptedShellExecutor();
     return new CommandLine(
         new RunCommand(
-            operator -> OperationsFactory.open(dbPath, operator),
+            operator -> OperationsFactory.open(dbPath),
             operator -> new LocalIdentity(noGit, dbPath.resolveSibling("none.pub"), operator),
             dryRun -> shell,
             terminal));

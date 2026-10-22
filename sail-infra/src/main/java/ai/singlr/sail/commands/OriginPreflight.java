@@ -67,7 +67,7 @@ final class OriginPreflight {
                   - http://localhost:7070
 
           Then restart the control plane there: %s"""
-        .formatted(lead, SshTunnel.ORIGIN, box, OperatorCommand.elsewhere("host service restart"));
+        .formatted(lead, SshTunnel.ORIGIN, box, OperatorCommand.SUDO.sail("host service restart"));
   }
 
   private static Map<String, Object> loginStartBody() throws IOException, InterruptedException {

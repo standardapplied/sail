@@ -189,7 +189,8 @@ class ReviewFindingsMigrationTest {
 
     assertEquals(1, run.report().applied());
     assertEquals(1, run.report().skipped());
-    assertTrue(run.report().notes().getLast().contains(orphan), run.report().notes().toString());
+    assertTrue(
+        run.report().notes().getLast().plain().contains(orphan), run.report().notes().toString());
     assertNotNull(findingsHash(folds));
     assertNull(findingsHash(orphan));
     assertEquals(

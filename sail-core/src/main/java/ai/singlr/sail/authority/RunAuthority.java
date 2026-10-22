@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.authority;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RoomStore;
@@ -187,7 +188,7 @@ public final class RunAuthority implements WriteAuthority {
       return Refusal.of(
           Refusal.Kind.NOT_OWNER,
           "Run '" + id + "' was deleted, and a deleted run cannot be brought back.",
-          null);
+          Remedy.NONE);
     }
     if (!executedBy(pusher, held) || !executedBy(pusher, next)) {
       return Refusal.of(
@@ -197,7 +198,7 @@ public final class RunAuthority implements WriteAuthority {
               + "' may change it, and this is '"
               + pusher
               + "'.",
-          null);
+          Remedy.NONE);
     }
     var owner = next == null ? pusher : Snapshots.text(next, "owner");
     if (!pusher.equals(owner)) {
@@ -210,7 +211,7 @@ public final class RunAuthority implements WriteAuthority {
               + "', but a box's runs act for its own FDE, '"
               + pusher
               + "'.",
-          null);
+          Remedy.NONE);
     }
     return Optional.empty();
   }

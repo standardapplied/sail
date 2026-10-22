@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.authority;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
@@ -228,7 +229,7 @@ public final class EventAuthority {
               + type
               + "' speaks for this box, and you may not drive what it does: only this box's FDE or"
               + " an admin publishes it.",
-          null);
+          Remedy.NONE);
     }
     if (owner || subject.executedHere() || rule == Rule.NARRATES) {
       return Refusal.of(
@@ -255,7 +256,7 @@ public final class EventAuthority {
       return Refusal.of(
           Refusal.Kind.NOT_PUBLISHABLE,
           "Event type '" + type + "' is not available to agent principals.",
-          null);
+          Remedy.NONE);
     }
     if (RunStore.namesRun(actor.handle(), subject.runId())) {
       return Optional.empty();
@@ -269,7 +270,7 @@ public final class EventAuthority {
             + ", and '"
             + actor.handle()
             + "' may narrate only its own run.",
-        null);
+        Remedy.NONE);
   }
 
   private Optional<String> specOwner(String specId) {

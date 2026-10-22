@@ -29,7 +29,7 @@ public final class ScopedHeadsMigration implements DataMigration {
         db.queryOne(
                 "SELECT COUNT(*) FROM change_heads WHERE project IS NULL", row -> row.integer(0))
             .orElse(0L);
-    return new Report(
+    return Report.of(
         Math.toIntExact(filled),
         0,
         Math.toIntExact(unknown),

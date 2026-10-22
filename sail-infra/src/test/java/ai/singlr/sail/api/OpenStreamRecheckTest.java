@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -74,7 +73,7 @@ class OpenStreamRecheckTest {
     fdes.add("mady", null, null, "admin");
     client = fdes.add("client", null, null, "member");
     fdes.restrict("client");
-    fdes.grant("client", "acme", OperatorCommand.PLAIN);
+    fdes.grant("client", "acme");
     bus = new EventBus();
     clock = new ManualClock(Instant.parse("2026-10-19T10:00:00Z"), Duration.ofMinutes(1));
     var sessions = TestAuth.sessions(db, MAIN);
@@ -188,7 +187,7 @@ class OpenStreamRecheckTest {
     publish("acme");
     assertEquals("acme", next(frames), "beta was not granted yet");
 
-    fdes.grant("client", "beta", OperatorCommand.PLAIN);
+    fdes.grant("client", "beta");
     clock.advance(Duration.ofSeconds(1));
     publish("beta");
 
@@ -198,10 +197,10 @@ class OpenStreamRecheckTest {
 
   @Test
   void aProjectRevokedWhileTheStreamIsOpenIsNoLongerSent() throws Exception {
-    fdes.grant("client", "beta", OperatorCommand.PLAIN);
+    fdes.grant("client", "beta");
     var frames = open();
 
-    fdes.revoke("client", "acme", OperatorCommand.PLAIN);
+    fdes.revoke("client", "acme");
     clock.advance(Duration.ofSeconds(1));
     publish("acme");
     publish("beta");
@@ -215,12 +214,12 @@ class OpenStreamRecheckTest {
   @Test
   void eventsWithinTheSameSecondShareOneCheckAndTheFilterItBuilt() throws Exception {
     var frames = open();
-    fdes.grant("client", "beta", OperatorCommand.PLAIN);
+    fdes.grant("client", "beta");
     clock.advance(Duration.ofSeconds(1));
     publish("beta");
     assertEquals("beta", next(frames));
 
-    fdes.revoke("client", "beta", OperatorCommand.PLAIN);
+    fdes.revoke("client", "beta");
     publish("beta");
     assertEquals("beta", next(frames), "within the second, the filter the check built holds");
     assertEquals(1, checks.get());
@@ -253,13 +252,13 @@ class OpenStreamRecheckTest {
   void aRemovedFdesStreamEndsAtTheNextCheckWithItsReason() throws Exception {
     var frames = open();
 
-    fdes.remove(client.id(), OperatorCommand.PLAIN);
+    fdes.remove(client.id());
     clock.advance(Duration.ofSeconds(1));
     publish("acme");
 
     assertEquals(
         "error {\"code\": \"invalid_bearer_token\", \"message\": \"Session token is invalid or"
-            + " expired.\"}",
+            + " expired.\", \"action\": null, \"field_errors\": []}",
         next(frames));
     assertEquals(END, next(frames));
     assertNull(frames.poll(), "nothing after the stream ended");
@@ -274,7 +273,7 @@ class OpenStreamRecheckTest {
 
     assertEquals(
         "error {\"code\": \"invalid_bearer_token\", \"message\": \"Session token is invalid or"
-            + " expired.\"}",
+            + " expired.\", \"action\": null, \"field_errors\": []}",
         next(frames));
     assertEquals(END, next(frames));
   }

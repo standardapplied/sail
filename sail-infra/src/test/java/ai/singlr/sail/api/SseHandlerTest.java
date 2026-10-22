@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
@@ -243,7 +242,7 @@ class SseHandlerTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(OperatorCommand.PLAIN),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,
@@ -315,7 +314,7 @@ class SseHandlerTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(OperatorCommand.PLAIN),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,
@@ -343,7 +342,7 @@ class SseHandlerTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(OperatorCommand.PLAIN),
+              new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,

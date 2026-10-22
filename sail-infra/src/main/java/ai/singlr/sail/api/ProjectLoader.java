@@ -5,10 +5,10 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import java.util.Objects;
 
@@ -23,12 +23,10 @@ final class ProjectLoader {
 
   private final ShellExec shell;
   private final ProjectReader definitions;
-  private final OperatorCommand operator;
 
-  ProjectLoader(ShellExec shell, ProjectReader definitions, OperatorCommand operator) {
+  ProjectLoader(ShellExec shell, ProjectReader definitions) {
     this.shell = shell;
     this.definitions = Objects.requireNonNull(definitions, "definitions");
-    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   LoadedProject load(String project) {
@@ -43,9 +41,9 @@ final class ProjectLoader {
 
   private SailYaml definition(String project) {
     try {
-      return definitions.require(project, operator);
+      return definitions.require(project);
     } catch (ProjectReader.Unreadable e) {
-      throw new ApiException(ErrorCode.PROJECT_LOAD_FAILED, e.getMessage(), e);
+      throw ApiException.of(ErrorCode.PROJECT_LOAD_FAILED, e);
     }
   }
 
@@ -55,7 +53,7 @@ final class ProjectLoader {
       case ContainerState.Running ignored -> {
         return loaded;
       }
-      case ContainerState.Stopped ignored -> throw stopped(project, operator);
+      case ContainerState.Stopped ignored -> throw stopped(project);
       case ContainerState.NotCreated ignored ->
           throw new ApiException(
               ErrorCode.PROJECT_NOT_CREATED, "Project '" + project + "' does not exist.");
@@ -64,11 +62,11 @@ final class ProjectLoader {
     }
   }
 
-  static ApiException stopped(String project, OperatorCommand operator) {
+  static ApiException stopped(String project) {
     return new ApiException(
         ErrorCode.PROJECT_STOPPED,
         "Project '" + project + "' is stopped.",
-        "Start it with " + operator.sail("project start " + project) + ".");
+        Remedy.of("Start it with ", Remedy.sail("project start", project), "."));
   }
 
   void requireExists(String project) {

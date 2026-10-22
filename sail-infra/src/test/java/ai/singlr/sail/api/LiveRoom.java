@@ -9,7 +9,6 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.LiveMemberPrompt;
 import ai.singlr.sail.engine.LiveStream;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -168,7 +167,7 @@ final class LiveRoom implements AutoCloseable {
             reviews,
             runs,
             new ProjectStore(db),
-            ConnectEnvironment.detector(OperatorCommand.PLAIN),
+            ConnectEnvironment.detector(),
             SyncScheduler.disabled(),
             new FdeStore(db),
             new Terminals(),
@@ -178,8 +177,7 @@ final class LiveRoom implements AutoCloseable {
                 (project, config) -> "",
                 this::launch,
                 DispatchOperations.Listener.NONE,
-                StopOperations.Listener.NONE),
-            OperatorCommand.PLAIN)
+                StopOperations.Listener.NONE))
         .useMessages(messages)
         .useRooms(rooms);
   }

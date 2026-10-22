@@ -6,7 +6,6 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.SailVersion;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.pty.PtySessionHost;
@@ -35,14 +34,13 @@ public final class PtyHostCommand implements Callable<Integer> {
   @Override
   public Integer call() throws Exception {
     var handoff = PtySessionHost.Handoff.fromEnvironment(PtyHostCommand::shimCommand);
-    var operator = OperatorCommand.unknownReader();
     var host =
         startHost(
             SailPaths.ptySocketPath(),
             SailPaths.sessionsDir(),
-            new PtyHostIdentity(operator),
-            new PtyHostRooms(operator),
-            new PtyHostEvents(operator),
+            new PtyHostIdentity(),
+            new PtyHostRooms(),
+            new PtyHostEvents(),
             handoff);
     var done = new CountDownLatch(1);
     Runtime.getRuntime()

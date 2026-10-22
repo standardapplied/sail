@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
@@ -74,7 +75,7 @@ public final class ConnectCommand implements Runnable {
     }
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name, operator);
+    ContainerStateGuard.requireRunning(state, name);
     var containerIp = state instanceof ContainerState.Running running ? running.ipv4() : null;
 
     if (containerIp == null) {
@@ -88,7 +89,7 @@ public final class ConnectCommand implements Runnable {
         Objects.requireNonNullElse(serverUser, System.getProperty("user.name"));
     var containerUser = resolveContainerUser(name, operator);
 
-    var registered = WorkstationIdentity.registered(operator);
+    var registered = WorkstationIdentity.registered();
     var identityFile = WorkstationIdentity.identityFileFor(registered);
 
     if (json) {
@@ -140,7 +141,7 @@ public final class ConnectCommand implements Runnable {
     return "  @|yellow ⚠|@ No workstation key is registered on this box; the snippet below assumes"
         + " ~/.ssh/id_ed25519. If the container rejects your key, register the one you connect"
         + " with, then apply the project to put it in the container:\n    @|bold "
-        + WorkstationIdentity.setKeyHint(operator)
+        + operator.render(Remedy.of(WorkstationIdentity.SET_KEY))
         + "|@\n    @|bold "
         + operator.sail("project apply " + name)
         + "|@";

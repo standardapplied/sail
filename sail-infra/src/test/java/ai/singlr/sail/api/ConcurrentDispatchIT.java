@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.ContainerFilePush;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -134,8 +133,7 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
               (project, config) -> "",
               DispatchOperations.shellLauncher(shell),
               DispatchOperations.Listener.NONE,
-              SessionYield.NONE,
-              OperatorCommand.PLAIN);
+              SessionYield.NONE);
 
       var first = dispatchBackground(dispatchOps, "spec-app");
       var second = dispatchBackground(dispatchOps, "spec-web");

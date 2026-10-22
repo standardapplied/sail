@@ -5,16 +5,18 @@
 
 package ai.singlr.sail.authority;
 
+import ai.singlr.sail.common.Remedy;
 import java.util.Objects;
 import java.util.Optional;
 
 /**
  * Why a rule refuses a write: its {@link Kind}, the message a client shows, and the action that
- * unblocks it ({@code fix}, null when there is none to name). Every door translates the kind to its
- * own error envelope, and main answers the message as its denial, so one refusal reads the same
- * wherever the rule decides.
+ * unblocks it ({@code fix}, {@link Remedy#NONE} when there is none to name), its commands kept as
+ * data until a door renders them for its reader. Every door translates the kind to its own error
+ * envelope, and main answers the message as its denial, so one refusal reads the same wherever the
+ * rule decides.
  */
-public record Refusal(Kind kind, String message, String fix) {
+public record Refusal(Kind kind, String message, Remedy fix) {
 
   /** What a refusal is about. */
   public enum Kind {
@@ -41,9 +43,20 @@ public record Refusal(Kind kind, String message, String fix) {
   public Refusal {
     Objects.requireNonNull(kind, "kind");
     Objects.requireNonNull(message, "message");
+    fix = Objects.requireNonNullElse(fix, Remedy.NONE);
+  }
+
+  /** A refusal whose fix names no command. */
+  public Refusal(Kind kind, String message, String fix) {
+    this(kind, message, fix == null ? Remedy.NONE : Remedy.of(fix));
   }
 
   /** A refusal of {@code kind}, as the optional every rule answers. */
+  public static Optional<Refusal> of(Kind kind, String message, Remedy fix) {
+    return Optional.of(new Refusal(kind, message, fix));
+  }
+
+  /** A refusal of {@code kind} whose fix names no command. */
   public static Optional<Refusal> of(Kind kind, String message, String fix) {
     return Optional.of(new Refusal(kind, message, fix));
   }

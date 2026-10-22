@@ -10,7 +10,6 @@ import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.AgentSession;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -201,14 +200,13 @@ public final class DispatchOperations {
       Snapshotter snapshotter,
       AgentLauncher launcher,
       Listener listener,
-      SessionYield sessionYield,
-      OperatorCommand operator) {
+      SessionYield sessionYield) {
     this.shell = Objects.requireNonNull(shell, "shell");
-    this.projects = new ProjectLoader(shell, definitions, operator);
+    this.projects = new ProjectLoader(shell, definitions);
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.runStore = runStore;
-    this.admission = new LaunchAdmission(shell, fdeStore, operator);
+    this.admission = new LaunchAdmission(shell, fdeStore);
     this.events = Objects.requireNonNull(events, "events");
     this.watcherSpawner = Objects.requireNonNull(watcherSpawner, "watcherSpawner");
     this.snapshotter = Objects.requireNonNull(snapshotter, "snapshotter");
@@ -216,8 +214,7 @@ public final class DispatchOperations {
     this.listener = Objects.requireNonNull(listener, "listener");
     this.sessionYield = Objects.requireNonNull(sessionYield, "sessionYield");
     this.membership =
-        new MembershipService(
-            specStore, () -> roomStore, projects, admission, this.events, shell, operator);
+        new MembershipService(specStore, () -> roomStore, projects, admission, this.events, shell);
     this.roomCommitGuard = new RoomCommitGuard(runStore, projects, this.events, shell);
     this.runLauncher =
         new RunLauncher(
@@ -270,8 +267,7 @@ public final class DispatchOperations {
             snapshotter,
             listener,
             this.events,
-            shell,
-            operator);
+            shell);
   }
 
   /**

@@ -32,6 +32,7 @@ import ai.singlr.sail.api.WebauthnAuthHandler;
 import ai.singlr.sail.auth.EnrollmentService;
 import ai.singlr.sail.auth.PasskeyService;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
@@ -46,7 +47,6 @@ import ai.singlr.sail.engine.GracefulShutdown;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.NodeIdentity;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -141,7 +141,6 @@ public final class ServerStartCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    var operator = OperatorCommand.unknownReader();
     BindPolicy.requireBindable(host, allowRemote);
     var dbPath = SailPaths.controlPlaneDb();
     SailPaths.ensureDataDir(dbPath.getParent());
@@ -150,8 +149,7 @@ public final class ServerStartCommand implements Runnable {
     var shutdown = new GracefulShutdown().register(db);
     Runtime.getRuntime().addShutdownHook(new Thread(shutdown::shutdown, "sail-shutdown"));
     var migrationResult =
-        MigrationRunner.applyAll(
-            db, DataMigrations.all(operator), DataMigration.Prompter.NON_INTERACTIVE);
+        MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
     if (migrationResult.schemaAfter() > migrationResult.schemaBefore()) {
       System.out.println(
           Ansi.AUTO.string(
@@ -176,7 +174,7 @@ public final class ServerStartCommand implements Runnable {
                     + " ambiguous, "
                     + run.report().skipped()
                     + " skipped"));
-        run.report().notes().forEach(note -> System.out.println("    " + note));
+        run.report().notes().forEach(note -> System.out.println("    " + note.plain()));
       }
     }
 
@@ -203,7 +201,7 @@ public final class ServerStartCommand implements Runnable {
     var projectStore = new ProjectStore(db);
     var boxCredentialStore = new BoxCredentialStore(db);
     try (var rounds = FileMutex.holdRounds(db.path())) {
-      provisionBoxCredential(boxCredentialStore, operator);
+      provisionBoxCredential(boxCredentialStore);
     }
     var operations =
         OperationsFactory.create(
@@ -212,8 +210,7 @@ public final class ServerStartCommand implements Runnable {
             bus,
             persister,
             SyncScheduler.disabled(),
-            new PtyHostYield(),
-            operator);
+            new PtyHostYield());
     var syncScheduler =
         NodeSync.scheduler(
             HostSync.config(),
@@ -221,7 +218,7 @@ public final class ServerStartCommand implements Runnable {
             System.getenv(),
             () -> {
               var round = operations.sync(new SyncRequest(null));
-              System.out.println(SyncCommand.render(round, false, operator));
+              System.out.println(SyncCommand.render(round, false, Remedy::plain));
             });
     operations.useSyncScheduler(syncScheduler);
     shutdown.register(syncScheduler);
@@ -272,11 +269,7 @@ public final class ServerStartCommand implements Runnable {
     var tokenAuth = new TokenAuth(tokenStore, roles);
     var passkeyHandler =
         new WebauthnAuthHandler(
-            passkeyService,
-            enrollment,
-            tokenAuth,
-            configured ? webauthn.origins() : null,
-            operator);
+            passkeyService, enrollment, tokenAuth, configured ? webauthn.origins() : null);
     var auth = new SessionAwareAuth(new AuthSessionStore(db), roster, roles, tokenAuth);
 
     var server =
@@ -415,15 +408,18 @@ public final class ServerStartCommand implements Runnable {
    * Skipped with a loud note when the box has no sync handle — the socket then keeps refusing
    * interactive callers, which is fail-closed, not broken.
    */
-  private static void provisionBoxCredential(BoxCredentialStore store, OperatorCommand operator) {
+  private static void provisionBoxCredential(BoxCredentialStore store) {
     var handle = NodeIdentity.handle();
     if (Strings.isBlank(handle)) {
       System.out.println(
           Ansi.AUTO.string(
-              "  @|yellow ⚠|@ No sync handle configured — interactive container sessions get no"
-                  + " ambient credential ('"
-                  + operator.sail("host config set sync-handle <fde>")
-                  + "' enables it)"));
+              "  @|yellow ⚠|@ "
+                  + Remedy.of(
+                          "No sync handle configured — interactive container sessions get no"
+                              + " ambient credential ('",
+                          Remedy.sail("host config set sync-handle", "<fde>"),
+                          "' enables it)")
+                      .plain()));
       return;
     }
     try {

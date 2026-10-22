@@ -127,7 +127,7 @@ public final class PersonalRoomErasure implements DataMigration {
     }
     notes.addAll(contested);
     notes.addAll(kept);
-    return new Report(rooms, 0, kept.size(), notes);
+    return Report.of(rooms, 0, kept.size(), notes);
   }
 
   /** Every room, live or deleted, whose id could be a personal room's. */

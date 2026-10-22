@@ -18,6 +18,7 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.Resolution;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
@@ -205,8 +206,7 @@ class ConflictsCommandTest {
       Acting.system(() -> nodeFiles.put("acme", "file", new ByteArrayInputStream(mine), 0644));
       SyncBox.round(main.db, node.db, "file");
 
-      var conflict =
-          new ConflictOperations(node.db, OperatorCommand.PLAIN).find("file", "acme/file");
+      var conflict = new ConflictOperations(node.db).find("file", "acme/file");
       assertEquals(List.of("content"), conflict.fields());
       var diff =
           ConflictMerge.diff(
@@ -230,13 +230,7 @@ class ConflictsCommandTest {
   private HostOperations operations() {
     var config = new SyncConfig("node", "sail@main", "node");
     return OperationsFactory.create(
-            db,
-            new ShellExecutor(true),
-            null,
-            null,
-            SyncScheduler.disabled(),
-            SessionYield.NONE,
-            OperatorCommand.PLAIN)
+            db, new ShellExecutor(true), null, null, SyncScheduler.disabled(), SessionYield.NONE)
         .useControlPlane(
             db,
             tempDir,
@@ -248,7 +242,7 @@ class ConflictsCommandTest {
                 target -> {
                   throw new IOException("main unavailable");
                 },
-                OperatorCommand.PLAIN));
+                SyncOperations.PLAIN_NOTICES));
   }
 
   private void parkASpecAndItsRoomUnderOneId() {
@@ -394,7 +388,11 @@ class ConflictsCommandTest {
 
     assertEquals(1, stale.exit());
     assertEquals(409, assertInstanceOf(ApiException.class, stale.escaped()).status());
-    assertTrue(stale.escaped().getMessage().contains("Run 'sail sync' to refresh it"));
+    assertTrue(
+        ((ApiException) stale.escaped())
+            .remedy()
+            .plain()
+            .startsWith("Run 'sail sync' to refresh it"));
     assertEquals(2, conflicts.pending().size());
   }
 
@@ -436,8 +434,11 @@ class ConflictsCommandTest {
     assertEquals(1, absent.exit());
     assertEquals(400, assertInstanceOf(ApiException.class, absent.escaped()).status());
     assertEquals(
-        "A merged record must start from 'sail conflicts show auth --template'.",
+        "A merged record does not name the version it was made from.",
         absent.escaped().getMessage());
+    assertEquals(
+        Remedy.of("Start it from '", Remedy.sail("conflicts show", "auth", "--template"), "'."),
+        ((ApiException) absent.escaped()).remedy());
     assertEquals(parked, parkedSpec());
 
     park("spec", "title", "main's title, revised");

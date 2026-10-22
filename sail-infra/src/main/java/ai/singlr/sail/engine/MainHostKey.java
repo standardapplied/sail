@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -33,37 +35,31 @@ public final class MainHostKey {
 
   private final ShellExec shell;
   private final Path knownHosts;
-  private final OperatorCommand operator;
 
-  public MainHostKey(ShellExec shell, Path knownHosts, OperatorCommand operator) {
+  public MainHostKey(ShellExec shell, Path knownHosts) {
     this.shell = shell;
     this.knownHosts = knownHosts;
-    this.operator = operator;
   }
 
-  /**
-   * This account's {@code ~/.ssh/known_hosts}: root's under sudo, the file its sail-api reads. A
-   * refusal is worded for {@code operator}.
-   */
-  public static MainHostKey here(OperatorCommand operator) {
+  /** This account's {@code ~/.ssh/known_hosts}: root's under sudo, the file its sail-api reads. */
+  public static MainHostKey here() {
     return new MainHostKey(
-        new ShellExecutor(false),
-        Path.of(System.getProperty("user.home"), ".ssh", "known_hosts"),
-        operator);
+        new ShellExecutor(false), Path.of(System.getProperty("user.home"), ".ssh", "known_hosts"));
   }
 
   /**
    * How a node recovers from main's host key no longer being the one it pinned for {@code target}:
    * drop the old pin, then join again, which pins the new one and prints it to check against main.
    */
-  public static String rebuiltRecovery(String target, OperatorCommand operator) {
-    return "If main was rebuilt from a copy of its database, remove the old key with '"
-        + operator.asThisProcess("ssh-keygen -R " + hostOf(target))
-        + "', re-run '"
-        + operator.sail("init --main " + target)
-        + "' and compare the fingerprint it prints with main's ('"
-        + FINGERPRINT_ON_MAIN
-        + "' on main); otherwise something between this box and main is answering for it.";
+  public static Remedy rebuiltRecovery(String target) {
+    return Remedy.of(
+        "If main was rebuilt from a copy of its database, remove the old key with '",
+        Remedy.program("ssh-keygen", "-R", hostOf(target)),
+        "', re-run '",
+        Remedy.sail("init", "--main", target),
+        "' and compare the fingerprint it prints with main's ('"
+            + FINGERPRINT_ON_MAIN
+            + "' on main); otherwise something between this box and main is answering for it.");
   }
 
   /** The line a join prints for the key it pinned, {@code fingerprint}, to check against main. */
@@ -93,22 +89,23 @@ public final class MainHostKey {
             .map(String::strip)
             .filter(scanned -> keyOf(scanned).isPresent())
             .findFirst()
-            .orElseThrow(() -> unread(host, target, scan.stderr(), operator));
+            .orElseThrow(() -> unread(host, target, scan.stderr()));
     var key = keyOf(line).orElseThrow();
     var entries = entries(host);
     if (entries.stream()
         .filter(entry -> entry.startsWith(REVOKED))
         .anyMatch(entry -> sameKey(entry, key))) {
-      throw new IllegalStateException(
+      throw Remedied.state(
           host
               + "'s SSH host key "
               + key.fingerprint()
               + " is revoked in "
               + knownHosts
-              + ", so ssh would refuse it at every sync. Give main a new host key, or remove the"
-              + " revocation if it was a mistake, then re-run "
-              + operator.sail("init --main " + target)
-              + ".");
+              + ", so ssh would refuse it at every sync.",
+          Remedy.of(
+              "Give main a new host key, or remove the revocation if it was a mistake, then re-run ",
+              Remedy.sail("init", "--main", target),
+              "."));
     }
     var pinned =
         entries.stream()
@@ -121,14 +118,14 @@ public final class MainHostKey {
       return key.fingerprint();
     }
     if (pinned.stream().noneMatch(known -> known.blob().equals(key.blob()))) {
-      throw new IllegalStateException(
+      throw Remedied.state(
           host
               + "'s SSH host key is "
               + key.fingerprint()
               + ", but this box pinned "
               + pinned.getFirst().fingerprint()
-              + ". "
-              + rebuiltRecovery(target, operator));
+              + ".",
+          rebuiltRecovery(target));
     }
     return key.fingerprint();
   }
@@ -187,8 +184,7 @@ public final class MainHostKey {
     }
   }
 
-  private static IllegalStateException unread(
-      String host, String target, String stderr, OperatorCommand operator) {
+  private static IllegalStateException unread(String host, String target, String stderr) {
     var reason =
         stderr
             .lines()
@@ -196,13 +192,11 @@ public final class MainHostKey {
             .filter(line -> !line.isEmpty() && !line.startsWith("#"))
             .reduce((first, second) -> second)
             .orElse("no ed25519 host key came back");
-    return new IllegalStateException(
-        "Couldn't read "
-            + host
-            + "'s SSH host key on port 22: "
-            + reason
-            + ". Check the address and firewall, then re-run "
-            + operator.sail("init --main " + target)
-            + ".");
+    return Remedied.state(
+        "Couldn't read " + host + "'s SSH host key on port 22: " + reason + ".",
+        Remedy.of(
+            "Check the address and firewall, then re-run ",
+            Remedy.sail("init", "--main", target),
+            "."));
   }
 }

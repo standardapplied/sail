@@ -18,8 +18,10 @@ import ai.singlr.sail.engine.ShellExecutor;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
+import picocli.CommandLine.Spec;
 
 /**
  * Renames a project on this box. Re-keys the catalog, specs, shared files, on-disk state, the Incus
@@ -31,6 +33,8 @@ import picocli.CommandLine.Parameters;
     description = "Rename a project on this box (local only — does not sync to other boxes).",
     mixinStandardHelpOptions = true)
 public final class ProjectRenameCommand implements Runnable {
+
+  @Spec private CommandSpec spec;
 
   @Parameters(index = "0", description = "Current project name.")
   private String name;
@@ -63,12 +67,10 @@ public final class ProjectRenameCommand implements Runnable {
       Banner.printBranding(System.out, Ansi.AUTO);
     }
     if (!dryRun && !ConsoleHelper.isRoot()) {
-      throw new IllegalStateException(
-          "Root privileges required. Run with: "
-              + OperatorCommand.SUDO.sail("project rename " + name + " " + newName));
+      throw RootRequired.refusal(spec);
     }
 
-    try (var operations = OperationsFactory.open(operator)) {
+    try (var operations = OperationsFactory.open()) {
       operations.schema().initialize();
       if (operations.catalog().project(name).isEmpty()) {
         throw new IllegalStateException(

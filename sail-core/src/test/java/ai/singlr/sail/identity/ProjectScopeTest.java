@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SyncConfig;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -90,14 +89,13 @@ class ProjectScopeTest {
 
     assertEquals(ProjectScope.none(), fdes.scopeOf("bob"));
     assertEquals(ProjectScope.all(), fdes.scopeOf("ada"));
-    fdes.grant("bob", "alpha", OperatorCommand.PLAIN);
-    fdes.grant("bob", "alpha", OperatorCommand.PLAIN);
-    fdes.grant("bob", "beta", OperatorCommand.PLAIN);
+    fdes.grant("bob", "alpha");
+    fdes.grant("bob", "alpha");
+    fdes.grant("bob", "beta");
     assertEquals(ProjectScope.of(List.of("alpha", "beta")), fdes.scopeOf("bob"));
-    assertEquals(
-        ProjectScope.of(List.of("alpha", "beta")), fdes.grantsOf("bob", OperatorCommand.PLAIN));
-    fdes.revoke("bob", "alpha", OperatorCommand.PLAIN);
-    fdes.revoke("bob", "alpha", OperatorCommand.PLAIN);
+    assertEquals(ProjectScope.of(List.of("alpha", "beta")), fdes.grantsOf("bob"));
+    fdes.revoke("bob", "alpha");
+    fdes.revoke("bob", "alpha");
     assertEquals(ProjectScope.of(List.of("beta")), fdes.scopeOf("bob"));
   }
 
@@ -107,7 +105,7 @@ class ProjectScopeTest {
     fdes.add("cy", null, null, "member");
     for (var scoped : List.of("bob", "cy")) {
       fdes.restrict(scoped);
-      fdes.grant(scoped, "alpha", OperatorCommand.PLAIN);
+      fdes.grant(scoped, "alpha");
     }
 
     assertTrue(fdes.unrestrict("bob"));
@@ -125,26 +123,20 @@ class ProjectScopeTest {
     fdes.add("ada", null, null, "admin");
     var bob = fdes.add("bob", null, null, "member");
     fdes.restrict("bob");
-    fdes.grant("bob", "alpha", OperatorCommand.PLAIN);
+    fdes.grant("bob", "alpha");
 
     assertEquals(
         "FDE 'ada' sees every project, so there is nothing to grant or revoke. Scope it first"
             + " with 'sail fde update ada --scoped'.",
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> fdes.grant("ada", "alpha", OperatorCommand.PLAIN))
+        assertThrows(IllegalArgumentException.class, () -> fdes.grant("ada", "alpha"))
             .getMessage());
     assertEquals(
         "Unknown FDE 'nobody'.",
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> fdes.revoke("nobody", "alpha", OperatorCommand.PLAIN))
+        assertThrows(IllegalArgumentException.class, () -> fdes.revoke("nobody", "alpha"))
             .getMessage());
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> fdes.grant("bob", "Not A Name", OperatorCommand.PLAIN));
+    assertThrows(IllegalArgumentException.class, () -> fdes.grant("bob", "Not A Name"));
 
-    fdes.remove(bob.id(), OperatorCommand.PLAIN);
+    fdes.remove(bob.id());
 
     assertEquals(
         0L,
@@ -181,10 +173,10 @@ class ProjectScopeTest {
       fdes.add(scoped, scoped.toUpperCase(), scoped + "@x.dev", "member");
       fdes.restrict(scoped);
     }
-    fdes.grant("nia", "alpha", OperatorCommand.PLAIN);
-    fdes.grant("sam", "alpha", OperatorCommand.PLAIN);
-    fdes.grant("sam", "beta", OperatorCommand.PLAIN);
-    fdes.grant("zed", "beta", OperatorCommand.PLAIN);
+    fdes.grant("nia", "alpha");
+    fdes.grant("sam", "alpha");
+    fdes.grant("sam", "beta");
+    fdes.grant("zed", "beta");
 
     var roster = fdes.visibleTo("nia", fdes.scopeOf("nia"));
 
@@ -207,7 +199,7 @@ class ProjectScopeTest {
   void theRoleRuleResolvesAScopeBesideARole() {
     fdes.add("bob", null, null, "member");
     fdes.restrict("bob");
-    fdes.grant("bob", "alpha", OperatorCommand.PLAIN);
+    fdes.grant("bob", "alpha");
     var box = new SyncConfig("main", null, "ada", "main-box");
 
     assertEquals(ProjectScope.of(List.of("alpha")), new RoleRule(() -> box, fdes).scopeOf("bob"));

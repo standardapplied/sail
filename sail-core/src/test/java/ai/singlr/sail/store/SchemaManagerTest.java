@@ -15,7 +15,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.ProjectScope;
@@ -55,8 +54,7 @@ class SchemaManagerTest {
     db.execute(
         "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
         SchemaManager.V1_VERSION + prior);
-    new ContentMigration(OperatorCommand.PLAIN)
-        .apply(db, null, DataMigration.Prompter.NON_INTERACTIVE);
+    new ContentMigration().apply(db, null, DataMigration.Prompter.NON_INTERACTIVE);
     var hash = new BlobStore(db).putText("content");
     for (var mode : List.of(0644, 0600)) {
       db.execute(
@@ -421,7 +419,7 @@ class SchemaManagerTest {
     var fdes = new FdeStore(db);
     assertEquals(ProjectScope.all(), fdes.scopeOf("ada"), "an FDE from before scoping sees all");
     fdes.restrict("ada");
-    fdes.grant("ada", "alpha", OperatorCommand.PLAIN);
+    fdes.grant("ada", "alpha");
     assertEquals(ProjectScope.of(List.of("alpha")), fdes.scopeOf("ada"));
     assertThrows(
         SqliteException.class,
@@ -891,8 +889,7 @@ class SchemaManagerTest {
   }
 
   private static List<String> canonicalSchema(Sqlite database) {
-    new ContentMigration(OperatorCommand.PLAIN)
-        .apply(database, null, DataMigration.Prompter.NON_INTERACTIVE);
+    new ContentMigration().apply(database, null, DataMigration.Prompter.NON_INTERACTIVE);
     return database.query(
         "SELECT type, name, tbl_name, sql FROM sqlite_master"
             + " WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'"

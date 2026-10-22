@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -80,7 +81,9 @@ class PersonalRoomErasureTest {
     round();
 
     assertEquals(2, report.applied());
-    assertEquals(List.of("Erased 2 personal rooms: 4 messages, 2 runs"), report.notes());
+    assertEquals(
+        List.of("Erased 2 personal rooms: 4 messages, 2 runs"),
+        report.notes().stream().map(Remedy::plain).toList());
     for (var box : List.of(main, node)) {
       for (var erased : List.of(udays, rajeshs)) {
         assertGone(box.db, erased);
@@ -116,7 +119,7 @@ class PersonalRoomErasureTest {
         List.of(
             "Removed 1 personal rooms this box alone held: 1 messages, 0 runs",
             "1 personal rooms are main's to erase; this node adopts its erasures"),
-        report.notes());
+        report.notes().stream().map(Remedy::plain).toList());
     assertGone(node.db, nodes);
     assertEquals(
         0,
@@ -152,8 +155,11 @@ class PersonalRoomErasureTest {
     round();
 
     assertEquals(
-        List.of("Removed 1 personal rooms this box alone held: 1 messages, 0 runs"), local.notes());
-    assertEquals(List.of("Erased 1 personal rooms: 2 messages, 1 runs"), report.notes());
+        List.of("Removed 1 personal rooms this box alone held: 1 messages, 0 runs"),
+        local.notes().stream().map(Remedy::plain).toList());
+    assertEquals(
+        List.of("Erased 1 personal rooms: 2 messages, 1 runs"),
+        report.notes().stream().map(Remedy::plain).toList());
     for (var box : List.of(main, node)) {
       assertGone(box.db, deleted);
       assertGone(box.db, nodes);
@@ -193,7 +199,7 @@ class PersonalRoomErasureTest {
             "Left personal room '"
                 + RAJESH
                 + "' as an ordinary room: spec 'born-there' converses in it"),
-        report.notes());
+        report.notes().stream().map(Remedy::plain).toList());
     for (var kept : List.of(working, housing)) {
       for (var id : kept.ids()) {
         assertEquals(
@@ -233,7 +239,7 @@ class PersonalRoomErasureTest {
                 + "' is main's to erase, decided on main's copy, though here run '"
                 + running
                 + "' has not finished"),
-        report.notes());
+        report.notes().stream().map(Remedy::plain).toList());
     round();
     assertFalse(new RoomStore(node.db).findById(UDAY).isPresent(), "main's erasure is adopted");
   }
@@ -255,7 +261,7 @@ class PersonalRoomErasureTest {
         List.of(
             "Removed 0 personal rooms this box alone held: 0 messages, 0 runs",
             "1 personal rooms are main's to erase; this node adopts its erasures"),
-        local.notes());
+        local.notes().stream().map(Remedy::plain).toList());
     assertTrue(new RoomStore(node.db).findById(UDAY).isPresent(), "main kept it, so does the node");
     assertEquals(1, count(node.db, "SELECT count(*) FROM runs WHERE id = ?", running));
   }

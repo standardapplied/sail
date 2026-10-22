@@ -517,7 +517,7 @@ class HandleChangeTest {
               opened.incrementAndGet();
               return PipedSyncChannel.to(main.server(UDAY));
             },
-            OperatorCommand.PLAIN);
+            SyncOperations.PLAIN_NOTICES);
     var failure = new AtomicReference<Throwable>();
     var round = new AtomicReference<Thread>();
 

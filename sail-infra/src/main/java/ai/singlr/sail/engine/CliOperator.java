@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Actor;
@@ -30,44 +31,41 @@ public final class CliOperator {
 
   private CliOperator() {}
 
-  /**
-   * The operator this box's configuration and roster name; a null roster is none kept yet. A
-   * refusal is worded for {@code reader}.
-   */
-  public static Actor of(SyncConfig config, FdeStore roster, OperatorCommand reader) {
+  /** The operator this box's configuration and roster name; a null roster is none kept yet. */
+  public static Actor of(SyncConfig config, FdeStore roster) {
     var roles = new RoleRule(() -> config, roster);
     var handle = roles.boxFde().orElse(null);
     return roles
         .roleOfUnbound(Role.ADMIN)
         .map(role -> new Actor(handle, role, Actor.Lane.CLI))
-        .orElseThrow(() -> unplaced(handle, reader));
+        .orElseThrow(() -> unplaced(handle));
   }
 
   /**
    * The refusal for whatever acts for this box's FDE, {@code handle}, when the box cannot place it:
    * a node whose roster does not know that FDE yet or has disabled it, or a node that names none.
    */
-  public static ApiException unplaced(String handle, OperatorCommand reader) {
+  public static ApiException unplaced(String handle) {
     if (Strings.isBlank(handle)) {
       return new ApiException(
           ErrorCode.CONFLICT,
           "This box syncs with main but names no FDE of its own, so it cannot tell what you may do.",
-          "Name it with '"
-              + reader.sail("host config set sync-handle <you>")
-              + "', then run '"
-              + reader.sail("sync")
-              + "'.");
+          Remedy.of(
+              "Name it with '",
+              Remedy.sail("host config set sync-handle", "<you>"),
+              "', then run '",
+              Remedy.sail("sync"),
+              "'."));
     }
     return new ApiException(
         ErrorCode.CONFLICT,
         "This box does not know its FDE's role ('"
             + handle
             + "'), so it cannot tell what you may do.",
-        "Run '"
-            + reader.sail("sync")
-            + "' first. If it still refuses, ask an admin whether '"
-            + handle
-            + "' is disabled.");
+        Remedy.of(
+            "Run '",
+            Remedy.sail("sync"),
+            "' first. If it still refuses, ask an admin whether '" + handle + "' is disabled."));
   }
 
   /**
@@ -80,16 +78,16 @@ public final class CliOperator {
   }
 
   /** The operator of this box, read from its host configuration and control-plane roster. */
-  public static Actor current(OperatorCommand reader) {
-    return current(NodeIdentity.config(), SailPaths.controlPlaneDb(), reader);
+  public static Actor current() {
+    return current(NodeIdentity.config(), SailPaths.controlPlaneDb());
   }
 
-  static Actor current(SyncConfig config, Path controlPlane, OperatorCommand reader) {
+  static Actor current(SyncConfig config, Path controlPlane) {
     if (!Files.exists(controlPlane)) {
-      return of(config, null, reader);
+      return of(config, null);
     }
     try (var db = Sqlite.open(controlPlane)) {
-      return of(config, new FdeStore(db), reader);
+      return of(config, new FdeStore(db));
     }
   }
 }

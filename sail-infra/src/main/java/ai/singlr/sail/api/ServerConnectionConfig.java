@@ -5,9 +5,10 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -59,7 +60,9 @@ public record ServerConnectionConfig(String serverUrl, String token) {
 
     if (url == null) url = DEFAULT_URL;
     if (token == null) {
-      throw new IOException(noTokenMessage());
+      throw Remedied.io(
+          "No API token configured — sail-api may not be installed or started on this box.",
+          noTokenRemedy());
     }
     return new ServerConnectionConfig(url, token);
   }
@@ -70,15 +73,13 @@ public record ServerConnectionConfig(String serverUrl, String token) {
    * — not {@code sail login}, which is the thin-client path. Naming both (and the env/file
    * overrides) keeps the message honest wherever it surfaces.
    */
-  static String noTokenMessage() {
-    return "No API token configured — sail-api may not be installed or started on this box.\n"
-        + "  On a dev box: "
-        + OperatorCommand.elsewhere("host service install")
-        + " (installs and starts the control plane).\n"
-        + "  On a thin client: "
-        + OperatorCommand.client("login")
-        + ".\n"
-        + "  Or set SAIL_TOKEN, or pass --token-file.";
+  static Remedy noTokenRemedy() {
+    return Remedy.of(
+        "On a dev box: ",
+        Remedy.sail("host service install"),
+        " (installs and starts the control plane).\n  On a thin client: ",
+        Remedy.client("login"),
+        ".\n  Or set SAIL_TOKEN, or pass --token-file.");
   }
 
   /** Reads a token from a file, trimming surrounding whitespace; {@code null} path yields null. */

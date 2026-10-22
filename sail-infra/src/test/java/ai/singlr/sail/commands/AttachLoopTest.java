@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.pty.PtySessionHost;
 import java.io.ByteArrayOutputStream;
 import java.io.PipedInputStream;
@@ -93,6 +95,32 @@ class AttachLoopTest {
       assertTrue(next > at, "expected '" + line + "' in order in: " + rendered);
       at = next;
     }
+  }
+
+  @Test
+  void aHostsRefusalIsNarratedAsItsReaderTypesTheFix() throws Exception {
+    var frames = new ByteArrayOutputStream();
+    var sink = java.nio.channels.Channels.newChannel(frames);
+    ai.singlr.sail.pty.PtyWire.write(
+        sink,
+        new ai.singlr.sail.pty.PtyMessage.Err(
+            Remedy.of("Room lounge is gone. Run '", Remedy.sail("sync"), "'.")));
+    ai.singlr.sail.pty.PtyWire.write(
+        sink, new ai.singlr.sail.pty.PtyMessage.SessionEnded("exited(0)"));
+    var stdout = new ByteArrayOutputStream();
+
+    AttachLoop.run(
+        new ScriptedChannel(frames.toByteArray()),
+        new PipedInputStream(),
+        stdout,
+        AttachLoop.Resizes.NONE,
+        OperatorCommand.SUDO);
+
+    assertTrue(
+        stdout
+            .toString(StandardCharsets.UTF_8)
+            .contains("[sail: Room lounge is gone. Run 'sudo sail sync'.]"),
+        stdout.toString(StandardCharsets.UTF_8));
   }
 
   /** A host that has already said everything it will: the frames, then end of stream. */
@@ -205,7 +233,7 @@ class AttachLoopTest {
             };
 
         var stdin = new PipedInputStream(new PipedOutputStream());
-        var reason = AttachLoop.run(channel, stdin, stdout, resizes);
+        var reason = AttachLoop.run(channel, stdin, stdout, resizes, OperatorCommand.PLAIN);
 
         assertEquals("exited(0)", reason);
         assertTrue(

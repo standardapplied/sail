@@ -6,11 +6,11 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.authority.EraseAuthority;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.HostInfo;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
@@ -66,16 +66,9 @@ final class SpecPruner {
   private final EventBus eventBus;
   private final BooleanSupplier authoritative;
   private final Supplier<Instant> clock;
-  private final OperatorCommand operator;
 
-  SpecPruner(
-      Sqlite db,
-      EventBus eventBus,
-      BooleanSupplier authoritative,
-      Supplier<Instant> clock,
-      OperatorCommand operator) {
+  SpecPruner(Sqlite db, EventBus eventBus, BooleanSupplier authoritative, Supplier<Instant> clock) {
     this.db = Objects.requireNonNull(db, "db");
-    this.operator = Objects.requireNonNull(operator, "operator");
     this.specs = new SpecStore(db);
     this.messages = new MessageStore(db);
     this.runs = new RunStore(db);
@@ -98,7 +91,8 @@ final class SpecPruner {
           ErrorCode.INVALID_REQUEST,
           "A policy prune runs on main, which decides it on its own copy; a node prunes specs by"
               + " id and projects.",
-          "Run it on main, or name the specs: " + operator.sail("spec prune <id...>") + ".");
+          Remedy.of(
+              "Run it on main, or name the specs: ", Remedy.sail("spec prune", "<id...>"), "."));
     }
     var handle = principal(actor.handle());
     IntFunction<List<Erasure.Target>> select = limit -> roots(request, limit);
@@ -238,10 +232,11 @@ final class SpecPruner {
       return blobs.gc(BlobStore.Compaction.NONE, true).freed();
     } catch (RuntimeException e) {
       System.err.println(
-          "  [prune] erased, but could not collect its content; '"
-              + operator.sail("sync gc")
-              + "' frees it: "
-              + e.getMessage());
+          Remedy.of(
+                  "  [prune] erased, but could not collect its content; '",
+                  Remedy.sail("sync gc"),
+                  "' frees it: " + e.getMessage())
+              .plain());
       return 0;
     }
   }
@@ -252,9 +247,7 @@ final class SpecPruner {
       throw new ApiException(
           ErrorCode.AGENT_LANE_FORBIDDEN,
           "An agent cannot prune: erasing is irreversible and belongs to the FDE.",
-          "Ask the FDE who owns the work to run '"
-              + OperatorCommand.elsewhere("spec prune")
-              + "'.");
+          Remedy.of("Ask the FDE who owns the work to run '", Remedy.sail("spec prune"), "'."));
     }
     Refusals.enforce(authority.request(actor, request.ids().isEmpty()));
   }

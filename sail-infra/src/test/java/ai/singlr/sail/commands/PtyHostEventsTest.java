@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.pty.PtySession;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -37,7 +36,7 @@ class PtyHostEventsTest {
   }
 
   private PtyHostEvents events(Path dbPath) {
-    return new PtyHostEvents(dbPath, drops(), OperatorCommand.PLAIN);
+    return new PtyHostEvents(dbPath, drops());
   }
 
   private static List<EventStore.EventRow> recent(Path path) {

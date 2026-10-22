@@ -8,7 +8,6 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -50,9 +49,7 @@ class CatalogRevisionBySyncTest {
           () -> authored.upsert("zenith", ZENITH.replace("ntfy.sh/zenith", "ntfy.sh/moved")));
       SyncBox.round(main, node);
 
-      assertEquals(
-          "https://ntfy.sh/moved",
-          reader.require("zenith", OperatorCommand.PLAIN).agent().notifications().url());
+      assertEquals("https://ntfy.sh/moved", reader.require("zenith").agent().notifications().url());
       assertEquals(
           "https://ntfy.sh/moved",
           ReviewWiring.definitions(reader).apply("zenith").agent().notifications().url());

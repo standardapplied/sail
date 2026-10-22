@@ -21,13 +21,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
+import picocli.CommandLine.Spec;
 
 @Command(
     name = "status",
     description = "Show server health, resources, and storage usage.",
     mixinStandardHelpOptions = true)
 public final class HostStatusCommand implements Runnable {
+
+  @Spec private CommandSpec spec;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -40,8 +44,7 @@ public final class HostStatusCommand implements Runnable {
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
     if (!ConsoleHelper.isRoot()) {
-      throw new IllegalStateException(
-          "Root privileges required. Run with: " + OperatorCommand.SUDO.sail("host status"));
+      throw RootRequired.refusal(spec);
     }
 
     var hostYamlPath = SailPaths.hostConfigPath();

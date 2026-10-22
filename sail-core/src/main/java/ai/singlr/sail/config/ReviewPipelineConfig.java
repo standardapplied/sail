@@ -5,8 +5,9 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PromptConversation;
 import ai.singlr.sail.store.Finding;
 import java.util.LinkedHashMap;
@@ -14,6 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 
 /**
  * Configurable multi-stage review pipeline. Parsed from the {@code agent.review_pipeline} block in
@@ -36,27 +38,31 @@ public record ReviewPipelineConfig(
   }
 
   /** The keys of a stage sail no longer reads, each with where its text now goes. */
-  private static final Map<String, String> DELETED_STAGE_KEYS =
+  private static final Map<String, Function<String, Remedy>> DELETED_STAGE_KEYS =
       Map.of(
           "skill",
-          "is no longer read: a stage judges under its brief. Put what the skill said in the"
-              + " stage's brief (%s), or keep it as a project skill ("
-              + OperatorCommand.elsewhere("project skills add")
-              + ") the brief tells the stage to run.",
+          brief ->
+              Remedy.of(
+                  "is no longer read: a stage judges under its brief. Put what the skill said in"
+                      + " the stage's brief ("
+                      + brief
+                      + "), or keep it as a project skill (",
+                  Remedy.sail("project skills add"),
+                  ") the brief tells the stage to run."),
           "categories",
-          "is no longer read: what a stage focuses on is its brief. Say it in %s.");
+          brief ->
+              Remedy.of(
+                  "is no longer read: what a stage focuses on is its brief. Say it in "
+                      + brief
+                      + "."));
 
   /**
    * The one sentence refusing {@code key}, a key sail no longer reads, on the stage called {@code
    * stage}: which key, and where its text now goes.
    */
-  public static String deletedStageKey(String stage, String key) {
-    return "agent.review_pipeline.stages["
-        + stage
-        + "]."
-        + key
-        + " "
-        + DELETED_STAGE_KEYS.get(key).formatted(briefKey(stage));
+  public static Remedy deletedStageKey(String stage, String key) {
+    return Remedy.of("agent.review_pipeline.stages[" + stage + "]." + key + " ")
+        .then(DELETED_STAGE_KEYS.get(key).apply(briefKey(stage)));
   }
 
   /** How many review iterations a dispatch attempt gets when the project sets none. */
@@ -112,7 +118,7 @@ public record ReviewPipelineConfig(
       }
       for (var key : DELETED_STAGE_KEYS.keySet()) {
         if (map.containsKey(key)) {
-          throw new IllegalArgumentException(deletedStageKey(name, key));
+          throw Remedied.argument("", deletedStageKey(name, key));
         }
       }
       var type = StageType.parse((String) map.getOrDefault("type", "agent"));

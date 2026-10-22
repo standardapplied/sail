@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.SailPaths;
 import java.io.IOException;
@@ -14,8 +16,12 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.Consumer;
 
 /**
  * HTTP client for the Sail control plane API. Used by CLI commands and in-container agents to
@@ -87,13 +93,7 @@ public final class SailApiClient implements AutoCloseable {
           client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
       var body = YamlUtil.parseMap(response.body());
       if (response.statusCode() >= 400) {
-        var error = (Map<String, Object>) body.get("error");
-        var message = error != null ? (String) error.get("message") : "API request failed";
-        var action = error != null ? (String) error.get("action") : null;
-        if (action != null && !action.isBlank()) {
-          message = message + " " + action;
-        }
-        throw new IOException(message + " (HTTP " + response.statusCode() + ")");
+        throw Refused.of(response.statusCode(), (Map<String, Object>) body.get("error"));
       }
       return body;
     } catch (InterruptedException e) {
@@ -105,6 +105,81 @@ public final class SailApiClient implements AutoCloseable {
   @Override
   public void close() {
     client.close();
+  }
+
+  /**
+   * sail-api's refusal of a request: its message and its remedy, the commands in it kept as data
+   * for the door that prints them to render for its reader.
+   */
+  public static final class Refused extends IOException implements Remedied {
+    private final String reason;
+    private final transient Remedy remedy;
+
+    private Refused(String reason, Remedy remedy) {
+      super(Remedied.message(reason, remedy));
+      this.reason = reason;
+      this.remedy = remedy;
+    }
+
+    /** The refusal an error envelope with {@code status} describes. */
+    public static Refused of(int status, Map<String, Object> error) {
+      var http = " (HTTP " + status + ")";
+      if (error == null) {
+        return new Refused("API request failed" + http, Remedy.NONE);
+      }
+      var refused = of(error);
+      return refused.remedy.isEmpty()
+          ? new Refused(refused.reason + http, Remedy.NONE)
+          : new Refused(refused.reason, refused.remedy.then(http));
+    }
+
+    /** The refusal a response with {@code status} and an error envelope as its body describes. */
+    @SuppressWarnings("unchecked")
+    public static Refused fromBody(int status, String body) {
+      return of(status, (Map<String, Object>) YamlUtil.parseMap(body).get("error"));
+    }
+
+    /** The refusal {@code error} describes, a stream's closing {@code error} event among them. */
+    public static Refused of(Map<String, Object> error) {
+      var message = Objects.toString(error.get("message"), "API request failed");
+      var remedy =
+          error.get("remedy") instanceof List<?> parts
+              ? Remedy.fromMaps(parts)
+              : Result.words(Objects.toString(error.get("action"), null));
+      return new Refused(message, remedy);
+    }
+
+    @Override
+    public String reason() {
+      return reason;
+    }
+
+    @Override
+    public Remedy remedy() {
+      return remedy;
+    }
+  }
+
+  /**
+   * Hands each event's data in an SSE stream to {@code onData} until the stream ends; a stream the
+   * server ended with an {@code error} event ends in the refusal it names.
+   */
+  public static void readStream(Iterator<String> lines, Consumer<String> onData) throws Refused {
+    var ending = false;
+    while (lines.hasNext()) {
+      var line = lines.next();
+      if (line.isEmpty()) {
+        ending = false;
+      } else if (line.equals("event: error")) {
+        ending = true;
+      } else if (line.startsWith("data: ")) {
+        var data = line.substring("data: ".length());
+        if (ending) {
+          throw Refused.of(YamlUtil.parseMap(data));
+        }
+        onData.accept(data);
+      }
+    }
   }
 
   public static SailApiClient fromConfig() throws IOException {

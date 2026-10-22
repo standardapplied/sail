@@ -170,7 +170,7 @@ class DispatchCommandWiringTest {
             target -> {
               throw new IOException("main unavailable");
             },
-            OperatorCommand.PLAIN));
+            SyncOperations.PLAIN_NOTICES));
     assertInstanceOf(
         DispatchOperations.Dispatched.class,
         DispatchCommand.dispatchAsOperator(operations, "acme", request(), HANDLE));
@@ -220,7 +220,7 @@ class DispatchCommandWiringTest {
             target -> {
               throw new IOException("main unavailable");
             },
-            OperatorCommand.PLAIN));
+            SyncOperations.PLAIN_NOTICES));
 
     assertEquals(
         List.of("e2e"),
@@ -280,8 +280,7 @@ class DispatchCommandWiringTest {
             new ProjectStore(db),
             SyncScheduler.disabled(),
             new FdeStore(db),
-            SessionYield.NONE,
-            OperatorCommand.PLAIN);
+            SessionYield.NONE);
     var served = server.runs("acme", null);
     assertTrue(
         served.isSuccess(), "/v1/runs answers from the rows a CLI-lane dispatch just recorded");

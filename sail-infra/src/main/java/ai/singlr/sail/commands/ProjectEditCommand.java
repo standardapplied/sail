@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
@@ -63,7 +64,7 @@ public final class ProjectEditCommand implements Runnable {
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
-    var actor = CliOperator.current(operator);
+    var actor = CliOperator.current();
     ProjectCatalog.requireRecordable(name, actor);
     var current =
         ProjectDefinitions.definition(name, null)
@@ -112,8 +113,10 @@ public final class ProjectEditCommand implements Runnable {
     SailYaml config;
     try {
       config = SailYaml.fromMap(YamlUtil.parseMap(edited));
-    } catch (Exception e) {
-      throw new IllegalArgumentException("Edited descriptor is not valid YAML: " + e.getMessage());
+    } catch (RuntimeException e) {
+      throw Remedied.argument(
+          Remedied.joined("Edited descriptor is not valid:", Remedied.reasonOf(e)),
+          Remedied.remedyOf(e));
     }
     if (config.name() == null || !config.name().equals(name)) {
       throw new IllegalArgumentException(

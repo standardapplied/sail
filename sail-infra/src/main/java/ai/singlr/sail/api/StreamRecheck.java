@@ -12,7 +12,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.InstantSource;
-import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -76,14 +75,7 @@ final class StreamRecheck {
 
   /** The stream's last event: why it ended, as an SSE {@code error} event. */
   static void writeEnded(OutputStream out, Ended ended) throws IOException {
-    var error = ended.error();
-    var fields = new LinkedHashMap<String, Object>();
-    fields.put("code", error.code());
-    fields.put("message", error.message());
-    if (error.action() != null) {
-      fields.put("action", error.action());
-    }
-    var data = YamlUtil.dumpJson(fields);
+    var data = YamlUtil.dumpJson(ended.error().toMap());
     out.write(("event: error\ndata: " + data + "\n\n").getBytes(StandardCharsets.UTF_8));
     out.flush();
   }

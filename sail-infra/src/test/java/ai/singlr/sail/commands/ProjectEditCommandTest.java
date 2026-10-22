@@ -11,9 +11,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ProjectEditCommandTest {
@@ -46,7 +48,11 @@ class ProjectEditCommandTest {
         assertThrows(
             IllegalArgumentException.class,
             () -> ProjectEditCommand.validate("acme", "name: acme\nrepos: [unclosed"));
-    assertTrue(error.getMessage().contains("not valid YAML"));
+    assertTrue(
+        error
+            .getMessage()
+            .startsWith("Edited descriptor is not valid: while parsing a flow sequence"),
+        error.getMessage());
   }
 
   @Test
@@ -59,6 +65,25 @@ class ProjectEditCommandTest {
                     "acme", "name: acme\nagent:\n  type: codex\n  build_skill: sail-x\n"));
     assertTrue(
         error.getMessage().contains("agent.build_skill is no longer read"), error.getMessage());
+  }
+
+  @Test
+  void aDeletedKeysRemedyReachesTheDoorAsDataAndIsRenderedForTheReader() {
+    var error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                ProjectEditCommand.validate(
+                    "acme", "name: acme\nagent:\n  type: codex\n  build_skill: sail-x\n"));
+    var sentence =
+        "Edited descriptor is not valid: agent.build_skill is no longer read: sail's work prompt"
+            + " says how a build runs. Put what the skill said in the repo's AGENTS.md, or keep it"
+            + " as a project skill (%s project skills add) the agent invokes when relevant. Then"
+            + " remove `agent.build_skill` from acme/sail.yaml.";
+    assertEquals(
+        List.of(sentence.formatted("sudo sail")), CliCommand.lines(error, OperatorCommand.SUDO));
+    assertEquals(
+        List.of(sentence.formatted("sail")), CliCommand.lines(error, OperatorCommand.UNPRIVILEGED));
   }
 
   @Test

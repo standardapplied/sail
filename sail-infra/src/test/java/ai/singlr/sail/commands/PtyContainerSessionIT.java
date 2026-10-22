@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.AbstractIncusIT;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyRooms;
@@ -138,7 +139,7 @@ class PtyContainerSessionIT extends AbstractIncusIT {
             };
 
         var stdin = new PipedInputStream(new PipedOutputStream());
-        var reason = AttachLoop.run(channel, stdin, stdout, resizes);
+        var reason = AttachLoop.run(channel, stdin, stdout, resizes, OperatorCommand.PLAIN);
         var rendered = stdout.toString(StandardCharsets.UTF_8);
 
         assertEquals("exited(0)", reason);

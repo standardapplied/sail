@@ -28,15 +28,17 @@ class SyncDiagnosticTest {
   @TempDir Path home;
 
   private String syncFailure(String sshSaid) throws Exception {
+    return OperatorCommand.SUDO.render(failure(sshSaid));
+  }
+
+  private SyncTransportException failure(String sshSaid) throws Exception {
     try (var db = Sqlite.open(home.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
       var config = new SyncConfig("node", "sail@main", "mady", "box-1");
       var operations =
-          new SyncOperations(
-              db, "node", home, () -> config, target -> closed(sshSaid), OperatorCommand.SUDO);
+          new SyncOperations(db, "node", home, () -> config, target -> closed(sshSaid));
       return assertThrows(
-              SyncTransportException.class, () -> operations.sync(new SyncRequest(null)))
-          .getMessage();
+          SyncTransportException.class, () -> operations.sync(new SyncRequest(null)));
     }
   }
 
@@ -72,6 +74,13 @@ class SyncDiagnosticTest {
             + " /etc/ssh/ssh_host_ed25519_key.pub' on main); otherwise something between this box"
             + " and main is answering for it.",
         syncFailure("Host key verification failed."));
+    assertEquals(
+        "hello: Sync channel closed before main replied. ssh said: Host key verification failed. If"
+            + " main was rebuilt from a copy of its database, remove the old key with 'ssh-keygen"
+            + " -R main', re-run 'sail init --main sail@main' and compare the fingerprint it prints"
+            + " with main's ('sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on main);"
+            + " otherwise something between this box and main is answering for it.",
+        OperatorCommand.PLAIN.render(failure("Host key verification failed.")));
   }
 
   @Test

@@ -45,7 +45,7 @@ public final class SnapsCommand implements Runnable {
     var snapMgr = new SnapshotManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireCreated(state, name, operator);
+    ContainerStateGuard.requireCreated(state, name);
 
     var snapshots = snapMgr.list(name);
 

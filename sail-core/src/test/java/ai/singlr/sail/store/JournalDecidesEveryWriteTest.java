@@ -14,7 +14,6 @@ import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -230,7 +229,7 @@ class JournalDecidesEveryWriteTest {
         write("SpecStore.reHomeToOwnRoom", Kind.FIXED, f -> f.specs.reHomeToOwnRoom("guest")),
         owned("SpecStore.delete", f -> f.specs.delete("theirs")),
         owned("SpecStore.setContent", f -> f.specs.setContent("theirs", "body", "plan")),
-        owned("SpecStore.restore", f -> f.specs.restore("gone", f.goneRev, OperatorCommand.PLAIN)),
+        owned("SpecStore.restore", f -> f.specs.restore("gone", f.goneRev)),
         owned("SpecStore.reproject", f -> f.specs.reproject("acme", "acme3")),
         owned(
             "SpecStore.assignMigrationProject",

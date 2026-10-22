@@ -4,9 +4,10 @@
  */
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.sync.SyncWire;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -25,12 +26,6 @@ import java.util.Objects;
  */
 public final class ContentMigration implements DataMigration {
   public static final String NAME = "content-addressed-blobs-v1";
-
-  private final OperatorCommand operator;
-
-  public ContentMigration(OperatorCommand operator) {
-    this.operator = operator;
-  }
 
   @Override
   public String name() {
@@ -62,13 +57,18 @@ public final class ContentMigration implements DataMigration {
         if (changed) count++;
       }
     }
-    dropLegacyContent(db, operator);
+    dropLegacyContent(db);
     return new Report(
         count,
         0,
         0,
         List.of(
-            "Migrated " + count + " entities; stored " + (bytes(db) - before) + " content bytes"));
+            Remedy.of(
+                "Migrated "
+                    + count
+                    + " entities; stored "
+                    + (bytes(db) - before)
+                    + " content bytes")));
   }
 
   /**
@@ -76,7 +76,7 @@ public final class ContentMigration implements DataMigration {
    * that cannot be redone, so a row the loop did not see — written by a process this one raced —
    * stops it, and the next run finishes the job.
    */
-  static void dropLegacyContent(Sqlite db, OperatorCommand operator) {
+  static void dropLegacyContent(Sqlite db) {
     db.transaction(
         () -> {
           if (!hasContentColumn(db)) return null;
@@ -86,11 +86,9 @@ public final class ContentMigration implements DataMigration {
                       r -> r.integer(0))
                   .orElseThrow();
           if (unhashed > 0) {
-            throw new IllegalStateException(
-                unhashed
-                    + " shared file(s) still carry no content hash; run '"
-                    + operator.sail("migrate")
-                    + "' again");
+            throw Remedied.state(
+                unhashed + " shared file(s) still carry no content hash;",
+                Remedy.of("run '", Remedy.sail("migrate"), "' again"));
           }
           db.execute("ALTER TABLE project_files DROP COLUMN content");
           return null;

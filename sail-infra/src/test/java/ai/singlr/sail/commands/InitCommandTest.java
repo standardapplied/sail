@@ -346,7 +346,7 @@ class InitCommandTest {
 
     assertEquals(1, init("--as-main"));
 
-    assertEquals("Root privileges required. Re-run with: sudo sail init --as-main", refusal);
+    assertEquals("Root privileges required. Run with: sudo sail init --as-main", refusal);
     assertEquals(List.of(), ran);
   }
 
@@ -356,8 +356,7 @@ class InitCommandTest {
 
     assertEquals(1, init("--main", "maindevbox"));
 
-    assertEquals(
-        "Root privileges required. Re-run with: sudo sail init --main maindevbox", refusal);
+    assertEquals("Root privileges required. Run with: sudo sail init --main maindevbox", refusal);
   }
 
   @Test

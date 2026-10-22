@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.store;
 
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import java.util.List;
 
@@ -18,26 +17,23 @@ public final class DataMigrations {
 
   private DataMigrations() {}
 
-  /** Every migration, in order; what one reports to {@code operator} is worded for them. */
-  public static List<DataMigration> all(OperatorCommand operator) {
+  /** Every migration, in order. */
+  public static List<DataMigration> all() {
     return List.of(
-        new ContentMigration(operator),
-        new LegacyDataMigration(operator),
+        new ContentMigration(),
+        new LegacyDataMigration(),
         new ReviewFindingsMigration(),
         new RoomsBackfillMigration(),
         new OrphanErasure(),
         new PersonalRoomErasure(),
-        new MaterializedFilesMigration(SailPaths.projectsDir(), operator),
+        new MaterializedFilesMigration(SailPaths.projectsDir()),
         new StagePromptsMigration(),
         new ScopedHeadsMigration());
   }
 
-  /**
-   * The migrations the sync lane applies: those that need nothing of this box's own files. What one
-   * reports is worded for {@code operator}, the reader of the round.
-   */
-  public static List<DataMigration> databaseOnly(OperatorCommand operator) {
-    return all(operator).stream().filter(migration -> !migration.readsBoxFiles()).toList();
+  /** The migrations the sync lane applies: those that need nothing of this box's own files. */
+  public static List<DataMigration> databaseOnly() {
+    return all().stream().filter(migration -> !migration.readsBoxFiles()).toList();
   }
 
   /** Whether any of {@code migrations} has not yet been applied to {@code db}. */

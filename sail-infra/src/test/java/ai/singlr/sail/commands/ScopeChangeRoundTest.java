@@ -13,7 +13,6 @@ import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.ShellExec;
@@ -78,8 +77,7 @@ class ScopeChangeRoundTest {
   void setUp() {
     var mainPath = tempDir.resolve("main.db");
     try (var db = Sqlite.open(mainPath)) {
-      MigrationRunner.applyAll(
-          db, DataMigrations.all(OperatorCommand.PLAIN), DataMigration.Prompter.NON_INTERACTIVE);
+      MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
     }
     main = SyncDatabase.converge(mainPath, "main");
     mainDb = main.db();
@@ -97,7 +95,7 @@ class ScopeChangeRoundTest {
           specs.create(spec("a1", "acme"));
           specs.create(spec("b1", "beta"));
         });
-    fdes.grant("zed", "beta", OperatorCommand.PLAIN);
+    fdes.grant("zed", "beta");
     var token = new AuthSessionStore(mainDb).create(nia.id(), Duration.ofHours(1)).token();
     nodeDb = Sqlite.open(tempDir.resolve("node.db"));
     new SchemaManager(nodeDb).migrate();
@@ -121,7 +119,7 @@ class ScopeChangeRoundTest {
                             SyncTransitionSink.NONE,
                             () -> new SyncConfig(SyncConfig.ROLE_MAIN, null, "ada", "main"))),
             event -> {},
-            OperatorCommand.PLAIN,
+            SyncOperations.PLAIN_NOTICES,
             incus);
     node.prepare();
   }
@@ -149,7 +147,7 @@ class ScopeChangeRoundTest {
   private void narrowTo(String... projects) {
     fdes.restrict("nia");
     for (var project : projects) {
-      fdes.grant("nia", project, OperatorCommand.PLAIN);
+      fdes.grant("nia", project);
     }
   }
 
@@ -178,7 +176,7 @@ class ScopeChangeRoundTest {
       throws Exception {
     assertEquals(
         List.of(
-            "  2 new project(s) synced from main: acme, beta. Provision with 'sail project"
+            "  ⚠ 2 new project(s) synced from main: acme, beta. Provision with 'sail project"
                 + " apply <name>'."),
         round());
     filesOf("beta");
@@ -336,7 +334,7 @@ class ScopeChangeRoundTest {
     fdes.unrestrict("nia");
     assertEquals(
         List.of(
-            "  1 new project(s) synced from main: beta. Provision with 'sail project apply"
+            "  ⚠ 1 new project(s) synced from main: beta. Provision with 'sail project apply"
                 + " <name>'."),
         round());
 

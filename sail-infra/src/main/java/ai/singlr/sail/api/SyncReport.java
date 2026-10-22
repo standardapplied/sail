@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.sync.Settlement;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
@@ -13,12 +14,12 @@ import java.util.List;
 /** One round's summed counts, an optional reason nothing ran, and the per-type detail. */
 public record SyncReport(
     SyncEngine.Report report,
-    String message,
+    Remedy message,
     List<SyncSession.TypeReport> types,
     List<Settlement.Settled> settled) {
 
   /** A report of a round that settled nothing. */
-  public SyncReport(SyncEngine.Report report, String message, List<SyncSession.TypeReport> types) {
+  public SyncReport(SyncEngine.Report report, Remedy message, List<SyncSession.TypeReport> types) {
     this(report, message, types, List.of());
   }
 
@@ -45,7 +46,7 @@ public record SyncReport(
     return types.stream().flatMap(type -> type.refusals().stream()).toList();
   }
 
-  public SyncReport(SyncEngine.Report report, String message) {
+  public SyncReport(SyncEngine.Report report, Remedy message) {
     this(report, message, List.of());
   }
 }

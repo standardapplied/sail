@@ -116,7 +116,7 @@ public final class ApiSpecCreateCommand implements Runnable {
     }
     NameValidator.requireValidSpecId(id);
     var config = connection.resolve();
-    var resolvedProject = CurrentProject.require(project, operator);
+    var resolvedProject = CurrentProject.require(project);
 
     var body = new LinkedHashMap<String, Object>();
     body.put("id", id);

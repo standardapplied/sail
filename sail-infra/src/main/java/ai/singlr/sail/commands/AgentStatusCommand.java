@@ -55,7 +55,7 @@ public final class AgentStatusCommand implements Runnable {
   private final Function<OperatorCommand, HostOperations> operations;
 
   public AgentStatusCommand() {
-    this(OperationsFactory::open);
+    this(operator -> OperationsFactory.open(operator::warn));
   }
 
   AgentStatusCommand(Function<OperatorCommand, HostOperations> operations) {
@@ -185,7 +185,7 @@ public final class AgentStatusCommand implements Runnable {
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name, operator);
+    ContainerStateGuard.requireRunning(state, name);
 
     AgentSession.SessionInfo info;
     SailYaml config;

@@ -5,9 +5,10 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -84,40 +85,37 @@ final class CurrentProject {
    * {@code sail.yaml}, otherwise the current project. Throws with actionable guidance when none is
    * available.
    */
-  static String require(String explicit, OperatorCommand operator) {
-    return require(explicit, fromCwd().orElse(null), file(), operator);
+  static String require(String explicit) {
+    return require(explicit, fromCwd().orElse(null), file());
   }
 
-  static String require(
-      String explicit, String cwdProject, Path stateFile, OperatorCommand operator) {
+  static String require(String explicit, String cwdProject, Path stateFile) {
     if (Strings.isNotBlank(explicit)) {
       return explicit;
     }
     return infer(cwdProject, stateFile)
         .orElseThrow(
             () ->
-                new IllegalStateException(
+                Remedied.state(
                     "No project given and none could be inferred (no sail.yaml in the current"
-                        + " directory tree, no current project). Name the project on the command"
-                        + " line (-p/--project or the <project> argument), or run '"
-                        + operator.sail("project switch <project>")
-                        + "' first."));
+                        + " directory tree, no current project).",
+                    Remedy.of(
+                        "Name the project on the command line (-p/--project or the <project>"
+                            + " argument), or run '",
+                        Remedy.sail("project switch", "<project>"),
+                        "' first.")));
   }
 
   /**
    * Resolves the project filter for listing commands: empty means every project (requested with
    * {@code --all-projects} or {@code --project '*'}), otherwise {@link #require} semantics apply.
    */
-  static Optional<String> scope(String explicit, boolean allProjects, OperatorCommand operator) {
-    return scope(explicit, allProjects, fromCwd().orElse(null), file(), operator);
+  static Optional<String> scope(String explicit, boolean allProjects) {
+    return scope(explicit, allProjects, fromCwd().orElse(null), file());
   }
 
   static Optional<String> scope(
-      String explicit,
-      boolean allProjects,
-      String cwdProject,
-      Path stateFile,
-      OperatorCommand operator) {
+      String explicit, boolean allProjects, String cwdProject, Path stateFile) {
     if (allProjects && Strings.isNotBlank(explicit) && !"*".equals(explicit)) {
       throw new IllegalArgumentException("Pass either --project or --all-projects, not both.");
     }
@@ -131,12 +129,14 @@ final class CurrentProject {
         infer(cwdProject, stateFile)
             .orElseThrow(
                 () ->
-                    new IllegalStateException(
+                    Remedied.state(
                         "No project given and none could be inferred (no sail.yaml in the current"
-                            + " directory tree, no current project). Pass -p/--project <project>"
-                            + " (or --all-projects for every project), or run '"
-                            + operator.sail("project switch <project>")
-                            + "' first."));
+                            + " directory tree, no current project).",
+                        Remedy.of(
+                            "Pass -p/--project <project> (or --all-projects for every project), or"
+                                + " run '",
+                            Remedy.sail("project switch", "<project>"),
+                            "' first.")));
     return Optional.of(inferred);
   }
 }

@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.DatabaseCatalog;
 import ai.singlr.sail.store.SchemaManager;
@@ -44,8 +44,7 @@ class NodeRoundAdmitTest {
         new ByteStreams.Output(),
         SyncWire.Hello.of("0.53.0", "node-box"),
         ignored -> {},
-        ignored -> {},
-        OperatorCommand.PLAIN);
+        ignored -> {});
   }
 
   private void admit(String catalog) {
@@ -67,8 +66,14 @@ class NodeRoundAdmitTest {
     assertEquals("refused", refused.kind());
     assertEquals(
         "Main at sail@main names no database catalog, so this box cannot tell whether it is the"
-            + " database it synced with: upgrade main ('sudo sail upgrade' on main), then sync"
-            + " again.",
+            + " database it synced with:",
+        refused.reason());
+    assertEquals(
+        Remedy.of("upgrade main ('", Remedy.sail("upgrade"), "' on main), then sync again."),
+        refused.remedy());
+    assertEquals(
+        "Main at sail@main names no database catalog, so this box cannot tell whether it is the"
+            + " database it synced with: upgrade main ('sail upgrade' on main), then sync again.",
         refused.getMessage());
     assertEquals(Optional.empty(), new DatabaseCatalog(db).main());
   }

@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.engine.OperatorCommand;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
@@ -39,30 +38,17 @@ class CurrentProjectTest {
   @Test
   void requireFavoursTheExplicitNameThenCwdThenTheCurrent() {
     CurrentProject.set(state(), "acme");
-    assertEquals(
-        "globex",
-        CurrentProject.require("globex", "initech", state(), OperatorCommand.PLAIN),
-        "explicit wins");
-    assertEquals(
-        "initech",
-        CurrentProject.require(null, "initech", state(), OperatorCommand.PLAIN),
-        "cwd beats current");
-    assertEquals(
-        "acme",
-        CurrentProject.require(null, null, state(), OperatorCommand.PLAIN),
-        "falls back to current");
-    assertEquals(
-        "acme",
-        CurrentProject.require("  ", null, state(), OperatorCommand.PLAIN),
-        "blank is not explicit");
+    assertEquals("globex", CurrentProject.require("globex", "initech", state()), "explicit wins");
+    assertEquals("initech", CurrentProject.require(null, "initech", state()), "cwd beats current");
+    assertEquals("acme", CurrentProject.require(null, null, state()), "falls back to current");
+    assertEquals("acme", CurrentProject.require("  ", null, state()), "blank is not explicit");
   }
 
   @Test
   void requireFailsWithGuidanceNamingBothOptionsWhenNothingIsAvailable() {
     var e =
         assertThrows(
-            IllegalStateException.class,
-            () -> CurrentProject.require(null, null, state(), OperatorCommand.PLAIN));
+            IllegalStateException.class, () -> CurrentProject.require(null, null, state()));
     assertTrue(e.getMessage().contains("sail project switch"), e.getMessage());
     assertTrue(e.getMessage().contains("--project"), e.getMessage());
   }
@@ -78,25 +64,16 @@ class CurrentProjectTest {
   @Test
   void scopeResolvesExplicitThenInferred() {
     CurrentProject.set(state(), "acme");
-    assertEquals(
-        "globex",
-        CurrentProject.scope("globex", false, "initech", state(), OperatorCommand.PLAIN)
-            .orElseThrow());
-    assertEquals(
-        "initech",
-        CurrentProject.scope(null, false, "initech", state(), OperatorCommand.PLAIN).orElseThrow());
-    assertEquals(
-        "acme",
-        CurrentProject.scope(null, false, null, state(), OperatorCommand.PLAIN).orElseThrow());
+    assertEquals("globex", CurrentProject.scope("globex", false, "initech", state()).orElseThrow());
+    assertEquals("initech", CurrentProject.scope(null, false, "initech", state()).orElseThrow());
+    assertEquals("acme", CurrentProject.scope(null, false, null, state()).orElseThrow());
   }
 
   @Test
   void scopeIsUnboundedForAllProjectsOrStar() {
-    assertTrue(
-        CurrentProject.scope(null, true, "initech", state(), OperatorCommand.PLAIN).isEmpty());
-    assertTrue(
-        CurrentProject.scope("*", false, "initech", state(), OperatorCommand.PLAIN).isEmpty());
-    assertTrue(CurrentProject.scope("*", true, null, state(), OperatorCommand.PLAIN).isEmpty());
+    assertTrue(CurrentProject.scope(null, true, "initech", state()).isEmpty());
+    assertTrue(CurrentProject.scope("*", false, "initech", state()).isEmpty());
+    assertTrue(CurrentProject.scope("*", true, null, state()).isEmpty());
   }
 
   @Test
@@ -104,7 +81,7 @@ class CurrentProjectTest {
     var e =
         assertThrows(
             IllegalArgumentException.class,
-            () -> CurrentProject.scope("globex", true, null, state(), OperatorCommand.PLAIN));
+            () -> CurrentProject.scope("globex", true, null, state()));
     assertTrue(e.getMessage().contains("--all-projects"), e.getMessage());
   }
 
@@ -112,8 +89,7 @@ class CurrentProjectTest {
   void scopeFailsWithGuidanceWhenNothingIsAvailable() {
     var e =
         assertThrows(
-            IllegalStateException.class,
-            () -> CurrentProject.scope(null, false, null, state(), OperatorCommand.PLAIN));
+            IllegalStateException.class, () -> CurrentProject.scope(null, false, null, state()));
     assertTrue(e.getMessage().contains("--all-projects"), e.getMessage());
     assertTrue(e.getMessage().contains("sail project switch"), e.getMessage());
   }

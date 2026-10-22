@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SyncConfig;
@@ -13,7 +15,6 @@ import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalogRename;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
@@ -159,12 +160,14 @@ final class HostLanes {
           .map(ProjectStore.ProjectRow::definition)
           .orElseThrow(
               () ->
-                  new IllegalStateException(
-                      "The demo project isn't on this box. On main or a standalone box, '"
-                          + OperatorCommand.elsewhere("migrate")
-                          + "' seeds it; a node gets it from main once an admin grants it there: "
-                          + OperatorCommand.elsewhere("fde grant <handle> demo")
-                          + "."));
+                  Remedied.state(
+                      "The demo project isn't on this box.",
+                      Remedy.of(
+                          "On main or a standalone box, '",
+                          Remedy.sail("migrate"),
+                          "' seeds it; a node gets it from main once an admin grants it there: ",
+                          Remedy.sail("fde grant", "<handle>", "demo"),
+                          ".")));
     }
 
     @Override
@@ -267,16 +270,15 @@ final class HostLanes {
     }
   }
 
-  record Pty(Sqlite db, RoleRule roles, EventStore events, OperatorCommand operator)
-      implements HostPty {
+  record Pty(Sqlite db, RoleRule roles, EventStore events) implements HostPty {
     @Override
     public PtyIdentity identity(String token, String boxHandle) throws IOException {
-      return new HostAccess(db, roles, operator).identity(token, boxHandle);
+      return new HostAccess(db, roles).identity(token, boxHandle);
     }
 
     @Override
     public void admitRoom(String room, String project, PtyIdentity identity) throws IOException {
-      new HostAccess(db, roles, operator).admit(room, project, identity);
+      new HostAccess(db, roles).admit(room, project, identity);
     }
 
     @Override

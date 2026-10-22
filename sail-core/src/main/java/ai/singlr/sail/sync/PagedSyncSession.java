@@ -5,7 +5,8 @@
 
 package ai.singlr.sail.sync;
 
-import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -74,7 +75,6 @@ public final class PagedSyncSession implements SyncSession {
   private final OutputStream out;
   private final String mainId;
   private final int frame;
-  private final OperatorCommand operator;
   private final SyncEngine engine = new SyncEngine();
   private Map<String, Long> tips;
   private Map<String, Asked> asked;
@@ -89,9 +89,9 @@ public final class PagedSyncSession implements SyncSession {
   private Set<String> touched = Set.of();
   private List<SyncSession.Denial> denials = new ArrayList<>();
   private List<SyncSession.Refusal> refusals = new ArrayList<>();
-  private Consumer<String> notice = ignored -> {};
+  private Consumer<Remedy> notice = ignored -> {};
   private Consumer<SyncSession.Denial> onDenial = ignored -> {};
-  private String broken;
+  private Remedy broken;
   private String handle;
   private String catalog;
   private long mainFileMax;
@@ -110,18 +110,16 @@ public final class PagedSyncSession implements SyncSession {
     return this;
   }
 
-  PagedSyncSession(
-      InputStream in, OutputStream out, String mainId, int frame, OperatorCommand operator) {
+  PagedSyncSession(InputStream in, OutputStream out, String mainId, int frame) {
     this.in = Objects.requireNonNull(in, "in");
     this.out = Objects.requireNonNull(out, "out");
     this.mainId = Objects.requireNonNull(mainId, "mainId");
     this.frame = frame;
-    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   /** This session with pushes and need requests cut at {@code frame} bytes; a test seam. */
   PagedSyncSession frame(int frame) {
-    var copy = new PagedSyncSession(in, out, mainId, frame, operator);
+    var copy = new PagedSyncSession(in, out, mainId, frame);
     copy.tips = tips;
     copy.blobs = blobs;
     copy.erasure = erasure;
@@ -144,9 +142,8 @@ public final class PagedSyncSession implements SyncSession {
       OutputStream out,
       SyncWire.Hello hello,
       SyncWire.Welcome welcome,
-      Consumer<String> notice,
-      Consumer<SyncSession.Denial> onDenial,
-      OperatorCommand operator) {
+      Consumer<Remedy> notice,
+      Consumer<SyncSession.Denial> onDenial) {
     if (welcome.protocol() != SyncWire.PROTOCOL) {
       throw new SyncTransportException(
           "refused",
@@ -166,13 +163,14 @@ public final class PagedSyncSession implements SyncSession {
         && nodeVersion.isPresent()
         && mainVersion.get().compareTo(nodeVersion.get()) < 0) {
       notice.accept(
-          "this node is sail "
-              + hello.version()
-              + " but main is "
-              + welcome.version()
-              + "; upgrade main first, then nodes.");
+          Remedy.of(
+              "this node is sail "
+                  + hello.version()
+                  + " but main is "
+                  + welcome.version()
+                  + "; upgrade main first, then nodes."));
     }
-    var session = new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME, operator);
+    var session = new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME);
     session.notice = notice;
     session.onDenial = onDenial;
     session.handle = welcome.handle();
@@ -212,13 +210,11 @@ public final class PagedSyncSession implements SyncSession {
       contentLeft = false;
       return freed;
     } catch (RuntimeException e) {
-      System.err.println(
-          "  [sync] "
-              + type
-              + ": could not collect content; '"
-              + operator.sail("sync gc")
-              + "' frees it: "
-              + e.getMessage());
+      notice.accept(
+          Remedy.of(
+              type + ": could not collect content; '",
+              Remedy.sail("sync gc"),
+              "' frees it: " + e.getMessage()));
       return 0;
     }
   }
@@ -236,11 +232,8 @@ public final class PagedSyncSession implements SyncSession {
     if (broken != null) {
       throw new SyncTransportException(
           "unreachable",
-          "channel unusable after an earlier failure ("
-              + broken
-              + "); run "
-              + operator.sail("sync")
-              + " again",
+          "channel unusable after an earlier failure",
+          Remedy.of("(", broken, "); run ", Remedy.sail("sync"), " again"),
           null);
     }
     return exchange.get();
@@ -250,7 +243,7 @@ public final class PagedSyncSession implements SyncSession {
     try {
       return reply.get();
     } catch (RuntimeException e) {
-      broken = e.getMessage();
+      broken = Remedied.whole(e);
       throw e;
     }
   }
@@ -275,8 +268,7 @@ public final class PagedSyncSession implements SyncSession {
       throw new SyncTransportException("refused", type + ": main does not sync this type", null);
     }
     if (!ask.refusals().isEmpty()) {
-      throw new SyncTransportException(
-          "refused", type + ": main refused to prune " + String.join("; ", ask.refusals()), null);
+      throw pruneRefused(type, ask.refusals());
     }
     acknowledgeLostAnswers(type, local);
     var since = local.checkpoint(mainId);
@@ -332,7 +324,15 @@ public final class PagedSyncSession implements SyncSession {
   }
 
   /** What asking main to erase one type's pending prunes came to. */
-  private record Asked(int count, int adopted, List<String> refusals) {
+  private static SyncTransportException pruneRefused(String type, List<Remedy> refusals) {
+    var joined = Remedy.NONE;
+    for (var refusal : refusals) {
+      joined = joined.isEmpty() ? refusal : joined.then("; ", refusal);
+    }
+    return new SyncTransportException("refused", type + ": main refused to prune", joined, null);
+  }
+
+  private record Asked(int count, int adopted, List<Remedy> refusals) {
     static final Asked NONE = new Asked(0, 0, List.of());
   }
 
@@ -377,8 +377,7 @@ public final class PagedSyncSession implements SyncSession {
     tips = null;
     adopted += late.adopted();
     if (!late.refusals().isEmpty()) {
-      throw new SyncTransportException(
-          "refused", type + ": main refused to prune " + String.join("; ", late.refusals()), null);
+      throw pruneRefused(type, late.refusals());
     }
     return late;
   }
@@ -390,7 +389,7 @@ public final class PagedSyncSession implements SyncSession {
    */
   private Asked askErasures(String type, List<String> ids) {
     var asks = ids.stream().map(MainReplica.Offer::erasure).toList();
-    var refusals = new ArrayList<String>();
+    var refusals = new ArrayList<Remedy>();
     var applied = 0;
     for (var offset = 0; offset < asks.size(); ) {
       var offers = fitting(asks, offset, SyncWire::encodedLength);
@@ -409,7 +408,7 @@ public final class PagedSyncSession implements SyncSession {
           }
           case SyncWire.Refused refused when refused.id().equals(id) -> {
             eraseRequests.drop(type, id);
-            refusals.add(id + ": " + refused.reason());
+            refusals.add(Remedy.of(id + ": ", refused.reason()));
           }
           default ->
               throw new SyncTransportException(
@@ -788,10 +787,10 @@ public final class PagedSyncSession implements SyncSession {
   private static SyncTransportException unexpected(
       String context, String expected, SyncWire.Response response) {
     if (response instanceof SyncWire.Failed failed) {
-      return new SyncTransportException(failed.kind(), context + ": " + failed.message(), null);
+      return new SyncTransportException(failed.kind(), context + ":", failed.detail(), null);
     }
     if (response instanceof SyncWire.Refuse refuse) {
-      return new SyncTransportException("refused", context + ": " + refuse.reason(), null);
+      return new SyncTransportException("refused", context + ":", refuse.reason(), null);
     }
     return new SyncTransportException(context + ": Expected a " + expected + ", got: " + response);
   }
@@ -1106,7 +1105,7 @@ public final class PagedSyncSession implements SyncSession {
           var refusal = new SyncSession.Refusal(type, refused.id(), refused.reason());
           refusals.add(refusal);
           notice.accept(refusal.describe());
-          yield new CommitOutcome.Refused(refused.reason());
+          yield new CommitOutcome.Refused(refused.reason().plain());
         }
       };
     }

@@ -20,14 +20,18 @@ import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
+import picocli.CommandLine.Spec;
 
 @Command(
     name = "destroy",
     description = "Destroy a project: delete its container and all state.",
     mixinStandardHelpOptions = true)
 public final class ProjectDestroyCommand implements Runnable {
+
+  @Spec private CommandSpec spec;
 
   @Parameters(index = "0", description = "Project name to destroy.")
   private String name;
@@ -65,9 +69,7 @@ public final class ProjectDestroyCommand implements Runnable {
     }
 
     if (!dryRun && !ConsoleHelper.isRoot()) {
-      throw new IllegalStateException(
-          "Root privileges required. Run with: "
-              + OperatorCommand.SUDO.sail("project destroy " + name));
+      throw RootRequired.refusal(spec);
     }
 
     var shell = new ShellExecutor(dryRun);
@@ -133,7 +135,7 @@ public final class ProjectDestroyCommand implements Runnable {
 
   /** What the purge will erase, rehearsed through the one prune method before anything goes. */
   private String rehearsePurge(OperatorCommand operator) {
-    try (var operations = OperationsFactory.open(operator)) {
+    try (var operations = OperationsFactory.open()) {
       return operations.catalog().purgeSummary(name);
     }
   }
@@ -144,7 +146,7 @@ public final class ProjectDestroyCommand implements Runnable {
       System.out.println("[dry-run] erase '" + name + "' everywhere: " + erases);
       return new HostCatalog.Destroyed(name, false, false);
     }
-    try (var operations = OperationsFactory.open(operator)) {
+    try (var operations = OperationsFactory.open()) {
       return operations.catalog().destroy(name, true);
     }
   }

@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.sync.SyncedEntities;
@@ -415,7 +416,7 @@ public sealed interface Holdings {
     }
 
     static String unheld(Refusal refused) {
-      return refused.fix() == null ? refused.message() : refused.message() + " " + refused.fix();
+      return Remedied.message(refused.message(), refused.fix());
     }
 
     static String runPending(String run, String actor) {

@@ -32,7 +32,7 @@ public final class ServerStatusCommand implements Runnable {
       return;
     }
 
-    try (var operations = OperationsFactory.open(dbPath, operator)) {
+    try (var operations = OperationsFactory.open(dbPath)) {
       var tokens = operations.identity().tokens();
 
       System.out.println(Ansi.AUTO.string("  @|bold Sail Server|@"));

@@ -9,9 +9,9 @@ import ai.singlr.sail.authority.ProjectAuthority;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.PersonalFields;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -159,10 +159,11 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
             + (visible.isEmpty() ? "none" : String.join(", ", visible))
             + ".",
         scoped
-            ? "Ask an admin to grant it on main: "
-                + OperatorCommand.elsewhere("fde grant " + handle + " " + nextProject)
-                + "."
-            : null);
+            ? Remedy.of(
+                "Ask an admin to grant it on main: ",
+                Remedy.sail("fde grant", handle, nextProject),
+                ".")
+            : Remedy.NONE);
   }
 
   @Override

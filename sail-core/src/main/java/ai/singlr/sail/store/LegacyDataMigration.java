@@ -5,10 +5,11 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.engine.NodeIdentity;
-import ai.singlr.sail.engine.OperatorCommand;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.function.Supplier;
@@ -24,15 +25,13 @@ public final class LegacyDataMigration implements DataMigration {
   public static final String NAME = "legacy-data-floor-0.14.0";
 
   private final Supplier<String> nodeHandle;
-  private final OperatorCommand operator;
 
-  public LegacyDataMigration(OperatorCommand operator) {
-    this(NodeIdentity::handle, operator);
+  public LegacyDataMigration() {
+    this(NodeIdentity::handle);
   }
 
-  LegacyDataMigration(Supplier<String> nodeHandle, OperatorCommand operator) {
+  LegacyDataMigration(Supplier<String> nodeHandle) {
     this.nodeHandle = nodeHandle;
-    this.operator = operator;
   }
 
   @Override
@@ -65,16 +64,18 @@ public final class LegacyDataMigration implements DataMigration {
     }
     var handle = nodeHandle.get();
     if (Strings.isBlank(handle)) {
-      throw new IllegalStateException(
+      throw Remedied.state(
           "The 0.14.0 migration cannot attribute "
               + ids.size()
               + " legacy run(s) without this box's FDE handle: "
               + String.join(", ", ids)
-              + ". Set it with '"
-              + operator.sail("host config set sync-handle <handle>")
-              + "', then rerun '"
-              + operator.sail("migrate")
-              + "'.");
+              + ".",
+          Remedy.of(
+              "Set it with '",
+              Remedy.sail("host config set sync-handle", "<handle>"),
+              "', then rerun '",
+              Remedy.sail("migrate"),
+              "'."));
     }
     for (var id : ids) {
       db.transaction(
