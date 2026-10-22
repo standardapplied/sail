@@ -120,19 +120,31 @@ public final class SailApiClient implements AutoCloseable {
     }
 
     /** The refusal an error envelope with {@code status} describes. */
-    static Refused of(int status, Map<String, Object> error) {
+    public static Refused of(int status, Map<String, Object> error) {
       var http = " (HTTP " + status + ")";
       if (error == null) {
         return new Refused("API request failed" + http, Remedy.NONE);
       }
+      var refused = ended(error);
+      return refused.remedy.isEmpty()
+          ? new Refused(refused.reason + http, Remedy.NONE)
+          : new Refused(refused.reason, refused.remedy.then(http));
+    }
+
+    /** The refusal a response with {@code status} and an error envelope as its body describes. */
+    @SuppressWarnings("unchecked")
+    public static Refused fromBody(int status, String body) {
+      return of(status, (Map<String, Object>) YamlUtil.parseMap(body).get("error"));
+    }
+
+    /** The refusal a stream's closing {@code error} event describes. */
+    public static Refused ended(Map<String, Object> error) {
       var message = Objects.toString(error.get("message"), "API request failed");
       var remedy =
           error.get("remedy") instanceof List<?> parts
               ? Remedy.fromMaps(parts)
               : Result.words(Objects.toString(error.get("action"), null));
-      return remedy.isEmpty()
-          ? new Refused(message + http, Remedy.NONE)
-          : new Refused(message, remedy.then(http));
+      return new Refused(message, remedy);
     }
 
     @Override

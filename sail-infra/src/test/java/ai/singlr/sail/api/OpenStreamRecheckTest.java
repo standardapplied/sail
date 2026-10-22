@@ -258,7 +258,7 @@ class OpenStreamRecheckTest {
 
     assertEquals(
         "error {\"code\": \"invalid_bearer_token\", \"message\": \"Session token is invalid or"
-            + " expired.\"}",
+            + " expired.\", \"action\": null, \"field_errors\": []}",
         next(frames));
     assertEquals(END, next(frames));
     assertNull(frames.poll(), "nothing after the stream ended");
@@ -273,7 +273,7 @@ class OpenStreamRecheckTest {
 
     assertEquals(
         "error {\"code\": \"invalid_bearer_token\", \"message\": \"Session token is invalid or"
-            + " expired.\"}",
+            + " expired.\", \"action\": null, \"field_errors\": []}",
         next(frames));
     assertEquals(END, next(frames));
   }

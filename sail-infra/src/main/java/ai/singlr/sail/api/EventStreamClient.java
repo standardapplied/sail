@@ -21,6 +21,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -81,8 +82,10 @@ public final class EventStreamClient implements AutoCloseable {
             .build();
     var response = answer(client, request);
     if (response.statusCode() != 200) {
-      throw new IOException(
-          "Event stream request returned HTTP " + response.statusCode() + " from " + request.uri());
+      try (var body = response.body()) {
+        throw SailApiClient.Refused.fromBody(
+            response.statusCode(), body.collect(Collectors.joining("\n")));
+      }
     }
     var stream = new EventStreamClient(response, queue, projectFilter);
     if (!stream.subscribedLatch.await(SUBSCRIBED_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {

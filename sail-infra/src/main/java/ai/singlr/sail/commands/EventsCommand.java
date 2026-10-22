@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
@@ -17,9 +18,11 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -34,6 +37,7 @@ import picocli.CommandLine.Option;
 public final class EventsCommand implements Runnable {
 
   private static final String DATA_PREFIX = "data: ";
+  private static final String ERROR_EVENT = "event: error";
   private static final int DEFAULT_RECENT_LIMIT = 100;
 
   @Option(
@@ -95,8 +99,7 @@ public final class EventsCommand implements Runnable {
             .build();
     var response = client.send(request, HttpResponse.BodyHandlers.ofString());
     if (response.statusCode() != 200) {
-      throw new IllegalStateException(
-          "GET " + uri + " returned " + response.statusCode() + ": " + response.body());
+      throw SailApiClient.Refused.fromBody(response.statusCode(), response.body());
     }
     @SuppressWarnings("unchecked")
     var body = (Map<String, Object>) YamlUtil.parseMap(response.body());
@@ -107,7 +110,7 @@ public final class EventsCommand implements Runnable {
       return;
     }
     for (var map : events) {
-      printOne(out, Event.fromMap(map));
+      printOne(out, Event.fromMap(map), json);
     }
   }
 
@@ -120,24 +123,41 @@ public final class EventsCommand implements Runnable {
             .GET()
             .build();
     var response = client.send(request, HttpResponse.BodyHandlers.ofLines());
-    if (response.statusCode() != 200) {
-      throw new IllegalStateException("Stream request returned HTTP " + response.statusCode());
-    }
     try (Stream<String> lineStream = response.body()) {
-      lineStream.forEach(
-          line -> {
-            if (line.startsWith(DATA_PREFIX)) {
-              try {
-                printOne(out, Event.fromJsonLine(line.substring(DATA_PREFIX.length())));
-              } catch (Exception parseError) {
-                System.err.println("  ⚠ failed to parse event: " + parseError.getMessage());
-              }
-            }
-          });
+      if (response.statusCode() != 200) {
+        throw SailApiClient.Refused.fromBody(
+            response.statusCode(), lineStream.collect(Collectors.joining("\n")));
+      }
+      print(lineStream.iterator(), out, json);
     }
   }
 
-  private void printOne(PrintStream out, Event event) {
+  /**
+   * Prints each event the stream sends until it ends; a stream the server ended with an {@code
+   * error} event ends in the refusal it names.
+   */
+  static void print(Iterator<String> lines, PrintStream out, boolean json)
+      throws SailApiClient.Refused {
+    var ending = false;
+    while (lines.hasNext()) {
+      var line = lines.next();
+      if (line.equals(ERROR_EVENT)) {
+        ending = true;
+      } else if (line.startsWith(DATA_PREFIX)) {
+        var data = line.substring(DATA_PREFIX.length());
+        if (ending) {
+          throw SailApiClient.Refused.ended(YamlUtil.parseMap(data));
+        }
+        try {
+          printOne(out, Event.fromJsonLine(data), json);
+        } catch (Exception parseError) {
+          System.err.println("  ⚠ failed to parse event: " + parseError.getMessage());
+        }
+      }
+    }
+  }
+
+  private static void printOne(PrintStream out, Event event, boolean json) {
     if (json) {
       out.println(event.toJsonLine());
     } else {

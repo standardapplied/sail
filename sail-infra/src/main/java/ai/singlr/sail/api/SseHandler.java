@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -210,11 +211,11 @@ public final class SseHandler implements HttpHandler {
   }
 
   private static void sendError(HttpExchange exchange, ApiException error) throws IOException {
-    var body = error.failure().fullError();
+    var response = ApiResponse.error(error.failure());
     var bytes =
-        (body == null ? error.failure().errorMessage() : body).getBytes(StandardCharsets.UTF_8);
-    exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
-    exchange.sendResponseHeaders(error.failure().errorCode().httpCode(), bytes.length);
+        YamlUtil.dumpJson(new LinkedHashMap<>(response.body())).getBytes(StandardCharsets.UTF_8);
+    exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
+    exchange.sendResponseHeaders(response.status(), bytes.length);
     try (var out = exchange.getResponseBody()) {
       out.write(bytes);
     }

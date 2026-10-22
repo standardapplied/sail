@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.RunStore;
@@ -131,6 +132,30 @@ class AgentLogStreamerTest {
     assertTrue(out.body().contains("forbidden_not_assignee"), out.body());
     assertTrue(out.body().contains("uday"), out.body());
     assertTrue(out.body().contains("\"fix\""), out.body());
+  }
+
+  @Test
+  void aCallerRefusedAtTheDoorIsToldTheRemedyAsData() throws Exception {
+    var out = new CapturingExchange("/v1/runs/r1/stream");
+
+    new AgentLogStreamer(
+            exchange -> {
+              throw CliOperator.unplaced("ada");
+            },
+            id -> Optional.of(runOn("node-a")),
+            id -> Optional.empty(),
+            () -> "node-a")
+        .handle(out);
+
+    assertEquals(409, out.status);
+    assertEquals(
+        "{\"code\": \"conflict\", \"message\": \"This box does not know its FDE's role ('ada'),"
+            + " so it cannot tell what you may do.\", \"action\": \"Run 'sync' first. If it still"
+            + " refuses, ask an admin whether 'ada' is disabled.\", \"remedy\": [{\"text\": \"Run"
+            + " '\"}, {\"run\": \"sail\", \"verb\": \"sync\", \"args\": []}, {\"text\": \"' first."
+            + " If it still refuses, ask an admin whether 'ada' is disabled.\"}], \"field_errors\":"
+            + " []}",
+        out.body());
   }
 
   @Test
@@ -474,7 +499,7 @@ class AgentLogStreamerTest {
 
     assertEquals(
         "id: 1\ndata: first\n\nevent: error\ndata: {\"code\": \"run_not_found\", \"message\":"
-            + " \"No run 'r1'.\"}\n\n",
+            + " \"No run 'r1'.\", \"action\": null, \"field_errors\": []}\n\n",
         out.toString(StandardCharsets.UTF_8));
     assertEquals(1, asked.get(), "asked once, a second after it opened");
   }
@@ -507,7 +532,7 @@ class AgentLogStreamerTest {
     assertEquals(
         "event: error\ndata: {\"code\": \"invalid_bearer_token\", \"message\": \"Bearer"
             + " token's FDE 'raj' is disabled.\", \"action\": \"Ask an admin to re-enable"
-            + " 'raj'.\"}\n\n",
+            + " 'raj'.\", \"field_errors\": []}\n\n",
         out.toString(StandardCharsets.UTF_8));
   }
 
