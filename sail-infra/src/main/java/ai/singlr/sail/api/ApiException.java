@@ -47,6 +47,12 @@ public final class ApiException extends RuntimeException implements Remedied {
         : new ApiException(errorCode, failure.getMessage(), Remedy.NONE, failure);
   }
 
+  /** The refusal {@code failure} answers with: its code, its reason and its remedy as they are. */
+  public static ApiException of(Result.Failure<?> failure) {
+    return new ApiException(
+        failure.errorCode(), failure.errorMessage(), failure.remedy(), failure.cause());
+  }
+
   public int status() {
     return failure.errorCode().httpCode();
   }

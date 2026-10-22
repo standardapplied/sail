@@ -900,7 +900,7 @@ public final class ApiRouter implements HttpHandler {
     }
     var detail = operations.globalSpec(specId);
     if (detail instanceof Result.Failure<?> failure) {
-      throw new ApiException(failure.errorCode(), failure.errorMessage());
+      throw ApiException.of(failure);
     }
     var current = ((Result.Success<GlobalSpecDetailResponse>) detail).value();
     var currentEtag = etagOf(current.spec().updatedAt());

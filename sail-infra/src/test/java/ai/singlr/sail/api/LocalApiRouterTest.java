@@ -378,7 +378,33 @@ class LocalApiRouterTest {
     var response = router.handle(form("POST", "/v1/events", event.toJsonLine()));
 
     assertEquals(403, response.status());
-    assertEquals("Event type 'spec_dispatched' is not available.", response.body().get("error"));
+    assertEquals(
+        "Event type 'spec_dispatched' is not available.",
+        ((Map<?, ?>) response.body().get("error")).get("message"));
+  }
+
+  @Test
+  void aRemediedRefusalFromTheEventDoorKeepsItsRemedyAsData() {
+    ops.eventRefusal =
+        Result.failure(
+            ErrorCode.CONFLICT,
+            "This box cannot place its FDE.",
+            Remedy.of("Run '", Remedy.sail("sync"), "' first."));
+    var event = Event.of("acme", "auth", "agent_tool_started", "claude-code", "host-01");
+
+    var error =
+        (Map<?, ?>)
+            router.handle(form("POST", "/v1/events", event.toJsonLine())).body().get("error");
+
+    assertEquals(
+        List.of(
+            Map.of("text", "Run '"),
+            Map.of("run", "sail", "verb", "sync", "args", List.of()),
+            Map.of("text", "' first.")),
+        error.get("remedy"));
+    assertEquals(
+        "Run 'sudo sail sync' first.",
+        OperatorCommand.SUDO.render(Remedy.fromMaps((List<?>) error.get("remedy"))));
   }
 
   @Test

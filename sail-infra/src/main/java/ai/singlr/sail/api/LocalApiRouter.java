@@ -280,8 +280,7 @@ final class LocalApiRouter implements LocalApiHandler {
     return switch (operations.publishEvent(scoped)) {
       case Result.Success<EventPublishResponse> published ->
           new ApiResponse(202, Map.of("id", published.value().id()));
-      case Result.Failure<EventPublishResponse> refused ->
-          problem(refused.code(), refused.errorMessage());
+      case Result.Failure<EventPublishResponse> refused -> ApiResponse.error(refused);
     };
   }
 

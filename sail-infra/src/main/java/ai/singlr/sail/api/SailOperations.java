@@ -743,8 +743,7 @@ public final class SailOperations implements HostOperations {
                 postRoomMessage(roomId, new SpecMessageRequest(text, null, false), actor.handle()));
     return switch (posted) {
       case Result.Success<SpecMessageResponse> landed -> landed.value().message().id();
-      case Result.Failure<SpecMessageResponse> refused ->
-          throw new ApiException(refused.errorCode(), refused.errorMessage());
+      case Result.Failure<SpecMessageResponse> refused -> throw ApiException.of(refused);
     };
   }
 

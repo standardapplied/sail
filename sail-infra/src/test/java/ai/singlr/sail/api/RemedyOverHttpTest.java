@@ -188,6 +188,30 @@ class RemedyOverHttpTest {
   }
 
   @Test
+  void anIfMatchCheckRefusedBelowTheDoorKeepsItsRemedy() throws Exception {
+    db.execute("UPDATE specs SET body_hash = NULL WHERE id = 'taken'");
+    var response =
+        HttpClient.newHttpClient()
+            .send(
+                HttpRequest.newBuilder(
+                        URI.create("http://127.0.0.1:" + server.port() + "/v1/specs/taken"))
+                    .header("Authorization", "Bearer " + token)
+                    .header("Content-Type", "application/json")
+                    .header("If-Match", "\"2026-10-22T00:00:00Z\"")
+                    .PUT(HttpRequest.BodyPublishers.ofString("{\"title\": \"U\"}"))
+                    .build(),
+                HttpResponse.BodyHandlers.ofString());
+
+    assertEquals(500, response.statusCode(), response.body());
+    assertEquals(
+        List.of(
+            Map.of("text", "Run '"),
+            Map.of("run", "sail", "verb", "migrate", "args", List.of()),
+            Map.of("text", "'.")),
+        ((Map<?, ?>) YamlUtil.parseMap(response.body()).get("error")).get("remedy"));
+  }
+
+  @Test
   void aCatalogDefinitionRefusedByItsReaderKeepsItsRemedy() {
     Actor.run(
         Actor.system(),
