@@ -14,6 +14,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
@@ -42,7 +43,6 @@ import java.util.stream.Stream;
  */
 public final class EventStreamClient implements AutoCloseable {
 
-  private static final String DATA_PREFIX = "data: ";
   private static final String SUBSCRIBED_LINE = ": subscribed";
   private static final Duration SUBSCRIBED_TIMEOUT = Duration.ofSeconds(5);
 
@@ -126,19 +126,7 @@ public final class EventStreamClient implements AutoCloseable {
 
   private void readLoop(BlockingQueue<Event> queue) {
     try {
-      lineStream.forEach(
-          line -> {
-            if (stopped) {
-              throw new StopReadingException();
-            }
-            if (line != null && line.startsWith(SUBSCRIBED_LINE)) {
-              subscribedLatch.countDown();
-              return;
-            }
-            if (!processLine(line, queue)) {
-              throw new StopReadingException();
-            }
-          });
+      read(lineStream.peek(this::observe).iterator(), queue);
     } catch (StopReadingException closed) {
     } catch (Exception e) {
       if (!stopped) {
@@ -147,17 +135,38 @@ public final class EventStreamClient implements AutoCloseable {
     }
   }
 
-  /**
-   * Parses one SSE line and pushes the resulting event onto {@code queue}. Returns {@code false}
-   * iff the current thread was interrupted (so the caller knows to stop reading). Visible for tests
-   * so the parser can be exercised without spinning up an HTTP server.
-   */
-  static boolean processLine(String line, BlockingQueue<Event> queue) {
-    if (line == null || !line.startsWith(DATA_PREFIX)) {
-      return true;
+  private void observe(String line) {
+    if (stopped) {
+      throw new StopReadingException();
     }
+    if (line.startsWith(SUBSCRIBED_LINE)) {
+      subscribedLatch.countDown();
+    }
+  }
+
+  /**
+   * Pushes each event the stream sends onto {@code queue} until it ends: a stream the server ended
+   * with an {@code error} event ends in the refusal it names, and an interrupted push stops the
+   * reading. Visible for tests so the reading can be exercised without spinning up an HTTP server.
+   */
+  static void read(Iterator<String> lines, BlockingQueue<Event> queue)
+      throws SailApiClient.Refused {
+    SailApiClient.readStream(
+        lines,
+        data -> {
+          if (!deliver(data, queue)) {
+            throw new StopReadingException();
+          }
+        });
+  }
+
+  /**
+   * Parses one event's data and pushes it onto {@code queue}. Returns {@code false} iff the current
+   * thread was interrupted (so the caller knows to stop reading); a malformed event is dropped.
+   */
+  static boolean deliver(String data, BlockingQueue<Event> queue) {
     try {
-      queue.put(Event.fromJsonLine(line.substring(DATA_PREFIX.length())));
+      queue.put(Event.fromJsonLine(data));
       return true;
     } catch (InterruptedException ie) {
       Thread.currentThread().interrupt();
