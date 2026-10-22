@@ -147,7 +147,7 @@ public final class HostInitCommand implements Runnable {
       if (!json) {
         Banner.printUnsupported(hostInfo, System.err, Ansi.AUTO);
       }
-      throw new IllegalStateException("Unsupported operating system: " + hostInfo.osPrettyName());
+      throw new CliCommand.Refused("Unsupported operating system: " + hostInfo.osPrettyName());
     }
 
     if (Files.exists(hostYamlPath) && !dryRun) {
@@ -162,7 +162,7 @@ public final class HostInitCommand implements Runnable {
       }
     }
 
-    var selectedDisk = isZfs && disk == null ? detectAndSelectDisk(shell) : disk;
+    var selectedDisk = isZfs && disk == null ? detectAndSelectDisk(new ShellExecutor(false)) : disk;
 
     var resolvedServerIp = serverIp;
     if (resolvedServerIp == null) {
@@ -362,7 +362,7 @@ public final class HostInitCommand implements Runnable {
       if (!fatal.isEmpty()) {
         Banner.printMissingPrerequisites(fatal, System.err, Ansi.AUTO);
         var names = fatal.stream().map(PrerequisiteChecker.Prerequisite::command).toList();
-        throw new IllegalStateException(
+        throw new CliCommand.Refused(
             "Missing commands that cannot be auto-installed: " + String.join(", ", names));
       }
 

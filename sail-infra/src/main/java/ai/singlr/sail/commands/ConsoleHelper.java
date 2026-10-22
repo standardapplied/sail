@@ -105,29 +105,22 @@ final class ConsoleHelper {
    * refuses too, so a command nobody told to go on never exits 0.
    */
   static void proceed(String prompt, String notDone, String flag) {
-    requireTerminal(notDone, flag);
-    if (!confirm(prompt)) {
-      throw aborted();
-    }
+    ask(() -> confirm(prompt), notDone, flag);
   }
 
   /** As {@link #proceed}, for an action that cannot be undone: it defaults to no. */
   static void confirmDestructive(String prompt, String notDone, String flag) {
-    requireTerminal(notDone, flag);
-    if (!confirmNo(prompt)) {
-      throw aborted();
-    }
+    ask(() -> confirmNo(prompt), notDone, flag);
   }
 
-  private static void requireTerminal(String notDone, String flag) {
+  private static void ask(BooleanSupplier answeredYes, String notDone, String flag) {
     if (!hasConsole()) {
       throw new CliCommand.Refused(
           notDone + ": no terminal to confirm on. Re-run with " + flag + ".");
     }
-  }
-
-  private static CliCommand.Refused aborted() {
-    return new CliCommand.Refused("Aborted.");
+    if (!answeredYes.getAsBoolean()) {
+      throw new CliCommand.Refused("Aborted.");
+    }
   }
 
   /** Returns {@code true} if the current process is running as root. */

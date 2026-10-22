@@ -666,7 +666,7 @@ public final class ProjectApplyCommand implements Runnable {
       if (!json) {
         Banner.printResumeInfo(tracker.currentState(), System.out, Ansi.AUTO);
       }
-      if (!yes && !json) {
+      if (!yes && !dryRun && !json) {
         ConsoleHelper.proceed("Resume provisioning?", "Not provisioned", "--yes");
       }
     }

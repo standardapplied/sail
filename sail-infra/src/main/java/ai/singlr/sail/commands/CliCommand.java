@@ -57,11 +57,13 @@ public final class CliCommand {
   }
 
   /**
-   * Whether sail refused {@code failure} on purpose: a {@link Refused}, or a refusal its rules or
-   * its API answered with a client error, a write the journal refused included.
+   * Whether sail refused {@code failure} on purpose: a {@link Refused}, an argument it rejected, or
+   * a refusal its rules or its API answered with a client error, a write the journal refused
+   * included.
    */
   private static boolean decided(Exception failure) {
     return failure instanceof Refused
+        || failure instanceof IllegalArgumentException
         || Refusals.translated(failure) instanceof ApiException refusal
             && refusal.status() / 100 == 4;
   }

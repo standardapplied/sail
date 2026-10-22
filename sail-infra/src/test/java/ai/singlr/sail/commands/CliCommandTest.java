@@ -289,4 +289,21 @@ class CliCommandTest {
     @Override
     public void run() {}
   }
+
+  @Test
+  void anArgumentSailRejectedGetsNoDryRunHint() {
+    assertThrows(
+        CliCommand.Printed.class,
+        () ->
+            CliCommand.run(
+                CliCommand.DRY_RUN_HINT,
+                () -> {
+                  throw new IllegalArgumentException(
+                      "Invalid storage backend: 'btrfs'. Must be 'dir' or 'zfs'.");
+                }));
+
+    assertEquals(
+        "  ✗ Invalid storage backend: 'btrfs'. Must be 'dir' or 'zfs'.\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
+  }
 }

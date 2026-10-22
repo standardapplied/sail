@@ -209,4 +209,18 @@ class SshSyncChannelTest {
     assertEquals(List.of("sail", "_sync"), command.subList(command.size() - 2, command.size()));
     assertTrue(command.indexOf("sail@host") < command.indexOf("sail"));
   }
+
+  @Test
+  void theReceiptNamesTheLineFirstSoOneCutShortNamesNoBox() throws Exception {
+    kept(TARGET, "mady", PUB, MAIN.fingerprint());
+    var written = Files.readString(receipt());
+
+    assertEquals(
+        List.of("authorize_command", "target", "handle", "public_key", "main_host_key"),
+        written.lines().filter(l -> !l.startsWith(" ")).map(l -> l.split(":")[0]).toList(),
+        written);
+
+    Files.writeString(receipt(), written.substring(0, written.length() / 2));
+    assertEquals(Optional.empty(), authorisation("mady", pinned()));
+  }
 }

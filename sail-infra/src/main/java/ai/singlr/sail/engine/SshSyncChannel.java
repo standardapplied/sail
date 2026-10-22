@@ -87,7 +87,8 @@ public final class SshSyncChannel implements SyncOperations.Channel {
   /**
    * Keeps, in {@code receipt}, the line a join printed for main's operator to authorise {@code
    * publicKey} as {@code handle} on {@code target}, whose host key it pinned as {@code
-   * mainHostKey}, and returns that line.
+   * mainHostKey}, and returns that line. The line is written first and what names the box after it,
+   * so a receipt a crash cut short names no box and is never repeated.
    */
   public static String keep(
       Path receipt,
@@ -99,8 +100,9 @@ public final class SshSyncChannel implements SyncOperations.Channel {
       String mainHostKey)
       throws IOException {
     var line = authorizeLine(handle, name, email, publicKey, mainHostKey);
-    var kept = new LinkedHashMap<String, Object>(joined(target, handle, publicKey, mainHostKey));
+    var kept = new LinkedHashMap<String, Object>();
     kept.put(LINE, line);
+    kept.putAll(joined(target, handle, publicKey, mainHostKey));
     YamlUtil.dumpToFile(kept, receipt);
     return line;
   }
@@ -137,8 +139,12 @@ public final class SshSyncChannel implements SyncOperations.Channel {
 
   private static Map<String, String> joined(
       String target, String handle, String publicKey, String mainHostKey) {
-    return Map.of(
-        "target", target, "handle", handle, "public_key", publicKey, "main_host_key", mainHostKey);
+    var joined = new LinkedHashMap<String, String>();
+    joined.put("target", target);
+    joined.put("handle", handle);
+    joined.put("public_key", publicKey);
+    joined.put("main_host_key", mainHostKey);
+    return joined;
   }
 
   /**

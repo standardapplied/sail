@@ -96,4 +96,24 @@ class HostInitCommandTest {
           String.valueOf(typed));
     }
   }
+
+  @Test
+  void anInvalidStorageBackendIsRefusedWithNoDryRunHint() {
+    var err = new ByteArrayOutputStream();
+    var originalErr = System.err;
+    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+    var cmd = new CommandLine(new Sail());
+    cmd.setExecutionExceptionHandler((failure, line, parsed) -> 1);
+    int exit;
+    try {
+      exit = cmd.execute("host", "init", "--storage", "btrfs", "--dry-run");
+    } finally {
+      System.setErr(originalErr);
+    }
+
+    assertEquals(1, exit);
+    assertEquals(
+        "  ✗ Invalid storage backend: 'btrfs'. Must be 'dir' or 'zfs'.\n",
+        err.toString(StandardCharsets.UTF_8));
+  }
 }
