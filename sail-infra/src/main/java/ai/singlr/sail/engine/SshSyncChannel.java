@@ -6,7 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.PlaceholderResolver;
+import ai.singlr.sail.config.YamlUtil;
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -18,11 +18,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
+import org.snakeyaml.engine.v2.exceptions.YamlEngineException;
 
 /**
  * One sync session's transport: an {@code ssh sail@main sail _sync} subprocess whose stdio is the
@@ -34,6 +37,7 @@ import java.util.function.Function;
 public final class SshSyncChannel implements SyncOperations.Channel {
 
   private static final Duration EXIT_GRACE = Duration.ofSeconds(5);
+  private static final String LINE = "authorize_command";
 
   private final Process process;
   private final InputStream reader;
@@ -67,7 +71,7 @@ public final class SshSyncChannel implements SyncOperations.Channel {
                     SailPaths.syncPublicKeyPath(),
                     target,
                     MainHostKey.here(),
-                    LocalIdentity.detect(OperatorCommand.SUDO)));
+                    receipt(SailPaths.hostConfigPath())));
   }
 
   @Override
@@ -75,31 +79,55 @@ public final class SshSyncChannel implements SyncOperations.Channel {
     return authorisation.apply(handle);
   }
 
+  /** Where a join keeps the line it printed, beside the host config {@code hostConfig}. */
+  public static Path receipt(Path hostConfig) {
+    return hostConfig.resolveSibling("join.yaml");
+  }
+
   /**
-   * The line a join printed for main's operator to authorise this box's sync key, {@code
-   * publicKey}, as {@code handle}: the roster name and email this box's identity holds, which a
-   * join gave it, and the fingerprint of main's host key this box pinned for {@code target}. Empty
-   * when the box holds no key or no pin to name.
+   * Keeps, in {@code receipt}, the line a join printed for main's operator to authorise {@code
+   * publicKey} as {@code handle} on {@code target}, whose host key it pinned as {@code
+   * mainHostKey}, and returns that line.
+   */
+  public static String keep(
+      Path receipt,
+      String target,
+      String handle,
+      String name,
+      String email,
+      String publicKey,
+      String mainHostKey)
+      throws IOException {
+    var line = authorizeLine(handle, name, email, publicKey, mainHostKey);
+    var kept = new LinkedHashMap<String, Object>(joined(target, handle, publicKey, mainHostKey));
+    kept.put(LINE, line);
+    YamlUtil.dumpToFile(kept, receipt);
+    return line;
+  }
+
+  /**
+   * The line the join kept in {@code receipt}, while it still names this box: {@code handle}, the
+   * key at {@code publicKey}, and the fingerprint of main's host key this box pinned for {@code
+   * target}. Empty when the box holds no key, no pin or no such line to name, a receipt a crash cut
+   * short included.
    */
   static Optional<String> authorisation(
-      String handle,
-      Path publicKey,
-      String target,
-      MainHostKey mainHostKey,
-      LocalIdentity identity) {
+      String handle, Path publicKey, String target, MainHostKey mainHostKey, Path receipt) {
     try {
       var pinned = mainHostKey.pinned(target);
-      if (Strings.isBlank(handle) || pinned.isEmpty() || !Files.isRegularFile(publicKey)) {
+      if (Strings.isBlank(handle)
+          || pinned.isEmpty()
+          || !Files.isRegularFile(publicKey)
+          || !Files.isRegularFile(receipt)) {
         return Optional.empty();
       }
-      return Optional.of(
-          authorizeLine(
-              handle,
-              identity.gitValue(PlaceholderResolver.GIT_NAME).orElse(null),
-              identity.gitValue(PlaceholderResolver.GIT_EMAIL).orElse(null),
-              Files.readString(publicKey).strip(),
-              pinned.get()));
-    } catch (IOException | TimeoutException e) {
+      var kept = YamlUtil.parseFile(receipt);
+      var current = joined(target, handle, Files.readString(publicKey).strip(), pinned.get());
+      return current.entrySet().stream().allMatch(e -> e.getValue().equals(kept.get(e.getKey())))
+              && kept.get(LINE) instanceof String line
+          ? Optional.of(line)
+          : Optional.empty();
+    } catch (IOException | TimeoutException | YamlEngineException e) {
       return Optional.empty();
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
@@ -107,21 +135,30 @@ public final class SshSyncChannel implements SyncOperations.Channel {
     }
   }
 
+  private static Map<String, String> joined(
+      String target, String handle, String publicKey, String mainHostKey) {
+    return Map.of(
+        "target", target, "handle", handle, "public_key", publicKey, "main_host_key", mainHostKey);
+  }
+
   /**
    * The {@code sail fde add} line main's operator runs to authorise a node's key, carrying the host
-   * key this node pinned for main so main refuses it when another box answered the join.
+   * key this node pinned for main so main refuses it when another box answered the join. Every
+   * value is one shell word, so a name main's operator pastes runs nothing.
    */
   public static String authorizeLine(
       String handle, String name, String email, String publicKey, String mainHostKey) {
-    var line = new StringBuilder(OperatorCommand.SUDO.sail("fde add " + handle + " --role member"));
+    var line =
+        new StringBuilder(
+            OperatorCommand.SUDO.sail("fde add " + Strings.shellWord(handle) + " --role member"));
     if (Strings.isNotBlank(name)) {
-      line.append(" --name \"").append(name).append('"');
+      line.append(" --name ").append(Strings.shellWord(name));
     }
     if (Strings.isNotBlank(email)) {
-      line.append(" --email \"").append(email).append('"');
+      line.append(" --email ").append(Strings.shellWord(email));
     }
-    line.append(" --key \"").append(publicKey).append('"');
-    line.append(" --main-host-key ").append(mainHostKey);
+    line.append(" --key ").append(Strings.shellWord(publicKey));
+    line.append(" --main-host-key ").append(Strings.shellWord(mainHostKey));
     return line.toString();
   }
 

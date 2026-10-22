@@ -407,8 +407,8 @@ class OperatorHintsTest {
   @Test
   void anotherBoxsOperatorIsToldTheReadmesFormAndAThinClientPlainSail() {
     assertEquals(
-        "sudo sail fde add ada --role member --email \"ada@example.com\" --key \"ssh-ed25519"
-            + " AAAA\" --main-host-key SHA256:abc",
+        "sudo sail fde add ada --role member --email ada@example.com --key 'ssh-ed25519"
+            + " AAAA' --main-host-key SHA256:abc",
         SshSyncChannel.authorizeLine(
             "ada", null, "ada@example.com", "ssh-ed25519 AAAA", "SHA256:abc"));
     assertEquals("sail login", OperatorCommand.client("login"));

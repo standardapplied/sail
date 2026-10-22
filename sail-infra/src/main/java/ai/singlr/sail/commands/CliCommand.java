@@ -18,9 +18,9 @@ import picocli.CommandLine.Help.Ansi;
 
 /**
  * Runs a command body and prints its failure once: the message, a refusal's fix, then, for a
- * failure sail did not decide ({@link Refused}), any hint, each command in them rendered for the
- * account reading this terminal. The top-level handler ({@link ai.singlr.sail.Main#report}) prints
- * only what was not printed here.
+ * failure sail did not decide (neither a {@link Refused} nor a client error), any hint, each
+ * command in them rendered for the account reading this terminal. The top-level handler ({@link
+ * ai.singlr.sail.Main#report}) prints only what was not printed here.
  */
 public final class CliCommand {
 
@@ -49,11 +49,21 @@ public final class CliCommand {
       var lines = lines(e, reader());
       err.println(Banner.errorLine(lines.getFirst(), Ansi.AUTO));
       lines.stream().skip(1).forEach(err::println);
-      if (Strings.isNotBlank(failureHint) && !(e instanceof Refused)) {
+      if (Strings.isNotBlank(failureHint) && !decided(e)) {
         err.println(failureHint);
       }
       throw new Printed(lines.getFirst(), e);
     }
+  }
+
+  /**
+   * Whether sail refused {@code failure} on purpose: a {@link Refused}, or a refusal its rules or
+   * its API answered with a client error, a write the journal refused included.
+   */
+  private static boolean decided(Exception failure) {
+    return failure instanceof Refused
+        || Refusals.translated(failure) instanceof ApiException refusal
+            && refusal.status() / 100 == 4;
   }
 
   /**

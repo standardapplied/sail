@@ -13,6 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.Main;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
+import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.engine.CliOperator;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -101,24 +105,63 @@ class CliCommandTest {
   }
 
   @Test
-  void aRefusalIsPrintedOnceWithItsFixThenTheHintAndThrownAsPrinted() {
-    var refusal =
-        new ApiException(ErrorCode.CONFLICT, "The roster is unsynced.", "Run 'sail sync'.");
+  void aRefusalIsPrintedOnceWithItsFixWithNoDryRunHintAndThrownAsPrinted() {
+    var refusal = CliOperator.unplaced(null);
 
     var error =
         assertThrows(
             CliCommand.Printed.class,
             () ->
                 CliCommand.run(
-                    "  try --dry-run",
+                    CliCommand.DRY_RUN_HINT,
                     () -> {
                       throw refusal;
                     }));
 
     assertEquals(
-        "  ✗ The roster is unsynced.\nRun 'sail sync'.\n  try --dry-run\n",
+        "  ✗ This box syncs with main but names no FDE of its own, so it cannot tell what you may"
+            + " do.\n"
+            + OperatorCommand.here().render(refusal.remedy())
+            + "\n",
         capturedErr.toString(StandardCharsets.UTF_8));
     assertEquals(refusal, error.getCause());
+  }
+
+  @Test
+  void aWriteTheJournalRefusedGetsNoDryRunHint() {
+    var refused =
+        new WriteRefused(
+            new Refusal(
+                Refusal.Kind.ADMIN_ONLY, "Purging project 'acme' is admin-only.", "Ask an admin."));
+
+    assertThrows(
+        CliCommand.Printed.class,
+        () ->
+            CliCommand.run(
+                CliCommand.DRY_RUN_HINT,
+                () -> {
+                  throw refused;
+                }));
+
+    assertEquals(
+        "  ✗ Purging project 'acme' is admin-only.\nAsk an admin.\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void aServerErrorIsFollowedByTheDryRunHint() {
+    assertThrows(
+        CliCommand.Printed.class,
+        () ->
+            CliCommand.run(
+                CliCommand.DRY_RUN_HINT,
+                () -> {
+                  throw new ApiException(ErrorCode.CONTAINER_ERROR, "incus delete acme failed.");
+                }));
+
+    assertEquals(
+        "  ✗ incus delete acme failed.\n" + CliCommand.DRY_RUN_HINT + "\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
   }
 
   @Test

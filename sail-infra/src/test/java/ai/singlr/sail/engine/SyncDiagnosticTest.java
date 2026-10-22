@@ -30,7 +30,7 @@ class SyncDiagnosticTest {
   @TempDir Path home;
 
   private static final String AUTHORISE =
-      "sudo sail fde add mady --role member --key \"ssh-ed25519 AAAA sail-sync:mady\""
+      "sudo sail fde add mady --role member --key 'ssh-ed25519 AAAA sail-sync:mady'"
           + " --main-host-key SHA256:pinned";
 
   private String syncFailure(String sshSaid) throws Exception {

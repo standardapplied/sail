@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -28,42 +29,71 @@ class SshSyncChannelTest {
 
   @TempDir Path dir;
 
+  private static final String TARGET = "sail@10.0.0.1";
+
+  private Path receipt() {
+    return SshSyncChannel.receipt(dir.resolve("host.yaml"));
+  }
+
+  private String kept(String target, String handle, String key, String fingerprint)
+      throws IOException {
+    return SshSyncChannel.keep(
+        receipt(), target, handle, "Mady M", "mady@example.com", key, fingerprint);
+  }
+
   private Optional<String> authorisation(String handle, ScriptedShellExecutor shell)
       throws Exception {
     var publicKey = Files.writeString(dir.resolve("sync_ed25519.pub"), PUB + "\n");
     var knownHosts = Files.writeString(dir.resolve("known_hosts"), "");
     return SshSyncChannel.authorisation(
-        handle,
-        publicKey,
-        "sail@10.0.0.1",
-        new MainHostKey(shell, knownHosts),
-        new LocalIdentity(shell, dir.resolve("workstation_key.pub"), OperatorCommand.PLAIN));
+        handle, publicKey, TARGET, new MainHostKey(shell, knownHosts), receipt());
   }
 
-  private static ScriptedShellExecutor pinnedAndNamed() {
+  private static ScriptedShellExecutor pinned() {
     return new ScriptedShellExecutor()
         .onOk(
             "ssh-keygen -F 10.0.0.1",
-            "# Host 10.0.0.1 found: line 1\n|1|c2FsdA==|aG1hYw== ssh-ed25519 " + MAIN.blob() + "\n")
-        .onOk("user.name", "Mady M\n")
-        .onOk("user.email", "mady@example.com\n");
+            "# Host 10.0.0.1 found: line 1\n|1|c2FsdA==|aG1hYw== ssh-ed25519 "
+                + MAIN.blob()
+                + "\n");
   }
 
   @Test
   void aRefusedKeyIsAuthorisedByTheLineTheJoinPrinted() throws Exception {
+    var printed = kept(TARGET, "mady", PUB, MAIN.fingerprint());
+
     assertEquals(
-        Optional.of(
-            "sudo sail fde add mady --role member --name \"Mady M\" --email \"mady@example.com\""
-                + " --key \""
-                + PUB
-                + "\" --main-host-key "
-                + MAIN.fingerprint()),
-        authorisation("mady", pinnedAndNamed()));
+        "sudo sail fde add mady --role member --name 'Mady M' --email mady@example.com --key '"
+            + PUB
+            + "' --main-host-key "
+            + MAIN.fingerprint(),
+        printed);
+    assertEquals(Optional.of(printed), authorisation("mady", pinned()));
+  }
+
+  @Test
+  void aLineThatNoLongerNamesThisBoxIsNotRepeated() throws Exception {
+    kept(TARGET, "ada", PUB, MAIN.fingerprint());
+    assertEquals(Optional.empty(), authorisation("mady", pinned()), "another handle");
+    kept("sail@10.0.0.2", "mady", PUB, MAIN.fingerprint());
+    assertEquals(Optional.empty(), authorisation("mady", pinned()), "another main");
+    kept(TARGET, "mady", PUB.replace("BLOB", "OTHER"), MAIN.fingerprint());
+    assertEquals(Optional.empty(), authorisation("mady", pinned()), "another key");
+    kept(TARGET, "mady", PUB, "SHA256:another");
+    assertEquals(Optional.empty(), authorisation("mady", pinned()), "another pin");
+  }
+
+  @Test
+  void aBoxNoJoinKeptALineForNamesNone() throws Exception {
+    assertEquals(Optional.empty(), authorisation("mady", pinned()));
+    Files.writeString(receipt(), "target: \"sail@10.0.0.1\nhandle: [mady");
+    assertEquals(Optional.empty(), authorisation("mady", pinned()), "a receipt cut short");
   }
 
   @Test
   void noHandleNoPinOrAnUnreadablePinNamesNoLine() throws Exception {
-    assertEquals(Optional.empty(), authorisation(null, pinnedAndNamed()));
+    kept(TARGET, "mady", PUB, MAIN.fingerprint());
+    assertEquals(Optional.empty(), authorisation(null, pinned()));
     assertEquals(
         Optional.empty(),
         authorisation("mady", new ScriptedShellExecutor().onOk("ssh-keygen -F 10.0.0.1", "")));
@@ -77,39 +107,60 @@ class SshSyncChannelTest {
 
   @Test
   void aBoxWithNoPublicKeyNamesNoLine() throws Exception {
+    kept(TARGET, "mady", PUB, MAIN.fingerprint());
     var knownHosts = Files.writeString(dir.resolve("known_hosts"), "");
-    var shell = pinnedAndNamed();
 
     assertEquals(
         Optional.empty(),
         SshSyncChannel.authorisation(
             "mady",
             dir.resolve("absent.pub"),
-            "sail@10.0.0.1",
-            new MainHostKey(shell, knownHosts),
-            new LocalIdentity(shell, dir.resolve("workstation_key.pub"), OperatorCommand.PLAIN)));
-  }
-
-  @Test
-  void authorizeLineCarriesNameAndEmailWhenPresent() {
-    assertEquals(
-        "sudo sail fde add mady --role member --name \"Mady M\" --email \"mady@example.com\""
-            + " --key \""
-            + PUB
-            + "\" --main-host-key "
-            + MAIN.fingerprint(),
-        SshSyncChannel.authorizeLine(
-            "mady", "Mady M", "mady@example.com", PUB, MAIN.fingerprint()));
+            TARGET,
+            new MainHostKey(pinned(), knownHosts),
+            receipt()));
   }
 
   @Test
   void authorizeLineOmitsBlankNameAndEmail() {
     assertEquals(
-        "sudo sail fde add mady --role member --key \""
+        "sudo sail fde add mady --role member --key '"
             + PUB
-            + "\" --main-host-key "
+            + "' --main-host-key "
             + MAIN.fingerprint(),
         SshSyncChannel.authorizeLine("mady", null, "  ", PUB, MAIN.fingerprint()));
+  }
+
+  @Test
+  void aPastedLineGivesSailEveryValueAsTypedAndRunsNothingElse() throws Exception {
+    var name = "Ada $(touch pwned) `touch pwned` \"quoted\" O'Brien $HOME";
+    var email = "a'b\"$(id)@example.com";
+    var line = SshSyncChannel.authorizeLine("mady", name, email, PUB, MAIN.fingerprint());
+
+    var shell =
+        new ProcessBuilder("bash", "-c", "sudo() { printf '%s\\n' \"$@\"; }; " + line)
+            .directory(dir.toFile())
+            .start();
+    var argv = new String(shell.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+    assertEquals(0, shell.waitFor());
+    assertEquals(
+        List.of(
+            "sail",
+            "fde",
+            "add",
+            "mady",
+            "--role",
+            "member",
+            "--name",
+            name,
+            "--email",
+            email,
+            "--key",
+            PUB,
+            "--main-host-key",
+            MAIN.fingerprint()),
+        argv.lines().toList());
+    assertFalse(Files.exists(dir.resolve("pwned")));
   }
 
   @Test

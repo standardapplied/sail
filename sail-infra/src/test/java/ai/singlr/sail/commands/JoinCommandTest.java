@@ -23,6 +23,7 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.SshSyncChannel;
 import ai.singlr.sail.engine.SyncIdentity;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -482,7 +483,15 @@ class JoinCommandTest {
     var out =
         JoinCommand.render(
             new JoinCommand.Plan(
-                "sail@host", "mady", "Mady M", "mady@example.com", PUB, MAIN.fingerprint(), false),
+                "sail@host",
+                "mady",
+                "Mady M",
+                "mady@example.com",
+                PUB,
+                MAIN.fingerprint(),
+                SshSyncChannel.authorizeLine(
+                    "mady", "Mady M", "mady@example.com", PUB, MAIN.fingerprint()),
+                false),
             true,
             OperatorCommand.PLAIN);
 
@@ -517,13 +526,42 @@ class JoinCommandTest {
 
             Send this to the operator of sail@maindevbox — they run it once:
 
-              sudo sail fde add mady --role member --key "%s" --main-host-key %s
+              sudo sail fde add mady --role member --key '%s' --main-host-key %s
 
             Once they have, finish here with sudo sail sync. Only a public key leaves this box — \
         never a secret.\
         """
             .formatted(MAIN.fingerprint(), PUB, MAIN.fingerprint()),
         human(plan));
+  }
+
+  @Test
+  void aJoinKeepsTheLineItPrintedWithTheIdentityItWasGiven() throws Exception {
+    var hostConfig = writeHostConfig();
+
+    var plan =
+        JoinCommand.plan(
+            hostConfig,
+            dir.resolve("sail.db"),
+            identity(),
+            "sail@maindevbox",
+            "mady",
+            "A B",
+            "a@b",
+            NO_MAIN,
+            pin(),
+            OperatorCommand.PLAIN);
+
+    assertEquals(
+        "sudo sail fde add mady --role member --name 'A B' --email a@b --key '"
+            + PUB
+            + "' --main-host-key "
+            + MAIN.fingerprint(),
+        plan.authorize());
+    assertTrue(human(plan).contains(plan.authorize()));
+    assertEquals(
+        plan.authorize(),
+        YamlUtil.parseFile(SshSyncChannel.receipt(hostConfig)).get("authorize_command"));
   }
 
   private JoinCommand.Plan join(Path hostConfig, String handle, SyncOperations.Channels channels)
@@ -567,9 +605,9 @@ class JoinCommandTest {
             .formatted(MAIN.fingerprint()),
         human(plan));
     assertEquals(
-        "sudo sail fde add mady --role member --key \""
+        "sudo sail fde add mady --role member --key '"
             + PUB
-            + "\" --main-host-key "
+            + "' --main-host-key "
             + MAIN.fingerprint(),
         YamlUtil.parseMap(json(plan)).get("authorize_command"));
   }

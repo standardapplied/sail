@@ -351,7 +351,7 @@ public final class InitCommand implements Runnable {
     out.println(
         Ansi.AUTO.string(
             "    @|cyan "
-                + operator.sail("fde add mady --role member --key \"…\" --main-host-key SHA256:…")
+                + operator.sail("fde add mady --role member --key '…' --main-host-key SHA256:…")
                 + "|@"));
   }
 

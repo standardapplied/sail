@@ -768,9 +768,10 @@ old pin with `sudo ssh-keygen -R <host>`, re-run `sudo sail init --main <target>
 the fingerprint it prints with main's (`sudo ssh-keygen -lf
 /etc/ssh/ssh_host_ed25519_key.pub` on main). A round ssh closes on "Permission denied
 (publickey)" with the box's own sync key is a node main has not authorised yet: the channel
-names the `fde add` line join printed (`SshSyncChannel.authorizeLine`: the handle, the roster
-name and email the box's git identity holds, the key and the pinned fingerprint), and the
-failure tells the node to send it to main's operator, then sync again, before ssh's words. On
+names the `fde add` line join printed and kept beside the host config (`SshSyncChannel.keep`,
+`join.yaml`: the handle, the roster name and email the join was given, the key and the pinned
+fingerprint, each one shell word), while it still names this box's handle, key, main and pin;
+and the failure tells the node to send it to main's operator, then sync again, before ssh's words. On
 main, that key sits on the locked `sail`
 user's `authorized_keys` as a forced command,
 `command="…/sail _gateway --fde <handle>",restrict …`. The gateway resolves the FDE and
