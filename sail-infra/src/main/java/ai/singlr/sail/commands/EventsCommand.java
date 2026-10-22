@@ -36,8 +36,6 @@ import picocli.CommandLine.Option;
     mixinStandardHelpOptions = true)
 public final class EventsCommand implements Runnable {
 
-  private static final String DATA_PREFIX = "data: ";
-  private static final String ERROR_EVENT = "event: error";
   private static final int DEFAULT_RECENT_LIMIT = 100;
 
   @Option(
@@ -138,23 +136,15 @@ public final class EventsCommand implements Runnable {
    */
   static void print(Iterator<String> lines, PrintStream out, boolean json)
       throws SailApiClient.Refused {
-    var ending = false;
-    while (lines.hasNext()) {
-      var line = lines.next();
-      if (line.equals(ERROR_EVENT)) {
-        ending = true;
-      } else if (line.startsWith(DATA_PREFIX)) {
-        var data = line.substring(DATA_PREFIX.length());
-        if (ending) {
-          throw SailApiClient.Refused.of(YamlUtil.parseMap(data));
-        }
-        try {
-          printOne(out, Event.fromJsonLine(data), json);
-        } catch (Exception parseError) {
-          System.err.println("  ⚠ failed to parse event: " + parseError.getMessage());
-        }
-      }
-    }
+    SailApiClient.readStream(
+        lines,
+        data -> {
+          try {
+            printOne(out, Event.fromJsonLine(data), json);
+          } catch (Exception parseError) {
+            System.err.println("  ⚠ failed to parse event: " + parseError.getMessage());
+          }
+        });
   }
 
   private static void printOne(PrintStream out, Event event, boolean json) {

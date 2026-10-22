@@ -16,10 +16,12 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 /**
  * HTTP client for the Sail control plane API. Used by CLI commands and in-container agents to
@@ -155,6 +157,28 @@ public final class SailApiClient implements AutoCloseable {
     @Override
     public Remedy remedy() {
       return remedy;
+    }
+  }
+
+  /**
+   * Hands each event's data in an SSE stream to {@code onData} until the stream ends; a stream the
+   * server ended with an {@code error} event ends in the refusal it names.
+   */
+  public static void readStream(Iterator<String> lines, Consumer<String> onData) throws Refused {
+    var ending = false;
+    while (lines.hasNext()) {
+      var line = lines.next();
+      if (line.isEmpty()) {
+        ending = false;
+      } else if (line.equals("event: error")) {
+        ending = true;
+      } else if (line.startsWith("data: ")) {
+        var data = line.substring("data: ".length());
+        if (ending) {
+          throw Refused.of(YamlUtil.parseMap(data));
+        }
+        onData.accept(data);
+      }
     }
   }
 

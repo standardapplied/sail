@@ -12,11 +12,13 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.PrintStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -84,25 +86,27 @@ public final class AgentStreamCommand implements Runnable {
       var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
       if (response.statusCode() != 200) {
         try (var body = response.body()) {
-          System.err.println(
+          throw new IllegalStateException(
               formatHttpError(
                   response.statusCode(),
                   new String(body.readAllBytes(), StandardCharsets.UTF_8),
                   OperatorCommand.here()));
         }
-        return;
       }
 
       try (var reader =
           new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
-        String line;
-        while ((line = reader.readLine()) != null) {
-          if (line.startsWith("data: ")) {
-            System.out.println(line.substring(6));
-          }
-        }
+        print(reader.lines().iterator(), System.out);
       }
     }
+  }
+
+  /**
+   * Prints each log line the stream sends until it ends; a stream the server ended with an {@code
+   * error} event ends in the refusal it names, for the door to render for its reader.
+   */
+  static void print(Iterator<String> lines, PrintStream out) throws SailApiClient.Refused {
+    SailApiClient.readStream(lines, out::println);
   }
 
   /**
