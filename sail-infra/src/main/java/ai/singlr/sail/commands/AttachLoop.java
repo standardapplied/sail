@@ -41,13 +41,25 @@ public final class AttachLoop {
 
   private AttachLoop() {}
 
+  /**
+   * {@link #run(ByteChannel, InputStream, OutputStream, Resizes, OperatorCommand)} for a caller
+   * with no terminal to resize, whose refusals read plain.
+   */
   public static String run(ByteChannel channel, InputStream stdin, OutputStream stdout)
       throws IOException {
-    return run(channel, stdin, stdout, Resizes.NONE);
+    return run(channel, stdin, stdout, Resizes.NONE, OperatorCommand.PLAIN);
   }
 
+  /**
+   * Attaches until detach or the session's end; each host refusal is narrated as {@code reader}
+   * reads it.
+   */
   public static String run(
-      ByteChannel channel, InputStream stdin, OutputStream stdout, Resizes resizes)
+      ByteChannel channel,
+      InputStream stdin,
+      OutputStream stdout,
+      Resizes resizes,
+      OperatorCommand reader)
       throws IOException {
     var seq = new AtomicLong();
     var writeLock = new Object();
@@ -121,8 +133,7 @@ public final class AttachLoop {
                   stdout, "history resumes mid-sequence; the screen settles on the next redraw");
             }
           }
-          case PtyMessage.Err(var refusal) ->
-              narrate(stdout, OperatorCommand.here().render(refusal));
+          case PtyMessage.Err(var refusal) -> narrate(stdout, reader.render(refusal));
           default -> {}
         }
       }

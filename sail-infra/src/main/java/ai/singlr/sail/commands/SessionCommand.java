@@ -149,7 +149,7 @@ public final class SessionCommand {
     @Override
     public Integer call() throws Exception {
       try (var client = SessionClient.connect(socketOrDefault(socket))) {
-        return attachTerminal(client, name, !observe);
+        return attachTerminal(client, name, !observe, operator());
       }
     }
   }
@@ -159,7 +159,8 @@ public final class SessionCommand {
    * duration, {@code Ctrl-]} detaches, and the ending — detach or session end — is narrated on the
    * way out. Fails before touching the terminal when there is none to put in raw mode.
    */
-  static int attachTerminal(SessionClient client, String name, boolean write) throws Exception {
+  static int attachTerminal(
+      SessionClient client, String name, boolean write, OperatorCommand reader) throws Exception {
     var channel = client.attach(name, write);
     var saved = Stty.saved().orElse(null);
     if (saved == null) {
@@ -169,7 +170,7 @@ public final class SessionCommand {
     Stty.set("raw -echo");
     String reason;
     try {
-      reason = AttachLoop.run(channel, System.in, System.out, terminalResizes());
+      reason = AttachLoop.run(channel, System.in, System.out, terminalResizes(), reader);
     } finally {
       Stty.set(saved);
     }

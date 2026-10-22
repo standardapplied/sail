@@ -183,7 +183,7 @@ public final class AgentAttachCommand implements Runnable {
                   : "  @|faint Joined the live session "
                       + plan.session()
                       + " (Ctrl-] detaches).|@"));
-      SessionCommand.attachTerminal(client, plan.session(), true);
+      SessionCommand.attachTerminal(client, plan.session(), true, operator);
     }
   }
 
