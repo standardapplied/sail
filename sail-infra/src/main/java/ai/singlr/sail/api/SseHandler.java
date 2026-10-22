@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -109,7 +108,7 @@ public final class SseHandler implements HttpHandler {
       try {
         auth.require(exchange);
       } catch (ApiException e) {
-        sendError(exchange, e);
+        ApiResponse.sendError(exchange, e);
         return;
       }
       if (!connectionPermits.tryAcquire()) {
@@ -208,17 +207,6 @@ public final class SseHandler implements HttpHandler {
   private static void writeComment(OutputStream out, String text) throws IOException {
     out.write((": " + text + "\n\n").getBytes(StandardCharsets.UTF_8));
     out.flush();
-  }
-
-  private static void sendError(HttpExchange exchange, ApiException error) throws IOException {
-    var response = ApiResponse.error(error.failure());
-    var bytes =
-        YamlUtil.dumpJson(new LinkedHashMap<>(response.body())).getBytes(StandardCharsets.UTF_8);
-    exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
-    exchange.sendResponseHeaders(response.status(), bytes.length);
-    try (var out = exchange.getResponseBody()) {
-      out.write(bytes);
-    }
   }
 
   private static void sendMethodNotAllowed(HttpExchange exchange) throws IOException {

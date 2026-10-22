@@ -125,7 +125,7 @@ public final class SailApiClient implements AutoCloseable {
       if (error == null) {
         return new Refused("API request failed" + http, Remedy.NONE);
       }
-      var refused = ended(error);
+      var refused = of(error);
       return refused.remedy.isEmpty()
           ? new Refused(refused.reason + http, Remedy.NONE)
           : new Refused(refused.reason, refused.remedy.then(http));
@@ -137,8 +137,8 @@ public final class SailApiClient implements AutoCloseable {
       return of(status, (Map<String, Object>) YamlUtil.parseMap(body).get("error"));
     }
 
-    /** The refusal a stream's closing {@code error} event describes. */
-    public static Refused ended(Map<String, Object> error) {
+    /** The refusal {@code error} describes, a stream's closing {@code error} event among them. */
+    public static Refused of(Map<String, Object> error) {
       var message = Objects.toString(error.get("message"), "API request failed");
       var remedy =
           error.get("remedy") instanceof List<?> parts

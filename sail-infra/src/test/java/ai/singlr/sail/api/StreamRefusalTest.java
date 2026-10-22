@@ -120,7 +120,7 @@ class StreamRefusalTest {
             + " an admin whether 'ada' is disabled.\"}], \"field_errors\": []}\n\n",
         frame);
     var data = frame.substring(frame.indexOf("data: ") + "data: ".length()).strip();
-    var refused = SailApiClient.Refused.ended(YamlUtil.parseMap(data));
+    var refused = SailApiClient.Refused.of(YamlUtil.parseMap(data));
     assertEquals(
         List.of(
             REASON

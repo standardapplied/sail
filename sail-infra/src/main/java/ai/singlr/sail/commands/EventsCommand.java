@@ -146,7 +146,7 @@ public final class EventsCommand implements Runnable {
       } else if (line.startsWith(DATA_PREFIX)) {
         var data = line.substring(DATA_PREFIX.length());
         if (ending) {
-          throw SailApiClient.Refused.ended(YamlUtil.parseMap(data));
+          throw SailApiClient.Refused.of(YamlUtil.parseMap(data));
         }
         try {
           printOne(out, Event.fromJsonLine(data), json);

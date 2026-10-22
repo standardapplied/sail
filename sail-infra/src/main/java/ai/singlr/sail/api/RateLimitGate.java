@@ -5,15 +5,11 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.config.YamlUtil;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
-import java.io.IOException;
 import java.net.Inet6Address;
 import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
-import java.util.LinkedHashMap;
 import java.util.Objects;
 
 /**
@@ -88,7 +84,7 @@ public final class RateLimitGate {
         charge("address:" + addressKey(exchange.getRemoteAddress()));
       } catch (ApiException e) {
         try {
-          writeError(exchange, e);
+          ApiResponse.sendError(exchange, e);
         } finally {
           exchange.close();
         }
@@ -133,16 +129,5 @@ public final class RateLimitGate {
     }
     return (bytes[10] == 0 && bytes[11] == 0)
         || (bytes[10] == (byte) 0xff && bytes[11] == (byte) 0xff);
-  }
-
-  private static void writeError(HttpExchange exchange, ApiException error) throws IOException {
-    var response = ApiResponse.error(error.failure());
-    var body =
-        YamlUtil.dumpJson(new LinkedHashMap<>(response.body())).getBytes(StandardCharsets.UTF_8);
-    exchange.getResponseHeaders().set("Content-Type", "application/json; charset=utf-8");
-    exchange.sendResponseHeaders(response.status(), body.length);
-    try (var output = exchange.getResponseBody()) {
-      output.write(body);
-    }
   }
 }
