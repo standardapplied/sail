@@ -10,7 +10,9 @@ import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.OperatorCommand;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
+import picocli.CommandLine.Spec;
 
 /**
  * Repairs the {@code sail} user's {@code authorized_keys} from the SSH-key registry. Key mutations
@@ -39,6 +41,8 @@ public final class HostKeysCommand implements Runnable {
       mixinStandardHelpOptions = true)
   static final class Sync implements Runnable {
 
+    @Spec private CommandSpec spec;
+
     @Option(names = "--dry-run", description = "Print the authorized_keys instead of writing it.")
     private boolean dryRun;
 
@@ -47,7 +51,7 @@ public final class HostKeysCommand implements Runnable {
       CliCommand.run(
           () -> {
             var operator = OperatorCommand.here();
-            try (var operations = OperationsFactory.open(operator)) {
+            try (var operations = OperationsFactory.open()) {
               var sync = new AuthorizedKeysSync();
               if (dryRun) {
                 System.out.print(sync.render(operations.identity().sshKeys()));
@@ -62,9 +66,10 @@ public final class HostKeysCommand implements Runnable {
                                 + " key(s) to "
                                 + synced.destination()));
                 case AuthorizedKeysSync.NeedsRoot _ ->
-                    throw new IllegalStateException(
-                        "Writing the sail user's authorized_keys requires root. Run it on the host"
-                            + " as root, or preview with --dry-run.");
+                    throw RootRequired.refusal(
+                        "Writing the sail user's authorized_keys requires root (preview it with"
+                            + " --dry-run).",
+                        spec);
                 case AuthorizedKeysSync.NotProvisioned _ ->
                     throw new IllegalStateException(notProvisioned(operator));
               }

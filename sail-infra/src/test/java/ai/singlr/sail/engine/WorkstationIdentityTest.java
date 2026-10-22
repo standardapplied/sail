@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -43,7 +45,7 @@ class WorkstationIdentityTest {
     var path = dir.resolve("workstation_key.pub");
     Files.writeString(path, ED25519 + "\n");
 
-    var key = WorkstationIdentity.registeredAt(path, OperatorCommand.PLAIN);
+    var key = WorkstationIdentity.registeredAt(path);
 
     assertTrue(key.isPresent());
     assertEquals("ssh-ed25519", key.orElseThrow().type());
@@ -58,8 +60,7 @@ class WorkstationIdentityTest {
     try {
       var refused =
           assertThrows(
-              IllegalStateException.class,
-              () -> WorkstationIdentity.registeredAt(unreadable, OperatorCommand.PLAIN));
+              IllegalStateException.class, () -> WorkstationIdentity.registeredAt(unreadable));
 
       assertEquals(
           "This box's workstation key ("
@@ -78,9 +79,7 @@ class WorkstationIdentityTest {
     Files.write(binary, new byte[] {(byte) 0xff, (byte) 0xfe, 'x'});
 
     var refused =
-        assertThrows(
-            IllegalStateException.class,
-            () -> WorkstationIdentity.registeredAt(binary, OperatorCommand.PLAIN));
+        assertThrows(IllegalStateException.class, () -> WorkstationIdentity.registeredAt(binary));
 
     assertTrue(
         refused
@@ -91,9 +90,7 @@ class WorkstationIdentityTest {
 
   @Test
   void registeredIsEmptyWhenMissing(@TempDir Path dir) {
-    assertTrue(
-        WorkstationIdentity.registeredAt(dir.resolve("absent.pub"), OperatorCommand.PLAIN)
-            .isEmpty());
+    assertTrue(WorkstationIdentity.registeredAt(dir.resolve("absent.pub")).isEmpty());
   }
 
   @Test
@@ -102,9 +99,7 @@ class WorkstationIdentityTest {
     Files.writeString(garbage, "not a key at all\n");
 
     var refused =
-        assertThrows(
-            IllegalStateException.class,
-            () -> WorkstationIdentity.registeredAt(garbage, OperatorCommand.SUDO));
+        assertThrows(IllegalStateException.class, () -> WorkstationIdentity.registeredAt(garbage));
 
     assertTrue(
         refused
@@ -114,14 +109,15 @@ class WorkstationIdentityTest {
                     + garbage
                     + ") is not an SSH public key: Unsupported"),
         refused.getMessage());
+    assertEquals(
+        Remedy.of("Register the key you connect with: ", WorkstationIdentity.SET_KEY),
+        ((Remedied) refused).remedy());
     assertTrue(
-        refused
-            .getMessage()
+        OperatorCommand.SUDO
+            .render((Remedied) refused)
             .endsWith(
                 " Register the key you connect with: sudo sail host config set ssh-public-key"),
         refused.getMessage());
-    assertEquals(
-        Optional.empty(),
-        WorkstationIdentity.registeredAt(dir.resolve("none.pub"), OperatorCommand.SUDO));
+    assertEquals(Optional.empty(), WorkstationIdentity.registeredAt(dir.resolve("none.pub")));
   }
 }

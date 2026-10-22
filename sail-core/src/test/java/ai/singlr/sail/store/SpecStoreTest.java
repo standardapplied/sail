@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import java.nio.charset.StandardCharsets;
@@ -799,7 +798,7 @@ class SpecStoreTest {
     Actor.run(Actor.cliOperator("mady"), () -> store.reproject("test-project", "renamed"));
     assertAuthoredBy("auth", "mady");
 
-    Actor.run(Actor.cliOperator("raj"), () -> store.restore("auth", first, OperatorCommand.PLAIN));
+    Actor.run(Actor.cliOperator("raj"), () -> store.restore("auth", first));
     assertAuthoredBy("auth", "raj");
 
     Actor.run(Actor.cliOperator("ada"), () -> store.delete("auth"));

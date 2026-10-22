@@ -9,6 +9,8 @@ import ai.singlr.sail.authority.PostingRule;
 import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.EngagementMode;
 import ai.singlr.sail.config.FileLimits;
@@ -28,7 +30,6 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -91,14 +92,14 @@ public final class SailOperations implements HostOperations {
     this.controlPlane = Objects.requireNonNull(db, "db");
     this.projectsDir = Objects.requireNonNull(projectsDir, "projectsDir");
     this.syncOperations = Objects.requireNonNull(syncOperations, "syncOperations");
-    this.pruner = new SpecPruner(db, eventBus, this::authoritative, DateTimeUtils::now, operator);
+    this.pruner = new SpecPruner(db, eventBus, this::authoritative, DateTimeUtils::now);
     this.door = new EventDoor(db, () -> box().handle());
     this.schema = new HostLanes.Schema(db, syncOperations);
     this.catalog =
         new HostLanes.Catalog(
             db, projectStore, specStore, roomStore, schema, pruner, this::cliOperator);
     this.identity = new HostLanes.Identity(db, this::box, roles(), this::cliOperator);
-    this.pty = new HostLanes.Pty(db, roles(), eventStore, operator);
+    this.pty = new HostLanes.Pty(db, roles(), eventStore);
     projectSkills = new ProjectSkills(this::projectFiles);
     dispatchOps.useProjectSkills(projectSkills);
     return this;
@@ -137,7 +138,7 @@ public final class SailOperations implements HostOperations {
 
   /** The operator of this box's root CLI, as {@link CliOperator} resolves it. */
   private Actor cliOperator() {
-    return CliOperator.of(syncOperations.configuration(), fdeStore, operator);
+    return CliOperator.of(syncOperations.configuration(), fdeStore);
   }
 
   @Override
@@ -187,7 +188,7 @@ public final class SailOperations implements HostOperations {
   @Override
   public synchronized SyncReport sync(SyncRequest request) throws Exception {
     var config = syncOperations.configuration();
-    var target = SyncOperations.resolveMain(request.main(), config, operator).target();
+    var target = SyncOperations.resolveMain(request.main(), config).target();
     if (target == null) return syncOperations.sync(request);
     var health = new SyncHealth(controlPlane);
     var attemptedAt = syncClock.instant();
@@ -203,11 +204,11 @@ public final class SailOperations implements HostOperations {
               : e instanceof IOException || e instanceof UncheckedIOException
                   ? "unreachable"
                   : "store";
-      var error = Objects.toString(e.getMessage(), e.getClass().getSimpleName());
+      var error = Remedied.whole(e);
       try {
         if (health.find(target).isEmpty()) health.begin(target, attemptedAt);
         if (health.failed(target, syncClock.instant(), kind, error) == 1) {
-          publishSyncTransition(target, false, kind, error);
+          publishSyncTransition(target, false, kind, error.plain());
         }
       } catch (RuntimeException recordingFailure) {
         e.addSuppressed(recordingFailure);
@@ -281,17 +282,17 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public List<SyncConflicts.Conflict> conflicts() {
-    return new ConflictOperations(controlPlane, operator).list();
+    return new ConflictOperations(controlPlane).list();
   }
 
   @Override
   public SyncConflicts.Conflict conflict(String type, String id) {
-    return new ConflictOperations(controlPlane, operator).find(type, id);
+    return new ConflictOperations(controlPlane).find(type, id);
   }
 
   @Override
   public String conflictMergeTemplate(String type, String id) {
-    return new ConflictOperations(controlPlane, operator).mergeTemplate(type, id);
+    return new ConflictOperations(controlPlane).mergeTemplate(type, id);
   }
 
   /**
@@ -302,7 +303,7 @@ public final class SailOperations implements HostOperations {
   @Override
   public SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution) {
     Refusals.requireWriter("resolve conflicts");
-    var resolved = new ConflictOperations(controlPlane, operator).resolve(type, id, resolution);
+    var resolved = new ConflictOperations(controlPlane).resolve(type, id, resolution);
     triggerSyncAfterWrite();
     return resolved;
   }
@@ -326,7 +327,6 @@ public final class SailOperations implements HostOperations {
   private final ProjectLoader projects;
   private final SnapshotOperations snapshotOps;
   private final GlobalSpecOperations globalSpecOps;
-  private final OperatorCommand operator;
   private SpecPruner pruner;
   private EventDoor door;
   private final ReviewOperations reviewOps;
@@ -340,20 +340,17 @@ public final class SailOperations implements HostOperations {
   private BoxCredentialStore boxCredentialStore;
   private EventStore eventStore;
 
-  public SailOperations(OperatorCommand operator) {
-    this(new ShellExecutor(false), ProjectReader.ofCatalog(null), operator);
+  public SailOperations() {
+    this(new ShellExecutor(false), ProjectReader.ofCatalog(null));
   }
 
-  public SailOperations(ShellExec shell, ProjectReader definitions, OperatorCommand operator) {
-    this(shell, definitions, WatcherSpawner::spawnProcess, operator);
+  public SailOperations(ShellExec shell, ProjectReader definitions) {
+    this(shell, definitions, WatcherSpawner::spawnProcess);
   }
 
   SailOperations(
-      ShellExec shell,
-      ProjectReader definitions,
-      WatcherSpawner.ProcessSpawner watcherFallback,
-      OperatorCommand operator) {
-    this(shell, definitions, watcherFallback, null, null, operator);
+      ShellExec shell, ProjectReader definitions, WatcherSpawner.ProcessSpawner watcherFallback) {
+    this(shell, definitions, watcherFallback, null, null);
   }
 
   /** Construct with explicit event-bus wiring; used by {@link SailApiServer}. */
@@ -361,17 +358,8 @@ public final class SailOperations implements HostOperations {
       ShellExec shell,
       ProjectReader definitions,
       EventBus eventBus,
-      AuditPersister auditPersister,
-      OperatorCommand operator) {
-    this(
-        shell,
-        definitions,
-        WatcherSpawner::spawnProcess,
-        eventBus,
-        auditPersister,
-        null,
-        null,
-        operator);
+      AuditPersister auditPersister) {
+    this(shell, definitions, WatcherSpawner::spawnProcess, eventBus, auditPersister, null, null);
   }
 
   /** Construct with database-backed stores; used by the control plane server. */
@@ -381,8 +369,7 @@ public final class SailOperations implements HostOperations {
       EventBus eventBus,
       EventSubscriber auditSubscriber,
       SpecStore specStore,
-      ReviewStore reviewStore,
-      OperatorCommand operator) {
+      ReviewStore reviewStore) {
     this(
         shell,
         definitions,
@@ -390,8 +377,7 @@ public final class SailOperations implements HostOperations {
         eventBus,
         auditSubscriber instanceof AuditPersister ap ? ap : null,
         specStore,
-        reviewStore,
-        operator);
+        reviewStore);
   }
 
   /** Construct with database-backed spec store (no review store). */
@@ -400,9 +386,8 @@ public final class SailOperations implements HostOperations {
       ProjectReader definitions,
       EventBus eventBus,
       EventSubscriber auditSubscriber,
-      SpecStore specStore,
-      OperatorCommand operator) {
-    this(shell, definitions, eventBus, auditSubscriber, specStore, null, operator);
+      SpecStore specStore) {
+    this(shell, definitions, eventBus, auditSubscriber, specStore, null);
   }
 
   /** Construct with the project catalog included but no sync or run aggregate. */
@@ -413,8 +398,7 @@ public final class SailOperations implements HostOperations {
       EventSubscriber auditSubscriber,
       SpecStore specStore,
       ReviewStore reviewStore,
-      ProjectStore projectStore,
-      OperatorCommand operator) {
+      ProjectStore projectStore) {
     this(
         shell,
         definitions,
@@ -426,8 +410,7 @@ public final class SailOperations implements HostOperations {
         projectStore,
         SyncScheduler.disabled(),
         null,
-        SessionYield.NONE,
-        operator);
+        SessionYield.NONE);
   }
 
   /**
@@ -451,8 +434,7 @@ public final class SailOperations implements HostOperations {
       ProjectStore projectStore,
       SyncScheduler syncScheduler,
       FdeStore fdeStore,
-      SessionYield sessionYield,
-      OperatorCommand operator) {
+      SessionYield sessionYield) {
     this(
         shell,
         definitions,
@@ -463,11 +445,10 @@ public final class SailOperations implements HostOperations {
         reviewStore,
         runStore,
         projectStore,
-        ConnectEnvironment.detector(operator),
+        ConnectEnvironment.detector(),
         syncScheduler,
         fdeStore,
-        sessionYield,
-        operator);
+        sessionYield);
   }
 
   public SailOperations useSyncScheduler(SyncScheduler scheduler) {
@@ -533,9 +514,8 @@ public final class SailOperations implements HostOperations {
       ProjectReader definitions,
       WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
-      AuditPersister auditPersister,
-      OperatorCommand operator) {
-    this(shell, definitions, watcherFallback, eventBus, auditPersister, null, null, operator);
+      AuditPersister auditPersister) {
+    this(shell, definitions, watcherFallback, eventBus, auditPersister, null, null);
   }
 
   SailOperations(
@@ -545,8 +525,7 @@ public final class SailOperations implements HostOperations {
       EventBus eventBus,
       AuditPersister auditPersister,
       SpecStore specStore,
-      ReviewStore reviewStore,
-      OperatorCommand operator) {
+      ReviewStore reviewStore) {
     this(
         shell,
         definitions,
@@ -555,8 +534,7 @@ public final class SailOperations implements HostOperations {
         auditPersister,
         specStore,
         reviewStore,
-        null,
-        operator);
+        null);
   }
 
   SailOperations(
@@ -567,8 +545,7 @@ public final class SailOperations implements HostOperations {
       AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore,
-      RunStore runStore,
-      OperatorCommand operator) {
+      RunStore runStore) {
     this(
         shell,
         definitions,
@@ -579,11 +556,10 @@ public final class SailOperations implements HostOperations {
         reviewStore,
         runStore,
         null,
-        ConnectEnvironment.detector(operator),
+        ConnectEnvironment.detector(),
         SyncScheduler.disabled(),
         null,
-        SessionYield.NONE,
-        operator);
+        SessionYield.NONE);
   }
 
   SailOperations(
@@ -596,8 +572,7 @@ public final class SailOperations implements HostOperations {
       ReviewStore reviewStore,
       RunStore runStore,
       ProjectStore projectStore,
-      Supplier<ConnectEnvironment> connectEnvironment,
-      OperatorCommand operator) {
+      Supplier<ConnectEnvironment> connectEnvironment) {
     this(
         shell,
         definitions,
@@ -611,8 +586,7 @@ public final class SailOperations implements HostOperations {
         connectEnvironment,
         SyncScheduler.disabled(),
         null,
-        SessionYield.NONE,
-        operator);
+        SessionYield.NONE);
   }
 
   SailOperations(
@@ -626,8 +600,7 @@ public final class SailOperations implements HostOperations {
       RunStore runStore,
       ProjectStore projectStore,
       Supplier<ConnectEnvironment> connectEnvironment,
-      SyncScheduler syncScheduler,
-      OperatorCommand operator) {
+      SyncScheduler syncScheduler) {
     this(
         shell,
         definitions,
@@ -641,8 +614,7 @@ public final class SailOperations implements HostOperations {
         connectEnvironment,
         syncScheduler,
         null,
-        SessionYield.NONE,
-        operator);
+        SessionYield.NONE);
   }
 
   SailOperations(
@@ -658,8 +630,7 @@ public final class SailOperations implements HostOperations {
       Supplier<ConnectEnvironment> connectEnvironment,
       SyncScheduler syncScheduler,
       FdeStore fdeStore,
-      SessionYield sessionYield,
-      OperatorCommand operator) {
+      SessionYield sessionYield) {
     this(
         shell,
         definitions,
@@ -682,8 +653,7 @@ public final class SailOperations implements HostOperations {
             DispatchOperations.autoSnapshotter(shell),
             DispatchOperations.shellLauncher(shell),
             DispatchOperations.Listener.NONE,
-            StopOperations.Listener.NONE),
-        operator);
+            StopOperations.Listener.NONE));
   }
 
   public SailOperations(
@@ -700,8 +670,7 @@ public final class SailOperations implements HostOperations {
       SyncScheduler syncScheduler,
       FdeStore fdeStore,
       SessionYield sessionYield,
-      OperationHooks hooks,
-      OperatorCommand operator) {
+      OperationHooks hooks) {
     this.shell = shell;
     this.watcherSpawner = hooks.watcher();
     this.eventBus = eventBus;
@@ -713,19 +682,12 @@ public final class SailOperations implements HostOperations {
     this.connectEnvironment = connectEnvironment;
     this.syncScheduler = syncScheduler;
     this.fdeStore = fdeStore;
-    this.operator = Objects.requireNonNull(operator, "operator");
-    this.projects = new ProjectLoader(shell, definitions, operator);
+    this.projects = new ProjectLoader(shell, definitions);
     this.snapshotOps = new SnapshotOperations(shell, projects, runStore, this::publishOnBus);
     this.globalSpecOps =
         new GlobalSpecOperations(
-            specStore,
-            reviewStore,
-            eventBus,
-            runStore,
-            () -> roomStore,
-            this::authoritative,
-            operator);
-    this.reviewOps = new ReviewOperations(reviewStore, specStore, operator);
+            specStore, reviewStore, eventBus, runStore, () -> roomStore, this::authoritative);
+    this.reviewOps = new ReviewOperations(reviewStore, specStore);
     this.dispatchOps =
         new DispatchOperations(
             shell,
@@ -739,8 +701,7 @@ public final class SailOperations implements HostOperations {
             hooks.snapshotter(),
             hooks.launcher(),
             hooks.dispatchListener(),
-            sessionYield,
-            operator);
+            sessionYield);
     this.dispatchOps.liveMembers().useRoom(this::postAsRun);
     this.stopOps =
         specStore != null && runStore != null
@@ -751,8 +712,7 @@ public final class SailOperations implements HostOperations {
                 runStore,
                 hooks.events(),
                 StopOperations.sessionHalter(shell),
-                hooks.stopListener(),
-                operator)
+                hooks.stopListener())
             : null;
   }
 
@@ -830,7 +790,7 @@ public final class SailOperations implements HostOperations {
   @Override
   public Result<FdesResponse> fdes() {
     if (fdeStore == null) {
-      return Result.failure(ErrorCode.INTERNAL, storeUnavailable("FDE roster", operator));
+      return storeUnavailable("FDE roster").failure().asFailure();
     }
     return safe(this::fdesValue);
   }
@@ -1290,8 +1250,13 @@ public final class SailOperations implements HostOperations {
     return safe(() -> agentReportValue(readable(project), localHandle));
   }
 
-  static String storeUnavailable(String store, OperatorCommand operator) {
-    return store + " not available. Start the server with '" + operator.sail("server start") + "'.";
+  /** What starts the server that keeps the stores and logs this box answers from. */
+  static final Remedy START_SERVER =
+      Remedy.of("Start the server with '", Remedy.sail("server start"), "'.");
+
+  /** The refusal for a store this process opened none of. */
+  static ApiException storeUnavailable(String store) {
+    return new ApiException(ErrorCode.INTERNAL, store + " not available.", START_SERVER);
   }
 
   /**
@@ -1300,7 +1265,7 @@ public final class SailOperations implements HostOperations {
    */
   private String readable(String project) {
     if (!Actor.reader().scope().admits(project)) {
-      throw ProjectReader.absent(project, operator);
+      throw ProjectReader.absent(project);
     }
     return project;
   }
@@ -1366,7 +1331,7 @@ public final class SailOperations implements HostOperations {
   @Override
   public Result<StopRunResponse> stopRun(String runId, String localHandle) {
     if (stopOps == null) {
-      return Result.failure(ErrorCode.INTERNAL, storeUnavailable("Run store", operator));
+      return storeUnavailable("Run store").failure().asFailure();
     }
     var outcome = safe(() -> stopOps.stop(new StopOperations.RunTarget(runId), localHandle, false));
     if (outcome instanceof Result.Failure<StopOperations.Outcome>) {
@@ -1402,7 +1367,7 @@ public final class SailOperations implements HostOperations {
   private <T> Result<T> onLocalRun(
       String runId, String localHandle, Function<RunStore.RunRow, Result<T>> served) {
     if (runStore == null) {
-      return Result.failure(ErrorCode.INTERNAL, storeUnavailable("Run store", operator));
+      return storeUnavailable("Run store").failure().asFailure();
     }
     var run =
         Scoped.row(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project).orElse(null);
@@ -1437,7 +1402,7 @@ public final class SailOperations implements HostOperations {
 
   private RunStore requireRunStore() {
     if (runStore == null) {
-      throw new ApiException(ErrorCode.INTERNAL, storeUnavailable("Run store", operator));
+      throw storeUnavailable("Run store");
     }
     return runStore;
   }
@@ -1535,7 +1500,7 @@ public final class SailOperations implements HostOperations {
       throw new ApiException(
           ErrorCode.SERVER_IP_NOT_CONFIGURED,
           "Server IP is not configured on this node.",
-          "Run: " + operator.sail("host config set server-ip <your-server-ip>"));
+          Remedy.of("Run: ", Remedy.sail("host config set server-ip", "<your-server-ip>")));
     }
     return new ConnectResponse(
         project,
@@ -2087,7 +2052,7 @@ public final class SailOperations implements HostOperations {
    */
   private RunStore.RunRow requireRun(String runId) {
     if (runStore == null) {
-      throw new ApiException(ErrorCode.INTERNAL, storeUnavailable("Run store", operator));
+      throw storeUnavailable("Run store");
     }
     return Scoped.row(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project)
         .orElseThrow(
@@ -2098,7 +2063,7 @@ public final class SailOperations implements HostOperations {
 
   private MessageStore requireMessageStore() {
     if (messageStore == null) {
-      throw new ApiException(ErrorCode.INTERNAL, storeUnavailable("Message store", operator));
+      throw storeUnavailable("Message store");
     }
     return messageStore;
   }
@@ -2120,7 +2085,7 @@ public final class SailOperations implements HostOperations {
             throw new ApiException(
                 ErrorCode.INTERNAL,
                 "This box keeps no erasure log, so nothing can be pruned here.",
-                "Start the server with '" + operator.sail("server start") + "'.");
+                START_SERVER);
           }
           return pruner.prune(request);
         });

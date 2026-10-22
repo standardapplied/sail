@@ -18,7 +18,6 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -119,8 +118,7 @@ class HomeRoomTest {
             null,
             specStore,
             new ReviewStore(db),
-            new RunStore(db),
-            OperatorCommand.PLAIN)
+            new RunStore(db))
         .useMessages(new MessageStore(db))
         .useRooms(roomStore)
         .useLaunchExecutor(Runnable::run);
@@ -219,7 +217,7 @@ class HomeRoomTest {
     assertEquals("Agent 'claude-code' is not installed in project 'acme'.", refused.getMessage());
     assertEquals(
         "Add claude-code to sail.yaml's agent.install list and run 'sail project apply acme'.",
-        refused.failure().action());
+        refused.failure().remedy().plain());
     assertTrue(roomStore.findById("acme--ada").isEmpty(), "a refused member leaves no room");
     assertTrue(
         new ChangeLog(db).head("room", "acme--ada").isEmpty(), "and no revision for sync to carry");
@@ -333,7 +331,7 @@ class HomeRoomTest {
         refused.getMessage());
     assertEquals(
         "Have mady or an admin delete room 'acme--ada', then apply again.",
-        refused.failure().action());
+        refused.failure().remedy().plain());
     assertTrue(roster("acme--ada").isEmpty());
   }
 
@@ -414,7 +412,7 @@ class HomeRoomTest {
     assertEquals(
         "Room 'acme--ada' belongs to project 'other', not 'acme', whose home room it would be.",
         refused.getMessage());
-    assertEquals("Free room id 'acme--ada', then apply again.", refused.failure().action());
+    assertEquals("Free room id 'acme--ada', then apply again.", refused.failure().remedy().plain());
     assertEquals("other", roomStore.findById("acme--ada").orElseThrow().project());
   }
 
@@ -459,8 +457,7 @@ class HomeRoomTest {
             null,
             specStore,
             new ReviewStore(db),
-            new RunStore(db),
-            OperatorCommand.PLAIN);
+            new RunStore(db));
 
     var refused =
         assertThrows(
@@ -493,7 +490,7 @@ class HomeRoomTest {
             ApiException.class, () -> HomeRoom.ensure(ops, definition(CLAUDE_ONLY), "ada"));
 
     assertEquals("The catalog is locked.", refused.getMessage());
-    assertEquals("Retry.", refused.failure().action());
+    assertEquals("Retry.", refused.failure().remedy().plain());
   }
 
   @Test

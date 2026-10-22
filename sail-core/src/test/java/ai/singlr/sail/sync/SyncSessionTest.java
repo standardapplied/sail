@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.engine.OperatorCommand;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
@@ -35,9 +34,8 @@ class SyncSessionTest {
         new ai.singlr.sail.sync.ByteStreams.Input(serverLines),
         out,
         HELLO,
-        notices::add,
-        ignored -> {},
-        OperatorCommand.PLAIN);
+        notice -> notices.add(notice.plain()),
+        ignored -> {});
   }
 
   @Test
@@ -159,9 +157,8 @@ class SyncSessionTest {
             new ai.singlr.sail.sync.ByteStreams.Input(older),
             new ai.singlr.sail.sync.ByteStreams.Output(),
             SyncWire.Hello.of("0.44.2", "node"),
-            notices::add,
-            ignored -> {},
-            OperatorCommand.PLAIN)) {
+            notice -> notices.add(notice.plain()),
+            ignored -> {})) {
       assertInstanceOf(PagedSyncSession.class, session);
     }
     assertEquals(1, notices.size());
@@ -179,9 +176,8 @@ class SyncSessionTest {
             new ai.singlr.sail.sync.ByteStreams.Input(dev),
             new ai.singlr.sail.sync.ByteStreams.Output(),
             SyncWire.Hello.of("0.44.2", "node"),
-            notices::add,
-            ignored -> {},
-            OperatorCommand.PLAIN)) {
+            notice -> notices.add(notice.plain()),
+            ignored -> {})) {
       assertInstanceOf(PagedSyncSession.class, session);
     }
     assertTrue(notices.isEmpty());
@@ -206,8 +202,7 @@ class SyncSessionTest {
                 brokenWriter(),
                 HELLO,
                 n -> {},
-                ignored -> {},
-                OperatorCommand.PLAIN));
+                ignored -> {}));
   }
 
   @Test
@@ -279,11 +274,7 @@ class SyncSessionTest {
             () -> {
               try (var session =
                   new PagedSyncSession(
-                      new ai.singlr.sail.sync.ByteStreams.Input(""),
-                      brokenWriter(),
-                      "main",
-                      64,
-                      OperatorCommand.PLAIN)) {
+                      new ai.singlr.sail.sync.ByteStreams.Input(""), brokenWriter(), "main", 64)) {
                 throw original;
               }
             });

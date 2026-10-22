@@ -27,8 +27,10 @@ import java.util.List;
 import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
+import picocli.CommandLine.Spec;
 
 /**
  * Joins this box to a main devbox as a sync node in one step: generates the sail-managed sync key
@@ -49,6 +51,8 @@ import picocli.CommandLine.Parameters;
     description = "Join this box to a main devbox as a sync node (prints the key to authorise).",
     mixinStandardHelpOptions = true)
 public final class JoinCommand implements Runnable {
+
+  @Spec private CommandSpec spec;
 
   @Parameters(
       index = "0",
@@ -81,6 +85,7 @@ public final class JoinCommand implements Runnable {
 
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
+    requireWritable(SailPaths.hostConfigPath());
     var normalized = normalizeTarget(target);
     nonSailUserWarning(target)
         .ifPresent(warning -> System.err.println(Banner.errorLine(warning, Ansi.AUTO)));
@@ -98,7 +103,7 @@ public final class JoinCommand implements Runnable {
             resolvedName,
             resolvedEmail,
             SshSyncChannel::open,
-            MainHostKey.here(operator),
+            MainHostKey.here(),
             operator);
     System.out.println(render(plan, json, operator));
   }
@@ -130,7 +135,6 @@ public final class JoinCommand implements Runnable {
       throw HostInitCommand.notInitialized(operator);
     }
     HostConfigSetCommand.validate("sync-main", target);
-    requireWritable(hostConfig, target);
     var pinned = mainHostKey.pin(target);
     var host = HostYaml.fromMap(YamlUtil.parseFile(hostConfig));
     var keyBefore = identity.exists();
@@ -141,19 +145,13 @@ public final class JoinCommand implements Runnable {
             handle);
     HandleChange.write(hostConfig, db, host, updated, channels, operator);
     var publicKey = identity.ensure("sail-sync:" + handle);
-    var mainHasKey =
-        keyBefore && SyncOperations.welcomedAs(updated.sync(), channels, handle, operator);
+    var mainHasKey = keyBefore && SyncOperations.welcomedAs(updated.sync(), channels, handle);
     return new Plan(target, handle, name, email, publicKey, pinned, mainHasKey);
   }
 
-  private static void requireWritable(Path hostConfig, String target) {
-    var probe = Files.exists(hostConfig) ? hostConfig : hostConfig.getParent();
-    if (probe != null && !Files.isWritable(probe)) {
-      throw new IllegalStateException(
-          "Writing "
-              + hostConfig
-              + " needs root. Re-run: "
-              + OperatorCommand.SUDO.sail("join " + target));
+  private void requireWritable(Path hostConfig) {
+    if (Files.exists(hostConfig) && !Files.isWritable(hostConfig)) {
+      throw RootRequired.refusal("Writing " + hostConfig + " needs root.", spec);
     }
   }
 
@@ -313,7 +311,7 @@ public final class JoinCommand implements Runnable {
    */
   static String authorizeLine(
       String handle, String name, String email, String publicKey, String mainHostKey) {
-    var line = new StringBuilder(OperatorCommand.elsewhere("fde add " + handle + " --role member"));
+    var line = new StringBuilder(OperatorCommand.SUDO.sail("fde add " + handle + " --role member"));
     if (Strings.isNotBlank(name)) {
       line.append(" --name \"").append(name).append('"');
     }

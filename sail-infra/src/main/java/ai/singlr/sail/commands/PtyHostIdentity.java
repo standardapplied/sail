@@ -6,7 +6,6 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.pty.PtyIdentity;
 import java.io.IOException;
@@ -23,21 +22,19 @@ final class PtyHostIdentity implements PtyIdentity.Resolver {
 
   private final Supplier<String> boxHandle;
   private final Path dbPath;
-  private final OperatorCommand operator;
 
-  PtyHostIdentity(OperatorCommand operator) {
-    this(HostSync::handle, SailPaths.controlPlaneDb(), operator);
+  PtyHostIdentity() {
+    this(HostSync::handle, SailPaths.controlPlaneDb());
   }
 
-  PtyHostIdentity(Supplier<String> boxHandle, Path dbPath, OperatorCommand operator) {
+  PtyHostIdentity(Supplier<String> boxHandle, Path dbPath) {
     this.boxHandle = boxHandle;
     this.dbPath = dbPath;
-    this.operator = operator;
   }
 
   @Override
   public PtyIdentity resolve(String token) throws IOException {
-    try (var operations = OperationsFactory.open(dbPath, operator)) {
+    try (var operations = OperationsFactory.open(dbPath)) {
       return operations.pty().identity(token, boxHandle.get());
     }
   }

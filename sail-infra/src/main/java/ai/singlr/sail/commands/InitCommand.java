@@ -25,7 +25,9 @@ import java.util.function.Supplier;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
+import picocli.CommandLine.Spec;
 
 /**
  * One command to bring a box fully online and connect it to the org. It converges from whatever
@@ -46,6 +48,8 @@ import picocli.CommandLine.Option;
     description = "Set up this box and connect it to the org in one step.",
     mixinStandardHelpOptions = true)
 public final class InitCommand implements Runnable {
+
+  @Spec private CommandSpec spec;
 
   @Option(
       names = "--as-main",
@@ -282,9 +286,7 @@ public final class InitCommand implements Runnable {
 
   private void requireRoot(boolean root) {
     if (!root) {
-      throw new IllegalStateException(
-          "Root privileges required. Re-run with: "
-              + OperatorCommand.SUDO.sail("init " + (asMain ? "--as-main" : "--main " + main)));
+      throw RootRequired.refusal(spec);
     }
   }
 
@@ -344,7 +346,7 @@ public final class InitCommand implements Runnable {
         Ansi.AUTO.string("  @|bold,green ✓|@ This box is the org's @|bold main|@ and ready."));
     out.println(
         "  Add each engineer once they send you the line their '"
-            + OperatorCommand.elsewhere("init --main")
+            + OperatorCommand.SUDO.sail("init --main")
             + "' printed, e.g.:");
     out.println(
         Ansi.AUTO.string(

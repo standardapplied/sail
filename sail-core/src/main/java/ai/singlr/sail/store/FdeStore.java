@@ -6,10 +6,11 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.util.Collection;
@@ -254,19 +255,15 @@ public final class FdeStore {
    * @throws IllegalArgumentException when the roster holds no such FDE, or it is not scoped: an FDE
    *     that sees every project has nothing to be granted
    */
-  public ProjectScope grantsOf(String handle, OperatorCommand operator) {
+  public ProjectScope grantsOf(String handle) {
     if (byHandle(handle).isEmpty()) {
       throw new IllegalArgumentException("Unknown FDE '" + handle + "'.");
     }
     var scope = scopeOf(handle);
     if (scope.unrestricted()) {
-      throw new IllegalArgumentException(
-          "FDE '"
-              + handle
-              + "' sees every project, so there is nothing to grant or revoke. Scope it first"
-              + " with '"
-              + operator.sail("fde update " + handle + " --scoped")
-              + "'.");
+      throw Remedied.argument(
+          "FDE '" + handle + "' sees every project, so there is nothing to grant or revoke.",
+          Remedy.of("Scope it first with '", Remedy.sail("fde update", handle, "--scoped"), "'."));
     }
     return scope;
   }
@@ -275,11 +272,11 @@ public final class FdeStore {
    * Grants the scoped FDE {@code handle} the project {@code project}; granting what it already
    * holds changes nothing. Refused as {@link #grantsOf} refuses.
    */
-  public void grant(String handle, String project, OperatorCommand operator) {
+  public void grant(String handle, String project) {
     NameValidator.requireValidProjectName(project);
     db.transaction(
         () -> {
-          grantsOf(handle, operator);
+          grantsOf(handle);
           db.execute(
               """
               INSERT INTO project_grants (fde_id, project, granted_at)
@@ -296,10 +293,10 @@ public final class FdeStore {
    * Takes the project {@code project} back from the scoped FDE {@code handle}; revoking what it
    * does not hold changes nothing. Refused as {@link #grantsOf} refuses.
    */
-  public void revoke(String handle, String project, OperatorCommand operator) {
+  public void revoke(String handle, String project) {
     db.transaction(
         () -> {
-          grantsOf(handle, operator);
+          grantsOf(handle);
           db.execute(
               """
               DELETE FROM project_grants WHERE project = ?
@@ -386,13 +383,13 @@ public final class FdeStore {
    * <p>Refuses to remove the last active admin. The guard runs inside the delete transaction so two
    * concurrent removals cannot both pass it and leave the host with no administrator.
    */
-  public void remove(String fdeId, OperatorCommand operator) {
+  public void remove(String fdeId) {
     db.transaction(
         () -> {
           var fde =
               byId(fdeId)
                   .orElseThrow(() -> new IllegalArgumentException("No FDE with id " + fdeId + "."));
-          requireRemovable(fde, operator);
+          requireRemovable(fde);
           delete(fde);
         });
   }
@@ -427,13 +424,12 @@ public final class FdeStore {
    * asks it again inside its delete, so a caller that asks first only learns of the refusal before
    * it does anything else.
    */
-  public void requireRemovable(Fde fde, OperatorCommand operator) {
+  public void requireRemovable(Fde fde) {
     if ("admin".equals(fde.role()) && fde.active() && activeAdminCount() <= 1) {
-      throw new IllegalStateException(
-          "'"
-              + fde.handle()
-              + "' is the last active admin FDE. Add another admin first: "
-              + operator.sail("fde add <handle> --role admin"));
+      throw Remedied.state(
+          "'" + fde.handle() + "' is the last active admin FDE.",
+          Remedy.of(
+              "Add another admin first: ", Remedy.sail("fde add", "<handle>", "--role", "admin")));
     }
   }
 

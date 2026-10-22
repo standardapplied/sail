@@ -5,9 +5,10 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.OperatorCommand;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -32,34 +33,38 @@ public record SailYaml(
     Ssh ssh) {
 
   /** The keys sail no longer reads, each with the one sentence saying where its text now goes. */
-  public static final Map<String, String> DELETED_KEYS =
+  public static final Map<String, Remedy> DELETED_KEYS =
       Map.of(
           "agent_context",
-          "agent_context is no longer read: sail writes no context file. Put what it said in the"
-              + " repo's AGENTS.md, and a rule in a project skill ("
-              + OperatorCommand.elsewhere("project skills add")
-              + ").",
+          Remedy.of(
+              "agent_context is no longer read: sail writes no context file. Put what it said in"
+                  + " the repo's AGENTS.md, and a rule in a project skill (",
+              Remedy.sail("project skills add"),
+              ")."),
           "agent.methodology",
-          "agent.methodology is no longer read: sail's work prompt tells the agent to run the"
-              + " project's verification. Put the commands in the repo's AGENTS.md.",
+          Remedy.of(
+              "agent.methodology is no longer read: sail's work prompt tells the agent to run the"
+                  + " project's verification. Put the commands in the repo's AGENTS.md."),
           "agent.build_skill",
-          "agent.build_skill is no longer read: sail's work prompt says how a build runs. Put what"
-              + " the skill said in the repo's AGENTS.md, or keep it as a project skill ("
-              + OperatorCommand.elsewhere("project skills add")
-              + ") the agent invokes when relevant.",
+          Remedy.of(
+              "agent.build_skill is no longer read: sail's work prompt says how a build runs. Put"
+                  + " what the skill said in the repo's AGENTS.md, or keep it as a project skill (",
+              Remedy.sail("project skills add"),
+              ") the agent invokes when relevant."),
           "agent.review_pipeline.fix_skill",
-          "agent.review_pipeline.fix_skill is no longer read: a fix run reads the build's work"
-              + " prompt. Put what the skill said in the repo's AGENTS.md, or keep it as a project"
-              + " skill ("
-              + OperatorCommand.elsewhere("project skills add")
-              + ").");
+          Remedy.of(
+              "agent.review_pipeline.fix_skill is no longer read: a fix run reads the build's work"
+                  + " prompt. Put what the skill said in the repo's AGENTS.md, or keep it as a"
+                  + " project skill (",
+              Remedy.sail("project skills add"),
+              ")."));
 
   /** Refuses a definition that still sets {@code key}, one of {@link #DELETED_KEYS}. */
   static void refuseDeleted(Map<String, Object> map, String key, String descriptor) {
     var leaf = key.substring(key.lastIndexOf('.') + 1);
     if (map.containsKey(leaf)) {
-      throw new IllegalArgumentException(
-          DELETED_KEYS.get(key) + " Then remove `" + key + "` from " + descriptor + ".");
+      throw Remedied.argument(
+          "", DELETED_KEYS.get(key).then(" Then remove `" + key + "` from " + descriptor + "."));
     }
   }
 

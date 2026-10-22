@@ -41,7 +41,7 @@ final class NodeSync {
       SyncConfig sync, boolean noSync, Map<String, String> env, OperatorCommand operator) {
     var scheduler = scheduler(sync, noSync, env, () -> syncOnce(operator));
     if (shouldSync(sync, noSync)) {
-      var operations = OperationsFactory.open(operator);
+      var operations = OperationsFactory.open();
       scheduler.useHealth(operations::syncStatus, operations);
     }
     return scheduler;

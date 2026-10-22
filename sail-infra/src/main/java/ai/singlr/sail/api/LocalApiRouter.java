@@ -6,9 +6,9 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -101,18 +101,20 @@ final class LocalApiRouter implements LocalApiHandler {
               () ->
                   problem(
                       403,
-                      "This run acts for "
-                          + (Strings.isBlank(run.owner())
-                              ? "this box's FDE"
-                              : "FDE '" + run.owner() + "'")
-                          + ", whom this box cannot place: its roster has disabled that FDE or"
-                          + " does not know it yet, or this box names no FDE of its own. Ask an"
-                          + " admin to re-enable the FDE, run '"
-                          + OperatorCommand.elsewhere("sync")
-                          + "' on a node that has not pulled main's roster, or name this box's FDE"
-                          + " with '"
-                          + OperatorCommand.elsewhere("host config set sync-handle <you>")
-                          + "'."));
+                      Remedy.of(
+                              "This run acts for "
+                                  + (Strings.isBlank(run.owner())
+                                      ? "this box's FDE"
+                                      : "FDE '" + run.owner() + "'")
+                                  + ", whom this box cannot place: its roster has disabled that"
+                                  + " FDE or does not know it yet, or this box names no FDE of"
+                                  + " its own. Ask an admin to re-enable the FDE, run '",
+                              Remedy.sail("sync"),
+                              "' on a node that has not pulled main's roster, or name this box's"
+                                  + " FDE with '",
+                              Remedy.sail("host config set sync-handle", "<you>"),
+                              "'.")
+                          .plain()));
     }
     return operations
         .boxActorForCredential(request.bearer())

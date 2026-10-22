@@ -10,7 +10,6 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.engine.HostInfo;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.identity.Actor;
@@ -49,7 +48,6 @@ public final class MembershipService {
   private final LaunchAdmission admission;
   private final DispatchOperations.EventSink events;
   private final ShellExec shell;
-  private final OperatorCommand operator;
 
   public MembershipService(
       SpecStore specStore,
@@ -57,9 +55,7 @@ public final class MembershipService {
       ProjectLoader projects,
       LaunchAdmission admission,
       DispatchOperations.EventSink events,
-      ShellExec shell,
-      OperatorCommand operator) {
-    this.operator = Objects.requireNonNull(operator, "operator");
+      ShellExec shell) {
     this.specStore = specStore;
     this.rooms = Objects.requireNonNull(rooms, "rooms");
     this.projects = projects;
@@ -156,7 +152,7 @@ public final class MembershipService {
     if (spec == null) {
       return engageSpecless(specId, agentYamlName, mode, model, localHandle);
     }
-    LaunchAdmission.requireAllowed(spec.toSpec(), localHandle, operator);
+    LaunchAdmission.requireAllowed(spec.toSpec(), localHandle);
     authorizeRoster(spec.roomIdOrIdentity());
     var project = spec.project();
     var member = admit(project, agentYamlName, mode, model, localHandle);
@@ -180,7 +176,7 @@ public final class MembershipService {
       String roomId, String agentYamlName, String mode, String model, String localHandle) {
     var store = requireRooms();
     var room = readable(store, roomId);
-    LaunchAdmission.requireAllowedForRoom(roomId, store.ownerOf(roomId), localHandle, operator);
+    LaunchAdmission.requireAllowedForRoom(roomId, store.ownerOf(roomId), localHandle);
     authorizeRoster(roomId);
     var member = admit(room.project(), agentYamlName, mode, model, localHandle);
     store.updateRoster(roomId, Roster.solo(member).toJson());
@@ -201,7 +197,7 @@ public final class MembershipService {
       EngageRequest request,
       String localHandle,
       Function<String, T> create) {
-    LaunchAdmission.requireAllowedForRoom(roomId, owner, localHandle, operator);
+    LaunchAdmission.requireAllowedForRoom(roomId, owner, localHandle);
     var member = admit(project, request.agent(), request.mode(), request.model(), localHandle);
     var created = create.apply(Roster.solo(member).toJson());
     publishEngaged(project, roomId, member, "");
@@ -269,7 +265,7 @@ public final class MembershipService {
     if (spec == null) {
       return disengageSpecless(specId, localHandle);
     }
-    LaunchAdmission.requireAllowed(spec.toSpec(), localHandle, operator);
+    LaunchAdmission.requireAllowed(spec.toSpec(), localHandle);
     authorizeRoster(spec.roomIdOrIdentity());
     var standing = stateOf(rooms.get(), spec).standing();
     if (standing == null) {
@@ -287,7 +283,7 @@ public final class MembershipService {
   private String disengageSpecless(String roomId, String localHandle) {
     var store = requireRooms();
     var room = readable(store, roomId);
-    LaunchAdmission.requireAllowedForRoom(roomId, store.ownerOf(roomId), localHandle, operator);
+    LaunchAdmission.requireAllowedForRoom(roomId, store.ownerOf(roomId), localHandle);
     authorizeRoster(roomId);
     var standing = Roster.fromJson(room.roster()).standing();
     if (standing == null) {

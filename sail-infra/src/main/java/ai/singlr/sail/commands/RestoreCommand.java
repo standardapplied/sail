@@ -52,7 +52,7 @@ public final class RestoreCommand implements Runnable {
     var snapMgr = new SnapshotManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireCreated(state, name, operator);
+    ContainerStateGuard.requireCreated(state, name);
 
     if (label == null) {
       var snapshots = snapMgr.list(name);

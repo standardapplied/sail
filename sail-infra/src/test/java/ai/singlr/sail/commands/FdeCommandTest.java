@@ -17,6 +17,7 @@ import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.FileMutexTest;
+import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.SailPaths;
@@ -100,6 +101,7 @@ class FdeCommandTest {
   private String operator = "root";
   private String main;
   private String refusal;
+  private Exception refused;
   private String handle = "ada";
 
   @BeforeEach
@@ -175,6 +177,10 @@ class FdeCommandTest {
     command.setExecutionExceptionHandler(
         (failure, line, parsed) -> {
           refusal = failure.getMessage();
+          refused =
+              failure instanceof CliCommand.Printed printed
+                  ? (Exception) printed.getCause()
+                  : failure;
           return 1;
         });
     return command;
@@ -646,7 +652,7 @@ class FdeCommandTest {
           var fdes = new FdeStore(db);
           fdes.add("client", null, "client@x.com", "member");
           fdes.restrict("client");
-          fdes.grant("client", "acme", OperatorCommand.PLAIN);
+          fdes.grant("client", "acme");
           return fdes.add("eng", null, "eng@x.com", "member");
         });
     var roster = inDb(db -> new FdeStore(db).list());
@@ -1299,7 +1305,7 @@ class FdeCommandTest {
             (db, json) ->
                 MigrateCommand.revokeOtherFdesPairings(db, this::box, json, OperatorCommand.PLAIN));
     assertFalse(
-        DataMigrations.all(OperatorCommand.PLAIN).stream()
+        DataMigrations.all().stream()
             .anyMatch(migration -> migration.name().equals(OwnBoxPairings.NAME)),
         "every lane runs the registry; only the box's own convergence revokes");
 
@@ -1794,6 +1800,18 @@ class FdeCommandTest {
         "FDE 'uma' sees every project, so there is nothing to grant or revoke. Scope it first"
             + " with 'sail fde update uma --scoped'.",
         refusal);
+    assertEquals(
+        List.of(
+            "FDE 'uma' sees every project, so there is nothing to grant or revoke. Scope it first"
+                + " with 'sudo sail fde update uma --scoped'."),
+        CliCommand.lines(refused, OperatorCommand.SUDO),
+        "read through sudo on a system box");
+    assertEquals(
+        List.of(
+            "FDE 'uma' sees every project, so there is nothing to grant or revoke. Scope it first"
+                + " with 'sail fde update uma --scoped'."),
+        CliCommand.lines(refused, OperatorCommand.PLAIN),
+        "read by root logged in directly");
     assertEquals(1, fde("add", "root", "--role", "admin", "--scoped"));
     assertEquals(
         "FDE 'root' cannot be both scoped and an admin: an admin edits the roster, and so could"
@@ -2347,6 +2365,10 @@ class FdeCommandTest {
     assertEquals(Path.of(System.getProperty("user.home")), box.home());
     assertEquals(Path.of("/etc/ssh/ssh_host_ed25519_key.pub"), box.hostKey());
     assertEquals(SailPaths.workstationPublicKeyPath(), box.workstationKey());
+    assertEquals(
+        LocalIdentity.detect(OperatorCommand.PLAIN).sshPublicKeyPath(),
+        box.workstationKey(),
+        "a pairing writes the key ${SSH_PUBLIC_KEY} resolves from");
     assertEquals(SailPaths.controlPlaneDb(), box.database());
     assertFalse(box.shell().isDryRun());
     assertEquals(HostSync.isNode(HostSync.config()), box.node());

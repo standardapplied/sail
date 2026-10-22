@@ -797,12 +797,15 @@ other placeholder is touched. Both paths substitute into the parsed definition, 
 text (`PlaceholderResolver.substitute`): a redacted row holds its placeholders quoted, so a
 value's own characters, such as the apostrophe in `O'Neil`, land in the value and never in the
 YAML around it. `${SSH_PUBLIC_KEY}` resolves to the box's registered
-workstation key at `~/.sail/workstation_key.pub`, which is the laptop key the box owner
+workstation key at `.sail/workstation_key.pub` in the box owner's home
+(`SailPaths.workstationPublicKeyPath`, the one resolver a pairing, `host config set
+ssh-public-key`, connect's warning and the key a container trusts all read), which is the laptop key the box owner
 connects to containers with. This is a different key from the machine sync key that a node
 presents to main. Because each box has a single owner, one workstation key authorizes that
 owner into every container the box provisions. It is registered once with `sail host config
 set ssh-public-key`, which auto-detects it from the box's `authorized_keys` when no value is
-given. A missing or invalid value fails loud with the fixing command rather than
+given and writes it under `PairingTrust`, as a pairing does, so an apply never reads the key on
+one side of a change and installs it on the other. A missing or invalid value fails loud with the fixing command rather than
 provisioning a container no laptop can reach. The result is that each engineer's containers
 commit as them and trust only their own key.
 
@@ -844,19 +847,29 @@ clone a project's source repos into its container at provision time, not to move
   prints for its operator to type is rendered by `OperatorCommand`: a `sudo` caller reads it
   with `sudo`, since root's sail acts on root's state and the caller's own plain `sail` never
   reaches it; root logged in directly reads it plain; a non-root process reads its own plain
-  `sail`, and `sudo` for a verb only root runs. A process that cannot see who reads it
-  (sail-api, the pty host, an agent watcher) renders with `OperatorCommand.unknownReader()`,
-  the README's form as root. The operator is resolved once per
-  command, at the command's door (`OperatorCommand.here()` in the command class), and passed
-  down: every message builder below it, in `engine`, `api`, `Banner` and `sail-core`, takes the
-  operator as a parameter, so its `sudo` wording is a plain unit assertion
-  (`OperatorHintsTest` scans the sources for the seam). A command is rendered three ways:
-  `sail(args)` for the caller on this box, `elsewhere(args)` for a reader this box cannot know
-  (another box's operator, the reader of a journal refusal or an API answer), always `sudo sail
-  …` as the README writes it, and `client(args)` for a thin client, always plain. A refusal only
-  a non-root caller reads ("Root privileges required…") renders through `OperatorCommand.SUDO`.
-  No literal in `src/main` spells a `sail` command: `OperatorHintsTest` scans every string
-  literal for `sudo sail` and for `sail <verb>` outside `OperatorCommand`.
+  `sail`, and `sudo` for a verb only root runs.
+  - **A remedy is data until the door that prints it renders it.** Code that cannot see who
+    reads what it says (`sail-core`'s stores, migrations, sync and authority, `sail-harness`,
+    the `api` package, sail-api, the pty host, an agent watcher, the sync lane) never holds an
+    `OperatorCommand`: it names a command as a `Remedy` (words, and commands each a verb and its
+    arguments), a failure carries one through `Remedied` (`Result.Failure.remedy()` for an API
+    answer, a refusal's `fix`), and a stored sync error keeps it as data. The CLI's doors
+    (`Main.report`, `CliCommand.run`) render it with `OperatorCommand.here()`, the reader typing;
+    the API serialises it (`remedy` beside a verb-only `action`, no `sail` sentence), and the
+    terminal that reads the answer renders it for its own reader, so a `sudo` caller, a thin
+    client's gateway account and root logged in directly each read the command they type. A
+    daemon's log line prints the plain reading (`Remedy.plain`). `OperatorCommand` lives in
+    `sail-infra`, so neither `sail-core` nor `sail-harness` can reach it, and
+    `OperatorHintsTest.codeThatCannotSeeItsReaderNeverRendersACommand` fails on any use in the
+    `api` package or a daemon's classes.
+  - The operator is resolved once per command, at the command's door (`OperatorCommand.here()`
+    in the command class), and a class only the CLI runs may take it as a parameter.
+  - A refusal of a verb only root runs names the caller's own command, every word as typed,
+    shell-quoted, with `sudo` in front (`RootRequired`); `RootRequiredTest` runs every root-only
+    verb with every option it has and parses the re-run back.
+  - No literal in `src/main` spells a `sail` command: `OperatorHintsTest` scans every string
+    literal for `sudo sail` and for `sail <verb>` outside `OperatorCommand`, and parses every
+    command rendered through the seam, a `Remedy`'s included, against the command tree.
 - **Client mode.** Only `~/.sail/config.yaml` exists. Commands are forwarded to a box over
   SSH by `RemoteCommandRunner`, in lanes:
   - Local commands (`--version`, `upgrade`, `init`, `client`, `login`) run on the client.

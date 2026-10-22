@@ -329,8 +329,7 @@ class FileImporterTest {
   }
 
   private void seed() {
-    new DataMigrator(
-            db, List.of(new MaterializedFilesMigration(projectsDir, OperatorCommand.PLAIN)))
+    new DataMigrator(db, List.of(new MaterializedFilesMigration(projectsDir)))
         .run(
             ProjectRegistry.loadFromDisk(tempDir.resolve("no-projects")),
             DataMigration.Prompter.NON_INTERACTIVE);

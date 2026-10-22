@@ -14,7 +14,6 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.DispatchGate;
@@ -126,13 +125,7 @@ class EventDoorTest {
     operations =
         TestControlPlane.on(
             OperationsFactory.create(
-                db,
-                SHELL,
-                bus,
-                null,
-                SyncScheduler.disabled(),
-                SessionYield.NONE,
-                OperatorCommand.PLAIN),
+                db, SHELL, bus, null, SyncScheduler.disabled(), SessionYield.NONE),
             db,
             tempDir,
             MAIN);

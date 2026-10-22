@@ -5,8 +5,8 @@
 
 package ai.singlr.sail.authority;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.ChangeLog;
@@ -28,10 +28,11 @@ import java.util.Optional;
  */
 public final class ScopeRule {
 
-  private static final String GRANT =
-      "Ask an admin on main for the project: "
-          + OperatorCommand.elsewhere("fde grant <handle> <project>")
-          + ".";
+  private static final Remedy GRANT =
+      Remedy.of(
+          "Ask an admin on main for the project: ",
+          Remedy.sail("fde grant", "<handle>", "<project>"),
+          ".");
   private static final String SPEC = "spec";
   private static final String ROOM = "room";
   private static final String RUN = "run";

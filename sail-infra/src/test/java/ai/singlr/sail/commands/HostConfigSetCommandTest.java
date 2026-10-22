@@ -17,8 +17,10 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -39,9 +41,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
+import java.util.concurrent.FutureTask;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
@@ -487,6 +491,28 @@ class HostConfigSetCommandTest {
 
     assertEquals(value, written.line(), "returns the parsed key whose canonical line was written");
     assertEquals(value + "\n", java.nio.file.Files.readString(dest));
+  }
+
+  @Test
+  @Timeout(60)
+  void aKeyChangeWaitsWhileAnApplyOrAPairingHoldsTheTrust(@TempDir Path tmp) throws Exception {
+    var database = tmp.resolve("sail.db");
+    var dest = tmp.resolve("workstation_key.pub");
+    var key = SshPublicKey.parse("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILDpT0mMcK sumesh@macbook");
+    var write =
+        new FutureTask<Void>(
+            () -> {
+              HostConfigSetCommand.installWorkstationKey(database, dest, key);
+              return null;
+            });
+
+    try (var apply = PairingTrust.hold(database)) {
+      FileMutexTest.awaitParked(Thread.ofPlatform().start(write));
+      assertFalse(Files.exists(dest), "the key is not changed under an apply that read it");
+    }
+
+    write.get();
+    assertEquals(key.line() + "\n", Files.readString(dest));
   }
 
   @Test

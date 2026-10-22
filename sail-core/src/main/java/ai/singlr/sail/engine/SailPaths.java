@@ -152,13 +152,15 @@ public final class SailPaths {
   }
 
   /**
-   * The box owner's workstation (laptop) SSH public key: {@code ~/.sail/workstation_key.pub}. This
-   * is the human key an engineer connects to project containers with — distinct from the machine
-   * {@link #syncKeyPath() sync key}. Each box has a single owner, so one workstation key authorizes
-   * that owner into the box's containers.
+   * The box owner's workstation (laptop) SSH public key: {@code .sail/workstation_key.pub} in the
+   * home of the account that owns the box ({@link #identityHome()}). This is the human key an
+   * engineer connects to project containers with — distinct from the machine {@link #syncKeyPath()
+   * sync key}. Each box has a single owner, so one workstation key authorizes that owner into the
+   * box's containers. It is resolved here alone: {@code ${SSH_PUBLIC_KEY}}, the key a container
+   * trusts, a pairing's write and {@code host config set ssh-public-key} all name this one file.
    */
   public static Path workstationPublicKeyPath() {
-    return workstationPublicKeyPath(SAIL_DIR.getParent());
+    return workstationPublicKeyPath(identityHome());
   }
 
   /** The workstation public key of the account whose home is {@code home}. */

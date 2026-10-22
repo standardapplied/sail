@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.authority;
 
-import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
@@ -54,7 +54,7 @@ public final class EraseAuthority {
       return Refusal.of(
           Refusal.Kind.ADMIN_ONLY,
           "Pruning by policy or a whole project is admin-only.",
-          "Name the specs you own by id: " + OperatorCommand.elsewhere("spec prune <id...>") + ".");
+          Remedy.of("Name the specs you own by id: ", Remedy.sail("spec prune", "<id...>"), "."));
     }
     return Optional.empty();
   }
@@ -139,7 +139,8 @@ public final class EraseAuthority {
       return denied;
     }
     if (!sees(actor, Erasure.SPEC, spec.id())) {
-      return Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Spec '" + spec.id() + "' was not found.", null);
+      return Refusal.of(
+          Refusal.Kind.OUT_OF_SCOPE, "Spec '" + spec.id() + "' was not found.", Remedy.NONE);
     }
     if (!actor.isAdmin() && !actor.actsFor(spec.owner())) {
       return SpecAuthority.notOwner(spec.id(), spec.assignee(), spec.createdBy());
@@ -152,9 +153,10 @@ public final class EraseAuthority {
               + "' is "
               + spec.status().wire()
               + ": only archived, cancelled or deleted specs are pruned.",
-          "Archive it first: "
-              + OperatorCommand.elsewhere("spec update " + spec.id() + " --status archived")
-              + ".");
+          Remedy.of(
+              "Archive it first: ",
+              Remedy.sail("spec update", spec.id(), "--status", "archived"),
+              "."));
     }
     if (!actor.scope().unrestricted()
         && erasure.closure(List.of(new Erasure.Target(Erasure.SPEC, spec.id()))).stream()
@@ -188,6 +190,6 @@ public final class EraseAuthority {
     return Refusal.of(
         Refusal.Kind.NOT_PRUNABLE,
         "Run '" + unfinished.getFirst() + "' has not finished; a prune never erases work going on.",
-        "Stop it first: " + OperatorCommand.elsewhere("agent stop") + ", then prune.");
+        Remedy.of("Stop it first: ", Remedy.sail("agent stop"), ", then prune."));
   }
 }

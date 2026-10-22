@@ -7,6 +7,8 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.api.Scoped;
 import ai.singlr.sail.authority.PostingRule;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -24,14 +26,16 @@ import java.util.Objects;
  * FDE a session token names, or with no token this box's FDE, and acts with the role {@link
  * RoleRule} gives it; a disabled FDE is refused.
  */
-public record HostAccess(Sqlite db, RoleRule roles, OperatorCommand operator) {
+public record HostAccess(Sqlite db, RoleRule roles) {
   public PtyIdentity identity(String token, String boxHandle) throws IOException {
     if (Strings.isBlank(token)) {
       if (Strings.isBlank(boxHandle)) {
-        throw new IOException(
-            "This box has no FDE identity. Set one with '"
-                + operator.sail("host config set sync-handle <handle>")
-                + "' or connect through the gateway.");
+        throw Remedied.io(
+            "This box has no FDE identity.",
+            Remedy.of(
+                "Set one with '",
+                Remedy.sail("host config set sync-handle", "<handle>"),
+                "' or connect through the gateway."));
       }
       return new PtyIdentity(boxHandle, roleOf(boxHandle) == Role.ADMIN);
     }
@@ -67,7 +71,7 @@ public record HostAccess(Sqlite db, RoleRule roles, OperatorCommand operator) {
     }
     var refused = PostingRule.decide(actor, room.id(), new RoomStore(db).owners(room.id()));
     if (refused.isPresent()) {
-      throw new IOException(refused.get().message() + " " + refused.get().fix());
+      throw Remedied.io(refused.get().message(), refused.get().fix());
     }
   }
 
@@ -78,12 +82,12 @@ public record HostAccess(Sqlite db, RoleRule roles, OperatorCommand operator) {
   private Actor actorOf(String handle) throws IOException {
     var actor = roles.actorOf(handle, Role.ADMIN, Actor.Lane.API);
     if (actor.isEmpty()) {
-      throw new IOException(
-          "FDE '"
-              + handle
-              + "' is disabled or not in this box's roster. Ask an admin to re-enable it, or run '"
-              + operator.sail("sync")
-              + "' on a node that has not synced its roster.");
+      throw Remedied.io(
+          "FDE '" + handle + "' is disabled or not in this box's roster.",
+          Remedy.of(
+              "Ask an admin to re-enable it, or run '",
+              Remedy.sail("sync"),
+              "' on a node that has not synced its roster."));
     }
     return actor.get();
   }

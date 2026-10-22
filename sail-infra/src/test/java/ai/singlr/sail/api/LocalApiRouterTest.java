@@ -16,7 +16,6 @@ import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -178,7 +177,7 @@ class LocalApiRouterTest {
           TestOperations.OWNER, () -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var local = box.specs.comparableSnapshot("auth");
       parkTitle(box, local, "remote");
-      var conflicts = new ConflictOperations(box.db, OperatorCommand.PLAIN);
+      var conflicts = new ConflictOperations(box.db);
       var rev = box.specs.revOf("auth");
       var lane =
           new LocalApiRouter(
@@ -213,7 +212,20 @@ class LocalApiRouterTest {
               "code",
               "bad_request",
               "message",
-              "A merged record must start from 'sail conflicts show auth --template'.",
+              "A merged record does not name the version it was made from.",
+              "action",
+              "Start it from 'conflicts show auth --template'.",
+              "remedy",
+              List.of(
+                  Map.of("text", "Start it from '"),
+                  Map.of(
+                      "run",
+                      "sail",
+                      "verb",
+                      "conflicts show",
+                      "args",
+                      List.of("auth", "--template")),
+                  Map.of("text", "'.")),
               "field_errors",
               List.of()),
           unnamed.body().get("error"),

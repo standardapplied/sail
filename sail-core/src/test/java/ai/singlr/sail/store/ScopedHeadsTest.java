@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
@@ -207,7 +206,7 @@ class ScopedHeadsTest {
           target + ": pruned before heads carried a project");
     }
     assertEquals(
-        new DataMigration.Report(
+        DataMigration.Report.of(
             10,
             0,
             6,
@@ -216,9 +215,7 @@ class ScopedHeadsTest {
                     + " nodes hear of them.")),
         report);
     assertEquals(ScopedHeadsMigration.NAME, new ScopedHeadsMigration().name());
-    assertTrue(
-        DataMigrations.all(OperatorCommand.PLAIN).stream()
-            .anyMatch(ScopedHeadsMigration.class::isInstance));
+    assertTrue(DataMigrations.all().stream().anyMatch(ScopedHeadsMigration.class::isInstance));
   }
 
   @Test

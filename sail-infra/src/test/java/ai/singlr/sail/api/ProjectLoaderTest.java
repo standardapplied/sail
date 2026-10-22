@@ -9,9 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.ContainerState;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import java.io.IOException;
@@ -27,9 +27,7 @@ class ProjectLoaderTest {
   void aProjectIsItsDefinitionAndItsContainerState() {
     var loader =
         new ProjectLoader(
-            listing("[{\"name\":\"acme\",\"status\":\"Running\"}]"),
-            p -> Optional.of(ACME),
-            OperatorCommand.PLAIN);
+            listing("[{\"name\":\"acme\",\"status\":\"Running\"}]"), p -> Optional.of(ACME));
 
     var loaded = loader.load("acme");
 
@@ -39,7 +37,7 @@ class ProjectLoaderTest {
 
   @Test
   void aProjectWithNoRowIsNotFoundWithTheReadersOwnError() {
-    var loader = new ProjectLoader(listing("[]"), p -> Optional.empty(), OperatorCommand.PLAIN);
+    var loader = new ProjectLoader(listing("[]"), p -> Optional.empty());
 
     var refused = assertThrows(ApiException.class, () -> loader.load("acme"));
 
@@ -55,8 +53,7 @@ class ProjectLoaderTest {
             listing("[]"),
             p -> {
               throw unreadable;
-            },
-            OperatorCommand.PLAIN);
+            });
 
     var failed = assertThrows(ApiException.class, () -> loader.load("acme"));
 
@@ -70,8 +67,7 @@ class ProjectLoaderTest {
     var loader =
         new ProjectLoader(
             new ScriptedShellExecutor().onThrow("incus list", new IOException("incus unreachable")),
-            p -> Optional.of(ACME),
-            OperatorCommand.PLAIN);
+            p -> Optional.of(ACME));
 
     var failed = assertThrows(ApiException.class, () -> loader.load("acme"));
 
@@ -83,24 +79,20 @@ class ProjectLoaderTest {
   void aStoppedProjectIsRefusedWithTheCommandThatStartsIt() {
     var loader =
         new ProjectLoader(
-            listing("[{\"name\":\"gamma\",\"status\":\"Stopped\"}]"),
-            p -> Optional.of(ACME),
-            OperatorCommand.PLAIN);
+            listing("[{\"name\":\"gamma\",\"status\":\"Stopped\"}]"), p -> Optional.of(ACME));
 
     var refused = assertThrows(ApiException.class, () -> loader.loadRunning("gamma"));
 
     assertEquals(ErrorCode.PROJECT_STOPPED, refused.failure().errorCode());
     assertEquals("Project 'gamma' is stopped.", refused.getMessage());
     assertEquals(
-        "Start it with " + OperatorCommand.here().sail("project start gamma") + ".",
-        refused.error().action());
+        Remedy.of("Start it with ", Remedy.sail("project start", "gamma"), "."), refused.remedy());
+    assertEquals("Start it with project start gamma.", refused.error().action());
   }
 
   @Test
   void aLoaderNeedsAReader() {
-    assertThrows(
-        NullPointerException.class,
-        () -> new ProjectLoader(listing("[]"), null, OperatorCommand.PLAIN));
+    assertThrows(NullPointerException.class, () -> new ProjectLoader(listing("[]"), null));
   }
 
   private static ShellExec listing(String json) {

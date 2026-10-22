@@ -25,14 +25,18 @@ import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
+import picocli.CommandLine.Spec;
 
 @Command(
     name = "set",
     description = "Update CPU, memory, or disk allocation for an existing project.",
     mixinStandardHelpOptions = true)
 public final class ProjectResourcesSetCommand implements Runnable {
+
+  @Spec private CommandSpec spec;
 
   @Parameters(index = "0", description = "Project name.")
   private String name;
@@ -86,13 +90,11 @@ public final class ProjectResourcesSetCommand implements Runnable {
     requireRequestedChange();
 
     if (!dryRun && !rootChecker.getAsBoolean()) {
-      throw new IllegalStateException(
-          "Root privileges required. Run with: "
-              + OperatorCommand.SUDO.sail("project resources set " + name));
+      throw RootRequired.refusal(spec);
     }
 
     var explicit = ProjectDefinitions.explicitFile(file);
-    var actor = ProjectMutations.catalogOperator(name, explicit, dryRun, operator);
+    var actor = ProjectMutations.catalogOperator(name, explicit, dryRun);
     var descriptorPath = explicit != null ? explicit : ProjectDefinitions.canonicalPath(name);
     var config =
         SailYaml.fromMap(

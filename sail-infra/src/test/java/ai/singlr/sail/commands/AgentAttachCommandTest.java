@@ -50,9 +50,9 @@ class AgentAttachCommandTest {
   @Test
   void theHarnessIsTheCatalogRowsAgentAndTheDefaultForAProjectWithNoRow() {
     var dbPath = seeded("acme", "name: acme\nagent:\n  type: codex\n");
-    var acme = new AgentAttachCommand(operator -> OperationsFactory.open(dbPath, operator));
+    var acme = new AgentAttachCommand(operator -> OperationsFactory.open(dbPath));
     new CommandLine(acme).parseArgs("acme");
-    var absent = new AgentAttachCommand(operator -> OperationsFactory.open(dbPath, operator));
+    var absent = new AgentAttachCommand(operator -> OperationsFactory.open(dbPath));
     new CommandLine(absent).parseArgs("absent", "-f", "/abs/sail.yaml");
 
     assertEquals("codex", acme.resolveHarness(OperatorCommand.PLAIN).yamlName());

@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.ActingAs;
 import java.nio.file.Path;
 import java.util.List;
@@ -116,7 +115,7 @@ class SpecJournalTest {
     var goodRev = store.history("auth").getLast().rev();
     store.setContent("auth", "clobbered", "clobbered");
 
-    store.restore("auth", goodRev, OperatorCommand.PLAIN);
+    store.restore("auth", goodRev);
 
     var content = store.getContent("auth").orElseThrow();
     assertEquals("original body", content.body());
@@ -135,7 +134,7 @@ class SpecJournalTest {
     var beforeDelete = store.history("auth").getLast().rev();
     store.delete("auth");
 
-    store.restore("auth", beforeDelete, OperatorCommand.PLAIN);
+    store.restore("auth", beforeDelete);
 
     var restored = store.findById("auth").orElseThrow();
     assertEquals("Auth", restored.title());
@@ -145,10 +144,7 @@ class SpecJournalTest {
   @Test
   void restoreRejectsUnknownRevision() {
     store.create(spec("auth", "Auth", "pending", "uday"));
-    var thrown =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> store.restore("auth", "99-x", OperatorCommand.PLAIN));
+    var thrown = assertThrows(IllegalArgumentException.class, () -> store.restore("auth", "99-x"));
     assertTrue(thrown.getMessage().contains("99-x"));
   }
 

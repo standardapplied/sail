@@ -8,7 +8,6 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -111,8 +110,7 @@ class RoomsReadTest {
             new ProjectStore(db),
             scheduler,
             new FdeStore(db),
-            SessionYield.NONE,
-            OperatorCommand.PLAIN)
+            SessionYield.NONE)
         .useMessages(new MessageStore(db))
         .useRooms(roomStore);
   }

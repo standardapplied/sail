@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -22,24 +24,19 @@ public final class WorkstationIdentity {
 
   private WorkstationIdentity() {}
 
-  /**
-   * The one command that registers a box's workstation key, as {@code operator} types it — shared
-   * so the guidance can't drift.
-   */
-  public static String setKeyHint(OperatorCommand operator) {
-    return operator.sail("host config set ssh-public-key");
-  }
+  /** The one command that registers a box's workstation key, shared so the guidance can't drift. */
+  public static final Remedy.Command SET_KEY = Remedy.sail("host config set ssh-public-key");
 
   /**
    * The registered workstation key, or empty when the box owner has not set one. A key file that
    * holds no readable key is refused rather than read as none: every container trusts this key, so
    * a damaged file would silently take it out of all of them on the next apply.
    */
-  public static Optional<SshPublicKey> registered(OperatorCommand operator) {
-    return registeredAt(SailPaths.workstationPublicKeyPath(), operator);
+  public static Optional<SshPublicKey> registered() {
+    return registeredAt(SailPaths.workstationPublicKeyPath());
   }
 
-  public static Optional<SshPublicKey> registeredAt(Path path, OperatorCommand operator) {
+  public static Optional<SshPublicKey> registeredAt(Path path) {
     if (!Files.isRegularFile(path)) {
       return Optional.empty();
     }
@@ -58,20 +55,16 @@ public final class WorkstationIdentity {
     try {
       return Optional.of(SshPublicKey.parse(line));
     } catch (IllegalArgumentException e) {
-      throw new IllegalStateException(
-          "This box's workstation key ("
-              + path
-              + ") is not an SSH public key: "
-              + e.getMessage()
-              + " Register the key you connect with: "
-              + setKeyHint(operator),
+      throw Remedied.state(
+          "This box's workstation key (" + path + ") is not an SSH public key: " + e.getMessage(),
+          Remedy.of("Register the key you connect with: ", SET_KEY),
           e);
     }
   }
 
   /** The Mac-side {@code IdentityFile} a connect snippet should reference for this box's owner. */
-  public static String identityFile(OperatorCommand operator) {
-    return identityFileFor(registered(operator));
+  public static String identityFile() {
+    return identityFileFor(registered());
   }
 
   public static String identityFileFor(Optional<SshPublicKey> key) {

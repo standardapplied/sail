@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.fail;
 import ai.singlr.sail.Main;
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.DataMigration;
@@ -104,8 +103,7 @@ class NodeSyncOnWriteIT {
    */
   private static String seedMainWithMemberSession(Path mainDb) {
     try (var db = Sqlite.open(mainDb)) {
-      MigrationRunner.applyAll(
-          db, DataMigrations.all(OperatorCommand.PLAIN), DataMigration.Prompter.NON_INTERACTIVE);
+      MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
     }
     try (var converged = SyncDatabase.converge(mainDb, "mainbox")) {
       Actor.run(

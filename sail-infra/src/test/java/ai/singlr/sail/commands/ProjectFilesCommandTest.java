@@ -450,7 +450,7 @@ class ProjectFilesCommandTest {
     assertTrue(lines.get(0).contains("kept local edit: acme/edited.txt (unchanged)"), lines.get(0));
     assertTrue(lines.get(1).contains("kept acme/stale.conf"), lines.get(1));
     assertTrue(
-        lines.get(1).contains(MaterializedFiles.undecidedRemedy(OperatorCommand.PLAIN)),
+        lines.get(1).contains(OperatorCommand.PLAIN.render(MaterializedFiles.UNDECIDED_REMEDY)),
         lines.get(1));
   }
 

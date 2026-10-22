@@ -7,11 +7,10 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -100,7 +99,7 @@ class SailOperationsSyncTest {
     var failure = assertInstanceOf(Result.Failure.class, result);
     assertEquals(ErrorCode.NOT_FOUND, failure.errorCode());
     assertEquals("Project 'beta' isn't on this box. Projects here: acme.", failure.errorMessage());
-    assertNull(failure.action());
+    assertEquals(Remedy.NONE, failure.remedy());
     assertEquals(0, rounds.get());
   }
 
@@ -253,8 +252,7 @@ class SailOperationsSyncTest {
             null,
             null,
             () -> new ConnectEnvironment("203.0.113.7", "uday", true),
-            scheduler,
-            OperatorCommand.PLAIN),
+            scheduler),
         db,
         tempDir);
   }

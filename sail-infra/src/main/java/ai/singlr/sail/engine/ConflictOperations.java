@@ -9,6 +9,7 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Resolution;
 import ai.singlr.sail.api.Scoped;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
@@ -24,7 +25,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
@@ -36,13 +36,11 @@ public final class ConflictOperations {
 
   private final Sqlite db;
   private final SyncConflicts conflicts;
-  private final OperatorCommand operator;
 
-  /** Over {@code db}, with every command a refusal names worded for {@code operator}. */
-  public ConflictOperations(Sqlite db, OperatorCommand operator) {
+  /** Over {@code db}. */
+  public ConflictOperations(Sqlite db) {
     this.db = db;
     this.conflicts = new SyncConflicts(db);
-    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   public List<SyncConflicts.Conflict> list() {
@@ -182,9 +180,9 @@ public final class ConflictOperations {
           ErrorCode.CONFLICT,
           """
           '%s' was recorded before conflicts kept main's revision, so main's side cannot be \
-          adopted as main made it.
-          Run '%s' to re-record it, then resolve."""
-              .formatted(conflict.entityId(), operator.sail("sync")));
+          adopted as main made it."""
+              .formatted(conflict.entityId()),
+          Remedy.of("Run '", Remedy.sail("sync"), "' to re-record it, then resolve."));
     }
   }
 
@@ -216,8 +214,11 @@ public final class ConflictOperations {
     if (!(madeFrom instanceof String named) || named.isBlank()) {
       throw new ApiException(
           ErrorCode.BAD_REQUEST,
-          "A merged record must start from '%s'."
-              .formatted(operator.sail("conflicts show " + conflict.entityId() + " --template")));
+          "A merged record does not name the version it was made from.",
+          Remedy.of(
+              "Start it from '",
+              Remedy.sail("conflicts show", conflict.entityId(), "--template"),
+              "'."));
     }
     if (!named.equals(fingerprint(conflict))) {
       throw new ApiException(
@@ -259,16 +260,13 @@ public final class ConflictOperations {
     if (!drift.isEmpty()) {
       throw new ApiException(
           ErrorCode.CONFLICT,
-          """
-          '%s' changed on this box after this conflict was recorded (%s).
-          Run '%s' to refresh it, then %s."""
+          "'%s' changed on this box after this conflict was recorded (%s)."
               .formatted(
                   conflict.entityId(),
                   drift.stream()
                       .map(ConflictOperations::displayField)
-                      .collect(Collectors.joining(", ")),
-                  operator.sail("sync"),
-                  then));
+                      .collect(Collectors.joining(", "))),
+          Remedy.of("Run '", Remedy.sail("sync"), "' to refresh it, then " + then + "."));
     }
   }
 

@@ -5,7 +5,8 @@
 
 package ai.singlr.sail.sync;
 
-import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.MigrationRunner;
@@ -42,7 +43,7 @@ public final class SyncDatabase implements AutoCloseable {
   public static SyncDatabase converge(Path dbPath, String box) {
     var db = Sqlite.open(dbPath);
     try {
-      prepare(db, box, OperatorCommand.SUDO);
+      prepare(db, box);
       return new SyncDatabase(db);
     } catch (RuntimeException e) {
       db.close();
@@ -50,31 +51,24 @@ public final class SyncDatabase implements AutoCloseable {
     }
   }
 
-  /**
-   * Converges {@code db}'s schema and data; what a migration reports is worded for {@code
-   * operator}, the reader of the round: {@link OperatorCommand#SUDO} when that reader is another
-   * box's, whom this box cannot know.
-   */
-  public static void prepare(Sqlite db, String box, OperatorCommand operator) {
+  /** Converges {@code db}'s schema and data. */
+  public static void prepare(Sqlite db, String box) {
     try {
       new SchemaManager(db).migrate();
-      var migrations = DataMigrations.databaseOnly(operator);
+      var migrations = DataMigrations.databaseOnly();
       if (DataMigrations.anyPending(db, migrations)) {
         MigrationRunner.applyAll(db, migrations, DataMigration.Prompter.NON_INTERACTIVE);
       }
     } catch (SchemaManager.PreFloorException e) {
       throw e;
     } catch (RuntimeException e) {
-      throw new IllegalStateException(
+      throw Remedied.state(
           "Sync aborted before touching data: could not converge the database schema on '"
               + box
               + "': "
               + e.getMessage()
-              + ". Run '"
-              + operator.sail("upgrade")
-              + "' on '"
-              + box
-              + "', then sync again.",
+              + ".",
+          Remedy.of("Run '", Remedy.sail("upgrade"), "' on '" + box + "', then sync again."),
           e);
     }
   }

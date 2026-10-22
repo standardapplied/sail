@@ -47,7 +47,7 @@ public final class AgentReportCommand implements Runnable {
   private final Function<OperatorCommand, HostOperations> operations;
 
   public AgentReportCommand() {
-    this(OperationsFactory::open);
+    this(operator -> OperationsFactory.open(operator::warn));
   }
 
   AgentReportCommand(Function<OperatorCommand, HostOperations> operations) {
@@ -62,13 +62,13 @@ public final class AgentReportCommand implements Runnable {
   /** The project's definition from the catalog, which a report needs. */
   SailYaml definition(OperatorCommand operator) {
     try (var operations = this.operations.apply(operator)) {
-      return operations.catalog().definitions().require(name, operator);
+      return operations.catalog().definitions().require(name);
     }
   }
 
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
-    name = CurrentProject.require(name, operator);
+    name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);

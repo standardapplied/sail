@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.HostAccess;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -80,14 +79,7 @@ class UnassignedSpecTest {
     HeldProjects.hold(db, "acme");
     specs = new SpecStore(db);
     operations =
-        OperationsFactory.create(
-                db,
-                SHELL,
-                null,
-                null,
-                SyncScheduler.disabled(),
-                SessionYield.NONE,
-                OperatorCommand.PLAIN)
+        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
             .useControlPlane(
                 db,
                 tempDir,
@@ -98,8 +90,7 @@ class UnassignedSpecTest {
                     SyncConfig::unset,
                     target -> {
                       throw new IOException("main unavailable");
-                    },
-                    OperatorCommand.PLAIN));
+                    }));
     var auth = TestAuth.sessions(db);
     server = new SailApiServer("127.0.0.1", 0, operations, auth, new EventBus(), null, null, null);
     server.start();
@@ -152,9 +143,7 @@ class UnassignedSpecTest {
     var router = new LocalApiRouter(operations);
     var answered = router.handle(form("POST", "/v1/specs/auth/messages", room, "body=on it"));
     assertEquals(201, answered.status(), answered.body().toString());
-    var terminal =
-        new HostAccess(
-            db, new RoleRule(SyncConfig::unset, new FdeStore(db)), OperatorCommand.PLAIN);
+    var terminal = new HostAccess(db, new RoleRule(SyncConfig::unset, new FdeStore(db)));
     terminal.admit("auth", "acme", new PtyIdentity("mady", false));
     var refused =
         assertThrows(

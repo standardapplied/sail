@@ -46,7 +46,7 @@ public final class ServerTokenCommand implements Runnable {
     private final Function<OperatorCommand, HostOperations> operations;
 
     Create() {
-      this(OperationsFactory::open);
+      this(operator -> OperationsFactory.open(operator::warn));
     }
 
     Create(Function<OperatorCommand, HostOperations> operations) {
@@ -144,7 +144,7 @@ public final class ServerTokenCommand implements Runnable {
     private final Function<OperatorCommand, HostOperations> operations;
 
     ListTokens() {
-      this(OperationsFactory::open);
+      this(operator -> OperationsFactory.open(operator::warn));
     }
 
     ListTokens(Function<OperatorCommand, HostOperations> operations) {
@@ -181,7 +181,7 @@ public final class ServerTokenCommand implements Runnable {
     private final Function<OperatorCommand, HostOperations> operations;
 
     Revoke() {
-      this(OperationsFactory::open);
+      this(operator -> OperationsFactory.open(operator::warn));
     }
 
     Revoke(Function<OperatorCommand, HostOperations> operations) {

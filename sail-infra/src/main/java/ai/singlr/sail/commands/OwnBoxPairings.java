@@ -68,7 +68,7 @@ final class OwnBoxPairings implements DataMigration {
       throw new UncheckedIOException(
           "Could not take the pairing lock (" + failure.getMessage() + ").", failure);
     }
-    return new Report(notes.size(), 0, 0, List.copyOf(notes));
+    return Report.of(notes.size(), 0, 0, List.copyOf(notes));
   }
 
   /**

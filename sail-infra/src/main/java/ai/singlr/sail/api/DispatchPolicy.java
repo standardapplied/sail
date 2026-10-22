@@ -5,9 +5,9 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import java.util.Objects;
 
@@ -35,22 +35,22 @@ public final class DispatchPolicy {
    * localHandle}. Rules are checked in order — node identity, execution locality, caller
    * capability, then ownership — so the most fundamental precondition names the refusal.
    */
-  public static DispatchDecision check(Spec spec, String localHandle, OperatorCommand operator) {
+  public static DispatchDecision check(Spec spec, String localHandle) {
     var actor = Actor.current();
     if (actor.agentLane()) {
       return agentLaneForbidden("dispatch specs");
     }
     if (Strings.isBlank(localHandle)) {
-      return nodeHandleUnset(operator);
+      return nodeHandleUnset();
     }
     if (!localHandle.equals(spec.assignee())) {
-      return runsOnOtherNode(spec, localHandle, operator);
+      return runsOnOtherNode(spec, localHandle);
     }
     if (!actor.canWrite()) {
       return new DispatchDecision.Refused(
           ErrorCode.READ_ONLY_CREDENTIAL,
           "Your credential is read-only and cannot dispatch specs.",
-          "Ask an admin for a member or admin credential.");
+          Remedy.of("Ask an admin for a member or admin credential."));
     }
     if (!actor.isAdmin() && !actor.actsFor(spec.assignee())) {
       return new DispatchDecision.Refused(
@@ -62,9 +62,10 @@ public final class DispatchPolicy {
               + "', not you ('"
               + Objects.toString(actor.handle(), "")
               + "').",
-          "Ask "
-              + spec.assignee()
-              + " to dispatch it, or have an admin reassign it before dispatching.");
+          Remedy.of(
+              "Ask "
+                  + spec.assignee()
+                  + " to dispatch it, or have an admin reassign it before dispatching."));
     }
     return new DispatchDecision.Allowed();
   }
@@ -77,29 +78,29 @@ public final class DispatchPolicy {
     return new DispatchDecision.Refused(
         ErrorCode.AGENT_LANE_FORBIDDEN,
         "Agent principals cannot " + action + ".",
-        "Only an operator lane (CLI or API token) may do this.");
+        Remedy.of("Only an operator lane (CLI or API token) may do this."));
   }
 
   /** The rule-1 refusal: this box carries no sync-handle, so no spec has an execution node here. */
-  public static DispatchDecision.Refused nodeHandleUnset(OperatorCommand operator) {
+  public static DispatchDecision.Refused nodeHandleUnset() {
     return new DispatchDecision.Refused(
         ErrorCode.NODE_HANDLE_UNSET,
         "This node has no sync-handle, so it cannot be any spec's execution node.",
-        "Set it once: "
-            + operator.sail("host config set sync-handle <handle>")
-            + " (a node gets it from '"
-            + operator.sail("join")
-            + "').");
+        Remedy.of(
+            "Set it once: ",
+            Remedy.sail("host config set sync-handle", "<handle>"),
+            " (a node gets it from '",
+            Remedy.sail("join"),
+            "')."));
   }
 
-  static DispatchDecision.Refused runsOnOtherNode(
-      Spec spec, String localHandle, OperatorCommand operator) {
-    var claim = operator.sail("spec update " + spec.id() + " --assignee " + localHandle);
+  static DispatchDecision.Refused runsOnOtherNode(Spec spec, String localHandle) {
+    var claim = Remedy.sail("spec update", spec.id(), "--assignee", localHandle);
     if (Strings.isBlank(spec.assignee())) {
       return new DispatchDecision.Refused(
           ErrorCode.RUNS_ON_OTHER_NODE,
           "Spec '" + spec.id() + "' is unassigned, so no node may dispatch it.",
-          "Claim it first: " + claim);
+          Remedy.of("Claim it first: ", claim));
     }
     return new DispatchDecision.Refused(
         ErrorCode.RUNS_ON_OTHER_NODE,
@@ -110,6 +111,6 @@ public final class DispatchPolicy {
             + "', which runs on that FDE's devbox, not this node ('"
             + localHandle
             + "').",
-        "Reassign it to dispatch here: " + claim);
+        Remedy.of("Reassign it to dispatch here: ", claim));
   }
 }

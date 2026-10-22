@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
@@ -106,11 +105,10 @@ class RoomPrincipalAccessTest {
                 new ReviewStore(db),
                 runStore,
                 null,
-                ConnectEnvironment.detector(OperatorCommand.PLAIN),
+                ConnectEnvironment.detector(),
                 SyncScheduler.disabled(),
                 new FdeStore(db),
-                SessionYield.NONE,
-                OperatorCommand.PLAIN)
+                SessionYield.NONE)
             .useMessages(messageStore)
             .useRooms(new RoomStore(db));
     router = new LocalApiRouter(operations);

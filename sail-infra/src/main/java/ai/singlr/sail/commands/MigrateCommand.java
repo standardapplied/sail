@@ -617,7 +617,7 @@ public final class MigrateCommand implements Runnable {
         phase(
             animate,
             "Migrating database schema",
-            () -> MigrationRunner.applyAll(db, DataMigrations.all(operator), prompter));
+            () -> MigrationRunner.applyAll(db, DataMigrations.all(), prompter));
     if (!jsonOutput) {
       printSummary(dbPath, result.schemaBefore(), result.schemaAfter(), result.dataRuns());
     }

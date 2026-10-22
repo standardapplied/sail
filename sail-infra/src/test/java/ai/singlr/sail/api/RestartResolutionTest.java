@@ -149,8 +149,10 @@ class RestartResolutionTest {
     assertEquals(ErrorCode.BRANCH_CREATE_FAILED, ex.failure().errorCode());
     assertTrue(ex.getMessage().contains("agent/x"));
     assertTrue(
-        ex.failure().action().contains("restart"), "must point the caller at the restart option");
-    assertFalse(ex.failure().action().contains("--restart"), "collision fix must be lane-neutral");
+        ex.failure().remedy().plain().contains("restart"),
+        "must point the caller at the restart option");
+    assertFalse(
+        ex.failure().remedy().plain().contains("--restart"), "collision fix must be lane-neutral");
   }
 
   @Test

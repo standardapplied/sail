@@ -16,7 +16,6 @@ import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
 import ai.singlr.sail.api.TestAuth;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
@@ -74,8 +73,7 @@ class ApiSpecCommandsTest {
                 bus,
                 persister,
                 specStore,
-                reviewStore,
-                OperatorCommand.PLAIN)
+                reviewStore)
             .useMessages(new MessageStore(db))
             .useRooms(new RoomStore(db));
     server =

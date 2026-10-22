@@ -5,8 +5,8 @@
 
 package ai.singlr.sail.ssh;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -168,14 +168,17 @@ public final class SshGateway {
   private static String adminRequiredReason(
       List<String> tokens, String fdeHandle, String subcommand) {
     if (isPasskeyCommand(tokens)) {
-      return "Managing another FDE's passkeys requires the admin role. You may manage your"
-          + " own: "
-          + OperatorCommand.client("fde passkey list " + fdeHandle);
+      return Remedy.of(
+              "Managing another FDE's passkeys requires the admin role. You may manage your own: ",
+              Remedy.client("fde passkey list", fdeHandle))
+          .plain();
     }
     if (isEnrollCommand(tokens)) {
-      return "Minting an enrollment ticket for another FDE requires the admin role."
-          + " Enroll yourself with: "
-          + OperatorCommand.client("enroll");
+      return Remedy.of(
+              "Minting an enrollment ticket for another FDE requires the admin role. Enroll"
+                  + " yourself with: ",
+              Remedy.client("enroll"))
+          .plain();
     }
     return "'" + subcommand + "' requires the admin role.";
   }

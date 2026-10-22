@@ -84,7 +84,7 @@ public final class ProjectListCommand implements Runnable {
   }
 
   private static List<String> catalogNames(OperatorCommand operator) {
-    try (var operations = OperationsFactory.open(operator)) {
+    try (var operations = OperationsFactory.open()) {
       return operations.catalog().projects().stream().map(ProjectStore.ProjectRow::name).toList();
     } catch (RuntimeException e) {
       return List.of();

@@ -6,6 +6,8 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.FilePicker;
@@ -127,21 +129,20 @@ public final class ApiRouter implements HttpHandler {
     } catch (WriteRefused e) {
       write(exchange, ApiResponse.error(Refusals.exception(e.refusal()).failure()));
     } catch (IllegalArgumentException e) {
-      write(
-          exchange,
-          ApiResponse.error(
-              new Result.Failure<>(ErrorCode.INVALID_REQUEST, e.getMessage(), null, null, e)));
+      write(exchange, ApiResponse.error(ApiException.of(ErrorCode.INVALID_REQUEST, e).failure()));
     } catch (Exception e) {
       ApiLog.unexpected(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath(), e);
       write(
           exchange,
           ApiResponse.error(
-              new Result.Failure<>(
-                  ErrorCode.INTERNAL,
-                  "sail API request failed.",
-                  "Check sail API logs.",
-                  null,
-                  e)));
+              e instanceof Remedied
+                  ? ApiException.of(ErrorCode.INTERNAL, e).failure()
+                  : new Result.Failure<>(
+                      ErrorCode.INTERNAL,
+                      "sail API request failed.",
+                      Remedy.of("Check sail API logs."),
+                      null,
+                      e)));
     } finally {
       exchange.close();
     }

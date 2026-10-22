@@ -5,10 +5,10 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.ContainerExec;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
@@ -16,7 +16,6 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.FdeStore;
 import java.util.List;
-import java.util.Objects;
 
 /**
  * The pre-launch admission checks every run lane runs before it reserves a container or takes a
@@ -30,12 +29,10 @@ public final class LaunchAdmission {
 
   private final ShellExec shell;
   private final FdeStore fdeStore;
-  private final OperatorCommand operator;
 
-  public LaunchAdmission(ShellExec shell, FdeStore fdeStore, OperatorCommand operator) {
+  public LaunchAdmission(ShellExec shell, FdeStore fdeStore) {
     this.shell = shell;
     this.fdeStore = fdeStore;
-    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   /**
@@ -43,8 +40,7 @@ public final class LaunchAdmission {
    * set, and this box owns the room (assignee, else creator). Whether the actor may change the room
    * is the room rule's, decided where its roster is written.
    */
-  public static void requireAllowedForRoom(
-      String roomId, String owner, String localHandle, OperatorCommand operator) {
+  public static void requireAllowedForRoom(String roomId, String owner, String localHandle) {
     var actor = Actor.current();
     if (actor.agentLane()) {
       throw new ApiException(
@@ -56,7 +52,7 @@ public final class LaunchAdmission {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED,
           "This box has no FDE handle, so room ownership cannot be established.",
-          handleHint(operator));
+          HANDLE_HINT);
     }
     if (!Ownership.owns(localHandle, owner)) {
       throw new ApiException(
@@ -70,9 +66,8 @@ public final class LaunchAdmission {
    * Refuses when the actor may not act on {@code spec} from the box identified by {@code
    * localHandle}.
    */
-  public static void requireAllowed(Spec spec, String localHandle, OperatorCommand operator) {
-    if (DispatchPolicy.check(spec, localHandle, operator)
-        instanceof DispatchDecision.Refused refused) {
+  public static void requireAllowed(Spec spec, String localHandle) {
+    if (DispatchPolicy.check(spec, localHandle) instanceof DispatchDecision.Refused refused) {
       throw new ApiException(refused.code(), refused.message(), refused.fix());
     }
   }
@@ -94,9 +89,10 @@ public final class LaunchAdmission {
             + localHandle
             + "' is not an active member of this box's roster, so its assigned specs cannot be"
             + " trusted.",
-        "Run '"
-            + operator.sail("sync")
-            + "' to pull the roster from main, or get authorized there first.");
+        Remedy.of(
+            "Run '",
+            Remedy.sail("sync"),
+            "' to pull the roster from main, or get authorized there first."));
   }
 
   /**
@@ -111,23 +107,21 @@ public final class LaunchAdmission {
                 project,
                 List.of("bash", "-lc", "command -v -- \"$1\"", "bash", harness.binaryName())));
     if (!found.ok()) {
-      throw notInstalled(harness, project, operator);
+      throw notInstalled(harness, project);
     }
   }
 
-  static String handleHint(OperatorCommand operator) {
-    return "Set it with: " + operator.sail("host config set sync-handle <handle>");
-  }
+  static final Remedy HANDLE_HINT =
+      Remedy.of("Set it with: ", Remedy.sail("host config set sync-handle", "<handle>"));
 
-  static ApiException notInstalled(Harness harness, String project, OperatorCommand operator) {
+  static ApiException notInstalled(Harness harness, String project) {
     return new ApiException(
         ErrorCode.AGENT_NOT_CONFIGURED,
         "Agent '" + harness.yamlName() + "' is not installed in project '" + project + "'.",
-        "Add "
-            + harness.yamlName()
-            + " to sail.yaml's agent.install list and run '"
-            + operator.sail("project apply " + project)
-            + "'.");
+        Remedy.of(
+            "Add " + harness.yamlName() + " to sail.yaml's agent.install list and run '",
+            Remedy.sail("project apply", project),
+            "'."));
   }
 
   /** Resolves the agent to launch, refusing an unknown or missing name as a client error. */

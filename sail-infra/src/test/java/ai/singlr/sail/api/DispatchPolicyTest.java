@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import java.util.List;
@@ -44,14 +43,14 @@ class DispatchPolicyTest {
   private static DispatchDecision.Refused refuse(Actor actor, Spec spec, String localHandle) {
     return assertInstanceOf(
         DispatchDecision.Refused.class,
-        Actor.call(actor, () -> DispatchPolicy.check(spec, localHandle, OperatorCommand.PLAIN)));
+        Actor.call(actor, () -> DispatchPolicy.check(spec, localHandle)));
   }
 
   @Test
   void blankLocalHandleRefusesNodeHandleUnset() {
     var refused = refuse(member(NODE), spec(NODE), "");
     assertEquals(ErrorCode.NODE_HANDLE_UNSET, refused.code());
-    assertTrue(refused.fix().contains("sync-handle"), refused.fix());
+    assertTrue(refused.fix().plain().contains("sync-handle"), refused.fix().plain());
   }
 
   @Test
@@ -61,7 +60,7 @@ class DispatchPolicyTest {
 
   @Test
   void nodeHandleUnsetHelperCarriesTheCode() {
-    var refused = DispatchPolicy.nodeHandleUnset(OperatorCommand.PLAIN);
+    var refused = DispatchPolicy.nodeHandleUnset();
     assertEquals(ErrorCode.NODE_HANDLE_UNSET, refused.code());
     assertTrue(refused.message().contains("execution node"), refused.message());
   }
@@ -71,7 +70,7 @@ class DispatchPolicyTest {
     var refused = refuse(member(NODE), spec("raj"), NODE);
     assertEquals(ErrorCode.RUNS_ON_OTHER_NODE, refused.code());
     assertTrue(refused.message().contains("'raj'"), refused.message());
-    assertTrue(refused.fix().contains("--assignee " + NODE), refused.fix());
+    assertTrue(refused.fix().plain().contains("--assignee " + NODE), refused.fix().plain());
   }
 
   @Test
@@ -79,7 +78,7 @@ class DispatchPolicyTest {
     var refused = refuse(member(NODE), spec(null), NODE);
     assertEquals(ErrorCode.RUNS_ON_OTHER_NODE, refused.code());
     assertTrue(refused.message().contains("unassigned"), refused.message());
-    assertTrue(refused.fix().contains("--assignee " + NODE), refused.fix());
+    assertTrue(refused.fix().plain().contains("--assignee " + NODE), refused.fix().plain());
   }
 
   @Test
@@ -100,8 +99,7 @@ class DispatchPolicyTest {
   void memberDispatchingOwnLocalSpecIsAllowed() {
     assertInstanceOf(
         DispatchDecision.Allowed.class,
-        Actor.call(
-            member(NODE), () -> DispatchPolicy.check(spec(NODE), NODE, OperatorCommand.PLAIN)));
+        Actor.call(member(NODE), () -> DispatchPolicy.check(spec(NODE), NODE)));
   }
 
   @Test
@@ -109,7 +107,7 @@ class DispatchPolicyTest {
     var admin = new Actor("ops", Role.ADMIN, Actor.Lane.API);
     assertInstanceOf(
         DispatchDecision.Allowed.class,
-        Actor.call(admin, () -> DispatchPolicy.check(spec(NODE), NODE, OperatorCommand.PLAIN)));
+        Actor.call(admin, () -> DispatchPolicy.check(spec(NODE), NODE)));
   }
 
   @Test
@@ -122,9 +120,7 @@ class DispatchPolicyTest {
   void cliOperatorDispatchingOwnSpecIsAllowed() {
     assertInstanceOf(
         DispatchDecision.Allowed.class,
-        Actor.call(
-            Actor.cliOperator(NODE),
-            () -> DispatchPolicy.check(spec(NODE), NODE, OperatorCommand.PLAIN)));
+        Actor.call(Actor.cliOperator(NODE), () -> DispatchPolicy.check(spec(NODE), NODE)));
   }
 
   @Test

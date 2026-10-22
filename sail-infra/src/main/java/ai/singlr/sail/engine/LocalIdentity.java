@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.PlaceholderResolver;
 import ai.singlr.sail.ssh.SshPublicKey;
@@ -65,6 +66,11 @@ public final class LocalIdentity {
         SailPaths.identityHome(),
         SailPaths.invokingHome(),
         operator);
+  }
+
+  /** The workstation key file this identity's {@code ${SSH_PUBLIC_KEY}} resolves from. */
+  public Path sshPublicKeyPath() {
+    return sshPublicKeyPath;
   }
 
   /**
@@ -179,7 +185,7 @@ public final class LocalIdentity {
   }
 
   private String sshPublicKey() {
-    return WorkstationIdentity.registeredAt(sshPublicKeyPath, operator)
+    return WorkstationIdentity.registeredAt(sshPublicKeyPath)
         .map(SshPublicKey::line)
         .orElseThrow(() -> new IllegalStateException(missingKeyMessage()));
   }
@@ -190,7 +196,7 @@ public final class LocalIdentity {
         you to connect from your laptop.
           Register it (auto-detected from this box's authorized_keys, or pass the key):
             %s"""
-        .formatted(sshPublicKeyPath, WorkstationIdentity.setKeyHint(operator));
+        .formatted(sshPublicKeyPath, operator.render(Remedy.of(WorkstationIdentity.SET_KEY)));
   }
 
   private String run(List<String> command) {

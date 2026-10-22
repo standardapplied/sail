@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -68,8 +67,7 @@ class ResourceAuthzTest {
             new EventBus(),
             null,
             specStore,
-            reviewStore,
-            OperatorCommand.PLAIN);
+            reviewStore);
     var auth = TestAuth.sessions(db);
     server = new SailApiServer("127.0.0.1", 0, ops, auth, new EventBus(), null, null, null);
     server.start();

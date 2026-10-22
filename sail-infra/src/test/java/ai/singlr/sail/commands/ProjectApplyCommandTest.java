@@ -45,6 +45,7 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 
 class ProjectApplyCommandTest {
 
@@ -189,7 +190,7 @@ class ProjectApplyCommandTest {
             ApiException.class,
             () ->
                 ProjectApplyCommand.ensureHomeRoom(
-                    new SailOperations(OperatorCommand.PLAIN),
+                    new SailOperations(),
                     claudeProject(),
                     "ada",
                     () -> {
@@ -224,16 +225,23 @@ class ProjectApplyCommandTest {
     var thrown =
         assertThrows(
             IllegalStateException.class,
-            () -> ProjectApplyCommand.requireRootToProvision("web", false, false));
+            () -> ProjectApplyCommand.requireRootToProvision("web", false, false, applied("web")));
 
-    assertTrue(thrown.getMessage().contains("Root privileges required"));
-    assertTrue(thrown.getMessage().contains("sudo sail project apply web"));
+    assertEquals(
+        "Root privileges required to provision 'web'. Run with: sudo sail project apply web",
+        thrown.getMessage());
   }
 
   @Test
   void dryRunAndRootSkipTheRootGate() {
-    ProjectApplyCommand.requireRootToProvision("web", true, false);
-    ProjectApplyCommand.requireRootToProvision("web", false, true);
+    ProjectApplyCommand.requireRootToProvision("web", true, false, applied("web"));
+    ProjectApplyCommand.requireRootToProvision("web", false, true, applied("web"));
+  }
+
+  private static CommandSpec applied(String... args) {
+    var apply = new CommandLine(new ProjectApplyCommand());
+    apply.parseArgs(args);
+    return apply.getCommandSpec();
   }
 
   @Test

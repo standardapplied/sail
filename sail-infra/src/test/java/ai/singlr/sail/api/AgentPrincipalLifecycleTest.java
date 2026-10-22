@@ -14,7 +14,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.ConnectEnvironment;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -138,8 +137,7 @@ class AgentPrincipalLifecycleTest {
               return 0;
             },
             DispatchOperations.Listener.NONE,
-            SessionYield.NONE,
-            OperatorCommand.PLAIN);
+            SessionYield.NONE);
 
     var outcome =
         Acting.by(
@@ -169,11 +167,10 @@ class AgentPrincipalLifecycleTest {
             new ReviewStore(db),
             runStore,
             null,
-            ConnectEnvironment.detector(OperatorCommand.PLAIN),
+            ConnectEnvironment.detector(),
             SyncScheduler.disabled(),
             new FdeStore(db),
-            SessionYield.NONE,
-            OperatorCommand.PLAIN);
+            SessionYield.NONE);
     TestControlPlane.standalone(operations, db, tempDir);
     var router = new LocalApiRouter(operations);
     var delivered = new CountDownLatch(1);
@@ -242,8 +239,7 @@ class AgentPrincipalLifecycleTest {
               agentAlive.set(false);
               return new AgentSession.Halt.Ended();
             },
-            StopOperations.Listener.NONE,
-            OperatorCommand.PLAIN);
+            StopOperations.Listener.NONE);
     var stopped =
         Acting.by(ADMIN, () -> stopOps.stop(new StopOperations.RunTarget(runId), HANDLE, false));
     assertInstanceOf(StopOperations.Stopped.class, stopped);
@@ -311,8 +307,7 @@ class AgentPrincipalLifecycleTest {
               return 0;
             },
             DispatchOperations.Listener.NONE,
-            SessionYield.NONE,
-            OperatorCommand.PLAIN);
+            SessionYield.NONE);
 
     var outcome =
         Acting.by(
@@ -341,11 +336,10 @@ class AgentPrincipalLifecycleTest {
             new ReviewStore(db),
             runStore,
             null,
-            ConnectEnvironment.detector(OperatorCommand.PLAIN),
+            ConnectEnvironment.detector(),
             SyncScheduler.disabled(),
             new FdeStore(db),
-            SessionYield.NONE,
-            OperatorCommand.PLAIN);
+            SessionYield.NONE);
     var router = new LocalApiRouter(operations);
     var updated = router.handle(request("PUT", "/v1/specs/auth", credential.get(), "priority=7"));
     assertEquals(

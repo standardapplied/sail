@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedy;
+
 /**
  * The outcome of {@link DispatchPolicy#check}: either {@link Allowed} or a {@link Refused} carrying
  * the structured {@link ErrorCode} a GUI client renders verbatim, a human-readable reason, and the
@@ -16,5 +18,5 @@ public sealed interface DispatchDecision
 
   record Allowed() implements DispatchDecision {}
 
-  record Refused(ErrorCode code, String message, String fix) implements DispatchDecision {}
+  record Refused(ErrorCode code, String message, Remedy fix) implements DispatchDecision {}
 }

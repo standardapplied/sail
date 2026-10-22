@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SailYaml;
@@ -36,7 +37,7 @@ public final class StagePromptsMigration implements DataMigration {
     var store = new ProjectStore(db);
     var applied = 0;
     var skipped = 0;
-    var notes = new ArrayList<String>();
+    var notes = new ArrayList<Remedy>();
     for (var row : store.list()) {
       Map<String, Object> map;
       try {
@@ -44,11 +45,12 @@ public final class StagePromptsMigration implements DataMigration {
       } catch (RuntimeException notYaml) {
         skipped++;
         notes.add(
-            "Left project '"
-                + row.name()
-                + "' alone: its definition is not YAML ("
-                + notYaml.getMessage()
-                + ")");
+            Remedy.of(
+                "Left project '"
+                    + row.name()
+                    + "' alone: its definition is not YAML ("
+                    + notYaml.getMessage()
+                    + ")"));
         continue;
       }
       var dropped = strip(map);
@@ -58,7 +60,7 @@ public final class StagePromptsMigration implements DataMigration {
       store.upsert(row.name(), YamlUtil.dumpToString(map));
       applied++;
       for (var sentence : dropped) {
-        notes.add("Project '" + row.name() + "': dropped " + sentence);
+        notes.add(Remedy.of("Project '" + row.name() + "': dropped ", sentence));
       }
     }
     return new Report(applied, 0, skipped, notes);
@@ -66,10 +68,10 @@ public final class StagePromptsMigration implements DataMigration {
 
   /** Removes every deleted key from {@code map}, and says for each where its text belongs. */
   @SuppressWarnings("unchecked")
-  static List<String> strip(Map<String, Object> map) {
-    var dropped = new ArrayList<String>();
+  static List<Remedy> strip(Map<String, Object> map) {
+    var dropped = new ArrayList<Remedy>();
     if (drop(map, "agent_context")) {
-      dropped.add("agent_context. " + SailYaml.DELETED_KEYS.get("agent_context"));
+      dropped.add(Remedy.of("agent_context. ", SailYaml.DELETED_KEYS.get("agent_context")));
     }
     if (!(map.get("agent") instanceof Map<?, ?> agentRaw)) {
       return dropped;
@@ -77,7 +79,7 @@ public final class StagePromptsMigration implements DataMigration {
     var agent = (Map<String, Object>) agentRaw;
     for (var key : List.of("methodology", "build_skill")) {
       if (drop(agent, key)) {
-        dropped.add("agent." + key + ". " + SailYaml.DELETED_KEYS.get("agent." + key));
+        dropped.add(Remedy.of("agent." + key + ". ", SailYaml.DELETED_KEYS.get("agent." + key)));
       }
     }
     if (!(agent.get("review_pipeline") instanceof Map<?, ?> pipelineRaw)) {
@@ -86,8 +88,9 @@ public final class StagePromptsMigration implements DataMigration {
     var pipeline = (Map<String, Object>) pipelineRaw;
     if (drop(pipeline, "fix_skill")) {
       dropped.add(
-          "agent.review_pipeline.fix_skill. "
-              + SailYaml.DELETED_KEYS.get("agent.review_pipeline.fix_skill"));
+          Remedy.of(
+              "agent.review_pipeline.fix_skill. ",
+              SailYaml.DELETED_KEYS.get("agent.review_pipeline.fix_skill")));
     }
     if (!(pipeline.get("stages") instanceof List<?> stages)) {
       return dropped;

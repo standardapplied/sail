@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.sync;
 
-import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -74,7 +74,6 @@ public final class PagedSyncSession implements SyncSession {
   private final OutputStream out;
   private final String mainId;
   private final int frame;
-  private final OperatorCommand operator;
   private final SyncEngine engine = new SyncEngine();
   private Map<String, Long> tips;
   private Map<String, Asked> asked;
@@ -89,7 +88,7 @@ public final class PagedSyncSession implements SyncSession {
   private Set<String> touched = Set.of();
   private List<SyncSession.Denial> denials = new ArrayList<>();
   private List<SyncSession.Refusal> refusals = new ArrayList<>();
-  private Consumer<String> notice = ignored -> {};
+  private Consumer<Remedy> notice = ignored -> {};
   private Consumer<SyncSession.Denial> onDenial = ignored -> {};
   private String broken;
   private String handle;
@@ -110,18 +109,16 @@ public final class PagedSyncSession implements SyncSession {
     return this;
   }
 
-  PagedSyncSession(
-      InputStream in, OutputStream out, String mainId, int frame, OperatorCommand operator) {
+  PagedSyncSession(InputStream in, OutputStream out, String mainId, int frame) {
     this.in = Objects.requireNonNull(in, "in");
     this.out = Objects.requireNonNull(out, "out");
     this.mainId = Objects.requireNonNull(mainId, "mainId");
     this.frame = frame;
-    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   /** This session with pushes and need requests cut at {@code frame} bytes; a test seam. */
   PagedSyncSession frame(int frame) {
-    var copy = new PagedSyncSession(in, out, mainId, frame, operator);
+    var copy = new PagedSyncSession(in, out, mainId, frame);
     copy.tips = tips;
     copy.blobs = blobs;
     copy.erasure = erasure;
@@ -144,9 +141,8 @@ public final class PagedSyncSession implements SyncSession {
       OutputStream out,
       SyncWire.Hello hello,
       SyncWire.Welcome welcome,
-      Consumer<String> notice,
-      Consumer<SyncSession.Denial> onDenial,
-      OperatorCommand operator) {
+      Consumer<Remedy> notice,
+      Consumer<SyncSession.Denial> onDenial) {
     if (welcome.protocol() != SyncWire.PROTOCOL) {
       throw new SyncTransportException(
           "refused",
@@ -166,13 +162,14 @@ public final class PagedSyncSession implements SyncSession {
         && nodeVersion.isPresent()
         && mainVersion.get().compareTo(nodeVersion.get()) < 0) {
       notice.accept(
-          "this node is sail "
-              + hello.version()
-              + " but main is "
-              + welcome.version()
-              + "; upgrade main first, then nodes.");
+          Remedy.of(
+              "this node is sail "
+                  + hello.version()
+                  + " but main is "
+                  + welcome.version()
+                  + "; upgrade main first, then nodes."));
     }
-    var session = new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME, operator);
+    var session = new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME);
     session.notice = notice;
     session.onDenial = onDenial;
     session.handle = welcome.handle();
@@ -212,13 +209,11 @@ public final class PagedSyncSession implements SyncSession {
       contentLeft = false;
       return freed;
     } catch (RuntimeException e) {
-      System.err.println(
-          "  [sync] "
-              + type
-              + ": could not collect content; '"
-              + operator.sail("sync gc")
-              + "' frees it: "
-              + e.getMessage());
+      notice.accept(
+          Remedy.of(
+              type + ": could not collect content; '",
+              Remedy.sail("sync gc"),
+              "' frees it: " + e.getMessage()));
       return 0;
     }
   }
@@ -236,11 +231,8 @@ public final class PagedSyncSession implements SyncSession {
     if (broken != null) {
       throw new SyncTransportException(
           "unreachable",
-          "channel unusable after an earlier failure ("
-              + broken
-              + "); run "
-              + operator.sail("sync")
-              + " again",
+          "channel unusable after an earlier failure (" + broken + ");",
+          Remedy.of("run ", Remedy.sail("sync"), " again"),
           null);
     }
     return exchange.get();
@@ -791,7 +783,7 @@ public final class PagedSyncSession implements SyncSession {
       return new SyncTransportException(failed.kind(), context + ": " + failed.message(), null);
     }
     if (response instanceof SyncWire.Refuse refuse) {
-      return new SyncTransportException("refused", context + ": " + refuse.reason(), null);
+      return new SyncTransportException("refused", context + ":", refuse.reason(), null);
     }
     return new SyncTransportException(context + ": Expected a " + expected + ", got: " + response);
   }
@@ -1105,7 +1097,7 @@ public final class PagedSyncSession implements SyncSession {
         case SyncWire.Refused refused -> {
           var refusal = new SyncSession.Refusal(type, refused.id(), refused.reason());
           refusals.add(refusal);
-          notice.accept(refusal.describe());
+          notice.accept(Remedy.of(refusal.describe()));
           yield new CommitOutcome.Refused(refused.reason());
         }
       };

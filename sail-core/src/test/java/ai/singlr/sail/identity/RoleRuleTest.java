@@ -8,7 +8,6 @@ package ai.singlr.sail.identity;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.config.SyncConfig;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -165,7 +164,7 @@ class RoleRuleTest {
   void theOperatorIsNeverScopedWhateverTheRosterSaysAndAnActorCarriesItsRoleAndScopeTogether() {
     roster.restrict("uday");
     roster.restrict("mady");
-    roster.grant("mady", "alpha", OperatorCommand.PLAIN);
+    roster.grant("mady", "alpha");
     var rule = new RoleRule(() -> MAIN, roster);
 
     assertEquals(ProjectScope.all(), rule.scopeOf("uday"), "main's own FDE acts as an admin");

@@ -164,8 +164,8 @@ class SpecCliHelperTest {
         assertEquals(
             "spec: no credential: SAIL_RUN_CREDENTIAL is unset and "
                 + home.resolve("box.credential")
-                + " is unreadable: this box has no sync handle. Give it one on the host: sudo sail"
-                + " host config set sync-handle <handle>\n",
+                + " is unreadable: this box has no sync handle. Give it one on the host: sail host"
+                + " config set sync-handle <handle>\n",
             refused.output());
       }
     } finally {

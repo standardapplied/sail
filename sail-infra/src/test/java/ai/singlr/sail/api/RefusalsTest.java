@@ -47,9 +47,9 @@ class RefusalsTest {
 
     assertEquals(ErrorCode.FORBIDDEN_NOT_AUTHOR, thrown.failure().errorCode());
     assertEquals("'ada' may not write as 'bob'.", thrown.getMessage());
-    assertEquals("Fix it.", thrown.failure().action());
+    assertEquals("Fix it.", thrown.failure().remedy().plain());
     assertEquals(ErrorCode.FORBIDDEN_NOT_AUTHOR, failure.errorCode());
-    assertEquals("Fix it.", failure.action());
+    assertEquals("Fix it.", failure.remedy().plain());
     Refusals.enforce(Optional.empty());
   }
 }

@@ -5,10 +5,10 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.HostInfo;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -26,18 +26,28 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /** The control-plane database and operations wiring shared by host commands and the server. */
 public final class OperationsFactory {
   private OperationsFactory() {}
 
-  /** Every command a reply names is worded for {@code operator}, the caller of this process. */
-  public static HostOperations open(OperatorCommand operator) {
-    return open(SailPaths.controlPlaneDb(), operator);
+  /** The operations over this box's control-plane database. */
+  public static HostOperations open() {
+    return open(SyncOperations.PLAIN_NOTICES);
   }
 
-  public static HostOperations open(Path path, OperatorCommand operator) {
+  /** As {@link #open()}, a sync round's notices going to {@code notice}. */
+  public static HostOperations open(Consumer<Remedy> notice) {
+    return opened(SailPaths.controlPlaneDb(), notice);
+  }
+
+  public static HostOperations open(Path path) {
+    return opened(path, SyncOperations.PLAIN_NOTICES);
+  }
+
+  private static HostOperations opened(Path path, Consumer<Remedy> notice) {
     return open(
         path,
         db ->
@@ -48,12 +58,13 @@ public final class OperationsFactory {
                 null,
                 SyncScheduler.disabled(),
                 SessionYield.NONE,
-                operator));
+                defaultHooks(new ShellExecutor(false), null),
+                notice));
   }
 
   public static HostOperations open(
-      ShellExec shell, OperationHooks hooks, SessionYield sessionYield, OperatorCommand operator) {
-    return open(SailPaths.controlPlaneDb(), db -> create(db, shell, hooks, sessionYield, operator));
+      ShellExec shell, OperationHooks hooks, SessionYield sessionYield) {
+    return open(SailPaths.controlPlaneDb(), db -> create(db, shell, hooks, sessionYield));
   }
 
   private static HostOperations open(Path path, Function<Sqlite, SailOperations> create) {
@@ -67,12 +78,16 @@ public final class OperationsFactory {
   }
 
   public static SailOperations create(
-      Sqlite db,
-      ShellExec shell,
-      OperationHooks hooks,
-      SessionYield sessionYield,
-      OperatorCommand operator) {
-    return create(db, shell, null, null, SyncScheduler.disabled(), sessionYield, hooks, operator);
+      Sqlite db, ShellExec shell, OperationHooks hooks, SessionYield sessionYield) {
+    return create(
+        db,
+        shell,
+        null,
+        null,
+        SyncScheduler.disabled(),
+        sessionYield,
+        hooks,
+        SyncOperations.PLAIN_NOTICES);
   }
 
   public static SailOperations create(
@@ -81,8 +96,7 @@ public final class OperationsFactory {
       EventBus bus,
       EventSubscriber audit,
       SyncScheduler scheduler,
-      SessionYield sessionYield,
-      OperatorCommand operator) {
+      SessionYield sessionYield) {
     return create(
         db,
         shell,
@@ -90,16 +104,20 @@ public final class OperationsFactory {
         audit,
         scheduler,
         sessionYield,
-        new OperationHooks(
-            event -> {
-              if (bus != null) bus.publish(event);
-            },
-            new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
-            DispatchOperations.autoSnapshotter(shell),
-            DispatchOperations.shellLauncher(shell),
-            DispatchOperations.Listener.NONE,
-            StopOperations.Listener.NONE),
-        operator);
+        defaultHooks(shell, bus),
+        SyncOperations.PLAIN_NOTICES);
+  }
+
+  private static OperationHooks defaultHooks(ShellExec shell, EventBus bus) {
+    return new OperationHooks(
+        event -> {
+          if (bus != null) bus.publish(event);
+        },
+        new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
+        DispatchOperations.autoSnapshotter(shell),
+        DispatchOperations.shellLauncher(shell),
+        DispatchOperations.Listener.NONE,
+        StopOperations.Listener.NONE);
   }
 
   private static SailOperations create(
@@ -110,7 +128,7 @@ public final class OperationsFactory {
       SyncScheduler scheduler,
       SessionYield sessionYield,
       OperationHooks hooks,
-      OperatorCommand operator) {
+      Consumer<Remedy> notice) {
     var projectStore = new ProjectStore(db);
     return new SailOperations(
             shell,
@@ -122,12 +140,11 @@ public final class OperationsFactory {
             new ReviewStore(db),
             new RunStore(db),
             projectStore,
-            ConnectEnvironment.detector(operator),
+            ConnectEnvironment.detector(),
             scheduler,
             new FdeStore(db),
             sessionYield,
-            hooks,
-            operator)
+            hooks)
         .useMessages(new MessageStore(db))
         .useRooms(new RoomStore(db))
         .useBoxCredentials(new BoxCredentialStore(db))
@@ -141,6 +158,6 @@ public final class OperationsFactory {
                 SailPaths.projectsDir(),
                 BoxIdentity::config,
                 SshSyncChannel::open,
-                operator));
+                notice));
   }
 }

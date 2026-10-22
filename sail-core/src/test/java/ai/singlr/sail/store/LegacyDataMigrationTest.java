@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectRegistry;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.ActingAs;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -93,8 +92,7 @@ class LegacyDataMigrationTest {
 
     var revisions = changeLogCount();
     var second =
-        new DataMigrator(
-                db, List.of(new LegacyDataMigration(() -> "node-a", OperatorCommand.PLAIN)))
+        new DataMigrator(db, List.of(new LegacyDataMigration(() -> "node-a")))
             .run(projects, DataMigration.Prompter.NON_INTERACTIVE);
 
     assertTrue(second.getFirst().alreadyApplied());
@@ -168,8 +166,7 @@ class LegacyDataMigrationTest {
         """
         INSERT INTO specs (id, title, status, created_at, updated_at, project)
         VALUES ('shared', 'Shared', 'pending', '2026-01-01', '2026-01-01', 'unassigned')""");
-    new ContentMigration(OperatorCommand.PLAIN)
-        .apply(db, null, DataMigration.Prompter.NON_INTERACTIVE);
+    new ContentMigration().apply(db, null, DataMigration.Prompter.NON_INTERACTIVE);
     var legacyStore = new SpecStore(db);
     legacyStore.recordRevision("shared", "local", false);
     var legacyRev = legacyStore.latestRev("shared");
@@ -204,10 +201,8 @@ class LegacyDataMigrationTest {
           INSERT INTO specs (id, title, status, created_at, updated_at, project)
           VALUES ('shared', 'Shared', 'pending', '2026-01-01', '2026-01-01', 'unassigned')""");
       new SchemaManager(other).migrate();
-      new ContentMigration(OperatorCommand.PLAIN)
-          .apply(other, projects, DataMigration.Prompter.NON_INTERACTIVE);
-      new DataMigrator(
-              other, List.of(new LegacyDataMigration(() -> "node-b", OperatorCommand.PLAIN)))
+      new ContentMigration().apply(other, projects, DataMigration.Prompter.NON_INTERACTIVE);
+      new DataMigrator(other, List.of(new LegacyDataMigration(() -> "node-b")))
           .run(projects, DataMigration.Prompter.NON_INTERACTIVE);
 
       assertEquals(firstRev, new SpecStore(other).latestRev("shared"));
@@ -216,10 +211,8 @@ class LegacyDataMigrationTest {
 
   private List<DataMigrator.Run> migrate(ProjectRegistry projects) {
     new SchemaManager(db).migrate();
-    new ContentMigration(OperatorCommand.PLAIN)
-        .apply(db, projects, DataMigration.Prompter.NON_INTERACTIVE);
-    return new DataMigrator(
-            db, List.of(new LegacyDataMigration(() -> "node-a", OperatorCommand.PLAIN)))
+    new ContentMigration().apply(db, projects, DataMigration.Prompter.NON_INTERACTIVE);
+    return new DataMigrator(db, List.of(new LegacyDataMigration(() -> "node-a")))
         .run(projects, DataMigration.Prompter.NON_INTERACTIVE);
   }
 

@@ -189,9 +189,9 @@ public final class AgentLogStreamer implements HttpHandler {
       var refused = refusal.get();
       var code = Refusals.code(refused.kind());
       var fix =
-          Strings.isBlank(refused.fix())
+          refused.fix().isEmpty()
               ? null
-              : ", \"fix\": \"" + jsonEscape(refused.fix()) + "\"";
+              : ", \"fix\": \"" + jsonEscape(refused.fix().described()) + "\"";
       return new Refused(code.httpCode(), code.code(), refused.message(), fix);
     }
     return new Admitted(run);

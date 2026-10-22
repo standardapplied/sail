@@ -182,6 +182,19 @@ class SailPathsTest {
   }
 
   @Test
+  void theBoxsWorkstationKeyIsTheOneFileInItsOwnersHome() throws Exception {
+    var dev = ownBox("dev");
+
+    assertEquals(
+        dev.resolve(".sail").resolve("workstation_key.pub"),
+        SailPaths.workstationPublicKeyPath(
+            SailPaths.identityHome(true, "dev", this::homeOf, tempDir.resolve("root"))));
+    assertEquals(
+        SailPaths.workstationPublicKeyPath(SailPaths.identityHome()),
+        SailPaths.workstationPublicKeyPath());
+  }
+
+  @Test
   void everyOtherAccountResolvesItsOwnIdentity() throws Exception {
     ownBox("dev");
     var own = tempDir.resolve("own");

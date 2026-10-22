@@ -169,7 +169,7 @@ public final class SshTunnel implements AutoCloseable {
             + "\n  Is the control plane running on "
             + host
             + "? Install it there with: "
-            + OperatorCommand.elsewhere("host service install")
+            + OperatorCommand.SUDO.sail("host service install")
             + sshDiagnostics());
   }
 

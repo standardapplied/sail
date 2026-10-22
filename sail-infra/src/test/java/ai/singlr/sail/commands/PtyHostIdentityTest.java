@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -42,7 +41,7 @@ class PtyHostIdentityTest {
       token = new AuthSessionStore(db).create(fde.id(), Duration.ofMinutes(5)).token();
     }
 
-    var identity = new PtyHostIdentity(() -> "uday", path, OperatorCommand.PLAIN).resolve(token);
+    var identity = new PtyHostIdentity(() -> "uday", path).resolve(token);
 
     assertEquals("mady", identity.fde());
     assertTrue(identity.admin());
@@ -55,7 +54,7 @@ class PtyHostIdentityTest {
       new FdeStore(db).add("uday", "Uday", null, "member");
     }
 
-    var identity = new PtyHostIdentity(() -> "uday", path, OperatorCommand.PLAIN).resolve("");
+    var identity = new PtyHostIdentity(() -> "uday", path).resolve("");
 
     assertEquals("uday", identity.fde());
     assertFalse(identity.admin());
@@ -67,14 +66,11 @@ class PtyHostIdentityTest {
 
     var forged =
         assertThrows(
-            IOException.class,
-            () -> new PtyHostIdentity(() -> "uday", path, OperatorCommand.PLAIN).resolve("nope"));
+            IOException.class, () -> new PtyHostIdentity(() -> "uday", path).resolve("nope"));
     assertTrue(forged.getMessage().contains("not valid"), forged.getMessage());
 
     var ownerless =
-        assertThrows(
-            IOException.class,
-            () -> new PtyHostIdentity(() -> null, path, OperatorCommand.PLAIN).resolve(""));
+        assertThrows(IOException.class, () -> new PtyHostIdentity(() -> null, path).resolve(""));
     assertTrue(ownerless.getMessage().contains("sync-handle"), ownerless.getMessage());
   }
 }

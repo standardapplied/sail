@@ -20,7 +20,6 @@ import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.BoxCredentialFile;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.IncusDeviceManager;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
@@ -101,8 +100,7 @@ class PtyRoomSessionIT extends AbstractIncusIT {
                   null,
                   SyncScheduler.disabled(),
                   fdeStore,
-                  SessionYield.NONE,
-                  OperatorCommand.PLAIN)
+                  SessionYield.NONE)
               .useMessages(new MessageStore(db))
               .useBoxCredentials(boxStore)
               .useRooms(rooms);
@@ -115,8 +113,8 @@ class PtyRoomSessionIT extends AbstractIncusIT {
                   dir.resolve("s"),
                   64 * 1024,
                   token -> new PtyIdentity(token.isBlank() ? "it" : "mady", true),
-                  new PtyHostRooms(dbPath, OperatorCommand.PLAIN),
-                  new PtyHostEvents(dbPath, dir.resolve("pty-events.drops"), OperatorCommand.PLAIN),
+                  new PtyHostRooms(dbPath),
+                  new PtyHostEvents(dbPath, dir.resolve("pty-events.drops")),
                   "0.0.0-test")) {
         api.start();
         host.start();

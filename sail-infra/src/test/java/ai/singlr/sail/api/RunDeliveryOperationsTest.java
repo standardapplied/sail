@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -85,8 +84,7 @@ class RunDeliveryOperationsTest {
                 new ProjectStore(db),
                 SyncScheduler.disabled(),
                 new FdeStore(db),
-                SessionYield.NONE,
-                OperatorCommand.PLAIN)
+                SessionYield.NONE)
             .useMessages(messages)
             .useRooms(new RoomStore(db));
     runId = newRun("room");

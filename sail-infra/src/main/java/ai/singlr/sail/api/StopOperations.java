@@ -12,7 +12,6 @@ import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.HostInfo;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
@@ -173,10 +172,9 @@ public final class StopOperations {
       RunStore runStore,
       DispatchOperations.EventSink events,
       AgentHalter halter,
-      Listener listener,
-      OperatorCommand operator) {
+      Listener listener) {
     this.shell = Objects.requireNonNull(shell, "shell");
-    this.projects = new ProjectLoader(shell, definitions, operator);
+    this.projects = new ProjectLoader(shell, definitions);
     this.specStore = Objects.requireNonNull(specStore, "specStore");
     this.runStore = Objects.requireNonNull(runStore, "runStore");
     this.events = Objects.requireNonNull(events, "events");

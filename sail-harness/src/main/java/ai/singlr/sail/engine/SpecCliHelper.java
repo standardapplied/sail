@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Remedy;
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
@@ -199,7 +200,7 @@ public final class SpecCliHelper {
         .replace("__SAIL_API_SOCKET__", SailPaths.apiSocketContainerPath().toString())
         .replace(
             "__SAIL_SET_HANDLE__",
-            OperatorCommand.elsewhere("host config set sync-handle <handle>"));
+            Remedy.of(Remedy.sail("host config set sync-handle", "<handle>")).plain());
   }
 
   /** Returns the PATH line that {@link #install(String)} appends to {@link #PROFILE_PATH}. */

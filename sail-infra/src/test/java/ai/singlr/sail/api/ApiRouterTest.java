@@ -13,13 +13,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.FileMaterializer;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.identity.Acting;
@@ -120,14 +121,13 @@ class ApiRouterTest {
           new TestOperations() {
             @Override
             public SyncConflicts.Conflict conflict(String type, String id) {
-              return new ConflictOperations(box.db, OperatorCommand.PLAIN).find(type, id);
+              return new ConflictOperations(box.db).find(type, id);
             }
 
             @Override
             public SyncConflicts.Conflict resolveConflict(
                 String type, String id, Resolution resolution) {
-              return new ConflictOperations(box.db, OperatorCommand.PLAIN)
-                  .resolve(type, id, resolution);
+              return new ConflictOperations(box.db).resolve(type, id, resolution);
             }
           };
       try (var server = serverWith(operations, true)) {
@@ -151,7 +151,10 @@ class ApiRouterTest {
         assertTrue(
             stale.body().contains("changed on this box after this conflict was recorded (body)"),
             stale.body());
-        assertTrue(stale.body().contains("Run 'sail sync' to refresh it"), stale.body());
+        assertTrue(stale.body().contains("Run 'sync' to refresh it"), stale.body());
+        assertTrue(
+            stale.body().contains("{\"run\": \"sail\", \"verb\": \"sync\", \"args\": []}"),
+            stale.body());
         assertEquals(2, box.conflicts.pending().size());
 
         var resolved =
@@ -190,7 +193,7 @@ class ApiRouterTest {
       Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var local = box.specs.comparableSnapshot("auth");
       park(box, "spec", local, "title", "remote");
-      var conflicts = new ConflictOperations(box.db, OperatorCommand.PLAIN);
+      var conflicts = new ConflictOperations(box.db);
       var rev = box.specs.revOf("auth");
       var operations =
           new TestOperations() {
@@ -216,7 +219,7 @@ class ApiRouterTest {
                 mergeBody(started.replaceAll("(?m)^" + ConflictMerge.CONFLICT + ": .*\n", "")));
         assertEquals(400, unnamed.statusCode(), unnamed.body());
         assertTrue(
-            unnamed.body().contains("must start from 'sail conflicts show auth --template'"),
+            unnamed.body().contains("Start it from 'conflicts show auth --template'"),
             unnamed.body());
 
         park(box, "spec", local, "title", "remote, revised");
@@ -1097,6 +1100,33 @@ class ApiRouterTest {
 
       assertEquals(409, response.statusCode());
       assertTrue(response.body().contains("conflict"));
+    }
+  }
+
+  @Test
+  void aFailureBelowTheDoorThatNamesARemedyReachesTheClientAsData() throws Exception {
+    try (var server = serverWith(new MigrationPendingOperations())) {
+      server.start();
+
+      var response = get(server, "/v1/projects/acme/agent", "token");
+
+      assertEquals(500, response.statusCode());
+      assertEquals(
+          Map.of(
+              "code",
+              "internal",
+              "message",
+              "Spec a has no content hash.",
+              "action",
+              "Run 'migrate'.",
+              "remedy",
+              List.of(
+                  Map.of("text", "Run '"),
+                  Map.of("run", "sail", "verb", "migrate", "args", List.of()),
+                  Map.of("text", "'.")),
+              "field_errors",
+              List.of()),
+          YamlUtil.parseMap(response.body()).get("error"));
     }
   }
 
@@ -2639,6 +2669,14 @@ class ApiRouterTest {
               + label
               + "' would discard its live work.",
           "Wait for it to finish or stop it, then retry the restore.");
+    }
+  }
+
+  private static final class MigrationPendingOperations extends FakeOperations {
+    @Override
+    public Result<AgentStatusResponse> agentStatus(String project, String localHandle) {
+      throw Remedied.state(
+          "Spec a has no content hash.", Remedy.of("Run '", Remedy.sail("migrate"), "'."));
     }
   }
 

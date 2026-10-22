@@ -283,8 +283,8 @@ class RunLauncherTest {
     assertEquals(ErrorCode.CONFLICT, ex.failure().errorCode());
     assertTrue(ex.getMessage().contains("its agent survived its halt"), ex.getMessage());
     assertTrue(
-        ex.failure().action().contains(AgentUnit.forRun(RUN_ID).unitName()),
-        "the operator is told which unit is still to be stopped: " + ex.failure().action());
+        ex.failure().remedy().plain().contains(AgentUnit.forRun(RUN_ID).unitName()),
+        "the operator is told which unit is still to be stopped: " + ex.failure().remedy().plain());
   }
 
   @Test

@@ -135,6 +135,6 @@ public final class HomeRoom {
   }
 
   private static ApiException refusal(Result.Failure<?> failure) {
-    return new ApiException(failure.errorCode(), failure.errorMessage(), failure.action());
+    return new ApiException(failure.errorCode(), failure.errorMessage(), failure.remedy());
   }
 }

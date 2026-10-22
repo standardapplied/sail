@@ -9,10 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import java.nio.file.Path;
 import java.util.List;
@@ -137,24 +137,25 @@ class StagePromptsMigrationTest {
 
   @Test
   void theReportListsPerProjectWhatItDroppedAndWhereItBelongs() {
-    var notes = apply().notes();
+    var notes = apply().notes().stream().map(Remedy::plain).toList();
 
     assertEquals(
         List.of(
             "Project 'api': dropped agent.build_skill. "
-                + SailYaml.DELETED_KEYS.get("agent.build_skill"),
+                + SailYaml.DELETED_KEYS.get("agent.build_skill").plain(),
             "Project 'api': dropped agent.review_pipeline.fix_skill. "
-                + SailYaml.DELETED_KEYS.get("agent.review_pipeline.fix_skill"),
+                + SailYaml.DELETED_KEYS.get("agent.review_pipeline.fix_skill").plain(),
             "Project 'api': dropped agent.review_pipeline.stages[security].skill is no longer read:"
                 + " a stage judges under its brief. Put what the skill said in the stage's brief"
                 + " (agent.review_pipeline.stages[security].brief), or keep it as a project skill"
-                + " (sudo sail project skills add) the brief tells the stage to run.",
+                + " (sail project skills add) the brief tells the stage to run.",
             "Project 'api': dropped agent.review_pipeline.stages[security].categories is no longer"
                 + " read: what a stage focuses on is its brief. Say it in"
                 + " agent.review_pipeline.stages[security].brief.",
-            "Project 'web': dropped agent_context. " + SailYaml.DELETED_KEYS.get("agent_context"),
+            "Project 'web': dropped agent_context. "
+                + SailYaml.DELETED_KEYS.get("agent_context").plain(),
             "Project 'web': dropped agent.methodology. "
-                + SailYaml.DELETED_KEYS.get("agent.methodology")),
+                + SailYaml.DELETED_KEYS.get("agent.methodology").plain()),
         notes);
   }
 
@@ -195,7 +196,9 @@ class StagePromptsMigrationTest {
     assertNotEquals(before, store.latestRev("ops"));
     assertEquals(
         6,
-        report.notes().stream().filter(note -> note.startsWith("Project 'ops': dropped ")).count(),
+        report.notes().stream()
+            .filter(note -> note.plain().startsWith("Project 'ops': dropped "))
+            .count(),
         report.notes().toString());
     SailYaml.fromMap(YamlUtil.parseMap(definition("ops")));
   }
@@ -222,17 +225,15 @@ class StagePromptsMigrationTest {
     assertEquals(2, report.applied());
     assertEquals(1, report.skipped());
     assertTrue(
-        report.notes().stream().anyMatch(note -> note.startsWith("Left project 'docs' alone:")),
+        report.notes().stream()
+            .anyMatch(note -> note.plain().startsWith("Left project 'docs' alone:")),
         report.notes().toString());
     assertEquals("agent: [unterminated", definition("docs"));
   }
 
   @Test
   void theMigrationIsRegisteredAndNeedsNothingOfTheBoxsFiles() {
-    for (var registry :
-        List.of(
-            DataMigrations.all(OperatorCommand.PLAIN),
-            DataMigrations.databaseOnly(OperatorCommand.PLAIN))) {
+    for (var registry : List.of(DataMigrations.all(), DataMigrations.databaseOnly())) {
       assertTrue(registry.stream().anyMatch(StagePromptsMigration.class::isInstance));
     }
   }

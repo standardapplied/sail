@@ -155,7 +155,7 @@ public final class ProjectConfigCommand implements Runnable {
     if (!(state instanceof ContainerState.Running)) {
       return null;
     }
-    try (var operations = OperationsFactory.open(operator)) {
+    try (var operations = OperationsFactory.open()) {
       return operations.dispatching().projectSession(containerName, NodeIdentity.handle());
     }
   }
@@ -169,7 +169,7 @@ public final class ProjectConfigCommand implements Runnable {
     if (config.agent() == null) {
       return SpecSnapshot.unavailable("specs_not_configured");
     }
-    try (var operations = OperationsFactory.open(operator)) {
+    try (var operations = OperationsFactory.open()) {
       return SpecSnapshot.available(SpecCatalog.summarize(operations.catalog().projectSpecs(name)));
     } catch (Exception e) {
       return SpecSnapshot.unavailable("specs_unavailable");

@@ -16,7 +16,6 @@ import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerFilePush;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -130,8 +129,7 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
               (project, config) -> "",
               DispatchOperations.shellLauncher(shell),
               DispatchOperations.Listener.NONE,
-              SessionYield.NONE,
-              OperatorCommand.PLAIN);
+              SessionYield.NONE);
 
       var session =
           Acting.by(
@@ -167,8 +165,7 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
               runStore,
               events::add,
               StopOperations.sessionHalter(shell),
-              StopOperations.Listener.NONE,
-              OperatorCommand.PLAIN);
+              StopOperations.Listener.NONE);
       var outcome =
           Acting.by(
               OPERATOR,

@@ -197,7 +197,7 @@ public final class ProjectDefinitions {
    */
   public static SailYaml definitionWithBoxIdentity(
       HostCatalog catalog, String name, LocalIdentity identity, OperatorCommand operator) {
-    catalog.definitions().require(name, operator);
+    catalog.definitions().require(name);
     var text = catalog.project(name).orElseThrow().definition();
     var values = new LinkedHashMap<String, String>();
     for (var field : List.of(PlaceholderResolver.GIT_NAME, PlaceholderResolver.GIT_EMAIL)) {

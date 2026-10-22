@@ -72,13 +72,13 @@ public final class AgentLogCommand implements Runnable {
 
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
-    name = CurrentProject.require(name, operator);
+    name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name, operator);
+    ContainerStateGuard.requireRunning(state, name);
 
     var logPath = resolveLogPath(name, lane(), operator);
     if (logPath == null) {
@@ -147,7 +147,7 @@ public final class AgentLogCommand implements Runnable {
    * lane only selects which run, never another file shape.
    */
   private String resolveLogPath(String project, Optional<Lane> lane, OperatorCommand operator) {
-    try (var operations = OperationsFactory.open(operator)) {
+    try (var operations = OperationsFactory.open()) {
       var dispatching = operations.dispatching();
       var node = NodeIdentity.handle();
       return logPathFrom(

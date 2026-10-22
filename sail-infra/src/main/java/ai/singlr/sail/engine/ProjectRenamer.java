@@ -56,10 +56,10 @@ public final class ProjectRenamer {
   private final ShellExec shell;
   private final Path projectsDir;
 
-  public ProjectRenamer(Sqlite db, ShellExec shell, Path projectsDir, OperatorCommand operator) {
+  public ProjectRenamer(Sqlite db, ShellExec shell, Path projectsDir) {
     this(
         OperationsFactory.create(
-            db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE, operator),
+            db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE),
         shell,
         projectsDir);
   }

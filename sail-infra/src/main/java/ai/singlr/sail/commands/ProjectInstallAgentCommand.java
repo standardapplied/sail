@@ -58,7 +58,7 @@ public final class ProjectInstallAgentCommand implements Runnable {
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
 
-    ContainerStateGuard.requireRunning(state, name, operator);
+    ContainerStateGuard.requireRunning(state, name);
 
     var check = shell.exec(ContainerExec.asDevUser(name, List.of("which", tool.binaryName())));
     if (check.ok()) {

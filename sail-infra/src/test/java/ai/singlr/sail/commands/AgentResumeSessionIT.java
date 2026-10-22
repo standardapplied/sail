@@ -18,7 +18,6 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.AgentUnit;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.pty.PtyIdentity;
@@ -95,8 +94,8 @@ class AgentResumeSessionIT extends AbstractIncusIT {
               dir.resolve("s"),
               64 * 1024,
               token -> new PtyIdentity("it", true),
-              new PtyHostRooms(dbPath, OperatorCommand.PLAIN),
-              new PtyHostEvents(dbPath, dir.resolve("pty-events.drops"), OperatorCommand.PLAIN),
+              new PtyHostRooms(dbPath),
+              new PtyHostEvents(dbPath, dir.resolve("pty-events.drops")),
               "0.0.0-test")) {
         host.start();
         launchPrepared(CONTAINER);

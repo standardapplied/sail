@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -145,8 +144,7 @@ class NodeIdentitySyncTest {
     try (var link = SyncBox.connect(main.server(UDAY), ada)) {
       var failure =
           assertThrows(
-              SyncTransportException.class,
-              () -> NodeRound.begin(link.session(), ada.db, "ada", OperatorCommand.PLAIN));
+              SyncTransportException.class, () -> NodeRound.begin(link.session(), ada.db, "ada"));
 
       assertEquals("refused", failure.kind());
       assertTrue(failure.getMessage().contains("FDE 'uday'"), failure.getMessage());
@@ -162,8 +160,7 @@ class NodeIdentitySyncTest {
     try (var link = SyncBox.connect(main.server(ADA), ada)) {
       var failure =
           assertThrows(
-              SyncTransportException.class,
-              () -> NodeRound.begin(link.session(), ada.db, null, OperatorCommand.PLAIN));
+              SyncTransportException.class, () -> NodeRound.begin(link.session(), ada.db, null));
 
       assertTrue(failure.getMessage().contains("FDE 'ada'"), failure.getMessage());
       assertTrue(failure.getMessage().contains("no sync handle"), failure.getMessage());
@@ -180,15 +177,13 @@ class NodeIdentitySyncTest {
     try (var link =
         SyncBox.connect(main.server(ADA), ada, SyncWire.MAX_FRAME, welcomingAsAnOlderMain())) {
       assertTrue(link.session().handle().isEmpty());
-      Actor.run(
-          Actor.main(),
-          () -> NodeRound.begin(link.session(), ada.db, "ada", OperatorCommand.PLAIN));
+      Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), ada.db, "ada"));
       var report = link.reconcile("run", ada.replicas().get("run"));
 
       assertEquals(1, report.report().pushed(), report.toString());
     }
     assertEquals("ada", new RunStore(main.db).findById(unstamped).orElseThrow().owner());
-    NodeRound.requireAgreed(Optional.empty(), "anyone", OperatorCommand.PLAIN);
+    NodeRound.requireAgreed(Optional.empty(), "anyone");
     SyncBox.assertConverged(main, ada.syncsAs(ADA));
   }
 

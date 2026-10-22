@@ -17,7 +17,6 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.QuietNarrator;
 import ai.singlr.sail.api.RunWatch;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
@@ -51,7 +50,7 @@ class AgentWatchCommandTest {
             "acme",
             "name: acme\nagent:\n  type: claude-code\n  notifications:\n"
                 + "    url: https://ntfy.sh/acme\n    events: [guardrail_triggered]\n");
-    var command = new AgentWatchCommand(operator -> OperationsFactory.open(dbPath, operator));
+    var command = new AgentWatchCommand(() -> OperationsFactory.open(dbPath));
     new CommandLine(command)
         .parseArgs(
             "acme",
@@ -66,20 +65,19 @@ class AgentWatchCommandTest {
             "--action",
             "stop");
 
-    assertEquals("https://ntfy.sh/acme", command.notifications(OperatorCommand.PLAIN).url());
+    assertEquals("https://ntfy.sh/acme", command.notifications().url());
   }
 
   @Test
   void aProjectWithNoRowFailsSayingSoAndOneWithNoNotificationsHasNone() {
     var dbPath = seeded("quiet", "name: quiet\nagent:\n  type: claude-code\n");
-    var quiet = new AgentWatchCommand(operator -> OperationsFactory.open(dbPath, operator));
+    var quiet = new AgentWatchCommand(() -> OperationsFactory.open(dbPath));
     new CommandLine(quiet).parseArgs("quiet", "--run", RUN_ID, "--started-at", STARTED_AT);
-    var absent = new AgentWatchCommand(operator -> OperationsFactory.open(dbPath, operator));
+    var absent = new AgentWatchCommand(() -> OperationsFactory.open(dbPath));
     new CommandLine(absent).parseArgs("absent", "--run", RUN_ID, "--started-at", STARTED_AT);
 
-    assertNull(quiet.notifications(OperatorCommand.PLAIN));
-    var refused =
-        assertThrows(ApiException.class, () -> absent.notifications(OperatorCommand.PLAIN));
+    assertNull(quiet.notifications());
+    var refused = assertThrows(ApiException.class, () -> absent.notifications());
     assertEquals("Project 'absent' is not in the catalog.", refused.getMessage());
   }
 
@@ -222,7 +220,7 @@ class AgentWatchCommandTest {
     var stops = new ArrayList<Event>();
 
     assertTrue(
-        watching().watchable(silent, stops::add, OperatorCommand.PLAIN),
+        watching().watchable(silent, stops::add),
         "nothing says the agent is gone, so it may be at work: the watch starts and asks again");
     assertTrue(stops.isEmpty());
   }
@@ -243,7 +241,7 @@ class AgentWatchCommandTest {
                     .formatted(RUN_ID));
     var stops = new ArrayList<Event>();
 
-    assertFalse(watching().watchable(ended, stops::add, OperatorCommand.PLAIN));
+    assertFalse(watching().watchable(ended, stops::add));
 
     assertEquals(1, stops.size(), "an agent that died at launch is told ended, with how");
     assertEquals(3, stops.getFirst().data().get(Event.WellKnownData.EXIT_CODE));
@@ -259,9 +257,7 @@ class AgentWatchCommandTest {
     var stops = new ArrayList<Event>();
 
     var refused =
-        assertThrows(
-            IllegalStateException.class,
-            () -> watching().watchable(never, stops::add, OperatorCommand.PLAIN));
+        assertThrows(IllegalStateException.class, () -> watching().watchable(never, stops::add));
 
     assertEquals(
         "No agent session running. Launch one with: sail agent run acme --background --task '...'",

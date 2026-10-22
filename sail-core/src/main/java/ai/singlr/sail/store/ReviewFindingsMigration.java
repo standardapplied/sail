@@ -48,7 +48,7 @@ public final class ReviewFindingsMigration implements DataMigration {
       }
     }
     notes.addFirst("Folded the findings of " + folded + " review(s) into their content");
-    return new Report(folded, 0, notes.size() - 1, notes);
+    return Report.of(folded, 0, notes.size() - 1, notes);
   }
 
   private static List<String> legacyReviews(Sqlite db) {

@@ -7,7 +7,6 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.ssh.SshGateway;
 import java.util.ArrayList;
@@ -33,9 +32,8 @@ public final class GatewayCommand implements Callable<Integer> {
 
   @Override
   public Integer call() throws Exception {
-    var operator = OperatorCommand.here();
     var original = System.getenv("SSH_ORIGINAL_COMMAND");
-    try (var operations = OperationsFactory.open(operator)) {
+    try (var operations = OperationsFactory.open()) {
       var decision = operations.identity().authorizeGateway(original, fde);
       return switch (decision) {
         case SshGateway.Rejected rejected -> {

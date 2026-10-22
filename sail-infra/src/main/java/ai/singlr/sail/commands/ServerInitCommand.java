@@ -31,7 +31,7 @@ public final class ServerInitCommand implements Runnable {
     var dbPath = SailPaths.controlPlaneDb();
     SailPaths.ensureDataDir(dbPath.getParent());
 
-    try (var operations = OperationsFactory.open(dbPath, operator)) {
+    try (var operations = OperationsFactory.open(dbPath)) {
       var migration = operations.schema().initialize();
       var before = migration.before();
       var after = migration.after();

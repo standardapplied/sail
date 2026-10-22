@@ -4,6 +4,7 @@
  */
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
@@ -33,7 +34,7 @@ public final class SyncHealth {
       Instant lastSuccessAt,
       int consecutiveFailures,
       String lastErrorKind,
-      String lastError,
+      Remedy lastError,
       SyncEngine.Report lastReport,
       String state,
       Instant staleSince,
@@ -57,7 +58,7 @@ public final class SyncHealth {
               instant(row.text(2)),
               Math.toIntExact(row.integer(3)),
               row.text(4),
-              row.text(5),
+              error(row.text(5)),
               row.text(6) == null ? null : report(last),
               row.text(7),
               instant(row.text(8)),
@@ -130,7 +131,11 @@ public final class SyncHealth {
         });
   }
 
-  public int failed(String peer, Instant at, String kind, String error) {
+  /**
+   * A failed round, {@code error} kept as data, its commands rendered for whoever reads it later
+   * ({@link #find}): the reader of a stored failure is not the process that stored it.
+   */
+  public int failed(String peer, Instant at, String kind, Remedy error) {
     return db.transaction(
         () -> {
           db.execute(
@@ -140,11 +145,26 @@ public final class SyncHealth {
             stale_since = coalesce(stale_since, ?) WHERE peer = ?""",
               at.toString(),
               kind,
-              error,
+              YamlUtil.dumpJson(error.toMaps()),
               at.toString(),
               peer);
           return find(peer).orElseThrow().consecutiveFailures();
         });
+  }
+
+  /** A stored failure, or the plain message a box kept before failures were data, as words. */
+  private static Remedy error(String stored) {
+    if (stored == null) {
+      return null;
+    }
+    if (stored.startsWith("[{")) {
+      try {
+        return Remedy.fromMaps(YamlUtil.parseList(stored));
+      } catch (RuntimeException plain) {
+        return Remedy.of(stored);
+      }
+    }
+    return Remedy.of(stored);
   }
 
   private static Instant instant(String value) {

@@ -58,7 +58,7 @@ public final class ProjectRemoveServiceCommand implements Runnable {
     var out = System.out;
 
     var explicit = ProjectDefinitions.explicitFile(file);
-    var actor = ProjectMutations.catalogOperator(name, explicit, dryRun, operator);
+    var actor = ProjectMutations.catalogOperator(name, explicit, dryRun);
     var config =
         SailYaml.fromMap(
             YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit, operator)));
@@ -71,7 +71,7 @@ public final class ProjectRemoveServiceCommand implements Runnable {
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
 
-    ContainerStateGuard.requireRunning(state, name, operator);
+    ContainerStateGuard.requireRunning(state, name);
 
     var applier = new ProjectApplier(shell, out);
     var result = applier.removeServices(name, List.of(serviceName));

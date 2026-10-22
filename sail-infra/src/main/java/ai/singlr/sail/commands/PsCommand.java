@@ -45,7 +45,7 @@ public final class PsCommand implements Runnable {
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name, operator);
+    ContainerStateGuard.requireRunning(state, name);
 
     var cmd = ContainerExec.asDevUser(name, List.of("podman", "ps", "--format", "json"));
     var result = shell.exec(cmd);

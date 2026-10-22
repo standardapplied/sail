@@ -63,7 +63,7 @@ public final class ProjectEditCommand implements Runnable {
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
-    var actor = CliOperator.current(operator);
+    var actor = CliOperator.current();
     ProjectCatalog.requireRecordable(name, actor);
     var current =
         ProjectDefinitions.definition(name, null)

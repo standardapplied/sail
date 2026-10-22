@@ -7,7 +7,6 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.HostToken;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.TokenStore;
@@ -86,6 +85,6 @@ public final class TokenAuth implements ApiAuth {
     }
     return roles
         .roleOfUnbound(minted)
-        .orElseThrow(() -> CliOperator.unplaced(roles.boxFde().orElse(null), OperatorCommand.SUDO));
+        .orElseThrow(() -> CliOperator.unplaced(roles.boxFde().orElse(null)));
   }
 }

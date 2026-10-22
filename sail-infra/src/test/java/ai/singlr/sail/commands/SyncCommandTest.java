@@ -16,11 +16,14 @@ import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncReport;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.FileMaterializer;
+import ai.singlr.sail.engine.MainHostKey;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
@@ -42,6 +45,7 @@ import ai.singlr.sail.sync.Settlement;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
+import ai.singlr.sail.sync.SyncTransportException;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -74,8 +78,7 @@ class SyncCommandTest {
                   null,
                   null,
                   SyncScheduler.disabled(),
-                  SessionYield.NONE,
-                  OperatorCommand.PLAIN)
+                  SessionYield.NONE)
               .useControlPlane(
                   db,
                   Path.of(System.getProperty("java.io.tmpdir")),
@@ -87,7 +90,7 @@ class SyncCommandTest {
                       target -> {
                         throw new IOException("offline");
                       },
-                      OperatorCommand.PLAIN));
+                      SyncOperations.PLAIN_NOTICES));
       var output = new ByteArrayOutputStream();
       var previous = System.out;
       try (var stream = new PrintStream(output)) {
@@ -125,8 +128,7 @@ class SyncCommandTest {
                   null,
                   null,
                   SyncScheduler.disabled(),
-                  SessionYield.NONE,
-                  OperatorCommand.PLAIN)
+                  SessionYield.NONE)
               .useControlPlane(
                   db,
                   home,
@@ -138,7 +140,7 @@ class SyncCommandTest {
                       target -> {
                         throw new IOException("offline");
                       },
-                      OperatorCommand.PLAIN));
+                      SyncOperations.PLAIN_NOTICES));
       var previous = System.out;
       try (var stream = new PrintStream(new ByteArrayOutputStream())) {
         System.setOut(stream);
@@ -169,8 +171,7 @@ class SyncCommandTest {
                   null,
                   null,
                   SyncScheduler.disabled(),
-                  SessionYield.NONE,
-                  OperatorCommand.PLAIN)
+                  SessionYield.NONE)
               .useControlPlane(
                   db,
                   home,
@@ -182,7 +183,7 @@ class SyncCommandTest {
                       target -> {
                         throw new IOException("main unavailable");
                       },
-                      OperatorCommand.PLAIN));
+                      SyncOperations.PLAIN_NOTICES));
       Supplier<SyncCommand.Status> status = () -> new SyncCommand.Status(ignored -> operations);
       assertEquals(
           Map.of(
@@ -211,7 +212,7 @@ class SyncCommandTest {
           "sail@main",
           Instant.parse("2026-09-14T00:00:00Z"),
           "protocol",
-          "message: page exceeded 4 MiB");
+          Remedy.of("message: page exceeded 4 MiB"));
       var stale = nonNull(capture(() -> new CommandLine(status.get()).execute("--json")));
       assertEquals("stale", stale.get("state"));
       assertEquals("protocol", stale.get("last_error_kind"));
@@ -219,6 +220,35 @@ class SyncCommandTest {
       assertEquals(
           "Stale since 2026-09-14T00:00:00Z — message: page exceeded 4 MiB",
           SyncCommand.renderStatus(stale, OperatorCommand.PLAIN));
+
+      health.failed(
+          "sail@main",
+          Instant.parse("2026-09-15T00:00:00Z"),
+          "unreachable",
+          Remedied.whole(
+              new SyncTransportException(
+                  "unreachable",
+                  "hello: ssh said: Host key verification failed.",
+                  MainHostKey.rebuiltRecovery("sail@main"),
+                  null)));
+      var rebuilt = nonNull(capture(() -> new CommandLine(status.get()).execute("--json")));
+      assertEquals(
+          "Stale since 2026-09-14T00:00:00Z — hello: ssh said: Host key verification failed. If"
+              + " main was rebuilt from a copy of its database, remove the old key with 'sudo"
+              + " ssh-keygen -R main', re-run 'sudo sail init --main sail@main' and compare the"
+              + " fingerprint it prints with main's ('sudo ssh-keygen -lf"
+              + " /etc/ssh/ssh_host_ed25519_key.pub' on main); otherwise something between this box"
+              + " and main is answering for it.",
+          SyncCommand.renderStatus(rebuilt, OperatorCommand.SUDO),
+          "a node's stored failure read through sudo");
+      assertEquals(
+          "Stale since 2026-09-14T00:00:00Z — hello: ssh said: Host key verification failed. If"
+              + " main was rebuilt from a copy of its database, remove the old key with 'ssh-keygen"
+              + " -R main', re-run 'sail init --main sail@main' and compare the fingerprint it prints"
+              + " with main's ('sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on main);"
+              + " otherwise something between this box and main is answering for it.",
+          SyncCommand.renderStatus(rebuilt, OperatorCommand.PLAIN),
+          "the same failure read by root logged in directly");
 
       new SyncConflicts(db)
           .record("spec", "auth", "base", "mine", "theirs", null, null, List.of("title"));
@@ -312,7 +342,7 @@ class SyncCommandTest {
         SyncCommand.resolveMain(
             null, new SyncConfig(SyncConfig.ROLE_MAIN, null, null), OperatorCommand.PLAIN);
     assertNull(resolved.target());
-    assertTrue(resolved.message().contains("main devbox"));
+    assertTrue(resolved.message().plain().contains("main devbox"));
   }
 
   @Test
@@ -322,15 +352,19 @@ class SyncCommandTest {
             "sail@other", new SyncConfig(SyncConfig.ROLE_MAIN, null, null), OperatorCommand.PLAIN);
 
     assertNull(resolved.target());
-    assertTrue(resolved.message().contains("main devbox"));
+    assertTrue(resolved.message().plain().contains("main devbox"));
   }
 
   @Test
   void resolveMainHasNoTargetAndGuidesWhenStandalone() {
     var resolved = SyncCommand.resolveMain("  ", SyncConfig.unset(), OperatorCommand.PLAIN);
     assertNull(resolved.target());
-    assertTrue(resolved.message().contains("Single devbox"));
-    assertTrue(resolved.message().contains("sail host sync --main"));
+    assertEquals(
+        Remedy.of(
+            "Single devbox — nothing to sync. Add a second box with: ",
+            Remedy.sail("host sync", "--main", "<user@host>"),
+            "."),
+        resolved.message());
   }
 
   @Test
@@ -344,7 +378,7 @@ class SyncCommandTest {
                     new SyncSession.TypeReport(
                         "spec", new SyncEngine.Report(1, 2, 3, 4), 2, 40, false, null, 456, 123))),
             true,
-            OperatorCommand.PLAIN);
+            OperatorCommand.PLAIN::render);
     var report = YamlUtil.parseMap(json);
     assertEquals(456, report.get("bytes_fetched"));
     assertEquals(123, report.get("bytes_sent"));
@@ -389,14 +423,15 @@ class SyncCommandTest {
 
   @Test
   void aRoundWhoseOnlyNewsIsADenialIsNotReportedAsAlreadyInSync() {
-    var text = SyncCommand.render(deniedRound(), false, OperatorCommand.PLAIN);
+    var text = SyncCommand.render(deniedRound(), false, OperatorCommand.PLAIN::render);
     assertFalse(text.contains("Already in sync"), text);
     assertTrue(text.contains("Synced with main"), text);
   }
 
   @Test
   void rendersDenialsInJsonByTypeIdAndReason() {
-    var report = YamlUtil.parseMap(SyncCommand.render(deniedRound(), true, OperatorCommand.PLAIN));
+    var report =
+        YamlUtil.parseMap(SyncCommand.render(deniedRound(), true, OperatorCommand.PLAIN::render));
     assertEquals(
         List.of(
             Map.of("type", "spec", "id", "auth", "reason", "your role is read-only"),
@@ -428,8 +463,8 @@ class SyncCommandTest {
                 new Settlement.Settled(
                     "message", "m1", new Settlement.How.Withdrawn(), "room 'lab' is gone here")));
 
-    var text = SyncCommand.render(round, false, OperatorCommand.PLAIN);
-    var json = YamlUtil.parseMap(SyncCommand.render(round, true, OperatorCommand.PLAIN));
+    var text = SyncCommand.render(round, false, OperatorCommand.PLAIN::render);
+    var json = YamlUtil.parseMap(SyncCommand.render(round, true, OperatorCommand.PLAIN::render));
 
     assertEquals(
         String.join(
@@ -468,7 +503,7 @@ class SyncCommandTest {
                 List.of(
                     new SyncSession.TypeReport("spec", SyncEngine.Report.NONE, 0, 0, true, null))),
             false,
-            OperatorCommand.PLAIN);
+            OperatorCommand.PLAIN::render);
     assertTrue(text.contains("Already in sync"));
     assertFalse(text.contains("spec"), "a skipped type earns no line");
   }
@@ -485,7 +520,7 @@ class SyncCommandTest {
                         "spec", new SyncEngine.Report(2, 1, 0, 0), 3, 12, false, null),
                     new SyncSession.TypeReport("file", SyncEngine.Report.NONE, 0, 0, true, null))),
             false,
-            OperatorCommand.PLAIN);
+            OperatorCommand.PLAIN::render);
     assertTrue(text.contains("pulled"));
     assertFalse(text.contains("conflict"));
     assertTrue(text.contains("spec:"), text);
@@ -502,7 +537,7 @@ class SyncCommandTest {
                 null,
                 List.of(SyncSession.TypeReport.failed("run", "run: main is away"))),
             false,
-            OperatorCommand.PLAIN);
+            OperatorCommand.PLAIN::render);
     assertEquals(
         String.join(
             "\n",
@@ -557,9 +592,16 @@ class SyncCommandTest {
 
   @Test
   void reasonUsesTheMessageOrFallsBackToTheExceptionType() {
-    assertEquals("boom", SyncCommand.reason(new IllegalStateException("boom")));
-    assertEquals("RuntimeException", SyncCommand.reason(new RuntimeException()));
-    assertEquals("IllegalStateException", SyncCommand.reason(new IllegalStateException("  ")));
+    var plain = OperatorCommand.PLAIN;
+    assertEquals("boom", SyncCommand.reason(new IllegalStateException("boom"), plain));
+    assertEquals("RuntimeException", SyncCommand.reason(new RuntimeException(), plain));
+    assertEquals(
+        "IllegalStateException", SyncCommand.reason(new IllegalStateException("  "), plain));
+    assertEquals(
+        "Gone. Run 'sudo sail migrate'.",
+        SyncCommand.reason(
+            Remedied.state("Gone.", Remedy.of("Run '", Remedy.sail("migrate"), "'.")),
+            OperatorCommand.SUDO));
   }
 
   @Test

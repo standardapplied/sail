@@ -104,7 +104,7 @@ public final class DispatchCommand implements Runnable {
 
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
-    name = CurrentProject.require(project, operator);
+    name = CurrentProject.require(project);
     NameValidator.requireValidProjectName(name);
     try (var sync = NodeSync.scheduler(syncOptions.noSync(), operator)) {
       execute(sync, operator);
@@ -132,8 +132,7 @@ public final class DispatchCommand implements Runnable {
                 DispatchOperations.terminalLauncher(),
                 renderer(sync),
                 StopOperations.Listener.NONE),
-            new PtyHostYield(),
-            operator)) {
+            new PtyHostYield())) {
       render(dispatchAsOperator(operations, name, request, handle), operator);
     }
   }
@@ -158,8 +157,7 @@ public final class DispatchCommand implements Runnable {
         shell,
         new OperationHooks(
             events, watcherSpawner, snapshotter, launcher, listener, StopOperations.Listener.NONE),
-        sessionYield,
-        operator);
+        sessionYield);
   }
 
   /**

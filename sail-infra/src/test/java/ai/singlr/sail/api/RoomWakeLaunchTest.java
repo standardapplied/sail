@@ -17,7 +17,6 @@ import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
@@ -147,8 +146,7 @@ class RoomWakeLaunchTest {
             (project, config) -> "",
             launcher,
             DispatchOperations.Listener.NONE,
-            SessionYield.NONE,
-            OperatorCommand.PLAIN)
+            SessionYield.NONE)
         .useMessages(messageStore)
         .useRooms(new RoomStore(db));
   }
@@ -179,8 +177,7 @@ class RoomWakeLaunchTest {
               return 0;
             },
             DispatchOperations.Listener.NONE,
-            SessionYield.NONE,
-            OperatorCommand.PLAIN);
+            SessionYield.NONE);
     seedSpec("auth");
 
     ops.startRoomRun("acme", "auth", HANDLE);
@@ -503,8 +500,7 @@ class RoomWakeLaunchTest {
                 "uday-box",
                 SyncWire.MAX_FRAME,
                 out -> out)) {
-      Actor.run(
-          Actor.main(), () -> NodeRound.begin(link.session(), db, HANDLE, OperatorCommand.PLAIN));
+      Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), db, HANDLE));
       var replicas = SyncedEntities.replicas(db, "uday-box", HANDLE);
       for (var entity : SyncedEntities.all()) {
         var report = link.reconcile(entity.type(), replicas.get(entity.type()));
@@ -1288,8 +1284,7 @@ class RoomWakeLaunchTest {
                   null,
                   specStore,
                   new ReviewStore(db),
-                  runStore,
-                  OperatorCommand.PLAIN)
+                  runStore)
               .useMessages(messageStore);
 
       var runId = sailOps.startRoomRun("acme", "auth", HANDLE);

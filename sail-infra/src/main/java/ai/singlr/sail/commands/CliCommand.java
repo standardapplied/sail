@@ -7,15 +7,19 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.Refusals;
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.io.PrintStream;
+import java.util.List;
 import java.util.Objects;
 import picocli.CommandLine.Help.Ansi;
 
 /**
- * Runs a command body and prints its failure once: the message, a refusal's fix, then any hint. The
- * top-level handler ({@link ai.singlr.sail.Main#report}) prints only what was not printed here.
+ * Runs a command body and prints its failure once: the message, a refusal's fix, then any hint,
+ * each command in them rendered for the account reading this terminal. The top-level handler
+ * ({@link ai.singlr.sail.Main#report}) prints only what was not printed here.
  */
 public final class CliCommand {
 
@@ -37,16 +41,13 @@ public final class CliCommand {
     try {
       runnable.run();
     } catch (Exception e) {
-      var message = Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName());
-      err.println(Banner.errorLine(message, Ansi.AUTO));
-      if (Refusals.translated(e) instanceof ApiException refusal
-          && Strings.isNotBlank(refusal.failure().action())) {
-        err.println(refusal.failure().action());
-      }
+      var lines = lines(e, reader());
+      err.println(Banner.errorLine(lines.getFirst(), Ansi.AUTO));
+      lines.stream().skip(1).forEach(err::println);
       if (Strings.isNotBlank(failureHint)) {
         err.println(failureHint);
       }
-      throw new Printed(message, e);
+      throw new Printed(lines.getFirst(), e);
     }
   }
 
@@ -61,15 +62,32 @@ public final class CliCommand {
   }
 
   /**
-   * A failure as the terminal shows it: its message, then a refusal's fix when it names one, a
-   * write the journal refused included.
+   * A failure as the terminal shows it on one line: its message, then a refusal's fix when it names
+   * one, a write the journal refused included.
    */
   static String describe(Exception failure) {
+    return String.join(" ", lines(failure, reader()));
+  }
+
+  /**
+   * A failure as {@code reader} reads it: an API refusal's message, then its fix on a line of its
+   * own; a failure below the door that names a remedy, its reason and remedy on one line; anything
+   * else, its message.
+   */
+  public static List<String> lines(Exception failure, OperatorCommand reader) {
     var e = Refusals.translated(failure);
     var message = Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName());
-    return e instanceof ApiException refusal && Strings.isNotBlank(refusal.failure().action())
-        ? message + " " + refusal.failure().action()
-        : message;
+    return switch (e) {
+      case ApiException refusal when !refusal.remedy().isEmpty() ->
+          List.of(message, reader.render(refusal.remedy()));
+      case ApiException refusal -> List.of(message);
+      case Remedied remedied -> List.of(reader.render(remedied));
+      default -> List.of(message);
+    };
+  }
+
+  private static OperatorCommand reader() {
+    return OperatorCommand.here();
   }
 
   @FunctionalInterface

@@ -19,7 +19,6 @@ import ai.singlr.sail.config.SlackNotifications;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ConnectEnvironment;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SlackPoster;
@@ -294,8 +293,7 @@ public final class Fleet implements AutoCloseable {
               (project, config) -> "",
               command -> 0,
               DispatchOperations.Listener.NONE,
-              SessionYield.NONE,
-              OperatorCommand.PLAIN);
+              SessionYield.NONE);
       reviewsController =
           new ReviewPipelineController(
               specs,
@@ -315,8 +313,7 @@ public final class Fleet implements AutoCloseable {
               runs,
               bus::publish,
               StopOperations.sessionHalter(shell),
-              StopOperations.Listener.NONE,
-              OperatorCommand.PLAIN);
+              StopOperations.Listener.NONE);
       operations =
           new SailOperations(
                   shell,
@@ -328,11 +325,10 @@ public final class Fleet implements AutoCloseable {
                   reviews,
                   runs,
                   projects,
-                  ConnectEnvironment.detector(OperatorCommand.PLAIN),
+                  ConnectEnvironment.detector(),
                   SyncScheduler.disabled(),
                   fdes,
-                  SessionYield.NONE,
-                  OperatorCommand.PLAIN)
+                  SessionYield.NONE)
               .useMessages(messages)
               .useRooms(new RoomStore(db));
       slack = new CapturingPoster();

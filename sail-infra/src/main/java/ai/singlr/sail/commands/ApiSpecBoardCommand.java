@@ -7,7 +7,6 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -41,8 +40,7 @@ public final class ApiSpecBoardCommand implements Runnable {
 
   private void execute() throws Exception {
     var config = connection.resolve();
-    var resolvedProject =
-        CurrentProject.scope(project, allProjects, OperatorCommand.here()).orElse(null);
+    var resolvedProject = CurrentProject.scope(project, allProjects).orElse(null);
     var path =
         resolvedProject != null ? "/v1/specs/board?project=" + resolvedProject : "/v1/specs/board";
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {

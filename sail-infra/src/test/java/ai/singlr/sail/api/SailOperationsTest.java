@@ -15,7 +15,6 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -118,15 +117,14 @@ class SailOperationsTest {
 
   @Test
   void healthReturnsOk() {
-    var operations =
-        new SailOperations(new FakeShell(), ProjectReader.ofCatalog(null), OperatorCommand.PLAIN);
+    var operations = new SailOperations(new FakeShell(), ProjectReader.ofCatalog(null));
 
     assertEquals("ok", get(operations.health(), "status"));
   }
 
   @Test
   void defaultConstructorSupportsHealthChecks() {
-    assertEquals("ok", get(new SailOperations(OperatorCommand.PLAIN).health(), "status"));
+    assertEquals("ok", get(new SailOperations().health(), "status"));
   }
 
   @Test
@@ -243,8 +241,7 @@ class SailOperationsTest {
             null,
             new SpecStore(db),
             new ReviewStore(db),
-            projectStore,
-            OperatorCommand.PLAIN);
+            projectStore);
 
     var result = operations.projects();
 
@@ -272,8 +269,7 @@ class SailOperationsTest {
             new ProjectStore(db),
             null,
             fdeStore,
-            SessionYield.NONE,
-            OperatorCommand.PLAIN);
+            SessionYield.NONE);
 
     var roster = (List<Map<String, Object>>) get(operations.fdes(), "fdes");
 
@@ -290,8 +286,7 @@ class SailOperationsTest {
   void fdesFailsWhenTheRosterIsNotWired() {
     assertError(
         ErrorCode.INTERNAL,
-        new SailOperations(new FakeShell(), ProjectReader.ofCatalog(null), OperatorCommand.PLAIN)
-            .fdes());
+        new SailOperations(new FakeShell(), ProjectReader.ofCatalog(null)).fdes());
   }
 
   @Test
@@ -729,7 +724,7 @@ class SailOperationsTest {
             .on(
                 "incus snapshot list acme",
                 "[{\"name\": \"snap-1\", \"created_at\": \"2026-08-17T08:00:00Z\"}]");
-    var operations = new SailOperations(shell, TestProjects.reading(yaml), OperatorCommand.PLAIN);
+    var operations = new SailOperations(shell, TestProjects.reading(yaml));
 
     var list = operations.snapshots("acme");
     assertEquals("dispatch", list.orThrow().snapshots().getFirst().source());
@@ -739,7 +734,7 @@ class SailOperationsTest {
 
     assertEquals(
         "accepted", operations.restoreSnapshot("acme", "snap-1", "uday").orThrow().status());
-    var deleter = new SailOperations(shell, TestProjects.reading(yaml), OperatorCommand.PLAIN);
+    var deleter = new SailOperations(shell, TestProjects.reading(yaml));
     assertEquals("accepted", deleter.deleteSnapshot("acme", "snap-1").orThrow().status());
   }
 
@@ -767,8 +762,7 @@ class SailOperationsTest {
               null,
               specStore,
               new ReviewStore(db),
-              brokenRuns,
-              OperatorCommand.PLAIN);
+              brokenRuns);
 
       var error = dispatch(operations, "acme", request("auth"));
 
@@ -888,7 +882,8 @@ class SailOperationsTest {
 
     assertError(ErrorCode.RUNS_ON_OTHER_NODE, refused);
     assertEquals(
-        "Claim it first: sail spec update draft --assignee " + LOCAL_HANDLE, refused.action());
+        "Claim it first: sail spec update draft --assignee " + LOCAL_HANDLE,
+        refused.remedy().plain());
   }
 
   @Test
@@ -1737,8 +1732,7 @@ class SailOperationsTest {
             new ProjectStore(db),
             SyncScheduler.disabled(),
             new FdeStore(db),
-            SessionYield.NONE,
-            OperatorCommand.PLAIN);
+            SessionYield.NONE);
 
     var result = operations.runs("acme", null);
 
@@ -1766,8 +1760,7 @@ class SailOperationsTest {
                 new ProjectStore(db),
                 SyncScheduler.disabled(),
                 new FdeStore(db),
-                SessionYield.NONE,
-                OperatorCommand.PLAIN)
+                SessionYield.NONE)
             .useMessages(new MessageStore(db))
             .useRooms(new RoomStore(db));
 
@@ -1803,8 +1796,7 @@ class SailOperationsTest {
                 new ProjectStore(db),
                 SyncScheduler.disabled(),
                 fdeStore,
-                SessionYield.NONE,
-                OperatorCommand.PLAIN)
+                SessionYield.NONE)
             .useBoxCredentials(boxStore);
 
     var credential = boxStore.replace("uday");
@@ -1824,7 +1816,7 @@ class SailOperationsTest {
   @Test
   void boxCredentialLaneFailsClosedWhenUnwired() {
     assertTrue(
-        new SailOperations(shell(), ProjectReader.ofCatalog(null), OperatorCommand.PLAIN)
+        new SailOperations(shell(), ProjectReader.ofCatalog(null))
             .boxActorForCredential("sailbox_x")
             .isEmpty());
   }
@@ -1856,8 +1848,9 @@ class SailOperationsTest {
     var error = dispatch(operations, "acme", request("auth"));
 
     assertError(ErrorCode.SPEC_NOT_READY, error);
-    assertTrue(error.action().contains("restart"), error.action());
-    assertFalse(error.action().contains("--restart"), "API callers must see a lane-neutral fix");
+    assertTrue(error.remedy().plain().contains("restart"), error.remedy().plain());
+    assertFalse(
+        error.remedy().plain().contains("--restart"), "API callers must see a lane-neutral fix");
     assertEquals(SpecStatus.REVIEW, stores[0].findById("auth").orElseThrow().status());
   }
 
@@ -1897,8 +1890,7 @@ class SailOperationsTest {
             new ProjectStore(db),
             SyncScheduler.disabled(),
             fdeStore,
-            SessionYield.NONE,
-            OperatorCommand.PLAIN);
+            SessionYield.NONE);
 
     var result =
         dispatch(operations, "acme", new DispatchRequest("auth", "background", false, null, true));
@@ -2084,14 +2076,7 @@ class SailOperationsTest {
               latch));
       var operations =
           new SailOperations(
-              shell,
-              TestProjects.reading(yaml),
-              (cmd, log) -> 4242L,
-              bus,
-              null,
-              store,
-              null,
-              OperatorCommand.PLAIN);
+              shell, TestProjects.reading(yaml), (cmd, log) -> 4242L, bus, null, store, null);
 
       dispatch(operations, "acme", request("auth"));
 
@@ -2565,8 +2550,7 @@ class SailOperationsTest {
   @Test
   void missingDescriptorMapsToNotFound() {
     var operations =
-        new SailOperations(
-            shell(), TestProjects.reading(tempDir.resolve("missail.yaml")), OperatorCommand.PLAIN);
+        new SailOperations(shell(), TestProjects.reading(tempDir.resolve("missail.yaml")));
 
     var error = operations.project("acme");
 
@@ -2594,8 +2578,7 @@ class SailOperationsTest {
   void publishEventFailsWithNoControlPlaneToDecideItBy(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
       var operations =
-          new SailOperations(
-              shell(), TestProjects.reading(baseYamlPath(tmp)), bus, null, OperatorCommand.PLAIN);
+          new SailOperations(shell(), TestProjects.reading(baseYamlPath(tmp)), bus, null);
       var result =
           Actor.call(
               ADMIN,
@@ -2778,12 +2761,7 @@ class SailOperationsTest {
             public void onEvent(Event event) {}
           });
       var operations =
-          new SailOperations(
-              shell(),
-              TestProjects.reading(baseYamlPath(tempDir)),
-              bus,
-              null,
-              OperatorCommand.PLAIN);
+          new SailOperations(shell(), TestProjects.reading(baseYamlPath(tempDir)), bus, null);
 
       var result = operations.eventBusStats();
 
@@ -2870,15 +2848,7 @@ class SailOperationsTest {
     var findingId = reviewStore.findingsForReview(reviewId).getFirst().id();
     var operations =
         new SailOperations(
-            shell(),
-            TestProjects.reading(yaml),
-            null,
-            null,
-            null,
-            specStore,
-            reviewStore,
-            null,
-            OperatorCommand.PLAIN);
+            shell(), TestProjects.reading(yaml), null, null, null, specStore, reviewStore, null);
 
     assertTrue(operations.reviewDetail(reviewId).isSuccess());
     assertTrue(Acting.by(ADMIN, () -> operations.dismissFinding(reviewId, findingId)).isSuccess());
@@ -3161,12 +3131,7 @@ class SailOperationsTest {
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     return TestControlPlane.standalone(
-        new SailOperations(
-            shell(),
-            TestProjects.reading(baseYamlPath(dir)),
-            bus,
-            persister,
-            OperatorCommand.PLAIN),
+        new SailOperations(shell(), TestProjects.reading(baseYamlPath(dir)), bus, persister),
         db,
         dir);
   }
@@ -3281,8 +3246,7 @@ class SailOperationsTest {
         null,
         specStore,
         reviewStore,
-        sessionStore,
-        OperatorCommand.PLAIN);
+        sessionStore);
   }
 
   /** Builds operations with a seeded project catalog and a fixed connect environment. */
@@ -3316,8 +3280,7 @@ class SailOperationsTest {
         null,
         null,
         projectStore,
-        environment,
-        OperatorCommand.PLAIN);
+        environment);
   }
 
   private static ConnectEnvironment environment() {
@@ -3339,15 +3302,7 @@ class SailOperationsTest {
     seed.accept(store);
     WatcherSpawner.ProcessSpawner fallback =
         watcher != null ? watcher : (command, logPath) -> 4242L;
-    return new SailOperations(
-        shell,
-        TestProjects.reading(yaml),
-        fallback,
-        null,
-        null,
-        store,
-        null,
-        OperatorCommand.PLAIN);
+    return new SailOperations(shell, TestProjects.reading(yaml), fallback, null, null, store, null);
   }
 
   /**

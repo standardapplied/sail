@@ -7,7 +7,6 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -72,8 +71,7 @@ public final class ApiSpecListCommand implements Runnable {
   @SuppressWarnings("unchecked")
   private void execute() throws Exception {
     var config = connection.resolve();
-    var resolvedProject =
-        CurrentProject.scope(project, allProjects, OperatorCommand.here()).orElse(null);
+    var resolvedProject = CurrentProject.scope(project, allProjects).orElse(null);
     var resolvedStatus = statusFilter(status, allStatuses);
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
       var params = new StringBuilder("/v1/specs?");

@@ -5,17 +5,21 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import java.util.List;
+import picocli.CommandLine.Help.Ansi;
 
 /**
  * How this process tells the person reading it to run sail on this box: with {@code sudo} when that
  * person came through {@code sudo}, since root's sail acts on root's state and the caller's own
  * plain {@code sail} never reaches it, and plain otherwise; a verb only root runs carries {@code
- * sudo} for everyone but root logged in directly. Every {@code sail} command sail prints is
- * rendered here, so a hint runs as printed for the account that reads it: {@link #sail} for the
- * caller on this box, {@link #elsewhere} for an operator this box cannot know, and {@link #client}
- * for a thin client.
+ * sudo} for everyone but root logged in directly. A command the CLI prints is rendered here, so a
+ * hint runs as printed for the account that reads it: {@link #sail} for the caller on this box and
+ * {@link #client} for a thin client. A {@link Remedy} from code that cannot see its reader (the
+ * stores, the sync lane, sail-api) is rendered here too, at the door that prints it ({@link
+ * #render}); that code never holds an operator.
  */
 public record OperatorCommand(boolean sudo, boolean rootLogin) {
 
@@ -44,8 +48,7 @@ public record OperatorCommand(boolean sudo, boolean rootLogin) {
 
   /**
    * A reader who types {@code sudo}: the caller root acts for, a non-root caller refused a command
-   * that needs root, or a reader this box cannot know, told the README's form (see {@link
-   * #elsewhere}).
+   * that needs root.
    */
   public static final OperatorCommand SUDO = new OperatorCommand(true, false);
 
@@ -61,19 +64,6 @@ public record OperatorCommand(boolean sudo, boolean rootLogin) {
   /** The reader of this process: the {@code sudo} caller when root acts for one, else itself. */
   public static OperatorCommand here() {
     return of(SailPaths.isRoot(), System.getenv("SUDO_USER"));
-  }
-
-  /**
-   * The reader of a process that cannot see who reads it, such as sail-api or a watcher: as root it
-   * answers the README's form, the one a {@code sudo} caller types; as another account it answers
-   * that account.
-   */
-  public static OperatorCommand unknownReader() {
-    return unknownReader(SailPaths.isRoot());
-  }
-
-  static OperatorCommand unknownReader(boolean root) {
-    return root ? SUDO : UNPRIVILEGED;
   }
 
   /** Pure of the process: root acting for a {@code sudo} caller tells that caller to type sudo. */
@@ -110,16 +100,33 @@ public record OperatorCommand(boolean sudo, boolean rootLogin) {
     return (sudo ? "sudo " : "") + command;
   }
 
-  /**
-   * {@code sail <args>} for another box's operator, whom this box cannot know: the README's form,
-   * as a box {@code sudo sail init} set up runs it.
-   */
-  public static String elsewhere(String args) {
-    return SUDO.sail(args);
-  }
-
   /** {@code sail <args>} on a thin client, where sail never runs as root. */
   public static String client(String args) {
     return "sail " + args;
+  }
+
+  /** {@code remedy} as this reader reads it, each command rendered for them. */
+  public String render(Remedy remedy) {
+    return remedy.render(this::command);
+  }
+
+  /** {@code failure}'s reason and remedy as one line this reader reads. */
+  public String render(Remedied failure) {
+    return failure.render(this::command);
+  }
+
+  /**
+   * Prints {@code notice}, a round's warning, to this process's terminal as this reader reads it.
+   */
+  public void warn(Remedy notice) {
+    System.err.println(Banner.warnLine(render(notice), Ansi.AUTO));
+  }
+
+  private String command(Remedy.Command command) {
+    return switch (command.runs()) {
+      case SAIL -> sail(command.line());
+      case CLIENT -> client(command.line());
+      case PROGRAM -> asThisProcess(command.line());
+    };
   }
 }

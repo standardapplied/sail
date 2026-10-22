@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SailRoomRelay;
 import ai.singlr.sail.engine.SailStopGate;
@@ -82,8 +81,7 @@ class RoomRelayDeliveryIT {
                 new ProjectStore(db),
                 SyncScheduler.disabled(),
                 new FdeStore(db),
-                SessionYield.NONE,
-                OperatorCommand.PLAIN)
+                SessionYield.NONE)
             .useMessages(messages);
     TestControlPlane.standalone(operations, db, root);
     runId = DateTimeUtils.newId().toString();

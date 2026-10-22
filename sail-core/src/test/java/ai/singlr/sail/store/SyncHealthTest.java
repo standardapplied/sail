@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
 import java.nio.file.Path;
@@ -47,8 +48,10 @@ class SyncHealthTest {
     assertEquals("in_sync", ok.state());
     assertEquals(1, ok.lastReport().pulled());
 
-    assertEquals(1, health.failed("main", t0.plusSeconds(2), "unreachable", "ssh: exit 255"));
-    assertEquals(2, health.failed("main", t0.plusSeconds(3), "unreachable", "ssh: exit 255"));
+    assertEquals(
+        1, health.failed("main", t0.plusSeconds(2), "unreachable", Remedy.of("ssh: exit 255")));
+    assertEquals(
+        2, health.failed("main", t0.plusSeconds(3), "unreachable", Remedy.of("ssh: exit 255")));
     var stale = health.find("main").orElseThrow();
     assertEquals("stale", stale.state());
     assertEquals(t0.plusSeconds(2), stale.staleSince(), "stale since the first failure");
@@ -56,6 +59,35 @@ class SyncHealthTest {
 
     assertTrue(health.succeeded("main", t0.plusSeconds(4), new SyncEngine.Report(0, 0, 0, 0)));
     assertEquals(0, health.find("main").orElseThrow().consecutiveFailures());
+  }
+
+  @Test
+  void aFailuresRemedyIsKeptAsDataForWhoeverReadsItLater() {
+    var t0 = Instant.parse("2026-09-17T00:00:00Z");
+    health.begin("main", t0);
+    var error =
+        Remedy.of(
+            "host key changed. Remove the old key with '",
+            Remedy.program("ssh-keygen", "-R", "main"),
+            "', re-run '",
+            Remedy.sail("init", "--main", "sail@main"),
+            "'.");
+
+    health.failed("main", t0, "unreachable", error);
+
+    assertEquals(error, health.find("main").orElseThrow().lastError());
+  }
+
+  @Test
+  void aFailureABoxStoredAsPlainTextReadsBackAsWords() {
+    var t0 = Instant.parse("2026-09-17T00:00:00Z");
+    health.begin("main", t0);
+    health.failed("main", t0, "unreachable", Remedy.NONE);
+    for (var stored : List.of("[sync] ssh: exit 255", "[{not json")) {
+      db.execute("UPDATE sync_health SET last_error = ? WHERE peer = 'main'", stored);
+
+      assertEquals(Remedy.of(stored), health.find("main").orElseThrow().lastError());
+    }
   }
 
   @Test
@@ -121,7 +153,8 @@ class SyncHealthTest {
       assertFalse(committedInBetween.get());
       assertEquals("in_sync", health.find("main").orElseThrow().state());
       other.execute("UPDATE sync_health SET last_error = 'other' WHERE peer = 'main'");
-      assertEquals("other", health.find("main").orElseThrow().lastError(), "and proceeds after");
+      assertEquals(
+          Remedy.of("other"), health.find("main").orElseThrow().lastError(), "and proceeds after");
     }
   }
 }

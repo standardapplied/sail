@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -27,7 +28,7 @@ class ResultTest {
     assertEquals(201, result.code());
     assertNull(result.errorCode());
     assertNull(result.errorMessage());
-    assertNull(result.action());
+    assertEquals(Remedy.NONE, result.remedy());
     assertEquals(List.of(), result.fieldErrors());
     assertNull(result.cause());
     assertNull(result.fullError());
@@ -52,7 +53,7 @@ class ResultTest {
     assertEquals(422, result.code());
     assertEquals(ErrorCode.INVALID_REQUEST, result.errorCode());
     assertEquals("Invalid request.", result.errorMessage());
-    assertNull(result.action());
+    assertEquals(Remedy.NONE, result.remedy());
     assertEquals(fieldErrors, result.fieldErrors());
     assertNull(result.cause());
     assertEquals(
@@ -66,7 +67,7 @@ class ResultTest {
     var withAction = Result.failure(ErrorCode.CONFLICT, "Busy.", "Wait.");
     var withCause = Result.failure(ErrorCode.INTERNAL, "Failed.", cause);
 
-    assertEquals("Wait.", withAction.action());
+    assertEquals("Wait.", withAction.remedy().plain());
     assertEquals(cause, withCause.cause());
     assertEquals("Busy.", withAction.fullError());
   }

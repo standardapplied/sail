@@ -9,8 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.sync.SyncBox;
@@ -67,27 +68,29 @@ class CompactionTest {
   }
 
   @Test
-  void aCompactedRevisionCannotBeRestoredAndTheRemedyIsWordedForTheOperator() {
+  void aCompactedRevisionCannotBeRestoredAndTheRemedyNamesTheHistoryCommand() {
     edits("busy", 30);
     var first = changes.history("spec", "busy").getFirst().rev();
 
     new BlobStore(db).gc(BlobStore.Compaction.ALL, false);
 
-    var sudo = OperatorCommand.SUDO;
+    var refused = (Remedied) specs.unrestorable("busy", first);
     assertEquals(
         "Revision '"
             + first
             + "' of spec 'busy' is not in its retained history: history keeps the newest 20"
-            + " revisions of each spec and every deletion. Pick one of those from 'sudo sail spec"
-            + " history busy'.",
-        specs.unrestorable("busy", first, sudo));
+            + " revisions of each spec and every deletion.",
+        refused.reason());
     assertEquals(
-        specs.unrestorable("busy", first, sudo),
-        assertThrows(IllegalArgumentException.class, () -> specs.restore("busy", first, sudo))
+        Remedy.of("Pick one of those from '", Remedy.sail("spec history", "busy"), "'."),
+        refused.remedy());
+    assertEquals(
+        specs.unrestorable("busy", first).getMessage(),
+        assertThrows(IllegalArgumentException.class, () -> specs.restore("busy", first))
             .getMessage());
     assertEquals(
         "No revision '0-x' recorded for spec 'never'.",
-        specs.unrestorable("never", "0-x", OperatorCommand.PLAIN));
+        specs.unrestorable("never", "0-x").getMessage());
   }
 
   @Test

@@ -88,7 +88,7 @@ class DemoSeederTest {
               dir.resolve("projects"),
               () -> new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "ada", "box"),
               target -> PipedSyncChannel.to(main.server(ada)),
-              OperatorCommand.PLAIN);
+              SyncOperations.PLAIN_NOTICES);
       syncing.prepare();
 
       var report =

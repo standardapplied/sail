@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
@@ -99,7 +100,7 @@ class JoinCommandTest {
   }
 
   private MainHostKey pin() {
-    return new MainHostKey(new Keyscan(), knownHosts(), OperatorCommand.SUDO);
+    return new MainHostKey(new Keyscan(), knownHosts());
   }
 
   private static String hashed(SshPublicKey key) {
@@ -165,7 +166,7 @@ class JoinCommandTest {
             + " compare the fingerprint it prints with main's ('sudo ssh-keygen -lf"
             + " /etc/ssh/ssh_host_ed25519_key.pub' on main); otherwise something between this box"
             + " and main is answering for it.",
-        refused.getMessage());
+        OperatorCommand.SUDO.render((Remedied) refused));
     assertEquals(before, Files.readString(hostConfig));
     assertEquals(hashed(MAIN) + "\n", Files.readString(knownHosts()));
   }
@@ -181,7 +182,7 @@ class JoinCommandTest {
     assertEquals(
         "Couldn't read maindevbox's SSH host key on port 22: no ed25519 host key came back. Check"
             + " the address and firewall, then re-run sudo sail init --main sail@maindevbox.",
-        refused.getMessage());
+        OperatorCommand.SUDO.render((Remedied) refused));
     assertEquals(before, Files.readString(hostConfig));
     assertFalse(Files.exists(dir.resolve("sync_ed25519")), "no sync key is made");
   }

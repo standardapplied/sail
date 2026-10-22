@@ -14,6 +14,7 @@ import ai.singlr.sail.engine.DaemonSecretInstaller;
 import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.NetworkDetector;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -33,14 +34,18 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
+import picocli.CommandLine.Spec;
 
 @Command(
     name = "set",
     description = "Update a host configuration value.",
     mixinStandardHelpOptions = true)
 public final class HostConfigSetCommand implements Runnable {
+
+  @Spec private CommandSpec spec;
 
   private static final Set<String> SETTABLE_KEYS =
       Set.of(
@@ -109,12 +114,7 @@ public final class HostConfigSetCommand implements Runnable {
     }
 
     if (!dryRun && !ConsoleHelper.isRoot()) {
-      throw new IllegalStateException(
-          "Root privileges required. Run with: "
-              + OperatorCommand.SUDO.sail(
-                  "host config set "
-                      + key
-                      + (value == null ? "" : " " + Strings.shellWord(value))));
+      throw RootRequired.refusal(spec);
     }
 
     if ("ssh-public-key".equals(key)) {
@@ -301,7 +301,7 @@ public final class HostConfigSetCommand implements Runnable {
           "[dry-run] Would set ssh-public-key (" + chosen.fingerprint() + ") in " + dest);
       return;
     }
-    writeKey(dest, chosen);
+    installWorkstationKey(SailPaths.controlPlaneDb(), dest, chosen);
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("key", key);
@@ -383,6 +383,17 @@ public final class HostConfigSetCommand implements Runnable {
    */
   static SshPublicKey writeWorkstationKey(Path dest, String value) throws IOException {
     return writeKey(dest, SshPublicKey.parse(value));
+  }
+
+  /**
+   * Writes {@code key} to {@code dest} under {@link PairingTrust} of the control plane at {@code
+   * database}: a {@code project apply} holds it from reading the workstation key to installing it,
+   * so it never reads the key on one side of this change and installs it on the other.
+   */
+  static void installWorkstationKey(Path database, Path dest, SshPublicKey key) throws IOException {
+    try (var held = PairingTrust.hold(database)) {
+      writeKey(dest, key);
+    }
   }
 
   private static SshPublicKey writeKey(Path dest, SshPublicKey key) throws IOException {

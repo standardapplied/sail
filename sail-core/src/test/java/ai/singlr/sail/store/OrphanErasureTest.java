@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.ActingAs;
 import java.io.IOException;
@@ -53,7 +54,8 @@ class OrphanErasureTest {
 
       assertEquals(3, report.applied());
       assertEquals(
-          List.of("Erased 3 orphaned rows: 1 runs, 1 reviews, 1 messages"), report.notes());
+          List.of("Erased 3 orphaned rows: 1 runs, 1 reviews, 1 messages"),
+          report.notes().stream().map(Remedy::plain).toList());
       for (var kept : List.of(livesRun, deletedsRun)) {
         assertEquals(1, count(db, "SELECT count(*) FROM runs WHERE id = ?", kept));
       }
@@ -105,7 +107,7 @@ class OrphanErasureTest {
       var report = new OrphanErasure(() -> false).apply(db, null, null);
 
       assertEquals(0, report.applied());
-      assertTrue(report.notes().getFirst().contains("erased by main"));
+      assertTrue(report.notes().getFirst().plain().contains("erased by main"));
       assertEquals(1, count(db, "SELECT count(*) FROM runs WHERE id = ?", orphan));
     }
   }

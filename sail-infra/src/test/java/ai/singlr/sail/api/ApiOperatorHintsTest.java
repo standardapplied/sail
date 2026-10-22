@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -41,15 +42,14 @@ class ApiOperatorHintsTest {
 
   private static List<String> hints(OperatorCommand operator) {
     return List.of(
-        ProjectLoader.stopped("gamma", operator).error().action(),
-        ProjectReader.absent("gamma", operator).error().action(),
-        DispatchPolicy.runsOnOtherNode(spec(null), "ada", operator).fix(),
-        DispatchPolicy.runsOnOtherNode(spec("bob"), "ada", operator).fix(),
-        LaunchAdmission.handleHint(operator),
-        LaunchAdmission.notInstalled(Harnesses.of("claude-code"), "gamma", operator)
-            .error()
-            .action(),
-        SailOperations.storeUnavailable("Run store", operator));
+        operator.render(ProjectLoader.stopped("gamma").remedy()),
+        operator.render(ProjectReader.absent("gamma").remedy()),
+        operator.render(DispatchPolicy.runsOnOtherNode(spec(null), "ada").fix()),
+        operator.render(DispatchPolicy.runsOnOtherNode(spec("bob"), "ada").fix()),
+        operator.render(LaunchAdmission.HANDLE_HINT),
+        operator.render(
+            LaunchAdmission.notInstalled(Harnesses.of("claude-code"), "gamma").remedy()),
+        operator.render((Remedied) SailOperations.storeUnavailable("Run store")));
   }
 
   @Test

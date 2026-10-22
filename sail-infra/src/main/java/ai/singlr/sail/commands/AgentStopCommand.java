@@ -67,7 +67,7 @@ public final class AgentStopCommand implements Runnable {
 
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
-    name = CurrentProject.require(name, operator);
+    name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
     try (var sync = NodeSync.scheduler(syncOptions.noSync(), operator)) {
       execute(sync, operator);
@@ -80,7 +80,7 @@ public final class AgentStopCommand implements Runnable {
     var handle = Objects.toString(HostSync.handle(), "");
     try (var operations =
         OperationsFactory.open(
-            shell, hooks(shell, this::publishLifecycle, listener()), SessionYield.NONE, operator)) {
+            shell, hooks(shell, this::publishLifecycle, listener()), SessionYield.NONE)) {
       var outcome = stopAsOperator(operations, name, handle, dryRun);
       render(outcome);
       if (!dryRun && outcome.mutated()) {
@@ -114,8 +114,7 @@ public final class AgentStopCommand implements Runnable {
       DispatchOperations.EventSink events,
       StopOperations.Listener listener,
       OperatorCommand operator) {
-    return OperationsFactory.create(
-        db, shell, hooks(shell, events, listener), SessionYield.NONE, operator);
+    return OperationsFactory.create(db, shell, hooks(shell, events, listener), SessionYield.NONE);
   }
 
   private static OperationHooks hooks(

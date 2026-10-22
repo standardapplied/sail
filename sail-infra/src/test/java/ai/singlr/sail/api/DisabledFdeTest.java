@@ -15,7 +15,6 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.HostAccess;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -88,14 +87,7 @@ class DisabledFdeTest {
     boxCredential = new BoxCredentialStore(db).replace("mady");
     runCredential = reserveRun("mady", "acme", "seed");
     operations =
-        OperationsFactory.create(
-                db,
-                SHELL,
-                null,
-                null,
-                SyncScheduler.disabled(),
-                SessionYield.NONE,
-                OperatorCommand.PLAIN)
+        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
             .useControlPlane(
                 db,
                 tempDir,
@@ -106,8 +98,7 @@ class DisabledFdeTest {
                     () -> MAIN,
                     target -> {
                       throw new IOException("main unavailable");
-                    },
-                    OperatorCommand.PLAIN));
+                    }));
     server =
         new SailApiServer(
             "127.0.0.1",
@@ -134,13 +125,10 @@ class DisabledFdeTest {
     assertEquals(200, get(session).statusCode());
     assertEquals(200, socket().status());
     assertEquals(200, socket(runCredential).status());
-    assertEquals("mady", CliOperator.of(MAIN, new FdeStore(db), OperatorCommand.PLAIN).handle());
+    assertEquals("mady", CliOperator.of(MAIN, new FdeStore(db)).handle());
     assertInstanceOf(SshGateway.Authorized.class, gateway());
     assertEquals(
-        "mady",
-        new HostAccess(db, TestAuth.roles(db, MAIN), OperatorCommand.PLAIN)
-            .identity(session, null)
-            .fde());
+        "mady", new HostAccess(db, TestAuth.roles(db, MAIN)).identity(session, null).fde());
   }
 
   @Test
@@ -156,18 +144,13 @@ class DisabledFdeTest {
     var ownerless = socket(reserveRun(null, "gamma", "other"));
     assertEquals(403, ownerless.status(), "a run acting for no FDE acts for the box's");
     assertTrue(ownerless.body().toString().contains("this box's FDE"), ownerless.body().toString());
-    var cli =
-        assertThrows(
-            ApiException.class,
-            () -> CliOperator.of(MAIN, new FdeStore(db), OperatorCommand.PLAIN));
+    var cli = assertThrows(ApiException.class, () -> CliOperator.of(MAIN, new FdeStore(db)));
     assertEquals(ErrorCode.CONFLICT, cli.failure().errorCode(), "the host CLI");
     assertInstanceOf(SshGateway.Rejected.class, gateway(), "the SSH gateway");
     var terminal =
         assertThrows(
             IOException.class,
-            () ->
-                new HostAccess(db, TestAuth.roles(db, MAIN), OperatorCommand.PLAIN)
-                    .identity(session, null));
+            () -> new HostAccess(db, TestAuth.roles(db, MAIN)).identity(session, null));
     assertTrue(terminal.getMessage().contains("disabled"), "the terminal");
   }
 

@@ -9,11 +9,12 @@ import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.SpecAuthority;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.identity.ProjectScope;
@@ -539,15 +540,15 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    * restore}) — the current state is never discarded, it becomes part of history too, so a restore
    * is itself reversible. Re-creates the spec if it had been deleted, from any revision history
    * still keeps — its tombstone included. A pruned spec has no history left to restore from, and
-   * says so; a revision compaction dropped says that too, naming the command as {@code operator}
-   * types it.
+   * says so; a revision compaction dropped says that too, naming the command that lists what is
+   * kept.
    */
-  public void restore(String id, String rev, OperatorCommand operator) {
+  public void restore(String id, String rev) {
     var entry =
         changeLog
             .at(ENTITY, id, rev)
             .filter(found -> found.kind() != ChangeLog.Kind.ERASURE)
-            .orElseThrow(() -> new IllegalArgumentException(unrestorable(id, rev, operator)));
+            .orElseThrow(() -> unrestorable(id, rev));
     var snapshot = new LinkedHashMap<>(YamlUtil.parseMap(entry.snapshot()));
     snapshot.remove("updated_at");
     snapshot.remove(STATUS_SINCE);
@@ -572,23 +573,24 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   /** Why {@code rev} of spec {@code id} cannot be restored, naming what can be done instead. */
-  public String unrestorable(String id, String rev, OperatorCommand operator) {
+  public IllegalArgumentException unrestorable(String id, String rev) {
     var head = changeLog.head(ENTITY, id).orElse(null);
     if (head == null) {
-      return "No revision '" + rev + "' recorded for spec '" + id + "'.";
+      return new IllegalArgumentException(
+          "No revision '" + rev + "' recorded for spec '" + id + "'.");
     }
     if (head.kind() == ChangeLog.Kind.ERASURE) {
-      return pruned(id);
+      return new IllegalArgumentException(pruned(id));
     }
-    return "Revision '"
-        + rev
-        + "' of spec '"
-        + id
-        + "' is not in its retained history: history keeps the newest "
-        + ChangeLog.HISTORY_REVISIONS
-        + " revisions of each spec and every deletion. Pick one of those from '"
-        + operator.sail("spec history " + id)
-        + "'.";
+    return Remedied.argument(
+        "Revision '"
+            + rev
+            + "' of spec '"
+            + id
+            + "' is not in its retained history: history keeps the newest "
+            + ChangeLog.HISTORY_REVISIONS
+            + " revisions of each spec and every deletion.",
+        Remedy.of("Pick one of those from '", Remedy.sail("spec history", id), "'."));
   }
 
   /** Why pruned spec {@code id} is gone for good: who pruned it and when. */
@@ -1203,12 +1205,9 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
 
   private static void requireMigrated(String hash, String id) {
     if (hash == null)
-      throw new IllegalStateException(
-          "Spec "
-              + id
-              + " has no content hash: this database's content migration never finished. Run '"
-              + OperatorCommand.elsewhere("migrate")
-              + "'.");
+      throw Remedied.state(
+          "Spec " + id + " has no content hash: this database's content migration never finished.",
+          Remedy.of("Run '", Remedy.sail("migrate"), "'."));
   }
 
   public List<SpecRow> readySpecs() {

@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -94,7 +93,7 @@ class UnheldProjectSyncTest {
     Acting.as("node", () -> main.specs.delete("old"));
     SyncBox.round(main, node);
 
-    Acting.as("node", () -> node.specs.restore("old", born, OperatorCommand.PLAIN));
+    Acting.as("node", () -> node.specs.restore("old", born));
     var report = specs(SyncBox.round(main, node));
 
     assertEquals(

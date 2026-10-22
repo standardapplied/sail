@@ -51,7 +51,7 @@ public final class SwitchCommand implements Runnable {
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireCreated(state, name, operator);
+    ContainerStateGuard.requireCreated(state, name);
 
     if (!dryRun) {
       CurrentProject.set(name);

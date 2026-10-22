@@ -35,7 +35,7 @@ public final class ShellCommand implements Runnable {
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name, operator);
+    ContainerStateGuard.requireRunning(state, name);
 
     var cmd =
         List.of(

@@ -85,7 +85,7 @@ class ServerTokenCommandTest {
   }
 
   private Function<OperatorCommand, HostOperations> operations() {
-    return operator -> OperationsFactory.open(database(), operator);
+    return operator -> OperationsFactory.open(database());
   }
 
   private int run(Runnable verb, String... args) {

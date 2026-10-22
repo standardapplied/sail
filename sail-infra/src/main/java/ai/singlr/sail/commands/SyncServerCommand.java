@@ -9,11 +9,12 @@ import ai.singlr.sail.SailVersion;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SyncTransitionEvents;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.HostInfo;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -68,7 +69,7 @@ public final class SyncServerCommand implements Callable<Integer> {
     try {
       mainDb = SyncDatabase.converge(SailPaths.controlPlaneDb(), boxId);
     } catch (RuntimeException e) {
-      System.err.println(SyncCommand.reason(e));
+      System.err.println(Remedied.whole(e).plain());
       return 1;
     }
     try (mainDb) {
@@ -131,11 +132,13 @@ public final class SyncServerCommand implements Callable<Integer> {
       new ShippedFollowUps(db).catchUp();
     } catch (RuntimeException e) {
       System.err.println(
-          "sync: main could not fix the findings of its shipped follow-ups ("
-              + e.getMessage()
-              + "); run "
-              + OperatorCommand.elsewhere("sync")
-              + " again.");
+          Remedy.of(
+                  "sync: main could not fix the findings of its shipped follow-ups ("
+                      + e.getMessage()
+                      + "); run ",
+                  Remedy.sail("sync"),
+                  " again.")
+              .plain());
       return 1;
     }
     SyncRpcServer.over(

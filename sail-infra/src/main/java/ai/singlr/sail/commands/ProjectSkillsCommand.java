@@ -138,7 +138,7 @@ public final class ProjectSkillsCommand implements Runnable {
     private final Function<OperatorCommand, HostOperations> operations;
 
     Ls() {
-      this(OperationsFactory::open);
+      this(operator -> OperationsFactory.open(operator::warn));
     }
 
     Ls(Function<OperatorCommand, HostOperations> operations) {
@@ -148,10 +148,10 @@ public final class ProjectSkillsCommand implements Runnable {
     @Override
     public Integer call() {
       var operator = operator();
-      project = CurrentProject.require(project, operator);
+      project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
       try (var operations = this.operations.apply(operator)) {
-        operations.catalog().definitions().require(project, operator);
+        operations.catalog().definitions().require(project);
         System.out.print(
             render(
                 project,
@@ -184,7 +184,7 @@ public final class ProjectSkillsCommand implements Runnable {
     private final Function<OperatorCommand, HostOperations> operations;
 
     Add() {
-      this(OperationsFactory::open);
+      this(operator -> OperationsFactory.open(operator::warn));
     }
 
     Add(Function<OperatorCommand, HostOperations> operations) {
@@ -194,7 +194,7 @@ public final class ProjectSkillsCommand implements Runnable {
     @Override
     public Integer call() throws Exception {
       var operator = operator();
-      project = CurrentProject.require(project, operator);
+      project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
       var source = folder.toAbsolutePath().normalize();
       if (!Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS)) {
@@ -306,7 +306,7 @@ public final class ProjectSkillsCommand implements Runnable {
     private final Function<OperatorCommand, HostOperations> operations;
 
     Rm() {
-      this(OperationsFactory::open);
+      this(operator -> OperationsFactory.open(operator::warn));
     }
 
     Rm(Function<OperatorCommand, HostOperations> operations) {
@@ -316,7 +316,7 @@ public final class ProjectSkillsCommand implements Runnable {
     @Override
     public Integer call() throws Exception {
       var operator = operator();
-      project = CurrentProject.require(project, operator);
+      project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
       StageSkill.requireName(name);
       var folder = StageSkill.projectFolder(name);
@@ -371,7 +371,7 @@ public final class ProjectSkillsCommand implements Runnable {
     private final Function<OperatorCommand, HostOperations> operations;
 
     Show() {
-      this(OperationsFactory::open);
+      this(operator -> OperationsFactory.open(operator::warn));
     }
 
     Show(Function<OperatorCommand, HostOperations> operations) {
@@ -385,7 +385,7 @@ public final class ProjectSkillsCommand implements Runnable {
         System.out.print(SpecSkillGenerator.skillMd());
         return 0;
       }
-      project = CurrentProject.require(project, operator);
+      project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
       StageSkill.requireName(name);
       try (var operations = this.operations.apply(operator)) {

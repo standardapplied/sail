@@ -4,6 +4,7 @@
  */
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
 import java.time.Instant;
@@ -18,7 +19,7 @@ public record SyncStatus(
     Instant lastSuccessAt,
     int consecutiveFailures,
     String lastErrorKind,
-    String lastError,
+    Remedy lastError,
     Instant staleSince,
     long fetchedBytes,
     long sentBytes,
@@ -37,7 +38,7 @@ public record SyncStatus(
       Instant lastSuccessAt,
       int consecutiveFailures,
       String lastErrorKind,
-      String lastError,
+      Remedy lastError,
       Instant staleSince) {
     this(
         role,

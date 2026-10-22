@@ -52,7 +52,7 @@ final class ContainerWorkspace {
   }
 
   private static String sshUser(String project, OperatorCommand operator) {
-    try (var operations = OperationsFactory.open(operator)) {
+    try (var operations = OperationsFactory.open()) {
       return operations
           .catalog()
           .project(project)

@@ -89,7 +89,7 @@ public final class AgentAttachCommand implements Runnable {
   private final Function<OperatorCommand, HostOperations> operations;
 
   public AgentAttachCommand() {
-    this(OperationsFactory::open);
+    this(operator -> OperationsFactory.open(operator::warn));
   }
 
   AgentAttachCommand(Function<OperatorCommand, HostOperations> operations) {
@@ -128,7 +128,7 @@ public final class AgentAttachCommand implements Runnable {
 
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
-    name = CurrentProject.require(name, operator);
+    name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
 
     var latest = latest(operator);
@@ -346,7 +346,7 @@ public final class AgentAttachCommand implements Runnable {
 
   private void requireRunning(OperatorCommand operator) throws Exception {
     var state = new ContainerManager(new ShellExecutor(false)).queryState(name);
-    ContainerStateGuard.requireRunning(state, name, operator);
+    ContainerStateGuard.requireRunning(state, name);
   }
 
   /**

@@ -11,8 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -55,7 +55,7 @@ class UnheldProjectTest {
         new Refusal(
             Refusal.Kind.UNHELD_PROJECT,
             "Project 'nosuch' isn't on this box. Projects here: acme, beta.",
-            null),
+            Remedy.NONE),
         refused.refusal());
     assertEquals(0, count("SELECT count(*) FROM specs"));
     assertEquals(0, count("SELECT count(*) FROM change_log WHERE entity_type = 'spec'"));
@@ -74,7 +74,10 @@ class UnheldProjectTest {
         new Refusal(
             Refusal.Kind.UNHELD_PROJECT,
             "Project 'beta' isn't on this box. Projects here: acme.",
-            "Ask an admin to grant it on main: sudo sail fde grant ada beta."),
+            Remedy.of(
+                "Ask an admin to grant it on main: ",
+                Remedy.sail("fde grant", "ada", "beta"),
+                ".")),
         refused.refusal());
     assertEquals(0, count("SELECT count(*) FROM specs"));
   }
@@ -91,7 +94,10 @@ class UnheldProjectTest {
         new Refusal(
             Refusal.Kind.UNHELD_PROJECT,
             "Project 'beta' isn't on this box. Projects here: acme.",
-            "Ask an admin to grant it on main: sudo sail fde grant ada beta."),
+            Remedy.of(
+                "Ask an admin to grant it on main: ",
+                Remedy.sail("fde grant", "ada", "beta"),
+                ".")),
         refused.refusal());
     assertEquals(0, count("SELECT count(*) FROM specs"));
   }
@@ -104,9 +110,7 @@ class UnheldProjectTest {
     db.execute("DELETE FROM projects WHERE name = 'beta'");
 
     var refused =
-        assertThrows(
-            WriteRefused.class,
-            () -> Acting.as("ada", () -> specs.restore("idea", born, OperatorCommand.PLAIN)));
+        assertThrows(WriteRefused.class, () -> Acting.as("ada", () -> specs.restore("idea", born)));
 
     assertEquals(
         "Project 'beta' isn't on this box. Projects here: acme.", refused.refusal().message());
@@ -127,7 +131,7 @@ class UnheldProjectTest {
         new Refusal(
             Refusal.Kind.UNHELD_PROJECT,
             "Project 'gamma' isn't on this box. Projects here: acme.",
-            null),
+            Remedy.NONE),
         refused.refusal());
   }
 

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BlobStore;
@@ -90,6 +91,7 @@ public final class SyncWire {
   private static final String STALE = "stale";
   private static final String REFUSED = "refused";
   private static final String REASON = "reason";
+  private static final String REMEDY = "remedy";
   private static final String DENIED = "denied";
   private static final String PROTOCOL_KEY = "protocol";
   private static final String VERSION = "version";
@@ -403,8 +405,15 @@ public final class SyncWire {
     }
   }
 
-  /** Main refused the session before serving anything, naming the remedy. */
-  public record Refuse(String reason) implements Response {}
+  /**
+   * Main refused the session before serving anything, naming the remedy as data. On the wire its
+   * plain reading rides beside it, the reason a node that predates remedies reads.
+   */
+  public record Refuse(Remedy reason) implements Response {
+    public Refuse(String reason) {
+      this(Remedy.of(reason));
+    }
+  }
 
   /** Main's high-water per entity type. */
   public record Tips(Map<String, Long> tips) implements Response {}
@@ -726,7 +735,10 @@ public final class SyncWire {
       }
       case Refuse refuse -> {
         map.put(OP, OP_REFUSE);
-        map.put(REASON, refuse.reason());
+        map.put(REASON, refuse.reason().plain());
+        if (!refuse.reason().commands().isEmpty()) {
+          map.put(REMEDY, refuse.reason().toMaps());
+        }
       }
       case Tips tips -> {
         map.put(OP, OP_TIPS);
@@ -814,7 +826,11 @@ public final class SyncWire {
               longValue(map, FILE_MAX),
               map.containsKey(SCOPE) ? ProjectScope.of(strings(map, SCOPE)) : ProjectScope.all(),
               string(map, CATALOG));
-      case OP_REFUSE -> new Refuse(string(map, REASON));
+      case OP_REFUSE ->
+          new Refuse(
+              map.get(REMEDY) instanceof List<?> remedy
+                  ? Remedy.fromMaps(remedy)
+                  : Remedy.of(Objects.toString(string(map, REASON), "")));
       case OP_TIPS -> new Tips(tips(map));
       case OP_PAGE ->
           new Page(

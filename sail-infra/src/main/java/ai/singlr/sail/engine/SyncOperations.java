@@ -11,6 +11,8 @@ import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SyncReport;
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.api.SyncTransitionEvents;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Actor;
@@ -91,9 +93,19 @@ public final class SyncOperations {
   private final Supplier<SyncConfig> configuration;
   private final Channels channels;
   private final Consumer<Event> events;
-  private final OperatorCommand operator;
+  private final Consumer<Remedy> notice;
   private final ShellExec shell;
   private SailEventPublisher publisher;
+
+  /** A round whose notices print as {@link #PLAIN_NOTICES} prints them. */
+  public SyncOperations(
+      Sqlite db,
+      String host,
+      Path projectsDir,
+      Supplier<SyncConfig> configuration,
+      Channels channels) {
+    this(db, host, projectsDir, configuration, channels, PLAIN_NOTICES);
+  }
 
   public SyncOperations(
       Sqlite db,
@@ -101,13 +113,14 @@ public final class SyncOperations {
       Path projectsDir,
       Supplier<SyncConfig> configuration,
       Channels channels,
-      OperatorCommand operator) {
-    this(db, host, projectsDir, configuration, channels, null, operator);
+      Consumer<Remedy> notice) {
+    this(db, host, projectsDir, configuration, channels, null, notice);
   }
 
   /**
-   * {@code events} receives every event a round publishes; {@code null} means the local API. Every
-   * command a round's notice names is worded for {@code operator}.
+   * {@code events} receives every event a round publishes; {@code null} means the local API. A
+   * round's notices, and the commands they name, go to {@code notice}, which the door that opened
+   * this renders for its reader.
    */
   public SyncOperations(
       Sqlite db,
@@ -116,9 +129,8 @@ public final class SyncOperations {
       Supplier<SyncConfig> configuration,
       Channels channels,
       Consumer<Event> events,
-      OperatorCommand operator) {
-    this(
-        db, host, projectsDir, configuration, channels, events, operator, new ShellExecutor(false));
+      Consumer<Remedy> notice) {
+    this(db, host, projectsDir, configuration, channels, events, notice, new ShellExecutor(false));
   }
 
   /** As above, asking Incus through {@code shell}. */
@@ -129,7 +141,7 @@ public final class SyncOperations {
       Supplier<SyncConfig> configuration,
       Channels channels,
       Consumer<Event> events,
-      OperatorCommand operator,
+      Consumer<Remedy> notice,
       ShellExec shell) {
     this.db = db;
     this.host = host;
@@ -137,7 +149,7 @@ public final class SyncOperations {
     this.configuration = configuration;
     this.channels = channels;
     this.events = events == null ? this::publishQuietly : events;
-    this.operator = Objects.requireNonNull(operator, "operator");
+    this.notice = Objects.requireNonNull(notice, "notice");
     this.shell = Objects.requireNonNull(shell, "shell");
   }
 
@@ -146,13 +158,13 @@ public final class SyncOperations {
   }
 
   public void prepare() {
-    SyncDatabase.prepare(db, host, operator);
+    SyncDatabase.prepare(db, host);
   }
 
   public synchronized SyncReport sync(SyncRequest request) throws Exception {
     try (var rounds = FileMutex.holdRounds(db.path())) {
       var config = configuration.get();
-      var target = resolveMain(request.main(), config, operator);
+      var target = resolveMain(request.main(), config);
       if (target.target() == null) {
         return new SyncReport(SyncEngine.Report.NONE, target.message());
       }
@@ -173,7 +185,7 @@ public final class SyncOperations {
     var files = new FileStore(db);
     var projects = new ProjectStore(db);
     try (var channel = channels.open(target);
-        var session = open(channel, config, db, target, operator)) {
+        var session = open(channel, config, db, target, notice)) {
       var handle = Objects.toString(config.handle(), "");
       var replicas = SyncedEntities.replicas(db, config.boxId(), handle);
       return reconcile(session, handle, replicas, messages, specs, files, projects);
@@ -190,7 +202,7 @@ public final class SyncOperations {
       ProjectStore projects)
       throws Exception {
     DemoSeeder.unseed(db);
-    var settled = new ArrayList<>(NodeRound.begin(session, db, handle, operator));
+    var settled = new ArrayList<>(NodeRound.begin(session, db, handle));
     session.keep(NodeRound.kept(settled));
     var types = new ArrayList<SyncSession.TypeReport>();
     var failures = new ArrayList<SyncTransportException>();
@@ -205,7 +217,7 @@ public final class SyncOperations {
       }
     }
     settled.addAll(NodeRound.end(db, handle));
-    settled.forEach(settlement -> notice(settlement.describe()));
+    settled.forEach(settlement -> notice.accept(Remedy.of(settlement.describe())));
     var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
     try {
       reportRejectedFdes(
@@ -239,9 +251,9 @@ public final class SyncOperations {
    * the runs main holds.
    */
   public static Set<String> acknowledgeHeld(
-      Sqlite db, SyncConfig config, Channels channels, OperatorCommand operator) throws Exception {
+      Sqlite db, SyncConfig config, Channels channels, Consumer<Remedy> notice) throws Exception {
     try (var channel = channels.open(config.main());
-        var session = open(channel, config, db, config.main(), operator)) {
+        var session = open(channel, config, db, config.main(), notice)) {
       return NodeRound.acknowledgeHeld(session, db);
     }
   }
@@ -252,17 +264,11 @@ public final class SyncOperations {
    * main unreachable included, is no evidence that it does. The probe says nothing of its own: the
    * answer it gives is what the caller shows.
    */
-  public static boolean welcomedAs(
-      SyncConfig config, Channels channels, String handle, OperatorCommand operator) {
+  public static boolean welcomedAs(SyncConfig config, Channels channels, String handle) {
     try (var channel = channels.open(config.main());
         var session =
             SyncSession.open(
-                channel.reader(),
-                channel.writer(),
-                hello(config, operator),
-                unsaid -> {},
-                unsaid -> {},
-                operator)) {
+                channel.reader(), channel.writer(), hello(config), unsaid -> {}, unsaid -> {})) {
       return session.handle().filter(handle::equals).isPresent();
     } catch (Exception notWelcomed) {
       return false;
@@ -275,8 +281,8 @@ public final class SyncOperations {
    * NodeRound#admit}).
    */
   private static SyncSession open(
-      Channel channel, SyncConfig config, Sqlite db, String target, OperatorCommand operator) {
-    var session = welcome(channel, config, db, target, operator);
+      Channel channel, SyncConfig config, Sqlite db, String target, Consumer<Remedy> notice) {
+    var session = welcome(channel, config, db, target, notice);
     try {
       NodeRound.admit(session, db, target);
       return session;
@@ -291,15 +297,14 @@ public final class SyncOperations {
   }
 
   private static SyncSession welcome(
-      Channel channel, SyncConfig config, Sqlite db, String target, OperatorCommand operator) {
+      Channel channel, SyncConfig config, Sqlite db, String target, Consumer<Remedy> notice) {
     try {
       return SyncSession.open(
           channel.reader(),
           channel.writer(),
-          hello(config, operator),
-          SyncOperations::notice,
-          denial -> notice(denial.describe(operator)),
-          operator,
+          hello(config),
+          notice,
+          denial -> notice.accept(denial.describe()),
           db);
     } catch (SyncTransportException e) {
       if (!"unreachable".equals(e.kind())) {
@@ -310,28 +315,24 @@ public final class SyncOperations {
         throw e;
       }
       throw new SyncTransportException(
-          "unreachable", explained(e.getMessage(), said, target, operator), e);
+          "unreachable", e.getMessage() + " ssh said: " + said, explained(said, target), e);
     }
   }
 
-  /** A closed channel's failure with the transport's last word, and its remedy when it has one. */
-  static String explained(String failure, String said, String target, OperatorCommand operator) {
-    var message = failure + " ssh said: " + said;
-    return HOST_KEY_FAILED.equals(said)
-        ? message + " " + MainHostKey.rebuiltRecovery(target, operator)
-        : message;
+  /** The remedy for a channel ssh closed saying {@code said}, when it names one. */
+  static Remedy explained(String said, String target) {
+    return HOST_KEY_FAILED.equals(said) ? MainHostKey.rebuiltRecovery(target) : Remedy.NONE;
   }
 
-  private static SyncWire.Hello hello(SyncConfig config, OperatorCommand operator) {
-    return SyncWire.Hello.of(SailVersion.version(), requireBoxId(config, operator));
+  private static SyncWire.Hello hello(SyncConfig config) {
+    return SyncWire.Hello.of(SailVersion.version(), requireBoxId(config));
   }
 
-  private static String requireBoxId(SyncConfig config, OperatorCommand operator) {
+  private static String requireBoxId(SyncConfig config) {
     if (Strings.isBlank(config.boxId())) {
-      throw new IllegalStateException(
-          "This box has no sync box id. Run '"
-              + operator.sail("migrate")
-              + "' to assign one, then sync again.");
+      throw Remedied.state(
+          "This box has no sync box id.",
+          Remedy.of("Run '", Remedy.sail("migrate"), "' to assign one, then sync again."));
     }
     return config.boxId();
   }
@@ -354,9 +355,12 @@ public final class SyncOperations {
         .orElse(SyncEngine.Report.NONE);
   }
 
-  private static void notice(String line) {
-    System.err.println(Banner.warnLine(line, Ansi.AUTO));
-  }
+  /**
+   * A round's notices as a process that cannot see its reader prints them, sail-api's sync lane
+   * among them: each command in its plain form.
+   */
+  public static final Consumer<Remedy> PLAIN_NOTICES =
+      remedy -> System.err.println(Banner.warnLine(remedy.plain(), Ansi.AUTO));
 
   private static void reportRejectedFdes(List<String> rejected) {
     if (!rejected.isEmpty()) {
@@ -370,17 +374,19 @@ public final class SyncOperations {
     }
   }
 
-  public record MainTarget(String target, String message) {}
+  public record MainTarget(String target, Remedy message) {}
 
   /**
    * The main this box syncs with: {@code flag}, else its configured main. The main box itself syncs
    * with nothing, whatever it is asked: a round adopts the other side's versions and roster, which
    * would overwrite the fleet's source of truth.
    */
-  public static MainTarget resolveMain(String flag, SyncConfig sync, OperatorCommand operator) {
+  public static MainTarget resolveMain(String flag, SyncConfig sync) {
     if (sync.isMain()) {
       return new MainTarget(
-          null, "This box is the main devbox — other boxes sync to it; it has nothing to sync to.");
+          null,
+          Remedy.of(
+              "This box is the main devbox — other boxes sync to it; it has nothing to sync to."));
     }
     if (Strings.isNotBlank(flag)) {
       return new MainTarget(flag, null);
@@ -390,9 +396,10 @@ public final class SyncOperations {
     }
     return new MainTarget(
         null,
-        "Single devbox — nothing to sync. Add a second box with: "
-            + operator.sail("host sync --main <user@host>")
-            + ".");
+        Remedy.of(
+            "Single devbox — nothing to sync. Add a second box with: ",
+            Remedy.sail("host sync", "--main", "<user@host>"),
+            "."));
   }
 
   public static List<Event> pulledMessageEvents(
@@ -484,13 +491,14 @@ public final class SyncOperations {
       } catch (IOException | TimeoutException unreachable) {
         dropped.forEach(
             project ->
-                notice(
-                    "project "
-                        + project
-                        + ": its container, if any, is deleted by the next round that can reach"
-                        + " Incus (sail-api within a minute, or '"
-                        + operator.root("sync")
-                        + "')"));
+                notice.accept(
+                    Remedy.of(
+                        "project "
+                            + project
+                            + ": its container, if any, is deleted by the next round that can"
+                            + " reach Incus (sail-api within a minute, or '",
+                        Remedy.sail("sync"),
+                        "')")));
         return;
       }
       var devices = new IncusDeviceManager(shell);
@@ -501,20 +509,22 @@ public final class SyncOperations {
         }
         if (devices.sailManaged(name)) {
           if (takeOff(teardown, name, true)) {
-            notice(
-                "project "
-                    + name
-                    + ": its container deleted, workspace and uncommitted work included — main"
-                    + " no longer grants this box the project");
+            notice.accept(
+                Remedy.of(
+                    "project "
+                        + name
+                        + ": its container deleted, workspace and uncommitted work included — main"
+                        + " no longer grants this box the project"));
           }
         } else if (dropped.contains(name)) {
-          notice(
-              "project "
-                  + name
-                  + ": container '"
-                  + name
-                  + "' kept — Sail did not provision it; remove it yourself if it holds the"
-                  + " project's work");
+          notice.accept(
+              Remedy.of(
+                  "project "
+                      + name
+                      + ": container '"
+                      + name
+                      + "' kept — Sail did not provision it; remove it yourself if it holds the"
+                      + " project's work"));
         }
       }
     } catch (IOException | TimeoutException e) {
@@ -588,15 +598,14 @@ public final class SyncOperations {
       }
     }
     if (!created.isEmpty()) {
-      System.err.println(
-          Ansi.AUTO.string(
-              "  @|faint "
-                  + created.size()
+      notice.accept(
+          Remedy.of(
+              created.size()
                   + " new project(s) synced from main: "
                   + String.join(", ", created)
-                  + ". Provision with '"
-                  + operator.sail("project apply <name>")
-                  + "'.|@"));
+                  + ". Provision with '",
+              Remedy.sail("project apply", "<name>"),
+              "'."));
     }
     return created;
   }
@@ -608,30 +617,26 @@ public final class SyncOperations {
       try {
         var report = materializer.materialize(project);
         if (!report.skipped().isEmpty()) {
-          System.err.println(
-              Banner.errorLine(
+          notice.accept(
+              Remedy.of(
                   "Kept "
                       + report.skipped().size()
                       + " locally-modified file(s) in '"
                       + project
-                      + "' (capture with '"
-                      + operator.sail("project files add")
-                      + "', or delete to take main's): "
-                      + String.join(", ", report.skipped()),
-                  Ansi.AUTO));
+                      + "' (capture with '",
+                  Remedy.sail("project files add"),
+                  "', or delete to take main's): " + String.join(", ", report.skipped())));
         }
         if (!report.undecided().isEmpty()) {
-          System.err.println(
-              Banner.errorLine(
-                  "Kept "
-                      + report.undecided().size()
-                      + " file(s) in '"
-                      + project
-                      + "' the upgrade could not tell from your edits ("
-                      + MaterializedFiles.undecidedRemedy(operator)
-                      + "): "
-                      + String.join(", ", report.undecided()),
-                  Ansi.AUTO));
+          notice.accept(
+              Remedy.of(
+                      "Kept "
+                          + report.undecided().size()
+                          + " file(s) in '"
+                          + project
+                          + "' the upgrade could not tell from your edits (")
+                  .then(MaterializedFiles.UNDECIDED_REMEDY)
+                  .then("): " + String.join(", ", report.undecided())));
         }
       } catch (IOException e) {
         System.err.println(

@@ -62,7 +62,7 @@ class CatalogAuthorityAuditTest {
 
   private Actor operatorWithRole(String role) {
     new FdeStore(db).add("ada", null, null, role);
-    return CliOperator.of(ADAS_NODE, new FdeStore(db), OperatorCommand.PLAIN);
+    return CliOperator.of(ADAS_NODE, new FdeStore(db));
   }
 
   @Test

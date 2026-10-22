@@ -5,8 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.Finding;
 import java.util.LinkedHashMap;
@@ -122,10 +122,12 @@ final class ReviewNarration {
             .map(String::strip)
             .filter(line -> !line.isEmpty() && !line.equals("^"))
             .collect(Collectors.joining(" "));
-    return (fault.isEmpty() ? "the project's review pipeline could not be read" : fault)
-        + "; fix the project's definition with `"
-        + OperatorCommand.elsewhere("project edit")
-        + "`, then re-dispatch with --restart";
+    return Remedy.of(
+            (fault.isEmpty() ? "the project's review pipeline could not be read" : fault)
+                + "; fix the project's definition with `",
+            Remedy.sail("project edit"),
+            "`, then re-dispatch with --restart")
+        .plain();
   }
 
   /** Why a review whose project has no pipeline stages left is a person's. */
