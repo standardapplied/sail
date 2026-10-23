@@ -6,7 +6,6 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -93,14 +92,14 @@ class InitCommandTest {
     return SailPaths.accountHome(passwd, user);
   }
 
-  private void runStep(Object command, String... args) {
+  private boolean runStep(Object command, String... args) {
     if (command instanceof HostInitCommand host) {
-      assertFalse(host.standalone(), "host init inside init prints no next step of its own");
+      assertEquals(null, host.failureHint(), "host init inside init offers no --dry-run");
     }
     var step = (command.getClass().getSimpleName() + " " + String.join(" ", args)).strip();
     ran.add(step);
     if (step.equals(failing)) {
-      throw new IllegalStateException("Setup stopped — the step above failed.");
+      return false;
     }
     if (step.startsWith("HostInitCommand")) {
       writeHostConfig("storage_backend: dir\n");
@@ -111,6 +110,7 @@ class InitCommandTest {
     if (command instanceof HostSyncCommand) {
       writeHostConfig("storage_backend: dir\nsync:\n  role: main\n  handle: " + args[2] + "\n");
     }
+    return true;
   }
 
   private void writeHostConfig(String yaml) {
@@ -430,12 +430,42 @@ class InitCommandTest {
         ran);
   }
 
+  @ParameterizedTest
+  @CsvSource({"PLAIN, sail", "SUDO, sudo sail"})
+  void aFailedProvisioningStopsSetupNamingTheCommandAsTyped(String reader, String sail) {
+    operator = reader.equals("PLAIN") ? OperatorCommand.PLAIN : OperatorCommand.SUDO;
+    failing = "HostInitCommand --yes";
+
+    assertEquals(1, init("--main", "m", "--handle", "h"));
+
+    assertEquals(
+        "Setup stopped at the step marked ✗ above. Fix the cause above and re-run: "
+            + sail
+            + " init --main m --handle h",
+        refusal);
+    assertEquals(List.of("HostInitCommand --yes"), ran);
+  }
+
+  @Test
+  void aStoppedSetupNamesEveryWordTypedQuoted() {
+    failing = "HostServiceInstallCommand";
+
+    assertEquals(1, init("--as-main", "--handle", "ada", "--name", "Ada L", "--email", "a@b"));
+
+    assertEquals(
+        "Setup stopped at the step marked ✗ above. Fix the cause above and re-run: sail init --as-main --handle ada"
+            + " --name 'Ada L' --email a@b",
+        refusal);
+  }
+
   @Test
   void reRunningAfterAFailedJoinResumesAndFinishes() {
     failing = "JoinCommand maindevbox";
 
     assertEquals(1, init("--main", "maindevbox"));
-    assertEquals("Setup stopped — the step above failed.", refusal);
+    assertEquals(
+        "Setup stopped at the step marked ✗ above. Fix the cause above and re-run: sail init --main maindevbox",
+        refusal);
     failing = null;
     ran.clear();
 
@@ -643,7 +673,8 @@ class InitCommandTest {
     }
 
     assertEquals(
-        "  ✗ main's SSH host key changed.\n  ✗ Setup stopped — the step above failed.\n",
+        "  ✗ main's SSH host key changed.\n  ✗ Setup stopped at the step marked ✗ above. Fix the cause above and"
+            + " re-run: sail init --main m\n",
         err.toString(StandardCharsets.UTF_8));
   }
 }

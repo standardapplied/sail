@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.engine.DiskDetector.Candidate;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -95,6 +96,36 @@ class HostInitCommandTest {
           refused.getMessage(),
           String.valueOf(typed));
     }
+  }
+
+  @Test
+  void aFailureHostInitDidNotDecideEndsWithTheDryRunHintOnlyWhenRunOnItsOwn() {
+    assertEquals(
+        "  ✗ Command timed out after 300s\n" + CliCommand.DRY_RUN_HINT + "\n",
+        failing(new HostInitCommand()),
+        "run on its own, host init has --dry-run to offer");
+    assertEquals(
+        "  ✗ Command timed out after 300s\n",
+        failing(HostInitCommand.initStep()),
+        "as a step of sail init, which has no --dry-run, it offers nothing");
+  }
+
+  private static String failing(HostInitCommand hostInit) {
+    var err = new ByteArrayOutputStream();
+    var originalErr = System.err;
+    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+    try {
+      assertThrows(
+          CliCommand.Printed.class,
+          () ->
+              hostInit.run(
+                  () -> {
+                    throw new IOException("Command timed out after 300s");
+                  }));
+    } finally {
+      System.setErr(originalErr);
+    }
+    return err.toString(StandardCharsets.UTF_8);
   }
 
   @Test

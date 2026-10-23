@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.api.ServerConnectionConfig;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -25,8 +26,10 @@ import java.util.Objects;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
+import picocli.CommandLine.Spec;
 
 /**
  * Streams agent log output via SSE from the Sail server. Connects to the server's agent stream
@@ -37,6 +40,8 @@ import picocli.CommandLine.Parameters;
     description = "Stream live agent output from the server.",
     mixinStandardHelpOptions = true)
 public final class AgentStreamCommand implements Runnable {
+
+  @Spec private CommandSpec spec;
 
   @Parameters(
       index = "0",
@@ -96,17 +101,19 @@ public final class AgentStreamCommand implements Runnable {
 
       try (var reader =
           new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
-        print(reader.lines().iterator(), System.out);
+        print(reader.lines().iterator(), System.out, RootRequired.typed(spec));
       }
     }
   }
 
   /**
-   * Prints each log line the stream sends until it ends; a stream the server ended with an {@code
-   * error} event ends in the refusal it names, for the door to render for its reader.
+   * Prints each log line the stream sends: a stream the server ended with an {@code error} event
+   * ends in the refusal it names, and one that ended or dropped without it in a failure naming
+   * {@code followAgain}, each for the door to render for its reader.
    */
-  static void print(Iterator<String> lines, PrintStream out) throws SailApiClient.Refused {
-    SailApiClient.readStream(lines, out::println);
+  static void print(Iterator<String> lines, PrintStream out, Remedy.Command followAgain)
+      throws SailApiClient.Refused {
+    SailApiClient.follow(lines, out::println, followAgain);
   }
 
   /**

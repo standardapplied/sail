@@ -69,14 +69,7 @@ public final class HostProvisioner {
     var isDir = HostYaml.BACKEND_DIR.equals(storageBackend);
     configured(hostYamlPath);
 
-    updatePackages();
-    installIncus();
-    installZfs(isDir);
-    var incusVersion = initIncus(bridge);
-    createStoragePool(isDir, pool, disk);
-    createBaseProfile(pool, bridge);
-    cacheImage();
-    configureFirewall(bridge);
+    var incusVersion = runSteps(isDir, disk, pool, bridge);
 
     try (var rounds = holdRounds(dbPath)) {
       var kept = configured(hostYamlPath);
@@ -97,6 +90,25 @@ public final class HostProvisioner {
               kept.retention());
       writeHostYaml(hostYaml, hostYamlPath);
       return hostYaml;
+    }
+  }
+
+  /** Runs every step, returning the incus version installed; a step that throws is failed. */
+  private String runSteps(boolean isDir, String disk, String pool, String bridge)
+      throws IOException, InterruptedException, TimeoutException {
+    try {
+      updatePackages();
+      installIncus();
+      installZfs(isDir);
+      var incusVersion = initIncus(bridge);
+      createStoragePool(isDir, pool, disk);
+      createBaseProfile(pool, bridge);
+      cacheImage();
+      configureFirewall(bridge);
+      return incusVersion;
+    } catch (Exception e) {
+      listener.onStepFailed();
+      throw e;
     }
   }
 

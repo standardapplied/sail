@@ -135,7 +135,8 @@ public final class HostStatusCommand implements Runnable {
 
   /**
    * This box's containers as Incus lists them, or why it could not: a daemon that does not answer
-   * leaves the rest of the status worth reading, and is never reported as zero containers.
+   * leaves the rest of the status worth reading, and is never reported as zero containers. Its
+   * banner row reads the first line of why, so the row stays one line of the box.
    */
   private record Containers(List<ContainerManager.ContainerInfo> listed, String error) {
 
@@ -157,7 +158,7 @@ public final class HostStatusCommand implements Runnable {
 
     String summary() {
       if (error != null) {
-        return "unavailable (" + error + ")";
+        return "unavailable (" + error.strip().lines().findFirst().orElse("") + ")";
       }
       return listed.size() + " total (" + running() + " running, " + stopped() + " stopped)";
     }

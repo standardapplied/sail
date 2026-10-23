@@ -262,8 +262,9 @@ class HostProvisionerTest {
             .onOk("which incus")
             .onOk("which zpool")
             .onFail("incus admin init", "permission denied");
+    var steps = new ArrayList<String>();
 
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
 
     var ex =
         assertThrows(
@@ -278,6 +279,9 @@ class HostProvisionerTest {
                     tempDir.resolve("h.yaml"),
                     tempDir.resolve("sail.db")));
     assertTrue(ex.getMessage().contains("Incus init failed"));
+    assertEquals(
+        List.of("step:4/8:Initializing Incus...", "failed"),
+        steps.subList(steps.size() - 2, steps.size()));
   }
 
   @Test
@@ -866,6 +870,11 @@ class HostProvisionerTest {
     @Override
     public void onStepSkipped(int step, int total, String detail) {
       events.add("skipped:" + step + "/" + total + ":" + detail);
+    }
+
+    @Override
+    public void onStepFailed() {
+      events.add("failed");
     }
   }
 }

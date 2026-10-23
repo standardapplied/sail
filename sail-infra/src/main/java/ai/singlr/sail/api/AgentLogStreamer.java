@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.authority.RunAuthority;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
@@ -57,6 +58,20 @@ public final class AgentLogStreamer implements HttpHandler {
 
   private static final byte[] HEARTBEAT = ": heartbeat\n\n".getBytes(StandardCharsets.UTF_8);
   private static final long HEARTBEAT_INTERVAL_NANOS = Duration.ofSeconds(15).toNanos();
+
+  /**
+   * Why a stream whose tail exited ended, and how run {@code runId} of {@code project} is followed
+   * again: the follower is told, not left to guess a restart of the API. The tail dies with its
+   * container and when incus restarts under it, so neither is blamed alone.
+   */
+  static ApiError tailEnded(String project, String runId) {
+    return new ApiError(
+        ErrorCode.CONFLICT.code(),
+        "The run's log can no longer be followed: its container stopped, or incus restarted under"
+            + " it.",
+        Remedy.of("Follow again: ", Remedy.sail("agent stream", project, "--run", runId)),
+        List.of());
+  }
 
   private final ApiAuth auth;
   private final Function<String, Optional<RunStore.RunRow>> runLookup;
@@ -159,7 +174,13 @@ public final class AgentLogStreamer implements HttpHandler {
         sendError(exchange, 400, "invalid_request", e.getMessage(), null);
         return;
       }
-      streamLog(exchange, run.project(), tailCommand, since, recheckOf(exchange, runId));
+      streamLog(
+          exchange,
+          run.project(),
+          tailCommand,
+          since,
+          recheckOf(exchange, runId),
+          tailEnded(run.project(), run.id()));
     } finally {
       exchange.close();
     }
@@ -216,7 +237,12 @@ public final class AgentLogStreamer implements HttpHandler {
   }
 
   private void streamLog(
-      HttpExchange exchange, String project, String[] tailCommand, int since, StreamRecheck recheck)
+      HttpExchange exchange,
+      String project,
+      String[] tailCommand,
+      int since,
+      StreamRecheck recheck,
+      ApiError tailEnded)
       throws IOException {
     Process tailProcess;
     try {
@@ -239,7 +265,7 @@ public final class AgentLogStreamer implements HttpHandler {
             new BufferedReader(
                 new InputStreamReader(tailProcess.getInputStream(), StandardCharsets.UTF_8))) {
       writeComment(out, "streaming " + project);
-      pump(tailProcess, reader, out, since, recheck);
+      pump(tailProcess, reader, out, since, recheck, tailEnded);
     } catch (IOException e) {
       // Client disconnected — expected during streaming
     } catch (InterruptedException e) {
@@ -256,16 +282,18 @@ public final class AgentLogStreamer implements HttpHandler {
    * (bad project) or whose agent has stopped exits, and without this the loop would heartbeat onto
    * a dead pipe forever, holding the connection open and never closing the stream. A process seen
    * gone is read to the end of its pipe first, so what it wrote between a {@code ready()} that saw
-   * nothing and its exit is still relayed. Before each line and each heartbeat the caller is asked
-   * again whether it may still read the run ({@code recheck}); once it may not, the stream ends
-   * with an {@code error} event saying why.
+   * nothing and its exit is still relayed, and the stream then ends with the {@code error} event
+   * {@code tailEnded}, which a follower tells from a dropped connection. Before each line and each
+   * heartbeat the caller is asked again whether it may still read the run ({@code recheck}); once
+   * it may not, the stream ends with an {@code error} event saying why.
    */
   static void pump(
       Process tailProcess,
       BufferedReader reader,
       OutputStream out,
       int since,
-      StreamRecheck recheck)
+      StreamRecheck recheck,
+      ApiError tailEnded)
       throws IOException, InterruptedException {
     var lineNumber = since > 0 ? since : 1;
     var lastHeartbeat = System.nanoTime();
@@ -274,7 +302,7 @@ public final class AgentLogStreamer implements HttpHandler {
         if (reader.ready() || !tailProcess.isAlive()) {
           var line = reader.readLine();
           if (line == null) {
-            break;
+            throw new StreamRecheck.Ended(tailEnded);
           }
           recheck.recheck();
           writeSseData(out, lineNumber, line);

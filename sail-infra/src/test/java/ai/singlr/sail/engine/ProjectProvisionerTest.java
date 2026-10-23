@@ -672,6 +672,7 @@ class ProjectProvisionerTest {
     var shell = new ConfigRecordingShell(script);
     shell.config.put("simple limits.cpu", "1");
 
+    var failedRun = new ArrayList<String>();
     var failure =
         assertThrows(
             IOException.class,
@@ -679,13 +680,16 @@ class ProjectProvisionerTest {
                 new ProjectProvisioner(
                         shell,
                         new ProvisionTracker<>(ProjectPhase.class, stateFile, false),
-                        null,
+                        new RecordingListener(failedRun),
                         Optional.empty(),
                         OperatorCommand.PLAIN)
                     .provision(minimalConfig(), hostYaml(), null, null));
 
     assertEquals(
         "Failed to restart container after config: shutdown timed out", failure.getMessage());
+    assertEquals(
+        List.of("step:3/20:Setting resource limits...", "failed"),
+        failedRun.subList(failedRun.size() - 2, failedRun.size()));
     assertEquals("DISK_QUOTA_SET", YamlUtil.parseFile(stateFile).get("completed_phase"));
     assertEquals("2", shell.config.get("simple limits.cpu"));
     assertEquals("true", shell.config.get("simple user.sail.restart_pending"));
@@ -3119,6 +3123,11 @@ class ProjectProvisionerTest {
     @Override
     public void onStepSkipped(int step, int total, String detail) {
       events.add("skipped:" + step + "/" + total + ":" + detail);
+    }
+
+    @Override
+    public void onStepFailed() {
+      events.add("failed");
     }
   }
 }

@@ -8,14 +8,9 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
-import ai.singlr.sail.Main;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
-import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
-import java.io.PrintWriter;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -23,6 +18,8 @@ import java.util.Map;
 import java.util.TreeSet;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import picocli.CommandLine;
 
 /**
@@ -72,9 +69,7 @@ class RootRequiredTest {
           Map.entry(
               "project resources set",
               List.of("gamma", "--cpu", "4", "--memory", "8GiB", "--disk", "40GiB", "--json")),
-          Map.entry("project demo", List.of("--json", "--git-token", "ghp_x")));
-
-  private final ByteArrayOutputStream err = new ByteArrayOutputStream();
+          Map.entry("project demo", List.of("--json")));
 
   @BeforeEach
   void asACallerWhoIsNotRoot() {
@@ -110,6 +105,31 @@ class RootRequiredTest {
         refusal("init", "--main", "sail@m", "--handle", "ada"));
   }
 
+  @ParameterizedTest
+  @CsvSource(
+      delimiter = '|',
+      value = {
+        "agent stream acme --token=s3cret --run r1|agent stream acme --token=<token> --run r1",
+        "agent stream acme --token s3cret --run r1|agent stream acme --token <token> --run r1",
+        "project demo --json --git-token ghp_x|project demo --json --git-token <token>",
+        "project demo --git-token=ghp_x --json|project demo --git-token=<token> --json"
+      })
+  void aCommandAsTypedNeverEchoesAToken(String argv, String typed) {
+    var parsed = new CommandLine(new Sail()).parseArgs(argv.split(" "));
+    while (parsed.subcommand() != null) {
+      parsed = parsed.subcommand();
+    }
+
+    assertEquals(typed, RootRequired.typed(parsed.commandSpec()).line());
+  }
+
+  @Test
+  void aRefusedDemoKeepsItsGitTokenOptionAndNotItsValue() {
+    assertEquals(
+        "Root privileges required. Run with: sudo sail project demo --git-token <token>",
+        refusal("project", "demo", "--git-token", "ghp_x"));
+  }
+
   @Test
   void everyRootOnlyVerbIsCovered() {
     var verbs = new TreeSet<>(OperatorCommand.ROOT_ONLY);
@@ -139,18 +159,9 @@ class RootRequiredTest {
   }
 
   private String refusal(String... args) {
-    err.reset();
-    var saved = System.err;
-    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
-    try {
-      var sail = new CommandLine(new Sail());
-      sail.setErr(new PrintWriter(err, true, StandardCharsets.UTF_8));
-      sail.setExecutionExceptionHandler((ex, line, parsed) -> Main.report(ex, line));
-      assertEquals(1, sail.execute(args), String.join(" ", args));
-    } finally {
-      System.setErr(saved);
-    }
-    var printed = err.toString(StandardCharsets.UTF_8).strip().lines().findFirst().orElse("");
+    var ran = SailCli.run(args);
+    assertEquals(1, ran.exit(), String.join(" ", args));
+    var printed = ran.err().strip().lines().findFirst().orElse("");
     return printed.substring(printed.indexOf(' ') + 1);
   }
 

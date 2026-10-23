@@ -10,6 +10,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.SailPaths;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -180,6 +181,28 @@ public final class SailApiClient implements AutoCloseable {
         onData.accept(data);
       }
     }
+  }
+
+  /**
+   * Follows an SSE stream as {@link #readStream} reads it, for as long as the server sends it: a
+   * followed stream never ends on its own, so one that ends or drops without an {@code error} event
+   * fails, naming {@code followAgain}, the command that follows it again.
+   */
+  public static void follow(
+      Iterator<String> lines, Consumer<String> onData, Remedy.Command followAgain) throws Refused {
+    try {
+      readStream(lines, onData);
+    } catch (UncheckedIOException dropped) {
+      throw closed(followAgain, dropped);
+    }
+    throw closed(followAgain, null);
+  }
+
+  private static IllegalStateException closed(Remedy.Command followAgain, Throwable cause) {
+    return Remedied.state(
+        "The sail API closed the stream (it restarted or stopped).",
+        Remedy.of("Follow again: ", followAgain),
+        cause);
   }
 
   public static SailApiClient fromConfig() throws IOException {
