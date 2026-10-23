@@ -106,8 +106,9 @@ public final class HostPackages {
   }
 
   /**
-   * Moves every held Incus package to apt's candidate, then holds them again. dpkg drops a
-   * package's hold as it unpacks it, so a failed move holds them again too, its failure kept.
+   * Moves every held Incus package to apt's candidate, then holds every Incus package installed
+   * after it, a dependency the new release brought in among them. The move drops the holds, so a
+   * failed move holds the packages it started from again, its failure kept.
    */
   public void upgrade() throws IOException, InterruptedException, TimeoutException {
     var held = incusPackages().stream().map(Installed::name).toList();
@@ -120,7 +121,7 @@ public final class HostPackages {
       holdAfter(failed, held);
       throw failed;
     }
-    mark(held);
+    hold();
   }
 
   private void holdAfter(IOException failed, List<String> held) throws InterruptedException {

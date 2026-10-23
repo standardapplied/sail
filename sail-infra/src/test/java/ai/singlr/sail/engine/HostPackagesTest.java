@@ -85,10 +85,11 @@ class HostPackagesTest {
       throws Exception {
     var shell =
         new ScriptedShellExecutor()
-            .onOk(
+            .onceOnOk(
                 "dpkg-query",
                 "incus hold installed\nincus-client hold installed\nincus-extra unknown"
                     + " not-installed\n")
+            .onOk("incus*", "incus install installed\nincus-client install installed\n")
             .onOk("apt-get")
             .onOk("apt-mark hold");
     var progress = new ArrayList<String>();
@@ -100,8 +101,27 @@ class HostPackagesTest {
             "dpkg-query -W -f=${Package} ${db:Status-Want} ${db:Status-Status}\\n incus*",
             String.join(" ", Apt.COMMAND)
                 + " install -y --only-upgrade --allow-change-held-packages incus incus-client",
+            "dpkg-query -W -f=${Package} ${db:Status-Want} ${db:Status-Status}\\n incus*",
             "apt-mark hold incus incus-client"),
         shell.invocations());
+  }
+
+  @Test
+  void anUpgradeThatBringsInANewIncusPackageHoldsItWithTheRest() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onceOnOk("dpkg-query", "incus hold installed\n")
+            .onOk("incus*", "incus install installed\nincus-new-runtime install installed\n")
+            .onOk("apt-get")
+            .onOk("apt-mark hold");
+
+    new HostPackages(shell, detail -> {}).upgrade();
+
+    assertEquals(
+        String.join(" ", Apt.COMMAND)
+            + " install -y --only-upgrade --allow-change-held-packages incus",
+        shell.invocations().get(1));
+    assertEquals("apt-mark hold incus incus-new-runtime", shell.invocations().getLast());
   }
 
   @Test

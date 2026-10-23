@@ -399,7 +399,8 @@ class HostIncusCommandTest {
     return new ScriptedShellExecutor()
         .onOk(APT_UPDATE)
         .onOk("apt-cache policy incus", policy)
-        .onOk("dpkg-query", "incus hold installed\nincus-client hold installed\n")
+        .onceOnOk("dpkg-query", "incus hold installed\nincus-client hold installed\n")
+        .onOk("incus*", "incus install installed\nincus-client install installed\n")
         .onOk(UPGRADE)
         .onOk("apt-mark hold");
   }
