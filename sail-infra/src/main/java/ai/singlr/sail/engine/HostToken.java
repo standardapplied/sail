@@ -6,12 +6,16 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.api.ServerConnectionConfig;
+import ai.singlr.sail.api.SessionAwareAuth;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Optional;
 
 /**
  * The API token this box's host CLI holds in its client config. It names no FDE of its own: it acts
@@ -33,6 +37,51 @@ public final class HostToken {
   public static void mint(TokenStore tokens, Duration ttl, Path configPath) throws IOException {
     ServerConnectionConfig.saveLocalToken(
         tokens.create(NAME, "admin", null, ttl).token(), configPath);
+  }
+
+  /** What {@link #ensure} found and did. */
+  public enum Outcome {
+    HELD,
+    MINTED,
+    REISSUED
+  }
+
+  /**
+   * Ensures the client config at {@code configPath} can reach the API of the database whose tokens
+   * are {@code tokens}. A database holding no token mints the host token. A config host token the
+   * database does not hold is the token of the box the database was copied from, its plaintext on
+   * that box: the copy's host token is revoked and a new one minted and saved, every other token
+   * kept. A config login session is the session store's to weigh, never this. Anything else is left
+   * as it is.
+   */
+  public static Outcome ensure(TokenStore tokens, Path configPath) throws IOException {
+    if (tokens.list().isEmpty()) {
+      mint(tokens, null, configPath);
+      return Outcome.MINTED;
+    }
+    if (!Files.exists(configPath)
+        || !(YamlUtil.parseFile(configPath).get("token") instanceof String token)
+        || token.startsWith(SessionAwareAuth.SESSION_PREFIX)
+        || tokens.validate(token).isPresent()) {
+      return Outcome.HELD;
+    }
+    tokens.revoke(NAME);
+    mint(tokens, null, configPath);
+    return Outcome.REISSUED;
+  }
+
+  /**
+   * What {@link #ensure} did, {@code outcome}, as the operator reads it, for the box configured as
+   * {@code box} whose client config is {@code configPath}; empty when it did nothing.
+   */
+  public static Optional<String> said(Outcome outcome, Path configPath, SyncConfig box) {
+    return switch (outcome) {
+      case HELD -> Optional.empty();
+      case MINTED ->
+          Optional.of("API token created and saved to " + configPath + "; " + describe(box));
+      case REISSUED ->
+          Optional.of("API token re-issued for this box: the database came from another box.");
+    };
   }
 
   /** Who the host token acts as on a box configured as {@code box}. */

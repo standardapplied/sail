@@ -17,6 +17,8 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -170,17 +172,91 @@ class SyncDiagnosticTest {
   }
 
   @Test
-  void sshsLastStderrLineIsItsDiagnosticOnceItExits() throws Exception {
-    var ssh =
-        new ProcessBuilder(
-                List.of(
-                    "sh",
-                    "-c",
-                    "echo 'Warning: no such host' >&2; echo 'Host key verification failed.' >&2;"
-                        + " echo >&2; exit 255"))
-            .start();
-    try (var channel = new SshSyncChannel(ssh, handle -> Optional.empty())) {
-      assertEquals("Host key verification failed.", channel.diagnostic());
+  void sshsLastStderrLineIsItsDiagnosticOnceItExitsAndNoneOfItIsPrinted() throws Exception {
+    var banner =
+        """
+        @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+        @    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+        @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+        Add correct host key in /root/.ssh/known_hosts to get rid of this message.
+          ssh-keygen -f '/root/.ssh/known_hosts' -R '10.128.0.29'
+        Host key verification failed.
+
+        """;
+    var err = System.err;
+    var printed = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(printed, true, StandardCharsets.UTF_8));
+    try {
+      var ssh =
+          new ProcessBuilder(List.of("sh", "-c", "printf '%s' \"$0\" >&2; exit 255", banner))
+              .start();
+      try (var channel = new SshSyncChannel(ssh, handle -> Optional.empty())) {
+        assertEquals("Host key verification failed.", channel.diagnostic());
+      }
+    } finally {
+      System.setErr(err);
     }
+    assertEquals("", printed.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void aSyncBeforeMainAuthorisedTheKeyQuotesSshOnceAndPrintsNothingOfItsOwn() throws Exception {
+    var err = System.err;
+    var printed = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(printed, true, StandardCharsets.UTF_8));
+    SyncTransportException refused;
+    try {
+      var ssh =
+          new ProcessBuilder(
+                  List.of(
+                      "sh",
+                      "-c",
+                      "read -r hello; echo 'sail@10.128.0.29: Permission denied (publickey).' >&2;"
+                          + " exit 255"))
+              .start();
+      refused =
+          failure(
+              new SshSyncChannel(ssh, handle -> Optional.of(AUTHORISE.replace("mady", handle))));
+    } finally {
+      System.setErr(err);
+    }
+
+    assertEquals("", printed.toString(StandardCharsets.UTF_8));
+    assertEquals(
+        "hello: Sync channel closed before main replied. Main has not authorised this box's key"
+            + " yet. Send its operator this line, then sync again:\n  "
+            + AUTHORISE
+            + "\n  ssh said: sail@10.128.0.29: Permission denied (publickey).",
+        OperatorCommand.PLAIN.render(refused));
+  }
+
+  @Test
+  void theReJoinProbeOfAMainThatRefusesTheKeyPrintsNothing() throws Exception {
+    var err = System.err;
+    var printed = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(printed, true, StandardCharsets.UTF_8));
+    boolean welcomed;
+    try {
+      welcomed =
+          SyncOperations.welcomedAs(
+              new SyncConfig("node", "sail@10.128.0.22", "rnode", "box-1"),
+              target ->
+                  new SshSyncChannel(
+                      new ProcessBuilder(
+                              List.of(
+                                  "sh",
+                                  "-c",
+                                  "read -r hello; echo \"$0: Permission denied (publickey).\" >&2;"
+                                      + " exit 255",
+                                  target))
+                          .start(),
+                      handle -> Optional.empty()),
+              "rnode");
+    } finally {
+      System.setErr(err);
+    }
+
+    assertEquals(false, welcomed);
+    assertEquals("", printed.toString(StandardCharsets.UTF_8));
   }
 }

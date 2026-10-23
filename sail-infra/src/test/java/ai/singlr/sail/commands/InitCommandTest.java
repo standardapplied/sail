@@ -332,12 +332,35 @@ class InitCommandTest {
   }
 
   @Test
-  void aNodeJoiningUnderAnotherHandleIsLeftToTheJoin() {
+  void aNodeReJoiningUnderAnotherHandleIsRefusedNamingBothBeforeAnyStep() {
     writeHostConfig("storage_backend: dir\nsync:\n  role: node\n  handle: grace\n");
 
-    assertEquals(0, init("--main", "m", "--handle", "ada"));
+    assertEquals(1, init("--main", "m", "--handle", "ada"));
 
-    assertEquals("JoinCommand m --handle ada", ran.getLast());
+    assertEquals(
+        "This box already acts as 'grace', not 'ada'. Re-run with --handle grace, or change its"
+            + " handle first: sail host config set sync-handle ada",
+        refusal);
+    assertEquals(List.of(), ran);
+  }
+
+  @Test
+  void aNodeReJoiningWithoutAHandleJoinsAsTheOneItActsAsWithoutAsking() {
+    writeHostConfig("storage_backend: dir\nsync:\n  role: node\n  handle: rnode\n");
+    answers.put("Your FDE handle", "dev");
+
+    assertEquals(0, init("--main", "10.128.0.22"));
+
+    assertEquals("JoinCommand 10.128.0.22 --handle rnode", ran.getLast());
+  }
+
+  @Test
+  void aNodesFirstJoinLeavesItsHandleToTheJoin() {
+    answers.put("Your FDE handle", "dev");
+
+    assertEquals(0, init("--main", "m"));
+
+    assertEquals("JoinCommand m", ran.getLast());
   }
 
   @Test

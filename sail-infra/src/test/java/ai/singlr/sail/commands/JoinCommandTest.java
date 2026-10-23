@@ -306,37 +306,74 @@ class JoinCommandTest {
   }
 
   @Test
-  void joiningAsAnotherHandleIsRefusedWhileARunMainHoldsUnderTheOldOneIsLive() throws Exception {
+  void reJoiningAsAnotherHandleIsRefusedBeforeMainIsAskedForAnything() throws Exception {
     var hostConfig = dir.resolve("host.yaml");
     YamlUtil.dumpToFile(
-        BASE.withSync(new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "ada", "box")).toMap(),
+        BASE.withSync(new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "rnode", "box")).toMap(),
         hostConfig);
-    var dbPath = dir.resolve("sail.db");
-    try (var db = Sqlite.open(dbPath)) {
-      new SchemaManager(db).migrate();
-      var runs = new RunStore(db);
-      var held = reservedOn(db, "ada");
-      Acting.system(() -> runs.applyRevision(held, runs.comparableSnapshot(held), "9-main"));
+    var before = Files.readString(hostConfig);
 
-      var refused =
-          assertThrows(
-              IllegalStateException.class,
-              () ->
-                  JoinCommand.plan(
-                      hostConfig,
-                      dbPath,
-                      identity(),
-                      "sail@main",
-                      "mady",
-                      null,
-                      null,
-                      NO_MAIN,
-                      pin(),
-                      OperatorCommand.PLAIN));
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                JoinCommand.plan(
+                    hostConfig,
+                    dir.resolve("sail.db"),
+                    identity(),
+                    "sail@main2",
+                    "other",
+                    null,
+                    null,
+                    NEVER_ASKED,
+                    pin(),
+                    OperatorCommand.SUDO));
 
-      assertTrue(refused.getMessage().contains(held), refused.getMessage());
-      assertEquals("ada", HostYaml.fromMap(YamlUtil.parseFile(hostConfig)).sync().handle());
-    }
+    assertEquals(
+        "This box already acts as 'rnode', not 'other'. Re-run with --handle rnode, or change its"
+            + " handle first: sudo sail host config set sync-handle other",
+        refused.getMessage());
+    assertEquals(before, Files.readString(hostConfig));
+    assertFalse(Files.exists(knownHosts()), "main's host key is not even read");
+    assertFalse(Files.exists(dir.resolve("sync_ed25519")), "no key is made");
+  }
+
+  @Test
+  void aReJoinWithoutAHandleKeepsTheOneTheBoxActsAsAndNamesItInTheLine() throws Exception {
+    var hostConfig = dir.resolve("host.yaml");
+    YamlUtil.dumpToFile(
+        BASE.withSync(new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "rnode", "box-7")).toMap(),
+        hostConfig);
+    var fallback = JoinCommand.defaultHandle(List.of("rnode", "ada"), "dev", "dev");
+    var choice =
+        JoinCommand.handleChoice(null, JoinCommand.heldHandle(hostConfig), false, false, fallback);
+
+    var plan = join(hostConfig, ((JoinCommand.HandleChoice.Resolved) choice).handle(), NEVER_ASKED);
+
+    var written = HostYaml.fromMap(YamlUtil.parseFile(hostConfig)).sync();
+    assertEquals("rnode", written.handle());
+    assertEquals("box-7", written.boxId());
+    assertEquals("sail@maindevbox", written.main());
+    assertEquals(
+        "sudo sail fde add rnode --role member --key '"
+            + PUB
+            + "' --main-host-key "
+            + MAIN.fingerprint(),
+        plan.authorize());
+  }
+
+  @Test
+  void aBoxWithNoHostConfigHoldsNoHandle() throws Exception {
+    assertEquals(null, JoinCommand.heldHandle(dir.resolve("absent.yaml")));
+    assertEquals(null, JoinCommand.heldHandle(writeHostConfig()));
+  }
+
+  @Test
+  void handleChoiceKeepsTheHandleTheBoxActsAsOnATerminalAndOffOne() {
+    var kept = new JoinCommand.HandleChoice.Resolved("rnode");
+    assertEquals(kept, JoinCommand.handleChoice(null, "rnode", false, false, "dev"));
+    assertEquals(kept, JoinCommand.handleChoice(" ", "rnode", false, true, "dev"));
+    assertEquals(kept, JoinCommand.handleChoice(null, "rnode", true, false, null));
   }
 
   @Test
@@ -427,7 +464,7 @@ class JoinCommandTest {
 
   @Test
   void handleChoiceUsesAnExplicitFlagAboveEverything() {
-    var choice = JoinCommand.handleChoice("mady", false, true, "ignored");
+    var choice = JoinCommand.handleChoice("mady", "ada", false, true, "ignored");
     assertEquals(new JoinCommand.HandleChoice.Resolved("mady"), choice);
   }
 
@@ -435,7 +472,8 @@ class JoinCommandTest {
   void handleChoiceFailsWhenJsonHasNoHandle() {
     var error =
         assertThrows(
-            IllegalArgumentException.class, () -> JoinCommand.handleChoice(null, true, true, "x"));
+            IllegalArgumentException.class,
+            () -> JoinCommand.handleChoice(null, null, true, true, "x"));
     assertTrue(error.getMessage().contains("--json requires --handle"));
   }
 
@@ -443,7 +481,7 @@ class JoinCommandTest {
   void handleChoiceUsesTheFallbackWhenThereIsNoConsole() {
     assertEquals(
         new JoinCommand.HandleChoice.Resolved("mady"),
-        JoinCommand.handleChoice(null, false, false, "mady"));
+        JoinCommand.handleChoice(null, null, false, false, "mady"));
   }
 
   @Test
@@ -451,7 +489,7 @@ class JoinCommandTest {
     var error =
         assertThrows(
             IllegalArgumentException.class,
-            () -> JoinCommand.handleChoice(null, false, false, null));
+            () -> JoinCommand.handleChoice(null, null, false, false, null));
     assertTrue(error.getMessage().contains("No terminal to prompt"));
   }
 
@@ -459,7 +497,7 @@ class JoinCommandTest {
   void handleChoiceAsksToPromptWhenInteractive() {
     assertEquals(
         new JoinCommand.HandleChoice.NeedsPrompt("mady"),
-        JoinCommand.handleChoice(null, false, true, "mady"));
+        JoinCommand.handleChoice(null, null, false, true, "mady"));
   }
 
   @Test

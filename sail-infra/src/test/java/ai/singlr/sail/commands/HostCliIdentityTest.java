@@ -34,10 +34,12 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -230,6 +232,74 @@ class HostCliIdentityTest {
 
     assertNotEquals(0, create(token, "after"));
     assertTrue(specs.findById("after").isEmpty());
+  }
+
+  @Test
+  void aMainSetUpAgainFromAnotherBoxsCopyReissuesItsHostTokenAndKeepsEveryOther() throws Exception {
+    fdes.add("uday", null, null, "admin");
+    var tokens = new TokenStore(db);
+    var ci = tokens.create("ci", "member").token();
+    tokens.create(HostToken.NAME, "admin");
+    try (var own = Sqlite.open(tempDir.resolve("own.db"))) {
+      new SchemaManager(own).migrate();
+      HostToken.mint(new TokenStore(own), null, configPath);
+    }
+    serve(MAIN);
+    assertNotEquals(0, create(savedToken(), "refused"), "the copy holds another box's token");
+
+    var outcome = HostToken.ensure(tokens, configPath);
+
+    assertEquals(HostToken.Outcome.REISSUED, outcome);
+    assertEquals(
+        "API token re-issued for this box: the database came from another box.",
+        HostToken.said(outcome, configPath, MAIN).orElseThrow());
+    assertEquals(0, create(savedToken(), "auth"));
+    assertEquals("uday", specs.findById("auth").orElseThrow().createdBy());
+    assertEquals("uday", whoami(savedToken()).get("fde"));
+    assertEquals("ci", whoami(ci).get("name"), "every other token in the copy is kept");
+    assertEquals(
+        List.of("admin", "ci"),
+        tokens.list().stream().map(TokenStore.TokenInfo::name).sorted().toList());
+  }
+
+  @Test
+  void aConfigTokenTheDatabaseHoldsIsLeftAsItIs() throws Exception {
+    var tokens = new TokenStore(db);
+    HostToken.mint(tokens, null, configPath);
+    var before = Files.readString(configPath);
+
+    var outcome = HostToken.ensure(tokens, configPath);
+
+    assertEquals(HostToken.Outcome.HELD, outcome);
+    assertEquals(before, Files.readString(configPath));
+    assertEquals(1, tokens.list().size());
+    assertEquals(Optional.empty(), HostToken.said(outcome, configPath, MAIN));
+  }
+
+  @Test
+  void aDatabaseWithNoTokenMintsTheHostToken() throws Exception {
+    var outcome = HostToken.ensure(new TokenStore(db), configPath);
+
+    assertEquals(HostToken.Outcome.MINTED, outcome);
+    assertEquals(
+        "API token created and saved to " + configPath + "; it acts as this box's FDE 'uday'",
+        HostToken.said(outcome, configPath, MAIN).orElseThrow());
+    assertEquals(HostToken.NAME, new TokenStore(db).validate(savedToken()).orElseThrow().name());
+  }
+
+  @Test
+  void aConfigWithNoHostTokenToWeighIsLeftAsItIs() throws Exception {
+    var tokens = new TokenStore(db);
+    tokens.create("ci", "member");
+    assertEquals(HostToken.Outcome.HELD, HostToken.ensure(tokens, configPath), "no config");
+
+    Files.writeString(configPath, "server: http://localhost:7070\n");
+    assertEquals(HostToken.Outcome.HELD, HostToken.ensure(tokens, configPath), "no token");
+
+    Files.writeString(configPath, "token: sess_0123\n");
+    assertEquals(HostToken.Outcome.HELD, HostToken.ensure(tokens, configPath), "a session");
+    assertEquals("token: sess_0123\n", Files.readString(configPath));
+    assertEquals(List.of("ci"), tokens.list().stream().map(TokenStore.TokenInfo::name).toList());
   }
 
   private void serve(SyncConfig config) throws IOException {

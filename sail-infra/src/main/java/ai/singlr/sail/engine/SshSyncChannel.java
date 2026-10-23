@@ -47,8 +47,8 @@ public final class SshSyncChannel implements SyncOperations.Channel {
   private volatile String lastLine = "";
 
   /**
-   * Wraps a started {@code ssh} whose stderr is piped, forwarding it as it arrives; {@code
-   * authorisation} is the line that authorises the key it presented, for a handle.
+   * Wraps a started {@code ssh} whose stderr is piped, kept as it arrives; {@code authorisation} is
+   * the line that authorises the key it presented, for a handle.
    */
   SshSyncChannel(Process process, Function<String, Optional<String>> authorisation) {
     this.process = process;
@@ -168,17 +168,20 @@ public final class SshSyncChannel implements SyncOperations.Channel {
     return line.toString();
   }
 
-  /** Forwards each line ssh writes to stderr, as an inherited stderr did, keeping the last one. */
+  /**
+   * Reads every line ssh writes to stderr and keeps the last one, printing none: what ssh said
+   * reaches the operator once, inside the sentence of the failure it explains ({@link
+   * SyncOperations}), never as ssh's own banner and advice, which name another command than the one
+   * sail does.
+   */
   private void drain(InputStream stderr) {
     try (var lines = new BufferedReader(new InputStreamReader(stderr, StandardCharsets.UTF_8))) {
       for (var line = lines.readLine(); line != null; line = lines.readLine()) {
-        System.err.println(line);
         if (!line.isBlank()) {
           lastLine = line.strip();
         }
       }
-    } catch (IOException closed) {
-      System.err.println("ssh's stderr closed: " + closed.getMessage());
+    } catch (IOException ignored) {
     }
   }
 

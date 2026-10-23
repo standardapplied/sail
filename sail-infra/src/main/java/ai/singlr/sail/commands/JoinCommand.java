@@ -20,6 +20,7 @@ import ai.singlr.sail.engine.SyncIdentity;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -62,7 +63,9 @@ public final class JoinCommand implements Runnable {
 
   @Option(
       names = "--handle",
-      description = "FDE handle main will authorise (skips the prompt; required with --json).")
+      description =
+          "FDE handle main will authorise (default: the one this box acts as; required with"
+              + " --json on a first join).")
   private String handle;
 
   @Option(
@@ -110,15 +113,16 @@ public final class JoinCommand implements Runnable {
 
   /**
    * Pins main's SSH host key, generates the sync key if needed and points the local host config at
-   * {@code target} as a node. The pin comes first, so a main whose key cannot be read or differs
-   * from the one pinned leaves no half-joined box. A change of handle is refused while a run main
-   * holds under the old one would be stranded, and once written every run main has not taken is
-   * stamped with the new one ({@link HandleChange}), in the box's database {@code db}. Main already
-   * holds this box's key when it welcomes a session opened with the key the box had before this
-   * join, as {@code handle} ({@link SyncOperations#welcomedAs}); a key this join makes is on no
-   * main yet, so main is not asked. The line that authorises the key is kept beside the config, for
-   * a sync main refuses to repeat ({@link SshSyncChannel#keep}). Pure of any prompting or stdout so
-   * it can be exercised directly in tests with a {@code @TempDir} config and a stub identity.
+   * {@code target} as a node. A box that already acts as an FDE re-joins as that one: another
+   * handle is refused before anything is read from main ({@link HostSyncCommand#requireHandle}).
+   * The pin comes next, so a main whose key cannot be read or differs from the one pinned leaves no
+   * half-joined box. A first join's handle stamps every run main has not taken ({@link
+   * HandleChange}), in the box's database {@code db}. Main already holds this box's key when it
+   * welcomes a session opened with the key the box had before this join, as {@code handle} ({@link
+   * SyncOperations#welcomedAs}); a key this join makes is on no main yet, so main is not asked. The
+   * line that authorises the key is kept beside the config, for a sync main refuses to repeat
+   * ({@link SshSyncChannel#keep}). Pure of any prompting or stdout so it can be exercised directly
+   * in tests with a {@code @TempDir} config and a stub identity.
    */
   static Plan plan(
       Path hostConfig,
@@ -136,8 +140,9 @@ public final class JoinCommand implements Runnable {
       throw HostInitCommand.notInitialized(operator);
     }
     HostConfigSetCommand.validate("sync-main", target);
-    var pinned = mainHostKey.pin(target);
     var host = HostYaml.fromMap(YamlUtil.parseFile(hostConfig));
+    HostSyncCommand.requireHandle(host.sync().handle(), handle, operator);
+    var pinned = mainHostKey.pin(target);
     var keyBefore = identity.exists();
     var updated =
         HostConfigSetCommand.applyChange(
@@ -205,22 +210,35 @@ public final class JoinCommand implements Runnable {
     return null;
   }
 
-  private String resolveHandle() {
+  private String resolveHandle() throws IOException {
     var fallback = defaultHandle(nodeFdeHandles(), System.getenv("SUDO_USER"), gitEmailLocalPart());
-    return switch (handleChoice(handle, json, System.console() != null, fallback)) {
+    var held = heldHandle(SailPaths.hostConfigPath());
+    return switch (handleChoice(handle, held, json, System.console() != null, fallback)) {
       case HandleChoice.Resolved resolved -> resolved.handle();
       case HandleChoice.NeedsPrompt prompt -> promptHandle(prompt.fallback());
     };
   }
 
+  /** The handle the box at {@code hostConfig} already acts as; null when it has none. */
+  static String heldHandle(Path hostConfig) throws IOException {
+    return Files.exists(hostConfig)
+        ? HostYaml.fromMap(YamlUtil.parseFile(hostConfig)).sync().handle()
+        : null;
+  }
+
   /**
-   * Decides how to obtain the handle without doing any I/O: an explicit {@code --handle} wins; a
+   * Decides how to obtain the handle without doing any I/O: an explicit {@code --handle} wins, then
+   * the handle the box already acts as, {@code held}, so a re-join never renames the box; a
    * non-interactive run ({@code --json} or no console) resolves from the fallback or fails with an
    * actionable message; otherwise the caller must prompt. Pure so every branch is unit-tested.
    */
-  static HandleChoice handleChoice(String flag, boolean json, boolean hasConsole, String fallback) {
+  static HandleChoice handleChoice(
+      String flag, String held, boolean json, boolean hasConsole, String fallback) {
     if (Strings.isNotBlank(flag)) {
       return new HandleChoice.Resolved(flag.strip());
+    }
+    if (Strings.isNotBlank(held)) {
+      return new HandleChoice.Resolved(held);
     }
     if (json) {
       throw new IllegalArgumentException("--json requires --handle (the FDE main will authorise).");
