@@ -168,14 +168,14 @@ class HostProvisionerTest {
 
     assertEquals(
         List.of(
-            apt("update"),
+            APT_UPDATE,
             apt("install", "-y", "incus"),
             DPKG_QUERY,
             List.of("apt-mark", "hold", "incus", "incus-base", "incus-client"),
             apt("install", "-y", "zfsutils-linux")),
         packageCommands(shell));
     var source = indexOfContaining(shell.invocations(), HostPackages.ZABBLY_SOURCE);
-    assertTrue(source >= 0 && source < shell.arguments().indexOf(apt("update")));
+    assertTrue(source >= 0 && source < shell.arguments().indexOf(APT_UPDATE));
     assertTrue(steps.contains("done:1/8:a library update never restarts Incus"), steps.toString());
     assertTrue(
         steps.contains("done:2/8:installed; incus held (sudo sail host incus upgrade moves it)"),
@@ -213,7 +213,7 @@ class HostProvisionerTest {
     provision(shell, "zfs", null);
 
     assertEquals(
-        List.of(DPKG_QUERY, apt("update"), apt("install", "-y", "zfsutils-linux")),
+        List.of(DPKG_QUERY, APT_UPDATE, apt("install", "-y", "zfsutils-linux")),
         packageCommands(shell));
     assertEquals(-1, indexOfContaining(shell.invocations(), HostPackages.ZABBLY_SOURCE));
   }
@@ -287,7 +287,7 @@ class HostProvisionerTest {
             new ScriptedShellExecutor()
                 .onFail("which incus", "")
                 .on(
-                    String.join(" ", apt("update")),
+                    String.join(" ", APT_UPDATE),
                     new ShellExec.Result(
                         100,
                         waiting + waiting,
@@ -972,6 +972,8 @@ class HostProvisionerTest {
       incus hold installed
       incus-base hold installed
       """;
+
+  private static final List<String> APT_UPDATE = apt("-o", "APT::Update::Error-Mode=any", "update");
 
   private static final List<String> DPKG_QUERY =
       List.of(

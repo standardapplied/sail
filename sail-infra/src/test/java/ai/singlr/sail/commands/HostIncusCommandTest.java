@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyMessage;
@@ -22,6 +23,7 @@ import ai.singlr.sail.pty.PtyRooms;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.store.RunStore;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
@@ -43,7 +45,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 class HostIncusCommandTest {
 
-  private static final String APT_UPDATE = "Dpkg::Options::=--force-confold update";
+  private static final String APT_UPDATE =
+      "Dpkg::Options::=--force-confold -o APT::Update::Error-Mode=any update";
   private static final String UPGRADE = "--only-upgrade --allow-change-held-packages";
 
   private static final String MOVABLE =
@@ -210,6 +213,47 @@ class HostIncusCommandTest {
         assertThrows(IllegalStateException.class, () -> upgrade(shell, () -> QUIET, true));
 
     assertEquals("Server not initialized. Run 'sudo sail host init' first.", refused.getMessage());
+  }
+
+  @Test
+  void aRefreshThatCouldNotReachASourceFailsInsteadOfCallingIncusCurrent() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .on(
+                APT_UPDATE,
+                new ShellExec.Result(
+                    100,
+                    "",
+                    "E: Failed to fetch https://pkgs.zabbly.com/incus/stable/dists/noble/InRelease"
+                        + "  Could not connect to pkgs.zabbly.com:443\n"
+                        + "E: Some index files failed to download. They have been ignored, or old"
+                        + " ones used instead.\n"))
+            .on(
+                " update",
+                new ShellExec.Result(
+                    0,
+                    "",
+                    "W: Some index files failed to download. They have been ignored, or old ones"
+                        + " used instead.\n"))
+            .onOk(
+                "apt-cache policy incus",
+                "incus:\n  Installed: 1:6.17-ubuntu24.04-1\n  Candidate: 1:6.17-ubuntu24.04-1\n")
+            .onOk("apt-mark hold");
+    var printed = new StringBuilder();
+
+    var failure =
+        assertThrows(
+            IOException.class,
+            () -> upgrade(shell, () -> fail("nothing is listed"), true, false, printed));
+
+    assertEquals(
+        "apt-get update failed: E: Failed to fetch"
+            + " https://pkgs.zabbly.com/incus/stable/dists/noble/InRelease  Could not connect to"
+            + " pkgs.zabbly.com:443 E: Some index files failed to download. They have been ignored,"
+            + " or old ones used instead.",
+        failure.getMessage());
+    assertEquals("", printed.toString());
+    assertEquals(List.of(), installs(shell));
   }
 
   @Test

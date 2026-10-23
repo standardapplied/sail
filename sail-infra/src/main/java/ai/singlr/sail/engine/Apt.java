@@ -57,9 +57,12 @@ public final class Apt {
     this.progress = progress;
   }
 
-  /** Refreshes apt's index of every configured source. */
+  /**
+   * Refreshes apt's index of every configured source. A source that fails to download fails the
+   * refresh, since apt otherwise exits 0 and answers from the index it had.
+   */
   public void update() throws IOException, InterruptedException {
-    run("apt-get update", List.of("update"));
+    run("apt-get update", List.of("-o", "APT::Update::Error-Mode=any", "update"));
   }
 
   /** Installs {@code packages}. */

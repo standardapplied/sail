@@ -34,6 +34,21 @@ class AptTest {
   }
 
   @Test
+  void aRefreshFailsWhenAnySourceFailsToDownload() throws Exception {
+    var shell = new ScriptedShellExecutor().onOk("apt-get");
+
+    new Apt(shell, detail -> {}).update();
+
+    assertEquals(
+        List.of(
+            "env LC_ALL=C DEBIAN_FRONTEND=noninteractive apt-get -q -o APT::Status-Fd=1 -o"
+                + " Acquire::Retries=3 -o DPkg::Lock::Timeout=600 -o"
+                + " Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o"
+                + " APT::Update::Error-Mode=any update"),
+        shell.unbounded());
+  }
+
+  @Test
   void aWaitThatEndsInTheLockIsNotBlamedOnAFailureAfterIt() {
     var shell =
         new ScriptedShellExecutor()
