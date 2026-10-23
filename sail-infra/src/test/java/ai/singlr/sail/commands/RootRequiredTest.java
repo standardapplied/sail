@@ -49,6 +49,7 @@ class RootRequiredTest {
                   "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHzE4dW5kSzqQ0UClK/KaUnW7m79n7yVMhV6E+CPjFFt ada@mac",
                   "--yes",
                   "--json")),
+          Map.entry("host incus upgrade", List.of("--yes", "--dry-run")),
           Map.entry("host keys sync", List.of()),
           Map.entry("host ssh-identity", List.of()),
           Map.entry("host status", List.of("--json")),
@@ -96,6 +97,13 @@ class RootRequiredTest {
         "Root privileges required. Run with: sudo sail host sync --as-main --handle ada --name"
             + " 'Ada L'",
         refusal("host", "sync", "--as-main", "--handle", "ada", "--name", "Ada L"));
+  }
+
+  @Test
+  void aRefusedIncusUpgradeIsToldToRunItWithSudo() {
+    assertEquals(
+        "Root privileges required. Run with: sudo sail host incus upgrade",
+        refusal("host", "incus", "upgrade"));
   }
 
   @Test

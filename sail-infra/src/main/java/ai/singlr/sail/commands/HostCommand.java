@@ -14,6 +14,7 @@ import picocli.CommandLine.Command;
     subcommands = {
       HostInitCommand.class,
       HostStatusCommand.class,
+      HostIncusCommand.class,
       HostConfigCommand.class,
       HostServiceCommand.class,
       HostSshIdentityCommand.class,

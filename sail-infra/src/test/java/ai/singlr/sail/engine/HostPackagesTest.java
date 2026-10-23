@@ -46,14 +46,17 @@ class HostPackagesTest {
     assertEquals(List.of("env LC_ALL=C apt-cache policy incus"), shell.invocations());
     assertTrue(versions.movable());
     assertEquals("6.18", versions.candidateRelease());
-    assertEquals("6.17 to 6.18", versions.move());
+    assertEquals("6.17", versions.from());
+    assertEquals("6.18", versions.to());
   }
 
   @Test
   void aRebuildOfTheSameReleaseNamesBothWholeVersions() {
     var versions = new HostPackages.Versions("1:6.18-ubuntu24.04-1", "1:6.18-ubuntu24.04-2");
 
-    assertEquals("1:6.18-ubuntu24.04-1 to 1:6.18-ubuntu24.04-2", versions.move());
+    assertEquals("1:6.18-ubuntu24.04-1", versions.from());
+    assertEquals("1:6.18-ubuntu24.04-2", versions.to());
+    assertEquals("6.18", new HostPackages.Versions("1:6.18-ubuntu24.04-1", null).from());
     assertEquals("6.18", HostPackages.Versions.release("6.18"));
   }
 

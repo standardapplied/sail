@@ -206,11 +206,18 @@ public final class HostPackages {
       return candidate == null ? null : release(candidate);
     }
 
-    /** "<installed> to <candidate>", as Incus numbers them unless that hides the difference. */
-    public String move() {
-      var from = release(installed);
-      var to = release(candidate);
-      return from.equals(to) ? installed + " to " + candidate : from + " to " + to;
+    /** The installed version as Incus numbers it, or whole when that hides the move. */
+    public String from() {
+      return distinct() ? release(installed) : installed;
+    }
+
+    /** The candidate as Incus numbers it, or whole when that hides the move. */
+    public String to() {
+      return distinct() ? release(candidate) : candidate;
+    }
+
+    private boolean distinct() {
+      return !movable() || !release(installed).equals(release(candidate));
     }
 
     /**
