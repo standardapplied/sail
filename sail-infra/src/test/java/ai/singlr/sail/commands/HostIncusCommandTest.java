@@ -23,9 +23,12 @@ import ai.singlr.sail.store.RunStore;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.function.Supplier;
+import java.util.regex.MatchResult;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -236,6 +239,30 @@ class HostIncusCommandTest {
     assertTrue(
         incus.out().contains("  upgrade  Move Incus to the version apt offers, after listing the"),
         incus.out());
+  }
+
+  @Test
+  void theReadmeSaysSailHoldsIncusAndMovesItOnlyWhenAskedAndTheOsIsTheOperators() throws Exception {
+    var readme = Files.readString(Path.of("..", "README.md"));
+    var start = readme.indexOf("Sail installs what it runs on");
+
+    assertEquals(
+        """
+        Sail installs what it runs on and nothing else: Incus from Zabbly's stable repository, and
+        zfsutils-linux for a zfs pool. It holds the incus packages, so neither `apt upgrade` nor
+        unattended-upgrades restarts Incus, which would end every terminal and agent run in every
+        container. `sudo sail host incus upgrade` moves Incus when you choose: it lists the sessions and
+        agent runs the restart ends, then asks. The rest of the OS is yours to keep current; sail never
+        upgrades it. The needrestart policy sail installs (`/etc/needrestart/conf.d/50-sail.conf`) keeps
+        a library update from restarting Incus.""",
+        readme.substring(start, readme.indexOf("\n\n", start)));
+    assertEquals(
+        List.of(),
+        Pattern.compile("(?i)upgrades? (ubuntu and )?incus with apt")
+            .matcher(readme)
+            .results()
+            .map(MatchResult::group)
+            .toList());
   }
 
   private String upgrade(
