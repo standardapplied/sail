@@ -16,6 +16,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.RunStore;
@@ -402,6 +403,8 @@ class AgentLogStreamerTest {
     assertFalse(AgentLogStreamer.isStreamPath("/v1/events/stream"));
   }
 
+  private static final ApiError ENDED = AgentLogStreamer.tailEnded("acme", "r1");
+
   @Test
   void pumpTerminatesWhenTheTailProcessExitsInsteadOfHeartbeatingForever() {
     assertTimeoutPreemptively(
@@ -413,7 +416,7 @@ class AgentLogStreamerTest {
                   new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
           var out = new ByteArrayOutputStream();
 
-          AgentLogStreamer.pump(process, reader, out, 0, NEVER_ENDS);
+          AgentLogStreamer.pump(process, reader, out, 0, NEVER_ENDS, ENDED);
 
           var body = out.toString(StandardCharsets.UTF_8);
           assertTrue(body.contains("first"), body);
@@ -435,16 +438,20 @@ class AgentLogStreamerTest {
         };
     var out = new ByteArrayOutputStream();
 
-    AgentLogStreamer.pump(process, arrivedLate, out, 0, NEVER_ENDS);
+    AgentLogStreamer.pump(process, arrivedLate, out, 0, NEVER_ENDS, ENDED);
 
     assertEquals(
         "id: 1\ndata: first\n\nid: 2\ndata: second\n\nevent: error\ndata: "
-            + YamlUtil.dumpJson(AgentLogStreamer.TAIL_ENDED.toMap())
+            + YamlUtil.dumpJson(ENDED.toMap())
             + "\n\n",
         out.toString(StandardCharsets.UTF_8));
     assertEquals(
-        "The run's log can no longer be followed: its container stopped or its log is gone.",
-        SailApiClient.Refused.of(AgentLogStreamer.TAIL_ENDED.toMap()).getMessage());
+        "The run's log can no longer be followed: its container stopped, or incus restarted under"
+            + " it. Follow again: sail agent stream acme --run r1",
+        SailApiClient.Refused.of(ENDED.toMap()).getMessage());
+    assertEquals(
+        "Follow again: sudo sail agent stream acme --run r1",
+        OperatorCommand.SUDO.render(SailApiClient.Refused.of(ENDED.toMap()).remedy()));
   }
 
   @Test
@@ -458,7 +465,7 @@ class AgentLogStreamerTest {
               new BufferedReader(
                   new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
 
-          AgentLogStreamer.pump(process, reader, new ByteArrayOutputStream(), 0, NEVER_ENDS);
+          AgentLogStreamer.pump(process, reader, new ByteArrayOutputStream(), 0, NEVER_ENDS, ENDED);
 
           assertFalse(process.isAlive());
         });
@@ -502,7 +509,7 @@ class AgentLogStreamerTest {
     var out = new ByteArrayOutputStream();
 
     AgentLogStreamer.pump(
-        process, revokedAfterTheFirst, out, 0, streamer.recheckOf(exchange, "r1"));
+        process, revokedAfterTheFirst, out, 0, streamer.recheckOf(exchange, "r1"), ENDED);
 
     assertEquals(
         "id: 1\ndata: first\n\nevent: error\ndata: {\"code\": \"run_not_found\", \"message\":"
@@ -534,7 +541,7 @@ class AgentLogStreamerTest {
     var out = new ByteArrayOutputStream();
 
     AgentLogStreamer.pump(
-        process, new BufferedReader(new StringReader("first\n")), out, 0, recheck);
+        process, new BufferedReader(new StringReader("first\n")), out, 0, recheck, ENDED);
 
     assertEquals(
         "event: error\ndata: {\"code\": \"invalid_bearer_token\", \"message\": \"Bearer"

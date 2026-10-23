@@ -69,7 +69,7 @@ class RootRequiredTest {
           Map.entry(
               "project resources set",
               List.of("gamma", "--cpu", "4", "--memory", "8GiB", "--disk", "40GiB", "--json")),
-          Map.entry("project demo", List.of("--json", "--git-token", "ghp_x")));
+          Map.entry("project demo", List.of("--json")));
 
   @BeforeEach
   void asACallerWhoIsNotRoot() {
@@ -109,18 +109,25 @@ class RootRequiredTest {
   @CsvSource(
       delimiter = '|',
       value = {
-        "--token=s3cret|agent stream acme --token=<token> --run r1",
-        "--token|agent stream acme --token <token> --run r1"
+        "agent stream acme --token=s3cret --run r1|agent stream acme --token=<token> --run r1",
+        "agent stream acme --token s3cret --run r1|agent stream acme --token <token> --run r1",
+        "project demo --json --git-token ghp_x|project demo --json --git-token <token>",
+        "project demo --git-token=ghp_x --json|project demo --git-token=<token> --json"
       })
-  void aCommandAsTypedNeverEchoesItsToken(String option, String typed) {
-    var args = new ArrayList<>(List.of("agent", "stream", "acme", option));
-    if (!option.contains("=")) {
-      args.add("s3cret");
+  void aCommandAsTypedNeverEchoesAToken(String argv, String typed) {
+    var parsed = new CommandLine(new Sail()).parseArgs(argv.split(" "));
+    while (parsed.subcommand() != null) {
+      parsed = parsed.subcommand();
     }
-    args.addAll(List.of("--run", "r1"));
-    var stream = new CommandLine(new Sail()).parseArgs(args.toArray(String[]::new));
 
-    assertEquals(typed, RootRequired.typed(stream.subcommand().subcommand().commandSpec()).line());
+    assertEquals(typed, RootRequired.typed(parsed.commandSpec()).line());
+  }
+
+  @Test
+  void aRefusedDemoKeepsItsGitTokenOptionAndNotItsValue() {
+    assertEquals(
+        "Root privileges required. Run with: sudo sail project demo --git-token <token>",
+        refusal("project", "demo", "--git-token", "ghp_x"));
   }
 
   @Test

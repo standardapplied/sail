@@ -105,7 +105,12 @@ public final class HostInitCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(failureHint(), this::execute);
+    run(this::execute);
+  }
+
+  /** Runs {@code body} as this host init runs: a failure it did not decide ends with its hint. */
+  void run(CliCommand.CheckedRunnable body) {
+    CliCommand.run(failureHint(), body);
   }
 
   private void execute() throws Exception {
