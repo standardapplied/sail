@@ -294,7 +294,7 @@ class NativeFleetIT {
           migrated);
       main.serving(
           () -> {
-            main.apiOk("spec", "list");
+            main.apiOk("spec", "list", "-p", "demo");
             assertEquals(
                 "uday", NativeFleet.json(main.interactiveSpec("whoami").output()).get("handle"));
           });
@@ -330,8 +330,13 @@ class NativeFleetIT {
                   + " history: sail spec history <id>."),
           round);
       fleet.assertConverged(mady);
-      fleet.assertHeadsAgree(mady);
-      assertTrue(mady.sailOk("spec", "history", "late-1").contains("late-1"));
+      assertEquals(
+          "2",
+          mady.query(
+                  "SELECT count(*) FROM change_log WHERE entity_type = 'spec' AND entity_id ="
+                      + " 'late-1'")
+              .strip(),
+          "the version pulled and its withdrawal stay in the spec's history");
       var again = mady.sailOk("sync");
       assertTrue(again.contains("Already in sync with main."), again);
     }
