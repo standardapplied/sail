@@ -115,6 +115,12 @@ public final class HostIncusCommand implements Runnable {
     if (versions.installed() == null) {
       throw HostInitCommand.notInitialized(operator);
     }
+    if (versions.candidate() == null) {
+      throw new IllegalStateException(
+          "apt offers no Incus to move to. Check the Zabbly source "
+              + HostPackages.ZABBLY_SOURCE
+              + " and any apt pin with 'apt-cache policy incus', then retry.");
+    }
     if (!versions.movable()) {
       out.println(Ansi.AUTO.string("  @|green ✓|@ Incus " + versions.from() + " is current."));
       return;

@@ -213,6 +213,23 @@ class HostIncusCommandTest {
   }
 
   @Test
+  void anIncusAptOffersNoCandidateForIsNeverSaidToBeCurrent() {
+    var shell = box("incus:\n  Installed: 1:6.18-ubuntu24.04-1\n  Candidate: (none)\n");
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> upgrade(shell, () -> fail("nothing is listed when apt offers no Incus"), true));
+
+    assertEquals(
+        "apt offers no Incus to move to. Check the Zabbly source"
+            + " /etc/apt/sources.list.d/zabbly-incus-stable.sources and any apt pin with"
+            + " 'apt-cache policy incus', then retry.",
+        refused.getMessage());
+    assertEquals(List.of(), installs(shell));
+  }
+
+  @Test
   @EnabledOnOs(OS.LINUX)
   void theLiveSessionsAreEveryOneThePtyHostRunsWhoeverOpenedIt(@TempDir Path dir) throws Exception {
     var socket = dir.resolve("pty.sock");

@@ -38,7 +38,7 @@ public final class HostPackages {
 
   static final String ZABBLY_KEY_URL = "https://pkgs.zabbly.com/key.asc";
   static final String ZABBLY_KEYRING = "/etc/apt/keyrings/zabbly.asc";
-  static final String ZABBLY_SOURCE = "/etc/apt/sources.list.d/zabbly-incus-stable.sources";
+  public static final String ZABBLY_SOURCE = "/etc/apt/sources.list.d/zabbly-incus-stable.sources";
 
   private static final Duration KEY_TIMEOUT = Duration.ofMinutes(2);
   private static final String HELD_PATTERN = "incus*";
