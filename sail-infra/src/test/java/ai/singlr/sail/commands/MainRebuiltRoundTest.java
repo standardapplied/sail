@@ -26,12 +26,15 @@ import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.DatabaseCatalog;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncDatabase;
+import ai.singlr.sail.sync.SyncSession;
 import ai.singlr.sail.sync.SyncTransitionSink;
 import ai.singlr.sail.sync.SyncTransportException;
 import ai.singlr.sail.sync.SyncWire;
@@ -63,6 +66,7 @@ class MainRebuiltRoundTest {
   private PipedSyncChannel.Main answering;
   private Sqlite nodeDb;
   private SyncOperations node;
+  private final List<String> notices = new ArrayList<>();
 
   /** One main database answering at {@link #TARGET} as the box {@code id}. */
   private record Main(SyncDatabase database, String id, String token) {
@@ -99,7 +103,7 @@ class MainRebuiltRoundTest {
                           () -> new SyncConfig(SyncConfig.ROLE_MAIN, null, "ada", main.id())));
             },
             event -> {},
-            SyncOperations.PLAIN_NOTICES,
+            remedy -> notices.add(OperatorCommand.SUDO.render(remedy)),
             new NoContainers());
     node.prepare();
   }
@@ -140,6 +144,7 @@ class MainRebuiltRoundTest {
   }
 
   private SyncReport round() throws Exception {
+    notices.clear();
     var err = System.err;
     System.setErr(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
     try {
@@ -286,6 +291,183 @@ class MainRebuiltRoundTest {
     assertEquals("  ✓ Already in sync with main.", rendered(round()));
   }
 
+  private static final String RESTORED =
+      "): main was restored from a copy older than this box's last sync. ";
+
+  private static List<String> specIds(Sqlite db) {
+    return db.query("SELECT id || ' ' || rev FROM specs ORDER BY id", r -> r.text(0));
+  }
+
+  /** Main writes {@code ids} after {@code copy} was taken, and the node pulls them. */
+  private Main pulledAfterACopy(String copyFile, String copyId, String... ids) throws Exception {
+    mainWrite(serving, "g0");
+    round();
+    var copy = copyOf(serving, copyFile, copyId);
+    for (var id : ids) {
+      mainWrite(serving, id);
+    }
+    round();
+    return copy;
+  }
+
+  @Test
+  void aMainRestoredInPlaceFromAnOlderCopyTakesTheSpecsItLostFromTheNodeIntoTheirHistory()
+      throws Exception {
+    serving = pulledAfterACopy("copy.db", serving.id(), "r-late-1", "r-late-2");
+
+    var round = round();
+
+    assertEquals(
+        List.of(
+            "main no longer holds 2 spec(s) this box had pulled (r-late-1, r-late-2"
+                + RESTORED
+                + "Each stays in its history: sudo sail spec history <id>."),
+        notices);
+    assertEquals(specIds(serving.db()), specIds(nodeDb), "the node holds what main holds");
+    assertEquals(List.of(), round.denials());
+    assertEquals(
+        List.of("r-late-1", "r-late-1"),
+        new SpecStore(nodeDb).history("r-late-1").stream().map(entry -> entry.entityId()).toList(),
+        "the pulled version and its withdrawal stay in the spec's history");
+    assertEquals("  ✓ Already in sync with main.", rendered(round()));
+    assertEquals(List.of(), notices);
+  }
+
+  @Test
+  void aMainBuiltFromACopyOnANewBoxTakesTheSpecsItLostFromTheNode() throws Exception {
+    serving = pulledAfterACopy("copy.db", "main-restored", "r-late-1", "r-late-2");
+
+    round();
+
+    assertEquals(
+        List.of(
+            "main no longer holds 2 spec(s) this box had pulled (r-late-1, r-late-2"
+                + RESTORED
+                + "Each stays in its history: sudo sail spec history <id>."),
+        notices);
+    assertEquals(specIds(serving.db()), specIds(nodeDb));
+    assertEquals("  ✓ Already in sync with main.", rendered(round()));
+  }
+
+  @Test
+  void aLostSpecTheNodeChangedIsRefusedNeverPushedAndKeptInItsHistory() throws Exception {
+    serving = pulledAfterACopy("copy.db", serving.id(), "r-late-1", "r-late-2");
+    Acting.as("nia", () -> new SpecStore(nodeDb).updateStatus("r-late-1", SpecStatus.IN_PROGRESS));
+
+    var round = round();
+
+    assertEquals(
+        List.of(
+            "main no longer holds r-late-1: it was restored from an older copy. Yours is in its"
+                + " history: sudo sail spec history r-late-1.",
+            "main no longer holds 1 spec(s) this box had pulled (r-late-2"
+                + RESTORED
+                + "Each stays in its history: sudo sail spec history <id>."),
+        notices);
+    assertEquals(
+        List.of("main no longer holds r-late-1: it was restored from an older copy"),
+        round.denials().stream().map(SyncSession.Denial::reason).toList());
+    assertEquals(List.of("g0"), serving.db().query("SELECT id FROM specs", r -> r.text(0)));
+    assertEquals(specIds(serving.db()), specIds(nodeDb));
+    assertEquals(
+        "nia",
+        new SpecStore(nodeDb)
+            .history("r-late-1").stream()
+                .map(entry -> entry.actor())
+                .filter("nia"::equals)
+                .findFirst()
+                .orElseThrow(),
+        "the node's own change stays in the spec's history");
+  }
+
+  @Test
+  void aLostRoomMessageAndProjectEachLeaveTheNodeNamedOncePerType() throws Exception {
+    mainWrite(serving, "g0");
+    round();
+    var copy = copyOf(serving, "copy.db", serving.id());
+    Acting.system(
+        () -> {
+          new ProjectStore(serving.db()).upsert("delta", "name: delta\n");
+          new RoomStore(serving.db()).ensureFor("r-room", "gamma", "late", null, null);
+        });
+    var message =
+        Acting.as("nia", () -> new MessageStore(serving.db()).append("g0", "nia", "late", null));
+    round();
+    serving = copy;
+
+    round();
+
+    assertEquals(
+        List.of(
+            "main no longer holds 1 room(s) this box had pulled (r-room"
+                + RESTORED
+                + "Each stays in this box's change log.",
+            "main no longer holds 1 project(s) this box had pulled (delta"
+                + RESTORED
+                + "Each stays in this box's change log.",
+            "main no longer holds 1 message(s) this box had pulled ("
+                + message.id()
+                + RESTORED
+                + "Each stays in this box's change log."),
+        notices);
+    assertEquals(
+        held(serving.db()).stream().filter(row -> row.startsWith("project")).toList(),
+        held(nodeDb).stream().filter(row -> row.startsWith("project")).toList());
+    assertEquals(
+        List.of(), nodeDb.query("SELECT id FROM rooms WHERE id = 'r-room'", r -> r.text(0)));
+    assertEquals(List.of(), new MessageStore(nodeDb).findById(message.id()).stream().toList());
+  }
+
+  @Test
+  void anOrdinaryRoundDropsNothingAndSaysNothing() throws Exception {
+    mainWrite(serving, "g0");
+    round();
+    write("n1");
+    mainWrite(serving, "g1");
+
+    round();
+
+    assertEquals(List.of(), notices);
+    assertEquals(
+        List.of("g0", "g1", "n1"), specIds(nodeDb).stream().map(r -> r.split(" ")[0]).toList());
+  }
+
+  @Test
+  void aNodesNewWorkStillReachesAMainRestoredFromACopy() throws Exception {
+    serving = pulledAfterACopy("copy.db", "main-restored", "r-late-1");
+    write("n-unpushed");
+
+    var round = round();
+
+    assertEquals(1, round.report().pushed());
+    assertEquals(
+        List.of("g0", "n-unpushed"),
+        serving.db().query("SELECT id FROM specs ORDER BY id", r -> r.text(0)));
+    assertEquals(specIds(serving.db()), specIds(nodeDb));
+  }
+
+  @Test
+  void aScopedNodeWeighsOnlyTheRowsOfItsScope() throws Exception {
+    var fdes = new FdeStore(serving.db());
+    fdes.restrict("nia");
+    fdes.grant("nia", "gamma");
+    Acting.system(() -> new ProjectStore(serving.db()).upsert("delta", "name: delta\n"));
+    Acting.as("ada", () -> new SpecStore(serving.db()).create(spec("d1", "delta")));
+    serving = pulledAfterACopy("copy.db", serving.id(), "r-late-1");
+
+    round();
+
+    assertEquals(
+        List.of(
+            "main no longer holds 1 spec(s) this box had pulled (r-late-1"
+                + RESTORED
+                + "Each stays in its history: sudo sail spec history <id>."),
+        notices);
+    assertEquals(
+        specIds(serving.db()).stream().filter(row -> !row.startsWith("d")).toList(),
+        specIds(nodeDb));
+  }
+
   @Test
   void aNodeThatSyncedBeforeCatalogsRecordsMainsOnItsNextRound() throws Exception {
     round();
@@ -358,9 +540,13 @@ class MainRebuiltRoundTest {
   }
 
   private static SpecStore.SpecRow spec(String id) {
+    return spec(id, "gamma");
+  }
+
+  private static SpecStore.SpecRow spec(String id, String project) {
     return new SpecStore.SpecRow(
         id,
-        "gamma",
+        project,
         "the " + id + " spec",
         SpecStatus.PENDING,
         null,
