@@ -105,6 +105,45 @@ class HostPackagesTest {
   }
 
   @Test
+  void anUpgradeAptFailsHoldsTheIncusPackagesAgainAndSaysAptsFailure() {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("dpkg-query", "incus hold installed\nincus-client hold installed\n")
+            .onFail("apt-get", "E: Sub-process /usr/bin/dpkg returned an error code (1)\n")
+            .onOk("apt-mark hold");
+
+    var failure =
+        assertThrows(IOException.class, () -> new HostPackages(shell, detail -> {}).upgrade());
+
+    assertEquals(
+        "apt-get install --only-upgrade incus incus-client failed: E: Sub-process /usr/bin/dpkg"
+            + " returned an error code (1)",
+        failure.getMessage());
+    assertEquals(0, failure.getSuppressed().length);
+    assertEquals("apt-mark hold incus incus-client", shell.invocations().getLast());
+  }
+
+  @Test
+  void anUpgradeWhoseHoldAlsoFailsKeepsAptsFailureFirst() {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("dpkg-query", "incus hold installed\n")
+            .onFail("apt-get", "E: Sub-process /usr/bin/dpkg returned an error code (1)\n")
+            .onFail("apt-mark", "E: Could not get lock /var/lib/dpkg/lock\n");
+
+    var failure =
+        assertThrows(IOException.class, () -> new HostPackages(shell, detail -> {}).upgrade());
+
+    assertEquals(
+        "apt-get install --only-upgrade incus failed: E: Sub-process /usr/bin/dpkg returned an"
+            + " error code (1)",
+        failure.getMessage());
+    assertEquals(
+        "apt-mark hold incus failed: E: Could not get lock /var/lib/dpkg/lock",
+        failure.getSuppressed()[0].getMessage());
+  }
+
+  @Test
   void anUpgradeWithNoIncusInstalledSaysSo() {
     var shell = new ScriptedShellExecutor().on("dpkg-query", new ShellExec.Result(1, "", "none"));
 

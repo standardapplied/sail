@@ -19,7 +19,11 @@ import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
@@ -53,6 +57,8 @@ public final class HostIncusCommand implements Runnable {
       mixinStandardHelpOptions = true)
   static final class Upgrade implements Runnable {
 
+    private static final Duration SESSIONS_DEADLINE = Duration.ofSeconds(5);
+
     @Spec private CommandSpec spec;
 
     @Option(names = "--yes", description = "Upgrade without asking (for non-interactive use).")
@@ -72,7 +78,7 @@ public final class HostIncusCommand implements Runnable {
             }
             upgrade(
                 new ShellExecutor(false),
-                () -> LiveWork.of(SailPaths.ptySocketPath(), liveRuns()),
+                () -> LiveWork.of(SailPaths.ptySocketPath(), liveRuns(), SESSIONS_DEADLINE),
                 yes,
                 dryRun,
                 OperatorCommand.here(),
@@ -164,9 +170,34 @@ public final class HostIncusCommand implements Runnable {
   record LiveWork(
       List<PtyMessage.SessionInfo> sessions, String sessionsUnread, List<RunStore.RunRow> runs) {
 
-    /** The live sessions the pty host at {@code ptySocket} answers with, and {@code runs}. */
-    static LiveWork of(Path ptySocket, List<RunStore.RunRow> runs) {
-      try (var client = SessionClient.connect(ptySocket)) {
+    /**
+     * Every live session the pty host at {@code ptySocket} answers its dispatch credential with,
+     * whoever opened it, and {@code runs}. A host that has not answered within {@code deadline}
+     * reads as one whose sessions could not be listed.
+     */
+    static LiveWork of(Path ptySocket, List<RunStore.RunRow> runs, Duration deadline) {
+      var listing = new FutureTask<>(() -> listed(ptySocket, runs));
+      Thread.ofVirtual().start(listing);
+      try {
+        return listing.get(deadline.toMillis(), TimeUnit.MILLISECONDS);
+      } catch (TimeoutException e) {
+        return new LiveWork(
+            List.of(),
+            "the session host did not answer within " + deadline.toSeconds() + "s",
+            runs);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException("Interrupted while listing terminal sessions", e);
+      } catch (ExecutionException e) {
+        throw new IllegalStateException("Could not list terminal sessions", e.getCause());
+      } finally {
+        listing.cancel(true);
+      }
+    }
+
+    private static LiveWork listed(Path ptySocket, List<RunStore.RunRow> runs) {
+      try (var client =
+          SessionClient.connect(ptySocket, PtyHostYield.dispatchCredential(ptySocket))) {
         var sessions = client.list().stream().filter(PtyMessage.SessionInfo::live).toList();
         return new LiveWork(sessions, null, runs);
       } catch (IOException e) {

@@ -105,14 +105,30 @@ public final class HostPackages {
     return policy.ok() ? Versions.parse(policy.stdout()) : Versions.NONE;
   }
 
-  /** Moves every held Incus package to apt's candidate, then holds them again. */
+  /**
+   * Moves every held Incus package to apt's candidate, then holds them again. dpkg drops a
+   * package's hold as it unpacks it, so a failed move holds them again too, its failure kept.
+   */
   public void upgrade() throws IOException, InterruptedException, TimeoutException {
     var held = incusPackages().stream().map(Installed::name).toList();
     if (held.isEmpty()) {
       throw new IOException("No Incus package is installed to upgrade.");
     }
-    apt.upgradeHeld(held);
+    try {
+      apt.upgradeHeld(held);
+    } catch (IOException failed) {
+      holdAfter(failed, held);
+      throw failed;
+    }
     mark(held);
+  }
+
+  private void holdAfter(IOException failed, List<String> held) throws InterruptedException {
+    try {
+      mark(held);
+    } catch (IOException | TimeoutException holdFailed) {
+      failed.addSuppressed(holdFailed);
+    }
   }
 
   private void addZabblySource() throws IOException, InterruptedException, TimeoutException {

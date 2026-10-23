@@ -19,12 +19,17 @@ import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyRooms;
+import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.store.RunStore;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.net.StandardProtocolFamily;
+import java.net.UnixDomainSocketAddress;
+import java.nio.channels.ServerSocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.function.Supplier;
 import java.util.regex.MatchResult;
@@ -53,6 +58,8 @@ class HostIncusCommandTest {
           List.of(session("design", "claude"), session("ops", "bash")),
           null,
           List.of(run("01a1", "acme", "spec-x", "build")));
+
+  private static final Duration DEADLINE = Duration.ofSeconds(5);
 
   private static final HostIncusCommand.LiveWork QUIET =
       new HostIncusCommand.LiveWork(List.of(), null, List.of());
@@ -159,7 +166,7 @@ class HostIncusCommandTest {
     var shell = box(MOVABLE);
     var live =
         HostIncusCommand.LiveWork.of(
-            dir.resolve("absent.sock"), List.of(run("01a2", "acme", null, "room")));
+            dir.resolve("absent.sock"), List.of(run("01a2", "acme", null, "room")), DEADLINE);
     assertNotNull(live.sessionsUnread());
     ConsoleStub.answering("\n", true);
 
@@ -207,23 +214,44 @@ class HostIncusCommandTest {
 
   @Test
   @EnabledOnOs(OS.LINUX)
-  void theLiveSessionsAreTheOnesThePtyHostAnswers(@TempDir Path dir) throws Exception {
+  void theLiveSessionsAreEveryOneThePtyHostRunsWhoeverOpenedIt(@TempDir Path dir) throws Exception {
     var socket = dir.resolve("pty.sock");
     try (var host =
             PtyHostCommand.startHost(
                 socket,
                 dir.resolve("sessions"),
-                token -> new PtyIdentity("uday", true),
+                token -> new PtyIdentity(token, false),
                 PtyRooms.NONE,
                 PtyEvents.NONE);
-        var client = SessionClient.connect(socket, "")) {
-      client.create("s1", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
+        var alice = SessionClient.connect(socket, "alice");
+        var bob = SessionClient.connect(socket, "bob")) {
+      alice.create("alice-live", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
+      bob.create("bob-live", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
 
-      var live = HostIncusCommand.LiveWork.of(socket, List.of());
+      var live = HostIncusCommand.LiveWork.of(socket, List.of(), DEADLINE);
 
       assertNull(live.sessionsUnread());
       assertEquals(
-          List.of("s1"), live.sessions().stream().map(PtyMessage.SessionInfo::name).toList());
+          List.of("alice-live", "bob-live"),
+          live.sessions().stream().map(PtyMessage.SessionInfo::name).sorted().toList());
+    }
+  }
+
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aPtyHostThatAcceptsButNeverRepliesReadsAsUnlisted(@TempDir Path dir) throws Exception {
+    var socket = dir.resolve("pty.sock");
+    Files.writeString(PtySessionHost.dispatchCredentialOf(socket), "credential");
+    try (var silent = ServerSocketChannel.open(StandardProtocolFamily.UNIX)) {
+      silent.bind(UnixDomainSocketAddress.of(socket));
+
+      var live =
+          HostIncusCommand.LiveWork.of(
+              socket, List.of(run("01a3", "acme", null, "room")), Duration.ofSeconds(1));
+
+      assertEquals("the session host did not answer within 1s", live.sessionsUnread());
+      assertEquals(List.of(), live.sessions());
+      assertEquals(1, live.runs().size());
     }
   }
 
