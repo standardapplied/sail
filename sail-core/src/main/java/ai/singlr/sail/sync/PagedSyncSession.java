@@ -301,7 +301,8 @@ public final class PagedSyncSession implements SyncSession {
         fetchContent(type, page.entries());
         seen.addAll(ids(page.entries()));
         var live = adoptErasures(type, page.entries());
-        report = report.plus(reconcile(local, ids(live), new PageView(type, live, page.next())));
+        var checkpoint = walksEveryHead ? 0 : page.next();
+        report = report.plus(reconcile(local, ids(live), new PageView(type, live, checkpoint)));
         pages++;
         entries += page.entries().size();
         since = page.next();
@@ -310,7 +311,11 @@ public final class PagedSyncSession implements SyncSession {
     var dirty = new LinkedHashSet<>(local.dirtyIds());
     dirty.removeAll(seen);
     dirty.removeIf(id -> kept(local, id));
-    var lost = walksEveryHead ? withdrawLost(type, local, lost(local, seen)) : Set.<String>of();
+    var lost = Set.<String>of();
+    if (walksEveryHead) {
+      lost = withdrawLost(type, local, lost(local, seen));
+      local.advanceCheckpoint(mainId, since);
+    }
     if (!dirty.isEmpty()) {
       report = report.plus(reconcileDirty(type, local, List.copyOf(dirty), since));
     }
@@ -339,22 +344,27 @@ public final class PagedSyncSession implements SyncSession {
    * with before this session ({@link #resumed}): main no longer holds them, having been restored
    * from a copy older than this box's last sync. A box meeting a database for the first time has
    * heard nothing from it, and what a former main took from its nodes it never heard from a main.
-   * Only what this box's scope admits and holds whole is weighed, and never work still live here.
+   * Only what this box's scope admits and holds whole is weighed, along with what it deleted and
+   * never pushed, and never work still live here.
    */
   private Set<String> lost(LocalReplica local, Set<String> seen) {
     var lost = new LinkedHashSet<String>();
+    var dirty = local.dirtyIds();
     for (var id : local.entityIds()) {
       if (!seen.contains(id)
           && scope.admits(local.project(id))
           && !kept(local, id)
           && local.heardFromMain(id)
           && !local.live(id)
-          && local.current(id) instanceof Map<String, Object> held
-          && !Snapshots.isDeletionMark(held)) {
+          && (dirty.contains(id) || held(local, id))) {
         lost.add(id);
       }
     }
     return lost;
+  }
+
+  private static boolean held(LocalReplica local, String id) {
+    return local.current(id) instanceof Map<String, Object> held && !Snapshots.isDeletionMark(held);
   }
 
   /**
@@ -362,12 +372,15 @@ public final class PagedSyncSession implements SyncSession {
    * revisions stay in this box's history and nothing is offered to rebuild main from it. Each is
    * weighed again in the same atomic scope as its withdrawal, so work that went live here since is
    * left alone, and one carrying a change main never took is refused as a denial is, naming why;
-   * the rest are named once for the type. Returns the rows withdrawn, counted as adopted.
+   * the rest are named once for the type. The latest heard go first, so a reply leaves before the
+   * message it answers, whose withdrawal would take it along unweighed. The type's checkpoint stays
+   * at 0 until all are withdrawn, so a round cut short walks every head again. Returns the rows
+   * withdrawn, counted as adopted.
    */
   private Set<String> withdrawLost(String type, LocalReplica local, Set<String> lost) {
     var withdrawn = new LinkedHashSet<String>();
     var dropped = new ArrayList<String>();
-    for (var id : lost) {
+    for (var id : List.copyOf(lost).reversed()) {
       var unpushed =
           Actor.call(
               Actor.main(null),

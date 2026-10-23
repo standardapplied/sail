@@ -433,6 +433,59 @@ class MainRebuiltRoundTest {
   }
 
   @Test
+  void aLostReplyIsWithdrawnWithItsThreadNotRefused() throws Exception {
+    mainWrite(serving, "g0");
+    round();
+    var copy = copyOf(serving, "copy.db", serving.id());
+    var messages = new MessageStore(serving.db());
+    var parent = Acting.as("nia", () -> messages.append("g0", "nia", "late", null));
+    var reply = Acting.as("nia", () -> messages.append("g0", "nia", "reply", parent.id()));
+    round();
+    serving = copy;
+
+    var round = round();
+
+    assertEquals(List.of(), round.denials());
+    assertEquals(
+        List.of(
+            "main no longer holds 2 message(s) this box had pulled ("
+                + String.join(", ", List.of(parent.id(), reply.id()).stream().sorted().toList())
+                + RESTORED
+                + "Each stays in this box's change log."),
+        notices);
+  }
+
+  @Test
+  void aLostSpecTheNodeDeletedIsRefusedWithTheRestoreSentence() throws Exception {
+    serving = pulledAfterACopy("copy.db", serving.id(), "r-late-1");
+    Acting.as("nia", () -> new SpecStore(nodeDb).delete("r-late-1"));
+
+    var round = round();
+
+    assertEquals(
+        List.of("main no longer holds r-late-1: it was restored from an older copy"),
+        round.denials().stream().map(SyncSession.Denial::reason).toList());
+    assertEquals(List.of("g0"), serving.db().query("SELECT id FROM specs", r -> r.text(0)));
+    assertEquals(specIds(serving.db()), specIds(nodeDb));
+    assertEquals("  ✓ Already in sync with main.", rendered(round()));
+  }
+
+  @Test
+  void anInterruptedWithdrawalIsFinishedByTheNextRound() throws Exception {
+    serving = pulledAfterACopy("copy.db", serving.id(), "r-late-1", "r-late-2");
+    nodeDb.execute(
+        "CREATE TRIGGER halt BEFORE DELETE ON specs WHEN OLD.id = 'r-late-2'"
+            + " BEGIN SELECT RAISE(ABORT, 'halted'); END");
+    assertThrows(SyncTransportException.class, this::round);
+    nodeDb.execute("DROP TRIGGER halt");
+
+    round();
+
+    assertEquals(specIds(serving.db()), specIds(nodeDb), "the node holds what main holds");
+    assertEquals("  ✓ Already in sync with main.", rendered(round()));
+  }
+
+  @Test
   void aRowThisBoxTookFromANodesPushIsNeverOneItHeardFromMain() throws Exception {
     var elsewhere = main("o.db", "o", "gamma");
     mainWrite(elsewhere, "pushed");
