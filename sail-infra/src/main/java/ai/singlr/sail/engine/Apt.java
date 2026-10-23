@@ -20,7 +20,8 @@ import java.util.stream.Collectors;
  * minutes for another apt to let go of the dpkg lock; a deadline that lands while dpkg runs leaves
  * the box half-installed, refusing every later apt call until someone runs {@code dpkg --configure
  * -a}. It runs at {@code -q}, not {@code -qq}, because {@code -qq} hides apt's lock-wait lines and
- * with them the process holding the lock. Its status lines become the progress shown.
+ * with them the process holding the lock, and in the C locale, because those lines are read by
+ * their English wording. Its status lines become the progress shown.
  */
 public final class Apt {
 
@@ -30,6 +31,7 @@ public final class Apt {
   static final List<String> COMMAND =
       List.of(
           "env",
+          "LC_ALL=C",
           "DEBIAN_FRONTEND=noninteractive",
           "apt-get",
           "-q",

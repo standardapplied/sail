@@ -138,7 +138,7 @@ class HostIncusCommandTest {
 
     assertEquals(
         List.of(
-            "env DEBIAN_FRONTEND=noninteractive apt-get -q -o APT::Status-Fd=1 -o"
+            "env LC_ALL=C DEBIAN_FRONTEND=noninteractive apt-get -q -o APT::Status-Fd=1 -o"
                 + " Acquire::Retries=3 -o DPkg::Lock::Timeout=600 -o"
                 + " Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y "
                 + UPGRADE

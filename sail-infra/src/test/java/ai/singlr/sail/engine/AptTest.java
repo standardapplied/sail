@@ -17,14 +17,15 @@ import org.junit.jupiter.api.Test;
 class AptTest {
 
   @Test
-  void everyCallAsksNothingWaitsOnTheLockRetriesAndReportsItsStatus() throws Exception {
+  void everyCallSpeaksTheCLocaleAsksNothingWaitsOnTheLockRetriesAndReportsItsStatus()
+      throws Exception {
     var shell = new ScriptedShellExecutor().onOk("apt-get");
 
     new Apt(shell, detail -> {}).upgradeHeld(List.of("incus", "incus-base"));
 
     assertEquals(
         List.of(
-            "env DEBIAN_FRONTEND=noninteractive apt-get -q -o APT::Status-Fd=1 -o"
+            "env LC_ALL=C DEBIAN_FRONTEND=noninteractive apt-get -q -o APT::Status-Fd=1 -o"
                 + " Acquire::Retries=3 -o DPkg::Lock::Timeout=600 -o"
                 + " Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y"
                 + " --only-upgrade --allow-change-held-packages incus incus-base"),
