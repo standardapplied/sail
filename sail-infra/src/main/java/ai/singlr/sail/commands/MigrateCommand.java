@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.FileImporter;
 import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.HostDropIn;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.HostPackages;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.NeedrestartPolicy;
@@ -220,6 +221,7 @@ public final class MigrateCommand implements Runnable {
     syncAuthorizedKeys(db, jsonOutput, operator);
     revokeOtherFdesPairings(db, FdeCommand.Box::here, jsonOutput, operator);
     ensureHostDropIns(jsonOutput);
+    ensureIncusHold(jsonOutput, operator);
     convergeContainers(jsonOutput, operator);
     ensurePtyHostService(jsonOutput);
   }
@@ -502,6 +504,39 @@ public final class MigrateCommand implements Runnable {
     } catch (IOException | TimeoutException e) {
       if (!jsonOutput) {
         System.out.println(Ansi.AUTO.string("  @|yellow ⚠|@ " + e.getMessage()));
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
+  /**
+   * Holds Incus on a box installed before sail held it ({@link HostPackages#hold}), for the same
+   * reason {@link #ensureHostDropIns} writes the drop-ins here: every upgrade runs it with
+   * new-binary code. Says so the first time; quiet once held, and without root.
+   */
+  private static void ensureIncusHold(boolean jsonOutput, OperatorCommand operator) {
+    ensureIncusHold(SailPaths.isRoot(), new ShellExecutor(false), jsonOutput, operator);
+  }
+
+  static void ensureIncusHold(
+      boolean root, ShellExec shell, boolean jsonOutput, OperatorCommand operator) {
+    if (!root) {
+      return;
+    }
+    try {
+      if (new HostPackages(shell, detail -> {}).hold() && !jsonOutput) {
+        System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + operator.render(HostPackages.HELD)));
+      }
+    } catch (IOException | TimeoutException e) {
+      if (!jsonOutput) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|yellow ⚠|@ "
+                    + e.getMessage()
+                    + ". Run '"
+                    + operator.sail("migrate")
+                    + "' again to hold Incus."));
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
