@@ -57,7 +57,7 @@ class ConsoleProvisionListenerTest {
     }
 
     var text = terminal.toString(StandardCharsets.UTF_8);
-    assertTrue(text.contains("  [1/8] ✓ up to date\n"), text);
+    assertTrue(text.contains("  [1/8] ✓ a library update never restarts Incus\n"), text);
     assertEquals(
         "  [2/8] ✗ Installing Incus (Zabbly stable)\n  ✗ Command timed out after 300s\n",
         text.substring(text.lastIndexOf(CLEARED) + CLEARED.length()));

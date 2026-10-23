@@ -10,7 +10,7 @@ import picocli.CommandLine.Help.Ansi;
 
 /**
  * Animated terminal spinner for long-running operations. Runs on a virtual thread, redraws in place
- * with the current elapsed seconds, and clears its line on {@link #stop()}.
+ * with its latest detail and the elapsed seconds, and clears its line on {@link #stop()}.
  *
  * <p>Use the static {@link #run} helper for try-with-resources style:
  *
@@ -29,6 +29,7 @@ public final class Spinner implements AutoCloseable {
   private final String message;
   private final long startNanos;
   private volatile boolean spinning;
+  private volatile String detail = "";
   private Thread thread;
 
   private Spinner(PrintStream out, String message) {
@@ -60,9 +61,10 @@ public final class Spinner implements AutoCloseable {
                             + Ansi.AUTO.string("@|yellow " + frame + "|@")
                             + " "
                             + message
+                            + (detail.isEmpty() ? "" : " " + detail)
                             + " ("
                             + elapsed
-                            + "s)");
+                            + "s)\033[K");
                     out.flush();
                     try {
                       Thread.sleep(FRAME_MS);
@@ -73,6 +75,11 @@ public final class Spinner implements AutoCloseable {
                     i++;
                   }
                 });
+  }
+
+  /** Shows {@code detail} after the message from the next frame on, replacing the last one. */
+  public void detail(String detail) {
+    this.detail = detail;
   }
 
   /** Stops the spinner and clears its line. */

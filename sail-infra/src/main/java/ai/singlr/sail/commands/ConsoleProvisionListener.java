@@ -12,8 +12,9 @@ import picocli.CommandLine.Help.Ansi;
 
 /**
  * Prints styled provisioning progress to stdout using picocli ANSI markup. Shows an animated
- * spinner on the current step while it is running, then replaces it with the final status line; a
- * step that fails is replaced by its ✗ line, so the reason reported next starts a line of its own.
+ * spinner on the current step while it is running, with its latest progress, then replaces it with
+ * the final status line; a step that fails is replaced by its ✗ line, so the reason reported next
+ * starts a line of its own.
  */
 final class ConsoleProvisionListener implements ProvisionListener {
 
@@ -42,6 +43,14 @@ final class ConsoleProvisionListener implements ProvisionListener {
   public void onStepSkipped(int step, int total, String detail) {
     stopSpinner();
     System.out.println(Banner.stepSkippedLine(step, total, detail, Ansi.AUTO));
+  }
+
+  @Override
+  public void onStepProgress(String detail) {
+    var r = running;
+    if (r != null) {
+      r.spinner().detail(detail);
+    }
   }
 
   @Override

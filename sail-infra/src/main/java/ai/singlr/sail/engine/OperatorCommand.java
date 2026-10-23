@@ -31,6 +31,7 @@ public record OperatorCommand(boolean sudo, boolean rootLogin) {
       List.of(
           "init",
           "host init",
+          "host incus upgrade",
           "host keys sync",
           "host ssh-identity",
           "host status",

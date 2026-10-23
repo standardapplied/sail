@@ -5,9 +5,11 @@
 
 package ai.singlr.sail.engine;
 
+import java.io.BufferedReader;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -15,6 +17,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
  * Thin wrapper around {@link ProcessBuilder} that implements {@link ShellExec}. Supports dry-run
@@ -73,6 +76,31 @@ public final class ShellExecutor implements ShellExec {
     stdoutThread.join();
     stderrThread.join();
     return new Result(process.exitValue(), stdout.get(), stderr.get());
+  }
+
+  @Override
+  public Result run(List<String> command, Consumer<String> lines)
+      throws IOException, InterruptedException {
+    if (dryRun) {
+      return dryRunResult(command);
+    }
+    var process = new ProcessBuilder(command).start();
+    process.getOutputStream().close();
+    var stderr = new AtomicReference<String>("");
+    var stderrThread =
+        Thread.ofVirtual().start(() -> stderr.set(readFully(process.getErrorStream())));
+    var stdout = new StringBuilder();
+    try (var reader =
+        new BufferedReader(
+            new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+      for (var line = reader.readLine(); line != null; line = reader.readLine()) {
+        stdout.append(line).append('\n');
+        lines.accept(line);
+      }
+    }
+    var exit = process.waitFor();
+    stderrThread.join();
+    return new Result(exit, stdout.toString(), stderr.get());
   }
 
   /**

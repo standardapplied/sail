@@ -69,15 +69,6 @@ public final class PrerequisiteChecker {
     }
 
     NeedrestartPolicy.DROP_IN.install(shell);
-    var command = new ArrayList<>(List.of("apt-get", "install", "-y", "-qq"));
-    command.addAll(packages);
-    var result = shell.exec(command, null, Duration.ofMinutes(3));
-    if (!result.ok()) {
-      throw new IOException(
-          "Failed to install prerequisite packages ("
-              + String.join(", ", packages)
-              + "): "
-              + result.stderr());
-    }
+    new Apt(shell, detail -> {}).install(packages);
   }
 }
