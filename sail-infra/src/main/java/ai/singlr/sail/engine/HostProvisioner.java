@@ -41,11 +41,17 @@ public final class HostProvisioner {
   private final ShellExec shell;
   private final ProvisionListener listener;
   private final HostPackages packages;
+  private final OperatorCommand operator;
 
-  public HostProvisioner(ShellExec shell, ProvisionListener listener) {
+  /**
+   * A provisioner whose steps report to {@code listener}, their hints rendered for {@code
+   * operator}.
+   */
+  public HostProvisioner(ShellExec shell, ProvisionListener listener, OperatorCommand operator) {
     this.shell = shell;
     this.listener = Objects.requireNonNullElse(listener, ProvisionListener.NOOP);
     this.packages = new HostPackages(shell, this.listener::onStepProgress);
+    this.operator = operator;
   }
 
   /**
@@ -144,10 +150,7 @@ public final class HostProvisioner {
     step(2, "Installing Incus (Zabbly stable)...");
     var installed = packages.ensure(HostPackages.INCUS) ? "installed" : "already installed";
     stepDone(
-        2,
-        packages.hold()
-            ? installed + "; " + OperatorCommand.here().render(HostPackages.HELD)
-            : installed);
+        2, packages.hold() ? installed + "; " + operator.render(HostPackages.HELD) : installed);
   }
 
   private void installZfs(String storageBackend)

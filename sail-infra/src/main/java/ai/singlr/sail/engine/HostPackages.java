@@ -99,11 +99,6 @@ public final class HostPackages {
     }
   }
 
-  /** Refreshes apt's index, so {@link #versions} sees what Zabbly offers now. */
-  public void refresh() throws IOException, InterruptedException {
-    apt.update();
-  }
-
   /** Incus as apt's local index has it: installed and candidate, no network. */
   public Versions versions() throws IOException, InterruptedException, TimeoutException {
     var policy = shell.exec(List.of("env", "LC_ALL=C", "apt-cache", "policy", INCUS.name()));

@@ -526,7 +526,7 @@ class MigrateCommandTest {
   @Test
   void initAndMigrateWriteTheSameNeedrestartPolicy(@TempDir Path dir) throws Exception {
     var provisioning = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
-    new HostProvisioner(provisioning, null)
+    new HostProvisioner(provisioning, null, OperatorCommand.SUDO)
         .provision(
             "dir", null, "devpool", "incusbr0", null, dir.resolve("host.yaml"), dir.resolve("db"));
     var migrating = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));

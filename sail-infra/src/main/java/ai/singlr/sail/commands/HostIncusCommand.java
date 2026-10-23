@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.engine.Apt;
 import ai.singlr.sail.engine.HostPackages;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -14,7 +16,6 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Spinner;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Path;
@@ -80,8 +81,8 @@ public final class HostIncusCommand implements Runnable {
     }
 
     private static List<RunStore.RunRow> liveRuns() {
-      try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-        return new RunStore(db).liveUnder(NodeIdentity.handle());
+      try (var operations = OperationsFactory.open()) {
+        return operations.dispatching().liveRuns(NodeIdentity.handle());
       }
     }
   }
@@ -101,7 +102,7 @@ public final class HostIncusCommand implements Runnable {
       throws IOException, InterruptedException, TimeoutException {
     if (!dryRun) {
       try (var spinner = Spinner.start(out, "Refreshing apt's index...")) {
-        new HostPackages(shell, spinner::detail).refresh();
+        new Apt(shell, spinner::detail).update();
       }
     }
     var versions = new HostPackages(shell, detail -> {}).versions();

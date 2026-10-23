@@ -43,7 +43,7 @@ class HostProvisionerTest {
     var shell = new ShellExecutor(true);
     var steps = new ArrayList<String>();
     var listener = new RecordingListener(steps);
-    var provisioner = new HostProvisioner(shell, listener);
+    var provisioner = new HostProvisioner(shell, listener, OperatorCommand.SUDO);
 
     var hostYaml =
         provisioner.provision(
@@ -80,7 +80,7 @@ class HostProvisionerTest {
             doneDetails.add(detail);
           }
         };
-    var provisioner = new HostProvisioner(shell, listener);
+    var provisioner = new HostProvisioner(shell, listener, OperatorCommand.SUDO);
 
     provisioner.provision(
         "zfs",
@@ -103,7 +103,7 @@ class HostProvisionerTest {
   @Test
   void provisionZfsDryRunDoesNotWriteHostYaml() throws Exception {
     var shell = new ShellExecutor(true);
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
     var hostYamlPath = tempDir.resolve("host.yaml");
 
     provisioner.provision(
@@ -115,7 +115,7 @@ class HostProvisionerTest {
   @Test
   void provisionZfsWithNullListenerDoesNotThrow() throws Exception {
     var shell = new ShellExecutor(true);
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
 
     assertDoesNotThrow(
         () ->
@@ -132,7 +132,7 @@ class HostProvisionerTest {
   @Test
   void provisionZfsReturnsHostYamlWithAllFields() throws Exception {
     var shell = new ShellExecutor(true);
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
 
     var result =
         provisioner.provision(
@@ -313,7 +313,7 @@ class HostProvisionerTest {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onOk("incus version", "6.3");
 
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
     var hostYamlPath = tempDir.resolve("etc/sail/host.yaml");
 
     provisioner.provision(
@@ -341,7 +341,7 @@ class HostProvisionerTest {
             .onFail("zpool list", "no such pool")
             .onFail("zpool create", "cannot open '/dev/sdb': no such device");
 
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
 
     var ex =
         assertThrows(
@@ -369,7 +369,8 @@ class HostProvisionerTest {
             .onFail("incus admin init", "permission denied");
     var steps = new ArrayList<String>();
 
-    var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
+    var provisioner =
+        new HostProvisioner(shell, new RecordingListener(steps), OperatorCommand.SUDO);
 
     var ex =
         assertThrows(
@@ -396,7 +397,7 @@ class HostProvisionerTest {
             .on("incus admin init", new ShellExec.Result(1, "", "network already exists"))
             .onOk("incus version", "6.3");
 
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
 
     assertDoesNotThrow(
         () ->
@@ -418,7 +419,7 @@ class HostProvisionerTest {
             .onFail("incus image list", "")
             .onFail("incus image copy", "network unreachable");
 
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
 
     var ex =
         assertThrows(
@@ -441,7 +442,7 @@ class HostProvisionerTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus version", "command not found");
 
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
     var result =
         provisioner.provision(
             "zfs",
@@ -460,7 +461,7 @@ class HostProvisionerTest {
     var shell = new ShellExecutor(true);
     var steps = new ArrayList<String>();
     var listener = new RecordingListener(steps);
-    var provisioner = new HostProvisioner(shell, listener);
+    var provisioner = new HostProvisioner(shell, listener, OperatorCommand.SUDO);
 
     provisioner.provision(
         "dir",
@@ -487,7 +488,8 @@ class HostProvisionerTest {
             .onFail("incus storage show", "not found")
             .onOk("incus storage create");
 
-    var provisioner = new HostProvisioner(shell, new RecordingListener(new ArrayList<>()));
+    var provisioner =
+        new HostProvisioner(shell, new RecordingListener(new ArrayList<>()), OperatorCommand.SUDO);
 
     provisioner.provision(
         "dir",
@@ -512,7 +514,8 @@ class HostProvisionerTest {
             .onOk("incus storage show");
 
     var steps = new ArrayList<String>();
-    var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
+    var provisioner =
+        new HostProvisioner(shell, new RecordingListener(steps), OperatorCommand.SUDO);
 
     provisioner.provision(
         "dir",
@@ -536,7 +539,7 @@ class HostProvisionerTest {
             .onFail("incus storage show", "not found")
             .onFail("incus storage create", "permission denied");
 
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
 
     var ex =
         assertThrows(
@@ -556,7 +559,7 @@ class HostProvisionerTest {
   @Test
   void dirBackendReturnsNullPoolDisk() throws Exception {
     var shell = new ShellExecutor(true);
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
 
     var result =
         provisioner.provision(
@@ -578,7 +581,7 @@ class HostProvisionerTest {
     var shell = new ShellExecutor(true);
     var steps = new ArrayList<String>();
     var listener = new RecordingListener(steps);
-    var provisioner = new HostProvisioner(shell, listener);
+    var provisioner = new HostProvisioner(shell, listener, OperatorCommand.SUDO);
 
     provisioner.provision(
         "dir",
@@ -602,7 +605,8 @@ class HostProvisionerTest {
             .onOk("ufw route");
 
     var steps = new ArrayList<String>();
-    var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
+    var provisioner =
+        new HostProvisioner(shell, new RecordingListener(steps), OperatorCommand.SUDO);
 
     provisioner.provision(
         "dir",
@@ -632,7 +636,8 @@ class HostProvisionerTest {
                 new IOException("Cannot run program \"ufw\": error=2, No such file or directory"));
 
     var steps = new ArrayList<String>();
-    var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
+    var provisioner =
+        new HostProvisioner(shell, new RecordingListener(steps), OperatorCommand.SUDO);
 
     assertDoesNotThrow(
         () ->
@@ -658,7 +663,8 @@ class HostProvisionerTest {
             .on("ufw status", new ShellExec.Result(0, "Status: inactive\n", ""));
 
     var steps = new ArrayList<String>();
-    var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
+    var provisioner =
+        new HostProvisioner(shell, new RecordingListener(steps), OperatorCommand.SUDO);
 
     provisioner.provision(
         "dir",
@@ -682,7 +688,8 @@ class HostProvisionerTest {
             .onFail("ufw route", "permission denied");
 
     var steps = new ArrayList<String>();
-    var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
+    var provisioner =
+        new HostProvisioner(shell, new RecordingListener(steps), OperatorCommand.SUDO);
 
     provisioner.provision(
         "dir",
@@ -775,7 +782,7 @@ class HostProvisionerTest {
         assertThrows(
             IllegalStateException.class,
             () ->
-                new HostProvisioner(shell, new RecordingListener(steps))
+                new HostProvisioner(shell, new RecordingListener(steps), OperatorCommand.SUDO)
                     .provision(
                         "dir",
                         null,
@@ -848,7 +855,7 @@ class HostProvisionerTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("incus version", "6.3")
             .on("ufw status", new ShellExec.Result(0, "Status: inactive\n", ""));
-    return new HostProvisioner(shell, listener)
+    return new HostProvisioner(shell, listener, OperatorCommand.SUDO)
         .provision(
             "dir", null, "devpool", "incusbr0", "192.0.2.4", path, path.resolveSibling("sail.db"));
   }
@@ -884,7 +891,7 @@ class HostProvisionerTest {
         assertThrows(
             IOException.class,
             () ->
-                new HostProvisioner(shell, null)
+                new HostProvisioner(shell, null, OperatorCommand.SUDO)
                     .provision(
                         "dir",
                         null,
@@ -906,7 +913,7 @@ class HostProvisionerTest {
     var original = System.out;
     System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
     try {
-      new HostProvisioner(new ShellExecutor(true), null)
+      new HostProvisioner(new ShellExecutor(true), null, OperatorCommand.SUDO)
           .provision(
               "dir",
               null,
@@ -992,7 +999,7 @@ class HostProvisionerTest {
 
   private HostYaml provision(ShellExec shell, String backend, ProvisionListener listener)
       throws Exception {
-    return new HostProvisioner(shell, listener)
+    return new HostProvisioner(shell, listener, OperatorCommand.SUDO)
         .provision(
             backend,
             "zfs".equals(backend) ? "/dev/sdb" : null,

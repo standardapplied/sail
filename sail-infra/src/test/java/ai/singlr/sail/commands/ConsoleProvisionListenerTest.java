@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.HostProvisioner;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -43,7 +44,8 @@ class ConsoleProvisionListenerTest {
               CliCommand.run(
                   printed,
                   () ->
-                      new HostProvisioner(shell, ConsoleProvisionListener.INSTANCE)
+                      new HostProvisioner(
+                              shell, ConsoleProvisionListener.INSTANCE, OperatorCommand.SUDO)
                           .provision(
                               "dir",
                               null,

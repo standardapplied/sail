@@ -34,6 +34,9 @@ public interface HostDispatching {
 
   List<DispatchGate.RunningRun> runningRuns(String project, String node);
 
+  /** Every run the box whose handle is {@code node} executes that has not finished. */
+  List<RunStore.RunRow> liveRuns(String node);
+
   AgentSession.SessionInfo projectSession(String project, String node) throws Exception;
 
   /**

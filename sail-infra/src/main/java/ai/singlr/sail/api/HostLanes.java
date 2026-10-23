@@ -93,6 +93,11 @@ final class HostLanes {
     }
 
     @Override
+    public List<RunStore.RunRow> liveRuns(String node) {
+      return runs.liveUnder(node);
+    }
+
+    @Override
     public AgentSession.SessionInfo projectSession(String project, String node) throws Exception {
       return StopOperations.resolveSession(shell, runs, project, node);
     }
