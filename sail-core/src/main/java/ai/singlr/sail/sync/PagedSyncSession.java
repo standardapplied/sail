@@ -311,9 +311,8 @@ public final class PagedSyncSession implements SyncSession {
     dirty.removeAll(seen);
     dirty.removeIf(id -> kept(local, id));
     if (walksEveryHead) {
-      var lost = lost(local, seen);
-      report = report.plus(new SyncEngine.Report(withdrawLost(type, local, lost, dirty), 0, 0, 0));
-      dirty.removeAll(lost);
+      var withdrawn = withdrawLost(type, local, lost(local, seen), dirty);
+      report = report.plus(new SyncEngine.Report(withdrawn, 0, 0, 0));
     }
     if (!dirty.isEmpty()) {
       report = report.plus(reconcileDirty(type, local, List.copyOf(dirty), since));

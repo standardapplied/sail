@@ -350,6 +350,20 @@ class MainRebuiltRoundTest {
   }
 
   @Test
+  void aNoticeNamesFiveLostRowsAndCountsTheRest() throws Exception {
+    serving = pulledAfterACopy("copy.db", serving.id(), "l1", "l2", "l3", "l4", "l5", "l6", "l7");
+
+    round();
+
+    assertEquals(
+        List.of(
+            "main no longer holds 7 spec(s) this box had pulled (l1, l2, l3, l4, l5 and 2 more"
+                + RESTORED
+                + "Each stays in its history: sudo sail spec history <id>."),
+        notices);
+  }
+
+  @Test
   void aLostSpecTheNodeChangedIsRefusedNeverPushedAndKeptInItsHistory() throws Exception {
     serving = pulledAfterACopy("copy.db", serving.id(), "r-late-1", "r-late-2");
     Acting.as("nia", () -> new SpecStore(nodeDb).updateStatus("r-late-1", SpecStatus.IN_PROGRESS));
