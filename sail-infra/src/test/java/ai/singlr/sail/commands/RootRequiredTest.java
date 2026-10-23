@@ -8,14 +8,9 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
-import ai.singlr.sail.Main;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
-import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
-import java.io.PrintWriter;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -23,6 +18,8 @@ import java.util.Map;
 import java.util.TreeSet;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import picocli.CommandLine;
 
 /**
@@ -74,8 +71,6 @@ class RootRequiredTest {
               List.of("gamma", "--cpu", "4", "--memory", "8GiB", "--disk", "40GiB", "--json")),
           Map.entry("project demo", List.of("--json", "--git-token", "ghp_x")));
 
-  private final ByteArrayOutputStream err = new ByteArrayOutputStream();
-
   @BeforeEach
   void asACallerWhoIsNotRoot() {
     assumeFalse(SailPaths.isRoot(), "the refusal is for a caller who is not root");
@@ -110,6 +105,24 @@ class RootRequiredTest {
         refusal("init", "--main", "sail@m", "--handle", "ada"));
   }
 
+  @ParameterizedTest
+  @CsvSource(
+      delimiter = '|',
+      value = {
+        "--token=s3cret|agent stream acme --token=<token> --run r1",
+        "--token|agent stream acme --token <token> --run r1"
+      })
+  void aCommandAsTypedNeverEchoesItsToken(String option, String typed) {
+    var args = new ArrayList<>(List.of("agent", "stream", "acme", option));
+    if (!option.contains("=")) {
+      args.add("s3cret");
+    }
+    args.addAll(List.of("--run", "r1"));
+    var stream = new CommandLine(new Sail()).parseArgs(args.toArray(String[]::new));
+
+    assertEquals(typed, RootRequired.typed(stream.subcommand().subcommand().commandSpec()).line());
+  }
+
   @Test
   void everyRootOnlyVerbIsCovered() {
     var verbs = new TreeSet<>(OperatorCommand.ROOT_ONLY);
@@ -139,18 +152,9 @@ class RootRequiredTest {
   }
 
   private String refusal(String... args) {
-    err.reset();
-    var saved = System.err;
-    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
-    try {
-      var sail = new CommandLine(new Sail());
-      sail.setErr(new PrintWriter(err, true, StandardCharsets.UTF_8));
-      sail.setExecutionExceptionHandler((ex, line, parsed) -> Main.report(ex, line));
-      assertEquals(1, sail.execute(args), String.join(" ", args));
-    } finally {
-      System.setErr(saved);
-    }
-    var printed = err.toString(StandardCharsets.UTF_8).strip().lines().findFirst().orElse("");
+    var ran = SailCli.run(args);
+    assertEquals(1, ran.exit(), String.join(" ", args));
+    var printed = ran.err().strip().lines().findFirst().orElse("");
     return printed.substring(printed.indexOf(' ') + 1);
   }
 

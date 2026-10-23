@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.SailApiClient;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -27,9 +28,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import picocli.CommandLine;
 
 class AgentStreamCommandTest {
+
+  private static final Remedy.Command FOLLOW_AGAIN = Remedy.sail("agent stream", "acme");
 
   @Test
   void aForeignRunRefusalSurfacesTheMessageAndTheOwningBox() {
@@ -101,7 +106,7 @@ class AgentStreamCommandTest {
     var refused =
         assertThrows(
             SailApiClient.Refused.class,
-            () -> AgentStreamCommand.print(frames, new PrintStream(out)));
+            () -> AgentStreamCommand.print(frames, new PrintStream(out), FOLLOW_AGAIN));
 
     assertEquals("first line\n", out.toString(StandardCharsets.UTF_8));
     assertEquals(UNPLACED_SUDO, String.join(" ", CliCommand.lines(refused, SUDO)));
@@ -109,13 +114,45 @@ class AgentStreamCommandTest {
   }
 
   @Test
-  void aDataLineAfterAnErrorEventEndsIsAnOrdinaryLogLine() throws Exception {
+  void aDataLineAfterAnErrorEventEndsIsAnOrdinaryLogLine() {
     var out = new ByteArrayOutputStream();
 
-    AgentStreamCommand.print(
-        List.of("event: error", "", "data: {\"a\": 1}").iterator(), new PrintStream(out));
+    var closed =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                AgentStreamCommand.print(
+                    List.of("event: error", "", "data: {\"a\": 1}").iterator(),
+                    new PrintStream(out),
+                    FOLLOW_AGAIN));
 
     assertEquals("{\"a\": 1}\n", out.toString(StandardCharsets.UTF_8));
+    assertEquals(
+        "The sail API closed the stream (it restarted or stopped). Follow again: sudo sail agent"
+            + " stream acme",
+        String.join(" ", CliCommand.lines(closed, SUDO)));
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void streamingARunTheApiStopsSendingExitsOneNamingTheCommandAsTyped(boolean dropped)
+      throws Exception {
+    var frames = "id: 1\ndata: first line\n\n";
+    try (var server = dropped ? StreamServer.dropping(frames) : StreamServer.ending(frames)) {
+      var url = "http://127.0.0.1:" + server.port();
+
+      var followed =
+          SailCli.run("agent", "stream", "acme", "--run", "r1", "--server", url, "--token", "tok");
+
+      assertEquals(1, followed.exit());
+      assertEquals("  Streaming agent output for acme...\nfirst line\n", followed.out());
+      assertEquals(
+          "  ✗ The sail API closed the stream (it restarted or stopped). Follow again: "
+              + OperatorCommand.here()
+                  .sail("agent stream acme --run r1 --server " + url + " --token <token>")
+              + "\n",
+          followed.err());
+    }
   }
 
   @Test

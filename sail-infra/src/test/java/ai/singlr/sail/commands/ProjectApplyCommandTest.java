@@ -262,17 +262,37 @@ class ProjectApplyCommandTest {
 
       assertEquals(1, apply.get());
       assertEquals(
-          Banner.errorLine(
-                  "Project descriptor not found: "
-                      + descriptor
-                      + "\n  Run 'sail project init' to author one, sync it from main with 'sail"
-                      + " sync', or specify one with --file.",
-                  Ansi.AUTO)
+          Banner.errorLine("Project descriptor not found: " + descriptor, Ansi.AUTO)
               + System.lineSeparator(),
           errors.toString(StandardCharsets.UTF_8));
     } finally {
       System.setErr(originalErr);
     }
+  }
+
+  @Test
+  void anApplyGivenNoFileNamesEveryWayToADescriptor(@TempDir Path dir) throws Exception {
+    var errors = new ByteArrayOutputStream();
+    var originalErr = System.err;
+    System.setErr(new PrintStream(errors, true, StandardCharsets.UTF_8));
+    try {
+      var apply = applying(dir.resolve("sail.db"), "--yes");
+      apply.run();
+
+      assertEquals(1, apply.get());
+    } finally {
+      System.setErr(originalErr);
+    }
+
+    assertEquals(
+        Banner.errorLine(
+                "Project descriptor not found: "
+                    + Path.of("sail.yaml").toAbsolutePath()
+                    + "\n  Run 'sail project init' to author one, sync it from main with 'sail"
+                    + " sync', or specify one with --file.",
+                Ansi.AUTO)
+            + System.lineSeparator(),
+        errors.toString(StandardCharsets.UTF_8));
   }
 
   @Test

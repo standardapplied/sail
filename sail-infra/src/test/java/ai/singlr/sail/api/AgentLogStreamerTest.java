@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ProjectScope;
@@ -437,7 +438,13 @@ class AgentLogStreamerTest {
     AgentLogStreamer.pump(process, arrivedLate, out, 0, NEVER_ENDS);
 
     assertEquals(
-        "id: 1\ndata: first\n\nid: 2\ndata: second\n\n", out.toString(StandardCharsets.UTF_8));
+        "id: 1\ndata: first\n\nid: 2\ndata: second\n\nevent: error\ndata: "
+            + YamlUtil.dumpJson(AgentLogStreamer.TAIL_ENDED.toMap())
+            + "\n\n",
+        out.toString(StandardCharsets.UTF_8));
+    assertEquals(
+        "The run's log can no longer be followed: its container stopped or its log is gone.",
+        SailApiClient.Refused.of(AgentLogStreamer.TAIL_ENDED.toMap()).getMessage());
   }
 
   @Test

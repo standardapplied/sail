@@ -190,6 +190,17 @@ public final class Banner {
     return amber(ansi, "  @|bold [" + step + "/" + total + "]|@ @|green \u2713|@ " + detail);
   }
 
+  /**
+   * A step that failed, named without its trailing ellipsis: its reason follows on its own line.
+   */
+  public static String stepFailedLine(int step, int total, String description, Ansi ansi) {
+    var name =
+        description.endsWith("...")
+            ? description.substring(0, description.length() - 3)
+            : description;
+    return amber(ansi, "  @|bold [" + step + "/" + total + "]|@ @|bold,red \u2717|@ " + name);
+  }
+
   /** Returns a formatted error line. */
   public static String errorLine(String message, Ansi ansi) {
     return amber(ansi, "  @|bold,red \u2717|@ " + message);

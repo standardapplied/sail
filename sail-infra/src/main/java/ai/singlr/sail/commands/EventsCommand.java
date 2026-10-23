@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.api.ServerConnectionConfig;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.PrintStream;
@@ -26,7 +27,9 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
+import picocli.CommandLine.Spec;
 
 @Command(
     name = "events",
@@ -37,6 +40,8 @@ import picocli.CommandLine.Option;
 public final class EventsCommand implements Runnable {
 
   private static final int DEFAULT_RECENT_LIMIT = 100;
+
+  @Spec private CommandSpec spec;
 
   @Option(
       names = {"-f", "--follow"},
@@ -126,17 +131,19 @@ public final class EventsCommand implements Runnable {
         throw SailApiClient.Refused.fromBody(
             response.statusCode(), lineStream.collect(Collectors.joining("\n")));
       }
-      print(lineStream.iterator(), out, json);
+      print(lineStream.iterator(), out, json, RootRequired.typed(spec));
     }
   }
 
   /**
-   * Prints each event the stream sends until it ends; a stream the server ended with an {@code
-   * error} event ends in the refusal it names.
+   * Prints each event the stream sends: a stream the server ended with an {@code error} event ends
+   * in the refusal it names, and one that ended or dropped without it in a failure naming {@code
+   * followAgain}.
    */
-  static void print(Iterator<String> lines, PrintStream out, boolean json)
+  static void print(
+      Iterator<String> lines, PrintStream out, boolean json, Remedy.Command followAgain)
       throws SailApiClient.Refused {
-    SailApiClient.readStream(
+    SailApiClient.follow(
         lines,
         data -> {
           try {
@@ -144,7 +151,8 @@ public final class EventsCommand implements Runnable {
           } catch (Exception parseError) {
             System.err.println("  ⚠ failed to parse event: " + parseError.getMessage());
           }
-        });
+        },
+        followAgain);
   }
 
   private static void printOne(PrintStream out, Event event, boolean json) {

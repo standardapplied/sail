@@ -28,12 +28,17 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import picocli.CommandLine;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Model.CommandSpec;
 
 /**
  * Every message a box prints that names a {@code sail} command for its operator to type, rendered
@@ -56,7 +61,7 @@ class OperatorHintsTest {
         Ansi.OFF.string(ProjectApplyCommand.serverIpUnsetLines("gamma", operator)),
         ConnectCommand.serverIpUnset("gamma", operator),
         Ansi.OFF.string(HostInitCommand.nextStep(true, true, operator).orElseThrow()),
-        ProjectApplyCommand.descriptorNotFound(Path.of("/srv/gamma/sail.yaml"), operator),
+        ProjectApplyCommand.descriptorNotFound(Path.of("/srv/gamma/sail.yaml"), false, operator),
         HostInitCommand.notInitialized(operator).getMessage(),
         operator.render((Remedied) ContainerStateGuard.notCreated("gamma")),
         launched.toString(StandardCharsets.UTF_8),
@@ -203,28 +208,47 @@ class OperatorHintsTest {
 
   @Test
   void everyCommandThatRefusesANonRootCallerIsARootOnlyVerb() {
-    var unlisted = new ArrayList<String>();
-    rootGuarded(new CommandLine(new Sail()), "", unlisted);
+    var unlisted =
+        verbs().stream()
+            .filter(
+                verb ->
+                    Files.exists(verb.source())
+                        && refusesNonRoot(read(verb.source()), verb.type().getSimpleName())
+                        && !OperatorCommand.ROOT_ONLY.contains(verb.name()))
+            .map(Verb::name)
+            .toList();
 
     assertEquals(List.of(), unlisted, "a command refuses non-root callers but is not ROOT_ONLY");
   }
 
   /**
-   * Walks the command tree collecting every verb whose class, a nested one read from its own
-   * declaration on, refuses a non-root caller in any of the words sail uses for it.
+   * A verb sail has: the words naming it, its command, and the source its class, a nested one
+   * included, is declared in.
    */
-  private static void rootGuarded(CommandLine command, String path, List<String> unlisted) {
+  private record Verb(String name, CommandSpec spec, Path source) {
+    Class<?> type() {
+      return spec.userObject().getClass();
+    }
+  }
+
+  /** Every verb in sail's command tree. */
+  private static List<Verb> verbs() {
+    var verbs = new ArrayList<Verb>();
+    verbs(new CommandLine(new Sail()), "", verbs);
+    return List.copyOf(verbs);
+  }
+
+  private static void verbs(CommandLine command, String path, List<Verb> verbs) {
     for (var sub : command.getSubcommands().entrySet()) {
-      var verb = (path + " " + sub.getKey()).strip();
-      var type = sub.getValue().getCommandSpec().userObject().getClass();
-      var source =
-          Path.of("src", "main", "java", type.getNestHost().getName().replace('.', '/') + ".java");
-      if (Files.exists(source)
-          && refusesNonRoot(read(source), type.getSimpleName())
-          && !OperatorCommand.ROOT_ONLY.contains(verb)) {
-        unlisted.add(verb);
-      }
-      rootGuarded(sub.getValue(), verb, unlisted);
+      var name = (path + " " + sub.getKey()).strip();
+      var spec = sub.getValue().getCommandSpec();
+      var host = spec.userObject().getClass().getNestHost();
+      verbs.add(
+          new Verb(
+              name,
+              spec,
+              Path.of("src", "main", "java", host.getName().replace('.', '/') + ".java")));
+      verbs(sub.getValue(), name, verbs);
     }
   }
 
@@ -418,8 +442,44 @@ class OperatorHintsTest {
   void hostInitInsideInitTellsTheOperatorNothingToRun() {
     assertEquals(Optional.empty(), HostInitCommand.nextStep(false, false, SUDO));
     assertEquals(Optional.empty(), HostInitCommand.nextStep(false, true, SUDO));
-    assertEquals(false, HostInitCommand.initStep().standalone());
-    assertEquals(true, new HostInitCommand().standalone());
+  }
+
+  /**
+   * Every hint a command's source prints names only an option that command takes: a sentence such
+   * as "re-run with --x", or {@link CliCommand#DRY_RUN_HINT} for {@code --dry-run}, its words
+   * joined across a concatenation; a file holding several commands offers the options of each.
+   */
+  @Test
+  void everyHintNamesAnOptionItsCommandTakes() {
+    var hint = Pattern.compile("(?i)(?:re-?run|specify one|pass it) with (--[a-z][a-z0-9-]*)");
+    var options = new TreeMap<Path, Set<String>>();
+    verbs()
+        .forEach(
+            verb ->
+                options
+                    .computeIfAbsent(verb.source(), ignored -> new TreeSet<>())
+                    .addAll(verb.spec().optionsMap().keySet()));
+    var lacking = new ArrayList<String>();
+    options.forEach(
+        (file, taken) -> {
+          var source = read(file).replaceAll("\"\\s*\\+\\s*\"", "");
+          var named = hint.matcher(source).results().map(found -> found.group(1));
+          var offered =
+              source.contains("CliCommand.DRY_RUN_HINT")
+                  ? Stream.of("--dry-run")
+                  : Stream.<String>of();
+          Stream.concat(named, offered)
+              .filter(option -> !taken.contains(option))
+              .forEach(option -> lacking.add(file.getFileName() + ": " + option));
+        });
+
+    assertEquals(List.of(), lacking, "a hint names an option its command does not take");
+  }
+
+  @Test
+  void onlyHostInitRunOnItsOwnOffersTheDryRunItHas() {
+    assertEquals(CliCommand.DRY_RUN_HINT, new HostInitCommand().failureHint());
+    assertEquals(null, HostInitCommand.initStep().failureHint());
   }
 
   @Test

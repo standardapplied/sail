@@ -131,10 +131,10 @@ public final class InitCommand implements Runnable {
     String ask(String label);
   }
 
-  /** Runs one granular command with its arguments, failing when it fails. */
+  /** Runs one granular command with its arguments, answering whether it succeeded. */
   @FunctionalInterface
   interface Steps {
-    void run(Object command, String... args);
+    boolean run(Object command, String... args);
   }
 
   @Override
@@ -158,7 +158,11 @@ public final class InitCommand implements Runnable {
       System.out.println(Ansi.AUTO.string("  @|faint Host already provisioned — skipping.|@"));
     }
     for (var step : InitPlan.plan(intent, provisioned)) {
-      runStep(step, box.steps(), fde, roster.name(), roster.email());
+      if (!runStep(step, box.steps(), fde, roster.name(), roster.email())) {
+        throw new IllegalStateException(
+            "Setup stopped at the step marked ✗ above. Fix the cause above and re-run: "
+                + box.operator().sail(RootRequired.typed(spec).line()));
+      }
     }
     name.adopt(box.identity());
     mail.adopt(box.identity());
@@ -276,14 +280,14 @@ public final class InitCommand implements Runnable {
     return ConsoleHelper.readLine();
   }
 
-  private void runStep(InitPlan.Step step, Steps steps, String fde, String name, String mail) {
-    switch (step) {
+  private boolean runStep(InitPlan.Step step, Steps steps, String fde, String name, String mail) {
+    return switch (step) {
       case PROVISION -> steps.run(HostInitCommand.initStep(), "--yes");
       case INSTALL_API_SYSTEM -> steps.run(new HostServiceInstallCommand());
       case SSH_IDENTITY -> steps.run(new HostSshIdentityCommand());
       case SYNC_AS_MAIN -> steps.run(new HostSyncCommand(), withFde("--as-main", fde, name, mail));
       case JOIN_MAIN -> steps.run(new JoinCommand(), withFde(main, fde, name, mail));
-    }
+    };
   }
 
   private void requireRoot(boolean root) {
@@ -359,13 +363,11 @@ public final class InitCommand implements Runnable {
 
   /**
    * Runs a step as {@code sail} runs a command, its failure reported by {@link Main#report} once
-   * and without a trace, then stops the setup.
+   * and without a trace, answering whether it succeeded.
    */
-  static void runCommand(Object command, String... args) {
+  static boolean runCommand(Object command, String... args) {
     var line = new CommandLine(command);
     line.setExecutionExceptionHandler((failure, failed, parsed) -> Main.report(failure, failed));
-    if (line.execute(args) != 0) {
-      throw new IllegalStateException("Setup stopped — the step above failed.");
-    }
+    return line.execute(args) == 0;
   }
 }

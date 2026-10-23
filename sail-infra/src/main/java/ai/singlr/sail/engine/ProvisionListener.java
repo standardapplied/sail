@@ -14,6 +14,9 @@ public interface ProvisionListener {
 
   default void onStepSkipped(int step, int total, String detail) {}
 
+  /** The step running, if one is, failed: its failure is reported after this returns. */
+  default void onStepFailed() {}
+
   /** A no-op listener that silently discards all events. */
   ProvisionListener NOOP =
       new ProvisionListener() {

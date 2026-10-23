@@ -95,14 +95,17 @@ public final class HostInitCommand implements Runnable {
     return new HostInitCommand(false);
   }
 
-  /** Whether this host init runs on its own rather than as a step of {@code sail init}. */
-  boolean standalone() {
-    return standalone;
+  /**
+   * What a failure sail did not decide ends with: the dry-run hint for host init run on its own,
+   * nothing as a step of {@code sail init}, which has no {@code --dry-run}.
+   */
+  String failureHint() {
+    return standalone ? CliCommand.DRY_RUN_HINT : null;
   }
 
   @Override
   public void run() {
-    CliCommand.run(CliCommand.DRY_RUN_HINT, this::execute);
+    CliCommand.run(failureHint(), this::execute);
   }
 
   private void execute() throws Exception {

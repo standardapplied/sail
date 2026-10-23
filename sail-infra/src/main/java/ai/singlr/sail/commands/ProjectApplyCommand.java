@@ -808,15 +808,21 @@ public final class ProjectApplyCommand implements Runnable {
     }
     var sailYamlPath = resolveSailYamlPath(name, file);
     if (!Files.exists(sailYamlPath)) {
-      throw new IllegalStateException(descriptorNotFound(sailYamlPath, operator));
+      throw new IllegalStateException(descriptorNotFound(sailYamlPath, file != null, operator));
     }
     return new Definition(Files.readString(sailYamlPath), sailYamlPath);
   }
 
-  /** The refusal of an apply that finds no definition of its project at {@code path}. */
-  static String descriptorNotFound(Path path, OperatorCommand operator) {
-    return "Project descriptor not found: "
-        + path.toAbsolutePath()
+  /**
+   * The refusal of an apply that finds no definition of its project at {@code path}: a path the
+   * caller {@code given} with {@code --file} is named alone, since the way out is the right path.
+   */
+  static String descriptorNotFound(Path path, boolean given, OperatorCommand operator) {
+    var missing = "Project descriptor not found: " + path.toAbsolutePath();
+    if (given) {
+      return missing;
+    }
+    return missing
         + "\n  Run '"
         + operator.sail("project init")
         + "' to author one, sync it from main with '"

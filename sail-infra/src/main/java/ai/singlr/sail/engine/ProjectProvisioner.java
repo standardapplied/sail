@@ -143,6 +143,7 @@ public final class ProjectProvisioner {
       writeProjectState(config);
       tracker.cleanup();
     } catch (Exception e) {
+      listener.onStepFailed();
       if (currentPhase != null) {
         tracker.recordFailure(currentPhase, e.getMessage());
       }

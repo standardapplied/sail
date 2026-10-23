@@ -58,6 +58,13 @@ public final class AgentLogStreamer implements HttpHandler {
   private static final byte[] HEARTBEAT = ": heartbeat\n\n".getBytes(StandardCharsets.UTF_8);
   private static final long HEARTBEAT_INTERVAL_NANOS = Duration.ofSeconds(15).toNanos();
 
+  /** Why a stream whose tail exited ended: the follower is told, not left to guess a restart. */
+  static final ApiError TAIL_ENDED =
+      new ApiError(
+          ErrorCode.CONFLICT.code(),
+          "The run's log can no longer be followed: its container stopped or its log is gone.",
+          null);
+
   private final ApiAuth auth;
   private final Function<String, Optional<RunStore.RunRow>> runLookup;
   private final Function<String, Optional<SpecStore.SpecRow>> specLookup;
@@ -256,9 +263,10 @@ public final class AgentLogStreamer implements HttpHandler {
    * (bad project) or whose agent has stopped exits, and without this the loop would heartbeat onto
    * a dead pipe forever, holding the connection open and never closing the stream. A process seen
    * gone is read to the end of its pipe first, so what it wrote between a {@code ready()} that saw
-   * nothing and its exit is still relayed. Before each line and each heartbeat the caller is asked
-   * again whether it may still read the run ({@code recheck}); once it may not, the stream ends
-   * with an {@code error} event saying why.
+   * nothing and its exit is still relayed, and the stream then ends with an {@code error} event
+   * saying so, which a follower tells from a dropped connection. Before each line and each
+   * heartbeat the caller is asked again whether it may still read the run ({@code recheck}); once
+   * it may not, the stream ends with an {@code error} event saying why.
    */
   static void pump(
       Process tailProcess,
@@ -274,7 +282,7 @@ public final class AgentLogStreamer implements HttpHandler {
         if (reader.ready() || !tailProcess.isAlive()) {
           var line = reader.readLine();
           if (line == null) {
-            break;
+            throw new StreamRecheck.Ended(TAIL_ENDED);
           }
           recheck.recheck();
           writeSseData(out, lineNumber, line);

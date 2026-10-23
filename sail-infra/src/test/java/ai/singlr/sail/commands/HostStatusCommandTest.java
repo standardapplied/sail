@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.ScriptedShellExecutor;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -94,6 +95,32 @@ class HostStatusCommandTest {
     assertTrue(
         text.contains("unavailable (incus list failed: cannot connect to the incus daemon)"), text);
     assertFalse(text.contains("0 total"), text);
+  }
+
+  @Test
+  void aStoppedDaemonsErrorIsOneRowThatFitsTheBoxAndWholeInTheJson() throws Exception {
+    var stderr =
+        "Error: The incus daemon doesn't appear to be started (socket path:"
+            + " /var/lib/incus/unix.socket)\nSee 'incus admin init'.\n";
+    var shell =
+        new ScriptedShellExecutor().onFail("incus list", stderr).onFail("incus version", stderr);
+
+    assertEquals("incus list failed: " + stderr, json(shell).get("containers_error"));
+    var box =
+        text(shell)
+            .lines()
+            .dropWhile(line -> !line.startsWith("  ╭"))
+            .takeWhile(line -> !line.isEmpty())
+            .toList();
+    assertEquals(
+        List.of(box.getFirst().length()),
+        box.stream().map(String::length).distinct().toList(),
+        String.join("\n", box));
+    assertEquals(
+        List.of(
+            "  │  Containers:  unavailable (incus list failed: Error: The incus daemon doesn't"
+                + " appear to be started (socket path: /var/lib/incus/unix.socket))│"),
+        box.stream().filter(line -> line.contains("Containers:")).toList());
   }
 
   private static Map<String, Object> json(ScriptedShellExecutor shell) throws Exception {

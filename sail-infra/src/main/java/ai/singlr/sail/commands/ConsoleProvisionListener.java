@@ -12,20 +12,24 @@ import picocli.CommandLine.Help.Ansi;
 
 /**
  * Prints styled provisioning progress to stdout using picocli ANSI markup. Shows an animated
- * spinner on the current step while it is running, then replaces it with the final status line.
+ * spinner on the current step while it is running, then replaces it with the final status line; a
+ * step that fails is replaced by its ✗ line, so the reason reported next starts a line of its own.
  */
 final class ConsoleProvisionListener implements ProvisionListener {
 
   static final ConsoleProvisionListener INSTANCE = new ConsoleProvisionListener();
 
-  private volatile Spinner spinner;
+  private volatile Running running;
 
   private ConsoleProvisionListener() {}
 
   @Override
   public void onStep(int step, int total, String description) {
     var label = Ansi.AUTO.string("@|bold [" + step + "/" + total + "]|@ ") + description;
-    spinner = Spinner.start(System.out, label);
+    running =
+        new Running(
+            Spinner.start(System.out, label),
+            Banner.stepFailedLine(step, total, description, Ansi.AUTO));
   }
 
   @Override
@@ -40,11 +44,23 @@ final class ConsoleProvisionListener implements ProvisionListener {
     System.out.println(Banner.stepSkippedLine(step, total, detail, Ansi.AUTO));
   }
 
-  private void stopSpinner() {
-    var s = spinner;
-    if (s != null) {
-      s.stop();
-      spinner = null;
+  @Override
+  public void onStepFailed() {
+    var failed = stopSpinner();
+    if (failed != null) {
+      System.out.println(failed.failedLine());
     }
   }
+
+  private Running stopSpinner() {
+    var r = running;
+    if (r != null) {
+      r.spinner().stop();
+      running = null;
+    }
+    return r;
+  }
+
+  /** The step whose spinner runs, and the line it ends on if it fails. */
+  private record Running(Spinner spinner, String failedLine) {}
 }
