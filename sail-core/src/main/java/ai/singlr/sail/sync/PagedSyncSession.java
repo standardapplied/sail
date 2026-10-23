@@ -391,7 +391,8 @@ public final class PagedSyncSession implements SyncSession {
     return lost.size();
   }
 
-  private static Remedy lostNotice(String type, List<String> ids) {
+  private static Remedy lostNotice(String type, List<String> dropped) {
+    var ids = dropped.stream().sorted().toList();
     var named = String.join(", ", ids.subList(0, Math.min(ids.size(), LOST_NAMED)));
     var more = ids.size() > LOST_NAMED ? " and " + (ids.size() - LOST_NAMED) + " more" : "";
     var kept =
