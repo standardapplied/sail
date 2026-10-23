@@ -73,8 +73,8 @@ then re-pins main's new host key (`sudo ssh-keygen -R <main-ip>`, then `sudo sai
 has not pushed yet. Work main took after the copy is lost with it and is not rebuilt from the node:
 that sync drops what the node had pulled of it, says so once per type, and keeps each row in its
 history (`sudo sail spec history <id>`). A main restored in place from an older copy is treated the
-same way. A main set up empty is a new org: every node refuses to sync with it. A copy taken before 0.54.0 counts as
-a new org too, so take a fresh one after upgrading.
+same way. A main set up empty is a new org: every node refuses to sync with it. A copy taken before
+0.54.0 counts as a new org too, so take a fresh one after upgrading.
 
 Mast, the desktop client, is a thin client of a box: specs, rooms and reviews over its API and
 event stream, terminals and files over its pty host.

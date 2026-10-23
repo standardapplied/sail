@@ -837,7 +837,8 @@ public final class ChangeLog {
 
   /**
    * Whether the latest version of {@code entityId} this box took from a sync came from main: a
-   * node's adoption of main's version, never a node's push main took when this box was main.
+   * node's adoption of main's version, never a node's push main took when this box was main. A
+   * version synced before revisions named their peer names none, and so answers false.
    */
   public boolean heardFromMain(String entityType, String entityId) {
     return db.queryOne(

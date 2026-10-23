@@ -289,6 +289,9 @@ class NativeFleetIT {
       assertTrue(rejoined.contains("Main already has this box's key."), rejoined);
       assertFalse(rejoined.contains("Permission denied"), rejoined);
       assertTrue(
+          mady.shOk("cat /root/.sail/host.yaml").contains("handle: mady"),
+          "a re-join without --handle keeps the handle, on a roster of two");
+      assertTrue(
           migrated.contains(
               "API token re-issued for this box: the database came from another box."),
           migrated);

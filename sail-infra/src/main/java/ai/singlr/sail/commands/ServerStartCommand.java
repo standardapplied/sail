@@ -180,12 +180,16 @@ public final class ServerStartCommand implements Runnable {
 
     var tokenStore = new TokenStore(db);
     var configPath = SailPaths.clientConfigPath();
-    HostToken.said(HostToken.ensure(tokenStore, configPath), configPath, BoxIdentity.config())
-        .ifPresent(
-            said -> {
-              System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + said));
-              System.out.println();
-            });
+    try {
+      HostToken.said(HostToken.ensure(tokenStore, configPath), configPath, BoxIdentity.config())
+          .ifPresent(
+              said -> {
+                System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + said));
+                System.out.println();
+              });
+    } catch (Exception e) {
+      System.err.println("  API token in " + configPath + " not checked: " + e.getMessage());
+    }
     var specStore = new SpecStore(db);
     var roomStore = new RoomStore(db);
     var eventStore = new EventStore(db);

@@ -306,6 +306,17 @@ class HostCliIdentityTest {
     assertEquals(List.of("ci"), tokens.list().stream().map(TokenStore.TokenInfo::name).toList());
   }
 
+  @Test
+  void aConfigThatCannotBeReadIsRefusedLoudlyNotWeighed() throws Exception {
+    var tokens = new TokenStore(db);
+    tokens.create("ci", "member");
+    Files.writeString(configPath, "token: [unclosed\n");
+
+    assertThrows(Exception.class, () -> HostToken.ensure(tokens, configPath));
+
+    assertEquals(List.of("ci"), tokens.list().stream().map(TokenStore.TokenInfo::name).toList());
+  }
+
   private void serve(SyncConfig config) throws IOException {
     box.set(config);
     operations =

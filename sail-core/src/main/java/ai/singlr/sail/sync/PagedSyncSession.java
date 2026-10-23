@@ -313,8 +313,11 @@ public final class PagedSyncSession implements SyncSession {
     dirty.removeIf(id -> kept(local, id));
     var lost = Set.<String>of();
     if (walksEveryHead) {
-      lost = withdrawLost(type, local, lost(local, seen));
-      local.advanceCheckpoint(mainId, since);
+      var weighed = lost(local, seen);
+      lost = withdrawLost(type, local, weighed);
+      if (lost.size() == weighed.size()) {
+        local.advanceCheckpoint(mainId, since);
+      }
     }
     if (!dirty.isEmpty()) {
       report = report.plus(reconcileDirty(type, local, List.copyOf(dirty), since));
@@ -345,7 +348,7 @@ public final class PagedSyncSession implements SyncSession {
    * from a copy older than this box's last sync. A box meeting a database for the first time has
    * heard nothing from it, and what a former main took from its nodes it never heard from a main.
    * Only what this box's scope admits and holds whole is weighed, along with what it deleted and
-   * never pushed, and never work still live here.
+   * never pushed.
    */
   private Set<String> lost(LocalReplica local, Set<String> seen) {
     var lost = new LinkedHashSet<String>();
@@ -353,9 +356,7 @@ public final class PagedSyncSession implements SyncSession {
     for (var id : local.entityIds()) {
       if (!seen.contains(id)
           && scope.admits(local.project(id))
-          && !kept(local, id)
           && local.heardFromMain(id)
-          && !local.live(id)
           && (dirty.contains(id) || held(local, id))) {
         lost.add(id);
       }
@@ -369,45 +370,54 @@ public final class PagedSyncSession implements SyncSession {
 
   /**
    * Withdraws each row main no longer holds, {@code lost}, as a denied offer is withdrawn: its
-   * revisions stay in this box's history and nothing is offered to rebuild main from it. Each is
-   * weighed again in the same atomic scope as its withdrawal, so work that went live here since is
-   * left alone, and one carrying a change main never took is refused as a denial is, naming why;
-   * the rest are named once for the type. The latest heard go first, so a reply leaves before the
-   * message it answers, whose withdrawal would take it along unweighed. The type's checkpoint stays
-   * at 0 until all are withdrawn, so a round cut short walks every head again. Returns the rows
-   * withdrawn, counted as adopted.
+   * revisions stay in this box's history and nothing is offered to rebuild main from it. Work still
+   * live here and a project this round keeps whole ({@link #keep}) are left for a later round, the
+   * former weighed in the same atomic scope as its withdrawal; the caller holds the type's
+   * checkpoint at 0 until none is left, so the next round walks every head again, as it does after
+   * a round cut short. One carrying a change main never took is refused as a denial is, naming why;
+   * the rest are named once for the type, those withdrawn before a failure included. The rows go in
+   * the reverse of the order the store lists them, so a reply, listed after the message it answers,
+   * leaves before it, whose withdrawal would take it along unweighed. Returns the rows withdrawn,
+   * counted as adopted.
    */
   private Set<String> withdrawLost(String type, LocalReplica local, Set<String> lost) {
     var withdrawn = new LinkedHashSet<String>();
     var dropped = new ArrayList<String>();
-    for (var id : List.copyOf(lost).reversed()) {
-      var unpushed =
-          Actor.call(
-              Actor.main(null),
-              () ->
-                  local.atomically(
-                      () -> {
-                        if (local.live(id)) {
-                          return Optional.<Boolean>empty();
-                        }
-                        var changed = !Objects.equals(local.currentRev(id), local.lastHeardRev(id));
-                        local.adopt(id, null, null, local.project(id));
-                        return Optional.of(changed);
-                      }));
-      if (unpushed.isEmpty()) {
-        continue;
+    try {
+      for (var id : List.copyOf(lost).reversed()) {
+        if (kept(local, id)) {
+          continue;
+        }
+        var unpushed =
+            Actor.call(
+                Actor.main(null),
+                () ->
+                    local.atomically(
+                        () -> {
+                          if (local.live(id)) {
+                            return Optional.<Boolean>empty();
+                          }
+                          var changed =
+                              !Objects.equals(local.currentRev(id), local.lastHeardRev(id));
+                          local.adopt(id, null, null, local.project(id));
+                          return Optional.of(changed);
+                        }));
+        if (unpushed.isEmpty()) {
+          continue;
+        }
+        withdrawn.add(id);
+        if (unpushed.get()) {
+          var lostHere = "main no longer holds " + id + ": it was restored from an older copy";
+          denials.add(new SyncSession.Denial(type, id, lostHere));
+          notice.accept(Remedy.of(lostHere + ". ").then(SyncSession.Denial.kept(type, id)));
+        } else {
+          dropped.add(id);
+        }
       }
-      withdrawn.add(id);
-      if (unpushed.get()) {
-        var lostHere = "main no longer holds " + id + ": it was restored from an older copy";
-        denials.add(new SyncSession.Denial(type, id, lostHere));
-        notice.accept(Remedy.of(lostHere + ". ").then(SyncSession.Denial.kept(type, id)));
-      } else {
-        dropped.add(id);
+    } finally {
+      if (!dropped.isEmpty()) {
+        notice.accept(lostNotice(type, dropped));
       }
-    }
-    if (!dropped.isEmpty()) {
-      notice.accept(lostNotice(type, dropped));
     }
     adopted += withdrawn.size();
     return withdrawn;
