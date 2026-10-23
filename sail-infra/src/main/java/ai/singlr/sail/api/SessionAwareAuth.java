@@ -25,7 +25,9 @@ import java.util.Objects;
 public final class SessionAwareAuth implements ApiAuth {
 
   private static final String BEARER = "Bearer ";
-  private static final String SESSION_PREFIX = "sess_";
+
+  /** The prefix of every login session token. */
+  public static final String SESSION_PREFIX = "sess_";
 
   private final AuthSessionStore sessions;
   private final FdeStore roster;

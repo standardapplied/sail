@@ -148,7 +148,7 @@ public final class InitCommand implements Runnable {
     requireRoot(box.root());
     requireNoUserService(box.sudoUser(), box.homeOf());
     var provisioned = Files.exists(box.hostConfig());
-    var fde = intent instanceof InitIntent.Main ? mainHandle(box, provisioned) : handle;
+    var fde = operatorHandle(intent, box, provisioned);
     var name = gitChoice(box, PlaceholderResolver.GIT_NAME, fullName, "Your full name", "--name");
     var mail = gitChoice(box, PlaceholderResolver.GIT_EMAIL, email, "Your email", "--email");
     var roster = roster(intent, box.identity(), name, mail);
@@ -168,17 +168,19 @@ public final class InitCommand implements Runnable {
   }
 
   /**
-   * Main's operator, the FDE dispatch picks this box's specs for: {@code --handle}, else the handle
-   * the box already acts as, else asked for. Settled before the first step, so a box acting as
-   * another FDE is refused untouched ({@link HostSyncCommand#requireHandle}).
+   * The FDE this box acts as: {@code --handle}, else the handle the box already acts as; for main,
+   * whose operator is the FDE dispatch picks this box's specs for, else asked for, and a node's
+   * first join asks on its own. Settled before the first step, so a box acting as another FDE is
+   * refused untouched ({@link HostSyncCommand#requireHandle}) and a re-join keeps its handle.
    */
-  private String mainHandle(Box box, boolean provisioned) throws Exception {
+  private String operatorHandle(InitIntent intent, Box box, boolean provisioned) throws Exception {
     var held =
         provisioned ? HostYaml.fromMap(YamlUtil.parseFile(box.hostConfig())).sync().handle() : null;
-    var chosen =
-        Strings.isNotBlank(handle)
-            ? handle
-            : Strings.isNotBlank(held) ? held : box.prompt().ask("Your FDE handle");
+    var given = Strings.isNotBlank(handle) ? handle : held;
+    if (intent instanceof InitIntent.Node && Strings.isBlank(given)) {
+      return null;
+    }
+    var chosen = Strings.isNotBlank(given) ? given : box.prompt().ask("Your FDE handle");
     if (Strings.isBlank(chosen)) {
       throw new IllegalStateException(
           "Main's operator is an FDE, the one dispatch picks this box's specs for. Re-run with"

@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
+import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
@@ -17,6 +18,7 @@ import ai.singlr.sail.engine.FileImporter;
 import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.HostDropIn;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.NeedrestartPolicy;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -39,6 +41,7 @@ import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncScope;
+import ai.singlr.sail.store.TokenStore;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -213,6 +216,7 @@ public final class MigrateCommand implements Runnable {
   private static void convergeHost(Sqlite db, boolean jsonOutput, OperatorCommand operator) {
     relocateHostConfig(db, jsonOutput, operator);
     assignBoxId(db, jsonOutput, operator);
+    ensureHostToken(db, jsonOutput, operator);
     syncAuthorizedKeys(db, jsonOutput, operator);
     revokeOtherFdesPairings(db, FdeCommand.Box::here, jsonOutput, operator);
     ensureHostDropIns(jsonOutput);
@@ -427,6 +431,32 @@ public final class MigrateCommand implements Runnable {
               + ". Run '"
               + operator.sail("migrate")
               + "' to write it; sync uses the hostname until then.");
+    }
+  }
+
+  /**
+   * Re-issues this box's host token when its client config holds one the database does not ({@link
+   * HostToken#ensure}): a database restored from another box's copy holds that box's tokens, and
+   * every host CLI call would be refused until the token is minted here.
+   */
+  private static void ensureHostToken(Sqlite db, boolean jsonOutput, OperatorCommand operator) {
+    var configPath = SailPaths.clientConfigPath();
+    try {
+      var said =
+          HostToken.said(
+              HostToken.ensure(new TokenStore(db), configPath), configPath, BoxIdentity.config());
+      if (!jsonOutput) {
+        said.ifPresent(line -> System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + line)));
+      }
+    } catch (Exception e) {
+      System.err.println(
+          "  API token in "
+              + configPath
+              + " not checked: "
+              + e.getMessage()
+              + ". Run '"
+              + operator.sail("migrate")
+              + "' again.");
     }
   }
 

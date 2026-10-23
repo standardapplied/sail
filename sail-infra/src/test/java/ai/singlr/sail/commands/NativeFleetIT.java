@@ -202,6 +202,7 @@ class NativeFleetIT {
                       + " ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on main); otherwise"
                       + " something between this box and main is answering for it."),
           refused::output);
+      assertFalse(refused.output().contains("REMOTE HOST IDENTIFICATION"), refused::output);
 
       mady.shOk("ssh-keygen -R localhost");
       var rejoined = mady.sailOk("join", "sail@localhost", "--handle", "mady");
@@ -274,9 +275,9 @@ class NativeFleetIT {
       main.shOk("sqlite3 /var/lib/sail/sail.db \".backup /root/sail.db.copy\"");
       fleet.offline(mady, () -> mady.createSpecs("node-new", 1, 1_000));
 
-      fleet.rebuildMain("/root/sail.db.copy");
+      var migrated = fleet.rebuildMain("/root/sail.db.copy");
       mady.shOk("ssh-keygen -R localhost");
-      var rejoined = mady.sailOk("join", "localhost", "--handle", "mady");
+      var rejoined = mady.sailOk("join", "localhost");
       var fingerprint = main.shOk("ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub").split(" ")[1];
 
       assertTrue(
@@ -286,9 +287,59 @@ class NativeFleetIT {
                   + ". Check it on main: sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub"),
           rejoined);
       assertTrue(rejoined.contains("Main already has this box's key."), rejoined);
+      assertFalse(rejoined.contains("Permission denied"), rejoined);
+      assertTrue(
+          mady.shOk("cat /root/.sail/host.yaml").contains("handle: mady"),
+          "a re-join without --handle keeps the handle, on a roster of two");
+      assertTrue(
+          migrated.contains(
+              "API token re-issued for this box: the database came from another box."),
+          migrated);
+      main.serving(
+          () -> {
+            main.apiOk("spec", "list", "-p", "demo");
+            assertEquals(
+                "uday", NativeFleet.json(main.interactiveSpec("whoami").output()).get("handle"));
+          });
       mady.sailOk("sync");
       assertEquals("1", main.query("SELECT count(*) FROM specs WHERE id = 'node-new-1'").strip());
       fleet.assertConverged(mady);
+      var again = mady.sailOk("sync");
+      assertTrue(again.contains("Already in sync with main."), again);
+    }
+  }
+
+  @Test
+  void aMainRestoredInPlaceFromAnOlderCopyLeavesTheNodeHoldingWhatMainHoldsAfterOneRound()
+      throws Exception {
+    try (var fleet = NativeFleet.openOrSkip()) {
+      var main = fleet.main("uday", fleet.candidate());
+      main.serving(() -> main.createSpecs("seed", 2, 1_000));
+      var mady = fleet.node("mady", fleet.candidate());
+      mady.sailOk("sync");
+      main.shOk("sqlite3 /var/lib/sail/sail.db \".backup /root/sail.db.copy\"");
+      main.serving(() -> main.createSpecs("late", 2, 1_000));
+      mady.sailOk("sync");
+      assertEquals("2", mady.query("SELECT count(*) FROM specs WHERE id LIKE 'late-%'").strip());
+
+      var migrated = fleet.restoreMain("/root/sail.db.copy");
+      var round = mady.sailOk("sync");
+
+      assertFalse(migrated.contains("API token"), migrated);
+      assertTrue(
+          round.contains(
+              "main no longer holds 2 spec(s) this box had pulled (late-1, late-2): main was"
+                  + " restored from a copy older than this box's last sync. Each stays in its"
+                  + " history: sail spec history <id>."),
+          round);
+      fleet.assertConverged(mady);
+      assertEquals(
+          "2",
+          mady.query(
+                  "SELECT count(*) FROM change_log WHERE entity_type = 'spec' AND entity_id ="
+                      + " 'late-1'")
+              .strip(),
+          "the version pulled and its withdrawal stay in the spec's history");
       var again = mady.sailOk("sync");
       assertTrue(again.contains("Already in sync with main."), again);
     }

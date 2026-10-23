@@ -116,6 +116,11 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
+  public boolean heardFromMain(String entityId) {
+    return changeLog.heardFromMain(store.entityType(), entityId);
+  }
+
+  @Override
   public void offering(String entityId, Map<String, Object> offered, Map<String, Object> from) {
     changeLog.recordOffer(store.entityType(), entityId, offered, from);
   }

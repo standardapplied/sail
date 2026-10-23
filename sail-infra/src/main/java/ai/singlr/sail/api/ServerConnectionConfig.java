@@ -31,7 +31,8 @@ import java.util.Set;
  */
 public record ServerConnectionConfig(String serverUrl, String token) {
 
-  private static final String DEFAULT_URL = "http://localhost:7070";
+  /** This box's own control plane, the server a host token is saved for. */
+  public static final String DEFAULT_URL = "http://localhost:7070";
 
   public static ServerConnectionConfig resolve() throws IOException {
     return resolve(null, null, SailPaths.clientConfigPath());

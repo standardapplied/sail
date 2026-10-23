@@ -164,23 +164,39 @@ public final class NativeFleet implements AutoCloseable {
    * place of the new database and migrated, which restores the sail user's keys from it: the
    * README's restore, but for stopping and starting sail-api, which no box here runs.
    */
-  public void rebuildMain(String copy) throws Exception {
+  public String rebuildMain(String copy) throws Exception {
     sshd.close();
     try {
       main.shOk(REBUILD_MAIN);
       main.sailOk("migrate");
       setUpMain(main);
-      if (copy != null) {
-        main.shOk(
-            "install -m 660 -g sail "
-                + copy
-                + " /var/lib/sail/sail.db && rm -f /var/lib/sail/sail.db-wal"
-                + " /var/lib/sail/sail.db-shm");
-        main.sailOk("migrate");
-      }
+      return copy == null ? "" : restore(copy);
     } finally {
       sshd = main.sshd();
     }
+  }
+
+  /**
+   * Puts {@code copy}, the path in main's box of a copy of its database, in place of main's
+   * database and migrates it, as the README's restore does but for stopping and starting sail-api,
+   * which no box here runs. Returns what the migrate printed.
+   */
+  public String restoreMain(String copy) throws Exception {
+    sshd.close();
+    try {
+      return restore(copy);
+    } finally {
+      sshd = main.sshd();
+    }
+  }
+
+  private String restore(String copy) throws Exception {
+    main.shOk(
+        "install -m 660 -g sail "
+            + copy
+            + " /var/lib/sail/sail.db && rm -f /var/lib/sail/sail.db-wal"
+            + " /var/lib/sail/sail.db-shm");
+    return main.sailOk("migrate");
   }
 
   public Box node(String handle, Path binary) throws Exception {

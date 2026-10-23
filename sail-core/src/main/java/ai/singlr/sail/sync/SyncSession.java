@@ -57,12 +57,16 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
 
     /** The denial as the FDE reads it: what main refused, why, and where their version is kept. */
     public Remedy describe() {
-      var kept =
-          "spec".equals(type)
-              ? Remedy.of("Yours is in its history: ", Remedy.sail("spec history", id), ".")
-              : Remedy.of("Yours stays in this box's change log.");
       var why = reason.endsWith(".") ? reason : reason + ".";
-      return Remedy.of(type + " " + id + ": main denied this change — " + why + " ").then(kept);
+      return Remedy.of(type + " " + id + ": main denied this change — " + why + " ")
+          .then(kept(type, id));
+    }
+
+    /** Where this box keeps its own version of {@code id}, a row of {@code type} it withdrew. */
+    public static Remedy kept(String type, String id) {
+      return "spec".equals(type)
+          ? Remedy.of("Yours is in its history: ", Remedy.sail("spec history", id), ".")
+          : Remedy.of("Yours stays in this box's change log.");
     }
   }
 

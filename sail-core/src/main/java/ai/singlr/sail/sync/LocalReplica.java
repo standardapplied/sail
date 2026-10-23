@@ -60,6 +60,12 @@ public interface LocalReplica {
    */
   String lastHeardRev(String id);
 
+  /**
+   * Whether the latest version of {@code id} this box heard ({@link #lastHeardRev}) was main's to a
+   * node, not a node's push this box took as main.
+   */
+  boolean heardFromMain(String id);
+
   /** The author this box records for its latest version of {@code id}; null when it names none. */
   String author(String id);
 

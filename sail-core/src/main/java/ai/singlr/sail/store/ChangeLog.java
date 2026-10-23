@@ -836,6 +836,23 @@ public final class ChangeLog {
   }
 
   /**
+   * Whether the latest version of {@code entityId} this box took from a sync came from main: a
+   * node's adoption of main's version, never a node's push main took when this box was main. A
+   * version synced before revisions named their peer names none, and so answers false.
+   */
+  public boolean heardFromMain(String entityType, String entityId) {
+    return db.queryOne(
+            "SELECT COALESCE(peer, '') FROM change_log WHERE entity_type = ? AND entity_id = ?"
+                + " AND origin = ? ORDER BY seq DESC LIMIT 1",
+            row -> row.text(0),
+            entityType,
+            entityId,
+            Entry.SYNC)
+        .filter(Actor.MAIN_HANDLE::equals)
+        .isPresent();
+  }
+
+  /**
    * An offer this box made to main whose answer it has not heard: {@code offered}, the version it
    * offered, and {@code from}, the state of the entity it was made from ({@code null} for a
    * deletion), kept from before main is asked until its answer is heard.

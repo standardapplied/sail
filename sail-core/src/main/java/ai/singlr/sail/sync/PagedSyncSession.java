@@ -11,6 +11,7 @@ import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.DatabaseCatalog;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.Snapshots;
@@ -68,6 +69,9 @@ public final class PagedSyncSession implements SyncSession {
   /** Entries asked for per pull; the frame bound, not this, is what caps a page's size. */
   static final int PAGE_LIMIT = 2000;
 
+  /** How many ids a notice of rows main no longer holds names before counting the rest. */
+  private static final int LOST_NAMED = 5;
+
   /** The bytes a {@code bases} entry costs beyond its id and rev: {@code ": "} and {@code ", "}. */
   private static final int BASE_PUNCTUATION = 4;
 
@@ -98,8 +102,10 @@ public final class PagedSyncSession implements SyncSession {
   private ProjectScope scope = ProjectScope.all();
   private Set<String> kept = Set.of();
   private boolean contentLeft;
+  private boolean resumed;
 
   PagedSyncSession content(Sqlite db) {
+    resumed = catalog != null && new DatabaseCatalog(db).main().filter(catalog::equals).isPresent();
     blobs = new BlobStore(db);
     erasure = new Erasure(db);
     eraseRequests = new EraseRequests(db);
@@ -134,6 +140,7 @@ public final class PagedSyncSession implements SyncSession {
     copy.scope = scope;
     copy.kept = kept;
     copy.contentLeft = contentLeft;
+    copy.resumed = resumed;
     return copy;
   }
 
@@ -276,6 +283,7 @@ public final class PagedSyncSession implements SyncSession {
       local.forgetCheckpoints(mainId);
       since = 0;
     }
+    var walksEveryHead = resumed && since == 0;
     var report = SyncEngine.Report.NONE;
     var pages = 0;
     var entries = 0;
@@ -293,7 +301,8 @@ public final class PagedSyncSession implements SyncSession {
         fetchContent(type, page.entries());
         seen.addAll(ids(page.entries()));
         var live = adoptErasures(type, page.entries());
-        report = report.plus(reconcile(local, ids(live), new PageView(type, live, page.next())));
+        var checkpoint = walksEveryHead ? 0 : page.next();
+        report = report.plus(reconcile(local, ids(live), new PageView(type, live, checkpoint)));
         pages++;
         entries += page.entries().size();
         since = page.next();
@@ -302,25 +311,136 @@ public final class PagedSyncSession implements SyncSession {
     var dirty = new LinkedHashSet<>(local.dirtyIds());
     dirty.removeAll(seen);
     dirty.removeIf(id -> kept(local, id));
+    var lost = Set.<String>of();
+    if (walksEveryHead) {
+      var weighed = lost(local, seen);
+      lost = withdrawLost(type, local, weighed);
+      if (lost.size() == weighed.size()) {
+        local.advanceCheckpoint(mainId, since);
+      }
+    }
     if (!dirty.isEmpty()) {
       report = report.plus(reconcileDirty(type, local, List.copyOf(dirty), since));
     }
     var late = askAfterPush(type);
     var reconciled = new LinkedHashSet<>(seen);
     reconciled.addAll(dirty);
+    reconciled.addAll(lost);
     touched = reconciled;
     return new TypeReport(
         type,
         report.plus(new SyncEngine.Report(adopted, 0, 0, 0)),
         pages,
         entries,
-        pages == 0 && dirty.isEmpty() && ask.count() + late.count() == 0,
+        pages == 0 && dirty.isEmpty() && lost.isEmpty() && ask.count() + late.count() == 0,
         null,
         fetchedBytes - fetchedBefore,
         sentBytes - sentBefore,
         0,
         denials,
         refusals);
+  }
+
+  /**
+   * The rows of a type main did not offer in a walk of every head it holds, {@code seen}, that this
+   * box heard from main as a node ({@link LocalReplica#heardFromMain}), of a database it synced
+   * with before this session ({@link #resumed}): main no longer holds them, having been restored
+   * from a copy older than this box's last sync. A box meeting a database for the first time has
+   * heard nothing from it, and what a former main took from its nodes it never heard from a main.
+   * Only what this box's scope admits and holds whole is weighed, along with what it deleted and
+   * never pushed.
+   */
+  private Set<String> lost(LocalReplica local, Set<String> seen) {
+    var lost = new LinkedHashSet<String>();
+    var dirty = local.dirtyIds();
+    for (var id : local.entityIds()) {
+      if (!seen.contains(id)
+          && scope.admits(local.project(id))
+          && local.heardFromMain(id)
+          && (dirty.contains(id) || held(local, id))) {
+        lost.add(id);
+      }
+    }
+    return lost;
+  }
+
+  private static boolean held(LocalReplica local, String id) {
+    return local.current(id) instanceof Map<String, Object> held && !Snapshots.isDeletionMark(held);
+  }
+
+  /**
+   * Withdraws each row main no longer holds, {@code lost}, as a denied offer is withdrawn: its
+   * revisions stay in this box's history and nothing is offered to rebuild main from it. Work still
+   * live here and a project this round keeps whole ({@link #keep}) are left for a later round, the
+   * former weighed in the same atomic scope as its withdrawal; the caller holds the type's
+   * checkpoint at 0 until none is left, so the next round walks every head again, as it does after
+   * a round cut short. One carrying a change main never took is refused as a denial is, naming why;
+   * the rest are named once for the type, those withdrawn before a failure included. The rows go in
+   * the reverse of the order the store lists them, so a reply, listed after the message it answers,
+   * leaves before it, whose withdrawal would take it along unweighed. Returns the rows withdrawn,
+   * counted as adopted.
+   */
+  private Set<String> withdrawLost(String type, LocalReplica local, Set<String> lost) {
+    var withdrawn = new LinkedHashSet<String>();
+    var dropped = new ArrayList<String>();
+    try {
+      for (var id : List.copyOf(lost).reversed()) {
+        if (kept(local, id)) {
+          continue;
+        }
+        var unpushed =
+            Actor.call(
+                Actor.main(null),
+                () ->
+                    local.atomically(
+                        () -> {
+                          if (local.live(id)) {
+                            return Optional.<Boolean>empty();
+                          }
+                          var changed =
+                              !Objects.equals(local.currentRev(id), local.lastHeardRev(id));
+                          local.adopt(id, null, null, local.project(id));
+                          return Optional.of(changed);
+                        }));
+        if (unpushed.isEmpty()) {
+          continue;
+        }
+        withdrawn.add(id);
+        if (unpushed.get()) {
+          var lostHere = "main no longer holds " + id + ": it was restored from an older copy";
+          denials.add(new SyncSession.Denial(type, id, lostHere));
+          notice.accept(Remedy.of(lostHere + ". ").then(SyncSession.Denial.kept(type, id)));
+        } else {
+          dropped.add(id);
+        }
+      }
+    } finally {
+      if (!dropped.isEmpty()) {
+        notice.accept(lostNotice(type, dropped));
+      }
+    }
+    adopted += withdrawn.size();
+    return withdrawn;
+  }
+
+  private static Remedy lostNotice(String type, List<String> dropped) {
+    var ids = dropped.stream().sorted().toList();
+    var named = String.join(", ", ids.subList(0, Math.min(ids.size(), LOST_NAMED)));
+    var more = ids.size() > LOST_NAMED ? " and " + (ids.size() - LOST_NAMED) + " more" : "";
+    var kept =
+        "spec".equals(type)
+            ? Remedy.of("Each stays in its history: ", Remedy.sail("spec history", "<id>"), ".")
+            : Remedy.of("Each stays in this box's change log.");
+    return Remedy.of(
+            "main no longer holds "
+                + ids.size()
+                + " "
+                + type
+                + "(s) this box had pulled ("
+                + named
+                + more
+                + "): main was restored from a copy older than this box's last sync. ")
+        .then(kept);
   }
 
   /** What asking main to erase one type's pending prunes came to. */

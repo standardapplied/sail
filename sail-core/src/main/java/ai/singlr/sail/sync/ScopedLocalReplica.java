@@ -65,6 +65,11 @@ record ScopedLocalReplica(LocalReplica inner, Set<String> ids, Set<String> unsee
   }
 
   @Override
+  public boolean heardFromMain(String id) {
+    return inner.heardFromMain(id);
+  }
+
+  @Override
   public String author(String id) {
     return inner.author(id);
   }

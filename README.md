@@ -65,12 +65,16 @@ sudo sail migrate
 sudo systemctl start sail-api
 ```
 
-Each node then re-pins main's new host key (`sudo ssh-keygen -R <main-ip>`, then `sudo sail init
---main <main-ip>`; compare the fingerprint it prints with `sudo ssh-keygen -lf
-/etc/ssh/ssh_host_ed25519_key.pub` on main), and its next `sudo sail sync` pushes whatever it has
-not pushed yet; work main took after the copy and lost with it is not rebuilt from the node. A main
-set up empty is a new org: every node refuses to sync with it. A copy taken before 0.54.0 counts as
-a new org too, so take a fresh one after upgrading.
+`sudo sail migrate` says "API token re-issued for this box: the database came from another box."
+when the copy came from another box, and `sudo sail spec list` then works on the new main. Each node
+then re-pins main's new host key (`sudo ssh-keygen -R <main-ip>`, then `sudo sail init --main
+<main-ip>`, which keeps the node's handle; compare the fingerprint it prints with `sudo ssh-keygen
+-lf /etc/ssh/ssh_host_ed25519_key.pub` on main), and its next `sudo sail sync` pushes whatever it
+has not pushed yet. Work main took after the copy is lost with it and is not rebuilt from the node:
+that sync drops what the node had pulled of it, says so once per type, and keeps each row in its
+history (`sudo sail spec history <id>`). A main restored in place from an older copy is treated the
+same way. A main set up empty is a new org: every node refuses to sync with it. A copy taken before
+0.54.0 counts as a new org too, so take a fresh one after upgrading.
 
 Mast, the desktop client, is a thin client of a box: specs, rooms and reviews over its API and
 event stream, terminals and files over its pty host.
