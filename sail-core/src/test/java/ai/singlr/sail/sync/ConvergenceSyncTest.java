@@ -83,6 +83,19 @@ class ConvergenceSyncTest {
     main.close();
   }
 
+  @Test
+  void onlyANodeHearsAVersionFromMainNeverAMainTakingANodesPush() {
+    ownSpec(ada, "ada", "heard", "ada");
+
+    SyncBox.quiesce(main, ada, bob);
+
+    assertTrue(new ChangeLog(main.db).latestHeard("spec", "heard").isPresent());
+    assertFalse(new ChangeLog(main.db).heardFromMain("spec", "heard"), "main took ada's push");
+    assertTrue(new ChangeLog(ada.db).heardFromMain("spec", "heard"), "ada heard main take it");
+    assertTrue(new ChangeLog(bob.db).heardFromMain("spec", "heard"), "bob pulled it");
+    assertFalse(new ChangeLog(bob.db).heardFromMain("spec", "never"));
+  }
+
   /** A synced type an FDE deletes and brings back, as the convergence cases drive it. */
   enum Kind {
     SPEC("spec", "s", "one", "two", "three") {

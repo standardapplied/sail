@@ -51,16 +51,20 @@ public final class HostToken {
    * are {@code tokens}. A database holding no token mints the host token. A config host token the
    * database does not hold is the token of the box the database was copied from, its plaintext on
    * that box: the copy's host token is revoked and a new one minted and saved, every other token
-   * kept. A config login session is the session store's to weigh, never this. Anything else is left
-   * as it is.
+   * kept. A config login session is the session store's to weigh, and a config for another server
+   * holds that server's token, never this box's. Anything else is left as it is.
    */
   public static Outcome ensure(TokenStore tokens, Path configPath) throws IOException {
     if (tokens.list().isEmpty()) {
       mint(tokens, null, configPath);
       return Outcome.MINTED;
     }
-    if (!Files.exists(configPath)
-        || !(YamlUtil.parseFile(configPath).get("token") instanceof String token)
+    if (!Files.exists(configPath)) {
+      return Outcome.HELD;
+    }
+    var config = YamlUtil.parseFile(configPath);
+    if (!ServerConnectionConfig.DEFAULT_URL.equals(config.get("server"))
+        || !(config.get("token") instanceof String token)
         || token.startsWith(SessionAwareAuth.SESSION_PREFIX)
         || tokens.validate(token).isPresent()) {
       return Outcome.HELD;

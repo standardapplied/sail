@@ -310,23 +310,21 @@ public final class PagedSyncSession implements SyncSession {
     var dirty = new LinkedHashSet<>(local.dirtyIds());
     dirty.removeAll(seen);
     dirty.removeIf(id -> kept(local, id));
-    if (walksEveryHead) {
-      var withdrawn = withdrawLost(type, local, lost(local, seen), dirty);
-      report = report.plus(new SyncEngine.Report(withdrawn, 0, 0, 0));
-    }
+    var lost = walksEveryHead ? withdrawLost(type, local, lost(local, seen)) : Set.<String>of();
     if (!dirty.isEmpty()) {
       report = report.plus(reconcileDirty(type, local, List.copyOf(dirty), since));
     }
     var late = askAfterPush(type);
     var reconciled = new LinkedHashSet<>(seen);
     reconciled.addAll(dirty);
+    reconciled.addAll(lost);
     touched = reconciled;
     return new TypeReport(
         type,
         report.plus(new SyncEngine.Report(adopted, 0, 0, 0)),
         pages,
         entries,
-        pages == 0 && dirty.isEmpty() && ask.count() + late.count() == 0,
+        pages == 0 && dirty.isEmpty() && lost.isEmpty() && ask.count() + late.count() == 0,
         null,
         fetchedBytes - fetchedBefore,
         sentBytes - sentBefore,
@@ -337,11 +335,11 @@ public final class PagedSyncSession implements SyncSession {
 
   /**
    * The rows of a type main did not offer in a walk of every head it holds, {@code seen}, that this
-   * box heard from main, a database it synced with before this session ({@link #resumed}): main no
-   * longer holds them, having been restored from a copy older than this box's last sync. A box
-   * meeting a database for the first time, a former main joining a new one among them, has heard
-   * nothing from it. Only what this box's scope admits and holds whole is weighed, and never work
-   * still live here.
+   * box heard from main as a node ({@link LocalReplica#heardFromMain}), of a database it synced
+   * with before this session ({@link #resumed}): main no longer holds them, having been restored
+   * from a copy older than this box's last sync. A box meeting a database for the first time has
+   * heard nothing from it, and what a former main took from its nodes it never heard from a main.
+   * Only what this box's scope admits and holds whole is weighed, and never work still live here.
    */
   private Set<String> lost(LocalReplica local, Set<String> seen) {
     var lost = new LinkedHashSet<String>();
@@ -349,7 +347,7 @@ public final class PagedSyncSession implements SyncSession {
       if (!seen.contains(id)
           && scope.admits(local.project(id))
           && !kept(local, id)
-          && local.lastHeardRev(id) != null
+          && local.heardFromMain(id)
           && !local.live(id)
           && local.current(id) instanceof Map<String, Object> held
           && !Snapshots.isDeletionMark(held)) {
@@ -361,22 +359,33 @@ public final class PagedSyncSession implements SyncSession {
 
   /**
    * Withdraws each row main no longer holds, {@code lost}, as a denied offer is withdrawn: its
-   * revisions stay in this box's history and nothing is offered to rebuild main from it. One with a
-   * change main never took, among {@code dirty}, is refused as a denial is, naming why; the rest
-   * are named once for the type. Returns how many were withdrawn.
+   * revisions stay in this box's history and nothing is offered to rebuild main from it. Each is
+   * weighed again in the same atomic scope as its withdrawal, so work that went live here since is
+   * left alone, and one carrying a change main never took is refused as a denial is, naming why;
+   * the rest are named once for the type. Returns the rows withdrawn, counted as adopted.
    */
-  private int withdrawLost(String type, LocalReplica local, Set<String> lost, Set<String> dirty) {
+  private Set<String> withdrawLost(String type, LocalReplica local, Set<String> lost) {
+    var withdrawn = new LinkedHashSet<String>();
     var dropped = new ArrayList<String>();
     for (var id : lost) {
-      Actor.run(
-          Actor.main(null),
-          () ->
-              local.atomically(
-                  () -> {
-                    local.adopt(id, null, null, local.project(id));
-                    return null;
-                  }));
-      if (dirty.contains(id)) {
+      var unpushed =
+          Actor.call(
+              Actor.main(null),
+              () ->
+                  local.atomically(
+                      () -> {
+                        if (local.live(id)) {
+                          return Optional.<Boolean>empty();
+                        }
+                        var changed = !Objects.equals(local.currentRev(id), local.lastHeardRev(id));
+                        local.adopt(id, null, null, local.project(id));
+                        return Optional.of(changed);
+                      }));
+      if (unpushed.isEmpty()) {
+        continue;
+      }
+      withdrawn.add(id);
+      if (unpushed.get()) {
         var lostHere = "main no longer holds " + id + ": it was restored from an older copy";
         denials.add(new SyncSession.Denial(type, id, lostHere));
         notice.accept(Remedy.of(lostHere + ". ").then(SyncSession.Denial.kept(type, id)));
@@ -387,7 +396,8 @@ public final class PagedSyncSession implements SyncSession {
     if (!dropped.isEmpty()) {
       notice.accept(lostNotice(type, dropped));
     }
-    return lost.size();
+    adopted += withdrawn.size();
+    return withdrawn;
   }
 
   private static Remedy lostNotice(String type, List<String> dropped) {

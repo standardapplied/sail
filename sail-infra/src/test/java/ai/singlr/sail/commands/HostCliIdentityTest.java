@@ -296,9 +296,13 @@ class HostCliIdentityTest {
     Files.writeString(configPath, "server: http://localhost:7070\n");
     assertEquals(HostToken.Outcome.HELD, HostToken.ensure(tokens, configPath), "no token");
 
-    Files.writeString(configPath, "token: sess_0123\n");
+    Files.writeString(configPath, "server: http://localhost:7070\ntoken: sess_0123\n");
     assertEquals(HostToken.Outcome.HELD, HostToken.ensure(tokens, configPath), "a session");
-    assertEquals("token: sess_0123\n", Files.readString(configPath));
+
+    var remote = "server: https://sail.example.dev\ntoken: sail_0123\n";
+    Files.writeString(configPath, remote);
+    assertEquals(HostToken.Outcome.HELD, HostToken.ensure(tokens, configPath), "another server");
+    assertEquals(remote, Files.readString(configPath));
     assertEquals(List.of("ci"), tokens.list().stream().map(TokenStore.TokenInfo::name).toList());
   }
 

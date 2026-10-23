@@ -450,13 +450,13 @@ public final class MigrateCommand implements Runnable {
       }
     } catch (Exception e) {
       System.err.println(
-          "  API token not checked: "
+          "  API token in "
+              + configPath
+              + " not checked: "
               + e.getMessage()
               + ". Run '"
               + operator.sail("migrate")
-              + "' again once "
-              + configPath
-              + " is readable.");
+              + "' again.");
     }
   }
 

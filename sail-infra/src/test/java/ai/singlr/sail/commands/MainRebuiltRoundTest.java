@@ -433,6 +433,30 @@ class MainRebuiltRoundTest {
   }
 
   @Test
+  void aRowThisBoxTookFromANodesPushIsNeverOneItHeardFromMain() throws Exception {
+    var elsewhere = main("o.db", "o", "gamma");
+    mainWrite(elsewhere, "pushed");
+    var pushed = new SpecStore(elsewhere.db());
+    var snapshot = pushed.comparableSnapshot("pushed");
+    var rev = pushed.latestRev("pushed");
+    serving = pulledAfterACopy("copy.db", serving.id(), "r-late-1");
+    Acting.by(
+        Actor.sync("mady", Role.MEMBER),
+        () -> new SpecStore(nodeDb).applyRevision("pushed", snapshot, rev));
+
+    round();
+
+    assertEquals(
+        List.of(
+            "main no longer holds 1 spec(s) this box had pulled (r-late-1"
+                + RESTORED
+                + "Each stays in its history: sudo sail spec history <id>."),
+        notices);
+    assertEquals(
+        List.of("g0", "pushed"), specIds(nodeDb).stream().map(r -> r.split(" ")[0]).toList());
+  }
+
+  @Test
   void anOrdinaryRoundDropsNothingAndSaysNothing() throws Exception {
     mainWrite(serving, "g0");
     round();

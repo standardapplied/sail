@@ -306,6 +306,11 @@ class SyncTransportTest {
     }
 
     @Override
+    public boolean heardFromMain(String id) {
+      return inner.heardFromMain(id);
+    }
+
+    @Override
     public String author(String id) {
       return inner.author(id);
     }
