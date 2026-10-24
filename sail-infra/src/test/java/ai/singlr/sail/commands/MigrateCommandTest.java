@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.engine.Apt;
 import ai.singlr.sail.engine.HostProvisioner;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.NeedrestartPolicy;
@@ -483,7 +484,7 @@ class MigrateCommandTest {
         new ScriptedShellExecutor()
             .onceOnOk("dpkg-query -W", "incus install installed\nincus-client install installed\n")
             .onOk("dpkg-query", "incus hold installed\nincus-client hold installed\n")
-            .onOk("apt-mark hold");
+            .onOk("apt-mark");
 
     MigrateCommand.ensureIncusHold(false, shell, false, OperatorCommand.SUDO);
     assertEquals(List.of(), shell.invocations(), "a non-root migrate holds nothing");
@@ -498,8 +499,8 @@ class MigrateCommandTest {
     assertEquals("  ✓ incus held (sudo sail host incus upgrade moves it)\n", first);
     assertEquals("", second);
     assertEquals(
-        List.of("apt-mark hold incus incus-client"),
-        shell.invocations().stream().filter(command -> command.startsWith("apt")).toList());
+        List.of(String.join(" ", Apt.HOLD) + " incus incus-client"),
+        shell.invocations().stream().filter(command -> command.contains("apt-mark")).toList());
   }
 
   @Test

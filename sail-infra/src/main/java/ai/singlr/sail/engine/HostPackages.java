@@ -5,11 +5,11 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
 import java.io.IOException;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
@@ -88,27 +88,34 @@ public final class HostPackages {
     return true;
   }
 
-  private void mark(List<String> packages)
-      throws IOException, InterruptedException, TimeoutException {
-    var command = new ArrayList<>(List.of("apt-mark", "hold"));
-    command.addAll(packages);
-    var result = shell.exec(command);
-    if (!result.ok()) {
-      throw new IOException(
-          "apt-mark hold " + String.join(" ", packages) + " failed: " + result.stderr().strip());
-    }
+  private void mark(List<String> packages) throws IOException, InterruptedException {
+    apt.hold(packages);
   }
 
-  /** Incus as apt's local index has it: installed and candidate, no network. */
+  /**
+   * Incus as apt's local index has it, no network: installed and candidate, and whether the
+   * candidate is the newer of the two as dpkg orders versions, since apt's candidate can be older
+   * than what is installed and a move to it would be a downgrade.
+   */
   public Versions versions() throws IOException, InterruptedException, TimeoutException {
     var policy = shell.exec(List.of("env", "LC_ALL=C", "apt-cache", "policy", INCUS.name()));
-    return policy.ok() ? Versions.parse(policy.stdout()) : Versions.NONE;
+    if (!policy.ok()) {
+      return Versions.NONE;
+    }
+    var installed = Versions.field(policy.stdout(), "Installed:");
+    var candidate = Versions.field(policy.stdout(), "Candidate:");
+    var differ = installed != null && candidate != null && !installed.equals(candidate);
+    var newer =
+        differ
+            && shell.exec(List.of("dpkg", "--compare-versions", candidate, "gt", installed)).ok();
+    return new Versions(installed, candidate, newer);
   }
 
   /**
    * Moves every held Incus package to apt's candidate, then holds every Incus package installed
    * after it, a dependency the new release brought in among them. The move drops the holds, so a
-   * failed move holds the packages it started from again, its failure kept.
+   * failed move holds the packages it started from again, its failure kept; a move that succeeded
+   * but could not be held again says so, naming the command that holds it.
    */
   public void upgrade() throws IOException, InterruptedException, TimeoutException {
     var held = incusPackages().stream().map(Installed::name).toList();
@@ -121,13 +128,19 @@ public final class HostPackages {
       holdAfter(failed, held);
       throw failed;
     }
-    hold();
+    try {
+      hold();
+    } catch (IOException | TimeoutException unheld) {
+      throw Remedied.io(
+          "Incus moved but is not held again (" + unheld.getMessage() + ").",
+          Remedy.of("Hold it: ", Remedy.sail("migrate")));
+    }
   }
 
   private void holdAfter(IOException failed, List<String> held) throws InterruptedException {
     try {
       mark(held);
-    } catch (IOException | TimeoutException holdFailed) {
+    } catch (IOException holdFailed) {
       failed.addSuppressed(holdFailed);
     }
   }
@@ -186,18 +199,15 @@ public final class HostPackages {
   }
 
   /**
-   * Incus's installed and candidate versions as apt names them, each null when apt has none. They
-   * differ when apt would move Incus, which the hold keeps it from doing on its own.
+   * Incus's installed and candidate versions as apt names them, each null when apt has none, and
+   * whether the candidate is the {@code newer}. Incus moves only to a newer candidate: an older
+   * one, a release Zabbly pulled or a build installed by hand, is nothing to move to.
    */
-  public record Versions(String installed, String candidate) {
+  public record Versions(String installed, String candidate, boolean newer) {
 
-    static final Versions NONE = new Versions(null, null);
+    static final Versions NONE = new Versions(null, null, false);
 
-    static Versions parse(String policy) {
-      return new Versions(field(policy, "Installed:"), field(policy, "Candidate:"));
-    }
-
-    private static String field(String policy, String name) {
+    static String field(String policy, String name) {
       return policy
           .lines()
           .map(String::strip)
@@ -208,28 +218,34 @@ public final class HostPackages {
           .orElse(null);
     }
 
-    /** Whether apt's candidate differs from what is installed. */
+    /** Whether apt's candidate is newer than what is installed, so Incus would move. */
     public boolean movable() {
+      return newer;
+    }
+
+    /** Whether apt's candidate is older than what is installed: nothing to move to. */
+    public boolean candidateOlder() {
+      return differ() && !newer;
+    }
+
+    /** The installed version as Incus numbers it, or whole when that hides the difference. */
+    public String from() {
+      return installed == null ? null : distinct() ? release(installed) : installed;
+    }
+
+    /**
+     * The candidate as Incus numbers it, or whole when that hides the difference; null for none.
+     */
+    public String to() {
+      return candidate == null ? null : distinct() ? release(candidate) : candidate;
+    }
+
+    private boolean differ() {
       return installed != null && candidate != null && !installed.equals(candidate);
     }
 
-    /** The candidate as Incus numbers it, or null. */
-    public String candidateRelease() {
-      return candidate == null ? null : release(candidate);
-    }
-
-    /** The installed version as Incus numbers it, or whole when that hides the move. */
-    public String from() {
-      return distinct() ? release(installed) : installed;
-    }
-
-    /** The candidate as Incus numbers it, or whole when that hides the move. */
-    public String to() {
-      return distinct() ? release(candidate) : candidate;
-    }
-
     private boolean distinct() {
-      return !movable() || !release(installed).equals(release(candidate));
+      return !differ() || !release(installed).equals(release(candidate));
     }
 
     /**

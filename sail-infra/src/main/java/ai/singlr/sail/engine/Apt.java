@@ -14,14 +14,14 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
- * The one way sail runs apt-get on its host. Nothing can wait on a question: no frontend, and dpkg
- * keeps a changed config file. Nothing is killed on a clock either: apt bounds a stalled connection
- * itself ({@code Acquire::http::Timeout}) and retries a failed fetch, and it waits up to ten
- * minutes for another apt to let go of the dpkg lock; a deadline that lands while dpkg runs leaves
- * the box half-installed, refusing every later apt call until someone runs {@code dpkg --configure
- * -a}. It runs at {@code -q}, not {@code -qq}, because {@code -qq} hides apt's lock-wait lines and
- * with them the process holding the lock, and in the C locale, because those lines are read by
- * their English wording. Its status lines become the progress shown.
+ * The one way sail runs apt-get, and apt-mark, on its host. Nothing can wait on a question: no
+ * frontend, and dpkg keeps a changed config file. Nothing is killed on a clock either: apt bounds a
+ * stalled connection itself ({@code Acquire::http::Timeout}) and retries a failed fetch, and it
+ * waits up to ten minutes for another apt to let go of the dpkg lock; a deadline that lands while
+ * dpkg runs leaves the box half-installed, refusing every later apt call until someone runs {@code
+ * dpkg --configure -a}. It runs at {@code -q}, not {@code -qq}, because {@code -qq} hides apt's
+ * lock-wait lines and with them the process holding the lock, and in the C locale, because those
+ * lines are read by their English wording. Its status lines become the progress shown.
  */
 public final class Apt {
 
@@ -45,6 +45,17 @@ public final class Apt {
           "Dpkg::Options::=--force-confdef",
           "-o",
           "Dpkg::Options::=--force-confold");
+
+  /** The front of every apt-mark call: the same frontend, locale and lock wait as apt-get's. */
+  public static final List<String> HOLD =
+      List.of(
+          "env",
+          "LC_ALL=C",
+          "DEBIAN_FRONTEND=noninteractive",
+          "apt-mark",
+          "-o",
+          "DPkg::Lock::Timeout=600",
+          "hold");
 
   private static final String WAITING = "Waiting for cache lock: ";
   private static final List<String> STATUS = List.of("dlstatus", "pmstatus");
@@ -78,6 +89,22 @@ public final class Apt {
         "apt-get install --only-upgrade " + String.join(" ", packages),
         withPackages(
             List.of("install", "-y", "--only-upgrade", "--allow-change-held-packages"), packages));
+  }
+
+  /**
+   * Holds {@code packages}, so apt moves them only when asked ({@code
+   * --allow-change-held-packages}).
+   */
+  public void hold(List<String> packages) throws IOException, InterruptedException {
+    var reader = new Reader();
+    var result = shell.run(withPackages(HOLD, packages), reader::read);
+    if (!result.ok()) {
+      throw new IOException(
+          "apt-mark hold "
+              + String.join(" ", packages)
+              + " failed: "
+              + reason(result, reader.heldBy));
+    }
   }
 
   private void run(String what, List<String> args) throws IOException, InterruptedException {

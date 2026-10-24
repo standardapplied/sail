@@ -34,6 +34,19 @@ class AptTest {
   }
 
   @Test
+  void aHoldSpeaksTheCLocaleAsksNothingAndWaitsOnTheLockLikeEveryCall() throws Exception {
+    var shell = new ScriptedShellExecutor().onOk("apt-mark");
+
+    new Apt(shell, detail -> {}).hold(List.of("incus", "incus-base"));
+
+    assertEquals(
+        List.of(
+            "env LC_ALL=C DEBIAN_FRONTEND=noninteractive apt-mark -o DPkg::Lock::Timeout=600 hold"
+                + " incus incus-base"),
+        shell.unbounded());
+  }
+
+  @Test
   void aRefreshFailsWhenAnySourceFailsToDownload() throws Exception {
     var shell = new ScriptedShellExecutor().onOk("apt-get");
 

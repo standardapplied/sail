@@ -90,14 +90,7 @@ public final class HostStatusCommand implements Runnable {
 
     if (json) {
       printJson(
-          hostYaml,
-          incusVersion,
-          versions.candidateRelease(),
-          hostInfo,
-          poolUsage,
-          fsUsage,
-          containers,
-          out);
+          hostYaml, incusVersion, versions.to(), hostInfo, poolUsage, fsUsage, containers, out);
       return;
     }
 
@@ -119,7 +112,7 @@ public final class HostStatusCommand implements Runnable {
     return versions.movable()
         ? incusVersion
             + " ("
-            + versions.candidateRelease()
+            + versions.to()
             + " available: "
             + operator.sail("host incus upgrade")
             + ")"

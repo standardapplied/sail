@@ -95,8 +95,9 @@ public final class HostIncusCommand implements Runnable {
 
   /**
    * Moves Incus to apt's candidate once the operator says so, having refreshed apt's index (not on
-   * a dry run, which reads the local one) and listed the live work the restart ends, read only once
-   * Incus is known to move.
+   * a dry run, which reads the local one, and not for a box with no Incus to move) and listed the
+   * live work the restart ends, read only once Incus is known to move. A candidate older than what
+   * is installed is nothing to move to.
    */
   static void upgrade(
       ShellExec shell,
@@ -106,20 +107,31 @@ public final class HostIncusCommand implements Runnable {
       OperatorCommand operator,
       PrintStream out)
       throws IOException, InterruptedException, TimeoutException {
+    var packages = new HostPackages(shell, detail -> {});
+    if (packages.versions().installed() == null) {
+      throw HostInitCommand.notInitialized(operator);
+    }
     if (!dryRun) {
       try (var spinner = Spinner.start(out, "Refreshing apt's index...")) {
         new Apt(shell, spinner::detail).update();
       }
     }
-    var versions = new HostPackages(shell, detail -> {}).versions();
-    if (versions.installed() == null) {
-      throw HostInitCommand.notInitialized(operator);
-    }
+    var versions = packages.versions();
     if (versions.candidate() == null) {
       throw new IllegalStateException(
           "apt offers no Incus to move to. Check the Zabbly source "
               + HostPackages.ZABBLY_SOURCE
               + " and any apt pin with 'apt-cache policy incus', then retry.");
+    }
+    if (versions.candidateOlder()) {
+      out.println(
+          Ansi.AUTO.string(
+              "  @|green ✓|@ Incus "
+                  + versions.from()
+                  + " is newer than apt's "
+                  + versions.to()
+                  + ". Nothing to move."));
+      return;
     }
     if (!versions.movable()) {
       out.println(Ansi.AUTO.string("  @|green ✓|@ Incus " + versions.from() + " is current."));

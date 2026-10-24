@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedied;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -35,28 +36,57 @@ class HostPackagesTest {
 
   @Test
   void theVersionsAreAptsInstalledAndCandidate() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk("apt-cache policy incus", POLICY);
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("apt-cache policy incus", POLICY)
+            .onOk("dpkg --compare-versions");
 
     var versions = new HostPackages(shell, detail -> {}).versions();
 
     assertEquals(
         new HostPackages.Versions(
-            "1:6.17-ubuntu24.04-202510010000", "1:6.18-ubuntu24.04-202511010000"),
+            "1:6.17-ubuntu24.04-202510010000", "1:6.18-ubuntu24.04-202511010000", true),
         versions);
-    assertEquals(List.of("env LC_ALL=C apt-cache policy incus"), shell.invocations());
+    assertEquals(
+        List.of(
+            "env LC_ALL=C apt-cache policy incus",
+            "dpkg --compare-versions 1:6.18-ubuntu24.04-202511010000 gt"
+                + " 1:6.17-ubuntu24.04-202510010000"),
+        shell.invocations());
     assertTrue(versions.movable());
-    assertEquals("6.18", versions.candidateRelease());
+    assertFalse(versions.candidateOlder());
     assertEquals("6.17", versions.from());
     assertEquals("6.18", versions.to());
   }
 
   @Test
+  void aCandidateOlderThanTheInstalledIncusIsNothingToMoveTo() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "apt-cache policy incus",
+                "incus:\n  Installed: 1:6.19-ubuntu24.04-1\n  Candidate: 1:6.18-ubuntu24.04-1\n")
+            .onFail("dpkg --compare-versions", "");
+
+    var versions = new HostPackages(shell, detail -> {}).versions();
+
+    assertFalse(versions.movable(), "a downgrade is never a move");
+    assertTrue(versions.candidateOlder());
+    assertEquals("6.19", versions.from());
+    assertEquals("6.18", versions.to());
+    assertEquals(
+        "dpkg --compare-versions 1:6.18-ubuntu24.04-1 gt 1:6.19-ubuntu24.04-1",
+        shell.invocations().getLast());
+  }
+
+  @Test
   void aRebuildOfTheSameReleaseNamesBothWholeVersions() {
-    var versions = new HostPackages.Versions("1:6.18-ubuntu24.04-1", "1:6.18-ubuntu24.04-2");
+    var versions = new HostPackages.Versions("1:6.18-ubuntu24.04-1", "1:6.18-ubuntu24.04-2", true);
 
     assertEquals("1:6.18-ubuntu24.04-1", versions.from());
     assertEquals("1:6.18-ubuntu24.04-2", versions.to());
-    assertEquals("6.18", new HostPackages.Versions("1:6.18-ubuntu24.04-1", null).from());
+    assertEquals("6.18", new HostPackages.Versions("1:6.18-ubuntu24.04-1", null, false).from());
+    assertNull(new HostPackages.Versions("1:6.18-ubuntu24.04-1", null, false).to());
     assertEquals("6.18", HostPackages.Versions.release("6.18"));
   }
 
@@ -72,12 +102,13 @@ class HostPackagesTest {
         new HostPackages(new ScriptedShellExecutor().onFail("apt-cache", "no apt"), detail -> {})
             .versions();
 
-    assertEquals(new HostPackages.Versions(null, null), none);
+    assertEquals(new HostPackages.Versions(null, null, false), none);
     assertEquals(none, unanswered);
     assertFalse(none.movable());
-    assertNull(none.candidateRelease());
-    assertFalse(new HostPackages.Versions("1:6.18-1", "1:6.18-1").movable());
-    assertFalse(new HostPackages.Versions("1:6.18-1", null).movable());
+    assertNull(none.to());
+    assertFalse(new HostPackages.Versions("1:6.18-1", "1:6.18-1", false).movable());
+    assertFalse(new HostPackages.Versions("1:6.18-1", "1:6.18-1", false).candidateOlder());
+    assertFalse(new HostPackages.Versions("1:6.18-1", null, false).movable());
   }
 
   @Test
@@ -91,7 +122,7 @@ class HostPackagesTest {
                     + " not-installed\n")
             .onOk("incus*", "incus install installed\nincus-client install installed\n")
             .onOk("apt-get")
-            .onOk("apt-mark hold");
+            .onOk("apt-mark");
     var progress = new ArrayList<String>();
 
     new HostPackages(shell, progress::add).upgrade();
@@ -102,8 +133,12 @@ class HostPackagesTest {
             String.join(" ", Apt.COMMAND)
                 + " install -y --only-upgrade --allow-change-held-packages incus incus-client",
             "dpkg-query -W -f=${Package} ${db:Status-Want} ${db:Status-Status}\\n incus*",
-            "apt-mark hold incus incus-client"),
+            String.join(" ", Apt.HOLD) + " incus incus-client"),
         shell.invocations());
+    assertEquals(
+        shell.invocations().stream().filter(command -> command.contains("apt-")).toList(),
+        shell.unbounded(),
+        "every apt call, apt-mark included, runs with no deadline");
   }
 
   @Test
@@ -113,7 +148,7 @@ class HostPackagesTest {
             .onceOnOk("dpkg-query", "incus hold installed\n")
             .onOk("incus*", "incus install installed\nincus-new-runtime install installed\n")
             .onOk("apt-get")
-            .onOk("apt-mark hold");
+            .onOk("apt-mark");
 
     new HostPackages(shell, detail -> {}).upgrade();
 
@@ -121,7 +156,8 @@ class HostPackagesTest {
         String.join(" ", Apt.COMMAND)
             + " install -y --only-upgrade --allow-change-held-packages incus",
         shell.invocations().get(1));
-    assertEquals("apt-mark hold incus incus-new-runtime", shell.invocations().getLast());
+    assertEquals(
+        String.join(" ", Apt.HOLD) + " incus incus-new-runtime", shell.invocations().getLast());
   }
 
   @Test
@@ -130,7 +166,7 @@ class HostPackagesTest {
         new ScriptedShellExecutor()
             .onOk("dpkg-query", "incus hold installed\nincus-client hold installed\n")
             .onFail("apt-get", "E: Sub-process /usr/bin/dpkg returned an error code (1)\n")
-            .onOk("apt-mark hold");
+            .onOk("apt-mark");
 
     var failure =
         assertThrows(IOException.class, () -> new HostPackages(shell, detail -> {}).upgrade());
@@ -140,7 +176,25 @@ class HostPackagesTest {
             + " returned an error code (1)",
         failure.getMessage());
     assertEquals(0, failure.getSuppressed().length);
-    assertEquals("apt-mark hold incus incus-client", shell.invocations().getLast());
+    assertEquals(String.join(" ", Apt.HOLD) + " incus incus-client", shell.invocations().getLast());
+  }
+
+  @Test
+  void anUpgradeThatMovedButCannotBeHeldAgainSaysSoNamingTheCommandThatHoldsIt() {
+    var shell =
+        new ScriptedShellExecutor()
+            .onceOnOk("dpkg-query", "incus hold installed\n")
+            .onOk("incus*", "incus install installed\n")
+            .onOk("apt-get")
+            .onFail("apt-mark", "E: Could not get lock /var/lib/dpkg/lock\n");
+
+    var failure =
+        assertThrows(IOException.class, () -> new HostPackages(shell, detail -> {}).upgrade());
+
+    assertEquals(
+        "Incus moved but is not held again (apt-mark hold incus failed: E: Could not get lock"
+            + " /var/lib/dpkg/lock). Hold it: sudo sail migrate",
+        OperatorCommand.SUDO.render((Remedied) failure));
   }
 
   @Test

@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.config.RunStatus;
+import ai.singlr.sail.engine.Apt;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -146,7 +147,7 @@ class HostIncusCommandTest {
                 + " Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install -y "
                 + UPGRADE
                 + " incus incus-client",
-            "apt-mark hold incus incus-client"),
+            String.join(" ", Apt.HOLD) + " incus incus-client"),
         installs(shell));
     assertTrue(out.endsWith("  ✓ Incus upgraded from 6.17 to 6.18.\n"), out);
   }
@@ -213,6 +214,19 @@ class HostIncusCommandTest {
         assertThrows(IllegalStateException.class, () -> upgrade(shell, () -> QUIET, true));
 
     assertEquals("Server not initialized. Run 'sudo sail host init' first.", refused.getMessage());
+    assertEquals(List.of(), shell.unbounded(), "no refresh for a box with nothing to move");
+  }
+
+  @Test
+  void aCandidateOlderThanTheInstalledIncusIsNothingToMoveToAndNothingIsAsked() throws Exception {
+    var shell =
+        box("incus:\n  Installed: 1:6.19-ubuntu24.04-1\n  Candidate: 1:6.18-ubuntu24.04-1\n")
+            .onFail("dpkg --compare-versions", "");
+
+    var out = upgrade(shell, () -> fail("nothing is listed for a move that is a downgrade"), true);
+
+    assertEquals("  ✓ Incus 6.19 is newer than apt's 6.18. Nothing to move.\n", out);
+    assertEquals(List.of(), installs(shell));
   }
 
   @Test
@@ -401,13 +415,14 @@ class HostIncusCommandTest {
         .onOk("apt-cache policy incus", policy)
         .onceOnOk("dpkg-query", "incus hold installed\nincus-client hold installed\n")
         .onOk("incus*", "incus install installed\nincus-client install installed\n")
+        .onOk("dpkg --compare-versions")
         .onOk(UPGRADE)
-        .onOk("apt-mark hold");
+        .onOk("apt-mark");
   }
 
   private static List<String> installs(ScriptedShellExecutor shell) {
     return shell.invocations().stream()
-        .filter(command -> command.contains(" install ") || command.startsWith("apt-mark"))
+        .filter(command -> command.contains(" install ") || command.contains("apt-mark"))
         .toList();
   }
 

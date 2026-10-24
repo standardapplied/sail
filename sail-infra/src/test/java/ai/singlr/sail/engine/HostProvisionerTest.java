@@ -161,7 +161,7 @@ class HostProvisionerTest {
                 .onFail("which incus", "")
                 .onFail("which zpool", "")
                 .onOk("dpkg-query", UNHELD)
-                .onOk("apt-mark hold"));
+                .onOk("apt-mark"));
     var steps = new ArrayList<String>();
 
     provision(shell, "zfs", new RecordingListener(steps));
@@ -171,7 +171,7 @@ class HostProvisionerTest {
             APT_UPDATE,
             apt("install", "-y", "incus"),
             DPKG_QUERY,
-            List.of("apt-mark", "hold", "incus", "incus-base", "incus-client"),
+            hold("incus", "incus-base", "incus-client"),
             apt("install", "-y", "zfsutils-linux")),
         packageCommands(shell));
     var source = indexOfContaining(shell.invocations(), HostPackages.ZABBLY_SOURCE);
@@ -1018,6 +1018,12 @@ class HostProvisionerTest {
     return command;
   }
 
+  private static List<String> hold(String... packages) {
+    var command = new ArrayList<>(Apt.HOLD);
+    command.addAll(List.of(packages));
+    return command;
+  }
+
   private static List<List<String>> packageCommands(ScriptedShellExecutor shell) {
     return shell.arguments().stream()
         .filter(
@@ -1029,7 +1035,7 @@ class HostProvisionerTest {
 
   private static void assertNoAptRanOnAClock(ScriptedShellExecutor shell) {
     assertEquals(
-        shell.invocations().stream().filter(command -> command.contains("apt-get")).toList(),
+        shell.invocations().stream().filter(command -> command.contains("apt-")).toList(),
         shell.unbounded());
   }
 
