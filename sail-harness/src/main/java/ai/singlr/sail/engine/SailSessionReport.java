@@ -139,7 +139,7 @@ public final class SailSessionReport {
               + " in "
               + container
               + ": "
-              + mkdir.stderr());
+              + mkdir.reason());
     }
 
     var write =
@@ -155,7 +155,7 @@ public final class SailSessionReport {
                     SCRIPT_PATH)));
     if (!write.ok()) {
       throw new IOException(
-          "Failed to install " + SCRIPT_PATH + " in " + container + ": " + write.stderr());
+          "Failed to install " + SCRIPT_PATH + " in " + container + ": " + write.reason());
     }
   }
 }

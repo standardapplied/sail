@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.common.Strings;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -135,12 +134,7 @@ public final class Apt {
             .lines()
             .filter(line -> line.startsWith("E: "))
             .collect(Collectors.joining(" "));
-    var said =
-        !errors.isEmpty()
-            ? errors
-            : Strings.isBlank(result.stderr())
-                ? "exit " + result.exitCode()
-                : result.stderr().strip();
+    var said = errors.isEmpty() ? result.reason() : errors;
     return heldBy == null ? said : said + " " + heldBy + ".";
   }
 

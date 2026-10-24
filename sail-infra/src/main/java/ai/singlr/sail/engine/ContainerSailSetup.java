@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
@@ -35,6 +36,10 @@ import java.util.concurrent.TimeoutException;
  *       hand-edited file runs every installer and restamps — the stamp is a fast-path hint, never
  *       proof, so machinery tampering cannot hide behind a current stamp.
  * </ol>
+ *
+ * <p>One process at a time reconciles a container: the boot sweep, apply, rename, {@code sail up}
+ * and a dispatch wait for each other on {@link #lockFile}, while different containers reconcile in
+ * parallel.
  *
  * <p>Designed for the dispatch hot path: the refresh is two idempotent {@code incus} calls, the
  * probe is one shell, and only a stale container pays for the installer shells.
@@ -72,6 +77,22 @@ public final class ContainerSailSetup {
   public static Result ensureInstalled(ShellExec probe, ShellExec shell, String container)
       throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(container);
+    try (var held = FileMutex.acquire(lockFile(container))) {
+      return reconcile(probe, shell, container);
+    }
+  }
+
+  /**
+   * The lock one container's reconciliation holds, beside the control-plane database where the API
+   * server's boot sweep and every CLI that reconciles reach the same file: the device refresh is a
+   * read, a remove and an add, and two of them interleaved on one container fail each other.
+   */
+  static Path lockFile(String container) {
+    return SailPaths.dataDir().resolve("locks").resolve(container + ".machinery.lock");
+  }
+
+  private static Result reconcile(ShellExec probe, ShellExec shell, String container)
+      throws IOException, InterruptedException, TimeoutException {
     new IncusDeviceManager(shell)
         .refreshEventSocket(
             container, SailPaths.apiSocketHostDir(), SailPaths.apiSocketContainerDir());
@@ -192,7 +213,7 @@ public final class ContainerSailSetup {
                 container,
                 List.of("bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", fingerprint, path)));
     if (!write.ok()) {
-      throw new IOException("Failed to stamp " + path + " in " + container + ": " + write.stderr());
+      throw new IOException("Failed to stamp " + path + " in " + container + ": " + write.reason());
     }
   }
 }

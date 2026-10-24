@@ -9,8 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class ContainerSetupSweepTest {
 
@@ -77,5 +82,34 @@ class ContainerSetupSweepTest {
             .onFail("incus list --format json", "daemon down");
 
     assertEquals(0, ContainerSetupSweep.sweep(unlistable, Set.of("acme")));
+  }
+
+  @ParameterizedTest
+  @CsvSource(
+      delimiter = '|',
+      value = {
+        "Error: The device already exists | Error: The device already exists",
+        "'' | exited 1"
+      })
+  void aFailedRefreshWarnsWithWhyIncusRefused(String stderr, String reason) throws Exception {
+    var refusing =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("config device get acme", "Error: Device not found")
+            .onFail("device add acme", stderr);
+    var err = System.err;
+    var printed = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(printed, true, StandardCharsets.UTF_8));
+    try {
+      assertFalse(ContainerSetupSweep.reconcile(refusing, "acme"));
+    } finally {
+      System.setErr(err);
+    }
+
+    assertEquals(
+        "sail setup: could not refresh helpers in 'acme' (Failed to add sail-api-sock to acme: "
+            + reason
+            + ")."
+            + System.lineSeparator(),
+        printed.toString(StandardCharsets.UTF_8));
   }
 }
