@@ -91,7 +91,7 @@ class AptTest {
     assertEquals(
         "dpkg: error processing archive",
         Apt.reason(new ShellExec.Result(1, "", "  dpkg: error processing archive\n"), null));
-    assertEquals("exit 100", Apt.reason(new ShellExec.Result(100, "", " \n"), null));
+    assertEquals("exited 100", Apt.reason(new ShellExec.Result(100, "", " \n"), null));
     assertEquals(
         "E: one E: two",
         Apt.reason(new ShellExec.Result(100, "", "W: warned\nE: one\nE: two\n"), null));

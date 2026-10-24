@@ -219,7 +219,7 @@ public final class SpecCliHelper {
     var mkdir = shell.exec(ContainerExec.asDevUser(container, List.of("mkdir", "-p", SCRIPT_DIR)));
     if (!mkdir.ok()) {
       throw new IOException(
-          "Failed to create " + SCRIPT_DIR + " in " + container + ": " + mkdir.stderr());
+          "Failed to create " + SCRIPT_DIR + " in " + container + ": " + mkdir.reason());
     }
 
     var write =
@@ -235,7 +235,7 @@ public final class SpecCliHelper {
                     SCRIPT_PATH)));
     if (!write.ok()) {
       throw new IOException(
-          "Failed to install " + SCRIPT_PATH + " in " + container + ": " + write.stderr());
+          "Failed to install " + SCRIPT_PATH + " in " + container + ": " + write.reason());
     }
 
     var onPath =
@@ -251,7 +251,7 @@ public final class SpecCliHelper {
                     PROFILE_PATH)));
     if (!onPath.ok()) {
       throw new IOException(
-          "Failed to add " + SCRIPT_DIR + " to PATH in " + container + ": " + onPath.stderr());
+          "Failed to add " + SCRIPT_DIR + " to PATH in " + container + ": " + onPath.reason());
     }
   }
 }

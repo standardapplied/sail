@@ -45,7 +45,7 @@ public final class SshdKeepalive {
         shell.exec(ContainerExec.asRoot(container, DROP_IN.installCommand(DROP_IN.path())));
     if (!result.ok()) {
       throw new IOException(
-          "Failed to install " + DROP_IN.path() + " in " + container + ": " + result.stderr());
+          "Failed to install " + DROP_IN.path() + " in " + container + ": " + result.reason());
     }
   }
 }

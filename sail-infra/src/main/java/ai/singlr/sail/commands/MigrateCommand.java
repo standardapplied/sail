@@ -473,10 +473,13 @@ public final class MigrateCommand implements Runnable {
       List.of(SshdKeepalive.DROP_IN, NeedrestartPolicy.DROP_IN);
 
   /**
-   * Writes the host's drop-ins, {@link SshdKeepalive} and {@link NeedrestartPolicy}. Lives here for
-   * the same reason {@link #syncAuthorizedKeys} does: an upgrade is executed by the OLD binary,
-   * which re-execs the NEW binary's {@code migrate}, so this is the one step every upgrade path
-   * runs with new-binary code. Needs root; quiet and never fatal otherwise.
+   * Writes the host's drop-ins, {@link SshdKeepalive} and {@link NeedrestartPolicy}, and on a main
+   * whose sail-api is pointed at a data directory, the pty session host's copy of that drop-in
+   * ({@link SshIdentityProvisioner#ptyHostDataDir}), which {@link #ensurePtyHostService} then
+   * restarts onto it. Lives here for the same reason {@link #syncAuthorizedKeys} does: an upgrade
+   * is executed by the OLD binary, which re-execs the NEW binary's {@code migrate}, so this is the
+   * one step every upgrade path runs with new-binary code. Needs root; quiet and never fatal
+   * otherwise.
    */
   private static void ensureHostDropIns(boolean jsonOutput) {
     ensureHostDropIns(SailPaths.isRoot(), new ShellExecutor(false), Path.of("/"), jsonOutput);
@@ -488,6 +491,17 @@ public final class MigrateCommand implements Runnable {
     }
     for (var dropIn : HOST_DROP_INS) {
       ensureDropIn(dropIn, shell, fsRoot.resolve(dropIn.path().substring(1)), jsonOutput);
+    }
+    var apis = fsRoot.resolve(SshIdentityProvisioner.DROP_IN.substring(1));
+    if (Files.exists(apis)) {
+      try {
+        var mirrored = SshIdentityProvisioner.ptyHostDataDir(Files.readString(apis));
+        ensureDropIn(mirrored, shell, fsRoot.resolve(mirrored.path().substring(1)), jsonOutput);
+      } catch (IOException e) {
+        if (!jsonOutput) {
+          System.out.println(Ansi.AUTO.string("  @|yellow ⚠|@ " + e.getMessage()));
+        }
+      }
     }
   }
 

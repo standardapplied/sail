@@ -93,17 +93,27 @@ class SshIdentityProvisionerTest {
   }
 
   @Test
-  void dropInPointsServiceAtSharedDataDirWithGroupUmask() {
-    var write =
+  void bothServicesArePointedAtTheSharedDataDirWithGroupUmask() {
+    var writes =
         plan().stream()
             .filter(SshIdentityProvisioner.WriteFile.class::isInstance)
             .map(SshIdentityProvisioner.WriteFile.class::cast)
-            .findFirst()
-            .orElseThrow();
-    assertEquals(Path.of(SshIdentityProvisioner.DROP_IN), write.path());
-    assertTrue(
-        write.content().contains("Environment=SAIL_DATA_DIR=/var/lib/sail"), write.content());
-    assertTrue(write.content().contains("UMask=0007"), write.content());
+            .map(SshIdentityProvisioner.WriteFile::file)
+            .toList();
+    var content = "[Service]\nEnvironment=SAIL_DATA_DIR=/var/lib/sail\nUMask=0007\n";
+    assertEquals(
+        List.of(
+            new HostDropIn(
+                "Point sail-api at the shared data directory",
+                "/etc/systemd/system/sail-api.service.d/10-sail-data-dir.conf",
+                content,
+                ""),
+            new HostDropIn(
+                "Point the pty session host at the shared data directory",
+                "/etc/systemd/system/sail-pty-host.service.d/10-sail-data-dir.conf",
+                content,
+                "")),
+        writes);
   }
 
   @Test

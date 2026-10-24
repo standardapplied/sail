@@ -94,7 +94,7 @@ public final class HarnessHooks {
       throws IOException, InterruptedException, TimeoutException {
     var mkdir = shell.exec(ContainerExec.asDevUser(container, List.of("mkdir", "-p", dir)));
     if (!mkdir.ok()) {
-      throw new IOException("Failed to create " + dir + " in " + container + ": " + mkdir.stderr());
+      throw new IOException("Failed to create " + dir + " in " + container + ": " + mkdir.reason());
     }
 
     var write =
@@ -103,7 +103,7 @@ public final class HarnessHooks {
                 container,
                 List.of("bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", content, path)));
     if (!write.ok()) {
-      throw new IOException("Failed to write " + path + " in " + container + ": " + write.stderr());
+      throw new IOException("Failed to write " + path + " in " + container + ": " + write.reason());
     }
   }
 

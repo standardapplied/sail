@@ -100,7 +100,7 @@ public final class IncusDeviceManager {
                 + " from "
                 + container
                 + ": "
-                + result.stderr());
+                + result.reason());
       }
     }
     addEventSocket(container, hostPath, containerPath);
@@ -122,7 +122,7 @@ public final class IncusDeviceManager {
               + " from "
               + container
               + ": "
-              + result.stderr());
+              + result.reason());
     }
   }
 
@@ -164,7 +164,7 @@ public final class IncusDeviceManager {
     NameValidator.requireValidProjectName(container);
     var result = shell.exec(List.of("incus", "config", "device", "show", container));
     if (!result.ok()) {
-      throw new IOException("Failed to read devices on " + container + ": " + result.stderr());
+      throw new IOException("Failed to read devices on " + container + ": " + result.reason());
     }
     if (result.stdout().isBlank()) {
       return List.of();
@@ -194,7 +194,7 @@ public final class IncusDeviceManager {
                 "path=" + containerPath));
     if (!result.ok()) {
       throw new IOException(
-          "Failed to add " + EVENT_SOCKET_DEVICE + " to " + container + ": " + result.stderr());
+          "Failed to add " + EVENT_SOCKET_DEVICE + " to " + container + ": " + result.reason());
     }
   }
 }

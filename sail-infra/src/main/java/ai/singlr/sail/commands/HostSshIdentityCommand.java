@@ -9,9 +9,9 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
-import java.nio.file.Files;
 import java.util.List;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -54,7 +54,7 @@ public final class HostSshIdentityCommand implements Runnable {
           }
           requireRoot();
           System.out.println();
-          execute(plan);
+          execute(plan, new ShellExecutor(false));
           syncKeys(operator);
           System.out.println();
           System.out.println(Ansi.AUTO.string(enabledLine(operator)));
@@ -79,8 +79,8 @@ public final class HostSshIdentityCommand implements Runnable {
             System.out.println(
                 Ansi.AUTO.string("     @|faint $ " + String.join(" ", run.command()) + "|@"));
         case SshIdentityProvisioner.WriteFile write -> {
-          System.out.println(Ansi.AUTO.string("     @|faint write " + write.path() + ":|@"));
-          for (var line : write.content().stripTrailing().split("\n")) {
+          System.out.println(Ansi.AUTO.string("     @|faint write " + write.file().path() + ":|@"));
+          for (var line : write.file().content().stripTrailing().split("\n")) {
             System.out.println(Ansi.AUTO.string("       @|faint " + line + "|@"));
           }
         }
@@ -88,19 +88,17 @@ public final class HostSshIdentityCommand implements Runnable {
     }
   }
 
-  private static void execute(List<SshIdentityProvisioner.Step> plan) throws Exception {
-    var shell = new ShellExecutor(false);
+  static void execute(List<SshIdentityProvisioner.Step> plan, ShellExec shell) throws Exception {
     for (var step : plan) {
       switch (step) {
         case SshIdentityProvisioner.Run run -> {
           var result = shell.exec(run.command());
           if (!result.ok()) {
             throw new IllegalStateException(
-                "Step failed: " + step.description() + "\n" + result.stderr());
+                "Step failed: " + step.description() + "\n" + result.reason());
           }
         }
-        case SshIdentityProvisioner.WriteFile write ->
-            Files.writeString(write.path(), write.content());
+        case SshIdentityProvisioner.WriteFile write -> write.file().install(shell);
       }
       System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + step.description()));
     }

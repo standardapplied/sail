@@ -52,7 +52,7 @@ public record HostDropIn(String name, String path, String content, String reload
       throws IOException, InterruptedException, TimeoutException {
     var result = shell.exec(installCommand(target));
     if (!result.ok()) {
-      throw new IOException("Failed to install " + target + ": " + result.stderr());
+      throw new IOException("Failed to install " + target + ": " + result.reason());
     }
   }
 }

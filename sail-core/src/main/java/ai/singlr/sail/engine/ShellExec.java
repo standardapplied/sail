@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -22,6 +23,11 @@ public interface ShellExec {
   record Result(int exitCode, String stdout, String stderr) {
     public boolean ok() {
       return exitCode == 0;
+    }
+
+    /** Why the command failed: what it wrote to stderr, or its exit code when it wrote nothing. */
+    public String reason() {
+      return Strings.isBlank(stderr) ? "exited " + exitCode : stderr.strip();
     }
   }
 

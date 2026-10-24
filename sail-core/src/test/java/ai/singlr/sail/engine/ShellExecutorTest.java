@@ -26,6 +26,13 @@ import org.junit.jupiter.api.io.TempDir;
 class ShellExecutorTest {
 
   @Test
+  void aFailuresReasonIsWhatItSaidOrItsExitCodeWhenItSaidNothing() {
+    assertEquals(
+        "Error: no such device", new ShellExec.Result(1, "", " Error: no such device\n").reason());
+    assertEquals("exited 1", new ShellExec.Result(1, "out", " \n").reason());
+  }
+
+  @Test
   void executesSimpleCommand() throws Exception {
     var executor = new ShellExecutor(false);
     var result = executor.exec(List.of("echo", "hello"));
