@@ -61,6 +61,11 @@ public final class SailPaths {
         System.getenv("SAIL_DATA_DIR"), Files.isReadable(SYSTEM_DATA_DIR.resolve("sail.db")));
   }
 
+  /** The box's lock files, beside its database, where the API server and a root CLI meet. */
+  public static Path locksDir() {
+    return dataDir().resolve("locks");
+  }
+
   /** Pure resolver; visible for tests so resolution can be exercised without the environment. */
   static Path dataDir(String configured, boolean provisionedSystemDb) {
     if (Strings.isNotBlank(configured)) {

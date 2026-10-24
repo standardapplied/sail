@@ -38,8 +38,8 @@ import java.util.concurrent.TimeoutException;
  * </ol>
  *
  * <p>One process at a time reconciles a container: the boot sweep, apply, rename, {@code sail up}
- * and a dispatch wait for each other on {@link #lockFile}, while different containers reconcile in
- * parallel.
+ * and a dispatch wait for each other on the container's lock file, while different containers
+ * reconcile in parallel.
  *
  * <p>Designed for the dispatch hot path: the refresh is two idempotent {@code incus} calls, the
  * probe is one shell, and only a stale container pays for the installer shells.
@@ -76,19 +76,25 @@ public final class ContainerSailSetup {
    */
   public static Result ensureInstalled(ShellExec probe, ShellExec shell, String container)
       throws IOException, InterruptedException, TimeoutException {
-    NameValidator.requireValidProjectName(container);
-    try (var held = FileMutex.acquire(lockFile(container))) {
-      return reconcile(probe, shell, container);
-    }
+    return ensureInstalled(probe, shell, container, SailPaths.locksDir());
   }
 
   /**
-   * The lock one container's reconciliation holds, beside the control-plane database where the API
-   * server's boot sweep and every CLI that reconciles reach the same file: the device refresh is a
-   * read, a remove and an add, and two of them interleaved on one container fail each other.
+   * The same reconciliation, serialised on its container's file under {@code locks}, the box's lock
+   * directory: the device refresh is a read, a remove and an add, and two of them interleaved on
+   * one container fail each other, so the API server's boot sweep and every CLI that reconciles
+   * wait for each other there. A dry run changes nothing, so it takes no lock.
    */
-  static Path lockFile(String container) {
-    return SailPaths.dataDir().resolve("locks").resolve(container + ".machinery.lock");
+  public static Result ensureInstalled(
+      ShellExec probe, ShellExec shell, String container, Path locks)
+      throws IOException, InterruptedException, TimeoutException {
+    NameValidator.requireValidProjectName(container);
+    if (shell.isDryRun()) {
+      return reconcile(probe, shell, container);
+    }
+    try (var held = FileMutex.acquire(locks.resolve(container + ".machinery.lock"))) {
+      return reconcile(probe, shell, container);
+    }
   }
 
   private static Result reconcile(ShellExec probe, ShellExec shell, String container)

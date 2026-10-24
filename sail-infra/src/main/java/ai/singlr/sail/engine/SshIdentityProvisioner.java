@@ -164,8 +164,8 @@ public final class SshIdentityProvisioner {
                     + "/host.yaml\" && chmod 640 \""
                     + dataDir
                     + "/host.yaml\"; true")),
-        dataDirDropIn("sail-api", DROP_IN, dataDir),
-        dataDirDropIn("the pty session host", PTY_HOST_DROP_IN, dataDir),
+        pointAt("sail-api", DROP_IN, dataDir),
+        pointAt("the pty session host", PTY_HOST_DROP_IN, dataDir),
         new Run("Reload systemd units", List.of("systemctl", "daemon-reload")),
         new Run(
             "Start sail-api on the shared data directory",
@@ -175,12 +175,22 @@ public final class SshIdentityProvisioner {
             List.of("systemctl", "restart", PtyHostUnit.UNIT_NAME)));
   }
 
-  private static WriteFile dataDirDropIn(String service, String path, String dataDir) {
+  /**
+   * The pty session host's drop-in holding {@code content}, the bytes sail-api's drop-in holds, so
+   * a box whose sail-api was pointed at a data directory before the pty host followed it there is
+   * converged by {@code migrate}.
+   */
+  public static HostDropIn ptyHostDataDir(String content) {
+    return dataDirDropIn("the pty session host", PTY_HOST_DROP_IN, content);
+  }
+
+  private static WriteFile pointAt(String service, String path, String dataDir) {
     return new WriteFile(
-        new HostDropIn(
-            "Point " + service + " at the shared data directory",
-            path,
-            "[Service]\nEnvironment=SAIL_DATA_DIR=" + dataDir + "\nUMask=0007\n",
-            ""));
+        dataDirDropIn(
+            service, path, "[Service]\nEnvironment=SAIL_DATA_DIR=" + dataDir + "\nUMask=0007\n"));
+  }
+
+  private static HostDropIn dataDirDropIn(String service, String path, String content) {
+    return new HostDropIn("Point " + service + " at the shared data directory", path, content, "");
   }
 }

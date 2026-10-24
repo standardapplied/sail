@@ -8,8 +8,10 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
@@ -18,6 +20,18 @@ import org.junit.jupiter.api.io.TempDir;
 class PtyHostUnitTest {
 
   private static final Path BINARY = Path.of("/usr/local/bin/sail");
+
+  @Test
+  void aSystemctlStepThatFailsSayingNothingIsReportedByItsExitCode(@TempDir Path home) {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .on("daemon-reload", new ShellExec.Result(1, "", " \n"));
+    var unit = new PtyHostUnit(shell, SystemdServiceInstaller.Mode.USER, home, BINARY);
+
+    var failed = assertThrows(IOException.class, unit::install);
+
+    assertEquals("Failed to reload systemd units: exited 1", failed.getMessage());
+  }
 
   @Test
   void rendersAUnitThatRunsThePtyHostWithNoBindSurface(@TempDir Path home) {

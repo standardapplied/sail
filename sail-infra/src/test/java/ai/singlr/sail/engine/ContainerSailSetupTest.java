@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -30,8 +31,11 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class ContainerSailSetupTest {
+
+  @TempDir Path locks;
 
   private static final String CONTAINER = "light-grid";
   private static final String PROBE = "cmp -s --";
@@ -43,7 +47,7 @@ class ContainerSailSetupTest {
             .onOk("config device get " + CONTAINER, "/run/sail\n")
             .onOk(PROBE);
 
-    var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+    var result = ContainerSailSetup.ensureInstalled(shell, shell, CONTAINER, locks);
 
     assertEquals(ContainerSailSetup.Result.ALREADY_PRESENT, result);
     assertTrue(
@@ -62,7 +66,7 @@ class ContainerSailSetupTest {
             .onOk("config device get " + CONTAINER, "/run/sail\n")
             .onOk(PROBE);
 
-    ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+    ContainerSailSetup.ensureInstalled(shell, shell, CONTAINER, locks);
 
     var probe =
         shell.invocations().stream().filter(c -> c.contains(PROBE)).findFirst().orElseThrow();
@@ -87,7 +91,7 @@ class ContainerSailSetupTest {
             .onOk("config device get " + CONTAINER, "/run/sail\n")
             .onOk(PROBE);
 
-    ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+    ContainerSailSetup.ensureInstalled(shell, shell, CONTAINER, locks);
 
     var probe =
         shell.invocations().stream().filter(c -> c.contains(PROBE)).findFirst().orElseThrow();
@@ -107,7 +111,7 @@ class ContainerSailSetupTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("config device get " + CONTAINER, "/run/sail\n");
 
-    var result = ContainerSailSetup.ensureInstalled(probe, mutator, CONTAINER);
+    var result = ContainerSailSetup.ensureInstalled(probe, mutator, CONTAINER, locks);
 
     assertEquals(ContainerSailSetup.Result.UPDATED, result);
     assertTrue(
@@ -132,7 +136,7 @@ class ContainerSailSetupTest {
             .onOk("config device get " + CONTAINER, "/run/sail\n")
             .onFail(PROBE, "stale");
 
-    ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+    ContainerSailSetup.ensureInstalled(shell, shell, CONTAINER, locks);
 
     var install =
         shell.invocations().stream()
@@ -150,7 +154,7 @@ class ContainerSailSetupTest {
             .onOk("config device get " + CONTAINER, "/run/sail\n")
             .onFail(PROBE, "No such file or directory");
 
-    var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+    var result = ContainerSailSetup.ensureInstalled(shell, shell, CONTAINER, locks);
 
     assertEquals(ContainerSailSetup.Result.UPDATED, result);
     var commands = shell.invocations();
@@ -181,7 +185,7 @@ class ContainerSailSetupTest {
             .onOk("config device get " + CONTAINER, "/run/sail\n")
             .onFail(PROBE, "");
 
-    var result = ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+    var result = ContainerSailSetup.ensureInstalled(shell, shell, CONTAINER, locks);
 
     assertEquals(
         ContainerSailSetup.Result.UPDATED,
@@ -282,7 +286,7 @@ class ContainerSailSetupTest {
             .onOk("config device get " + CONTAINER, hostDir + "\n")
             .onOk(PROBE);
 
-    ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+    ContainerSailSetup.ensureInstalled(shell, shell, CONTAINER, locks);
 
     var commands = shell.invocations();
     assertTrue(
@@ -301,7 +305,7 @@ class ContainerSailSetupTest {
             .onFail("config device get " + CONTAINER, "Device not found")
             .onOk(PROBE);
 
-    ContainerSailSetup.ensureInstalled(shell, CONTAINER);
+    ContainerSailSetup.ensureInstalled(shell, shell, CONTAINER, locks);
 
     var commands = shell.invocations();
     assertTrue(
@@ -320,14 +324,17 @@ class ContainerSailSetupTest {
             .onFail(PROBE, "missing")
             .onFail(ContainerSailSetup.STAMP_PATH, "read-only filesystem");
 
-    assertThrows(IOException.class, () -> ContainerSailSetup.ensureInstalled(shell, CONTAINER));
+    assertThrows(
+        IOException.class,
+        () -> ContainerSailSetup.ensureInstalled(shell, shell, CONTAINER, locks));
   }
 
   @Test
   void rejectsInvalidContainerName() {
     var shell = new ScriptedShellExecutor();
 
-    assertThrows(Exception.class, () -> ContainerSailSetup.ensureInstalled(shell, "../bad"));
+    assertThrows(
+        Exception.class, () -> ContainerSailSetup.ensureInstalled(shell, shell, "../bad", locks));
   }
 
   @Test
@@ -337,7 +344,20 @@ class ContainerSailSetupTest {
             .onFail("config device get", "Device not found")
             .onFail("config device add", "incus error");
 
-    assertThrows(IOException.class, () -> ContainerSailSetup.ensureInstalled(shell, CONTAINER));
+    assertThrows(
+        IOException.class,
+        () -> ContainerSailSetup.ensureInstalled(shell, shell, CONTAINER, locks));
+  }
+
+  @Test
+  void aDryRunReconcilesUnderNoLock() throws Exception {
+    var probe = new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail(PROBE, "stale");
+
+    var result =
+        ContainerSailSetup.ensureInstalled(probe, new ShellExecutor(true), CONTAINER, locks);
+
+    assertEquals(ContainerSailSetup.Result.UPDATED, result);
+    assertEquals(List.of(), Files.list(locks).toList(), "nothing changes, so nothing is held");
   }
 
   @Test
@@ -346,8 +366,10 @@ class ContainerSailSetupTest {
     var incus =
         new SharedIncus(
             () -> awaitUntil(() -> otherThan(threads).allMatch(parkedOrDone())), CONTAINER);
-    var first = new FutureTask<>(() -> ContainerSailSetup.ensureInstalled(incus, CONTAINER));
-    var second = new FutureTask<>(() -> ContainerSailSetup.ensureInstalled(incus, CONTAINER));
+    var first =
+        new FutureTask<>(() -> ContainerSailSetup.ensureInstalled(incus, incus, CONTAINER, locks));
+    var second =
+        new FutureTask<>(() -> ContainerSailSetup.ensureInstalled(incus, incus, CONTAINER, locks));
     threads.addAll(List.of(new Thread(first), new Thread(second)));
 
     threads.forEach(Thread::start);
@@ -374,8 +396,9 @@ class ContainerSailSetupTest {
               awaitUntil(() -> applying.get() != null && parkedOrDone().test(applying.get()));
             },
             CONTAINER);
-    var sweep = new FutureTask<>(() -> ContainerSetupSweep.reconcile(incus, CONTAINER));
-    var apply = new FutureTask<>(() -> ContainerSailSetup.ensureInstalled(incus, incus, CONTAINER));
+    var sweep = new FutureTask<>(() -> ContainerSetupSweep.reconcile(incus, CONTAINER, locks));
+    var apply =
+        new FutureTask<>(() -> ContainerSailSetup.ensureInstalled(incus, incus, CONTAINER, locks));
 
     new Thread(sweep).start();
     assertTrue(sweepInside.await(10, TimeUnit.SECONDS), "the sweep never reached the device");
@@ -398,8 +421,10 @@ class ContainerSailSetupTest {
                             .allMatch(thread -> thread.getState() == Thread.State.TERMINATED)),
             "acme",
             "beta");
-    var acme = new FutureTask<>(() -> ContainerSailSetup.ensureInstalled(incus, "acme"));
-    var beta = new FutureTask<>(() -> ContainerSailSetup.ensureInstalled(incus, "beta"));
+    var acme =
+        new FutureTask<>(() -> ContainerSailSetup.ensureInstalled(incus, incus, "acme", locks));
+    var beta =
+        new FutureTask<>(() -> ContainerSailSetup.ensureInstalled(incus, incus, "beta", locks));
     threads.addAll(List.of(new Thread(acme), new Thread(beta)));
 
     threads.forEach(Thread::start);

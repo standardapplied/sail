@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
@@ -28,9 +29,15 @@ public final class ContainerSetupSweep {
    */
   public static int sweep(ShellExec shell, Collection<String> projects)
       throws InterruptedException {
+    return sweep(shell, projects, SailPaths.locksDir());
+  }
+
+  /** As {@link #sweep(ShellExec, Collection)}, each container serialised under {@code locks}. */
+  public static int sweep(ShellExec shell, Collection<String> projects, Path locks)
+      throws InterruptedException {
     var reconciled = 0;
     for (var container : running(shell, projects)) {
-      if (reconcile(shell, container)) {
+      if (reconcile(shell, container, locks)) {
         reconciled++;
       }
     }
@@ -44,8 +51,14 @@ public final class ContainerSetupSweep {
    * their own error handling call {@link ContainerSailSetup#ensureInstalled} directly.
    */
   public static boolean reconcile(ShellExec shell, String container) throws InterruptedException {
+    return reconcile(shell, container, SailPaths.locksDir());
+  }
+
+  /** As {@link #reconcile(ShellExec, String)}, serialised under {@code locks}. */
+  public static boolean reconcile(ShellExec shell, String container, Path locks)
+      throws InterruptedException {
     try {
-      ContainerSailSetup.ensureInstalled(shell, container);
+      ContainerSailSetup.ensureInstalled(shell, shell, container, locks);
       return true;
     } catch (IOException | TimeoutException | RuntimeException e) {
       System.err.println(

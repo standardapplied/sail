@@ -37,7 +37,7 @@ final class PtyHostYield implements SessionYield {
   }
 
   PtyHostYield(Path socket) {
-    this(socket, SailPaths.dataDir().resolve("locks"));
+    this(socket, SailPaths.locksDir());
   }
 
   PtyHostYield(Path socket, Path lockDir) {

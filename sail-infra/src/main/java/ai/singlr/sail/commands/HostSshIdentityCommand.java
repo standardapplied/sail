@@ -95,7 +95,7 @@ public final class HostSshIdentityCommand implements Runnable {
           var result = shell.exec(run.command());
           if (!result.ok()) {
             throw new IllegalStateException(
-                "Step failed: " + step.description() + "\n" + result.stderr());
+                "Step failed: " + step.description() + "\n" + result.reason());
           }
         }
         case SshIdentityProvisioner.WriteFile write -> write.file().install(shell);

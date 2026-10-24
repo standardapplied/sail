@@ -146,7 +146,7 @@ public final class PtyHostUnit {
 
   private static void requireSuccess(ShellExec.Result result, String message) throws IOException {
     if (!result.ok()) {
-      throw new IOException(message + ": " + result.stderr());
+      throw new IOException(message + ": " + result.reason());
     }
   }
 }

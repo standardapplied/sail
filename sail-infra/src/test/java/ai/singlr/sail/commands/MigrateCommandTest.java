@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.NeedrestartPolicy;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.identity.Actor;
@@ -460,6 +461,34 @@ class MigrateCommandTest {
     Files.writeString(needrestart, NeedrestartPolicy.DROP_IN.content());
     MigrateCommand.ensureHostDropIns(true, shell, fsRoot, true);
     assertEquals(2, shell.arguments().size(), "drop-ins already current are left alone");
+  }
+
+  @Test
+  void aMainWhoseSailApiReadsASharedDataDirPointsThePtyHostThereTooOnce(@TempDir Path fsRoot)
+      throws Exception {
+    var content = "[Service]\nEnvironment=SAIL_DATA_DIR=/var/lib/sail\nUMask=0007\n";
+    var apis = fsRoot.resolve("etc/systemd/system/sail-api.service.d/10-sail-data-dir.conf");
+    var ptys = fsRoot.resolve("etc/systemd/system/sail-pty-host.service.d/10-sail-data-dir.conf");
+    Files.createDirectories(apis.getParent());
+    Files.writeString(apis, content);
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    var out = captureStdout(() -> MigrateCommand.ensureHostDropIns(true, shell, fsRoot, false));
+
+    assertEquals(
+        SshIdentityProvisioner.ptyHostDataDir(content).installCommand(ptys.toString()),
+        shell.arguments().getLast(),
+        "the pty host gets sail-api's bytes");
+    assertTrue(
+        out.endsWith("  ✓ Point the pty session host at the shared data directory written\n"), out);
+
+    Files.createDirectories(ptys.getParent());
+    Files.writeString(ptys, content);
+    MigrateCommand.ensureHostDropIns(true, shell, fsRoot, true);
+    assertEquals(
+        1,
+        shell.invocations().stream().filter(command -> command.contains("sail-pty-host")).count(),
+        "a pty host already pointed there is left alone");
   }
 
   @Test

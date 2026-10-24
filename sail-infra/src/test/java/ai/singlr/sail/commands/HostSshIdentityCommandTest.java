@@ -6,17 +6,53 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 class HostSshIdentityCommandTest {
+
+  @Test
+  void aStepThatFailsSayingNothingIsReportedByItsExitCode() {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .on("systemctl daemon-reload", new ShellExec.Result(1, "", " \n"));
+
+    var failed =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                HostSshIdentityCommand.execute(
+                    SshIdentityProvisioner.plan(Path.of("/root/.sail"), "/var/lib/sail"), shell));
+
+    assertEquals("Step failed: Reload systemd units\nexited 1", failed.getMessage());
+  }
+
+  @Test
+  void aDropInThatCannotBeWrittenSayingNothingIsReportedByItsExitCode() {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .on("sail-pty-host.service.d", new ShellExec.Result(1, "", ""));
+
+    var failed =
+        assertThrows(
+            IOException.class,
+            () ->
+                HostSshIdentityCommand.execute(
+                    SshIdentityProvisioner.plan(Path.of("/root/.sail"), "/var/lib/sail"), shell));
+
+    assertEquals(
+        "Failed to install " + SshIdentityProvisioner.PTY_HOST_DROP_IN + ": exited 1",
+        failed.getMessage());
+  }
 
   @Test
   void theDatabaseMoveEndsWithBothServicesRestartedOntoTheSharedDataDir() throws Exception {

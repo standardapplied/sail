@@ -12,12 +12,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 class ContainerSetupSweepTest {
+
+  @TempDir Path locks;
 
   private static final String LIST_JSON =
       """
@@ -32,7 +36,7 @@ class ContainerSetupSweepTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("incus list --format json", LIST_JSON);
 
-    var reconciled = ContainerSetupSweep.sweep(shell, Set.of("acme", "parked"));
+    var reconciled = ContainerSetupSweep.sweep(shell, Set.of("acme", "parked"), locks);
 
     assertEquals(1, reconciled);
     var commands = String.join("\n", shell.invocations());
@@ -47,7 +51,7 @@ class ContainerSetupSweepTest {
   void reconcileRefreshesTheMountAndProbesTheMachinery() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
 
-    assertTrue(ContainerSetupSweep.reconcile(shell, "acme"));
+    assertTrue(ContainerSetupSweep.reconcile(shell, "acme", locks));
 
     var commands = String.join("\n", shell.invocations());
     assertTrue(
@@ -65,7 +69,7 @@ class ContainerSetupSweepTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("device add acme", "container wedged");
 
-    assertFalse(ContainerSetupSweep.reconcile(wedged, "acme"));
+    assertFalse(ContainerSetupSweep.reconcile(wedged, "acme", locks));
   }
 
   @Test
@@ -75,13 +79,13 @@ class ContainerSetupSweepTest {
             .onOk("incus list --format json", LIST_JSON)
             .onFail("device add acme", "container wedged");
 
-    assertEquals(0, ContainerSetupSweep.sweep(failing, Set.of("acme")));
+    assertEquals(0, ContainerSetupSweep.sweep(failing, Set.of("acme"), locks));
 
     var unlistable =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus list --format json", "daemon down");
 
-    assertEquals(0, ContainerSetupSweep.sweep(unlistable, Set.of("acme")));
+    assertEquals(0, ContainerSetupSweep.sweep(unlistable, Set.of("acme"), locks));
   }
 
   @ParameterizedTest
@@ -100,7 +104,7 @@ class ContainerSetupSweepTest {
     var printed = new ByteArrayOutputStream();
     System.setErr(new PrintStream(printed, true, StandardCharsets.UTF_8));
     try {
-      assertFalse(ContainerSetupSweep.reconcile(refusing, "acme"));
+      assertFalse(ContainerSetupSweep.reconcile(refusing, "acme", locks));
     } finally {
       System.setErr(err);
     }
