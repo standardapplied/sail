@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.engine.Apt;
 import ai.singlr.sail.engine.HostProvisioner;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.NeedrestartPolicy;
@@ -478,9 +479,55 @@ class MigrateCommandTest {
   }
 
   @Test
+  void migrateHoldsAnUnheldIncusOnceAndSaysSoOnlyThatTime() {
+    var shell =
+        new ScriptedShellExecutor()
+            .onceOnOk("dpkg-query -W", "incus install installed\nincus-client install installed\n")
+            .onOk("dpkg-query", "incus hold installed\nincus-client hold installed\n")
+            .onOk("apt-mark");
+
+    MigrateCommand.ensureIncusHold(false, shell, false, OperatorCommand.SUDO);
+    assertEquals(List.of(), shell.invocations(), "a non-root migrate holds nothing");
+
+    var first =
+        captureStdout(
+            () -> MigrateCommand.ensureIncusHold(true, shell, false, OperatorCommand.SUDO));
+    var second =
+        captureStdout(
+            () -> MigrateCommand.ensureIncusHold(true, shell, false, OperatorCommand.SUDO));
+
+    assertEquals("  ✓ incus held (sudo sail host incus upgrade moves it)\n", first);
+    assertEquals("", second);
+    assertEquals(
+        List.of(String.join(" ", Apt.HOLD) + " incus incus-client"),
+        shell.invocations().stream().filter(command -> command.contains("apt-mark")).toList());
+  }
+
+  @Test
+  void aHoldThatFailsWarnsWithTheRerun() {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("dpkg-query", "incus install installed\n")
+            .onFail("apt-mark", "E: Could not get lock /var/lib/dpkg/lock");
+
+    var out =
+        captureStdout(
+            () -> MigrateCommand.ensureIncusHold(true, shell, false, OperatorCommand.PLAIN));
+    var quiet =
+        captureStdout(
+            () -> MigrateCommand.ensureIncusHold(true, shell, true, OperatorCommand.PLAIN));
+
+    assertEquals(
+        "  ⚠ apt-mark hold incus failed: E: Could not get lock /var/lib/dpkg/lock. Run 'sail"
+            + " migrate' again to hold Incus.\n",
+        out);
+    assertEquals("", quiet);
+  }
+
+  @Test
   void initAndMigrateWriteTheSameNeedrestartPolicy(@TempDir Path dir) throws Exception {
     var provisioning = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
-    new HostProvisioner(provisioning, null)
+    new HostProvisioner(provisioning, null, OperatorCommand.SUDO)
         .provision(
             "dir", null, "devpool", "incusbr0", null, dir.resolve("host.yaml"), dir.resolve("db"));
     var migrating = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));

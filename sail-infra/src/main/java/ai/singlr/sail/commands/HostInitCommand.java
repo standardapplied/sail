@@ -215,7 +215,7 @@ public final class HostInitCommand implements Runnable {
     }
 
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
-    var provisioner = new HostProvisioner(shell, listener);
+    var provisioner = new HostProvisioner(shell, listener, operator);
     var hostYaml =
         provisioner.provision(
             storage,

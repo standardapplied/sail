@@ -7,11 +7,13 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostDetector;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -123,6 +125,94 @@ class HostStatusCommandTest {
         box.stream().filter(line -> line.contains("Containers:")).toList());
   }
 
+  @Test
+  void anIncusAptWouldMoveNamesTheCandidateAndTheCommandThatMovesIt() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("incus list", "[]")
+            .onOk("incus version", "Client version: 6.17\nServer version: 6.17\n")
+            .onOk(
+                "apt-cache policy incus",
+                "incus:\n  Installed: 1:6.17-ubuntu24.04-202510010000\n"
+                    + "  Candidate: 1:6.18-ubuntu24.04-202511010000\n")
+            .onOk("dpkg --compare-versions");
+
+    assertEquals("6.18", json(shell).get("incus_candidate"));
+    var row = text(shell).lines().filter(line -> line.contains("Incus:")).toList();
+    assertEquals(
+        List.of("  │  Incus:       6.17 (6.18 available: sudo sail host incus upgrade)│"), row);
+  }
+
+  @Test
+  void aRebuildOfTheSameReleaseIsNamedWholeSoTheRowShowsTheMove() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("incus list", "[]")
+            .onOk("incus version", "6.17\n")
+            .onOk(
+                "apt-cache policy incus",
+                "incus:\n  Installed: 1:6.17-ubuntu24.04-202510010000\n"
+                    + "  Candidate: 1:6.17-ubuntu24.04-202510150000\n")
+            .onOk("dpkg --compare-versions");
+
+    assertEquals("1:6.17-ubuntu24.04-202510150000", json(shell).get("incus_candidate"));
+    assertEquals(
+        List.of(
+            "  │  Incus:       6.17 (1:6.17-ubuntu24.04-202510150000 available: sudo sail host"
+                + " incus upgrade)│"),
+        text(shell).lines().filter(line -> line.contains("Incus:")).toList());
+  }
+
+  @Test
+  void aCandidateOlderThanTheInstalledIncusLeavesTheRowAlone() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("incus list", "[]")
+            .onOk("incus version", "6.19\n")
+            .onOk(
+                "apt-cache policy incus",
+                "incus:\n  Installed: 1:6.19-ubuntu24.04-1\n  Candidate: 1:6.18-ubuntu24.04-1\n")
+            .onFail("dpkg --compare-versions", "");
+
+    assertEquals("6.18", json(shell).get("incus_candidate"));
+    assertEquals(
+        List.of("  │  Incus:       6.19"),
+        text(shell)
+            .lines()
+            .filter(line -> line.contains("Incus:"))
+            .map(line -> line.replaceAll(" +│$", ""))
+            .toList());
+  }
+
+  @Test
+  void anIncusThatIsCurrentOrUnknownToAptKeepsItsRow() throws Exception {
+    var current =
+        new ScriptedShellExecutor()
+            .onOk("incus list", "[]")
+            .onOk("incus version", "6.18\n")
+            .onOk(
+                "apt-cache policy incus",
+                "incus:\n  Installed: 1:6.18-ubuntu24.04-1\n  Candidate: 1:6.18-ubuntu24.04-1\n");
+    var unknown =
+        new ScriptedShellExecutor()
+            .onOk("incus list", "[]")
+            .onOk("incus version", "6.18\n")
+            .onOk("apt-cache policy incus", "");
+
+    assertEquals("6.18", json(current).get("incus_candidate"));
+    assertTrue(json(unknown).containsKey("incus_candidate"));
+    assertNull(json(unknown).get("incus_candidate"));
+    for (var shell : List.of(current, unknown)) {
+      assertEquals(
+          List.of("  │  Incus:       6.18"),
+          text(shell)
+              .lines()
+              .filter(line -> line.contains("Incus:"))
+              .map(line -> line.replaceAll(" +│$", ""))
+              .toList());
+    }
+  }
+
   private static Map<String, Object> json(ScriptedShellExecutor shell) throws Exception {
     return YamlUtil.parseMap(report(shell, true));
   }
@@ -134,7 +224,12 @@ class HostStatusCommandTest {
   private static String report(ScriptedShellExecutor shell, boolean json) throws Exception {
     var out = new ByteArrayOutputStream();
     HostStatusCommand.report(
-        RECORDED_AT_INIT, HOST, shell, json, new PrintStream(out, true, StandardCharsets.UTF_8));
+        RECORDED_AT_INIT,
+        HOST,
+        shell,
+        json,
+        OperatorCommand.SUDO,
+        new PrintStream(out, true, StandardCharsets.UTF_8));
     return out.toString(StandardCharsets.UTF_8);
   }
 }

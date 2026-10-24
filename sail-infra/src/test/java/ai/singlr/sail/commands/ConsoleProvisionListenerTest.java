@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.HostProvisioner;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -43,7 +44,8 @@ class ConsoleProvisionListenerTest {
               CliCommand.run(
                   printed,
                   () ->
-                      new HostProvisioner(shell, ConsoleProvisionListener.INSTANCE)
+                      new HostProvisioner(
+                              shell, ConsoleProvisionListener.INSTANCE, OperatorCommand.SUDO)
                           .provision(
                               "dir",
                               null,
@@ -57,7 +59,7 @@ class ConsoleProvisionListenerTest {
     }
 
     var text = terminal.toString(StandardCharsets.UTF_8);
-    assertTrue(text.contains("  [1/8] ✓ up to date\n"), text);
+    assertTrue(text.contains("  [1/8] ✓ a library update never restarts Incus\n"), text);
     assertEquals(
         "  [2/8] ✗ Installing Incus (Zabbly stable)\n  ✗ Command timed out after 300s\n",
         text.substring(text.lastIndexOf(CLEARED) + CLEARED.length()));

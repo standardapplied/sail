@@ -1473,6 +1473,10 @@ class SailOperationsSeamTest {
       assertTrue(operations.dispatching().activeRun("proj", "other").isEmpty());
       assertTrue(operations.dispatching().latestRun("proj", "other").isEmpty());
       assertEquals(1, operations.dispatching().runningRuns("proj", "node").size());
+      assertEquals(
+          List.of(id),
+          operations.dispatching().liveRuns("node").stream().map(RunStore.RunRow::id).toList());
+      assertEquals(List.of(), operations.dispatching().liveRuns("other"));
       assertTrue(operations.dispatching().latestRunInLane("proj", "node", Lane.REVIEW).isEmpty());
       Acting.system(() -> runs.complete(id, "completed", 0));
       var reviewer = DateTimeUtils.newId().toString();

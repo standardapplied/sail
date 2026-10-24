@@ -14,6 +14,9 @@ public interface ProvisionListener {
 
   default void onStepSkipped(int step, int total, String detail) {}
 
+  /** The step running moved on: {@code detail} says how far, until the next one replaces it. */
+  default void onStepProgress(String detail) {}
+
   /** The step running, if one is, failed: its failure is reported after this returns. */
   default void onStepFailed() {}
 

@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 
 /**
  * Contract for executing shell commands. Production code depends on this interface, enabling test
@@ -42,6 +43,17 @@ public interface ShellExec {
    */
   Result exec(List<String> command, Path workDir, Duration timeout)
       throws IOException, InterruptedException, TimeoutException;
+
+  /**
+   * Runs a command to its exit however long it takes, handing each line of its stdout to {@code
+   * lines} as it arrives: for a command that bounds its own waits and reports its own progress,
+   * such as apt, where a deadline could only ever kill it mid-write. The result holds all of both
+   * streams.
+   */
+  default Result run(List<String> command, Consumer<String> lines)
+      throws IOException, InterruptedException {
+    throw new UnsupportedOperationException("This executor does not run commands to exit");
+  }
 
   /** Streams raw stdout; closing the stream also closes the child process. */
   default java.io.InputStream stream(List<String> command) throws IOException {

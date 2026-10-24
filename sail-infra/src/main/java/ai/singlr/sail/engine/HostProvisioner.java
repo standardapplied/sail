@@ -19,8 +19,9 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * Provisions a bare-metal host: keeps a library update from restarting Incus ({@link
- * NeedrestartPolicy}), installs Incus, creates the storage pool (dir or ZFS), initializes Incus,
- * creates the base profile, caches the container image, and writes {@code /etc/sail/host.yaml}.
+ * NeedrestartPolicy}), installs and holds what sail runs on ({@link HostPackages}), creates the
+ * storage pool (dir or ZFS), initializes Incus, creates the base profile, caches the container
+ * image, and writes {@code /etc/sail/host.yaml}.
  *
  * <p>Every step is idempotent — safe to run again on an already-provisioned host. A re-run
  * refreshes only the fields it provisions and keeps the rest of {@code host.yaml}: sync identity,
@@ -33,16 +34,24 @@ import java.util.concurrent.TimeoutException;
 public final class HostProvisioner {
 
   private static final int TOTAL_STEPS = 8;
-  private static final Duration INSTALL_TIMEOUT = Duration.ofMinutes(5);
+  private static final Duration INIT_TIMEOUT = Duration.ofMinutes(5);
   private static final Duration POOL_TIMEOUT = Duration.ofMinutes(3);
   private static final Duration IMAGE_TIMEOUT = Duration.ofMinutes(5);
 
   private final ShellExec shell;
   private final ProvisionListener listener;
+  private final HostPackages packages;
+  private final OperatorCommand operator;
 
-  public HostProvisioner(ShellExec shell, ProvisionListener listener) {
+  /**
+   * A provisioner whose steps report to {@code listener}, their hints rendered for {@code
+   * operator}.
+   */
+  public HostProvisioner(ShellExec shell, ProvisionListener listener, OperatorCommand operator) {
     this.shell = shell;
     this.listener = Objects.requireNonNullElse(listener, ProvisionListener.NOOP);
+    this.packages = new HostPackages(shell, this.listener::onStepProgress);
+    this.operator = operator;
   }
 
   /**
@@ -66,10 +75,9 @@ public final class HostProvisioner {
       Path hostYamlPath,
       Path dbPath)
       throws IOException, InterruptedException, TimeoutException {
-    var isDir = HostYaml.BACKEND_DIR.equals(storageBackend);
     configured(hostYamlPath);
 
-    var incusVersion = runSteps(isDir, disk, pool, bridge);
+    var incusVersion = runSteps(storageBackend, disk, pool, bridge);
 
     try (var rounds = holdRounds(dbPath)) {
       var kept = configured(hostYamlPath);
@@ -94,12 +102,13 @@ public final class HostProvisioner {
   }
 
   /** Runs every step, returning the incus version installed; a step that throws is failed. */
-  private String runSteps(boolean isDir, String disk, String pool, String bridge)
+  private String runSteps(String storageBackend, String disk, String pool, String bridge)
       throws IOException, InterruptedException, TimeoutException {
+    var isDir = HostYaml.BACKEND_DIR.equals(storageBackend);
     try {
-      updatePackages();
+      writeNeedrestartPolicy();
       installIncus();
-      installZfs(isDir);
+      installZfs(storageBackend);
       var incusVersion = initIncus(bridge);
       createStoragePool(isDir, pool, disk);
       createBaseProfile(pool, bridge);
@@ -131,97 +140,27 @@ public final class HostProvisioner {
     }
   }
 
-  private void updatePackages() throws IOException, InterruptedException, TimeoutException {
-    step(1, "Updating system packages...");
+  private void writeNeedrestartPolicy() throws IOException, InterruptedException, TimeoutException {
+    step(1, "Writing needrestart policy...");
     NeedrestartPolicy.DROP_IN.install(shell);
-    var update = shell.exec(List.of("apt-get", "update", "-qq"), null, INSTALL_TIMEOUT);
-    if (!update.ok()) {
-      throw new IOException("apt-get update failed: " + update.stderr());
-    }
-    var upgrade = shell.exec(List.of("apt-get", "upgrade", "-y", "-qq"), null, INSTALL_TIMEOUT);
-    if (!upgrade.ok()) {
-      throw new IOException("apt-get upgrade failed: " + upgrade.stderr());
-    }
-    stepDone(1, "up to date");
+    stepDone(1, "a library update never restarts Incus");
   }
 
   private void installIncus() throws IOException, InterruptedException, TimeoutException {
     step(2, "Installing Incus (Zabbly stable)...");
-
-    var check = shell.exec(List.of("which", "incus"));
-    if (check.ok()) {
-      stepDone(2, "already installed");
-      return;
-    }
-
-    var mkdirResult = shell.exec(List.of("mkdir", "-p", "/etc/apt/keyrings"));
-    if (!mkdirResult.ok()) {
-      throw new IOException("Failed to create /etc/apt/keyrings: " + mkdirResult.stderr());
-    }
-    var gpg =
-        shell.exec(
-            List.of(
-                "bash",
-                "-c",
-                "curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc"),
-            null,
-            INSTALL_TIMEOUT);
-    if (!gpg.ok()) {
-      throw new IOException("Failed to add Zabbly GPG key: " + gpg.stderr());
-    }
-
-    var codename = shell.exec(List.of("bash", "-c", ". /etc/os-release && echo $VERSION_CODENAME"));
-    if (!codename.ok()) {
-      throw new IOException("Failed to detect OS codename: " + codename.stderr());
-    }
-    var arch = shell.exec(List.of("dpkg", "--print-architecture"));
-    var aptSource =
-        """
-        Enabled: yes
-        Types: deb
-        URIs: https://pkgs.zabbly.com/incus/stable
-        Suites: %s
-        Components: main
-        Architectures: %s
-        Signed-By: /etc/apt/keyrings/zabbly.asc
-        """
-            .formatted(codename.stdout().strip(), arch.ok() ? arch.stdout().strip() : "amd64");
-    pushHostFile(Path.of("/etc/apt/sources.list.d/zabbly-incus-stable.sources"), aptSource);
-    var aptUpdate = shell.exec(List.of("apt-get", "update", "-qq"), null, INSTALL_TIMEOUT);
-    if (!aptUpdate.ok()) {
-      throw new IOException(
-          "apt-get update failed after adding Zabbly repo: " + aptUpdate.stderr());
-    }
-    var install =
-        shell.exec(List.of("apt-get", "install", "-y", "-qq", "incus"), null, INSTALL_TIMEOUT);
-    if (!install.ok()) {
-      throw new IOException("Failed to install Incus: " + install.stderr());
-    }
-    stepDone(2, "installed");
+    var installed = packages.ensure(HostPackages.INCUS) ? "installed" : "already installed";
+    stepDone(
+        2, packages.hold() ? installed + "; " + operator.render(HostPackages.HELD) : installed);
   }
 
-  private void installZfs(boolean isDir)
+  private void installZfs(String storageBackend)
       throws IOException, InterruptedException, TimeoutException {
-    if (isDir) {
-      stepSkipped(3, "not needed (dir backend)");
+    if (!HostPackages.forBackend(storageBackend).contains(HostPackages.ZFS)) {
+      stepSkipped(3, "not needed (" + storageBackend + " backend)");
       return;
     }
-
     step(3, "Installing ZFS utilities...");
-
-    var check = shell.exec(List.of("which", "zpool"));
-    if (check.ok()) {
-      stepDone(3, "already installed");
-      return;
-    }
-
-    var result =
-        shell.exec(
-            List.of("apt-get", "install", "-y", "-qq", "zfsutils-linux"), null, INSTALL_TIMEOUT);
-    if (!result.ok()) {
-      throw new IOException("Failed to install ZFS utilities: " + result.stderr());
-    }
-    stepDone(3, "installed");
+    stepDone(3, packages.ensure(HostPackages.ZFS) ? "installed" : "already installed");
   }
 
   private String initIncus(String bridge)
@@ -254,7 +193,7 @@ public final class HostProvisioner {
           shell.exec(
               List.of("bash", "-c", "cat " + preseedFile + " | incus admin init --preseed"),
               null,
-              INSTALL_TIMEOUT);
+              INIT_TIMEOUT);
     } finally {
       Files.deleteIfExists(preseedFile);
     }
@@ -432,25 +371,6 @@ public final class HostProvisioner {
     }
     Files.createDirectories(path.getParent());
     YamlUtil.dumpToFile(hostYaml.toMap(), path);
-  }
-
-  /**
-   * Writes content to a host file via temp file + {@code install -m 644}. Routes the final
-   * placement through the shell executor so test doubles capture the write and dry-run mode prints
-   * it rather than touching the real filesystem.
-   */
-  private void pushHostFile(Path path, String content)
-      throws IOException, InterruptedException, TimeoutException {
-    var tmpFile = Files.createTempFile("sail-hostfile-", ".tmp");
-    try {
-      Files.writeString(tmpFile, content);
-      var result = shell.exec(List.of("install", "-m", "644", tmpFile.toString(), path.toString()));
-      if (!result.ok()) {
-        throw new IOException("Failed to write " + path + ": " + result.stderr());
-      }
-    } finally {
-      Files.deleteIfExists(tmpFile);
-    }
   }
 
   private void step(int step, String description) {

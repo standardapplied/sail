@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -63,7 +64,7 @@ class PrerequisiteCheckerTest {
     assertEquals(
         List.of(
             NeedrestartPolicy.DROP_IN.installCommand(NeedrestartPolicy.DROP_IN.path()),
-            List.of("apt-get", "install", "-y", "-qq", "curl", "gnupg")),
+            apt("install", "-y", "curl", "gnupg")),
         shell.arguments());
   }
 
@@ -110,7 +111,8 @@ class PrerequisiteCheckerTest {
 
     checker.installMissing(missing);
 
-    assertEquals(List.of("apt-get", "install", "-y", "-qq", "curl"), shell.arguments().getLast());
+    assertEquals(apt("install", "-y", "curl"), shell.arguments().getLast());
+    assertEquals(List.of(String.join(" ", apt("install", "-y", "curl"))), shell.unbounded());
   }
 
   @Test
@@ -145,5 +147,11 @@ class PrerequisiteCheckerTest {
 
     assertThrows(UnsupportedOperationException.class, () -> result.present().add(null));
     assertThrows(UnsupportedOperationException.class, () -> result.missing().add(null));
+  }
+
+  private static List<String> apt(String... args) {
+    var command = new ArrayList<>(Apt.COMMAND);
+    command.addAll(List.of(args));
+    return command;
   }
 }

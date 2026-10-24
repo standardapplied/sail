@@ -12,9 +12,12 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
@@ -171,5 +174,52 @@ class ShellExecutorTest {
               }
             });
     assertTrue(failure.getMessage().startsWith("Content command failed:"), failure.getMessage());
+  }
+
+  @Test
+  void runHandsEachLineOverAsItArrivesAndWaitsPastAnyDeadline(@TempDir Path dir) {
+    var executor = new ShellExecutor(false, Duration.ofMillis(100));
+    var seen = dir.resolve("seen");
+    var lines = new ArrayList<String>();
+    var command =
+        List.of(
+            "sh",
+            "-c",
+            "echo one; while [ ! -e \"$1\" ]; do sleep 0.01; done; sleep 0.3; echo two;"
+                + " echo oops >&2; exit 4",
+            "sh",
+            seen.toString());
+
+    var result =
+        assertTimeoutPreemptively(
+            Duration.ofSeconds(10),
+            () ->
+                executor.run(
+                    command,
+                    line -> {
+                      lines.add(line);
+                      touch(seen);
+                    }));
+
+    assertEquals(List.of("one", "two"), lines);
+    assertEquals(new ShellExec.Result(4, "one\ntwo\n", "oops\n"), result);
+  }
+
+  @Test
+  void runInDryRunPrintsTheCommandAndRunsNothing() throws Exception {
+    var lines = new ArrayList<String>();
+
+    var result = new ShellExecutor(true).run(List.of("sh", "-c", "echo hi"), lines::add);
+
+    assertEquals(new ShellExec.Result(0, "", ""), result);
+    assertEquals(List.of(), lines);
+  }
+
+  private static void touch(Path path) {
+    try {
+      Files.writeString(path, "");
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 }

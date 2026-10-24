@@ -56,7 +56,7 @@ final class PtyHostYield implements SessionYield {
       return;
     }
     var failures = Remedy.NONE;
-    try (var client = SessionClient.connect(socket, dispatchCredential())) {
+    try (var client = SessionClient.connect(socket, dispatchCredential(socket))) {
       for (var name : sessions) {
         try {
           client.yieldSession(name, reason);
@@ -76,12 +76,16 @@ final class PtyHostYield implements SessionYield {
     if (!Files.exists(socket)) {
       return false;
     }
-    try (var client = SessionClient.connect(socket, dispatchCredential())) {
+    try (var client = SessionClient.connect(socket, dispatchCredential(socket))) {
       return client.list().stream().anyMatch(info -> info.live() && session.equals(info.name()));
     }
   }
 
-  private String dispatchCredential() throws IOException {
+  /**
+   * The dispatch credential of the session host at {@code socket}, which admits it to every
+   * session.
+   */
+  static String dispatchCredential(Path socket) throws IOException {
     var path = PtySessionHost.dispatchCredentialOf(socket);
     try {
       return Files.readString(path).strip();

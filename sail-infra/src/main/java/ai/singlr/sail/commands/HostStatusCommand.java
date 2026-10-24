@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DirQuery;
 import ai.singlr.sail.engine.HostDetector;
+import ai.singlr.sail.engine.HostPackages;
 import ai.singlr.sail.engine.HostProvisioner;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
@@ -58,7 +59,13 @@ public final class HostStatusCommand implements Runnable {
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 
-    report(hostYaml, new HostDetector().detect(), new ShellExecutor(false), json, System.out);
+    report(
+        hostYaml,
+        new HostDetector().detect(),
+        new ShellExecutor(false),
+        json,
+        operator,
+        System.out);
   }
 
   static void report(
@@ -66,6 +73,7 @@ public final class HostStatusCommand implements Runnable {
       HostDetector.HostInfo hostInfo,
       ShellExec shell,
       boolean json,
+      OperatorCommand operator,
       PrintStream out)
       throws IOException, InterruptedException, TimeoutException {
     ZfsQuery.PoolUsage poolUsage = null;
@@ -77,21 +85,44 @@ public final class HostStatusCommand implements Runnable {
     }
 
     var incusVersion = HostProvisioner.incusVersion(shell);
+    var versions = new HostPackages(shell, detail -> {}).versions();
     var containers = Containers.of(shell);
 
     if (json) {
-      printJson(hostYaml, incusVersion, hostInfo, poolUsage, fsUsage, containers, out);
+      printJson(
+          hostYaml, incusVersion, versions.to(), hostInfo, poolUsage, fsUsage, containers, out);
       return;
     }
 
     Banner.printBranding(out, Ansi.AUTO);
     Banner.printHostStatus(
-        hostYaml, incusVersion, hostInfo, poolUsage, fsUsage, containers.summary(), out, Ansi.AUTO);
+        hostYaml,
+        incusRow(incusVersion, versions, operator),
+        hostInfo,
+        poolUsage,
+        fsUsage,
+        containers.summary(),
+        out,
+        Ansi.AUTO);
+  }
+
+  /** The Incus row: the version running, and the one apt would move it to, when it would. */
+  private static String incusRow(
+      String incusVersion, HostPackages.Versions versions, OperatorCommand operator) {
+    return versions.movable()
+        ? incusVersion
+            + " ("
+            + versions.to()
+            + " available: "
+            + operator.sail("host incus upgrade")
+            + ")"
+        : incusVersion;
   }
 
   private static void printJson(
       HostYaml hostYaml,
       String incusVersion,
+      String incusCandidate,
       HostDetector.HostInfo hostInfo,
       ZfsQuery.PoolUsage poolUsage,
       DirQuery.FsUsage fsUsage,
@@ -122,6 +153,7 @@ public final class HostStatusCommand implements Runnable {
       }
     }
     map.put("incus_version", incusVersion);
+    map.put("incus_candidate", incusCandidate);
     map.put("initialized_at", hostYaml.initializedAt());
     if (containers.error() != null) {
       map.put("containers_error", containers.error());

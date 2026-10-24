@@ -43,7 +43,7 @@ class HostProvisionerTest {
     var shell = new ShellExecutor(true);
     var steps = new ArrayList<String>();
     var listener = new RecordingListener(steps);
-    var provisioner = new HostProvisioner(shell, listener);
+    var provisioner = new HostProvisioner(shell, listener, OperatorCommand.SUDO);
 
     var hostYaml =
         provisioner.provision(
@@ -80,7 +80,7 @@ class HostProvisionerTest {
             doneDetails.add(detail);
           }
         };
-    var provisioner = new HostProvisioner(shell, listener);
+    var provisioner = new HostProvisioner(shell, listener, OperatorCommand.SUDO);
 
     provisioner.provision(
         "zfs",
@@ -91,7 +91,7 @@ class HostProvisionerTest {
         tempDir.resolve("host.yaml"),
         tempDir.resolve("sail.db"));
 
-    assertEquals("up to date", doneDetails.get(0));
+    assertEquals("a library update never restarts Incus", doneDetails.get(0));
     assertEquals("already installed", doneDetails.get(1));
     assertEquals("already installed", doneDetails.get(2));
     assertTrue(doneDetails.get(3).contains("bridge"));
@@ -103,7 +103,7 @@ class HostProvisionerTest {
   @Test
   void provisionZfsDryRunDoesNotWriteHostYaml() throws Exception {
     var shell = new ShellExecutor(true);
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
     var hostYamlPath = tempDir.resolve("host.yaml");
 
     provisioner.provision(
@@ -115,7 +115,7 @@ class HostProvisionerTest {
   @Test
   void provisionZfsWithNullListenerDoesNotThrow() throws Exception {
     var shell = new ShellExecutor(true);
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
 
     assertDoesNotThrow(
         () ->
@@ -132,7 +132,7 @@ class HostProvisionerTest {
   @Test
   void provisionZfsReturnsHostYamlWithAllFields() throws Exception {
     var shell = new ShellExecutor(true);
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
 
     var result =
         provisioner.provision(
@@ -153,54 +153,159 @@ class HostProvisionerTest {
   }
 
   @Test
-  void freshZfsInstallRunsAllInstallCommands() throws Exception {
+  void aFreshZfsBoxRefreshesAptOnceAfterTheZabblySourceThenInstallsAndHoldsIncusAndZfs()
+      throws Exception {
     var shell =
-        new ScriptedShellExecutor()
-            .onOk("needrestart")
-            .onOk("apt-get")
-            .onFail("which incus", "")
-            .onFail("which zpool", "")
-            .onOk("mkdir")
-            .onOk("curl")
-            .onOk("install -m 644")
-            .on("echo $VERSION_CODENAME", new ShellExec.Result(0, "noble\n", ""))
-            .on("dpkg --print-architecture", new ShellExec.Result(0, "amd64\n", ""))
-            .onOk("incus admin init")
-            .onOk("incus version", "6.3")
-            .onOk("zpool create")
-            .onFail("zpool list", "no such pool")
-            .onFail("incus profile show", "not found")
-            .onOk("incus profile create")
-            .onOk("incus profile device")
-            .onFail("incus image list", "")
-            .onOk("incus image copy");
-
+        bareBox(
+            new ScriptedShellExecutor()
+                .onFail("which incus", "")
+                .onFail("which zpool", "")
+                .onOk("dpkg-query", UNHELD)
+                .onOk("apt-mark"));
     var steps = new ArrayList<String>();
-    var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
 
-    var result =
-        provisioner.provision(
-            "zfs",
-            "/dev/sdb",
-            "devpool",
-            "incusbr0",
-            null,
-            tempDir.resolve("host.yaml"),
-            tempDir.resolve("sail.db"));
+    provision(shell, "zfs", new RecordingListener(steps));
 
-    assertEquals("devpool", result.pool());
-    assertEquals("6.3", result.incusVersion());
-    assertEquals(16, steps.size());
-    assertTrue(steps.stream().anyMatch(s -> s.contains("done:3/8:installed")));
+    assertEquals(
+        List.of(
+            APT_UPDATE,
+            apt("install", "-y", "incus"),
+            DPKG_QUERY,
+            hold("incus", "incus-base", "incus-client"),
+            apt("install", "-y", "zfsutils-linux")),
+        packageCommands(shell));
+    var source = indexOfContaining(shell.invocations(), HostPackages.ZABBLY_SOURCE);
+    assertTrue(source >= 0 && source < shell.arguments().indexOf(APT_UPDATE));
+    assertTrue(steps.contains("done:1/8:a library update never restarts Incus"), steps.toString());
+    assertTrue(
+        steps.contains("done:2/8:installed; incus held (sudo sail host incus upgrade moves it)"),
+        steps.toString());
+    assertTrue(steps.contains("done:3/8:installed"), steps.toString());
+    assertNoAptRanOnAClock(shell);
+  }
 
-    var cmds = shell.invocations();
-    assertTrue(cmds.size() > 10, "Should have executed multiple commands");
-    var aptUpdate = indexOfContaining(cmds, "apt-get update");
-    var installIncus = indexOfContaining(cmds, "apt-get install -y -qq incus");
-    var incusInit = indexOfContaining(cmds, "incus admin init");
-    var zpoolCreate = indexOfContaining(cmds, "zpool create");
-    assertTrue(aptUpdate < installIncus, "apt-get update should precede incus install");
-    assertTrue(incusInit < zpoolCreate, "incus init should precede zpool create");
+  @Test
+  void aProvisionedBoxRunsNoAptAndSaysNothingOfTheHold() throws Exception {
+    var shell =
+        bareBox(
+            new ScriptedShellExecutor()
+                .onOk("which incus")
+                .onOk("which zpool")
+                .onOk("dpkg-query", HELD));
+    var steps = new ArrayList<String>();
+
+    provision(shell, "zfs", new RecordingListener(steps));
+
+    assertEquals(List.of(DPKG_QUERY), packageCommands(shell));
+    assertTrue(steps.contains("done:2/8:already installed"), steps.toString());
+    assertTrue(steps.contains("done:3/8:already installed"), steps.toString());
+  }
+
+  @Test
+  void aBoxWithIncusButNoZpoolRefreshesAptOnceThenInstallsZfs() throws Exception {
+    var shell =
+        bareBox(
+            new ScriptedShellExecutor()
+                .onOk("which incus")
+                .onFail("which zpool", "")
+                .onOk("dpkg-query", HELD));
+
+    provision(shell, "zfs", null);
+
+    assertEquals(
+        List.of(DPKG_QUERY, APT_UPDATE, apt("install", "-y", "zfsutils-linux")),
+        packageCommands(shell));
+    assertEquals(-1, indexOfContaining(shell.invocations(), HostPackages.ZABBLY_SOURCE));
+  }
+
+  @Test
+  void anAptDownloadShowsItsLatestPercentAsTheStepsProgressAndCompletes() throws Exception {
+    var shell =
+        bareBox(
+            new ScriptedShellExecutor()
+                .onFail("which incus", "")
+                .onOk(
+                    "apt-get -q -o APT::Status-Fd=1 -o Acquire::Retries=3 -o DPkg::Lock::Timeout=600"
+                        + " -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+                        + " install",
+                    """
+                Reading package lists...
+                dlstatus:1:12.5000:Retrieving file 1 of 3
+                Get:1 https://pkgs.zabbly.com/incus/stable noble/main amd64 incus 1:6.18 [9 MB]
+                dlstatus:2:57.0000:Retrieving file 2 of 3
+                pmstatus:incus:80.0000:Installing incus (amd64)
+                """)
+                .onOk("dpkg-query", HELD));
+    var progress = new ArrayList<String>();
+    var steps = new ArrayList<String>();
+
+    provision(shell, "dir", new ProgressListener(steps, progress));
+
+    assertEquals(
+        List.of(
+            "12% Retrieving file 1 of 3",
+            "57% Retrieving file 2 of 3", "80% Installing incus (amd64)"),
+        progress);
+    assertTrue(steps.contains("done:2/8:installed"), steps.toString());
+  }
+
+  @Test
+  void aFetchThatFailsEndsTheStepWithAptsOwnErrorLine() {
+    var shell =
+        bareBox(
+            new ScriptedShellExecutor()
+                .onFail("which incus", "")
+                .on(
+                    " install -y incus",
+                    new ShellExec.Result(
+                        100,
+                        "",
+                        "W: Some index files failed to download.\n"
+                            + "E: Failed to fetch https://pkgs.zabbly.com/incus/stable/pool/main/i/incus"
+                            + "/incus_6.18_amd64.deb  Connection timed out\n")));
+    var steps = new ArrayList<String>();
+
+    var failure =
+        assertThrows(
+            IOException.class, () -> provision(shell, "dir", new RecordingListener(steps)));
+
+    assertEquals(
+        "apt-get install incus failed: E: Failed to fetch"
+            + " https://pkgs.zabbly.com/incus/stable/pool/main/i/incus/incus_6.18_amd64.deb "
+            + " Connection timed out",
+        failure.getMessage());
+    assertEquals("failed", steps.getLast());
+  }
+
+  @Test
+  void aLockStillHeldAfterTheWaitShowsTheWaitThenFailsNamingTheHolder() {
+    var waiting =
+        "Waiting for cache lock: Could not get lock /var/lib/dpkg/lock-frontend. It is held by"
+            + " process 812 (unattended-upgr)...\n";
+    var shell =
+        bareBox(
+            new ScriptedShellExecutor()
+                .onFail("which incus", "")
+                .on(
+                    String.join(" ", APT_UPDATE),
+                    new ShellExec.Result(
+                        100,
+                        waiting + waiting,
+                        "E: Unable to acquire the dpkg frontend lock (/var/lib/dpkg/lock-frontend), is"
+                            + " another process using it?\n")));
+    var progress = new ArrayList<String>();
+
+    var failure =
+        assertThrows(
+            IOException.class,
+            () -> provision(shell, "dir", new ProgressListener(new ArrayList<>(), progress)));
+
+    assertEquals(List.of(Apt.LOCK_WAIT, Apt.LOCK_WAIT), progress);
+    assertEquals(
+        "apt-get update failed: E: Unable to acquire the dpkg frontend lock"
+            + " (/var/lib/dpkg/lock-frontend), is another process using it? Could not get lock"
+            + " /var/lib/dpkg/lock-frontend. It is held by process 812 (unattended-upgr).",
+        failure.getMessage());
   }
 
   @Test
@@ -208,7 +313,7 @@ class HostProvisionerTest {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onOk("incus version", "6.3");
 
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
     var hostYamlPath = tempDir.resolve("etc/sail/host.yaml");
 
     provisioner.provision(
@@ -236,7 +341,7 @@ class HostProvisionerTest {
             .onFail("zpool list", "no such pool")
             .onFail("zpool create", "cannot open '/dev/sdb': no such device");
 
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
 
     var ex =
         assertThrows(
@@ -264,7 +369,8 @@ class HostProvisionerTest {
             .onFail("incus admin init", "permission denied");
     var steps = new ArrayList<String>();
 
-    var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
+    var provisioner =
+        new HostProvisioner(shell, new RecordingListener(steps), OperatorCommand.SUDO);
 
     var ex =
         assertThrows(
@@ -291,7 +397,7 @@ class HostProvisionerTest {
             .on("incus admin init", new ShellExec.Result(1, "", "network already exists"))
             .onOk("incus version", "6.3");
 
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
 
     assertDoesNotThrow(
         () ->
@@ -313,7 +419,7 @@ class HostProvisionerTest {
             .onFail("incus image list", "")
             .onFail("incus image copy", "network unreachable");
 
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
 
     var ex =
         assertThrows(
@@ -336,7 +442,7 @@ class HostProvisionerTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus version", "command not found");
 
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
     var result =
         provisioner.provision(
             "zfs",
@@ -355,7 +461,7 @@ class HostProvisionerTest {
     var shell = new ShellExecutor(true);
     var steps = new ArrayList<String>();
     var listener = new RecordingListener(steps);
-    var provisioner = new HostProvisioner(shell, listener);
+    var provisioner = new HostProvisioner(shell, listener, OperatorCommand.SUDO);
 
     provisioner.provision(
         "dir",
@@ -382,7 +488,8 @@ class HostProvisionerTest {
             .onFail("incus storage show", "not found")
             .onOk("incus storage create");
 
-    var provisioner = new HostProvisioner(shell, new RecordingListener(new ArrayList<>()));
+    var provisioner =
+        new HostProvisioner(shell, new RecordingListener(new ArrayList<>()), OperatorCommand.SUDO);
 
     provisioner.provision(
         "dir",
@@ -407,7 +514,8 @@ class HostProvisionerTest {
             .onOk("incus storage show");
 
     var steps = new ArrayList<String>();
-    var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
+    var provisioner =
+        new HostProvisioner(shell, new RecordingListener(steps), OperatorCommand.SUDO);
 
     provisioner.provision(
         "dir",
@@ -431,7 +539,7 @@ class HostProvisionerTest {
             .onFail("incus storage show", "not found")
             .onFail("incus storage create", "permission denied");
 
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
 
     var ex =
         assertThrows(
@@ -451,7 +559,7 @@ class HostProvisionerTest {
   @Test
   void dirBackendReturnsNullPoolDisk() throws Exception {
     var shell = new ShellExecutor(true);
-    var provisioner = new HostProvisioner(shell, null);
+    var provisioner = new HostProvisioner(shell, null, OperatorCommand.SUDO);
 
     var result =
         provisioner.provision(
@@ -473,7 +581,7 @@ class HostProvisionerTest {
     var shell = new ShellExecutor(true);
     var steps = new ArrayList<String>();
     var listener = new RecordingListener(steps);
-    var provisioner = new HostProvisioner(shell, listener);
+    var provisioner = new HostProvisioner(shell, listener, OperatorCommand.SUDO);
 
     provisioner.provision(
         "dir",
@@ -497,7 +605,8 @@ class HostProvisionerTest {
             .onOk("ufw route");
 
     var steps = new ArrayList<String>();
-    var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
+    var provisioner =
+        new HostProvisioner(shell, new RecordingListener(steps), OperatorCommand.SUDO);
 
     provisioner.provision(
         "dir",
@@ -527,7 +636,8 @@ class HostProvisionerTest {
                 new IOException("Cannot run program \"ufw\": error=2, No such file or directory"));
 
     var steps = new ArrayList<String>();
-    var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
+    var provisioner =
+        new HostProvisioner(shell, new RecordingListener(steps), OperatorCommand.SUDO);
 
     assertDoesNotThrow(
         () ->
@@ -553,7 +663,8 @@ class HostProvisionerTest {
             .on("ufw status", new ShellExec.Result(0, "Status: inactive\n", ""));
 
     var steps = new ArrayList<String>();
-    var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
+    var provisioner =
+        new HostProvisioner(shell, new RecordingListener(steps), OperatorCommand.SUDO);
 
     provisioner.provision(
         "dir",
@@ -577,7 +688,8 @@ class HostProvisionerTest {
             .onFail("ufw route", "permission denied");
 
     var steps = new ArrayList<String>();
-    var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
+    var provisioner =
+        new HostProvisioner(shell, new RecordingListener(steps), OperatorCommand.SUDO);
 
     provisioner.provision(
         "dir",
@@ -670,7 +782,7 @@ class HostProvisionerTest {
         assertThrows(
             IllegalStateException.class,
             () ->
-                new HostProvisioner(shell, new RecordingListener(steps))
+                new HostProvisioner(shell, new RecordingListener(steps), OperatorCommand.SUDO)
                     .provision(
                         "dir",
                         null,
@@ -743,32 +855,30 @@ class HostProvisionerTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("incus version", "6.3")
             .on("ufw status", new ShellExec.Result(0, "Status: inactive\n", ""));
-    return new HostProvisioner(shell, listener)
+    return new HostProvisioner(shell, listener, OperatorCommand.SUDO)
         .provision(
             "dir", null, "devpool", "incusbr0", "192.0.2.4", path, path.resolveSibling("sail.db"));
   }
 
   @Test
-  void provisioningDefersIncusRestartsBeforeItUpgradesAPackage() throws Exception {
-    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+  void provisioningWritesTheNeedrestartPolicyFirstAndNeverUpgradesTheOs() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("which incus", "")
+            .onFail("which zpool", "");
 
-    new HostProvisioner(shell, null)
-        .provision(
-            "dir",
-            null,
-            "devpool",
-            "incusbr0",
-            null,
-            tempDir.resolve("host.yaml"),
-            tempDir.resolve("sail.db"));
+    provision(shell, "zfs", null);
 
-    var commands = shell.arguments();
     var policy =
-        commands.indexOf(
-            NeedrestartPolicy.DROP_IN.installCommand(NeedrestartPolicy.DROP_IN.path()));
-    var upgrade = commands.indexOf(List.of("apt-get", "upgrade", "-y", "-qq"));
+        shell
+            .arguments()
+            .indexOf(NeedrestartPolicy.DROP_IN.installCommand(NeedrestartPolicy.DROP_IN.path()));
     assertEquals(0, policy, shell.invocations().toString());
-    assertTrue(policy < upgrade, "a library the upgrade replaces must not restart incusd");
+    assertEquals(
+        List.of(),
+        shell.invocations().stream()
+            .filter(command -> command.matches(".*\\b(upgrade|dist-upgrade|full-upgrade)\\b.*"))
+            .toList());
   }
 
   @Test
@@ -781,7 +891,7 @@ class HostProvisionerTest {
         assertThrows(
             IOException.class,
             () ->
-                new HostProvisioner(shell, null)
+                new HostProvisioner(shell, null, OperatorCommand.SUDO)
                     .provision(
                         "dir",
                         null,
@@ -803,7 +913,7 @@ class HostProvisionerTest {
     var original = System.out;
     System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
     try {
-      new HostProvisioner(new ShellExecutor(true), null)
+      new HostProvisioner(new ShellExecutor(true), null, OperatorCommand.SUDO)
           .provision(
               "dir",
               null,
@@ -822,6 +932,7 @@ class HostProvisionerTest {
                 " ", NeedrestartPolicy.DROP_IN.installCommand(NeedrestartPolicy.DROP_IN.path()))
             + "\n";
     assertTrue(out.toString(StandardCharsets.UTF_8).startsWith(printed), out.toString());
+    assertFalse(out.toString(StandardCharsets.UTF_8).contains("upgrade"), out.toString());
     assertFalse(Files.exists(tempDir.resolve("host.yaml")));
   }
 
@@ -848,11 +959,108 @@ class HostProvisionerTest {
                 .onThrow("incus version", new IOException("No such file or directory"))));
   }
 
+  private static final String UNHELD =
+      """
+      incus install installed
+      incus-base install installed
+      incus-client install installed
+      incus-extra unknown not-installed
+      """;
+
+  private static final String HELD =
+      """
+      incus hold installed
+      incus-base hold installed
+      """;
+
+  private static final List<String> APT_UPDATE = apt("-o", "APT::Update::Error-Mode=any", "update");
+
+  private static final List<String> DPKG_QUERY =
+      List.of(
+          "dpkg-query", "-W", "-f=${Package} ${db:Status-Want} ${db:Status-Status}\\n", "incus*");
+
+  /**
+   * {@code shell}, answering after its own scripts as a box whose every step but the packages is
+   * done: Incus initialized, pool, profile and image made.
+   */
+  private static ScriptedShellExecutor bareBox(ScriptedShellExecutor shell) {
+    return shell
+        .onOk("needrestart")
+        .onOk("curl")
+        .onOk(HostPackages.ZABBLY_SOURCE)
+        .on("echo $VERSION_CODENAME", new ShellExec.Result(0, "noble\n", ""))
+        .on("dpkg --print-architecture", new ShellExec.Result(0, "amd64\n", ""))
+        .onOk("apt-get")
+        .onOk("incus admin init")
+        .onOk("incus version", "6.3")
+        .onOk("incus storage")
+        .onOk("zpool list")
+        .onOk("incus profile show")
+        .onOk("incus image list");
+  }
+
+  private HostYaml provision(ShellExec shell, String backend, ProvisionListener listener)
+      throws Exception {
+    return new HostProvisioner(shell, listener, OperatorCommand.SUDO)
+        .provision(
+            backend,
+            "zfs".equals(backend) ? "/dev/sdb" : null,
+            "devpool",
+            "incusbr0",
+            null,
+            tempDir.resolve("host.yaml"),
+            tempDir.resolve("sail.db"));
+  }
+
+  private static List<String> apt(String... args) {
+    var command = new ArrayList<>(Apt.COMMAND);
+    command.addAll(List.of(args));
+    return command;
+  }
+
+  private static List<String> hold(String... packages) {
+    var command = new ArrayList<>(Apt.HOLD);
+    command.addAll(List.of(packages));
+    return command;
+  }
+
+  private static List<List<String>> packageCommands(ScriptedShellExecutor shell) {
+    return shell.arguments().stream()
+        .filter(
+            command ->
+                command.stream()
+                    .anyMatch(word -> word.startsWith("apt") || word.startsWith("dpkg-query")))
+        .toList();
+  }
+
+  private static void assertNoAptRanOnAClock(ScriptedShellExecutor shell) {
+    assertEquals(
+        shell.invocations().stream().filter(command -> command.contains("apt-")).toList(),
+        shell.unbounded());
+  }
+
   private static int indexOfContaining(List<String> list, String substring) {
     for (var i = 0; i < list.size(); i++) {
       if (list.get(i).contains(substring)) return i;
     }
     return -1;
+  }
+
+  /** Records each step's progress, and its events as {@link RecordingListener} does. */
+  private record ProgressListener(List<String> events, List<String> progress)
+      implements ProvisionListener {
+    @Override
+    public void onStep(int step, int total, String description) {}
+
+    @Override
+    public void onStepDone(int step, int total, String detail) {
+      events.add("done:" + step + "/" + total + ":" + detail);
+    }
+
+    @Override
+    public void onStepProgress(String detail) {
+      progress.add(detail);
+    }
   }
 
   /** Records all step events for assertion. */

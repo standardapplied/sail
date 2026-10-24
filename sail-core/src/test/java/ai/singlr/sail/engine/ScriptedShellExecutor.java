@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
 
 /**
  * Test double for {@link ShellExec} that returns scripted responses based on command patterns.
@@ -30,6 +31,7 @@ public final class ScriptedShellExecutor implements ShellExec {
   private final Set<String> consumed = new HashSet<>();
   private final List<String> invocations = new ArrayList<>();
   private final List<List<String>> arguments = new ArrayList<>();
+  private final List<String> unbounded = new ArrayList<>();
   private final Result defaultResult;
 
   public ScriptedShellExecutor() {
@@ -123,6 +125,20 @@ public final class ScriptedShellExecutor implements ShellExec {
   @Override
   public Result exec(List<String> command) throws IOException {
     return exec(command, null, Duration.ZERO);
+  }
+
+  /** The commands run to exit with no deadline ({@link #run}), joined, in order. */
+  public List<String> unbounded() {
+    return Collections.unmodifiableList(unbounded);
+  }
+
+  /** Answers as {@link #exec} does, handing the scripted stdout over line by line first. */
+  @Override
+  public Result run(List<String> command, Consumer<String> lines) throws IOException {
+    unbounded.add(String.join(" ", command));
+    var result = exec(command);
+    result.stdout().lines().forEach(lines);
+    return result;
   }
 
   @Override
