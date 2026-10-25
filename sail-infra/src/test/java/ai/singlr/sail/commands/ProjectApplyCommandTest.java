@@ -221,6 +221,34 @@ class ProjectApplyCommandTest {
   }
 
   @Test
+  void aBoxWhoseSailApiNeverRanIsRefusedTheStepThatSetsItUp(@TempDir Path dataDir) {
+    var err = new ByteArrayOutputStream();
+
+    assertThrows(
+        CliCommand.Printed.class,
+        () ->
+            CliCommand.run(
+                new PrintStream(err, true, StandardCharsets.UTF_8),
+                () -> ContainerSailSetup.requireApi(SailPaths.apiSocketHostDir(dataDir))));
+
+    assertEquals(
+        "  ✗ This box has no sail-api yet, which every project container talks to. Set it up"
+            + " first: "
+            + OperatorCommand.here().sail("init --as-main --handle <you>")
+            + ", or "
+            + OperatorCommand.here().sail("init --main <main>")
+            + ".\n",
+        err.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void aBoxWhoseSailApiRanIsLetProvision(@TempDir Path dataDir) throws Exception {
+    Files.createDirectories(SailPaths.apiSocketHostDir(dataDir));
+
+    assertDoesNotThrow(() -> ContainerSailSetup.requireApi(SailPaths.apiSocketHostDir(dataDir)));
+  }
+
+  @Test
   void provisioningRequiresRootOutsideDryRun() {
     var thrown =
         assertThrows(

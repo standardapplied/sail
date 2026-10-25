@@ -641,6 +641,7 @@ public final class ProjectApplyCommand implements Runnable {
     if (!Files.exists(hostYamlPath)) {
       throw HostInitCommand.notInitialized(operator);
     }
+    ContainerSailSetup.requireApi(SailPaths.apiSocketHostDir());
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 
     var tracker =
