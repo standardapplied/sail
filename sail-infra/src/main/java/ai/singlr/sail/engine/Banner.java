@@ -57,6 +57,9 @@ public final class Banner {
   /** What a box's line holds beyond its inner width: its indent and its two borders. */
   private static final int BOX_EDGES = 4;
 
+  /** The terminal's columns once measured; 0 until then. */
+  private static volatile int measured;
+
   private Banner() {}
 
   private static final String BRAND = "\033[1;38;2;252;73;38m";
@@ -1343,17 +1346,24 @@ public final class Banner {
 
   /**
    * The columns of the terminal sail prints to: {@link #COLUMNS} where it is bound, else the
-   * terminal's own, or {@link #DEFAULT_COLUMNS} when there is none.
+   * terminal stdout reaches, measured through {@code /dev/tty}, or {@link #DEFAULT_COLUMNS} when
+   * stdout is a pipe or a file. Stdout is the test, not stdin, so a command fed a heredoc or {@code
+   * </dev/null} still fits the terminal it prints to. Measured once per process, two shell-outs, so
+   * a report of twenty lines asks once.
    */
   static int columns() {
     if (COLUMNS.isBound()) {
       return COLUMNS.get();
     }
-    var console = System.console();
-    return columns(console != null && console.isTerminal(), () -> Stty.size(new int[] {0, 0})[1]);
+    if (measured == 0) {
+      measured = columns(Stty.printsToTerminal(), () -> Stty.size(new int[] {0, 0})[1]);
+    }
+    return measured;
   }
 
-  /** {@link #columns()} given whether sail prints to a {@code terminal} and its width. */
+  /**
+   * {@link #columns()} given whether stdout reaches a {@code terminal} and that terminal's width.
+   */
   static int columns(boolean terminal, IntSupplier ttyColumns) {
     var measured = terminal ? ttyColumns.getAsInt() : 0;
     return measured > 0 ? measured : DEFAULT_COLUMNS;

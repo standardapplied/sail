@@ -24,7 +24,6 @@ import java.io.PrintStream;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Objects;
 import java.util.concurrent.TimeoutException;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -113,10 +112,7 @@ public final class HostStatusCommand implements Runnable {
    */
   private static String incusRow(String incusVersion, HostPackages.Versions versions) {
     return versions.movable()
-        ? Objects.requireNonNullElse(versions.from(), incusVersion)
-            + " ("
-            + versions.to()
-            + " available)"
+        ? versions.from() + " (" + versions.to() + " available)"
         : incusVersion;
   }
 

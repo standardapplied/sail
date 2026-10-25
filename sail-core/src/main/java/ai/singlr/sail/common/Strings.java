@@ -8,9 +8,10 @@ package ai.singlr.sail.common;
 import java.util.regex.Pattern;
 
 /**
- * Null-safe string predicates. All application code checks emptiness/blankness through this seam
- * rather than inlining {@code s == null || s.isBlank()}, so the intent reads consistently and a
- * null is never dereferenced.
+ * Null-safe string predicates, and the terminal's measure of a line ({@link #columns}, {@link
+ * #fit}). All application code checks emptiness/blankness through this seam rather than inlining
+ * {@code s == null || s.isBlank()}, so the intent reads consistently and a null is never
+ * dereferenced.
  */
 public final class Strings {
 
@@ -79,28 +80,41 @@ public final class Strings {
     var styled = false;
     var end = 0;
     var used = 0;
+    var previous = -1;
     while (end < line.length()) {
       if (escape.region(end, line.length()).lookingAt()) {
         styled = true;
         end = escape.end();
         continue;
       }
-      var size = TerminalColumns.of(line.codePointAt(end));
+      var codePoint = line.codePointAt(end);
+      var size = TerminalColumns.of(codePoint, previous);
       if (used + size > width - 1) {
         break;
       }
       used += size;
+      previous = codePoint;
       end = line.offsetByCodePoints(end, 1);
     }
     return line.substring(0, end) + "…" + (styled ? RESET : "");
   }
 
   /**
-   * The terminal columns {@code text} spans: two for each wide character, none for a mark or a
-   * style escape.
+   * The terminal columns {@code text} spans: two for each wide character, and for a narrow one an
+   * emoji presentation selector follows; none for a mark or a style escape. Never fewer than a
+   * terminal draws for these, so a text fitted by it cannot pass the edge; a joined sequence it
+   * counts character by character may be drawn narrower, which only shortens the row.
    */
   public static int columns(String text) {
-    return ESCAPE.matcher(text).replaceAll("").codePoints().map(TerminalColumns::of).sum();
+    var plain = ESCAPE.matcher(text).replaceAll("");
+    var columns = 0;
+    var previous = -1;
+    for (var at = 0; at < plain.length(); at = plain.offsetByCodePoints(at, 1)) {
+      var codePoint = plain.codePointAt(at);
+      columns += TerminalColumns.of(codePoint, previous);
+      previous = codePoint;
+    }
+    return columns;
   }
 
   /** {@code word} as one shell word to paste back: bare when that is safe, else single-quoted. */

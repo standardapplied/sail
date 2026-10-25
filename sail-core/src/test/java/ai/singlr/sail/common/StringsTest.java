@@ -133,6 +133,22 @@ class StringsTest {
   }
 
   @Test
+  void anEmojiPresentationSelectorWidensANarrowCharacterToTwoColumnsAndAWideOneNotAtAll() {
+    assertEquals(1, Strings.columns("\u263A"));
+    assertEquals(2, Strings.columns("\u263A\uFE0F"));
+    assertEquals(2, Strings.columns("\u2764\uFE0F"));
+    assertEquals(2, Strings.columns("\uD83D\uDE80\uFE0F"));
+    assertEquals(0, Strings.columns("\uFE0F"));
+    assertEquals(2, Strings.columns("1\uFE0F\u20E3"), "a keycap is one two-column glyph");
+    assertEquals("\u263A\uFE0F…", Strings.fit("\u263A\uFE0Fab", 3));
+    assertEquals(
+        "a\u263A…",
+        Strings.fit("a\u263A\uFE0Fb", 3),
+        "cut before its selector, the face is drawn narrow and the row still fits");
+    assertEquals("ab", Strings.fit("ab", 2));
+  }
+
+  @Test
   void aStyleEscapeTakesNoColumnsAndACutStyledTextEndsWithAReset() {
     var styled = "\033[1;36mabcdef\033[0m";
 

@@ -700,11 +700,11 @@ class BannerTest {
           "2026-02-18T01:00:00Z");
 
   @Test
-  void aBoxSpansTheTerminalItPrintsToOrAHundredColumnsWithoutOne() {
+  void aBoxSpansTheTerminalStdoutReachesOrAHundredColumnsIntoAPipeOrAFile() {
     assertEquals(80, Banner.columns(true, () -> 80));
-    assertEquals(Banner.DEFAULT_COLUMNS, Banner.columns(false, () -> 80));
-    assertEquals(Banner.DEFAULT_COLUMNS, Banner.columns(true, () -> 0));
     assertEquals(12, Banner.columns(true, () -> 12));
+    assertEquals(Banner.DEFAULT_COLUMNS, Banner.columns(true, () -> 0));
+    assertEquals(Banner.DEFAULT_COLUMNS, Banner.columns(false, () -> 80));
   }
 
   @Test
@@ -793,6 +793,35 @@ class BannerTest {
     assertEquals(List.of(Banner.DEFAULT_COLUMNS), widths(lines), String.join("\n", lines));
     assertEquals(
         List.of("  │  Description: " + "\uD83D\uDE80".repeat(40) + "…│"),
+        lines.stream().filter(line -> line.contains("Description:")).toList());
+  }
+
+  @Test
+  void anEmojiPresentedByASelectorTakesTwoOfTheColumnsARowFits() {
+    var config =
+        new SailYaml(
+            "acme",
+            "\u263A\uFE0F".repeat(100),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
+
+    var lines =
+        printedAt(
+            Banner.DEFAULT_COLUMNS,
+            out ->
+                Banner.printProjectConfig(config, new ContainerState.NotCreated(), out, Ansi.OFF));
+
+    assertEquals(List.of(Banner.DEFAULT_COLUMNS), widths(lines), String.join("\n", lines));
+    assertEquals(
+        List.of("  │  Description: " + "\u263A\uFE0F".repeat(40) + "…│"),
         lines.stream().filter(line -> line.contains("Description:")).toList());
   }
 
@@ -963,7 +992,14 @@ class BannerTest {
 
   private static int spanned(String line) {
     return line.codePoints()
-        .reduce(0, (at, c) -> c == '\t' ? at / 8 * 8 + 8 : at + (c == '界' || c == 0x1F680 ? 2 : 1));
+        .reduce(
+            0,
+            (at, c) ->
+                c == '\t'
+                    ? at / 8 * 8 + 8
+                    : at
+                        + (c == '界' || c == 0x1F680 || c == 0xFE0F ? 2 : 1)
+                        - (c == 0xFE0F ? 1 : 0));
   }
 
   @Test

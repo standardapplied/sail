@@ -9,9 +9,12 @@ import java.util.Arrays;
 import java.util.Set;
 
 /**
- * The columns a terminal draws a code point in, as wcwidth counts them. The JDK carries no East
- * Asian width data, so {@link #WIDE} holds every range Unicode 17.0's EastAsianWidth.txt marks W
- * (wide, which takes in emoji presented as such) or F (fullwidth), adjacent ranges merged.
+ * The columns a terminal draws a code point in. The JDK carries no East Asian width data, so {@link
+ * #WIDE} holds every range Unicode 17.0's EastAsianWidth.txt marks W (wide, which takes in emoji
+ * presented as such) or F (fullwidth), adjacent ranges merged: to regenerate, take that file's W
+ * and F lines and merge neighbours. It counts as glibc's wcwidth does but for the characters
+ * Unicode 16 and 17 made wide, and it never counts fewer columns than a terminal draws for a
+ * character it knows; an East-Asian-ambiguous one, drawn wide only in a CJK locale, counts one.
  */
 final class TerminalColumns {
 
@@ -147,7 +150,22 @@ final class TerminalColumns {
           0xAD, 0x600, 0x601, 0x602, 0x603, 0x604, 0x605, 0x6DD, 0x70F, 0x890, 0x891, 0x8E2,
           0x110BD, 0x110CD);
 
+  /** The selector that asks for a character's emoji presentation, two columns wide. */
+  private static final int EMOJI_PRESENTATION = 0xFE0F;
+
   private TerminalColumns() {}
+
+  /**
+   * The columns {@code codePoint} adds after {@code previous} (-1 at the start): {@link #of},
+   * except that an emoji presentation selector after a one-column character widens that character
+   * to two, as a terminal draws ☺︎ U+FE0F. A terminal that keeps it narrow draws one column fewer,
+   * which only shortens the row, never widens it past the edge.
+   */
+  static int of(int codePoint, int previous) {
+    return codePoint == EMOJI_PRESENTATION && previous >= 0 && of(previous) == 1
+        ? 1
+        : of(codePoint);
+  }
 
   /**
    * Two for a wide character; none for a mark, an invisible format character, or a Hangul vowel or
