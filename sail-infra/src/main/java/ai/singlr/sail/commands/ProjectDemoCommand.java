@@ -102,9 +102,6 @@ public final class ProjectDemoCommand implements Runnable {
     }
     if (!dryRun) {
       ContainerSailSetup.requireApi(SailPaths.apiSocketHostDir());
-    }
-
-    if (!dryRun) {
       var shell = new ShellExecutor(false);
       var mgr = new ContainerManager(shell);
       var state = mgr.queryState(DEMO_PROJECT);
