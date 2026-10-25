@@ -698,7 +698,9 @@ class SyncBlobTest {
       node.specs.setContent("a", "mine", "");
       main.specs.setContent("a", "theirs from need", "");
       var remoteHash = main.specs.comparableSnapshot("a").get("body_hash").toString();
-      node.syncState.advance("main", "spec", main.replica.maxSeq());
+      var tip = main.replica.maxSeq();
+      node.syncState.read("main", "spec", tip, "a", main.specs.latestRev("a"));
+      node.syncState.advance("main", "spec", tip);
       try (var link = SyncBox.connect(main.server(Actor.sync("node", Role.MEMBER)), node)) {
         var report =
             link.reconcile("spec", SyncedEntities.replicas(node.db, "node", "node").get("spec"));
