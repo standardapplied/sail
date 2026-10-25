@@ -16,6 +16,7 @@ import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncState;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -81,6 +82,8 @@ public final class PagedSyncSession implements SyncSession {
   private final int frame;
   private final SyncEngine engine = new SyncEngine();
   private Map<String, Long> tips;
+  private Set<String> rewound = Set.of();
+  private SyncState syncState;
   private Map<String, Asked> asked;
   private BlobStore blobs;
   private Erasure erasure;
@@ -109,6 +112,7 @@ public final class PagedSyncSession implements SyncSession {
     blobs = new BlobStore(db);
     erasure = new Erasure(db);
     eraseRequests = new EraseRequests(db);
+    syncState = new SyncState(db);
     var fields = new LinkedHashMap<String, Set<String>>();
     for (var entity : SyncedEntities.all())
       fields.put(entity.type(), entity.store(db).contentFields());
@@ -130,6 +134,8 @@ public final class PagedSyncSession implements SyncSession {
     copy.blobs = blobs;
     copy.erasure = erasure;
     copy.eraseRequests = eraseRequests;
+    copy.syncState = syncState;
+    copy.rewound = rewound;
     copy.asked = asked;
     copy.contentFields = contentFields;
     copy.notice = notice;
@@ -279,8 +285,9 @@ public final class PagedSyncSession implements SyncSession {
     }
     acknowledgeLostAnswers(type, local);
     var since = local.checkpoint(mainId);
-    if (tip < since) {
+    if (tip < since || rewound.contains(type)) {
       local.forgetCheckpoints(mainId);
+      rewound = Set.of();
       since = 0;
     }
     var walksEveryHead = resumed && since == 0;
@@ -303,6 +310,7 @@ public final class PagedSyncSession implements SyncSession {
         var live = adoptErasures(type, page.entries());
         var checkpoint = walksEveryHead ? 0 : page.next();
         report = report.plus(reconcile(local, ids(live), new PageView(type, live, checkpoint)));
+        read(type, page.entries());
         pages++;
         entries += page.entries().size();
         since = page.next();
@@ -884,11 +892,28 @@ public final class PagedSyncSession implements SyncSession {
     return ids;
   }
 
+  /**
+   * Records the last entry of a page as what this node read of {@code type}, once its round has
+   * advanced the checkpoint over it, so the next {@link SyncWire.Heads} names it.
+   */
+  private void read(String type, List<SyncWire.Entry> entries) {
+    if (syncState != null && !entries.isEmpty()) {
+      var last = entries.getLast();
+      syncState.read(mainId, type, last.seq(), last.id(), last.rev());
+    }
+  }
+
+  /**
+   * Main's tips, read once per session and again after an erasure, naming what this node read at
+   * each checkpoint, so main says which types its log no longer holds them for ({@link #rewound}).
+   */
   private Map<String, Long> tips() {
     if (tips == null) {
-      var response = owed(() -> Rpc.exchange(in, out, new SyncWire.Heads()));
+      var marks = syncState == null ? Map.<String, SyncState.Mark>of() : syncState.marks(mainId);
+      var response = owed(() -> Rpc.exchange(in, out, new SyncWire.Heads(marks)));
       if (response instanceof SyncWire.Tips t) {
         tips = t.tips();
+        rewound = t.rewound();
       } else {
         throw unexpected("heads", "tips", response);
       }

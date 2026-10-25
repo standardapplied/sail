@@ -740,6 +740,35 @@ public final class ChangeLog {
         .collect(Collectors.toCollection(LinkedHashSet::new));
   }
 
+  /**
+   * Whether this log is still the one a reader of {@code entityType} read up to {@code mark}: the
+   * entry of the mark's id at its rev sits at its seq — or nothing does and a later entry of the
+   * id, an erasure or a newer revision, is still the reader's to page — and no head the reader's
+   * {@code scope} admits sits after that seq up to the checkpoint, where the reader saw none. A log
+   * restored from an older copy and grown again holds other entries there.
+   */
+  public boolean holds(String entityType, SyncState.Mark mark, ProjectScope scope) {
+    return db.queryOne(
+            """
+            SELECT CASE WHEN EXISTS (SELECT 1 FROM change_log WHERE seq = ?1)
+                THEN EXISTS (SELECT 1 FROM change_log WHERE seq = ?1 AND entity_type = ?2
+                    AND entity_id = ?3 AND rev = ?4)
+                ELSE EXISTS (SELECT 1 FROM change_log WHERE entity_type = ?2 AND entity_id = ?3
+                    AND seq > ?1)
+                END
+                AND NOT EXISTS (SELECT 1 FROM change_heads WHERE entity_type = ?2
+                    AND seq > ?1 AND seq <= ?5
+                    AND (?6 IS NULL OR project IN (SELECT value FROM json_each(?6))))""",
+            row -> row.integer(0) == 1,
+            mark.seq(),
+            entityType,
+            mark.id(),
+            mark.rev(),
+            mark.checkpoint(),
+            scopeArgument(scope))
+        .orElse(false);
+  }
+
   /** The highest sequence recorded for an entity type; 0 if none. The sync high-water mark. */
   public long maxSeq(String entityType) {
     return db.queryOne(

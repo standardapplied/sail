@@ -12,6 +12,7 @@ import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FastCdc;
 import ai.singlr.sail.store.Snapshots;
+import ai.singlr.sail.store.SyncState;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -24,6 +25,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.TreeMap;
 
 /**
  * The line protocol of one sync session over a Door-2 SSH channel, protocol 4: the node and main
@@ -37,7 +40,7 @@ import java.util.Objects;
  * for main's current rows of what it changed itself ({@link Need}), pushes in batches ({@link
  * Push}, answered by {@link Results}), mirrors the FDE roster ({@link FetchFdes}) and ends with
  * {@link Bye}. {@link Heads} lets an idle round cost one exchange: main's {@link Tips} say which
- * types moved past the node's checkpoints.
+ * types moved past the node's checkpoints, and which no longer hold what the node read at them.
  *
  * <p>A {@code null} snapshot is a deletion — it crosses the wire as an explicit JSON {@code null},
  * distinct from an absent key, so a tombstone is never mistaken for a missing row. Every page entry
@@ -112,6 +115,9 @@ public final class SyncWire {
   private static final String CREATOR = "creator";
   private static final String CREATED_AT = "created_at";
   private static final String GONE = "gone";
+  private static final String MARKS = "marks";
+  private static final String CHECKPOINT = "checkpoint";
+  private static final String REWOUND = "rewound";
 
   private static final String OP_HELLO = "hello";
   private static final String OP_HEADS = "heads";
@@ -217,8 +223,21 @@ public final class SyncWire {
     }
   }
 
-  /** Ask main for the high-water of every type, so the node pulls only what moved. */
-  public record Heads() implements Request {}
+  /**
+   * Ask main for the high-water of every type, so the node pulls only what moved, naming per type
+   * the {@code marks} of what the node read at its checkpoint, so main says which its log no longer
+   * holds ({@link Tips#rewound}).
+   */
+  public record Heads(Map<String, SyncState.Mark> marks) implements Request {
+    public Heads {
+      marks = Map.copyOf(marks);
+    }
+
+    /** Heads naming nothing read, as a node that predates marks asks. */
+    public Heads() {
+      this(Map.of());
+    }
+  }
 
   /** Ask for one page of {@code type}'s change log after {@code since}, at most {@code limit}. */
   public record Pull(String type, long since, int limit) implements Request {}
@@ -415,8 +434,21 @@ public final class SyncWire {
     }
   }
 
-  /** Main's high-water per entity type. */
-  public record Tips(Map<String, Long> tips) implements Response {}
+  /**
+   * Main's high-water per entity type, and the types whose mark ({@link Heads#marks}) names an
+   * entry main's log no longer holds: main was restored in place from an older copy, so the node
+   * walks every head again however far main's log has grown since.
+   */
+  public record Tips(Map<String, Long> tips, Set<String> rewound) implements Response {
+    public Tips {
+      rewound = Set.copyOf(rewound);
+    }
+
+    /** Tips naming no type rewound, as a main that predates marks answers. */
+    public Tips(Map<String, Long> tips) {
+      this(tips, Set.of());
+    }
+  }
 
   /**
    * One change of one entity at its head. A tombstone and an erasure carry {@code deleted} and no
@@ -697,7 +729,14 @@ public final class SyncWire {
         map.put(FLOOR, hello.floor());
         map.put(BOX, hello.box());
       }
-      case Heads ignored -> map.put(OP, OP_HEADS);
+      case Heads heads -> {
+        map.put(OP, OP_HEADS);
+        if (!heads.marks().isEmpty()) {
+          var marks = new TreeMap<String, Object>();
+          heads.marks().forEach((type, mark) -> marks.put(type, markMap(mark)));
+          map.put(MARKS, marks);
+        }
+      }
       case Pull pull -> {
         map.put(OP, OP_PULL);
         map.put(TYPE, pull.type());
@@ -757,6 +796,9 @@ public final class SyncWire {
       case Tips tips -> {
         map.put(OP, OP_TIPS);
         map.put(TIPS, new LinkedHashMap<String, Object>(tips.tips()));
+        if (!tips.rewound().isEmpty()) {
+          map.put(REWOUND, tips.rewound().stream().sorted().toList());
+        }
       }
       case Page page -> {
         map.put(OP, OP_PAGE);
@@ -797,7 +839,7 @@ public final class SyncWire {
               string(map, VERSION),
               string(map, FLOOR),
               string(map, BOX));
-      case OP_HEADS -> new Heads();
+      case OP_HEADS -> new Heads(marks(map));
       case OP_PULL -> new Pull(string(map, TYPE), longValue(map, SINCE), intValue(map, LIMIT));
       case OP_NEED ->
           new Need(string(map, TYPE), strings(map, IDS), bases(map), bool(map, ACCEPTED_ONLY));
@@ -842,7 +884,7 @@ public final class SyncWire {
               map.containsKey(SCOPE) ? ProjectScope.of(strings(map, SCOPE)) : ProjectScope.all(),
               string(map, CATALOG));
       case OP_REFUSE -> new Refuse(remedy(map, REASON));
-      case OP_TIPS -> new Tips(tips(map));
+      case OP_TIPS -> new Tips(tips(map), Set.copyOf(strings(map, REWOUND)));
       case OP_PAGE ->
           new Page(
               maps(map, ENTRIES).stream().map(SyncWire::entry).toList(),
@@ -1002,6 +1044,38 @@ public final class SyncWire {
       raw.forEach((type, value) -> tips.put(type, value instanceof Number n ? n.longValue() : 0L));
     }
     return tips;
+  }
+
+  private static Map<String, Object> markMap(SyncState.Mark mark) {
+    var map = new LinkedHashMap<String, Object>();
+    map.put(CHECKPOINT, mark.checkpoint());
+    map.put(SEQ, mark.seq());
+    map.put(ID, mark.id());
+    map.put(REV, mark.rev());
+    return map;
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Map<String, SyncState.Mark> marks(Map<String, Object> map) {
+    var marks = new LinkedHashMap<String, SyncState.Mark>();
+    var raw = snapshot(map, MARKS);
+    if (raw != null) {
+      raw.forEach(
+          (type, value) -> {
+            if (!(value instanceof Map<?, ?> mark)) {
+              throw new IllegalArgumentException(MARKS + " must hold objects");
+            }
+            var fields = (Map<String, Object>) mark;
+            marks.put(
+                type,
+                new SyncState.Mark(
+                    longValue(fields, CHECKPOINT),
+                    longValue(fields, SEQ),
+                    string(fields, ID),
+                    string(fields, REV)));
+          });
+    }
+    return marks;
   }
 
   @SuppressWarnings("unchecked")

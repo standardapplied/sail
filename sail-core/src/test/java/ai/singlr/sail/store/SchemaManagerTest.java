@@ -520,6 +520,33 @@ class SchemaManagerTest {
   }
 
   @Test
+  void aNodeUpgradedFromAReleaseThatKeptNothingBesideItsCheckpointsWalksMainsHeadsOnce() {
+    stageAtBaseline();
+    var prior = migrationIndex("ALTER TABLE sync_state ADD COLUMN read_seq");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    var state = new SyncState(db);
+    state.advance("main", "spec", 41);
+
+    new SchemaManager(db).migrate();
+
+    assertEquals(0, state.checkpoint("main", "spec"), "walks main's heads again");
+    assertEquals(Map.of(), state.marks("main"));
+    state.read("main", "spec", 40, "s1", "2-a");
+    state.advance("main", "spec", 41);
+    db.execute(SchemaManager.CHECKPOINTS_READ_AGAIN);
+    assertEquals(
+        Map.of("spec", new SyncState.Mark(41, 40, "s1", "2-a")),
+        state.marks("main"),
+        "a checkpoint kept with what was read there is never walked again");
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+  }
+
+  @Test
   void aMessageJournaledUnderWhoeverWasActingIsAttributedToItsPoster() {
     new SchemaManager(db).migrate();
     db.execute(
