@@ -13,7 +13,10 @@ import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import picocli.CommandLine;
 
-/** Runs {@code sail <args>} as {@link Main} runs it, what it printed captured. */
+/**
+ * Runs {@code sail <args>}, or one of its commands, as {@link Main} runs it, what it printed
+ * captured.
+ */
 final class SailCli {
 
   /** What {@code sail <args>} exited with and printed to stdout and stderr. */
@@ -22,6 +25,11 @@ final class SailCli {
   private SailCli() {}
 
   static Ran run(String... args) {
+    return run(new Sail(), args);
+  }
+
+  /** What {@code command} run with {@code args} as {@link Main} runs it exited with and printed. */
+  static Ran run(Object command, String... args) {
     var originalOut = System.out;
     var originalErr = System.err;
     var out = new ByteArrayOutputStream();
@@ -29,7 +37,7 @@ final class SailCli {
     System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
     System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
     try {
-      var sail = new CommandLine(new Sail());
+      var sail = new CommandLine(command);
       sail.setErr(new PrintWriter(err, true, StandardCharsets.UTF_8));
       sail.setExecutionExceptionHandler((failure, line, parsed) -> Main.report(failure, line));
       var exit = sail.execute(args);

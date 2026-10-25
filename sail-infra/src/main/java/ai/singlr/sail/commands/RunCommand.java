@@ -48,6 +48,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import picocli.CommandLine.Command;
@@ -105,6 +106,7 @@ public final class RunCommand implements Runnable {
   @Mixin private IgnoredFileOption file;
 
   private final Function<OperatorCommand, HostOperations> operations;
+  private final BiFunction<ShellExec, OperationHooks, HostOperations> launches;
   private final Function<OperatorCommand, LocalIdentity> identity;
   private final Function<Boolean, ShellExec> shells;
   private final DispatchOperations.AgentLauncher terminal;
@@ -113,22 +115,26 @@ public final class RunCommand implements Runnable {
   public RunCommand() {
     this(
         operator -> OperationsFactory.open(operator::warn),
+        (shell, hooks) -> OperationsFactory.open(shell, hooks, new PtyHostYield()),
         LocalIdentity::detect,
         ShellExecutor::new,
         DispatchOperations.terminalLauncher());
   }
 
   /**
+   * @param launches this box's operations over a shell, running a task session's hooks
    * @param shells the host shell, by whether this is a dry run
    * @param terminal what runs a foreground agent in this terminal: the interactive session's {@code
    *     ssh}, and a task session's agent command
    */
   RunCommand(
       Function<OperatorCommand, HostOperations> operations,
+      BiFunction<ShellExec, OperationHooks, HostOperations> launches,
       Function<OperatorCommand, LocalIdentity> identity,
       Function<Boolean, ShellExec> shells,
       DispatchOperations.AgentLauncher terminal) {
     this.operations = operations;
+    this.launches = launches;
     this.identity = identity;
     this.shells = shells;
     this.terminal = terminal;
@@ -337,7 +343,7 @@ public final class RunCommand implements Runnable {
         }
         throw Remedied.state(e.getMessage(), e.remedy(), e);
       }
-      render(session, launchCommand.get(), branchName, operator);
+      render(shell, session, launchCommand.get(), branchName, operator);
     }
   }
 
@@ -390,7 +396,7 @@ public final class RunCommand implements Runnable {
             }
           }
         };
-    return OperationsFactory.open(
+    return launches.apply(
         shell,
         new OperationHooks(
             this::publishLifecycle,
@@ -398,11 +404,11 @@ public final class RunCommand implements Runnable {
             (project, config) -> "",
             terminal,
             listener,
-            StopOperations.Listener.NONE),
-        new PtyHostYield());
+            StopOperations.Listener.NONE));
   }
 
   private void render(
+      ShellExec shell,
       DispatchOperations.AdhocSession session,
       List<String> command,
       String branchName,
@@ -437,8 +443,7 @@ public final class RunCommand implements Runnable {
       return;
     }
     if (session.exitCode() != null && session.exitCode() != 0) {
-      System.err.println(
-          Banner.errorLine("Agent session exited with code " + session.exitCode(), Ansi.AUTO));
+      throw AgentLogCommand.agentExited(shell, name, session.runId(), session.exitCode());
     }
   }
 
@@ -555,8 +560,7 @@ public final class RunCommand implements Runnable {
     } else {
       var exitCode = terminal.launch(sshCmd);
       if (exitCode != 0) {
-        System.err.println(
-            Banner.errorLine("Agent session exited with code " + exitCode, Ansi.AUTO));
+        throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "The agent exited " + exitCode + ".");
       }
     }
   }

@@ -14,12 +14,16 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.ErrorCode;
+import ai.singlr.sail.api.OperationHooks;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.LocalIdentity;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FileStore;
@@ -171,19 +175,82 @@ class RunCommandTest {
   }
 
   /** The command against a host whose {@code incus} has no container of any name. */
-  private static CommandLine command(Path dbPath) {
+  private CommandLine command(Path dbPath) {
     return command(dbPath, new ScriptedShellExecutor().onOk("incus list", "[]"), command -> 0);
   }
 
-  private static CommandLine command(
+  private CommandLine command(
+      Path dbPath, ScriptedShellExecutor shell, DispatchOperations.AgentLauncher terminal) {
+    return new CommandLine(runCommand(dbPath, shell, terminal));
+  }
+
+  private final List<Sqlite> opened = new ArrayList<>();
+
+  @AfterEach
+  void closeDatabases() {
+    opened.forEach(Sqlite::close);
+  }
+
+  /**
+   * {@code sail agent run} over the catalog at {@code dbPath}: a task session launches through the
+   * command's own hooks, its events dropped and its watcher a pid.
+   */
+  private RunCommand runCommand(
       Path dbPath, ScriptedShellExecutor shell, DispatchOperations.AgentLauncher terminal) {
     var noGit = new ScriptedShellExecutor();
-    return new CommandLine(
-        new RunCommand(
-            operator -> OperationsFactory.open(dbPath),
-            operator -> new LocalIdentity(noGit, dbPath.resolveSibling("none.pub"), operator),
-            dryRun -> shell,
-            terminal));
+    return new RunCommand(
+        operator -> OperationsFactory.open(dbPath),
+        (host, hooks) -> {
+          var db = Sqlite.open(dbPath);
+          opened.add(db);
+          return OperationsFactory.create(
+              db,
+              host,
+              new OperationHooks(
+                  event -> {},
+                  new WatcherSpawner(host, (spawned, logPath) -> 4242L),
+                  hooks.snapshotter(),
+                  hooks.launcher(),
+                  hooks.dispatchListener(),
+                  hooks.stopListener()),
+              SessionYield.NONE);
+        },
+        operator -> new LocalIdentity(noGit, dbPath.resolveSibling("none.pub"), operator),
+        dryRun -> shell,
+        terminal);
+  }
+
+  @Test
+  void aTaskSessionWhoseAgentExitsNonZeroFailsSayingWhy() {
+    var shell = runningContainer().onOk("tail -n 20", DispatchCommandWiringTest.NOT_LOGGED_IN);
+
+    var ran =
+        SailCli.run(
+            runCommand(catalogWithASharedSkill(), shell, command -> 1),
+            "test-proj",
+            "--task",
+            "Fix the build",
+            "--no-snapshot");
+
+    assertEquals(1, ran.exit(), ran.out());
+    assertEquals(
+        "  ✗ The agent exited 1: Not logged in · Please run /login\n"
+            + "Full log: "
+            + OperatorCommand.here().sail("agent log test-proj")
+            + "\n",
+        ran.err());
+  }
+
+  @Test
+  void anInteractiveSessionWhoseAgentExitsNonZeroFailsTheCommand() {
+    var ran =
+        SailCli.run(
+            runCommand(catalogWithASharedSkill(), runningContainer(), command -> 130),
+            "test-proj",
+            "--no-snapshot");
+
+    assertEquals(1, ran.exit(), ran.out());
+    assertEquals("  ✗ The agent exited 130.\n", ran.err());
   }
 
   private static final String E2E =
