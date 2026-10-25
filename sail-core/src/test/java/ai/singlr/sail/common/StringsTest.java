@@ -86,6 +86,15 @@ class StringsTest {
   }
 
   @Test
+  void fitKeepsOnlyStyleEscapesAndMakesTheEscapeOfAnyOtherControlASpace() {
+    assertEquals("a [99Cbc", Strings.fit("a\033[99Cbc", 80));
+    assertEquals("a [99…", Strings.fit("a\033[99Cbc", 6));
+    assertEquals(" [2J [H ]0;t ", Strings.fit("\033[2J\033[H\033]0;t\007", 80));
+    assertEquals("\033[38;5;214ma\033[0m b", Strings.fit("\033[38;5;214ma\033[0m\u009Bb", 80));
+    assertEquals(8, Strings.columns("a\033[99Cbc"));
+  }
+
+  @Test
   void columnsCountsWideCharactersTwiceAndMarksNotAtAll() {
     assertEquals(3, Strings.columns("abc"));
     assertEquals(4, Strings.columns("界가"));

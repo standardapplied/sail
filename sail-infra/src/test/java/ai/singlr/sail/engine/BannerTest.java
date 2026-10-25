@@ -826,6 +826,28 @@ class BannerTest {
   }
 
   @Test
+  void aCursorMoveInAValueIsTextTheRowFits() {
+    var config =
+        new SailYaml(
+            "acme", "\033[99CXX", null, null, null, null, null, null, null, null, null, null);
+
+    var lines =
+        printedAt(
+            Banner.DEFAULT_COLUMNS,
+            out ->
+                Banner.printProjectConfig(config, new ContainerState.NotCreated(), out, Ansi.OFF));
+
+    assertEquals(List.of(), lines.stream().filter(line -> line.contains("\033")).toList());
+    assertEquals(1, widths(lines).size(), String.join("\n", lines));
+    assertEquals(
+        List.of("  │  Description:  [99CXX"),
+        lines.stream()
+            .filter(line -> line.contains("Description:"))
+            .map(line -> line.replaceAll(" *│$", ""))
+            .toList());
+  }
+
+  @Test
   void theBrandingAboveAStatusBoxFitsTheTerminalToo() {
     var lines =
         printedAt(
