@@ -429,7 +429,10 @@ class SchemaManagerTest {
     assertEquals(1, log.backfillProjects());
     assertEquals(Optional.of("alpha"), log.headProject("spec", "s1"));
     assertEquals(ProjectScope.all(), new SyncScope(db).held());
-    assertEquals(12, new SyncState(db).checkpoint("main", "spec"));
+    assertEquals(
+        0,
+        new SyncState(db).checkpoint("main", "spec"),
+        "walked once more by a later release, to keep what it reads there");
     assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
   }
 

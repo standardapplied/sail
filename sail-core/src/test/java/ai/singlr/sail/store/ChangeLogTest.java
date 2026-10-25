@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
 import java.util.List;
@@ -258,5 +259,52 @@ class ChangeLogTest {
             "spec",
             since,
             2_000));
+  }
+
+  private long seqOf(String id) {
+    return log.head("spec", id).orElseThrow().seq();
+  }
+
+  @Test
+  void aLogHoldsTheEntryAReaderReadAtItsSeqAndNoOtherThere() {
+    log.append("spec", "a", "1-x", "local", false, "{}");
+    log.append("spec", "b", "1-y", "local", false, "{}");
+    var b = seqOf("b");
+    var all = ProjectScope.all();
+
+    assertTrue(log.holds("spec", new SyncState.Mark(b, b, "b", "1-y"), all));
+    assertFalse(log.holds("spec", new SyncState.Mark(b, b, "b", "1-z"), all), "another rev");
+    assertFalse(log.holds("spec", new SyncState.Mark(b, b, "a", "1-x"), all), "another entity");
+    assertFalse(log.holds("room", new SyncState.Mark(b, b, "b", "1-y"), all), "another type");
+  }
+
+  @Test
+  void aSeqAnErasureEmptiedIsHeldWhileTheErasureIsStillTheReadersToPage() {
+    log.append("spec", "a", "1-x", "local", false, "{}");
+    var a = seqOf("a");
+    log.append("spec", "b", "1-y", "local", false, "{}");
+    var b = seqOf("b");
+    log.erase("spec", "a", "2-x", "local");
+
+    assertTrue(
+        log.holds("spec", new SyncState.Mark(a, a, "a", "1-x"), ProjectScope.all()),
+        "the erasure of a sits after the seq it was read at");
+    assertFalse(
+        log.holds("spec", new SyncState.Mark(b, a, "c", "1-q"), ProjectScope.all()),
+        "nothing of c is left to page");
+  }
+
+  @Test
+  void aHeadTheReadersScopeAdmitsBetweenItsReadAndItsCheckpointWasNeverRead() {
+    log.append("spec", "a", "1-x", "local", false, "{}");
+    log.fileUnder("spec", "a", "alpha");
+    var a = seqOf("a");
+    log.append("spec", "b", "1-y", "local", false, "{}");
+    log.fileUnder("spec", "b", "beta");
+    var mark = new SyncState.Mark(seqOf("b"), a, "a", "1-x");
+
+    assertTrue(log.holds("spec", mark, ProjectScope.of(List.of("alpha"))), "b passed over");
+    assertFalse(log.holds("spec", mark, ProjectScope.of(List.of("alpha", "beta"))));
+    assertFalse(log.holds("spec", mark, ProjectScope.all()));
   }
 }

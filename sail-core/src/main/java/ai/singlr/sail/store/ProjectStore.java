@@ -70,7 +70,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     var canonical = PersonalFields.redact(definition);
     db.transaction(
         () -> {
-          writeRow(name, canonical, author(), null, DateTimeUtils.now().toString());
+          writeRow(name, canonical, author(), null, null, DateTimeUtils.now().toString());
           journal.recordRevision(name, ChangeLog.Entry.LOCAL, false);
         });
   }
@@ -109,7 +109,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
           }
           journal.recordTombstone(old, ChangeLog.Entry.LOCAL, BLOCKING);
           eraseRow(old);
-          writeRow(renamed, canonical, author(), null, DateTimeUtils.now().toString());
+          writeRow(renamed, canonical, author(), null, null, DateTimeUtils.now().toString());
           journal.recordRevision(renamed, ChangeLog.Entry.LOCAL, false);
         });
   }
@@ -316,25 +316,34 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Writes project {@code name} as {@code actor} at {@code updatedAt}. A new row is created at
-   * {@code createdAt}, or at {@code updatedAt} when it names none; a row already here keeps its
-   * creation time unless {@code createdAt} names one, as a revision from main does.
+   * Writes project {@code name} as {@code actor} at {@code updatedAt}. A new row is created by
+   * {@code creator} at {@code createdAt}, or by {@code actor} at {@code updatedAt} when either
+   * names none; a row already here keeps its creator and creation time unless {@code creator} and
+   * {@code createdAt} name them, as a revision from main does.
    */
   private void writeRow(
-      String name, String definition, String actor, String createdAt, String updatedAt) {
+      String name,
+      String definition,
+      String actor,
+      String creator,
+      String createdAt,
+      String updatedAt) {
     db.execute(
         "INSERT INTO projects (name, definition, created_by, created_at, updated_by, updated_at)"
-            + " VALUES (?, ?, ?, COALESCE(?, ?), ?, ?) ON CONFLICT(name) DO UPDATE SET"
+            + " VALUES (?, ?, COALESCE(?, ?), COALESCE(?, ?), ?, ?) ON CONFLICT(name) DO UPDATE SET"
             + " definition = excluded.definition, updated_by = excluded.updated_by,"
             + " updated_at = excluded.updated_at,"
+            + " created_by = COALESCE(?, projects.created_by),"
             + " created_at = COALESCE(?, projects.created_at)",
         name,
         definition,
+        creator,
         actor,
         createdAt,
         updatedAt,
         actor,
         updatedAt,
+        creator,
         createdAt);
   }
 
@@ -370,8 +379,8 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     }
 
     /**
-     * The definition, the one work field, and when the project was created and last revised; the
-     * author rides as the journal head's.
+     * The definition, the one work field, who created the project and when, and when it was last
+     * revised; the author rides as the journal head's.
      */
     @Override
     public Map<String, Object> snapshotMap(String id) {
@@ -379,6 +388,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
           .map(
               row -> {
                 var map = comparable(row.definition());
+                map.put("created_by", row.createdBy());
                 map.put("created_at", row.createdAt());
                 map.put("updated_at", row.updatedAt());
                 return map;
@@ -386,20 +396,30 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
           .orElse(null);
     }
 
-    /** Writes the definition at the revision's times ({@link Snapshots#timed}). */
+    /**
+     * Writes the definition at the revision's times ({@link Snapshots#timed}), by the creator main
+     * names when this box adopts main's revision ({@link Snapshots#adoptedCreator}).
+     */
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
+      var held = findByName(id).map(ProjectRow::createdBy).orElse(null);
       writeRow(
           id,
           definitionOf(snapshot),
           Snapshots.actor(snapshot),
+          Snapshots.adoptedCreator(snapshot, held),
           Snapshots.text(snapshot, Snapshots.CREATED_AT),
           Snapshots.timeOr(snapshot, Snapshots.UPDATED_AT, DateTimeUtils.now().toString()));
     }
 
     @Override
     public Map<String, Object> comparable(Map<String, Object> full) {
-      return Snapshots.timed(comparable(definitionOf(full)), full);
+      var comparable = comparable(definitionOf(full));
+      var creator = full.get("created_by");
+      if (creator != null) {
+        comparable.put(Snapshots.CREATOR, creator);
+      }
+      return Snapshots.timed(comparable, full);
     }
 
     @Override

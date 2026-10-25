@@ -19,6 +19,7 @@ import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FastCdc;
 import ai.singlr.sail.store.Snapshots;
+import ai.singlr.sail.store.SyncState;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -27,6 +28,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class SyncWireTest {
@@ -46,6 +48,10 @@ class SyncWireTest {
       List.of(
           SyncWire.Hello.of("0.44.1", "box-7"),
           new SyncWire.Heads(),
+          new SyncWire.Heads(
+              Map.of(
+                  "spec", new SyncState.Mark(41, 41, "auth", "3-abc"),
+                  "room", new SyncState.Mark(9, 4, "r1", "1-a"))),
           new SyncWire.Pull("spec", 41, 500),
           new SyncWire.Need("file", List.of("acme/a", "acme/b")),
           new SyncWire.Push(
@@ -63,6 +69,7 @@ class SyncWireTest {
           new SyncWire.Welcome(4, "0.46.3", "main-box", ""),
           new SyncWire.Refuse("hello required"),
           new SyncWire.Tips(Map.of("spec", 7L, "file", 0L)),
+          new SyncWire.Tips(Map.of("spec", 7L, "room", 3L), Set.of("spec", "room")),
           new SyncWire.Page(
               List.of(
                   new SyncWire.Entry(
@@ -96,6 +103,49 @@ class SyncWireTest {
                   Map.of("handle", "ada", "role", "admin", "status", "active"),
                   Map.of("handle", "uday", "role", "member", "status", "disabled"))),
           new SyncWire.Failed("disk full", "store"));
+
+  @Test
+  void headsAndTipsNameMarksAndRewoundTypesOnlyWhenThereAreAny() {
+    assertEquals("{\"op\": \"heads\"}", SyncWire.encode(new SyncWire.Heads()));
+    assertEquals(
+        "{\"op\": \"heads\", \"marks\": {\"spec\": {\"checkpoint\": 41, \"seq\": 40,"
+            + " \"id\": \"auth\", \"rev\": \"3-abc\"}}}",
+        SyncWire.encode(
+            new SyncWire.Heads(Map.of("spec", new SyncState.Mark(41, 40, "auth", "3-abc")))));
+    assertEquals(
+        "{\"op\": \"tips\", \"tips\": {\"spec\": 7}}",
+        SyncWire.encode(new SyncWire.Tips(Map.of("spec", 7L))));
+    assertEquals(
+        "{\"op\": \"tips\", \"tips\": {\"spec\": 7}, \"rewound\": [\"spec\"]}",
+        SyncWire.encode(new SyncWire.Tips(Map.of("spec", 7L), Set.of("spec"))));
+  }
+
+  @Test
+  void aNodeOrAMainOnTheReleaseBeforeMarksReadsAsNamingNone() {
+    assertEquals(
+        new SyncWire.Heads(), SyncWire.decodeRequest("{\"op\": \"heads\"}"), "an older node");
+    assertEquals(
+        new SyncWire.Tips(Map.of("spec", 7L)),
+        SyncWire.decodeResponse("{\"op\": \"tips\", \"tips\": {\"spec\": 7}}"),
+        "an older main");
+  }
+
+  @Test
+  void aMarkThatIsNotAnObjectOrReadsPastItsCheckpointIsRefused() {
+    var notAnObject =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> SyncWire.decodeRequest("{\"op\": \"heads\", \"marks\": {\"spec\": 4}}"));
+    assertEquals("marks must hold objects", notAnObject.getMessage());
+    var past =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                SyncWire.decodeRequest(
+                    "{\"op\": \"heads\", \"marks\": {\"spec\": {\"checkpoint\": 4,"
+                        + " \"seq\": 5, \"id\": \"a\", \"rev\": \"1-a\"}}}"));
+    assertEquals("A mark reads seq 5, outside its checkpoint 4", past.getMessage());
+  }
 
   @Test
   void aWelcomeNamesTheHandleOnlyWhenMainSaysOne() {

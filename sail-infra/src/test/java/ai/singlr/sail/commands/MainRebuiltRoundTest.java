@@ -433,8 +433,8 @@ class MainRebuiltRoundTest {
 
   private static List<String> projectRows(Sqlite db) {
     return db.query(
-        "SELECT name || ' ' || rev || ' ' || COALESCE(created_by, '-') || ' ' || definition"
-            + " FROM projects ORDER BY name",
+        "SELECT name || ' ' || rev || ' ' || created_by || ' ' || created_at || ' ' || updated_by"
+            + " || ' ' || updated_at || ' ' || definition FROM projects ORDER BY name",
         r -> r.text(0));
   }
 
@@ -722,11 +722,15 @@ class MainRebuiltRoundTest {
     write("n1");
     mainWrite(serving, "g1");
 
-    round();
+    var round = round();
 
     assertEquals(List.of(), notices);
     assertEquals(
         List.of("g0", "g1", "n1"), specIds(nodeDb).stream().map(r -> r.split(" ")[0]).toList());
+    assertEquals(
+        List.of(1),
+        round.types().stream().filter(t -> "spec".equals(t.type())).map(t -> t.entries()).toList(),
+        "pulled from the checkpoint, not from the first head");
   }
 
   @Test
