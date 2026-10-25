@@ -5,9 +5,12 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -57,6 +60,19 @@ public final class ContainerSailSetup {
     ALREADY_PRESENT,
     /** The stamp was missing or stale; every installer ran and the stamp was rewritten. */
     UPDATED
+  }
+
+  /**
+   * Refuses to provision a container on a box whose sail-api has never run: the event-socket mount
+   * needs {@code socketDir}, which sail-api creates, and a container provisioned before it exists
+   * is left without sail's machinery.
+   */
+  public static void requireApi(Path socketDir) {
+    if (!Files.isDirectory(socketDir)) {
+      throw Remedied.state(
+          "This box has no sail-api yet, which every project container talks to.",
+          Remedy.of("Set it up first: ", Remedy.setUp(), "."));
+    }
   }
 
   /**

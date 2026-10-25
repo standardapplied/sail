@@ -5,12 +5,21 @@
 
 package ai.singlr.sail.common;
 
+import java.util.regex.Pattern;
+
 /**
- * Null-safe string predicates. All application code checks emptiness/blankness through this seam
- * rather than inlining {@code s == null || s.isBlank()}, so the intent reads consistently and a
- * null is never dereferenced.
+ * Null-safe string predicates, and the terminal's measure of a line ({@link #columns}, {@link
+ * #fit}). All application code checks emptiness/blankness through this seam rather than inlining
+ * {@code s == null || s.isBlank()}, so the intent reads consistently and a null is never
+ * dereferenced.
  */
 public final class Strings {
+
+  private static final Pattern ESCAPE = Pattern.compile("\033\\[[0-9;:]*m");
+
+  private static final Pattern CONTROL = Pattern.compile("[\\p{Cc}&&[^\033]]|\033(?!\\[[0-9;:]*m)");
+
+  private static final String RESET = "\033[0m";
 
   private Strings() {}
 
@@ -49,6 +58,63 @@ public final class Strings {
     return text.codePointCount(0, text.length()) <= maxCodePoints
         ? text
         : text.substring(0, text.offsetByCodePoints(0, maxCodePoints));
+  }
+
+  /**
+   * {@code text} as one line when it spans at most {@code width} terminal columns, otherwise its
+   * beginning ending in "…", at most {@code width} columns in all; nothing when there is no room. A
+   * terminal's style escapes take no columns and are kept up to the cut, and a cut styled text ends
+   * with a reset so its style does not run on past it. It is one line: a tab, newline, cursor move
+   * or other control, which a terminal moves its cursor on rather than draws, has its control
+   * character made a space, so what is left of it prints and is measured as text.
+   */
+  public static String fit(String text, int width) {
+    var line = CONTROL.matcher(text).replaceAll(" ");
+    if (columns(line) <= width) {
+      return line;
+    }
+    if (width < 1) {
+      return "";
+    }
+    var escape = ESCAPE.matcher(line);
+    var styled = false;
+    var end = 0;
+    var used = 0;
+    var previous = -1;
+    while (end < line.length()) {
+      if (escape.region(end, line.length()).lookingAt()) {
+        styled = true;
+        end = escape.end();
+        continue;
+      }
+      var codePoint = line.codePointAt(end);
+      var size = TerminalColumns.of(codePoint, previous);
+      if (used + size > width - 1) {
+        break;
+      }
+      used += size;
+      previous = codePoint;
+      end = line.offsetByCodePoints(end, 1);
+    }
+    return line.substring(0, end) + "…" + (styled ? RESET : "");
+  }
+
+  /**
+   * The terminal columns {@code text} spans: two for each wide character, and for a narrow one an
+   * emoji presentation selector follows; none for a mark or a style escape. Never fewer than a
+   * terminal draws for these, so a text fitted by it cannot pass the edge; a joined sequence it
+   * counts character by character may be drawn narrower, which only shortens the row.
+   */
+  public static int columns(String text) {
+    var plain = ESCAPE.matcher(text).replaceAll("");
+    var columns = 0;
+    var previous = -1;
+    for (var at = 0; at < plain.length(); at = plain.offsetByCodePoints(at, 1)) {
+      var codePoint = plain.codePointAt(at);
+      columns += TerminalColumns.of(codePoint, previous);
+      previous = codePoint;
+    }
+    return columns;
   }
 
   /** {@code word} as one shell word to paste back: bare when that is safe, else single-quoted. */

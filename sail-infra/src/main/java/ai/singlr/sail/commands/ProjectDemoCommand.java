@@ -14,6 +14,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
+import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DemoProject;
 import ai.singlr.sail.engine.GitCredentials;
@@ -99,8 +100,8 @@ public final class ProjectDemoCommand implements Runnable {
     if (!dryRun && !Files.exists(hostYamlPath)) {
       throw HostInitCommand.notInitialized(operator);
     }
-
     if (!dryRun) {
+      ContainerSailSetup.requireApi(SailPaths.apiSocketHostDir());
       var shell = new ShellExecutor(false);
       var mgr = new ContainerManager(shell);
       var state = mgr.queryState(DEMO_PROJECT);

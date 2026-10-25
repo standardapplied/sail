@@ -11,11 +11,39 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
 
 class CommandTaxonomyTest {
+
+  @Test
+  void noFlagThatIsOnByDefaultLacksTheSpellingThatTurnsItOff() {
+    var unspellable = new ArrayList<String>();
+    collectUnspellableFlags(new CommandLine(new Sail()), unspellable);
+
+    assertEquals(List.of(), unspellable);
+  }
+
+  /**
+   * A boolean option true by default that is not negatable is toggled off by naming it, so the flag
+   * does the opposite of what it says.
+   */
+  private static void collectUnspellableFlags(CommandLine command, List<String> found) {
+    for (var option : command.getCommandSpec().options()) {
+      var type = option.type();
+      if ((type == boolean.class || type == Boolean.class)
+          && "true".equals(option.defaultValue())
+          && !option.negatable()) {
+        found.add(command.getCommandSpec().qualifiedName() + " " + option.longestName());
+      }
+    }
+    command.getSubcommands().values().stream()
+        .distinct()
+        .forEach(sub -> collectUnspellableFlags(sub, found));
+  }
 
   @Test
   void rootCommandsAreWorkflowGroups() {

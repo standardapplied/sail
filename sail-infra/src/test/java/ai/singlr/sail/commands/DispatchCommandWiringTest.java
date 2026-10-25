@@ -16,6 +16,8 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.OperationHooks;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
@@ -100,7 +102,22 @@ class DispatchCommandWiringTest {
   private Sqlite db;
 
   private SailOperations cliOperations(ShellExec shell, List<Event> events) throws Exception {
-    return Acting.system(
+    seed();
+    return DispatchCommand.operations(
+        db,
+        shell,
+        events::add,
+        new WatcherSpawner(shell, (command, logPath) -> 4242L),
+        (project, config) -> "",
+        command -> 0,
+        DispatchOperations.Listener.NONE,
+        SessionYield.NONE,
+        OperatorCommand.PLAIN);
+  }
+
+  /** The control plane holding project {@code acme} and its pending spec {@code auth}. */
+  private void seed() throws Exception {
+    Acting.system(
         () -> {
           db = Sqlite.open(tempDir.resolve("control-plane.db"));
           new SchemaManager(db).migrate();
@@ -128,17 +145,95 @@ class DispatchCommandWiringTest {
                           List.of(),
                           List.of())));
           specStore.setContent("auth", "Do auth", "");
-          return DispatchCommand.operations(
-              db,
-              shell,
-              events::add,
-              new WatcherSpawner(shell, (command, logPath) -> 4242L),
-              (project, config) -> "",
-              command -> 0,
-              DispatchOperations.Listener.NONE,
-              SessionYield.NONE,
-              OperatorCommand.PLAIN);
+          return null;
         });
+  }
+
+  /**
+   * {@code sail spec dispatch <args>} for {@code acme} as this box's admin runs it, its agent
+   * exiting {@code agent}: the door's own hooks, its events kept here and its watcher a pid.
+   */
+  private SailCli.Ran dispatch(ShellExec shell, int agent, String... args) throws Exception {
+    seed();
+    new FdeStore(db).add(HANDLE, null, null, "admin");
+    var command =
+        new DispatchCommand(
+            dryRun -> shell,
+            (host, hooks) ->
+                OperationsFactory.create(
+                    db,
+                    host,
+                    new OperationHooks(
+                        event -> {},
+                        new WatcherSpawner(host, (spawned, logPath) -> 4242L),
+                        hooks.snapshotter(),
+                        launched -> agent,
+                        hooks.dispatchListener(),
+                        hooks.stopListener()),
+                    SessionYield.NONE),
+            () -> HANDLE);
+    var all =
+        new ArrayList<>(List.of("-p", "acme", "--spec", "auth", "--no-sync", "--no-snapshot"));
+    all.addAll(List.of(args));
+    return SailCli.run(command, all.toArray(String[]::new));
+  }
+
+  @Test
+  void backgroundRunsTheAgentInTheBackgroundAsItsHelpSays() throws Exception {
+    var ran = dispatch(shell(), 0, "--background");
+
+    assertEquals(0, ran.exit(), ran.err());
+    assertTrue(ran.out().contains("Launching agent in background..."), ran.out());
+    assertTrue(ran.out().contains("Guardrail watcher started (pid 4242"), ran.out());
+  }
+
+  @Test
+  void aDispatchNamingNoModeRunsTheAgentInTheBackground() throws Exception {
+    var ran = dispatch(shell(), 0);
+
+    assertEquals(0, ran.exit(), ran.err());
+    assertTrue(ran.out().contains("Launching agent in background..."), ran.out());
+    assertTrue(ran.out().contains("Guardrail watcher started (pid 4242"), ran.out());
+  }
+
+  @Test
+  void noBackgroundRunsTheAgentInThisTerminal() throws Exception {
+    var ran = dispatch(shell(), 0, "--no-background");
+
+    assertEquals(0, ran.exit(), ran.err());
+    assertTrue(ran.out().contains("Launching agent with spec..."), ran.out());
+    assertFalse(ran.out().contains("Guardrail watcher started (pid 4242"), ran.out());
+  }
+
+  static final String NOT_LOGGED_IN =
+      "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,"
+          + "\"result\":\"Not logged in · Please run /login\"}\n";
+
+  @Test
+  void aForegroundAgentThatExitsNonZeroFailsTheDispatchSayingWhy() throws Exception {
+    var ran = dispatch(shell().on("tail -n 20", NOT_LOGGED_IN), 1, "--no-background");
+
+    assertEquals(1, ran.exit(), ran.out());
+    assertEquals(
+        "  ✗ The agent exited 1: Not logged in · Please run /login\n"
+            + "Full log: "
+            + OperatorCommand.here().sail("agent log acme")
+            + "\n",
+        ran.err());
+  }
+
+  @Test
+  void aBackgroundAgentsExitIsTheWatchersToReport() throws Exception {
+    var shell = shell().on("tail -n 20", NOT_LOGGED_IN);
+
+    var ran = dispatch(shell, 0);
+
+    assertEquals(0, ran.exit(), ran.err());
+    assertTrue(ran.out().contains("Guardrail watcher started (pid 4242"), ran.out());
+    assertFalse(ran.err().contains("✗"), ran.err());
+    assertTrue(
+        shell.invocations.stream().noneMatch(command -> command.contains("tail -n 20")),
+        "a background launch reads no log: " + shell.invocations);
   }
 
   static StubShell shell() {

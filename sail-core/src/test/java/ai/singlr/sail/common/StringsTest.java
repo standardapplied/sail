@@ -61,6 +61,105 @@ class StringsTest {
   }
 
   @Test
+  void fitKeepsAShortTextAndEndsALongOneInAnEllipsisAtTheWidth() {
+    assertEquals("short", Strings.fit("short", 80));
+    assertEquals("short", Strings.fit("short", 5));
+    assertEquals("x".repeat(39) + "…", Strings.fit("x".repeat(120), 40));
+    assertEquals("a\uD83D\uDE00…", Strings.fit("a\uD83D\uDE00bc", 4));
+    assertEquals("a…", Strings.fit("a\uD83D\uDE00bc", 3));
+    assertEquals("", Strings.fit("abc", 0));
+    assertEquals("", Strings.fit("abc", -3));
+  }
+
+  @Test
+  void fitCountsTheColumnsAWideCharacterSpans() {
+    assertEquals("界界…", Strings.fit("界".repeat(100), 6));
+    assertEquals("界界…", Strings.fit("界".repeat(100), 5));
+    assertEquals("ab界", Strings.fit("ab界", 4));
+  }
+
+  @Test
+  void fitMakesEveryControlCharacterButAnEscapeASpace() {
+    assertEquals("a b c d e", Strings.fit("a\tb\nc\rd\u0007e", 80));
+    assertEquals("a b…", Strings.fit("a\tb\tc\td", 4));
+    assertEquals("\033[1ma b\033[0m", Strings.fit("\033[1ma\tb\033[0m", 80));
+  }
+
+  @Test
+  void fitKeepsOnlyStyleEscapesAndMakesTheEscapeOfAnyOtherControlASpace() {
+    assertEquals("a [99Cbc", Strings.fit("a\033[99Cbc", 80));
+    assertEquals("a [99…", Strings.fit("a\033[99Cbc", 6));
+    assertEquals(" [2J [H ]0;t ", Strings.fit("\033[2J\033[H\033]0;t\007", 80));
+    assertEquals("\033[38;5;214ma\033[0m b", Strings.fit("\033[38;5;214ma\033[0m\u009Bb", 80));
+    assertEquals(8, Strings.columns("a\033[99Cbc"));
+  }
+
+  @Test
+  void columnsCountsWideCharactersTwiceAndMarksNotAtAll() {
+    assertEquals(3, Strings.columns("abc"));
+    assertEquals(4, Strings.columns("界가"));
+    assertEquals(2, Strings.columns("\uD83D\uDE00"));
+    assertEquals(4, Strings.columns("ｗ\uD840\uDC00"));
+    assertEquals(1, Strings.columns("e\u0301"));
+    assertEquals(1, Strings.columns("…"));
+  }
+
+  @Test
+  void columnsFollowsUnicodeEastAsianWidthToTheEdgesOfItsRanges() {
+    assertEquals(2, Strings.columns("\uD83D\uDE80"));
+    assertEquals(2, Strings.columns("\u231A"));
+    assertEquals(2, Strings.columns("\u2705"));
+    assertEquals(2, Strings.columns("\uD83E\uDEA9"));
+    assertEquals(2, Strings.columns("\uFF21"));
+    assertEquals(2, Strings.columns("\u1100"));
+    assertEquals(2, Strings.columns("\u115F"));
+    assertEquals(2, Strings.columns("\uD8BF\uDFFD"));
+    assertEquals(1, Strings.columns("\u10FF"));
+    assertEquals(1, Strings.columns("\u2713"));
+    assertEquals(1, Strings.columns("\u2588"));
+    assertEquals(1, Strings.columns("\uFF71"));
+    assertEquals(1, Strings.columns("\u303F"));
+    assertEquals(1, Strings.columns("\uD8BF\uDFFE"));
+  }
+
+  @Test
+  void columnsCountsAJoiningHangulJamoAndAnInvisibleFormatAsNoneAndAVisibleFormatAsOne() {
+    assertEquals(2, Strings.columns("\u1100\u1161\u11A8"));
+    assertEquals(0, Strings.columns("\uD7B0\uD7FF"));
+    assertEquals(0, Strings.columns("\u200B\u2060"));
+    assertEquals(1, Strings.columns("\u00AD"));
+    assertEquals(1, Strings.columns("\u0600"));
+    assertEquals(1, Strings.columns("\uD804\uDCBD"));
+  }
+
+  @Test
+  void anEmojiPresentationSelectorWidensANarrowCharacterToTwoColumnsAndAWideOneNotAtAll() {
+    assertEquals(1, Strings.columns("\u263A"));
+    assertEquals(2, Strings.columns("\u263A\uFE0F"));
+    assertEquals(2, Strings.columns("\u2764\uFE0F"));
+    assertEquals(2, Strings.columns("\uD83D\uDE80\uFE0F"));
+    assertEquals(0, Strings.columns("\uFE0F"));
+    assertEquals(2, Strings.columns("1\uFE0F\u20E3"), "a keycap is one two-column glyph");
+    assertEquals("\u263A\uFE0F…", Strings.fit("\u263A\uFE0Fab", 3));
+    assertEquals(
+        "a\u263A…",
+        Strings.fit("a\u263A\uFE0Fb", 3),
+        "cut before its selector, the face is drawn narrow and the row still fits");
+    assertEquals("ab", Strings.fit("ab", 2));
+  }
+
+  @Test
+  void aStyleEscapeTakesNoColumnsAndACutStyledTextEndsWithAReset() {
+    var styled = "\033[1;36mabcdef\033[0m";
+
+    assertEquals(6, Strings.columns(styled));
+    assertEquals(styled, Strings.fit(styled, 6));
+    assertEquals("\033[1;36mabc…\033[0m", Strings.fit(styled, 4));
+    assertEquals("\033[1;36m…\033[0m", Strings.fit(styled, 1));
+    assertEquals("ab…", Strings.fit("abcdef", 3));
+  }
+
+  @Test
   void shellWordLeavesASafeWordBareAndQuotesAnyOtherToPasteBack() {
     assertEquals("--title", Strings.shellWord("--title"));
     assertEquals("/var/lib/sail=a:b.c", Strings.shellWord("/var/lib/sail=a:b.c"));

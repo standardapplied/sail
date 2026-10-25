@@ -329,7 +329,7 @@ class DispatchCommandTest {
     var help = sw.toString();
     assertTrue(help.contains("--spec"));
     assertTrue(help.contains("--project"));
-    assertTrue(help.contains("--background"));
+    assertTrue(help.contains("--[no-]background"), help);
     assertTrue(help.contains("--repo"));
     assertTrue(help.contains("--dry-run"));
     assertTrue(help.contains("--json"));

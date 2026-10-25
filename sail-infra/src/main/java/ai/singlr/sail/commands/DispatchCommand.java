@@ -29,6 +29,9 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Sqlite;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
@@ -61,7 +64,14 @@ public final class DispatchCommand implements Runnable {
       description = "Override auto-selection: dispatch a specific spec by ID.")
   private String specId;
 
-  @Option(names = "--background", description = "Run agent in background.", defaultValue = "true")
+  @Option(
+      names = "--background",
+      negatable = true,
+      defaultValue = "true",
+      fallbackValue = "true",
+      description =
+          "Run the agent in the background (the default). Use --no-background to run it in this"
+              + " terminal.")
   private boolean background;
 
   @Option(
@@ -95,7 +105,31 @@ public final class DispatchCommand implements Runnable {
 
   @Mixin private SyncOptions syncOptions;
 
+  private final Function<Boolean, ShellExec> shells;
+  private final BiFunction<ShellExec, OperationHooks, HostOperations> operations;
+  private final Supplier<String> handle;
   private SailEventPublisher eventPublisher;
+
+  public DispatchCommand() {
+    this(
+        ShellExecutor::new,
+        (shell, hooks) -> OperationsFactory.open(shell, hooks, new PtyHostYield()),
+        HostSync::handle);
+  }
+
+  /**
+   * @param shells the host shell, by whether this is a dry run
+   * @param operations this box's operations over a shell, running a dispatch's hooks
+   * @param handle this box's FDE handle, or null when unset
+   */
+  DispatchCommand(
+      Function<Boolean, ShellExec> shells,
+      BiFunction<ShellExec, OperationHooks, HostOperations> operations,
+      Supplier<String> handle) {
+    this.shells = shells;
+    this.operations = operations;
+    this.handle = handle;
+  }
 
   @Override
   public void run() {
@@ -117,13 +151,13 @@ public final class DispatchCommand implements Runnable {
       Banner.printBranding(System.out, Ansi.AUTO);
     }
 
-    var shell = new ShellExecutor(dryRun);
-    var handle = Objects.toString(HostSync.handle(), "");
+    var shell = shells.apply(dryRun);
+    var localHandle = Objects.toString(handle.get(), "");
     var request =
         new DispatchOperations.Request(
             specId, background ? "background" : "foreground", dryRun, repoOverrides, restart);
     try (var operations =
-        OperationsFactory.open(
+        this.operations.apply(
             shell,
             new OperationHooks(
                 this::publishLifecycle,
@@ -131,9 +165,8 @@ public final class DispatchCommand implements Runnable {
                 snapshotter(shell),
                 DispatchOperations.terminalLauncher(),
                 renderer(sync),
-                StopOperations.Listener.NONE),
-            new PtyHostYield())) {
-      render(dispatchAsOperator(operations, name, request, handle), operator);
+                StopOperations.Listener.NONE))) {
+      render(dispatchAsOperator(operations, name, request, localHandle), shell, operator);
     }
   }
 
@@ -178,15 +211,15 @@ public final class DispatchCommand implements Runnable {
     }
   }
 
-  private void render(DispatchOperations.Outcome outcome, OperatorCommand operator) {
+  private void render(
+      DispatchOperations.Outcome outcome, ShellExec shell, OperatorCommand operator) {
     switch (outcome) {
       case DispatchOperations.NoSpecs ignored -> printNoSpecs();
       case DispatchOperations.Dispatched dispatched -> {
         if (!background) {
           if (dispatched.exitCode() != null && dispatched.exitCode() != 0) {
-            System.err.println(
-                Banner.errorLine(
-                    "Agent session exited with code " + dispatched.exitCode(), Ansi.AUTO));
+            throw AgentLogCommand.agentExited(
+                shell, name, dispatched.runId(), dispatched.exitCode());
           }
           return;
         }
@@ -210,7 +243,7 @@ public final class DispatchCommand implements Runnable {
    * The CLI lane's snapshot decision: fully per-dispatch opt-in via {@code --snapshot} / {@code
    * --no-snapshot}, prompting interactively when neither is passed, and never on a dry run.
    */
-  private DispatchOperations.Snapshotter snapshotter(ShellExecutor shell) {
+  private DispatchOperations.Snapshotter snapshotter(ShellExec shell) {
     return (project, config) -> {
       if (dryRun || !SnapshotDecision.shouldSnapshot(snapshot, config, json)) {
         return "";

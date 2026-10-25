@@ -5,7 +5,10 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentLogRenderer;
@@ -16,6 +19,7 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.RunStore;
 import java.io.BufferedReader;
@@ -26,6 +30,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -37,6 +42,8 @@ import picocli.CommandLine.Parameters;
     description = "View agent session output.",
     mixinStandardHelpOptions = true)
 public final class AgentLogCommand implements Runnable {
+
+  private static final int EXIT_TAIL = 20;
 
   @Parameters(
       index = "0",
@@ -185,6 +192,41 @@ public final class AgentLogCommand implements Runnable {
    */
   static String renderForLog(String line, boolean json) {
     return json ? line : AgentLogRenderer.render(line);
+  }
+
+  /**
+   * The failure a foreground agent that exited {@code exitCode} fails its command with: the code
+   * and the last line the agent wrote to run {@code runId}'s log, which is where a harness says why
+   * it would not start, then the command that shows the whole log.
+   */
+  static ApiException agentExited(ShellExec shell, String project, String runId, int exitCode) {
+    var said = lastLine(shell, project, AgentUnit.forRun(runId).logPath());
+    return new ApiException(
+        ErrorCode.AGENT_LAUNCH_FAILED,
+        "The agent exited " + exitCode + said.map(line -> ": " + line).orElse("."),
+        Remedy.of("Full log: ", Remedy.sail("agent log", project)));
+  }
+
+  private static Optional<String> lastLine(ShellExec shell, String project, String logPath) {
+    try {
+      var tail =
+          shell.exec(
+              ContainerExec.asDevUser(
+                  project, List.of("tail", "-n", String.valueOf(EXIT_TAIL), logPath)));
+      if (!tail.ok()) {
+        return Optional.empty();
+      }
+      return renderLines(tail.stdout())
+          .lines()
+          .map(String::strip)
+          .filter(line -> !line.isEmpty())
+          .reduce((earlier, later) -> later);
+    } catch (IOException | TimeoutException e) {
+      return Optional.empty();
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return Optional.empty();
+    }
   }
 
   private static String renderLines(String raw) {
