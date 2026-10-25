@@ -895,8 +895,8 @@ public final class PagedSyncSession implements SyncSession {
   /**
    * Records the last entry of a page as what this node read of {@code type}, so the next {@link
    * SyncWire.Heads} names it. Kept before the page adopts anything: a round cut short between the
-   * page's adoptions and its checkpoint leaves every row taken from main below a read main is asked
-   * about, never a checkpoint and a read that a restore could keep while losing the rows.
+   * page's adoptions and its checkpoint leaves every row the page took from main below a read main
+   * is asked about, never a checkpoint and a read that a restore could keep while losing the rows.
    */
   private void read(String type, List<SyncWire.Entry> entries) {
     if (syncState != null && !entries.isEmpty()) {

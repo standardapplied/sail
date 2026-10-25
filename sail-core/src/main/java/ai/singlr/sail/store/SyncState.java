@@ -31,7 +31,9 @@ public final class SyncState {
    * heads its scope passes over, so {@code seq} may sit below the checkpoint, and is 0, naming no
    * entity, when the node has read none at all. It sits past the checkpoint when the node read a
    * page whose round never advanced the checkpoint over it: the read is kept before the page adopts
-   * anything, so a row the node took from main is always below a read main is asked about.
+   * anything, so a row the node took from main in a page is always below a read main is asked
+   * about. A row it took outside a page, main's answer to a push, a need or an erasure, sits above
+   * the read until the next page reaches it.
    */
   public record Mark(long checkpoint, long seq, String id, String rev) {
     public Mark {
