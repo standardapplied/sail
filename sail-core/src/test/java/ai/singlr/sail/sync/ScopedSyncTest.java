@@ -35,6 +35,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncScope;
+import ai.singlr.sail.store.SyncState;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
@@ -44,6 +45,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -402,6 +404,27 @@ class ScopedSyncTest {
             .map(SyncWire.Entry::id)
             .toList(),
         "an unscoped session is handed what main took as it always has");
+  }
+
+  @Test
+  void aMarkNamingAnIdOutsideTheScopeIsAnsweredAsOneNamingAnIdMainNeverHeld() throws Exception {
+    main.specs.create(spec("short-lived", A, "nia"));
+    var erased = new ChangeLog(main.db).head("spec", "short-lived").orElseThrow().seq();
+    prune(main, "short-lived");
+    main.specs.create(spec("secret-plan", B, "uma"));
+    prune(main, "secret-plan");
+
+    var rewound = new ArrayList<Set<String>>();
+    for (var id : List.of("secret-plan", "missing-plan")) {
+      var marks = Map.of("spec", new SyncState.Mark(erased, erased, id, "guessed"));
+      rewound.add(
+          assertInstanceOf(
+                  SyncWire.Tips.class,
+                  serve(main.server(scoped(ONLY_A)), HELLO, new SyncWire.Heads(marks)).getLast())
+              .rewound());
+    }
+
+    assertEquals(List.of(Set.of("spec"), Set.of("spec")), rewound);
   }
 
   @Test

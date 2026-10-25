@@ -307,4 +307,60 @@ class ChangeLogTest {
     assertFalse(log.holds("spec", mark, ProjectScope.of(List.of("alpha", "beta"))));
     assertFalse(log.holds("spec", mark, ProjectScope.all()));
   }
+
+  @Test
+  void aReaderThatReadNothingHoldsTheLogWhileItsScopeAdmitsNoHeadUpToItsCheckpoint() {
+    log.append("spec", "b", "1-y", "local", false, "{}");
+    log.fileUnder("spec", "b", "beta");
+    var mark = SyncState.Mark.nothingRead(seqOf("b"));
+
+    assertTrue(log.holds("spec", mark, ProjectScope.of(List.of("alpha"))), "b passed over");
+    assertFalse(log.holds("spec", mark, ProjectScope.of(List.of("alpha", "beta"))));
+  }
+
+  @Test
+  void anIdTheReadersScopeDoesNotAdmitIsNeverHeldWhetherOrNotItExists() {
+    log.append("spec", "gone", "1-g", "local", false, "{}");
+    var gone = seqOf("gone");
+    log.erase("spec", "gone", "2-g", "local");
+    log.append("spec", "secret", "1-s", "local", false, "{}");
+    log.fileUnder("spec", "secret", "private");
+    log.erase("spec", "secret", "2-s", "local");
+    var outside = ProjectScope.of(List.of("public"));
+
+    assertFalse(log.holds("spec", new SyncState.Mark(gone, gone, "secret", "guessed"), outside));
+    assertFalse(log.holds("spec", new SyncState.Mark(gone, gone, "missing", "guessed"), outside));
+    assertTrue(
+        log.holds(
+            "spec",
+            new SyncState.Mark(gone, gone, "secret", "guessed"),
+            ProjectScope.of(List.of("private"))),
+        "the erasure of secret is still to page for a reader that sees it");
+  }
+
+  @Test
+  void aSeqCompactionEmptiedIsHeldUnderTheNewerRevisionsThatOutlivedIt() {
+    log.append("spec", "a", "1-x", "local", false, "{}");
+    var a = seqOf("a");
+    for (var i = 2; i <= ChangeLog.HISTORY_REVISIONS + 1; i++) {
+      log.append("spec", "a", i + "-x", "local", false, "{}");
+    }
+    var tip = seqOf("a");
+    log.compact("spec", List.of("a"), id -> null);
+
+    assertTrue(log.holds("spec", new SyncState.Mark(a, a, "a", "1-x"), ProjectScope.all()));
+    assertEquals(tip, seqOf("a"));
+  }
+
+  @Test
+  void aSeqEmptiedWithOneLaterRevisionOfTheIdIsNotTheLogTheReaderRead() {
+    log.append("spec", "a", "1-x", "local", false, "{}");
+    var a = seqOf("a");
+    log.append("spec", "a", "2-x", "local", false, "{}");
+    log.db().execute("DELETE FROM change_log WHERE seq = ?", a);
+
+    assertFalse(
+        log.holds("spec", new SyncState.Mark(a, a, "a", "1-x"), ProjectScope.all()),
+        "neither an erasure nor compaction empties a seq under one newer revision");
+  }
 }

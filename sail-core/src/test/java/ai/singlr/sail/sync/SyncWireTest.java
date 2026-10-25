@@ -51,7 +51,9 @@ class SyncWireTest {
           new SyncWire.Heads(
               Map.of(
                   "spec", new SyncState.Mark(41, 41, "auth", "3-abc"),
-                  "room", new SyncState.Mark(9, 4, "r1", "1-a"))),
+                  "room", new SyncState.Mark(9, 4, "r1", "1-a"),
+                  "file", SyncState.Mark.nothingRead(3),
+                  "message", new SyncState.Mark(2, 6, "m1", "1-b"))),
           new SyncWire.Pull("spec", 41, 500),
           new SyncWire.Need("file", List.of("acme/a", "acme/b")),
           new SyncWire.Push(
@@ -131,20 +133,20 @@ class SyncWireTest {
   }
 
   @Test
-  void aMarkThatIsNotAnObjectOrReadsPastItsCheckpointIsRefused() {
+  void aMarkThatIsNotAnObjectOrNamesAnEntryAtNoSeqIsRefused() {
     var notAnObject =
         assertThrows(
             IllegalArgumentException.class,
             () -> SyncWire.decodeRequest("{\"op\": \"heads\", \"marks\": {\"spec\": 4}}"));
     assertEquals("marks must hold objects", notAnObject.getMessage());
-    var past =
+    var atNoSeq =
         assertThrows(
             IllegalArgumentException.class,
             () ->
                 SyncWire.decodeRequest(
                     "{\"op\": \"heads\", \"marks\": {\"spec\": {\"checkpoint\": 4,"
-                        + " \"seq\": 5, \"id\": \"a\", \"rev\": \"1-a\"}}}"));
-    assertEquals("A mark reads seq 5, outside its checkpoint 4", past.getMessage());
+                        + " \"seq\": 0, \"id\": \"a\", \"rev\": \"1-a\"}}}"));
+    assertEquals("A mark reads seq 0 of a at 1-a, checkpoint 4", atNoSeq.getMessage());
   }
 
   @Test

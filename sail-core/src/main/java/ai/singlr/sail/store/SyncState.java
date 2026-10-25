@@ -26,18 +26,26 @@ import java.util.Objects;
 public final class SyncState {
 
   /**
-   * How far a node read one type of a peer's log, {@code checkpoint}, and the last entry it read at
-   * or below it: {@code seq}, the entity {@code id} and its {@code rev}. A scoped node reads
-   * nothing of the heads its scope passes over, so {@code seq} may sit below the checkpoint.
+   * How far a node read one type of a peer's log, {@code checkpoint}, and the last entry it read:
+   * {@code seq}, the entity {@code id} and its {@code rev}. A scoped node reads nothing of the
+   * heads its scope passes over, so {@code seq} may sit below the checkpoint, and is 0, naming no
+   * entity, when the node has read none at all. It sits past the checkpoint when the node read a
+   * page whose round never advanced the checkpoint over it: the read is kept before the page adopts
+   * anything, so a row the node took from main is always below a read main is asked about.
    */
   public record Mark(long checkpoint, long seq, String id, String rev) {
     public Mark {
       Objects.requireNonNull(id, "id");
       Objects.requireNonNull(rev, "rev");
-      if (seq <= 0 || seq > checkpoint) {
+      if (checkpoint <= 0 || seq < 0 || (seq == 0) != (id.isEmpty() && rev.isEmpty())) {
         throw new IllegalArgumentException(
-            "A mark reads seq " + seq + ", outside its checkpoint " + checkpoint);
+            "A mark reads seq " + seq + " of " + id + " at " + rev + ", checkpoint " + checkpoint);
       }
+    }
+
+    /** What a node read nothing of below {@code checkpoint}, its scope passing over every head. */
+    public static Mark nothingRead(long checkpoint) {
+      return new Mark(checkpoint, 0, "", "");
     }
   }
 
@@ -89,16 +97,16 @@ public final class SyncState {
   }
 
   /**
-   * The mark of every type this node read of {@code peer}'s log and holds a checkpoint over. A type
-   * whose checkpoint is 0 is walked from the first head anyway, and one whose read sits past its
-   * checkpoint was read by a page whose round never finished, so neither has a mark.
+   * The mark of every type this node holds a checkpoint over in {@code peer}'s log. A type whose
+   * checkpoint is 0 is walked from the first head anyway, so it has none.
    */
   public Map<String, Mark> marks(String peer) {
     var marks = new LinkedHashMap<String, Mark>();
     db.query(
             """
-            SELECT entity_type, checkpoint, read_seq, read_id, read_rev FROM sync_state
-            WHERE peer = ? AND read_seq > 0 AND read_seq <= checkpoint ORDER BY entity_type""",
+            SELECT entity_type, checkpoint, COALESCE(read_seq, 0), COALESCE(read_id, ''),
+                COALESCE(read_rev, '') FROM sync_state
+            WHERE peer = ? AND checkpoint > 0 ORDER BY entity_type""",
             row ->
                 Map.entry(
                     row.text(0),

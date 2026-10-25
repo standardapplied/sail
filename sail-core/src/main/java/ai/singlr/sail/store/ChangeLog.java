@@ -742,20 +742,29 @@ public final class ChangeLog {
 
   /**
    * Whether this log is still the one a reader of {@code entityType} read up to {@code mark}: the
-   * entry of the mark's id at its rev sits at its seq — or nothing does and a later entry of the
-   * id, an erasure or a newer revision, is still the reader's to page — and no head the reader's
-   * {@code scope} admits sits after that seq up to the checkpoint, where the reader saw none. A log
-   * restored from an older copy and grown again holds other entries there.
+   * entry of the mark's id at its rev sits at its seq — or nothing does, because the id's erasure
+   * removed it or {@link #compact} did under the newest {@link #HISTORY_REVISIONS} of the id, both
+   * still the reader's to page — and no head the reader's {@code scope} admits sits after that seq
+   * up to the checkpoint, where the reader saw none. A mark that read nothing names no entry, so
+   * only its stretch is asked about. An id the scope does not admit is never held, so a reader
+   * learns nothing of it. A log restored from an older copy and grown again holds other entries
+   * there.
    */
   public boolean holds(String entityType, SyncState.Mark mark, ProjectScope scope) {
     return db.queryOne(
             """
-            SELECT CASE WHEN EXISTS (SELECT 1 FROM change_log WHERE seq = ?1)
+            SELECT CASE WHEN ?1 = 0 THEN 1
+                WHEN EXISTS (SELECT 1 FROM change_log WHERE seq = ?1)
                 THEN EXISTS (SELECT 1 FROM change_log WHERE seq = ?1 AND entity_type = ?2
                     AND entity_id = ?3 AND rev = ?4)
                 ELSE EXISTS (SELECT 1 FROM change_log WHERE entity_type = ?2 AND entity_id = ?3
-                    AND seq > ?1)
+                    AND seq > ?1 AND kind = 'erasure')
+                  OR (SELECT count(*) FROM change_log WHERE entity_type = ?2 AND entity_id = ?3
+                    AND seq > ?1) >= ?7
                 END
+                AND (?1 = 0 OR ?6 IS NULL OR EXISTS (SELECT 1 FROM change_heads
+                    WHERE entity_type = ?2 AND entity_id = ?3
+                    AND project IN (SELECT value FROM json_each(?6))))
                 AND NOT EXISTS (SELECT 1 FROM change_heads WHERE entity_type = ?2
                     AND seq > ?1 AND seq <= ?5
                     AND (?6 IS NULL OR project IN (SELECT value FROM json_each(?6))))""",
@@ -765,7 +774,8 @@ public final class ChangeLog {
             mark.id(),
             mark.rev(),
             mark.checkpoint(),
-            scopeArgument(scope))
+            scopeArgument(scope),
+            HISTORY_REVISIONS)
         .orElse(false);
   }
 

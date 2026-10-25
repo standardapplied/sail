@@ -307,10 +307,10 @@ public final class PagedSyncSession implements SyncSession {
         }
         fetchContent(type, page.entries());
         seen.addAll(ids(page.entries()));
+        read(type, page.entries());
         var live = adoptErasures(type, page.entries());
         var checkpoint = walksEveryHead ? 0 : page.next();
         report = report.plus(reconcile(local, ids(live), new PageView(type, live, checkpoint)));
-        read(type, page.entries());
         pages++;
         entries += page.entries().size();
         since = page.next();
@@ -893,8 +893,10 @@ public final class PagedSyncSession implements SyncSession {
   }
 
   /**
-   * Records the last entry of a page as what this node read of {@code type}, once its round has
-   * advanced the checkpoint over it, so the next {@link SyncWire.Heads} names it.
+   * Records the last entry of a page as what this node read of {@code type}, so the next {@link
+   * SyncWire.Heads} names it. Kept before the page adopts anything: a round cut short between the
+   * page's adoptions and its checkpoint leaves every row taken from main below a read main is asked
+   * about, never a checkpoint and a read that a restore could keep while losing the rows.
    */
   private void read(String type, List<SyncWire.Entry> entries) {
     if (syncState != null && !entries.isEmpty()) {

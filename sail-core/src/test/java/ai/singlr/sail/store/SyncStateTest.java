@@ -64,22 +64,27 @@ class SyncStateTest {
   }
 
   @Test
-  void aMarkIsWhatTheNodeReadAtOrBelowItsCheckpoint() {
+  void aMarkIsWhatTheNodeReadOfEachTypeItHoldsACheckpointOver() {
     state.read("main", "spec", 40, "s1", "2-a");
     state.advance("main", "spec", 42);
     state.advance("main", "file", 7);
+    state.read("main", "room", 9, "r1", "1-a");
     state.read("backup", "spec", 3, "s0", "1-a");
     state.advance("backup", "spec", 3);
 
-    assertEquals(Map.of("spec", new SyncState.Mark(42, 40, "s1", "2-a")), state.marks("main"));
+    assertEquals(
+        Map.of(
+            "spec", new SyncState.Mark(42, 40, "s1", "2-a"), "file", SyncState.Mark.nothingRead(7)),
+        state.marks("main"),
+        "a room read at no checkpoint is walked from the first head anyway");
   }
 
   @Test
-  void aReadPastItsCheckpointIsNoMarkUntilTheCheckpointReachesIt() {
+  void aReadPastItsCheckpointIsTheMarkSoARoundCutShortStillNamesWhatItTook() {
     state.advance("main", "spec", 42);
     state.read("main", "spec", 50, "s2", "1-b");
 
-    assertEquals(Map.of(), state.marks("main"), "its page's round never finished");
+    assertEquals(Map.of("spec", new SyncState.Mark(42, 50, "s2", "1-b")), state.marks("main"));
 
     state.advance("main", "spec", 50);
     assertEquals(Map.of("spec", new SyncState.Mark(50, 50, "s2", "1-b")), state.marks("main"));
@@ -91,18 +96,21 @@ class SyncStateTest {
     state.advance("main", "spec", 42);
 
     state.reset("main");
-    state.advance("main", "spec", 42);
-
     assertEquals(Map.of(), state.marks("main"));
+
+    state.advance("main", "spec", 42);
+    assertEquals(Map.of("spec", SyncState.Mark.nothingRead(42)), state.marks("main"));
   }
 
   @Test
-  void aMarkOutsideItsCheckpointIsRefused() {
+  void aMarkNamesAnEntryExactlyWhenItReadOneAtACheckpoint() {
     var refused =
-        assertThrows(IllegalArgumentException.class, () -> new SyncState.Mark(4, 5, "s", "1-a"));
+        assertThrows(IllegalArgumentException.class, () -> new SyncState.Mark(0, 5, "s", "1-a"));
 
-    assertEquals("A mark reads seq 5, outside its checkpoint 4", refused.getMessage());
+    assertEquals("A mark reads seq 5 of s at 1-a, checkpoint 0", refused.getMessage());
+    assertThrows(IllegalArgumentException.class, () -> new SyncState.Mark(4, -1, "s", "1-a"));
     assertThrows(IllegalArgumentException.class, () -> new SyncState.Mark(4, 0, "s", "1-a"));
+    assertThrows(IllegalArgumentException.class, () -> new SyncState.Mark(4, 3, "", ""));
   }
 
   @Test

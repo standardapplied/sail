@@ -386,6 +386,53 @@ class MainRebuiltRoundTest {
   }
 
   @Test
+  void aScopedNodeThatReadNothingOfATypeStillTakesWhatAMainRestoredInPlaceWroteBelowItsCheckpoint()
+      throws Exception {
+    var fdes = new FdeStore(serving.db());
+    fdes.restrict("nia");
+    fdes.grant("nia", "gamma");
+    Acting.system(() -> new ProjectStore(serving.db()).upsert("delta", "name: delta\n"));
+    round();
+    var copy = copyOf(serving, "copy.db", serving.id());
+    Acting.as("ada", () -> new SpecStore(serving.db()).create(spec("d1", "delta")));
+    Acting.as("ada", () -> new SpecStore(serving.db()).create(spec("d2", "delta")));
+    round();
+    serving = copy;
+    for (var id : List.of("visible-1", "visible-2", "visible-3")) {
+      mainWrite(serving, id);
+    }
+
+    round();
+
+    assertEquals(
+        List.of("visible-1", "visible-2", "visible-3"),
+        specIds(nodeDb).stream().map(r -> r.split(" ")[0]).toList());
+  }
+
+  @Test
+  void aRoundCutShortBetweenAPagesAdoptionsAndItsCheckpointStillSeesTheRestoreThatLostThem()
+      throws Exception {
+    mainWrite(serving, "seed");
+    round();
+    var copy = copyOf(serving, "copy.db", serving.id());
+    mainWrite(serving, "lost-1");
+    mainWrite(serving, "lost-2");
+    nodeDb.execute(
+        "CREATE TRIGGER halt BEFORE UPDATE OF checkpoint ON sync_state"
+            + " WHEN NEW.entity_type = 'spec' AND NEW.checkpoint > OLD.checkpoint"
+            + " BEGIN SELECT RAISE(ABORT, 'halted'); END");
+    assertThrows(SyncTransportException.class, this::round);
+    nodeDb.execute("DROP TRIGGER halt");
+    assertEquals(3, specIds(nodeDb).size(), "the page was adopted, its checkpoint never moved");
+    serving = copy;
+    mainWrite(serving, "new-1");
+
+    round();
+
+    assertEquals(specIds(serving.db()), specIds(nodeDb), "the node holds what main holds");
+  }
+
+  @Test
   void anErasureOfTheSpecAtTheNodesCheckpointIsAnOrdinaryRound() throws Exception {
     mainWrite(serving, "g0");
     mainWrite(serving, "g1");
