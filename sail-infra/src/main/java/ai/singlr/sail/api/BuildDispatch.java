@@ -14,7 +14,6 @@ import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentUnit;
-import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
@@ -53,7 +52,7 @@ public final class BuildDispatch {
   private final DispatchOperations.Snapshotter snapshotter;
   private final DispatchOperations.Listener listener;
   private final DispatchOperations.EventSink events;
-  private final ShellExec shell;
+  private final WorkBranch workBranch;
 
   public BuildDispatch(
       ProjectLoader projects,
@@ -79,7 +78,7 @@ public final class BuildDispatch {
     this.snapshotter = snapshotter;
     this.listener = listener;
     this.events = events;
-    this.shell = shell;
+    this.workBranch = new WorkBranch(shell, listener);
   }
 
   /** Outcome of {@link #resolveSpec}: the chosen spec, and whether {@code restart} reset it. */
@@ -381,122 +380,8 @@ public final class BuildDispatch {
       publish(project, null, Event.WellKnownTypes.SNAPSHOT_CREATED, Map.of("label", snapshot));
     }
     var branchCreated =
-        checkoutBranch(project, config, targetRepos, branch, resolution.restarted());
+        workBranch.checkout(project, config, targetRepos, branch, resolution.restarted());
     return new PreparedClaim(snapshot, branchCreated);
-  }
-
-  /**
-   * Checks out the work branch in every target repo that exists in the container: a fresh branch
-   * with {@code checkout -b}, or — on a restart — a forced {@code checkout -f} onto the existing
-   * branch so re-dispatch lands on the prior work even over a dirty tree the previous run left. A
-   * collision on a non-restart dispatch fails loud, pointing the operator at {@code --restart}.
-   */
-  private boolean checkoutBranch(
-      String project,
-      SailYaml config,
-      List<SailYaml.Repo> targetRepos,
-      String branch,
-      boolean restarted) {
-    if (Strings.isBlank(branch)) {
-      return false;
-    }
-    var created = false;
-    for (var repo : targetRepos) {
-      var repoDir = "/home/" + config.sshUser() + "/workspace/" + repo.path();
-      var repoExists =
-          exec(ContainerExec.asDevUser(project, List.of("test", "-d", repoDir + "/.git")));
-      if (!repoExists.ok()) {
-        continue;
-      }
-      var branchExists =
-          exec(ContainerExec.asDevUser(
-                  project,
-                  List.of(
-                      "git",
-                      "-C",
-                      repoDir,
-                      "rev-parse",
-                      "--verify",
-                      "--quiet",
-                      "refs/heads/" + branch)))
-              .ok();
-      List<String> checkoutArgs;
-      if (branchExists) {
-        checkoutArgs = RestartResolution.branchCheckoutArgs(repoDir, branch, true, restarted);
-      } else {
-        var base = baseBranch(project, repoDir, repo);
-        checkoutArgs =
-            RestartResolution.freshBranchArgs(
-                repoDir, branch, base, fetchLatestBase(project, repoDir, base));
-      }
-      var result = exec(ContainerExec.asDevUser(project, checkoutArgs));
-      if (!result.ok()) {
-        throw new ApiException(
-            ErrorCode.BRANCH_CREATE_FAILED,
-            "Failed to "
-                + (branchExists ? "check out" : "create")
-                + " branch '"
-                + branch
-                + "' in repo '"
-                + repo.path()
-                + "'.");
-      }
-      listener.branchReady(branch, repo.path(), branchExists);
-      created = true;
-    }
-    if (!created) {
-      listener.branchUnavailable(branch);
-    }
-    return created;
-  }
-
-  /**
-   * The mainline a fresh work branch forks from: the repo's configured branch when {@code
-   * sail.yaml} pins one, else origin's default branch (the clone's {@code origin/HEAD}), else
-   * blank. Deriving it from the repo config or the remote default — never the current {@code HEAD}
-   * — keeps a new branch off the mainline even when a prior dispatch left the checkout on an
-   * earlier work branch.
-   */
-  private String baseBranch(String project, String repoDir, SailYaml.Repo repo) {
-    if (Strings.isNotBlank(repo.branch())) {
-      return repo.branch();
-    }
-    var result =
-        exec(
-            ContainerExec.asDevUser(
-                project,
-                List.of("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "origin/HEAD")));
-    if (!result.ok()) {
-      return "";
-    }
-    var ref = result.stdout().trim();
-    return ref.startsWith("origin/") ? ref.substring("origin/".length()) : ref;
-  }
-
-  /**
-   * Fetches {@code base} from origin so a fresh work branch forks from the current upstream tip
-   * rather than a stale local checkout. Best-effort: returns true only when {@code origin/<base>}
-   * is available to branch from afterwards, so an offline box, a repo with no {@code origin}, or a
-   * detached base falls back to the local {@code HEAD} instead of failing the dispatch.
-   */
-  private boolean fetchLatestBase(String project, String repoDir, String base) {
-    if (Strings.isBlank(base) || "HEAD".equals(base)) {
-      return false;
-    }
-    exec(
-        ContainerExec.asDevUser(
-            project, List.of("git", "-C", repoDir, "fetch", "--quiet", "origin", base)));
-    return exec(ContainerExec.asDevUser(
-            project,
-            List.of(
-                "git",
-                "-C",
-                repoDir,
-                "rev-parse",
-                "--verify",
-                "--quiet",
-                "refs/remotes/origin/" + base)))
-        .ok();
   }
 
   /**
@@ -579,14 +464,6 @@ public final class BuildDispatch {
 
   private void publish(String project, String specId, String type, Map<String, Object> data) {
     events.publish(Event.of(project, specId, type, Event.SAIL_AGENT, HostInfo.hostname(), data));
-  }
-
-  private ShellExec.Result exec(List<String> command) {
-    try {
-      return shell.exec(command);
-    } catch (Exception e) {
-      throw new ApiException(ErrorCode.COMMAND_FAILED, "A sail system command failed.", e);
-    }
   }
 
   private static ApiException refusal(DispatchDecision.Refused refused) {

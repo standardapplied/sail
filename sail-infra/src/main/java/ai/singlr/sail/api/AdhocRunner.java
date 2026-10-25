@@ -30,18 +30,21 @@ public final class AdhocRunner {
   private final RunReservation runReservation;
   private final RunStore runStore;
   private final DispatchOperations.Listener listener;
+  private final WorkBranch workBranch;
 
   public AdhocRunner(
       ProjectLoader projects,
       RunLauncher runLauncher,
       RunReservation runReservation,
       RunStore runStore,
-      DispatchOperations.Listener listener) {
+      DispatchOperations.Listener listener,
+      WorkBranch workBranch) {
     this.projects = projects;
     this.runLauncher = runLauncher;
     this.runReservation = runReservation;
     this.runStore = runStore;
     this.listener = listener;
+    this.workBranch = workBranch;
   }
 
   /**
@@ -51,7 +54,8 @@ public final class AdhocRunner {
    * guardrail watcher as dispatches. No spec means no policy: unlike dispatch, a blank node handle
    * is allowed — the reservation is stamped with whatever identity the box has. The {@code
    * preparer} runs strictly after the reservation is won and before anything is staged or launched,
-   * so a refused launch leaves the workspace untouched. A dry run mints the id and announces the
+   * so a refused launch leaves the workspace untouched; the work branch is cut after it, through
+   * the {@link WorkBranch} a dispatch cuts its own with. A dry run mints the id and announces the
    * launch command but reserves, prepares, writes, and executes nothing.
    */
   public DispatchOperations.AdhocSession start(
@@ -94,7 +98,12 @@ public final class AdhocRunner {
         reserveAdhocRun(
             runId, project, localHandle, agentType, request.branch(), request.task(), unit, config);
     try {
-      prepare(preparer);
+      prepare(
+          () -> {
+            preparer.prepare();
+            workBranch.checkout(
+                project, config, WorkBranch.repos(config, request.path()), request.branch(), false);
+          });
       var launch =
           runLauncher.launchSession(
               new RunLauncher.LaunchSpec(

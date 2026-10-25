@@ -194,13 +194,20 @@ class BuildDispatchCoverageTest {
 
   @Test
   void aCheckoutTheContainerRefusesFailsWithBranchCreateFailed() throws IOException {
-    var shell = happyPath().on(REPO + " rev-parse --verify --quiet refs/remotes/origin/main", "");
+    var shell =
+        happyPath()
+            .on(REPO + " rev-parse --verify --quiet refs/remotes/origin/main", "")
+            .refuse(
+                REPO + " checkout -b sail/auth", "fatal: cannot lock ref 'refs/heads/sail/auth'");
     var ops = ops(shell, YAML, seedDb());
 
     var thrown = assertThrows(ApiException.class, () -> dispatch(ops));
 
     assertEquals(ErrorCode.BRANCH_CREATE_FAILED, thrown.failure().errorCode());
-    assertEquals("Failed to create branch 'sail/auth' in repo 'app'.", thrown.getMessage());
+    assertEquals(
+        "Failed to create branch 'sail/auth' in repo 'app':"
+            + " fatal: cannot lock ref 'refs/heads/sail/auth'",
+        thrown.getMessage());
   }
 
   @Test
@@ -456,6 +463,11 @@ class BuildDispatchCoverageTest {
 
     RecordingShell on(String pattern, String stdout) {
       scripts.put(pattern, new Result(0, stdout, ""));
+      return this;
+    }
+
+    RecordingShell refuse(String pattern, String stderr) {
+      scripts.put(pattern, new Result(1, "", stderr));
       return this;
     }
 

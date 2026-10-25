@@ -15,8 +15,8 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.StopOperations;
+import ai.singlr.sail.api.WorkBranch;
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
@@ -24,7 +24,6 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.CliOperator;
-import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailWatcher;
@@ -41,7 +40,6 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.SpecStore;
-import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
@@ -220,7 +218,11 @@ public final class RunCommand implements Runnable {
     var branchName = branchName(config, label);
 
     if (task == null) {
-      prepareContainer(shell, workDir, snapshotTaken, label, branchName);
+      snapshot(shell, snapshotTaken, label);
+      if (!dryRun) {
+        new WorkBranch(shell, listener(new AtomicReference<>()))
+            .checkout(name, config, WorkBranch.repos(config, path), branchName, false);
+      }
     }
 
     if (!json) {
@@ -228,7 +230,7 @@ public final class RunCommand implements Runnable {
     }
 
     if (task != null) {
-      launchTaskSession(shell, config, workDir, branchName, snapshotTaken, label, operator);
+      launchTaskSession(shell, branchName, snapshotTaken, label, operator);
     } else {
       installSkills(shell, harness, operator);
       launchInteractive(sshUser, workDir, fullPermissions, harness);
@@ -267,31 +269,15 @@ public final class RunCommand implements Runnable {
   }
 
   /**
-   * The pre-launch container mutations — the snapshot and the work-branch checkout. The task lane
-   * runs this (and the skill install, which replaces folders in the shared home-level skills
-   * directory) only through {@link DispatchOperations.AdhocPreparer}, strictly after the
-   * whole-container reservation is won, so a refused launch never disturbs the workspace — or the
-   * lazily loaded skills — of the agent that owns it; the interactive lane, which reserves nothing,
-   * prepares inline.
+   * The pre-launch snapshot. The task lane takes it only through {@link
+   * DispatchOperations.AdhocPreparer}, strictly after the whole-container reservation is won and
+   * before the lane cuts the work branch, so a refused launch never disturbs the workspace of the
+   * agent that owns it; the interactive lane, which reserves nothing, takes it inline.
    */
-  private void prepareContainer(
-      ShellExec shell, String workDir, boolean snapshotTaken, String label, String branchName)
-      throws Exception {
+  private void snapshot(ShellExec shell, boolean snapshotTaken, String label) throws Exception {
     if (snapshotTaken) {
       SnapshotDecision.create(System.out, new SnapshotManager(shell), name, label, json);
     }
-    if (branchName == null) {
-      return;
-    }
-    System.out.println(Ansi.AUTO.string("  @|bold Creating branch:|@ " + branchName + "..."));
-    var branchCmd =
-        ContainerExec.asDevUser(name, List.of("git", "-C", workDir, "checkout", "-b", branchName));
-    var result = shell.exec(branchCmd);
-    if (!result.ok()) {
-      throw new IOException("Failed to create branch '" + branchName + "': " + result.stderr());
-    }
-    System.out.println(Ansi.AUTO.string("  @|green ✓|@ Branch " + branchName));
-    System.out.println();
   }
 
   /**
@@ -304,8 +290,6 @@ public final class RunCommand implements Runnable {
    */
   private void launchTaskSession(
       ShellExec shell,
-      SailYaml config,
-      String workDir,
       String branchName,
       boolean snapshotTaken,
       String label,
@@ -328,12 +312,7 @@ public final class RunCommand implements Runnable {
                     operations
                         .dispatching()
                         .startAdhoc(
-                            name,
-                            request,
-                            handle,
-                            () ->
-                                prepareContainer(
-                                    shell, workDir, snapshotTaken, label, branchName)));
+                            name, request, handle, () -> snapshot(shell, snapshotTaken, label)));
       } catch (ApiException e) {
         if (background
             && snapshotLabel != null
@@ -341,7 +320,7 @@ public final class RunCommand implements Runnable {
           System.err.println(Banner.errorLine(e.getMessage(), Ansi.AUTO));
           autoRollback(shell, snapshotLabel, 1);
         }
-        throw Remedied.state(e.getMessage(), e.remedy(), e);
+        throw e;
       }
       render(shell, session, launchCommand.get(), branchName, operator);
     }
@@ -359,43 +338,6 @@ public final class RunCommand implements Runnable {
 
   private HostOperations operations(
       ShellExec shell, AtomicReference<List<String>> launchCommand, OperatorCommand operator) {
-    var listener =
-        new DispatchOperations.Listener() {
-          @Override
-          public void launching(boolean bg, List<String> command) {
-            launchCommand.set(command);
-            if (json) {
-              return;
-            }
-            System.out.println(
-                Ansi.AUTO.string(
-                    bg
-                        ? "  @|bold Launching agent in background...|@"
-                        : "  @|bold Launching agent with task...|@"));
-            System.out.println(Ansi.AUTO.string("  @|faint " + String.join(" ", command) + "|@"));
-            System.out.println();
-          }
-
-          @Override
-          public void runsPruned(int count) {
-            if (count > 0 && !json) {
-              System.out.println(
-                  Ansi.AUTO.string(
-                      "  @|faint Pruned " + count + " old run log(s) in " + name + ".|@"));
-            }
-          }
-
-          @Override
-          public void sailSetupUpdated(boolean updated) {
-            if (updated && !json) {
-              System.out.println(
-                  Ansi.AUTO.string(
-                      "  @|faint Updated sail event helpers in "
-                          + name
-                          + " (installed files were stale or incomplete).|@"));
-            }
-          }
-        };
     return launches.apply(
         shell,
         new OperationHooks(
@@ -403,8 +345,64 @@ public final class RunCommand implements Runnable {
             new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
             (project, config) -> "",
             terminal,
-            listener,
+            listener(launchCommand),
             StopOperations.Listener.NONE));
+  }
+
+  /**
+   * What a run prints as it goes: the branch it cut and that it is launching. The launch command is
+   * kept in {@code launchCommand} for {@code --json} and {@code --dry-run}, never printed here: it
+   * is sail's plumbing, not a command an operator can run.
+   */
+  private DispatchOperations.Listener listener(AtomicReference<List<String>> launchCommand) {
+    return new DispatchOperations.Listener() {
+      @Override
+      public void branchReady(String branch, String repoPath, boolean reused) {
+        if (!json) {
+          Banner.printBranchReady(branch, repoPath, reused, System.out, Ansi.AUTO);
+        }
+      }
+
+      @Override
+      public void branchUnavailable(String branch) {
+        if (!json) {
+          Banner.printBranchUnavailable(branch, System.out, Ansi.AUTO);
+        }
+      }
+
+      @Override
+      public void launching(boolean bg, List<String> command) {
+        launchCommand.set(command);
+        if (json) {
+          return;
+        }
+        System.out.println(
+            Ansi.AUTO.string(
+                bg
+                    ? "  @|bold Launching agent in background...|@"
+                    : "  @|bold Launching agent with task...|@"));
+        System.out.println();
+      }
+
+      @Override
+      public void runsPruned(int count) {
+        if (count > 0 && !json) {
+          System.out.println(
+              Ansi.AUTO.string("  @|faint Pruned " + count + " old run log(s) in " + name + ".|@"));
+        }
+      }
+
+      @Override
+      public void sailSetupUpdated(boolean updated) {
+        if (updated && !json) {
+          System.out.println(
+              Ansi.AUTO.string(
+                  "  @|faint Updated sail event helpers in "
+                      + name
+                      + " (installed files were stale or incomplete).|@"));
+        }
+      }
+    };
   }
 
   private void render(

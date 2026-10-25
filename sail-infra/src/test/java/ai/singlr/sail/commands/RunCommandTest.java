@@ -19,6 +19,7 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -41,6 +42,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -251,6 +253,163 @@ class RunCommandTest {
 
     assertEquals(1, ran.exit(), ran.out());
     assertEquals("  ✗ The agent exited 130.\n", ran.err());
+  }
+
+  private static final String NOCAPTCHA =
+      """
+      name: test-proj
+      agent:
+        type: claude-code
+        auto_branch: true
+      repos:
+        - url: https://github.com/acme/nocaptcha.git
+          path: nocaptcha
+      """;
+
+  @Test
+  void aTaskRunCutsItsBranchInTheProjectsRepoAndSaysWhere() {
+    var shell = repoContainer();
+
+    var ran =
+        SailCli.run(
+            runCommand(catalog(NOCAPTCHA), shell, command -> 0),
+            "test-proj",
+            "--task",
+            "Fix the build",
+            "--no-snapshot");
+
+    assertEquals(0, ran.exit(), ran.err());
+    var branch = onlyBranchCutIn(shell, "/home/dev/workspace/nocaptcha");
+    assertTrue(
+        ran.out()
+            .contains(
+                "  Creating branch: "
+                    + branch
+                    + " in nocaptcha\n  ✓ Branch "
+                    + branch
+                    + " in nocaptcha\n"),
+        ran.out());
+  }
+
+  @Test
+  void aTaskRunInAPathCutsItsBranchInThatRepoAlone() {
+    var shell = repoContainer();
+    var twoRepos = NOCAPTCHA + "  - url: https://github.com/acme/web.git\n    path: web\n";
+
+    var ran =
+        SailCli.run(
+            runCommand(catalog(twoRepos), shell, command -> 0),
+            "test-proj",
+            "--task",
+            "Fix the build",
+            "--path",
+            "nocaptcha",
+            "--no-snapshot");
+
+    assertEquals(0, ran.exit(), ran.err());
+    assertTrue(onlyBranchCutIn(shell, "/home/dev/workspace/nocaptcha").startsWith("sail/snap-"));
+  }
+
+  @Test
+  void aTaskRunOfAProjectWithNoRepoCutsNoBranchAndSaysSoAsADispatchDoes() {
+    var shell = repoContainer();
+
+    var ran =
+        SailCli.run(
+            runCommand(
+                catalog("name: test-proj\nagent:\n  type: claude-code\n  auto_branch: true\n"),
+                shell,
+                command -> 0),
+            "test-proj",
+            "--task",
+            "Fix the build",
+            "--no-snapshot");
+
+    assertEquals(0, ran.exit(), ran.err());
+    assertEquals(List.of(), checkouts(shell));
+    assertTrue(
+        Pattern.compile("\n  Branch: sail/snap-\\S+ \\(create manually in repo\\)\n")
+            .matcher(ran.out())
+            .find(),
+        ran.out());
+  }
+
+  @Test
+  void aBranchGitRefusesFailsTheRunSayingWhatGitSaid() {
+    var shell =
+        repoContainer().onFail("checkout -b", "fatal: not a git repository: /home/dev/workspace");
+
+    var ran =
+        SailCli.run(
+            runCommand(catalog(NOCAPTCHA), shell, command -> 0),
+            "test-proj",
+            "--task",
+            "Fix the build",
+            "--no-snapshot");
+
+    assertEquals(1, ran.exit(), ran.out());
+    var branch = onlyBranchCutIn(shell, "/home/dev/workspace/nocaptcha");
+    assertEquals(
+        "  ✗ Failed to prepare the agent session: Failed to create branch '"
+            + branch
+            + "' in repo 'nocaptcha': fatal: not a git repository: /home/dev/workspace\n",
+        ran.err());
+  }
+
+  @Test
+  void aForegroundTaskRunPrintsNoLaunchCommandAndItsJsonKeepsIt() {
+    var foreground =
+        SailCli.run(
+            runCommand(catalog(NOCAPTCHA), repoContainer(), command -> 0),
+            "test-proj",
+            "--task",
+            "Fix the build",
+            "--no-snapshot");
+    var json =
+        SailCli.run(
+            runCommand(catalog(NOCAPTCHA), repoContainer(), command -> 0),
+            "test-proj",
+            "--task",
+            "Fix the build",
+            "--json");
+
+    assertEquals(0, foreground.exit(), foreground.err());
+    assertTrue(foreground.out().contains("  Launching agent with task...\n\n"), foreground.out());
+    assertFalse(foreground.out().contains("incus exec"), foreground.out());
+    assertEquals(0, json.exit(), json.err());
+    assertTrue(
+        String.valueOf(YamlUtil.parseMap(json.out()).get("ssh_command")).startsWith("incus exec "),
+        json.out());
+  }
+
+  /** A container whose repos exist and hold no branch yet. */
+  private static ScriptedShellExecutor repoContainer() {
+    return runningContainer().onFail("rev-parse --verify --quiet refs/heads/", "");
+  }
+
+  /** The branch {@code shell} cut, after checking it cut one, and only in {@code repoDir}. */
+  private static String onlyBranchCutIn(ScriptedShellExecutor shell, String repoDir) {
+    var checkouts = checkouts(shell);
+    assertEquals(1, checkouts.size(), checkouts.toString());
+    var checkout = checkouts.getFirst();
+    assertEquals(repoDir, checkout.get(checkout.indexOf("-C") + 1));
+    return checkout.get(checkout.indexOf("-b") + 1);
+  }
+
+  private static List<List<String>> checkouts(ScriptedShellExecutor shell) {
+    return shell.arguments().stream()
+        .filter(command -> command.contains("checkout") && command.contains("-b"))
+        .toList();
+  }
+
+  /** A catalog holding the one project {@code yaml} describes. */
+  private Path catalog(String yaml) {
+    var dbPath = tempDir.resolve("control-plane.db");
+    try (var db = Sqlite.open(dbPath)) {
+      new SchemaManager(db).migrate();
+      Acting.system(() -> new ProjectStore(db).upsert("test-proj", yaml));
+    }
+    return dbPath;
   }
 
   private static final String E2E =
