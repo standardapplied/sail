@@ -102,6 +102,27 @@ public class FileMutexTest {
   }
 
   @Test
+  void theHolderTakesItsFileAgainAndTheLockDropsWithTheOutermostHold(@TempDir Path dir)
+      throws Exception {
+    var file = dir.resolve("acme.lock");
+    var outer = FileMutex.acquire(file);
+
+    FileMutex.acquire(file).close();
+
+    try (var probe = FileChannel.open(file, StandardOpenOption.WRITE)) {
+      assertThrows(
+          OverlappingFileLockException.class,
+          probe::tryLock,
+          "the inner release leaves the outer hold on disk");
+    }
+    outer.close();
+    try (var probe = FileChannel.open(file, StandardOpenOption.WRITE);
+        var free = probe.tryLock()) {
+      assertNotNull(free, "released with the outermost hold");
+    }
+  }
+
+  @Test
   void differentFilesLockIndependently(@TempDir Path dir) throws Exception {
     try (var acme = FileMutex.acquire(dir.resolve("acme.lock"));
         var beta = FileMutex.acquire(dir.resolve("beta.lock"))) {

@@ -25,9 +25,11 @@ public final class ContainerManager {
   private static final long READINESS_POLL_MILLIS = 500;
 
   private final ShellExec shell;
+  private final ContainerConfig config;
 
   public ContainerManager(ShellExec shell) {
     this.shell = shell;
+    this.config = new ContainerConfig(shell);
   }
 
   /** Resource limits configured on a container (raw strings from Incus config). */
@@ -177,14 +179,7 @@ public final class ContainerManager {
   public void setResourceLimits(String name, ResourceLimits limits)
       throws IOException, InterruptedException, TimeoutException {
     var result =
-        shell.exec(
-            List.of(
-                "incus",
-                "config",
-                "set",
-                name,
-                "limits.cpu=" + limits.cpu(),
-                "limits.memory=" + limits.memory()));
+        config.set(name, List.of("limits.cpu=" + limits.cpu(), "limits.memory=" + limits.memory()));
     if (!result.ok()) {
       throw new IOException(
           "Failed to set resource limits for container '" + name + "': " + result.stderr());
@@ -194,14 +189,13 @@ public final class ContainerManager {
   /** Applies the root disk quota to a container. Throws on failure. */
   public void setDiskQuota(String name, String disk)
       throws IOException, InterruptedException, TimeoutException {
-    var result =
-        shell.exec(List.of("incus", "config", "device", "override", name, "root", "size=" + disk));
+    var size = List.of("root", "size=" + disk);
+    var result = config.device(name, "override", size);
     if (result.ok()) {
       return;
     }
     if (result.stderr().contains("already exists")) {
-      var setResult =
-          shell.exec(List.of("incus", "config", "device", "set", name, "root", "size=" + disk));
+      var setResult = config.device(name, "set", size);
       if (!setResult.ok()) {
         throw new IOException(
             "Failed to set disk quota for container '" + name + "': " + setResult.stderr());

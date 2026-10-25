@@ -19,7 +19,8 @@ import java.util.concurrent.TimeoutException;
  * socket into the container.
  *
  * <p>Operations are idempotent: {@link #ensureEventSocket} checks the existing config and skips,
- * adds, or replaces as needed so {@code sail project apply} can be safely re-run.
+ * adds, or replaces as needed so {@code sail project apply} can be safely re-run. Every write goes
+ * through {@link ContainerConfig}, under the container's lock.
  */
 public final class IncusDeviceManager {
 
@@ -27,9 +28,18 @@ public final class IncusDeviceManager {
   public static final String EVENT_SOCKET_DEVICE = "sail-api-sock";
 
   private final ShellExec shell;
+  private final ContainerConfig config;
 
   public IncusDeviceManager(ShellExec shell) {
+    this(shell, SailPaths.locksDir());
+  }
+
+  /**
+   * @param locks the box's lock directory, under which each write holds its container's lock
+   */
+  public IncusDeviceManager(ShellExec shell, Path locks) {
     this.shell = Objects.requireNonNull(shell, "shell");
+    this.config = new ContainerConfig(shell, locks);
   }
 
   /**
@@ -47,7 +57,10 @@ public final class IncusDeviceManager {
 
   /**
    * Idempotently attaches the {@code sail-api-sock} disk device to the given container, binding
-   * {@code hostPath} on the host to {@code containerPath} inside the container.
+   * {@code hostPath} on the host to {@code containerPath} inside the container: read, then remove
+   * and add only when the source moved, all under the container's lock. A device already pointing
+   * at {@code hostPath} is left alone; its persistent directory keeps one inode, so the mount
+   * cannot be stranded behind a matching path.
    *
    * <p>Callers must pass <em>directory</em> paths (not the socket file itself). The {@code
    * sail-api} listener unlinks and recreates its socket on every start; a file-level bind mount
@@ -60,70 +73,21 @@ public final class IncusDeviceManager {
     NameValidator.requireValidProjectName(container);
     Objects.requireNonNull(hostPath, "hostPath");
     Objects.requireNonNull(containerPath, "containerPath");
-    var existing = currentEventSocketSource(container);
-    if (existing == null) {
-      addEventSocket(container, hostPath, containerPath);
-      return EnsureResult.ADDED;
-    }
-    if (existing.equals(hostPath.toString())) {
-      return EnsureResult.ALREADY_PRESENT;
-    }
-    removeEventSocket(container);
-    addEventSocket(container, hostPath, containerPath);
-    return EnsureResult.REPLACED;
-  }
-
-  /**
-   * Force-refreshes the {@code sail-api-sock} device by removing it (if present) and re-adding it.
-   * Use this on the dispatch hot path: a bind mount's path can match the configured source yet
-   * still resolve to a stale inode after the host directory has been recreated (systemd's {@code
-   * RuntimeDirectory=} cleanup, for example). Removing and re-adding forces Incus to resolve the
-   * source against the current inode.
-   *
-   * <p>Callers in steady state should still prefer {@link #ensureEventSocket} for one-time
-   * provisioning; this method exists specifically for repeated reconciliation where freshness
-   * matters more than the extra two {@code incus} calls.
-   */
-  public void refreshEventSocket(String container, Path hostPath, Path containerPath)
-      throws IOException, InterruptedException, TimeoutException {
-    NameValidator.requireValidProjectName(container);
-    Objects.requireNonNull(hostPath, "hostPath");
-    Objects.requireNonNull(containerPath, "containerPath");
-    if (currentEventSocketSource(container) != null) {
-      var result =
-          shell.exec(
-              List.of("incus", "config", "device", "remove", container, EVENT_SOCKET_DEVICE));
-      if (!result.ok()) {
-        throw new IOException(
-            "Failed to remove "
-                + EVENT_SOCKET_DEVICE
-                + " from "
-                + container
-                + ": "
-                + result.reason());
-      }
-    }
-    addEventSocket(container, hostPath, containerPath);
-  }
-
-  /** Removes the {@code sail-api-sock} device if present. Idempotent — no-op if absent. */
-  public void removeEventSocket(String container)
-      throws IOException, InterruptedException, TimeoutException {
-    NameValidator.requireValidProjectName(container);
-    if (currentEventSocketSource(container) == null) {
-      return;
-    }
-    var result =
-        shell.exec(List.of("incus", "config", "device", "remove", container, EVENT_SOCKET_DEVICE));
-    if (!result.ok()) {
-      throw new IOException(
-          "Failed to remove "
-              + EVENT_SOCKET_DEVICE
-              + " from "
-              + container
-              + ": "
-              + result.reason());
-    }
+    return config.atomically(
+        container,
+        () -> {
+          var existing = currentEventSocketSource(container);
+          if (existing == null) {
+            addEventSocket(container, hostPath, containerPath);
+            return EnsureResult.ADDED;
+          }
+          if (existing.equals(hostPath.toString())) {
+            return EnsureResult.ALREADY_PRESENT;
+          }
+          removeEventSocket(container);
+          addEventSocket(container, hostPath, containerPath);
+          return EnsureResult.REPLACED;
+        });
   }
 
   /**
@@ -178,20 +142,27 @@ public final class IncusDeviceManager {
     return List.copyOf(map.keySet());
   }
 
+  private void removeEventSocket(String container)
+      throws IOException, InterruptedException, TimeoutException {
+    var result = config.device(container, "remove", List.of(EVENT_SOCKET_DEVICE));
+    if (!result.ok()) {
+      throw new IOException(
+          "Failed to remove "
+              + EVENT_SOCKET_DEVICE
+              + " from "
+              + container
+              + ": "
+              + result.reason());
+    }
+  }
+
   private void addEventSocket(String container, Path hostPath, Path containerPath)
       throws IOException, InterruptedException, TimeoutException {
     var result =
-        shell.exec(
-            List.of(
-                "incus",
-                "config",
-                "device",
-                "add",
-                container,
-                EVENT_SOCKET_DEVICE,
-                "disk",
-                "source=" + hostPath,
-                "path=" + containerPath));
+        config.device(
+            container,
+            "add",
+            List.of(EVENT_SOCKET_DEVICE, "disk", "source=" + hostPath, "path=" + containerPath));
     if (!result.ok()) {
       throw new IOException(
           "Failed to add " + EVENT_SOCKET_DEVICE + " to " + container + ": " + result.reason());

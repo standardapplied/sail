@@ -14,8 +14,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class IncusDeviceManagerTest {
+
+  @TempDir Path locks;
 
   private static final String CONTAINER = "light-grid";
   private static final Path HOST = Path.of("/var/lib/sail/run/api.sock");
@@ -32,7 +35,7 @@ class IncusDeviceManagerTest {
         new ScriptedShellExecutor()
             .onFail("config device get " + CONTAINER, "Device not found")
             .onOk("config device add " + CONTAINER);
-    var mgr = new IncusDeviceManager(shell);
+    var mgr = new IncusDeviceManager(shell, locks);
 
     var result = mgr.ensureEventSocket(CONTAINER, HOST, GUEST);
 
@@ -46,7 +49,7 @@ class IncusDeviceManagerTest {
   @Test
   void ensureSkipsWhenSameSourceExists() throws Exception {
     var shell = new ScriptedShellExecutor().onOk("config device get " + CONTAINER, HOST + "\n");
-    var mgr = new IncusDeviceManager(shell);
+    var mgr = new IncusDeviceManager(shell, locks);
 
     var result = mgr.ensureEventSocket(CONTAINER, HOST, GUEST);
 
@@ -62,7 +65,7 @@ class IncusDeviceManagerTest {
             .onOk("config device get " + CONTAINER, "/old/path/sail.sock\n")
             .onOk("config device remove " + CONTAINER)
             .onOk("config device add " + CONTAINER);
-    var mgr = new IncusDeviceManager(shell);
+    var mgr = new IncusDeviceManager(shell, locks);
 
     var result = mgr.ensureEventSocket(CONTAINER, HOST, GUEST);
 
@@ -75,13 +78,13 @@ class IncusDeviceManagerTest {
 
   @Test
   void ensureRejectsInvalidContainerName() {
-    var mgr = new IncusDeviceManager(new ScriptedShellExecutor());
+    var mgr = new IncusDeviceManager(new ScriptedShellExecutor(), locks);
     assertThrows(Exception.class, () -> mgr.ensureEventSocket("../bad", HOST, GUEST));
   }
 
   @Test
   void ensureRejectsNullPaths() {
-    var mgr = new IncusDeviceManager(new ScriptedShellExecutor());
+    var mgr = new IncusDeviceManager(new ScriptedShellExecutor(), locks);
     assertThrows(NullPointerException.class, () -> mgr.ensureEventSocket(CONTAINER, null, GUEST));
     assertThrows(NullPointerException.class, () -> mgr.ensureEventSocket(CONTAINER, HOST, null));
   }
@@ -92,52 +95,29 @@ class IncusDeviceManagerTest {
         new ScriptedShellExecutor()
             .onFail("config device get " + CONTAINER, "not found")
             .onFail("config device add " + CONTAINER, "permission denied");
-    var mgr = new IncusDeviceManager(shell);
+    var mgr = new IncusDeviceManager(shell, locks);
 
     var ex = assertThrows(IOException.class, () -> mgr.ensureEventSocket(CONTAINER, HOST, GUEST));
     assertTrue(ex.getMessage().contains("permission denied"));
   }
 
   @Test
-  void removeIsNoopWhenAbsent() throws Exception {
-    var shell = new ScriptedShellExecutor().onFail("config device get " + CONTAINER, "absent");
-    var mgr = new IncusDeviceManager(shell);
-
-    mgr.removeEventSocket(CONTAINER);
-
-    var anyRemove = shell.invocations().stream().anyMatch(c -> c.contains("config device remove"));
-    assertFalse(anyRemove);
-  }
-
-  @Test
-  void removeWhenPresentExecutesIncusRemove() throws Exception {
+  void aRemoveRefusedWhileReplacingSaysWhy() {
     var shell =
         new ScriptedShellExecutor()
-            .onOk("config device get " + CONTAINER, HOST + "\n")
-            .onOk("config device remove " + CONTAINER);
-    var mgr = new IncusDeviceManager(shell);
-
-    mgr.removeEventSocket(CONTAINER);
-
-    var sawRemove = shell.invocations().stream().anyMatch(c -> c.contains("config device remove"));
-    assertTrue(sawRemove);
-  }
-
-  @Test
-  void removeFailurePropagates() {
-    var shell =
-        new ScriptedShellExecutor()
-            .onOk("config device get " + CONTAINER, HOST + "\n")
+            .onOk("config device get " + CONTAINER, "/old/path\n")
             .onFail("config device remove " + CONTAINER, "rejected");
-    var mgr = new IncusDeviceManager(shell);
+    var mgr = new IncusDeviceManager(shell, locks);
 
-    assertThrows(IOException.class, () -> mgr.removeEventSocket(CONTAINER));
+    var ex = assertThrows(IOException.class, () -> mgr.ensureEventSocket(CONTAINER, HOST, GUEST));
+
+    assertEquals("Failed to remove sail-api-sock from light-grid: rejected", ex.getMessage());
   }
 
   @Test
   void currentSourceNullWhenAbsent() throws Exception {
     var shell = new ScriptedShellExecutor().onFail("config device get " + CONTAINER, "missing");
-    assertNull(new IncusDeviceManager(shell).currentEventSocketSource(CONTAINER));
+    assertNull(new IncusDeviceManager(shell, locks).currentEventSocketSource(CONTAINER));
   }
 
   @Test
@@ -145,7 +125,8 @@ class IncusDeviceManagerTest {
     var shell =
         new ScriptedShellExecutor().onOk("config device get " + CONTAINER, "/some/host/sock\n");
     assertEquals(
-        "/some/host/sock", new IncusDeviceManager(shell).currentEventSocketSource(CONTAINER));
+        "/some/host/sock",
+        new IncusDeviceManager(shell, locks).currentEventSocketSource(CONTAINER));
   }
 
   @Test
@@ -160,7 +141,7 @@ class IncusDeviceManagerTest {
         """;
     var shell = new ScriptedShellExecutor().onOk("config device show " + CONTAINER, output);
 
-    var devices = new IncusDeviceManager(shell).listDevices(CONTAINER);
+    var devices = new IncusDeviceManager(shell, locks).listDevices(CONTAINER);
 
     assertTrue(devices.contains("eth0"));
     assertTrue(devices.contains("root"));
@@ -170,14 +151,15 @@ class IncusDeviceManagerTest {
   void listDevicesEmptyWhenBlank() throws Exception {
     var shell = new ScriptedShellExecutor().onOk("config device show " + CONTAINER, "");
 
-    assertTrue(new IncusDeviceManager(shell).listDevices(CONTAINER).isEmpty());
+    assertTrue(new IncusDeviceManager(shell, locks).listDevices(CONTAINER).isEmpty());
   }
 
   @Test
   void listDevicesPropagatesFailure() {
     var shell = new ScriptedShellExecutor().onFail("config device show", "boom");
 
-    assertThrows(IOException.class, () -> new IncusDeviceManager(shell).listDevices(CONTAINER));
+    assertThrows(
+        IOException.class, () -> new IncusDeviceManager(shell, locks).listDevices(CONTAINER));
   }
 
   @Test
