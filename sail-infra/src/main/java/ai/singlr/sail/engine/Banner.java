@@ -45,7 +45,16 @@ public final class Banner {
   /** The columns a box fits when sail prints to no terminal, or to one it cannot measure. */
   static final int DEFAULT_COLUMNS = 100;
 
-  private static final int MIN_COLUMNS = 40;
+  /**
+   * The columns a box prints to when they are known ahead of measuring, as a test's terminal is;
+   * unbound, {@link #columns()} measures the terminal.
+   */
+  static final ScopedValue<Integer> COLUMNS = ScopedValue.newInstance();
+
+  private static final int NARROWEST_BOX = 4;
+
+  /** What a row's status indicator takes at its end: a space, the indicator and three spaces. */
+  private static final int INDICATOR_COLUMNS = 5;
 
   /** What a box's line holds beyond its inner width: its indent and its two borders. */
   private static final int BOX_EDGES = 4;
@@ -151,7 +160,7 @@ public final class Banner {
     var supportText = "Supported:   Ubuntu 24.04+";
     var w = W;
     w = Math.max(w, rowWidth("Hostname:", host));
-    w = Math.max(w, rowWidth("OS:", os) + 4);
+    w = Math.max(w, rowWidth("OS:", os) + INDICATOR_COLUMNS);
     w = Math.max(w, rowWidth("CPU:", cpu));
     w = Math.max(w, rowWidth("RAM:", mem));
     w = Math.max(w, 2 + supportText.length());
@@ -159,14 +168,7 @@ public final class Banner {
 
     out.println();
 
-    var title = " Host Detection ";
-    out.println(
-        amber(
-            ansi,
-            "  @|bold,cyan \u256d\u2500"
-                + title
-                + "\u2500".repeat(Math.max(1, w - title.length() - 1))
-                + "\u256e|@"));
+    out.println(amber(ansi, topBorder(w, " Host Detection ")));
 
     emptyRow(out, ansi, w);
     labelRow(out, ansi, w, "Hostname:", host, null, null);
@@ -175,18 +177,13 @@ public final class Banner {
     labelRow(out, ansi, w, "RAM:", mem, null, null);
     emptyRow(out, ansi, w);
 
+    var support = Strings.fit(supportText, w - 2);
     out.println(
-        amber(
-            ansi,
-            "  @|bold,cyan \u2502|@  @|faint "
-                + supportText
-                + "|@"
-                + " ".repeat(w - 2 - supportText.length())
-                + "@|bold,cyan \u2502|@"));
+        amber(ansi, boxLine(w, "  @|faint " + support + "|@", 2 + Strings.columns(support))));
 
     emptyRow(out, ansi, w);
 
-    out.println(amber(ansi, "  @|bold,cyan \u2570" + "\u2500".repeat(w) + "\u256f|@"));
+    out.println(amber(ansi, bottomBorder(w)));
     out.println();
   }
 
@@ -307,14 +304,7 @@ public final class Banner {
     w = boxWidth(w);
 
     out.println();
-    var title = " Project ";
-    out.println(
-        amber(
-            ansi,
-            "  @|bold,cyan \u256d\u2500"
-                + title
-                + "\u2500".repeat(Math.max(1, w - title.length() - 1))
-                + "\u256e|@"));
+    out.println(amber(ansi, topBorder(w, " Project ")));
 
     emptyRow(out, ansi, w);
     labelRow(out, ansi, w, "Name:", config.name(), null, null);
@@ -344,7 +334,7 @@ public final class Banner {
     }
     emptyRow(out, ansi, w);
 
-    out.println(amber(ansi, "  @|bold,cyan \u2570" + "\u2500".repeat(w) + "\u256f|@"));
+    out.println(amber(ansi, bottomBorder(w)));
     out.println();
   }
 
@@ -410,14 +400,7 @@ public final class Banner {
     w = boxWidth(w);
 
     out.println();
-    var title = " Project: " + config.name() + " ";
-    out.println(
-        amber(
-            ansi,
-            "  @|bold,cyan \u256d\u2500"
-                + title
-                + "\u2500".repeat(Math.max(1, w - title.length() - 1))
-                + "\u256e|@"));
+    out.println(amber(ansi, topBorder(w, " Project: " + config.name() + " ")));
 
     emptyRow(out, ansi, w);
     labelRow(out, ansi, w, "Name:", config.name(), null, null);
@@ -506,7 +489,7 @@ public final class Banner {
       emptyRow(out, ansi, w);
     }
 
-    out.println(amber(ansi, "  @|bold,cyan \u2570" + "\u2500".repeat(w) + "\u256f|@"));
+    out.println(amber(ansi, bottomBorder(w)));
     out.println();
   }
 
@@ -860,14 +843,7 @@ public final class Banner {
     w = boxWidth(w);
 
     out.println();
-    var title = " Host Status ";
-    out.println(
-        amber(
-            ansi,
-            "  @|bold,cyan \u256d\u2500"
-                + title
-                + "\u2500".repeat(Math.max(1, w - title.length() - 1))
-                + "\u256e|@"));
+    out.println(amber(ansi, topBorder(w, " Host Status ")));
 
     emptyRow(out, ansi, w);
     labelRow(out, ansi, w, "Hostname:", hostname, null, null);
@@ -908,7 +884,7 @@ public final class Banner {
     labelRow(out, ansi, w, "Containers:", containers, null, null);
     emptyRow(out, ansi, w);
 
-    out.println(amber(ansi, "  @|bold,cyan \u2570" + "\u2500".repeat(w) + "\u256f|@"));
+    out.println(amber(ansi, bottomBorder(w)));
     out.println();
   }
 
@@ -1293,8 +1269,9 @@ public final class Banner {
   }
 
   /**
-   * Prints a label-value row with optional status indicator. All padding is computed on visible
-   * character widths so borders always align regardless of ANSI markup.
+   * Prints a label-value row with optional status indicator. All padding is computed on the columns
+   * the text spans so borders always align regardless of ANSI markup, and a label or value that
+   * would pass the border is cut with "…".
    *
    * <p>Layout: │ Label: value ✓ │
    */
@@ -1306,49 +1283,58 @@ public final class Banner {
       String value,
       String indicator,
       String style) {
-    var gap = LABEL_COL - label.length();
-    if (gap < 1) gap = 1;
-
-    var room = (indicator == null ? width : width - 5) - 2 - label.length() - gap;
-    value = Strings.fit(value, room);
-    var used = 2 + label.length() + gap + value.length();
-
-    var sb = new StringBuilder();
-    sb.append("  @|bold,cyan \u2502|@  @|bold ").append(label).append("|@");
-    sb.append(" ".repeat(gap));
-    sb.append(value);
-
-    if (indicator != null) {
-      var indicatorPos = width - 4;
-      var spaceBefore = indicatorPos - used;
-      if (spaceBefore < 1) spaceBefore = 1;
-      sb.append(" ".repeat(spaceBefore));
-      sb.append("@|").append(style).append(" ").append(indicator).append("|@");
-      var remaining = width - used - spaceBefore - 1;
-      if (remaining > 0) sb.append(" ".repeat(remaining));
-    } else {
-      var pad = width - used;
-      if (pad > 0) sb.append(" ".repeat(pad));
-    }
-
-    sb.append("@|bold,cyan \u2502|@");
-    out.println(amber(ansi, sb.toString()));
+    var marked = indicator != null && width - 2 >= INDICATOR_COLUMNS;
+    var room = width - 2 - (marked ? INDICATOR_COLUMNS : 0);
+    var head = Strings.fit(label, room);
+    var gap = " ".repeat(Math.max(1, LABEL_COL - label.length()));
+    var tail = Strings.fit(gap + value, room - Strings.columns(head));
+    var pad = " ".repeat(room - Strings.columns(head) - Strings.columns(tail));
+    var mark = marked ? " @|" + style + " " + indicator + "|@   " : "";
+    out.println(amber(ansi, boxLine(width, "  @|bold " + head + "|@" + tail + pad + mark, width)));
   }
 
-  private static void emptyRow(PrintStream out, Ansi ansi, int width) {
-    out.println(amber(ansi, "  @|bold,cyan \u2502|@" + " ".repeat(width) + "@|bold,cyan \u2502|@"));
+  static void emptyRow(PrintStream out, Ansi ansi, int width) {
+    out.println(amber(ansi, boxLine(width, "", 0)));
+  }
+
+  /** A box's line: {@code markup}, which spans {@code shown} columns, padded to {@code width}. */
+  static String boxLine(int width, String markup, int shown) {
+    return "  @|bold,cyan \u2502|@"
+        + markup
+        + " ".repeat(Math.max(0, width - shown))
+        + "@|bold,cyan \u2502|@";
+  }
+
+  /** A box's top border, {@code width} wide inside, naming {@code title} or as much as fits. */
+  static String topBorder(int width, String title) {
+    var name = Strings.fit(title, width - 2);
+    return "  @|bold,cyan \u256d\u2500"
+        + name
+        + "\u2500".repeat(width - 1 - Strings.columns(name))
+        + "\u256e|@";
+  }
+
+  static String bottomBorder(int width) {
+    return "  @|bold,cyan \u2570" + "\u2500".repeat(width) + "\u256f|@";
   }
 
   /**
    * The inner width of a box whose widest row needs {@code natural}: that, unless the terminal is
-   * narrower, when the box spans the terminal and {@link #labelRow} cuts the values that overflow.
+   * narrower, when the box spans the terminal and its rows cut what overflows. No box is narrower
+   * than {@link #NARROWEST_BOX}: below it there is no room for a row's indent and a column of text.
    */
-  private static int boxWidth(int natural) {
-    return Math.min(natural, columns() - BOX_EDGES);
+  static int boxWidth(int natural) {
+    return Math.max(NARROWEST_BOX, Math.min(natural, columns() - BOX_EDGES));
   }
 
-  /** The columns of the terminal sail prints to, or {@link #DEFAULT_COLUMNS} when it has none. */
+  /**
+   * The columns of the terminal sail prints to: {@link #COLUMNS} where it is bound, else the
+   * terminal's own, or {@link #DEFAULT_COLUMNS} when there is none.
+   */
   static int columns() {
+    if (COLUMNS.isBound()) {
+      return COLUMNS.get();
+    }
     var console = System.console();
     return columns(console != null && console.isTerminal(), () -> Stty.size(new int[] {0, 0})[1]);
   }
@@ -1356,14 +1342,14 @@ public final class Banner {
   /** {@link #columns()} given whether sail prints to a {@code terminal} and its width. */
   static int columns(boolean terminal, IntSupplier ttyColumns) {
     var measured = terminal ? ttyColumns.getAsInt() : 0;
-    return measured > 0 ? Math.max(measured, MIN_COLUMNS) : DEFAULT_COLUMNS;
+    return measured > 0 ? measured : DEFAULT_COLUMNS;
   }
 
   /** Returns the width needed for a label-value pair (2 leading spaces + label + gap + value). */
   private static int rowWidth(String label, String value) {
     var gap = LABEL_COL - label.length();
     if (gap < 1) gap = 1;
-    return 2 + label.length() + gap + value.length();
+    return 2 + label.length() + gap + Strings.columns(value);
   }
 
   private static String serviceValue(Map.Entry<String, SailYaml.Service> entry) {

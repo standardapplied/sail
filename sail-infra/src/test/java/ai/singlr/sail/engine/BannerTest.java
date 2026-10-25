@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
@@ -24,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine.Help.Ansi;
 
@@ -702,7 +704,108 @@ class BannerTest {
     assertEquals(80, Banner.columns(true, () -> 80));
     assertEquals(Banner.DEFAULT_COLUMNS, Banner.columns(false, () -> 80));
     assertEquals(Banner.DEFAULT_COLUMNS, Banner.columns(true, () -> 0));
-    assertEquals(40, Banner.columns(true, () -> 12));
+    assertEquals(12, Banner.columns(true, () -> 12));
+  }
+
+  @Test
+  void aTableGivesWayToTheTerminalByCuttingItsWidestColumn() {
+    var session =
+        Map.<String, Object>of(
+            "status", "running",
+            "agent", "claude-code",
+            "spec_id", "s".repeat(80),
+            "started_at", "2026-10-25T00:00:00Z");
+
+    for (var columns : List.of(Banner.DEFAULT_COLUMNS, 60, 32, 12)) {
+      var lines =
+          printedAt(
+              columns,
+              out -> Banner.printAgentSessionsTable(List.of(session), "acme", out, Ansi.OFF));
+
+      assertEquals(List.of(columns), widths(lines), String.join("\n", lines));
+    }
+    var lines =
+        printedAt(
+            Banner.DEFAULT_COLUMNS,
+            out -> Banner.printAgentSessionsTable(List.of(session), "acme", out, Ansi.OFF));
+    assertEquals(
+        List.of("  │  running  claude-code  " + "s".repeat(48) + "…  2026-10-25T00:00:00Z │"),
+        lines.stream().filter(line -> line.contains("running")).toList());
+  }
+
+  @Test
+  void aTitleLongerThanItsBoxIsCutInsideTheBorder() {
+    var config =
+        new SailYaml(
+            "p".repeat(63), null, null, null, null, null, null, null, null, null, null, null);
+
+    var lines =
+        printedAt(
+            60,
+            out ->
+                Banner.printProjectConfig(config, new ContainerState.NotCreated(), out, Ansi.OFF));
+
+    assertEquals(List.of(60), widths(lines), String.join("\n", lines));
+    assertEquals("  ╭─ Project: " + "p".repeat(43) + "…─╮", lines.getFirst());
+  }
+
+  @Test
+  void aWideCharacterTakesTwoOfTheColumnsARowFits() {
+    var config =
+        new SailYaml(
+            "acme", "界".repeat(100), null, null, null, null, null, null, null, null, null, null);
+
+    var lines =
+        printedAt(
+            Banner.DEFAULT_COLUMNS,
+            out ->
+                Banner.printProjectConfig(config, new ContainerState.NotCreated(), out, Ansi.OFF));
+
+    assertEquals(List.of(Banner.DEFAULT_COLUMNS), widths(lines), String.join("\n", lines));
+    assertEquals(
+        List.of("  │  Description: " + "界".repeat(40) + "…│"),
+        lines.stream().filter(line -> line.contains("Description:")).toList());
+  }
+
+  @Test
+  void aBoxInATerminalNarrowerThanItsRowsSpansTheTerminalExactly() {
+    for (var columns : List.of(32, 16, 8)) {
+      var detection =
+          printedAt(columns, out -> Banner.printHostDetection(SUPPORTED, out, Ansi.OFF));
+      var status =
+          printedAt(
+              columns,
+              out ->
+                  Banner.printHostStatus(
+                      SAMPLE_HOST_YAML,
+                      "6.22",
+                      "sudo sail host incus upgrade",
+                      SUPPORTED,
+                      null,
+                      null,
+                      "unavailable (incus list failed)",
+                      out,
+                      Ansi.OFF));
+
+      assertEquals(List.of(columns), widths(detection), String.join("\n", detection));
+      assertEquals(List.of(columns), widths(status), String.join("\n", status));
+    }
+    assertEquals(
+        List.of("  │  OS:          U… ✓   │"),
+        printedAt(26, out -> Banner.printHostDetection(SUPPORTED, out, Ansi.OFF)).stream()
+            .filter(line -> line.contains("OS:"))
+            .toList());
+  }
+
+  private static List<String> printedAt(int columns, Consumer<PrintStream> print) {
+    var out = new ByteArrayOutputStream();
+    ScopedValue.where(Banner.COLUMNS, columns)
+        .run(() -> print.accept(new PrintStream(out, true, StandardCharsets.UTF_8)));
+    return out.toString(StandardCharsets.UTF_8).lines().filter(l -> !l.isEmpty()).toList();
+  }
+
+  private static List<Integer> widths(List<String> lines) {
+    return lines.stream().map(Strings::columns).distinct().toList();
   }
 
   @Test

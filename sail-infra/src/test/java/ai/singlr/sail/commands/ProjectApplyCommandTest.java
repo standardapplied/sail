@@ -30,6 +30,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -221,24 +222,40 @@ class ProjectApplyCommandTest {
   }
 
   @Test
-  void aBoxWhoseSailApiNeverRanIsRefusedTheStepThatSetsItUp(@TempDir Path dataDir) {
-    var err = new ByteArrayOutputStream();
+  void anApplyOnABoxWhereOnlyHostInitRanIsRefusedBeforeItTouchesIncus(@TempDir Path dir)
+      throws Exception {
+    var descriptor = dir.resolve("acme.yaml");
+    Files.writeString(
+        descriptor, "name: acme\nresources:\n  cpu: 2\n  memory: 4GB\n  disk: 50GB\n");
 
-    assertThrows(
-        CliCommand.Printed.class,
-        () ->
-            CliCommand.run(
-                new PrintStream(err, true, StandardCharsets.UTF_8),
-                () -> ContainerSailSetup.requireApi(SailPaths.apiSocketHostDir(dataDir))));
+    var box = hostInitOnly(dir);
 
-    assertEquals(
-        "  ✗ This box has no sail-api yet, which every project container talks to. Set it up"
-            + " first: "
-            + OperatorCommand.here().sail("init --as-main --handle <you>")
-            + ", or "
-            + OperatorCommand.here().sail("init --main <main>")
-            + ".\n",
-        err.toString(StandardCharsets.UTF_8));
+    for (var args :
+        List.of(
+            new String[] {"-f", descriptor.toString(), "--yes"}, new String[] {"--all", "--yes"})) {
+      var ran = SailCli.run(new ProjectApplyCommand(() -> box), args);
+
+      assertEquals(1, ran.exit());
+      assertEquals("", ran.out());
+      assertEquals(
+          Banner.errorLine(
+                  "This box has no sail-api yet, which every project container talks to. Set it"
+                      + " up first: "
+                      + OperatorCommand.here().sail("init --as-main --handle <you>")
+                      + ", or "
+                      + OperatorCommand.here().sail("init --main <main>")
+                      + ".",
+                  Ansi.AUTO)
+              + System.lineSeparator(),
+          ran.err());
+    }
+  }
+
+  private static ProjectApplyCommand.Box hostInitOnly(Path dir) throws IOException {
+    var hostConfig = dir.resolve("host.yaml");
+    Files.writeString(hostConfig, "pool: devpool\n");
+    return new ProjectApplyCommand.Box(
+        dir.resolve("sail.db"), hostConfig, SailPaths.apiSocketHostDir(dir));
   }
 
   @Test
@@ -449,7 +466,12 @@ class ProjectApplyCommandTest {
   }
 
   private static FutureTask<Integer> applying(Path database, String... args) {
-    var command = new CommandLine(new ProjectApplyCommand(() -> database));
+    var command =
+        new CommandLine(
+            new ProjectApplyCommand(
+                () ->
+                    new ProjectApplyCommand.Box(
+                        database, database.resolveSibling("host.yaml"), database.getParent())));
     command.setExecutionExceptionHandler((failure, line, parsed) -> 1);
     return new FutureTask<>(() -> command.execute(args));
   }

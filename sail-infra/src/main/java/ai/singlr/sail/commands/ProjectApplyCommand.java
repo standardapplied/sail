@@ -110,14 +110,22 @@ public final class ProjectApplyCommand implements Runnable {
       defaultValue = "${GITHUB_TOKEN}")
   private String gitToken;
 
-  private final Supplier<Path> database;
+  private final Supplier<Box> box;
 
   public ProjectApplyCommand() {
-    this(SailPaths::controlPlaneDb);
+    this(Box::here);
   }
 
-  ProjectApplyCommand(Supplier<Path> database) {
-    this.database = database;
+  ProjectApplyCommand(Supplier<Box> box) {
+    this.box = box;
+  }
+
+  /** The box apply provisions on: its database, its host.yaml and sail-api's socket directory. */
+  record Box(Path database, Path hostConfig, Path apiSockets) {
+    static Box here() {
+      return new Box(
+          SailPaths.controlPlaneDb(), SailPaths.hostConfigPath(), SailPaths.apiSocketHostDir());
+    }
   }
 
   enum Action {
@@ -160,7 +168,7 @@ public final class ProjectApplyCommand implements Runnable {
       converge(operator);
       return;
     }
-    try (var held = PairingTrust.hold(database.get())) {
+    try (var held = PairingTrust.hold(box.get().database())) {
       converge(operator);
     }
   }
@@ -192,6 +200,8 @@ public final class ProjectApplyCommand implements Runnable {
       throw new IllegalStateException(
           "sail.yaml must have a 'resources' section with cpu, memory, and disk.");
     }
+
+    requireReadyBox(operator);
 
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);
@@ -252,6 +262,18 @@ public final class ProjectApplyCommand implements Runnable {
   }
 
   /**
+   * Refuses before anything is created or started on a box where {@code host init} has not run, or
+   * sail-api has not, since every project container mounts its socket directory.
+   */
+  private void requireReadyBox(OperatorCommand operator) {
+    var here = box.get();
+    if (!Files.exists(here.hostConfig())) {
+      throw HostInitCommand.notInitialized(operator);
+    }
+    ContainerSailSetup.requireApi(here.apiSockets());
+  }
+
+  /**
    * Converges every Sail-managed container: one with a definition in the store, or a legacy
    * descriptor-less one an earlier release provisioned (recognizable by its API-socket device) —
    * the latter still gets its machinery and hostname healed, reported with a warning line, never a
@@ -262,6 +284,7 @@ public final class ProjectApplyCommand implements Runnable {
    * the post-upgrade retrofit: one command brings the whole box current.
    */
   private void applyAll(OperatorCommand operator) throws Exception {
+    requireReadyBox(operator);
     var observer = new ShellExecutor(false);
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
@@ -637,12 +660,7 @@ public final class ProjectApplyCommand implements Runnable {
     ProjectCatalog.requireUnpruned(config.name());
     persistCanonicalBundle(config.name(), sailYamlPath, dryRun, operator);
 
-    var hostYamlPath = SailPaths.hostConfigPath();
-    if (!Files.exists(hostYamlPath)) {
-      throw HostInitCommand.notInitialized(operator);
-    }
-    ContainerSailSetup.requireApi(SailPaths.apiSocketHostDir());
-    var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
+    var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(box.get().hostConfig()));
 
     var tracker =
         new ProvisionTracker<>(ProjectPhase.class, SailPaths.provisionState(config.name()), dryRun)
@@ -706,7 +724,7 @@ public final class ProjectApplyCommand implements Runnable {
     if (!(state instanceof ContainerState.Running r) || r.ipv4() == null) {
       return;
     }
-    var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(SailPaths.hostConfigPath()));
+    var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(box.get().hostConfig()));
     var serverIp = hostYaml.serverIp();
     if (serverIp != null) {
       Banner.printSshConfig(

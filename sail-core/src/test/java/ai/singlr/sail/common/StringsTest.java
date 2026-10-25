@@ -65,8 +65,27 @@ class StringsTest {
     assertEquals("short", Strings.fit("short", 80));
     assertEquals("short", Strings.fit("short", 5));
     assertEquals("x".repeat(39) + "…", Strings.fit("x".repeat(120), 40));
-    assertEquals("a\uD83D\uDE00…", Strings.fit("a\uD83D\uDE00bc", 3));
-    assertEquals("…", Strings.fit("abc", 0));
+    assertEquals("a\uD83D\uDE00…", Strings.fit("a\uD83D\uDE00bc", 4));
+    assertEquals("a…", Strings.fit("a\uD83D\uDE00bc", 3));
+    assertEquals("", Strings.fit("abc", 0));
+    assertEquals("", Strings.fit("abc", -3));
+  }
+
+  @Test
+  void fitCountsTheColumnsAWideCharacterSpans() {
+    assertEquals("界界…", Strings.fit("界".repeat(100), 6));
+    assertEquals("界界…", Strings.fit("界".repeat(100), 5));
+    assertEquals("ab界", Strings.fit("ab界", 4));
+  }
+
+  @Test
+  void columnsCountsWideCharactersTwiceAndMarksNotAtAll() {
+    assertEquals(3, Strings.columns("abc"));
+    assertEquals(4, Strings.columns("界가"));
+    assertEquals(2, Strings.columns("\uD83D\uDE00"));
+    assertEquals(4, Strings.columns("ｗ\uD840\uDC00"));
+    assertEquals(1, Strings.columns("e\u0301"));
+    assertEquals(1, Strings.columns("…"));
   }
 
   @Test

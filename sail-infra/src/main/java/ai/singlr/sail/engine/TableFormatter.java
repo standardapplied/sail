@@ -5,15 +5,17 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import java.io.PrintStream;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import picocli.CommandLine.Help.Ansi;
 
 /**
  * Renders bordered CLI tables with dynamically computed column widths. Columns auto-size to fit the
  * widest cell in each column (including headers), ensuring aligned borders regardless of content
- * length.
+ * length; when the terminal is narrower, the widest columns give way and their cells end in "…".
  */
 final class TableFormatter {
 
@@ -34,82 +36,67 @@ final class TableFormatter {
   }
 
   void render(PrintStream out, Ansi ansi) {
-    var ncols = headers.size();
-    var widths = new int[ncols];
-    for (var i = 0; i < ncols; i++) {
-      widths[i] = headers.get(i).length();
+    var widths = new int[headers.size()];
+    for (var i = 0; i < widths.length; i++) {
+      widths[i] = Strings.columns(headers.get(i));
     }
     for (var row : rows) {
-      for (var i = 0; i < ncols && i < row.size(); i++) {
-        widths[i] = Math.max(widths[i], row.get(i).length());
+      for (var i = 0; i < widths.length && i < row.size(); i++) {
+        widths[i] = Math.max(widths[i], Strings.columns(row.get(i)));
       }
     }
-
-    var contentWidth = 2;
-    for (var i = 0; i < ncols; i++) {
-      contentWidth += widths[i];
-      if (i < ncols - 1) {
-        contentWidth += COL_GAP;
-      }
-    }
-    var w = Math.max(MIN_WIDTH, contentWidth + 1);
+    var w = Banner.boxWidth(Math.max(MIN_WIDTH, contentWidth(widths) + 1));
+    narrow(widths, w - 1);
 
     out.println();
+    out.println(Banner.amber(ansi, Banner.topBorder(w, title)));
+    Banner.emptyRow(out, ansi, w);
+
+    var header = Strings.fit(formatRow(headers, widths), w - 2);
     out.println(
         Banner.amber(
-            ansi,
-            "  @|bold,cyan \u256d\u2500"
-                + title
-                + "\u2500".repeat(Math.max(0, w - title.length() - 1))
-                + "\u256e|@"));
-
-    out.println(
-        Banner.amber(ansi, "  @|bold,cyan \u2502|@" + " ".repeat(w) + "@|bold,cyan \u2502|@"));
-
-    var headerRow = formatRow(headers, widths);
-    var headerUsed = 2 + headerRow.length();
-    var headerPad = w - headerUsed;
-    out.println(
-        Banner.amber(
-            ansi,
-            "  @|bold,cyan \u2502|@  @|bold "
-                + headerRow
-                + "|@"
-                + (headerPad > 0 ? " ".repeat(headerPad) : "")
-                + "@|bold,cyan \u2502|@"));
+            ansi, Banner.boxLine(w, "  @|bold " + header + "|@", 2 + Strings.columns(header))));
 
     var sep = "\u2500".repeat(w - 4);
-    out.println(
-        Banner.amber(ansi, "  @|bold,cyan \u2502|@  @|faint " + sep + "|@  @|bold,cyan \u2502|@"));
+    out.println(Banner.amber(ansi, Banner.boxLine(w, "  @|faint " + sep + "|@  ", w)));
 
     for (var row : rows) {
-      var rowStr = formatRow(row, widths);
-      var rowUsed = 2 + rowStr.length();
-      var rowPad = w - rowUsed;
-      out.println(
-          Banner.amber(
-              ansi,
-              "  @|bold,cyan \u2502|@  "
-                  + rowStr
-                  + (rowPad > 0 ? " ".repeat(rowPad) : "")
-                  + "@|bold,cyan \u2502|@"));
+      var line = Strings.fit(formatRow(row, widths), w - 2);
+      out.println(Banner.amber(ansi, Banner.boxLine(w, "  " + line, 2 + Strings.columns(line))));
     }
 
-    out.println(
-        Banner.amber(ansi, "  @|bold,cyan \u2502|@" + " ".repeat(w) + "@|bold,cyan \u2502|@"));
-    out.println(Banner.amber(ansi, "  @|bold,cyan \u2570" + "\u2500".repeat(w) + "\u256f|@"));
+    Banner.emptyRow(out, ansi, w);
+    out.println(Banner.amber(ansi, Banner.bottomBorder(w)));
     out.println();
+  }
+
+  private static int contentWidth(int[] widths) {
+    return 2 + Arrays.stream(widths).sum() + COL_GAP * (widths.length - 1);
+  }
+
+  /** Takes a column at a time from the widest column until the row fits {@code room}. */
+  private static void narrow(int[] widths, int room) {
+    while (contentWidth(widths) > room) {
+      var widest = 0;
+      for (var i = 1; i < widths.length; i++) {
+        if (widths[i] > widths[widest]) {
+          widest = i;
+        }
+      }
+      if (widths[widest] <= 1) {
+        return;
+      }
+      widths[widest]--;
+    }
   }
 
   private String formatRow(List<String> cells, int[] widths) {
     var sb = new StringBuilder();
     for (var i = 0; i < widths.length; i++) {
-      var cell = i < cells.size() ? cells.get(i) : "";
+      var cell = Strings.fit(i < cells.size() ? cells.get(i) : "", widths[i]);
+      sb.append(cell);
       if (i < widths.length - 1) {
-        sb.append(String.format("%-" + widths[i] + "s", cell));
-        sb.append(" ".repeat(COL_GAP));
-      } else {
-        sb.append(cell);
+        sb.append(" ".repeat(widths[i] - Strings.columns(cell) + COL_GAP));
       }
     }
     return sb.toString();
