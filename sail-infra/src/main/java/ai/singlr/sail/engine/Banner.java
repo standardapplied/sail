@@ -224,35 +224,35 @@ public final class Banner {
 
   /** Prints the unsupported OS message. */
   public static void printUnsupported(HostDetector.HostInfo info, PrintStream out, Ansi ansi) {
-    out.println(
-        amber(ansi, "  @|bold,red \u2717 Unsupported operating system:|@ " + info.osPrettyName()));
-    out.println(amber(ansi, "    @|faint SAIL currently supports:|@ @|bold Ubuntu 24.04+|@"));
+    printLine(
+        out, ansi, "  @|bold,red \u2717 Unsupported operating system:|@ " + info.osPrettyName());
+    printLine(out, ansi, "    @|faint SAIL currently supports:|@ @|bold Ubuntu 24.04+|@");
   }
 
   /** Prints prerequisite check results — ✓ for present, ✗ for missing. */
   public static void printPrerequisites(
       PrerequisiteChecker.CheckResult result, PrintStream out, Ansi ansi) {
     out.println();
-    out.println(amber(ansi, "  @|bold Checking prerequisites...|@"));
+    printLine(out, ansi, "  @|bold Checking prerequisites...|@");
     for (var p : result.present()) {
-      out.println(
-          amber(
-              ansi,
-              "    @|green \u2713|@ "
-                  + String.format("%-12s", p.command())
-                  + "@|faint "
-                  + p.reason()
-                  + "|@"));
+      printLine(
+          out,
+          ansi,
+          "    @|green \u2713|@ "
+              + String.format("%-12s", p.command())
+              + "@|faint "
+              + p.reason()
+              + "|@");
     }
     for (var p : result.missing()) {
-      out.println(
-          amber(
-              ansi,
-              "    @|bold,red \u2717|@ "
-                  + String.format("%-12s", p.command())
-                  + "@|faint "
-                  + p.reason()
-                  + "|@"));
+      printLine(
+          out,
+          ansi,
+          "    @|bold,red \u2717|@ "
+              + String.format("%-12s", p.command())
+              + "@|faint "
+              + p.reason()
+              + "|@");
     }
     out.println();
   }
@@ -270,10 +270,10 @@ public final class Banner {
             .map(PrerequisiteChecker.Prerequisite::pkg)
             .collect(Collectors.joining(" "));
 
-    out.println(amber(ansi, "  @|bold,red Missing commands:|@ " + commands));
+    printLine(out, ansi, "  @|bold,red Missing commands:|@ " + commands);
     if (!packages.isEmpty()) {
-      out.println(
-          amber(ansi, "  @|faint Install with:|@ @|bold apt-get install -y " + packages + "|@"));
+      printLine(
+          out, ansi, "  @|faint Install with:|@ @|bold apt-get install -y " + packages + "|@");
     }
     out.println();
   }
@@ -500,7 +500,7 @@ public final class Banner {
   /** Prints the project creation success message with Zed connect hint. */
   public static void printProjectCreated(
       String name, OperatorCommand operator, PrintStream out, Ansi ansi) {
-    out.println(amber(ansi, "  @|bold,green \u2713 Project " + name + " created.|@"));
+    printLine(out, ansi, "  @|bold,green \u2713 Project " + name + " created.|@");
     printZedConnect(name, operator, out, ansi);
   }
 
@@ -521,24 +521,23 @@ public final class Banner {
       Ansi ansi) {
     var alias = projectSshAlias(name, boxHost);
     out.println();
-    out.println(amber(ansi, "    @|faint # Add to ~/.ssh/config on your Mac:|@"));
+    printLine(out, ansi, "    @|faint # Add to ~/.ssh/config on your Mac:|@");
     out.println();
-    out.println(amber(ansi, "    @|faint Host " + boxHost + "|@"));
-    out.println(amber(ansi, "    @|faint     HostName " + serverIp + "|@"));
-    out.println(amber(ansi, "    @|faint     User " + serverUser + "|@"));
-    out.println(amber(ansi, "    @|faint     IdentityFile " + identityFile + "|@"));
+    printLine(out, ansi, "    @|faint Host " + boxHost + "|@");
+    printLine(out, ansi, "    @|faint     HostName " + serverIp + "|@");
+    printLine(out, ansi, "    @|faint     User " + serverUser + "|@");
+    printLine(out, ansi, "    @|faint     IdentityFile " + identityFile + "|@");
     out.println();
-    out.println(amber(ansi, "    @|faint Host " + alias + "|@"));
-    out.println(amber(ansi, "    @|faint     HostName " + containerIp + "|@"));
-    out.println(amber(ansi, "    @|faint     User dev|@"));
-    out.println(amber(ansi, "    @|faint     ProxyJump " + boxHost + "|@"));
-    out.println(amber(ansi, "    @|faint     IdentityFile " + identityFile + "|@"));
+    printLine(out, ansi, "    @|faint Host " + alias + "|@");
+    printLine(out, ansi, "    @|faint     HostName " + containerIp + "|@");
+    printLine(out, ansi, "    @|faint     User dev|@");
+    printLine(out, ansi, "    @|faint     ProxyJump " + boxHost + "|@");
+    printLine(out, ansi, "    @|faint     IdentityFile " + identityFile + "|@");
     out.println();
-    out.println(
-        amber(ansi, "    @|bold \u2192 Zed:|@     zed ssh://dev@" + alias + "/home/dev/workspace"));
-    out.println(amber(ansi, "    @|bold \u2192 SSH:|@     ssh " + alias));
-    out.println(
-        amber(ansi, "    @|bold \u2192 Shell:|@   " + operator.sail("project shell " + name)));
+    printLine(
+        out, ansi, "    @|bold \u2192 Zed:|@     zed ssh://dev@" + alias + "/home/dev/workspace");
+    printLine(out, ansi, "    @|bold \u2192 SSH:|@     ssh " + alias);
+    printLine(out, ansi, "    @|bold \u2192 Shell:|@   " + operator.sail("project shell " + name));
   }
 
   /**
@@ -552,18 +551,18 @@ public final class Banner {
   /** Prints resume information when a prior incomplete provisioning run is detected. */
   public static void printResumeInfo(ProvisionState state, PrintStream out, Ansi ansi) {
     out.println();
-    out.println(amber(ansi, "  @|yellow Resuming incomplete provisioning|@"));
+    printLine(out, ansi, "  @|yellow Resuming incomplete provisioning|@");
     if (state.completedPhase() != null) {
-      out.println(amber(ansi, "    @|faint Last completed:|@ " + state.completedPhase()));
+      printLine(out, ansi, "    @|faint Last completed:|@ " + state.completedPhase());
     }
     if (state.error() != null) {
-      out.println(
-          amber(
-              ansi,
-              "    @|faint Prior failure:|@  "
-                  + state.error().failedPhase()
-                  + " \u2014 "
-                  + state.error().message()));
+      printLine(
+          out,
+          ansi,
+          "    @|faint Prior failure:|@  "
+              + state.error().failedPhase()
+              + " \u2014 "
+              + state.error().message());
     }
     out.println();
   }
@@ -571,10 +570,9 @@ public final class Banner {
   /** Prints the connect and shell hints after a container starts. */
   public static void printZedConnect(
       String name, OperatorCommand operator, PrintStream out, Ansi ansi) {
-    out.println(
-        amber(ansi, "    @|bold \u2192 Connect:|@ " + operator.sail("project connect " + name)));
-    out.println(
-        amber(ansi, "    @|bold \u2192 Shell:|@   " + operator.sail("project shell " + name)));
+    printLine(
+        out, ansi, "    @|bold \u2192 Connect:|@ " + operator.sail("project connect " + name));
+    printLine(out, ansi, "    @|bold \u2192 Shell:|@   " + operator.sail("project shell " + name));
   }
 
   /**
@@ -595,29 +593,29 @@ public final class Banner {
             .sorted()
             .map(p -> "-L " + p + ":localhost:" + p)
             .collect(Collectors.joining(" "));
-    out.println(
-        amber(
-            ansi,
-            "    @|bold \u2192 Ports:|@   ssh "
-                + tunnelArgs
-                + " "
-                + user
-                + "@"
-                + projectSshAlias(name, HostInfo.hostname())
-                + " -N"));
+    printLine(
+        out,
+        ansi,
+        "    @|bold \u2192 Ports:|@   ssh "
+            + tunnelArgs
+            + " "
+            + user
+            + "@"
+            + projectSshAlias(name, HostInfo.hostname())
+            + " -N");
   }
 
   /** Prints the agent auth tunnel hint: forwarding {@code port} for subscription-based login. */
   public static void printAgentAuthTunnel(String name, int port, PrintStream out, Ansi ansi) {
-    out.println(
-        amber(
-            ansi,
-            "    @|bold \u2192 Agent auth:|@ ssh -N -L "
-                + port
-                + ":localhost:"
-                + port
-                + " "
-                + projectSshAlias(name, HostInfo.hostname())));
+    printLine(
+        out,
+        ansi,
+        "    @|bold \u2192 Agent auth:|@ ssh -N -L "
+            + port
+            + ":localhost:"
+            + port
+            + " "
+            + projectSshAlias(name, HostInfo.hostname()));
   }
 
   /** Prints a container status line — green ✓ for running, faint ■ for stopped. */
@@ -626,14 +624,14 @@ public final class Banner {
     switch (state) {
       case ContainerState.Running r -> {
         var ip = r.ipv4() != null ? " (" + r.ipv4() + ")" : "";
-        out.println(amber(ansi, "  @|green \u2713|@ " + name + " is running" + ip));
+        printLine(out, ansi, "  @|green \u2713|@ " + name + " is running" + ip);
       }
       case ContainerState.Stopped ignored ->
-          out.println(amber(ansi, "  @|faint \u25a0 " + name + " is stopped|@"));
+          printLine(out, ansi, "  @|faint \u25a0 " + name + " is stopped|@");
       case ContainerState.NotCreated ignored ->
-          out.println(amber(ansi, "  @|faint \u25a0 " + name + " does not exist|@"));
+          printLine(out, ansi, "  @|faint \u25a0 " + name + " does not exist|@");
       case ContainerState.Error e ->
-          out.println(amber(ansi, "  @|bold,red \u2717|@ " + name + ": " + e.message()));
+          printLine(out, ansi, "  @|bold,red \u2717|@ " + name + ": " + e.message());
     }
   }
 
@@ -754,7 +752,7 @@ public final class Banner {
 
   /** Prints a success line for container destruction. */
   public static void printProjectDestroyed(String name, PrintStream out, Ansi ansi) {
-    out.println(amber(ansi, "  @|bold,green \u2713 Project " + name + " destroyed.|@"));
+    printLine(out, ansi, "  @|bold,green \u2713 Project " + name + " destroyed.|@");
   }
 
   /** Prints a bordered snapshot list table. */
@@ -774,15 +772,14 @@ public final class Banner {
   /** Prints a success line for snapshot creation. */
   public static void printSnapshotCreated(
       String containerName, String label, PrintStream out, Ansi ansi) {
-    out.println(amber(ansi, "  @|bold,green \u2713 Snapshot created:|@ " + label));
+    printLine(out, ansi, "  @|bold,green \u2713 Snapshot created:|@ " + label);
   }
 
   /** Prints a success line for snapshot restore. */
   public static void printSnapshotRestored(
       String containerName, String label, PrintStream out, Ansi ansi) {
-    out.println(
-        amber(
-            ansi, "  @|bold,green \u2713 Restored|@ " + containerName + " to snapshot: " + label));
+    printLine(
+        out, ansi, "  @|bold,green \u2713 Restored|@ " + containerName + " to snapshot: " + label);
   }
 
   /**
@@ -1025,13 +1022,13 @@ public final class Banner {
           .append(status.hostMemoryMb() / 1024)
           .append("GB");
     }
-    out.println(amber(ansi, sb.toString()));
-    out.println(
-        amber(
-            ansi,
-            "    @|faint Use '"
-                + operator.sail("project stop <project>")
-                + "' to stop projects and free resources.|@"));
+    printLine(out, ansi, sb.toString());
+    printLine(
+        out,
+        ansi,
+        "    @|faint Use '"
+            + operator.sail("project stop <project>")
+            + "' to stop projects and free resources.|@");
   }
 
   /** Prints agent session status with optional git activity and task progress. */
@@ -1046,59 +1043,51 @@ public final class Banner {
       Ansi ansi) {
     var statusStr = info.running() ? "Running" : "Stopped";
     var statusStyle = info.running() ? "green" : "faint";
-    out.println(
-        amber(
-            ansi,
-            "  @|bold Agent session for "
-                + name
-                + ":|@ @|"
-                + statusStyle
-                + " "
-                + statusStr
-                + "|@"));
-    out.println(amber(ansi, "    @|bold PID:|@        " + info.pid()));
+    printLine(
+        out,
+        ansi,
+        "  @|bold Agent session for " + name + ":|@ @|" + statusStyle + " " + statusStr + "|@");
+    printLine(out, ansi, "    @|bold PID:|@        " + info.pid());
     if (!info.task().isBlank()) {
-      out.println(amber(ansi, "    @|bold Task:|@       " + prettifyTask(info.task())));
+      printLine(out, ansi, "    @|bold Task:|@       " + prettifyTask(info.task()));
     }
     if (!info.startedAt().isBlank()) {
-      out.println(amber(ansi, "    @|bold Started:|@    " + formatTimestamp(info.startedAt())));
+      printLine(out, ansi, "    @|bold Started:|@    " + formatTimestamp(info.startedAt()));
       var elapsed = formatElapsed(info.startedAt(), DateTimeUtils.now());
       if (!elapsed.isEmpty()) {
-        out.println(amber(ansi, "    @|bold Elapsed:|@    " + elapsed));
+        printLine(out, ansi, "    @|bold Elapsed:|@    " + elapsed);
       }
     }
     if (!info.branch().isBlank()) {
-      out.println(amber(ansi, "    @|bold Branch:|@     " + info.branch()));
+      printLine(out, ansi, "    @|bold Branch:|@     " + info.branch());
     }
     if (commitCount > 0) {
-      out.println(amber(ansi, "    @|bold Commits:|@    " + commitCount + " since launch"));
+      printLine(out, ansi, "    @|bold Commits:|@    " + commitCount + " since launch");
     }
     if (taskCounts != null) {
       var total = taskCounts.values().stream().mapToInt(Integer::intValue).sum();
       var done = taskCounts.getOrDefault("done", 0);
       var inProgress = taskCounts.getOrDefault("in_progress", 0);
       var pending = taskCounts.getOrDefault("pending", 0);
-      out.println(
-          amber(
-              ansi,
-              "    @|bold Tasks:|@      "
-                  + done
-                  + "/"
-                  + total
-                  + " done, "
-                  + inProgress
-                  + " in_progress, "
-                  + pending
-                  + " pending"));
+      printLine(
+          out,
+          ansi,
+          "    @|bold Tasks:|@      "
+              + done
+              + "/"
+              + total
+              + " done, "
+              + inProgress
+              + " in_progress, "
+              + pending
+              + " pending");
     }
-    out.println(amber(ansi, "    @|bold Log:|@        " + info.logPath()));
+    printLine(out, ansi, "    @|bold Log:|@        " + info.logPath());
     if (info.running()) {
-      out.println(
-          amber(
-              ansi,
-              "    @|faint Tail output: "
-                  + operator.sail("agent log " + name + " --follow")
-                  + "|@"));
+      printLine(
+          out,
+          ansi,
+          "    @|faint Tail output: " + operator.sail("agent log " + name + " --follow") + "|@");
     }
   }
 
@@ -1121,16 +1110,16 @@ public final class Banner {
       OperatorCommand operator,
       PrintStream out,
       Ansi ansi) {
-    out.println(amber(ansi, "  @|green \u2713|@ Agent launched in background"));
+    printLine(out, ansi, "  @|green \u2713|@ Agent launched in background");
     if (task != null) {
-      out.println(amber(ansi, "    @|bold Task:|@    " + prettifyTask(task)));
+      printLine(out, ansi, "    @|bold Task:|@    " + prettifyTask(task));
     }
     if (Strings.isNotBlank(branch)) {
-      out.println(amber(ansi, "    @|bold Branch:|@  " + branch));
+      printLine(out, ansi, "    @|bold Branch:|@  " + branch);
     }
-    out.println(
-        amber(ansi, "    @|bold Log:|@     " + operator.sail("agent log " + name + " --follow")));
-    out.println(amber(ansi, "    @|bold Stop:|@    " + operator.sail("agent stop " + name)));
+    printLine(
+        out, ansi, "    @|bold Log:|@     " + operator.sail("agent log " + name + " --follow"));
+    printLine(out, ansi, "    @|bold Stop:|@    " + operator.sail("agent stop " + name));
   }
 
   /** Prints a list of other running projects (informational). */
@@ -1140,7 +1129,7 @@ public final class Banner {
       return;
     }
     out.println();
-    out.println(amber(ansi, "  @|faint Also running:|@"));
+    printLine(out, ansi, "  @|faint Also running:|@");
     for (var c : others) {
       var ip = c.state() instanceof ContainerState.Running r && r.ipv4() != null ? r.ipv4() : "";
       var res = "";
@@ -1149,7 +1138,7 @@ public final class Banner {
         var mem = c.limits().memory() != null ? c.limits().memory() : "";
         res = !cpu.isEmpty() && !mem.isEmpty() ? " (" + cpu + ", " + mem + ")" : "";
       }
-      out.println(amber(ansi, "    @|faint \u2022 " + c.name() + " " + ip + res + "|@"));
+      printLine(out, ansi, "    @|faint \u2022 " + c.name() + " " + ip + res + "|@");
     }
   }
 
@@ -1161,9 +1150,8 @@ public final class Banner {
       PrintStream out,
       Ansi ansi) {
     out.println();
-    out.println(amber(ansi, "  @|bold Agent Report \u2014 " + name + "|@"));
-    out.println(
-        amber(ansi, "  @|faint " + "\u2500".repeat(Math.max(20, 16 + name.length())) + "|@"));
+    printLine(out, ansi, "  @|bold Agent Report \u2014 " + name + "|@");
+    printLine(out, ansi, "  @|faint " + "\u2500".repeat(Math.max(20, 16 + name.length())) + "|@");
     out.println();
 
     var statusStyle =
@@ -1173,19 +1161,18 @@ public final class Banner {
           case "Rolled back" -> "red";
           default -> "faint";
         };
-    out.println(
-        amber(
-            ansi, "  @|bold Session:|@    @|" + statusStyle + " " + report.sessionStatus() + "|@"));
+    printLine(
+        out, ansi, "  @|bold Session:|@    @|" + statusStyle + " " + report.sessionStatus() + "|@");
     if (report.duration() != null) {
-      out.println(amber(ansi, "  @|bold Duration:|@   " + report.duration()));
+      printLine(out, ansi, "  @|bold Duration:|@   " + report.duration());
     }
     if (report.branch() != null && !report.branch().isBlank()) {
-      out.println(amber(ansi, "  @|bold Branch:|@     " + report.branch()));
+      printLine(out, ansi, "  @|bold Branch:|@     " + report.branch());
     }
     out.println();
 
     if (!report.specs().isEmpty()) {
-      out.println(amber(ansi, "  @|bold Specs:|@"));
+      printLine(out, ansi, "  @|bold Specs:|@");
       for (var spec : report.specs()) {
         var icon =
             switch (spec.status()) {
@@ -1197,7 +1184,7 @@ public final class Banner {
               default -> "@|faint \u25cb|@";
             };
         var idPad = String.format("%-16s", spec.id());
-        out.println(amber(ansi, "    " + icon + " " + idPad + spec.title()));
+        printLine(out, ansi, "    " + icon + " " + idPad + spec.title());
         if (!spec.dependsOn().isEmpty() && spec.status() == SpecStatus.PENDING) {
           var doneIds =
               report.specs().stream()
@@ -1206,68 +1193,66 @@ public final class Banner {
                   .collect(Collectors.toSet());
           var blocked = spec.dependsOn().stream().filter(d -> !doneIds.contains(d)).toList();
           if (!blocked.isEmpty()) {
-            out.println(
-                amber(
-                    ansi,
-                    "    @|faint "
-                        + " ".repeat(18)
-                        + "(blocked by: "
-                        + String.join(", ", blocked)
-                        + ")|@"));
+            printLine(
+                out,
+                ansi,
+                "    @|faint "
+                    + " ".repeat(18)
+                    + "(blocked by: "
+                    + String.join(", ", blocked)
+                    + ")|@");
           }
         }
       }
       out.println();
     }
 
-    out.println(amber(ansi, "  @|bold Git Activity:|@"));
+    printLine(out, ansi, "  @|bold Git Activity:|@");
     if (report.commitCount() > 0) {
       var commitStr = "    " + report.commitCount() + " commits since launch";
       if (report.lastCommitMinutesAgo() >= 0) {
         commitStr += ", last commit " + report.lastCommitMinutesAgo() + "m ago";
       }
-      out.println(amber(ansi, commitStr));
+      printLine(out, ansi, commitStr);
     } else {
-      out.println(amber(ansi, "    @|faint No commits found.|@"));
+      printLine(out, ansi, "    @|faint No commits found.|@");
     }
     out.println();
 
     if (report.guardrailTriggered()) {
-      out.println(
-          amber(
-              ansi, "  @|bold,yellow Guardrails:|@  Triggered (" + report.guardrailReason() + ")"));
-      out.println(amber(ansi, "    @|faint Action: " + report.guardrailAction() + "|@"));
+      printLine(
+          out, ansi, "  @|bold,yellow Guardrails:|@  Triggered (" + report.guardrailReason() + ")");
+      printLine(out, ansi, "    @|faint Action: " + report.guardrailAction() + "|@");
     } else {
-      out.println(amber(ansi, "  @|bold Guardrails:|@  @|green Not triggered|@"));
+      printLine(out, ansi, "  @|bold Guardrails:|@  @|green Not triggered|@");
     }
 
     if (report.rolledBack()) {
-      out.println(
-          amber(
-              ansi, "  @|bold,red Rollback:|@   Snapshot restored: " + report.rollbackSnapshot()));
+      printLine(
+          out, ansi, "  @|bold,red Rollback:|@   Snapshot restored: " + report.rollbackSnapshot());
     }
     out.println();
 
-    out.println(amber(ansi, "  @|bold Next Steps:|@"));
-    out.println(
-        amber(
-            ansi,
-            "    "
-                + operator.sail("agent log " + name + " --tail 50")
-                + "    @|faint # see agent output|@"));
+    printLine(out, ansi, "  @|bold Next Steps:|@");
+    printLine(
+        out,
+        ansi,
+        "    "
+            + operator.sail("agent log " + name + " --tail 50")
+            + "    @|faint # see agent output|@");
     var remaining =
         report.specs().stream()
             .filter(s -> s.status() == SpecStatus.PENDING || s.status() == SpecStatus.IN_PROGRESS)
             .count();
     if (remaining > 0) {
-      out.println(
-          amber(
-              ansi,
-              "    "
-                  + operator.sail("spec dispatch --project " + name)
-                  + "   @|faint # continue "
-                  + remaining
-                  + " remaining specs|@"));
+      printLine(
+          out,
+          ansi,
+          "    "
+              + operator.sail("spec dispatch --project " + name)
+              + "   @|faint # continue "
+              + remaining
+              + " remaining specs|@");
     }
     out.println();
   }
@@ -1332,6 +1317,11 @@ public final class Banner {
         ansi,
         width,
         "  @|bold,cyan \u2570" + "\u2500".repeat(Math.max(0, width)) + "\u256f|@");
+  }
+
+  /** Prints a line outside any box, cut where it passes the terminal's edge. */
+  private static void printLine(PrintStream out, Ansi ansi, String markup) {
+    out.println(Strings.fit(amber(ansi, markup), columns()));
   }
 
   /**

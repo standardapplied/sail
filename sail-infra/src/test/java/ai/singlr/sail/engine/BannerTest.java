@@ -833,6 +833,34 @@ class BannerTest {
   }
 
   @Test
+  void aLaunchLineLongerThanTheTerminalIsCutAtItsEdge() {
+    var branch = "agent/" + "b".repeat(100);
+    for (var columns : List.of(Banner.DEFAULT_COLUMNS, 32, 7, 1)) {
+      var lines =
+          printedAt(
+              columns,
+              out ->
+                  Banner.printAgentLaunched(
+                      "acme", "t".repeat(200), branch, OperatorCommand.SUDO, out, Ansi.OFF));
+
+      assertTrue(
+          widths(lines).stream().allMatch(width -> width <= columns), String.join("\n", lines));
+    }
+    var colored =
+        printedAt(
+            Banner.DEFAULT_COLUMNS,
+            out ->
+                Banner.printAgentLaunched(
+                    "acme", null, branch, OperatorCommand.SUDO, out, Ansi.ON));
+    assertEquals(
+        List.of("    Branch:  agent/" + "b".repeat(80) + "…"),
+        colored.stream()
+            .map(line -> line.replaceAll("\033\\[[0-9;]*m", ""))
+            .filter(line -> line.contains("Branch:"))
+            .toList());
+  }
+
+  @Test
   void aBoxInATerminalNarrowerThanItsRowsSpansTheTerminalExactly() {
     for (var columns : List.of(32, 16, 8, 7, 3, 1)) {
       var detection =
