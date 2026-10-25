@@ -201,6 +201,22 @@ class CliCommandTest {
   }
 
   @Test
+  void aCauseWithNoMessageIsNamedByItsType() {
+    assertThrows(
+        CliCommand.Printed.class,
+        () ->
+            CliCommand.run(
+                () -> {
+                  throw new ApiException(
+                      ErrorCode.COMMAND_FAILED, "A sail system command failed", new IOException());
+                }));
+
+    assertEquals(
+        "  ✗ A sail system command failed: IOException\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
   void theTopLevelHandlerPrintsNothingThisRunAlreadyPrinted() {
     var line = new CommandLine(new TestCommand());
     var err = new StringWriter();
