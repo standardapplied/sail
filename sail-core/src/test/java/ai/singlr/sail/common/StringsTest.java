@@ -89,6 +89,45 @@ class StringsTest {
   }
 
   @Test
+  void columnsFollowsUnicodeEastAsianWidthToTheEdgesOfItsRanges() {
+    assertEquals(2, Strings.columns("\uD83D\uDE80"));
+    assertEquals(2, Strings.columns("\u231A"));
+    assertEquals(2, Strings.columns("\u2705"));
+    assertEquals(2, Strings.columns("\uD83E\uDEA9"));
+    assertEquals(2, Strings.columns("\uFF21"));
+    assertEquals(2, Strings.columns("\u1100"));
+    assertEquals(2, Strings.columns("\u115F"));
+    assertEquals(2, Strings.columns("\uD8BF\uDFFD"));
+    assertEquals(1, Strings.columns("\u10FF"));
+    assertEquals(1, Strings.columns("\u2713"));
+    assertEquals(1, Strings.columns("\u2588"));
+    assertEquals(1, Strings.columns("\uFF71"));
+    assertEquals(1, Strings.columns("\u303F"));
+    assertEquals(1, Strings.columns("\uD8BF\uDFFE"));
+  }
+
+  @Test
+  void columnsCountsAJoiningHangulJamoAndAnInvisibleFormatAsNoneAndAVisibleFormatAsOne() {
+    assertEquals(2, Strings.columns("\u1100\u1161\u11A8"));
+    assertEquals(0, Strings.columns("\uD7B0\uD7FF"));
+    assertEquals(0, Strings.columns("\u200B\u2060"));
+    assertEquals(1, Strings.columns("\u00AD"));
+    assertEquals(1, Strings.columns("\u0600"));
+    assertEquals(1, Strings.columns("\uD804\uDCBD"));
+  }
+
+  @Test
+  void aStyleEscapeTakesNoColumnsAndACutStyledTextEndsWithAReset() {
+    var styled = "\033[1;36mabcdef\033[0m";
+
+    assertEquals(6, Strings.columns(styled));
+    assertEquals(styled, Strings.fit(styled, 6));
+    assertEquals("\033[1;36mabc…\033[0m", Strings.fit(styled, 4));
+    assertEquals("\033[1;36m…\033[0m", Strings.fit(styled, 1));
+    assertEquals("ab…", Strings.fit("abcdef", 3));
+  }
+
+  @Test
   void shellWordLeavesASafeWordBareAndQuotesAnyOtherToPasteBack() {
     assertEquals("--title", Strings.shellWord("--title"));
     assertEquals("/var/lib/sail=a:b.c", Strings.shellWord("/var/lib/sail=a:b.c"));

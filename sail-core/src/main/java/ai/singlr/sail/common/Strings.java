@@ -5,12 +5,18 @@
 
 package ai.singlr.sail.common;
 
+import java.util.regex.Pattern;
+
 /**
  * Null-safe string predicates. All application code checks emptiness/blankness through this seam
  * rather than inlining {@code s == null || s.isBlank()}, so the intent reads consistently and a
  * null is never dereferenced.
  */
 public final class Strings {
+
+  private static final Pattern ESCAPE = Pattern.compile("\033\\[[0-?]*[ -/]*[@-~]");
+
+  private static final String RESET = "\033[0m";
 
   private Strings() {}
 
@@ -53,7 +59,9 @@ public final class Strings {
 
   /**
    * {@code text} itself when it spans at most {@code width} terminal columns, otherwise its
-   * beginning ending in "…", at most {@code width} columns in all; nothing when there is no room.
+   * beginning ending in "…", at most {@code width} columns in all; nothing when there is no room. A
+   * terminal's style escapes take no columns and are kept up to the cut, and a cut styled text ends
+   * with a reset so its style does not run on past it.
    */
   public static String fit(String text, int width) {
     if (columns(text) <= width) {
@@ -62,47 +70,32 @@ public final class Strings {
     if (width < 1) {
       return "";
     }
+    var escape = ESCAPE.matcher(text);
+    var styled = false;
     var end = 0;
     var used = 0;
     while (end < text.length()) {
-      var size = columns(text.codePointAt(end));
+      if (escape.region(end, text.length()).lookingAt()) {
+        styled = true;
+        end = escape.end();
+        continue;
+      }
+      var size = TerminalColumns.of(text.codePointAt(end));
       if (used + size > width - 1) {
         break;
       }
       used += size;
       end = text.offsetByCodePoints(end, 1);
     }
-    return text.substring(0, end) + "…";
+    return text.substring(0, end) + "…" + (styled ? RESET : "");
   }
 
-  /** The terminal columns {@code text} spans: two for each wide character, none for a mark. */
+  /**
+   * The terminal columns {@code text} spans: two for each wide character, none for a mark or a
+   * style escape.
+   */
   public static int columns(String text) {
-    return text.codePoints().map(Strings::columns).sum();
-  }
-
-  private static int columns(int codePoint) {
-    return switch (Character.getType(codePoint)) {
-      case Character.NON_SPACING_MARK, Character.ENCLOSING_MARK, Character.FORMAT -> 0;
-      default -> isWide(codePoint) ? 2 : 1;
-    };
-  }
-
-  /** East Asian wide and fullwidth characters and emoji, after Markus Kuhn's wcwidth ranges. */
-  private static boolean isWide(int c) {
-    return (c >= 0x1100 && c <= 0x115F)
-        || (c >= 0x2E80 && c <= 0x303E)
-        || (c >= 0x3041 && c <= 0x33FF)
-        || (c >= 0x3400 && c <= 0x4DBF)
-        || (c >= 0x4E00 && c <= 0x9FFF)
-        || (c >= 0xA000 && c <= 0xA4CF)
-        || (c >= 0xAC00 && c <= 0xD7A3)
-        || (c >= 0xF900 && c <= 0xFAFF)
-        || (c >= 0xFE30 && c <= 0xFE4F)
-        || (c >= 0xFF00 && c <= 0xFF60)
-        || (c >= 0xFFE0 && c <= 0xFFE6)
-        || (c >= 0x1F300 && c <= 0x1F64F)
-        || (c >= 0x1F900 && c <= 0x1F9FF)
-        || (c >= 0x20000 && c <= 0x3FFFD);
+    return ESCAPE.matcher(text).replaceAll("").codePoints().map(TerminalColumns::of).sum();
   }
 
   /** {@code word} as one shell word to paste back: bare when that is safe, else single-quoted. */

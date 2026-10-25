@@ -716,7 +716,7 @@ class BannerTest {
             "spec_id", "s".repeat(80),
             "started_at", "2026-10-25T00:00:00Z");
 
-    for (var columns : List.of(Banner.DEFAULT_COLUMNS, 60, 32, 12)) {
+    for (var columns : List.of(Banner.DEFAULT_COLUMNS, 60, 32, 12, 7, 3, 1)) {
       var lines =
           printedAt(
               columns,
@@ -768,8 +768,73 @@ class BannerTest {
   }
 
   @Test
+  void anEmojiTakesTwoOfTheColumnsARowFits() {
+    var config =
+        new SailYaml(
+            "acme",
+            "\uD83D\uDE80".repeat(100),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
+
+    var lines =
+        printedAt(
+            Banner.DEFAULT_COLUMNS,
+            out ->
+                Banner.printProjectConfig(config, new ContainerState.NotCreated(), out, Ansi.OFF));
+
+    assertEquals(List.of(Banner.DEFAULT_COLUMNS), widths(lines), String.join("\n", lines));
+    assertEquals(
+        List.of("  │  Description: " + "\uD83D\uDE80".repeat(40) + "…│"),
+        lines.stream().filter(line -> line.contains("Description:")).toList());
+  }
+
+  @Test
+  void theBrandingAboveAStatusBoxFitsTheTerminalToo() {
+    var lines =
+        printedAt(
+            32,
+            out -> {
+              Banner.printBranding(out, Ansi.OFF);
+              Banner.printHostStatus(
+                  SAMPLE_HOST_YAML,
+                  "6.22",
+                  null,
+                  SUPPORTED,
+                  null,
+                  null,
+                  "unavailable (incus list failed)",
+                  out,
+                  Ansi.OFF);
+            });
+
+    assertEquals(List.of(32), widths(lines), String.join("\n", lines));
+    assertTrue(lines.contains("  Isolated dev environments for…"), String.join("\n", lines));
+    assertTrue(lines.contains("  https://github.com/standardap…"), String.join("\n", lines));
+  }
+
+  @Test
+  void aColoredBoxInATerminalNarrowerThanItsBordersIsCutAndReset() {
+    var lines =
+        printedAt(3, out -> Banner.printHostDetection(SUPPORTED, out, Ansi.ON)).stream()
+            .filter(line -> !line.isBlank())
+            .toList();
+
+    assertEquals(List.of(3), widths(lines), String.join("\n", lines));
+    assertTrue(
+        lines.stream().allMatch(line -> line.endsWith("…\033[0m")), String.join("\n", lines));
+  }
+
+  @Test
   void aBoxInATerminalNarrowerThanItsRowsSpansTheTerminalExactly() {
-    for (var columns : List.of(32, 16, 8)) {
+    for (var columns : List.of(32, 16, 8, 7, 3, 1)) {
       var detection =
           printedAt(columns, out -> Banner.printHostDetection(SUPPORTED, out, Ansi.OFF));
       var status =
@@ -804,8 +869,16 @@ class BannerTest {
     return out.toString(StandardCharsets.UTF_8).lines().filter(l -> !l.isEmpty()).toList();
   }
 
+  /**
+   * The columns each line spans, measured apart from {@link Strings#columns}: escapes dropped, and
+   * the only wide characters these tests print, 界 and 🚀, counted twice.
+   */
   private static List<Integer> widths(List<String> lines) {
-    return lines.stream().map(Strings::columns).distinct().toList();
+    return lines.stream()
+        .map(line -> line.replaceAll("\033\\[[0-9;]*m", ""))
+        .map(line -> line.codePoints().map(c -> c == '界' || c == 0x1F680 ? 2 : 1).sum())
+        .distinct()
+        .toList();
   }
 
   @Test

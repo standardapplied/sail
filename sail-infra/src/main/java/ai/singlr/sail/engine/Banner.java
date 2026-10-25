@@ -51,8 +51,6 @@ public final class Banner {
    */
   static final ScopedValue<Integer> COLUMNS = ScopedValue.newInstance();
 
-  private static final int NARROWEST_BOX = 4;
-
   /** What a row's status indicator takes at its end: a space, the indicator and three spaces. */
   private static final int INDICATOR_COLUMNS = 5;
 
@@ -65,7 +63,14 @@ public final class Banner {
   private static final String CYAN_BOLD = "\033[1;36m";
   private static final String DIM = "\033[2m";
   private static final String RESET = "\033[0m";
-  private static final int ANIMATION_WIDTH = 64;
+  private static final List<String> WORDMARK =
+      List.of(
+          "     /\\      ███████╗  █████╗  ██╗ ██╗",
+          "    /##\\     ██╔════╝ ██╔══██╗ ██║ ██║",
+          "   /####\\    ███████╗ ███████║ ██║ ██║",
+          "  /##/\\##\\   ╚════██║ ██╔══██║ ██║ ██║",
+          " /##/  \\##\\  ███████║ ██║  ██║ ██║ ███████╗",
+          "/__/    \\__\\ ╚══════╝ ╚═╝  ╚═╝ ╚═╝ ╚══════╝");
 
   /**
    * Replaces picocli's bold-cyan ANSI escape with the SAIL brand color for consistent borders.
@@ -79,24 +84,24 @@ public final class Banner {
     return result;
   }
 
-  /** Prints the SAIL ASCII wordmark and version. */
+  /** Prints the SAIL ASCII wordmark and version, each line cut where it passes the terminal. */
   public static void printBranding(PrintStream out, Ansi ansi) {
-    printIntroAnimation(out, ansi);
+    var width = columns();
+    printIntroAnimation(out, ansi, width);
     var useColor = ansi != Ansi.OFF;
     var a = useColor ? BRAND : "";
     var d = useColor ? DIM : "";
     var r = useColor ? RESET : "";
     out.println();
-    out.println("  " + a + "     /\\      ███████╗  █████╗  ██╗ ██╗" + r);
-    out.println("  " + a + "    /##\\     ██╔════╝ ██╔══██╗ ██║ ██║" + r);
-    out.println("  " + a + "   /####\\    ███████╗ ███████║ ██║ ██║" + r);
-    out.println("  " + a + "  /##/\\##\\   ╚════██║ ██╔══██║ ██║ ██║" + r);
-    out.println("  " + a + " /##/  \\##\\  ███████║ ██║  ██║ ██║ ███████╗" + r);
-    out.println("  " + a + "/__/    \\__\\ ╚══════╝ ╚═╝  ╚═╝ ╚═╝ ╚══════╝" + r);
+    for (var art : WORDMARK) {
+      out.println(Strings.fit("  " + a + art + r, width));
+    }
     out.println();
     out.println(
-        "  " + d + "Isolated dev environments for AI agents  ·  v" + SailVersion.version() + r);
-    out.println("  " + d + "https://github.com/standardapplied/sail" + r);
+        Strings.fit(
+            "  " + d + "Isolated dev environments for AI agents  ·  v" + SailVersion.version() + r,
+            width));
+    out.println(Strings.fit("  " + d + "https://github.com/standardapplied/sail" + r, width));
   }
 
   static boolean shouldAnimateBranding(
@@ -109,7 +114,7 @@ public final class Banner {
         && !"dumb".equalsIgnoreCase(env.get("TERM"));
   }
 
-  private static void printIntroAnimation(PrintStream out, Ansi ansi) {
+  private static void printIntroAnimation(PrintStream out, Ansi ansi, int width) {
     if (!shouldAnimateBranding(ansi, System.getenv(), () -> System.console() != null)) {
       return;
     }
@@ -124,11 +129,11 @@ public final class Banner {
     var color = useColor ? BRAND : "";
     var reset = useColor ? RESET : "";
     for (var frame : frames) {
-      out.print("\r  " + color + frame + reset);
+      out.print("\r" + Strings.fit("  " + color + frame + reset, width - 1));
       out.flush();
       sleepAnimationFrame();
     }
-    out.print("\r" + " ".repeat(ANIMATION_WIDTH) + "\r");
+    out.print("\r" + " ".repeat(Math.max(0, width - 1)) + "\r");
     out.flush();
   }
 
@@ -168,7 +173,7 @@ public final class Banner {
 
     out.println();
 
-    out.println(amber(ansi, topBorder(w, " Host Detection ")));
+    topBorder(out, ansi, w, " Host Detection ");
 
     emptyRow(out, ansi, w);
     labelRow(out, ansi, w, "Hostname:", host, null, null);
@@ -178,12 +183,11 @@ public final class Banner {
     emptyRow(out, ansi, w);
 
     var support = Strings.fit(supportText, w - 2);
-    out.println(
-        amber(ansi, boxLine(w, "  @|faint " + support + "|@", 2 + Strings.columns(support))));
+    boxLine(out, ansi, w, "  @|faint " + support + "|@", 2 + Strings.columns(support));
 
     emptyRow(out, ansi, w);
 
-    out.println(amber(ansi, bottomBorder(w)));
+    bottomBorder(out, ansi, w);
     out.println();
   }
 
@@ -304,7 +308,7 @@ public final class Banner {
     w = boxWidth(w);
 
     out.println();
-    out.println(amber(ansi, topBorder(w, " Project ")));
+    topBorder(out, ansi, w, " Project ");
 
     emptyRow(out, ansi, w);
     labelRow(out, ansi, w, "Name:", config.name(), null, null);
@@ -334,7 +338,7 @@ public final class Banner {
     }
     emptyRow(out, ansi, w);
 
-    out.println(amber(ansi, bottomBorder(w)));
+    bottomBorder(out, ansi, w);
     out.println();
   }
 
@@ -400,7 +404,7 @@ public final class Banner {
     w = boxWidth(w);
 
     out.println();
-    out.println(amber(ansi, topBorder(w, " Project: " + config.name() + " ")));
+    topBorder(out, ansi, w, " Project: " + config.name() + " ");
 
     emptyRow(out, ansi, w);
     labelRow(out, ansi, w, "Name:", config.name(), null, null);
@@ -489,7 +493,7 @@ public final class Banner {
       emptyRow(out, ansi, w);
     }
 
-    out.println(amber(ansi, bottomBorder(w)));
+    bottomBorder(out, ansi, w);
     out.println();
   }
 
@@ -843,7 +847,7 @@ public final class Banner {
     w = boxWidth(w);
 
     out.println();
-    out.println(amber(ansi, topBorder(w, " Host Status ")));
+    topBorder(out, ansi, w, " Host Status ");
 
     emptyRow(out, ansi, w);
     labelRow(out, ansi, w, "Hostname:", hostname, null, null);
@@ -884,7 +888,7 @@ public final class Banner {
     labelRow(out, ansi, w, "Containers:", containers, null, null);
     emptyRow(out, ansi, w);
 
-    out.println(amber(ansi, bottomBorder(w)));
+    bottomBorder(out, ansi, w);
     out.println();
   }
 
@@ -1288,43 +1292,63 @@ public final class Banner {
     var head = Strings.fit(label, room);
     var gap = " ".repeat(Math.max(1, LABEL_COL - label.length()));
     var tail = Strings.fit(gap + value, room - Strings.columns(head));
-    var pad = " ".repeat(room - Strings.columns(head) - Strings.columns(tail));
+    var pad = " ".repeat(Math.max(0, room - Strings.columns(head) - Strings.columns(tail)));
     var mark = marked ? " @|" + style + " " + indicator + "|@   " : "";
-    out.println(amber(ansi, boxLine(width, "  @|bold " + head + "|@" + tail + pad + mark, width)));
+    boxLine(out, ansi, width, "  @|bold " + head + "|@" + tail + pad + mark, width);
   }
 
   static void emptyRow(PrintStream out, Ansi ansi, int width) {
-    out.println(amber(ansi, boxLine(width, "", 0)));
+    boxLine(out, ansi, width, "", 0);
   }
 
   /** A box's line: {@code markup}, which spans {@code shown} columns, padded to {@code width}. */
-  static String boxLine(int width, String markup, int shown) {
-    return "  @|bold,cyan \u2502|@"
-        + markup
-        + " ".repeat(Math.max(0, width - shown))
-        + "@|bold,cyan \u2502|@";
+  static void boxLine(PrintStream out, Ansi ansi, int width, String markup, int shown) {
+    printBoxed(
+        out,
+        ansi,
+        width,
+        "  @|bold,cyan \u2502|@"
+            + markup
+            + " ".repeat(Math.max(0, width - shown))
+            + "@|bold,cyan \u2502|@");
   }
 
   /** A box's top border, {@code width} wide inside, naming {@code title} or as much as fits. */
-  static String topBorder(int width, String title) {
+  static void topBorder(PrintStream out, Ansi ansi, int width, String title) {
     var name = Strings.fit(title, width - 2);
-    return "  @|bold,cyan \u256d\u2500"
-        + name
-        + "\u2500".repeat(width - 1 - Strings.columns(name))
-        + "\u256e|@";
+    printBoxed(
+        out,
+        ansi,
+        width,
+        "  @|bold,cyan \u256d\u2500"
+            + name
+            + "\u2500".repeat(Math.max(0, width - 1 - Strings.columns(name)))
+            + "\u256e|@");
   }
 
-  static String bottomBorder(int width) {
-    return "  @|bold,cyan \u2570" + "\u2500".repeat(width) + "\u256f|@";
+  static void bottomBorder(PrintStream out, Ansi ansi, int width) {
+    printBoxed(
+        out,
+        ansi,
+        width,
+        "  @|bold,cyan \u2570" + "\u2500".repeat(Math.max(0, width)) + "\u256f|@");
+  }
+
+  /**
+   * Prints a line of a box {@code width} wide inside, cut where it passes the box's edge: a box
+   * narrowed below what its indent, borders and text need, in a terminal only a few columns wide,
+   * prints as much of each line as the terminal holds.
+   */
+  private static void printBoxed(PrintStream out, Ansi ansi, int width, String markup) {
+    out.println(Strings.fit(amber(ansi, markup), width + BOX_EDGES));
   }
 
   /**
    * The inner width of a box whose widest row needs {@code natural}: that, unless the terminal is
-   * narrower, when the box spans the terminal and its rows cut what overflows. No box is narrower
-   * than {@link #NARROWEST_BOX}: below it there is no room for a row's indent and a column of text.
+   * narrower, when the box spans the terminal and its rows cut what overflows.
    */
   static int boxWidth(int natural) {
-    return Math.max(NARROWEST_BOX, Math.min(natural, columns() - BOX_EDGES));
+    return Math.min(natural, columns() - BOX_EDGES);
   }
 
   /**

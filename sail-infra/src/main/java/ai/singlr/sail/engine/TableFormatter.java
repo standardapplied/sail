@@ -49,24 +49,22 @@ final class TableFormatter {
     narrow(widths, w - 1);
 
     out.println();
-    out.println(Banner.amber(ansi, Banner.topBorder(w, title)));
+    Banner.topBorder(out, ansi, w, title);
     Banner.emptyRow(out, ansi, w);
 
     var header = Strings.fit(formatRow(headers, widths), w - 2);
-    out.println(
-        Banner.amber(
-            ansi, Banner.boxLine(w, "  @|bold " + header + "|@", 2 + Strings.columns(header))));
+    Banner.boxLine(out, ansi, w, "  @|bold " + header + "|@", 2 + Strings.columns(header));
 
-    var sep = "\u2500".repeat(w - 4);
-    out.println(Banner.amber(ansi, Banner.boxLine(w, "  @|faint " + sep + "|@  ", w)));
+    var sep = "\u2500".repeat(Math.max(0, w - 4));
+    Banner.boxLine(out, ansi, w, "  @|faint " + sep + "|@  ", w);
 
     for (var row : rows) {
       var line = Strings.fit(formatRow(row, widths), w - 2);
-      out.println(Banner.amber(ansi, Banner.boxLine(w, "  " + line, 2 + Strings.columns(line))));
+      Banner.boxLine(out, ansi, w, "  " + line, 2 + Strings.columns(line));
     }
 
     Banner.emptyRow(out, ansi, w);
-    out.println(Banner.amber(ansi, Banner.bottomBorder(w)));
+    Banner.bottomBorder(out, ansi, w);
     out.println();
   }
 
