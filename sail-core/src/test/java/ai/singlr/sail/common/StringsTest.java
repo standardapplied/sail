@@ -79,6 +79,13 @@ class StringsTest {
   }
 
   @Test
+  void fitMakesEveryControlCharacterButAnEscapeASpace() {
+    assertEquals("a b c d e", Strings.fit("a\tb\nc\rd\u0007e", 80));
+    assertEquals("a b…", Strings.fit("a\tb\tc\td", 4));
+    assertEquals("\033[1ma b\033[0m", Strings.fit("\033[1ma\tb\033[0m", 80));
+  }
+
+  @Test
   void columnsCountsWideCharactersTwiceAndMarksNotAtAll() {
     assertEquals(3, Strings.columns("abc"));
     assertEquals(4, Strings.columns("界가"));

@@ -16,6 +16,8 @@ public final class Strings {
 
   private static final Pattern ESCAPE = Pattern.compile("\033\\[[0-?]*[ -/]*[@-~]");
 
+  private static final Pattern CONTROL = Pattern.compile("[\\p{Cc}&&[^\033]]");
+
   private static final String RESET = "\033[0m";
 
   private Strings() {}
@@ -58,36 +60,38 @@ public final class Strings {
   }
 
   /**
-   * {@code text} itself when it spans at most {@code width} terminal columns, otherwise its
+   * {@code text} as one line when it spans at most {@code width} terminal columns, otherwise its
    * beginning ending in "…", at most {@code width} columns in all; nothing when there is no room. A
    * terminal's style escapes take no columns and are kept up to the cut, and a cut styled text ends
-   * with a reset so its style does not run on past it.
+   * with a reset so its style does not run on past it. It is one line: a tab, newline or other
+   * control character, which a terminal moves its cursor on rather than draws, becomes a space.
    */
   public static String fit(String text, int width) {
-    if (columns(text) <= width) {
-      return text;
+    var line = CONTROL.matcher(text).replaceAll(" ");
+    if (columns(line) <= width) {
+      return line;
     }
     if (width < 1) {
       return "";
     }
-    var escape = ESCAPE.matcher(text);
+    var escape = ESCAPE.matcher(line);
     var styled = false;
     var end = 0;
     var used = 0;
-    while (end < text.length()) {
-      if (escape.region(end, text.length()).lookingAt()) {
+    while (end < line.length()) {
+      if (escape.region(end, line.length()).lookingAt()) {
         styled = true;
         end = escape.end();
         continue;
       }
-      var size = TerminalColumns.of(text.codePointAt(end));
+      var size = TerminalColumns.of(line.codePointAt(end));
       if (used + size > width - 1) {
         break;
       }
       used += size;
-      end = text.offsetByCodePoints(end, 1);
+      end = line.offsetByCodePoints(end, 1);
     }
-    return text.substring(0, end) + "…" + (styled ? RESET : "");
+    return line.substring(0, end) + "…" + (styled ? RESET : "");
   }
 
   /**

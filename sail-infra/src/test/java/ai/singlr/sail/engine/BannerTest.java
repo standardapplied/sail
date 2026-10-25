@@ -797,6 +797,35 @@ class BannerTest {
   }
 
   @Test
+  void aTabOrLineBreakInAValueIsASpaceTheRowFits() {
+    var config =
+        new SailYaml(
+            "acme",
+            "a\tb\nc\r".repeat(30),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null);
+
+    var lines =
+        printedAt(
+            Banner.DEFAULT_COLUMNS,
+            out ->
+                Banner.printProjectConfig(config, new ContainerState.NotCreated(), out, Ansi.OFF));
+
+    assertEquals(List.of(Banner.DEFAULT_COLUMNS), widths(lines), String.join("\n", lines));
+    assertEquals(
+        List.of("  │  Description: " + "a b c ".repeat(13) + "a …│"),
+        lines.stream().filter(line -> line.contains("Description:")).toList());
+  }
+
+  @Test
   void theBrandingAboveAStatusBoxFitsTheTerminalToo() {
     var lines =
         printedAt(
@@ -899,14 +928,20 @@ class BannerTest {
 
   /**
    * The columns each line spans, measured apart from {@link Strings#columns}: escapes dropped, and
-   * the only wide characters these tests print, 界 and 🚀, counted twice.
+   * the only wide characters these tests print, 界 and 🚀, counted twice, and a tab taken to the
+   * next of a terminal's eight-column tab stops.
    */
   private static List<Integer> widths(List<String> lines) {
     return lines.stream()
         .map(line -> line.replaceAll("\033\\[[0-9;]*m", ""))
-        .map(line -> line.codePoints().map(c -> c == '界' || c == 0x1F680 ? 2 : 1).sum())
+        .map(BannerTest::spanned)
         .distinct()
         .toList();
+  }
+
+  private static int spanned(String line) {
+    return line.codePoints()
+        .reduce(0, (at, c) -> c == '\t' ? at / 8 * 8 + 8 : at + (c == '界' || c == 0x1F680 ? 2 : 1));
   }
 
   @Test
