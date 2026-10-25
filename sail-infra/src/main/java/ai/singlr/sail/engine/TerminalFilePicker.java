@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
@@ -108,7 +109,7 @@ public final class TerminalFilePicker {
     var lines = CheckboxPicker.render(screen, size[0]);
     var sb = new StringBuilder(ESC + "[H");
     for (var i = 0; i < lines.size(); i++) {
-      sb.append(fit(lines.get(i), size[1])).append(ESC).append("[K");
+      sb.append(Strings.fit(lines.get(i), size[1])).append(ESC).append("[K");
       if (i < lines.size() - 1) {
         sb.append("\r\n");
       }
@@ -116,10 +117,6 @@ public final class TerminalFilePicker {
     sb.append(ESC).append("[0J");
     out.print(sb);
     out.flush();
-  }
-
-  static String fit(String line, int cols) {
-    return line.length() <= cols ? line : line.substring(0, Math.max(0, cols - 1)) + "…";
   }
 
   private int[] terminalSize() {

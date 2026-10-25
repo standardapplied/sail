@@ -28,8 +28,8 @@ class CommandTaxonomyTest {
   }
 
   /**
-   * A boolean option true by default that is not negatable is toggled off by naming it, so the
-   * flag does the opposite of what it says.
+   * A boolean option true by default that is not negatable is toggled off by naming it, so the flag
+   * does the opposite of what it says.
    */
   private static void collectUnspellableFlags(CommandLine command, List<String> found) {
     for (var option : command.getCommandSpec().options()) {

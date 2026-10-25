@@ -61,6 +61,15 @@ class StringsTest {
   }
 
   @Test
+  void fitKeepsAShortTextAndEndsALongOneInAnEllipsisAtTheWidth() {
+    assertEquals("short", Strings.fit("short", 80));
+    assertEquals("short", Strings.fit("short", 5));
+    assertEquals("x".repeat(39) + "…", Strings.fit("x".repeat(120), 40));
+    assertEquals("a\uD83D\uDE00…", Strings.fit("a\uD83D\uDE00bc", 3));
+    assertEquals("…", Strings.fit("abc", 0));
+  }
+
+  @Test
   void shellWordLeavesASafeWordBareAndQuotesAnyOtherToPasteBack() {
     assertEquals("--title", Strings.shellWord("--title"));
     assertEquals("/var/lib/sail=a:b.c", Strings.shellWord("/var/lib/sail=a:b.c"));

@@ -698,12 +698,40 @@ class BannerTest {
           "2026-02-18T01:00:00Z");
 
   @Test
+  void aBoxSpansTheTerminalItPrintsToOrAHundredColumnsWithoutOne() {
+    assertEquals(80, Banner.columns(true, () -> 80));
+    assertEquals(Banner.DEFAULT_COLUMNS, Banner.columns(false, () -> 80));
+    assertEquals(Banner.DEFAULT_COLUMNS, Banner.columns(true, () -> 0));
+    assertEquals(40, Banner.columns(true, () -> 12));
+  }
+
+  @Test
+  void aValueTooLongForARowWithAnIndicatorIsCutBeforeTheIndicator() {
+    var out = new ByteArrayOutputStream();
+    Banner.printHostDetection(
+        new HostDetector.HostInfo(
+            "main", "ubuntu", "24.04", "Ubuntu " + "x".repeat(200), 4, 8, 16384, true),
+        new PrintStream(out),
+        Ansi.OFF);
+
+    var lines = out.toString(StandardCharsets.UTF_8).lines().filter(l -> !l.isEmpty()).toList();
+    assertEquals(
+        List.of(Banner.DEFAULT_COLUMNS),
+        lines.stream().map(String::length).distinct().toList(),
+        String.join("\n", lines));
+    assertEquals(
+        List.of("  │  OS:          Ubuntu " + "x".repeat(68) + "… ✓   │"),
+        lines.stream().filter(line -> line.contains("OS:")).toList());
+  }
+
+  @Test
   void hostStatusShowsAllFields() {
     var poolUsage = new ZfsQuery.PoolUsage("960G", "150G", "810G", "15%");
     var out = new ByteArrayOutputStream();
     Banner.printHostStatus(
         SAMPLE_HOST_YAML,
         "6.22",
+        null,
         SUPPORTED,
         poolUsage,
         null,
@@ -734,6 +762,7 @@ class BannerTest {
     Banner.printHostStatus(
         SAMPLE_HOST_YAML,
         "6.21",
+        null,
         SUPPORTED,
         poolUsage,
         null,
@@ -756,6 +785,7 @@ class BannerTest {
     Banner.printHostStatus(
         SAMPLE_HOST_YAML,
         "6.21",
+        null,
         SUPPORTED,
         null,
         null,
@@ -786,6 +816,7 @@ class BannerTest {
     Banner.printHostStatus(
         dirHostYaml,
         "unknown",
+        null,
         SUPPORTED,
         null,
         fsUsage,

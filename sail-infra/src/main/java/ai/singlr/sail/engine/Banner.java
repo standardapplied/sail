@@ -29,6 +29,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
+import java.util.function.IntSupplier;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Help.Ansi;
 
@@ -40,6 +41,14 @@ public final class Banner {
 
   private static final int W = 56;
   private static final int LABEL_COL = 13;
+
+  /** The columns a box fits when sail prints to no terminal, or to one it cannot measure. */
+  static final int DEFAULT_COLUMNS = 100;
+
+  private static final int MIN_COLUMNS = 40;
+
+  /** What a box's line holds beyond its inner width: its indent and its two borders. */
+  private static final int BOX_EDGES = 4;
 
   private Banner() {}
 
@@ -146,6 +155,7 @@ public final class Banner {
     w = Math.max(w, rowWidth("CPU:", cpu));
     w = Math.max(w, rowWidth("RAM:", mem));
     w = Math.max(w, 2 + supportText.length());
+    w = boxWidth(w);
 
     out.println();
 
@@ -294,6 +304,7 @@ public final class Banner {
     if (config.repos() != null && !config.repos().isEmpty()) {
       w = Math.max(w, rowWidth("Repos:", config.repos().size() + " repositories"));
     }
+    w = boxWidth(w);
 
     out.println();
     var title = " Project ";
@@ -396,6 +407,7 @@ public final class Banner {
     if (config.ssh() != null) {
       w = Math.max(w, rowWidth("SSH user:", config.sshUser()));
     }
+    w = boxWidth(w);
 
     out.println();
     var title = " Project: " + config.name() + " ";
@@ -788,11 +800,14 @@ public final class Banner {
 
   /**
    * Prints a bordered host status box showing server info, pool usage, and container summary. The
-   * Incus version is the one installed now, not the one {@code host.yaml} recorded at init.
+   * Incus version is the one installed now, not the one {@code host.yaml} recorded at init; {@code
+   * incusUpgrade}, the command that moves it, has a row of its own when there is one, so neither is
+   * cut to fit.
    */
   public static void printHostStatus(
       HostYaml hostYaml,
       String incusVersion,
+      String incusUpgrade,
       HostDetector.HostInfo hostInfo,
       ZfsQuery.PoolUsage poolUsage,
       DirQuery.FsUsage fsUsage,
@@ -814,6 +829,9 @@ public final class Banner {
     w = Math.max(w, rowWidth("RAM:", mem));
     w = Math.max(w, rowWidth("Containers:", containers));
     w = Math.max(w, rowWidth("Incus:", incusVersion));
+    if (incusUpgrade != null) {
+      w = Math.max(w, rowWidth("Upgrade:", incusUpgrade));
+    }
     w = Math.max(w, rowWidth("Initialized:", formatTimestamp(hostYaml.initializedAt())));
 
     if (hostYaml.isZfs()) {
@@ -839,6 +857,7 @@ public final class Banner {
       }
       w = Math.max(w, rowWidth("Note:", "Quotas are advisory (not enforced)"));
     }
+    w = boxWidth(w);
 
     out.println();
     var title = " Host Status ";
@@ -880,6 +899,9 @@ public final class Banner {
     emptyRow(out, ansi, w);
 
     labelRow(out, ansi, w, "Incus:", incusVersion, null, null);
+    if (incusUpgrade != null) {
+      labelRow(out, ansi, w, "Upgrade:", incusUpgrade, null, null);
+    }
     labelRow(out, ansi, w, "Initialized:", formatTimestamp(hostYaml.initializedAt()), null, null);
     emptyRow(out, ansi, w);
 
@@ -1277,11 +1299,6 @@ public final class Banner {
    * <p>Layout: │ Label: value ✓ │
    */
   private static void labelRow(
-      PrintStream out, Ansi ansi, String label, String value, String indicator, String style) {
-    labelRow(out, ansi, W, label, value, indicator, style);
-  }
-
-  private static void labelRow(
       PrintStream out,
       Ansi ansi,
       int width,
@@ -1292,6 +1309,8 @@ public final class Banner {
     var gap = LABEL_COL - label.length();
     if (gap < 1) gap = 1;
 
+    var room = (indicator == null ? width : width - 5) - 2 - label.length() - gap;
+    value = Strings.fit(value, room);
     var used = 2 + label.length() + gap + value.length();
 
     var sb = new StringBuilder();
@@ -1316,13 +1335,28 @@ public final class Banner {
     out.println(amber(ansi, sb.toString()));
   }
 
-  /** Prints an empty row: │ │ */
-  private static void emptyRow(PrintStream out, Ansi ansi) {
-    emptyRow(out, ansi, W);
-  }
-
   private static void emptyRow(PrintStream out, Ansi ansi, int width) {
     out.println(amber(ansi, "  @|bold,cyan \u2502|@" + " ".repeat(width) + "@|bold,cyan \u2502|@"));
+  }
+
+  /**
+   * The inner width of a box whose widest row needs {@code natural}: that, unless the terminal is
+   * narrower, when the box spans the terminal and {@link #labelRow} cuts the values that overflow.
+   */
+  private static int boxWidth(int natural) {
+    return Math.min(natural, columns() - BOX_EDGES);
+  }
+
+  /** The columns of the terminal sail prints to, or {@link #DEFAULT_COLUMNS} when it has none. */
+  static int columns() {
+    var console = System.console();
+    return columns(console != null && console.isTerminal(), () -> Stty.size(new int[] {0, 0})[1]);
+  }
+
+  /** {@link #columns()} given whether sail prints to a {@code terminal} and its width. */
+  static int columns(boolean terminal, IntSupplier ttyColumns) {
+    var measured = terminal ? ttyColumns.getAsInt() : 0;
+    return measured > 0 ? Math.max(measured, MIN_COLUMNS) : DEFAULT_COLUMNS;
   }
 
   /** Returns the width needed for a label-value pair (2 leading spaces + label + gap + value). */

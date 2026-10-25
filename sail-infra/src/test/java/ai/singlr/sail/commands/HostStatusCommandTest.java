@@ -100,7 +100,7 @@ class HostStatusCommandTest {
   }
 
   @Test
-  void aStoppedDaemonsErrorIsOneRowThatFitsTheBoxAndWholeInTheJson() throws Exception {
+  void aStoppedDaemonsErrorIsCutToFitTheTerminalAndWholeInTheJson() throws Exception {
     var stderr =
         "Error: The incus daemon doesn't appear to be started (socket path:"
             + " /var/lib/incus/unix.socket)\nSee 'incus admin init'.\n";
@@ -115,13 +115,11 @@ class HostStatusCommandTest {
             .takeWhile(line -> !line.isEmpty())
             .toList();
     assertEquals(
-        List.of(box.getFirst().length()),
-        box.stream().map(String::length).distinct().toList(),
-        String.join("\n", box));
+        List.of(100), box.stream().map(String::length).distinct().toList(), String.join("\n", box));
     assertEquals(
         List.of(
             "  │  Containers:  unavailable (incus list failed: Error: The incus daemon doesn't"
-                + " appear to be started (socket path: /var/lib/incus/unix.socket))│"),
+                + " appear to be sta…│"),
         box.stream().filter(line -> line.contains("Containers:")).toList());
   }
 
@@ -137,10 +135,15 @@ class HostStatusCommandTest {
                     + "  Candidate: 1:6.18-ubuntu24.04-202511010000\n")
             .onOk("dpkg --compare-versions");
 
-    assertEquals("6.18", json(shell).get("incus_candidate"));
-    var row = text(shell).lines().filter(line -> line.contains("Incus:")).toList();
+    var status = json(shell);
+    assertEquals("1:6.17-ubuntu24.04-202510010000", status.get("incus_installed"));
+    assertEquals("1:6.18-ubuntu24.04-202511010000", status.get("incus_candidate"));
+    assertEquals("6.17", status.get("incus_version"));
     assertEquals(
-        List.of("  │  Incus:       6.17 (6.18 available: sudo sail host incus upgrade)│"), row);
+        List.of(
+            "  │  Incus:       6.17 (6.18 available)",
+            "  │  Upgrade:     sudo sail host incus upgrade"),
+        rows(shell, "Incus:", "Upgrade:"));
   }
 
   @Test
@@ -155,12 +158,15 @@ class HostStatusCommandTest {
                     + "  Candidate: 1:6.17-ubuntu24.04-202510150000\n")
             .onOk("dpkg --compare-versions");
 
-    assertEquals("1:6.17-ubuntu24.04-202510150000", json(shell).get("incus_candidate"));
+    var status = json(shell);
+    assertEquals("1:6.17-ubuntu24.04-202510010000", status.get("incus_installed"));
+    assertEquals("1:6.17-ubuntu24.04-202510150000", status.get("incus_candidate"));
     assertEquals(
         List.of(
-            "  │  Incus:       6.17 (1:6.17-ubuntu24.04-202510150000 available: sudo sail host"
-                + " incus upgrade)│"),
-        text(shell).lines().filter(line -> line.contains("Incus:")).toList());
+            "  │  Incus:       1:6.17-ubuntu24.04-202510010000 (1:6.17-ubuntu24.04-202510150000"
+                + " available)",
+            "  │  Upgrade:     sudo sail host incus upgrade"),
+        rows(shell, "Incus:", "Upgrade:"));
   }
 
   @Test
@@ -174,14 +180,8 @@ class HostStatusCommandTest {
                 "incus:\n  Installed: 1:6.19-ubuntu24.04-1\n  Candidate: 1:6.18-ubuntu24.04-1\n")
             .onFail("dpkg --compare-versions", "");
 
-    assertEquals("6.18", json(shell).get("incus_candidate"));
-    assertEquals(
-        List.of("  │  Incus:       6.19"),
-        text(shell)
-            .lines()
-            .filter(line -> line.contains("Incus:"))
-            .map(line -> line.replaceAll(" +│$", ""))
-            .toList());
+    assertEquals("1:6.18-ubuntu24.04-1", json(shell).get("incus_candidate"));
+    assertEquals(List.of("  │  Incus:       6.19"), rows(shell, "Incus:", "Upgrade:"));
   }
 
   @Test
@@ -199,18 +199,22 @@ class HostStatusCommandTest {
             .onOk("incus version", "6.18\n")
             .onOk("apt-cache policy incus", "");
 
-    assertEquals("6.18", json(current).get("incus_candidate"));
+    assertEquals("1:6.18-ubuntu24.04-1", json(current).get("incus_installed"));
+    assertEquals("1:6.18-ubuntu24.04-1", json(current).get("incus_candidate"));
     assertTrue(json(unknown).containsKey("incus_candidate"));
     assertNull(json(unknown).get("incus_candidate"));
     for (var shell : List.of(current, unknown)) {
-      assertEquals(
-          List.of("  │  Incus:       6.18"),
-          text(shell)
-              .lines()
-              .filter(line -> line.contains("Incus:"))
-              .map(line -> line.replaceAll(" +│$", ""))
-              .toList());
+      assertEquals(List.of("  │  Incus:       6.18"), rows(shell, "Incus:", "Upgrade:"));
     }
+  }
+
+  /** The banner's rows labelled any of {@code labels}, the padding before their border dropped. */
+  private static List<String> rows(ScriptedShellExecutor shell, String... labels) throws Exception {
+    return text(shell)
+        .lines()
+        .filter(line -> List.of(labels).stream().anyMatch(line::contains))
+        .map(line -> line.replaceAll(" *│$", ""))
+        .toList();
   }
 
   private static Map<String, Object> json(ScriptedShellExecutor shell) throws Exception {

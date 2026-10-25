@@ -51,6 +51,16 @@ public final class Strings {
         : text.substring(0, text.offsetByCodePoints(0, maxCodePoints));
   }
 
+  /**
+   * {@code text} itself when it is at most {@code width} code points long, otherwise its beginning
+   * ending in "…", {@code width} long in all.
+   */
+  public static String fit(String text, int width) {
+    return text.codePointCount(0, text.length()) <= width
+        ? text
+        : clip(text, Math.max(0, width - 1)) + "…";
+  }
+
   /** {@code word} as one shell word to paste back: bare when that is safe, else single-quoted. */
   public static String shellWord(String word) {
     return word.matches("[A-Za-z0-9._/=:@,+-]+") ? word : "'" + word.replace("'", "'\\''") + "'";

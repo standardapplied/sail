@@ -85,14 +85,6 @@ class TerminalFilePickerTest {
     assertFalse(TerminalFilePicker.isAvailable());
   }
 
-  @Test
-  void fitTruncatesOverlongLinesToTheTerminalWidth() {
-    assertEquals("short", TerminalFilePicker.fit("short", 80));
-    var fitted = TerminalFilePicker.fit("x".repeat(120), 40);
-    assertEquals(40, fitted.length());
-    assertTrue(fitted.endsWith("…"));
-  }
-
   private record MapSource(Map<Path, List<FilePicker.Entry>> tree) implements FileSource {
     @Override
     public List<FilePicker.Entry> children(Path dir) {

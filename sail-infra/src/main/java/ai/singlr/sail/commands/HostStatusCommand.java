@@ -24,6 +24,7 @@ import java.io.PrintStream;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.TimeoutException;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -89,15 +90,15 @@ public final class HostStatusCommand implements Runnable {
     var containers = Containers.of(shell);
 
     if (json) {
-      printJson(
-          hostYaml, incusVersion, versions.to(), hostInfo, poolUsage, fsUsage, containers, out);
+      printJson(hostYaml, incusVersion, versions, hostInfo, poolUsage, fsUsage, containers, out);
       return;
     }
 
     Banner.printBranding(out, Ansi.AUTO);
     Banner.printHostStatus(
         hostYaml,
-        incusRow(incusVersion, versions, operator),
+        incusRow(incusVersion, versions),
+        versions.movable() ? operator.sail("host incus upgrade") : null,
         hostInfo,
         poolUsage,
         fsUsage,
@@ -106,23 +107,23 @@ public final class HostStatusCommand implements Runnable {
         Ansi.AUTO);
   }
 
-  /** The Incus row: the version running, and the one apt would move it to, when it would. */
-  private static String incusRow(
-      String incusVersion, HostPackages.Versions versions, OperatorCommand operator) {
+  /**
+   * The Incus row: the version running, and, when apt would move it, the one it would move to, both
+   * named in the one form that tells them apart ({@link HostPackages.Versions#from()}).
+   */
+  private static String incusRow(String incusVersion, HostPackages.Versions versions) {
     return versions.movable()
-        ? incusVersion
+        ? Objects.requireNonNullElse(versions.from(), incusVersion)
             + " ("
             + versions.to()
-            + " available: "
-            + operator.sail("host incus upgrade")
-            + ")"
+            + " available)"
         : incusVersion;
   }
 
   private static void printJson(
       HostYaml hostYaml,
       String incusVersion,
-      String incusCandidate,
+      HostPackages.Versions versions,
       HostDetector.HostInfo hostInfo,
       ZfsQuery.PoolUsage poolUsage,
       DirQuery.FsUsage fsUsage,
@@ -153,7 +154,8 @@ public final class HostStatusCommand implements Runnable {
       }
     }
     map.put("incus_version", incusVersion);
-    map.put("incus_candidate", incusCandidate);
+    map.put("incus_installed", versions.installed());
+    map.put("incus_candidate", versions.candidate());
     map.put("initialized_at", hostYaml.initializedAt());
     if (containers.error() != null) {
       map.put("containers_error", containers.error());
