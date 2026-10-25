@@ -451,7 +451,7 @@ public final class SyncRpcServer {
                     ? new SyncWire.Failed("Content exchange requires a blob store", "protocol")
                     : helloRequired();
             case SyncWire.Hello hello -> onHello(hello);
-            case SyncWire.Heads ignored -> welcomed ? tips() : helloRequired();
+            case SyncWire.Heads heads -> welcomed ? tips(heads) : helloRequired();
             case SyncWire.Pull pull -> welcomed ? page(pull, frame) : helloRequired();
             case SyncWire.Need need -> welcomed ? current(need, frame) : helloRequired();
             case SyncWire.Push push -> welcomed ? results(push) : helloRequired();
@@ -605,10 +605,25 @@ public final class SyncRpcServer {
     return replicas.values().stream().findFirst().map(MainReplica::id).orElse("");
   }
 
-  private SyncWire.Response tips() {
+  /**
+   * Every type's high-water, and each type whose mark main's log no longer holds ({@link
+   * ChangeLog#holds}), read for the session's scope. A server with no database behind it names
+   * none.
+   */
+  private SyncWire.Response tips(SyncWire.Heads heads) {
     var tips = new LinkedHashMap<String, Long>();
-    replicas.forEach((type, main) -> tips.put(type, main.maxSeq()));
-    return new SyncWire.Tips(tips);
+    var rewound = new LinkedHashSet<String>();
+    replicas.forEach(
+        (type, main) -> {
+          tips.put(type, main.maxSeq());
+          var mark = heads.marks().get(type);
+          if (mark != null
+              && changeLog != null
+              && !changeLog.holds(type, mark, principal.scope())) {
+            rewound.add(type);
+          }
+        });
+    return new SyncWire.Tips(tips, rewound);
   }
 
   /**

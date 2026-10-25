@@ -346,6 +346,34 @@ class NativeFleetIT {
   }
 
   @Test
+  void aMainRestoredInPlaceThatWroteMoreThanItLostLeavesTheNodeHoldingWhatMainHolds()
+      throws Exception {
+    try (var fleet = NativeFleet.openOrSkip()) {
+      var main = fleet.main("uday", fleet.candidate());
+      main.serving(() -> main.createSpecs("seed", 2, 1_000));
+      var mady = fleet.node("mady", fleet.candidate());
+      mady.sailOk("sync");
+      main.shOk("sqlite3 /var/lib/sail/sail.db \".backup /root/sail.db.copy\"");
+      main.serving(() -> main.createSpecs("late", 2, 1_000));
+      mady.sailOk("sync");
+
+      fleet.restoreMain("/root/sail.db.copy");
+      main.serving(() -> main.createSpecs("after", 3, 1_000));
+      var round = mady.sailOk("sync");
+
+      assertTrue(
+          round.contains(
+              "main no longer holds 2 spec(s) this box had pulled (late-1, late-2): main was"
+                  + " restored from a copy older than this box's last sync."),
+          round);
+      assertEquals("3", mady.query("SELECT count(*) FROM specs WHERE id LIKE 'after-%'").strip());
+      fleet.assertConverged(mady);
+      var again = mady.sailOk("sync");
+      assertTrue(again.contains("Already in sync with main."), again);
+    }
+  }
+
+  @Test
   void aNodeUpgradedAheadOfMainRecoversOnceMainFollows() throws Exception {
     try (var fleet = NativeFleet.openOrSkip()) {
       var main = fleet.main("uday", fleet.released());

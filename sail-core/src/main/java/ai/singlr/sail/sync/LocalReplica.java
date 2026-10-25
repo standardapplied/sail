@@ -165,9 +165,10 @@ public interface LocalReplica {
 
   /**
    * Forgets every checkpoint this node keeps for {@code peerId}, so the round walks main's heads
-   * from the first again: main's log sits below what this node read, which is main restored in
-   * place from an older copy of its database, and what it wrote since the copy would otherwise stay
-   * unread below the checkpoint. What the node already holds re-adopts at the same rev.
+   * from the first again: main's log sits below what this node read, or no longer holds what it
+   * read at its checkpoint, which is main restored in place from an older copy of its database, and
+   * what it wrote since the copy would otherwise stay unread below the checkpoint. What the node
+   * already holds re-adopts at the same rev.
    */
   void forgetCheckpoints(String peerId);
 

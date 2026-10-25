@@ -20,6 +20,7 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FastCdc;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.SyncState;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -378,6 +379,38 @@ class SyncRpcServerTest {
     assertInstanceOf(SyncWire.Welcome.class, replies.get(0));
     assertEquals("protocol", assertInstanceOf(SyncWire.Failed.class, replies.get(1)).kind());
     assertInstanceOf(SyncWire.Tips.class, replies.get(2));
+  }
+
+  @Test
+  void headsNamingMarksAreAnsweredWithTheTypesMainsLogNoLongerHoldsThemFor() throws Exception {
+    try (var main = new SyncBox("main")) {
+      main.specs.create(SyncBox.spec("auth", "Auth", "pending"));
+      var seq = main.replica.maxSeq();
+      var rev = main.specs.latestRev("auth");
+      var tips =
+          assertInstanceOf(
+              SyncWire.Tips.class,
+              after(
+                  main.server(Actor.sync("n", Role.MEMBER)),
+                  new SyncWire.Heads(
+                      Map.of(
+                          "spec", new SyncState.Mark(seq, seq, "auth", rev),
+                          "room", new SyncState.Mark(seq, seq, "auth", rev),
+                          "unknown", new SyncState.Mark(seq, seq, "auth", rev)))));
+
+      assertEquals(Set.of("room"), tips.rewound());
+    }
+  }
+
+  @Test
+  void aServerWithNoDatabaseBehindItNamesNothingRewound() throws Exception {
+    var replies =
+        serve(
+            new SyncRpcServer(new FakeMain(), true),
+            HELLO,
+            new SyncWire.Heads(Map.of("spec", new SyncState.Mark(9, 9, "a", "1-a"))));
+
+    assertEquals(Set.of(), assertInstanceOf(SyncWire.Tips.class, replies.get(1)).rewound());
   }
 
   @Test

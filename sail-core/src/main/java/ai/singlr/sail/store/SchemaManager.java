@@ -261,6 +261,28 @@ public final class SchemaManager {
       "CREATE TABLE catalog AS SELECT lower(hex(randomblob(16))) AS id, NULL AS main";
 
   /**
+   * A checkpoint a node kept before it kept what it read there ({@link SyncState.Mark}) cannot be
+   * told from the same seq in a main restored in place and grown past it, so each node walks main's
+   * heads once more and keeps, from then on, what it read beside every checkpoint.
+   */
+  static final String CHECKPOINTS_READ_AGAIN =
+      "UPDATE sync_state SET checkpoint = 0 WHERE read_seq IS NULL";
+
+  /**
+   * What each entry {@link ChangeLog#compact} dropped was, by seq: the evidence that a seq a node
+   * read is empty under retention, never because main was restored from an older copy and grew
+   * other entries there.
+   */
+  static final String COMPACTED_ENTRIES =
+      """
+      CREATE TABLE compacted_entries (
+          seq INTEGER PRIMARY KEY,
+          entity_type TEXT NOT NULL,
+          entity_id TEXT NOT NULL,
+          rev TEXT NOT NULL
+      )""";
+
+  /**
    * The project each change head belongs to, null when unknown, so a page is scoped from the head
    * alone: a pruned row has no row left to join, yet its erasure must still reach the nodes that
    * held it and no other. Filled for existing heads by the {@code scoped-heads-v1} data migration.
@@ -807,7 +829,13 @@ public final class SchemaManager {
           STATUS_SINCE_REVISION_ON_INSERT,
           "DROP TRIGGER specs_status_since_update",
           STATUS_SINCE_REVISION_ON_UPDATE,
-          CATALOG);
+          CATALOG,
+          "ALTER TABLE sync_state ADD COLUMN read_seq INTEGER",
+          "ALTER TABLE sync_state ADD COLUMN read_id TEXT",
+          "ALTER TABLE sync_state ADD COLUMN read_rev TEXT",
+          CHECKPOINTS_READ_AGAIN,
+          COMPACTED_ENTRIES,
+          "CREATE INDEX idx_compacted_entries_entity ON compacted_entries(entity_type, entity_id)");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

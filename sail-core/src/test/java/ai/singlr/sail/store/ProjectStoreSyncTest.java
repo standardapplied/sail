@@ -55,6 +55,10 @@ class ProjectStoreSyncTest {
     return Map.of("definition", definition, "_actor", actor);
   }
 
+  private static Map<String, Object> def(String definition, String actor, String creator) {
+    return Map.of("definition", definition, "_actor", actor, Snapshots.CREATOR, creator);
+  }
+
   private static Map<String, Object> untimed(Map<String, Object> snapshot) {
     var work = new LinkedHashMap<>(snapshot);
     work.remove(Snapshots.CREATED_AT);
@@ -66,7 +70,7 @@ class ProjectStoreSyncTest {
   void upsertJournalsAComparableRevision() {
     store.upsert("acme", "name: acme\n");
 
-    assertEquals(def("name: acme\n", "uday"), untimed(store.comparableSnapshot("acme")));
+    assertEquals(def("name: acme\n", "uday", "uday"), untimed(store.comparableSnapshot("acme")));
     assertNotEquals(null, store.latestRev("acme"));
     assertTrue(store.syncEntityIds().contains("acme"));
   }
@@ -79,8 +83,8 @@ class ProjectStoreSyncTest {
     store.upsert("acme", "v2");
 
     assertNotEquals(rev1, store.latestRev("acme"));
-    assertEquals(def("v2", "uday"), untimed(store.comparableSnapshot("acme")));
-    assertEquals(def("v1", "uday"), untimed(store.comparableAtRev("acme", rev1)));
+    assertEquals(def("v2", "uday", "uday"), untimed(store.comparableSnapshot("acme")));
+    assertEquals(def("v1", "uday", "uday"), untimed(store.comparableAtRev("acme", rev1)));
   }
 
   @Test
@@ -88,7 +92,10 @@ class ProjectStoreSyncTest {
   void applyRevisionAdoptsMainsStateAtItsExactRevAsTheBase() {
     store.applyRevision("acme", def("from-main", "sumesh"), "rev-xyz");
 
-    assertEquals(def("from-main", "sumesh"), untimed(store.comparableSnapshot("acme")));
+    assertEquals(
+        def("from-main", "sumesh", "sumesh"),
+        untimed(store.comparableSnapshot("acme")),
+        "a main that names no creator leaves the author as the creator");
     assertEquals("sumesh", new ChangeLog(db).history("project", "acme").getLast().actor());
     assertEquals("rev-xyz", store.latestRev("acme"));
     assertEquals("rev-xyz", store.baseRevOf("acme"));
@@ -97,16 +104,46 @@ class ProjectStoreSyncTest {
   @Test
   @ActingAs(Actor.Lane.MAIN)
   void aRevisionCarriesItsAuthorsTimesAndEveryBoxWritesThemVerbatim() {
-    var authored = new LinkedHashMap<String, Object>(def("from-main", "sumesh"));
+    var authored = new LinkedHashMap<String, Object>(def("from-main", "sumesh", "carol"));
     authored.put(Snapshots.CREATED_AT, "2026-01-01T00:00:00Z");
     authored.put(Snapshots.UPDATED_AT, "2026-01-02T00:00:00Z");
 
     store.applyRevision("acme", authored, "rev-xyz");
 
     var row = store.findByName("acme").orElseThrow();
+    assertEquals("carol", row.createdBy());
     assertEquals("2026-01-01T00:00:00Z", row.createdAt());
     assertEquals("2026-01-02T00:00:00Z", row.updatedAt());
     assertEquals(authored, store.comparableSnapshot("acme"));
+  }
+
+  @Test
+  void aNodeAdoptingMainsRevisionOfARowItHoldsTakesTheCreatorMainNames() {
+    store.upsert("acme", "v1");
+
+    Acting.by(
+        Actor.main("sail"), () -> store.applyRevision("acme", def("v1", "sail", "sail"), "1-main"));
+
+    assertEquals("sail", store.findByName("acme").orElseThrow().createdBy());
+    Acting.by(Actor.main("sail"), () -> store.applyRevision("acme", def("v2", "sail"), "2-main"));
+    assertEquals(
+        "sail",
+        store.findByName("acme").orElseThrow().createdBy(),
+        "a main that names none leaves the creator held");
+  }
+
+  @Test
+  @ActingAs(value = Actor.Lane.SYNC, handle = "node")
+  void aPushNamingAnotherCreatorNeverMovesTheOneMainHolds() {
+    store.applyRevision("acme", def("base"), "rev-base");
+
+    store.commitRevision(
+        "acme", def("pushed", "node", "mallory"), "rev-base", new WriterAuthority(db, "projects"));
+    store.commitRevision(
+        "fresh", def("new", "node", "mallory"), null, new WriterAuthority(db, "projects"));
+
+    assertEquals("node", store.findByName("acme").orElseThrow().createdBy());
+    assertEquals("node", store.findByName("fresh").orElseThrow().createdBy());
   }
 
   @Test
@@ -144,7 +181,7 @@ class ProjectStoreSyncTest {
     var accepted = assertInstanceOf(PushOutcome.Accepted.class, outcome);
     assertNotEquals("rev-base", accepted.rev());
     assertEquals(accepted.rev(), store.latestRev("acme"));
-    assertEquals(def("pushed", "node"), untimed(store.comparableSnapshot("acme")));
+    assertEquals(def("pushed", "node", "node"), untimed(store.comparableSnapshot("acme")));
   }
 
   @Test
@@ -158,7 +195,7 @@ class ProjectStoreSyncTest {
             "acme", def("racing"), "rev-base", new WriterAuthority(db, "projects"));
 
     var stale = assertInstanceOf(PushOutcome.Stale.class, outcome);
-    assertEquals(def("moved", "node"), untimed(stale.currentSnapshot()));
+    assertEquals(def("moved", "node", "node"), untimed(stale.currentSnapshot()));
   }
 
   @Test
@@ -189,7 +226,7 @@ class ProjectStoreSyncTest {
     store.resolveConflict(
         "acme", def("theirs", "mady"), new MainVersion(def("theirs", "mady"), "9-main", "mady"));
 
-    assertEquals(def("theirs", "mady"), untimed(store.comparableSnapshot("acme")));
+    assertEquals(def("theirs", "mady", "uday"), untimed(store.comparableSnapshot("acme")));
     var head = new ChangeLog(db).head("project", "acme").orElseThrow();
     assertEquals("mady", head.actor(), "main's revision keeps main's author, not the resolver");
     assertEquals(Actor.MAIN_HANDLE, head.peer());
@@ -202,7 +239,7 @@ class ProjectStoreSyncTest {
     store.resolveConflict(
         "acme", def("mine"), new MainVersion(def("theirs", "mady"), "9-main", "mady"));
 
-    assertEquals(def("mine", "uday"), untimed(store.comparableSnapshot("acme")));
+    assertEquals(def("mine", "uday", "uday"), untimed(store.comparableSnapshot("acme")));
     var history = new ChangeLog(db).history("project", "acme");
     assertEquals(
         "mady",

@@ -298,6 +298,7 @@ public final class ChangeLog {
               "DELETE FROM change_log WHERE entity_type = ? AND entity_id = ? AND kind <> 'erasure'",
               entityType,
               entityId);
+          forgetCompacted(entityType, entityId);
           settleOffer(entityType, entityId);
           db.execute(
               "DELETE FROM change_heads WHERE entity_type = ? AND entity_id = ?",
@@ -328,12 +329,20 @@ public final class ChangeLog {
               "DELETE FROM change_log WHERE entity_type = ? AND entity_id = ?",
               entityType,
               entityId);
+          forgetCompacted(entityType, entityId);
           db.execute(
               "DELETE FROM change_heads WHERE entity_type = ? AND entity_id = ?",
               entityType,
               entityId);
           settleOffer(entityType, entityId);
         });
+  }
+
+  private void forgetCompacted(String entityType, String entityId) {
+    db.execute(
+        "DELETE FROM compacted_entries WHERE entity_type = ? AND entity_id = ?",
+        entityType,
+        entityId);
   }
 
   /**
@@ -564,12 +573,20 @@ public final class ChangeLog {
         .orElse(false);
   }
 
+  private static final String BEYOND_HISTORY =
+      """
+       FROM change_log WHERE entity_type = ?1 AND entity_id = ?2
+      AND kind = 'revision' AND rev IS NOT ?3
+      AND seq < (SELECT MIN(seq) FROM (SELECT seq FROM change_log
+          WHERE entity_type = ?1 AND entity_id = ?2 ORDER BY seq DESC LIMIT ?4))""";
+
   /**
    * Drops the entries of each of {@code ids} that fall outside what history keeps — the newest
    * {@link #HISTORY_REVISIONS} of the entity, the revision {@code baseRevOf} names as its synced
-   * base, and every tombstone and erasure — one entity per transaction. Returns how many entries
-   * were dropped. A head is always among the newest, so no head ever moves. Names no actor: it
-   * rewrites history under retention rather than recording a write.
+   * base, and every tombstone and erasure — one entity per transaction, keeping what each dropped
+   * entry was in {@code compacted_entries}. Returns how many entries were dropped. A head is always
+   * among the newest, so no head ever moves. Names no actor: it rewrites history under retention
+   * rather than recording a write.
    */
   public long compact(String entityType, Collection<String> ids, UnaryOperator<String> baseRevOf) {
     var dropped = 0L;
@@ -577,18 +594,16 @@ public final class ChangeLog {
       dropped +=
           db.transaction(
               () -> {
+                var baseRev = baseRevOf.apply(id);
                 db.execute(
-                    """
-                    DELETE FROM change_log WHERE entity_type = ? AND entity_id = ?
-                    AND kind = 'revision' AND rev IS NOT ?
-                    AND seq < (SELECT MIN(seq) FROM (SELECT seq FROM change_log
-                        WHERE entity_type = ? AND entity_id = ? ORDER BY seq DESC LIMIT ?))""",
+                    "INSERT INTO compacted_entries (seq, entity_type, entity_id, rev)"
+                        + " SELECT seq, entity_type, entity_id, rev"
+                        + BEYOND_HISTORY,
                     entityType,
                     id,
-                    baseRevOf.apply(id),
-                    entityType,
-                    id,
+                    baseRev,
                     HISTORY_REVISIONS);
+                db.execute("DELETE" + BEYOND_HISTORY, entityType, id, baseRev, HISTORY_REVISIONS);
                 return (long) db.changes();
               });
     }
@@ -738,6 +753,43 @@ public final class ChangeLog {
             Entry.DENIED)
         .stream()
         .collect(Collectors.toCollection(LinkedHashSet::new));
+  }
+
+  /**
+   * Whether this log is still the one a reader of {@code entityType} read up to {@code mark}: the
+   * entry of the mark's id at its rev sits at its seq — or nothing does, because the id's erasure
+   * removed it, still the reader's to page, or {@link #compact} did and kept that it was this entry
+   * — and no head the reader's {@code scope} admits sits after that seq up to the checkpoint, where
+   * the reader saw none. A mark that read nothing names no entry, so only its stretch is asked
+   * about. An id the scope does not admit is never held, so a reader learns nothing of it. A log
+   * restored from an older copy and grown again holds other entries there.
+   */
+  public boolean holds(String entityType, SyncState.Mark mark, ProjectScope scope) {
+    return db.queryOne(
+            """
+            SELECT CASE WHEN ?1 = 0 THEN 1
+                WHEN EXISTS (SELECT 1 FROM change_log WHERE seq = ?1)
+                THEN EXISTS (SELECT 1 FROM change_log WHERE seq = ?1 AND entity_type = ?2
+                    AND entity_id = ?3 AND rev = ?4)
+                ELSE EXISTS (SELECT 1 FROM change_log WHERE entity_type = ?2 AND entity_id = ?3
+                    AND seq > ?1 AND kind = 'erasure')
+                  OR EXISTS (SELECT 1 FROM compacted_entries WHERE seq = ?1 AND entity_type = ?2
+                    AND entity_id = ?3 AND rev = ?4)
+                END
+                AND (?1 = 0 OR ?6 IS NULL OR EXISTS (SELECT 1 FROM change_heads
+                    WHERE entity_type = ?2 AND entity_id = ?3
+                    AND project IN (SELECT value FROM json_each(?6))))
+                AND NOT EXISTS (SELECT 1 FROM change_heads WHERE entity_type = ?2
+                    AND seq > ?1 AND seq <= ?5
+                    AND (?6 IS NULL OR project IN (SELECT value FROM json_each(?6))))""",
+            row -> row.integer(0) == 1,
+            mark.seq(),
+            entityType,
+            mark.id(),
+            mark.rev(),
+            mark.checkpoint(),
+            scopeArgument(scope))
+        .orElse(false);
   }
 
   /** The highest sequence recorded for an entity type; 0 if none. The sync high-water mark. */

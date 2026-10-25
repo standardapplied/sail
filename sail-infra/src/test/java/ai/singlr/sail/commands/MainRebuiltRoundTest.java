@@ -17,6 +17,8 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PipedSyncChannel;
+import ai.singlr.sail.engine.ProjectImporter;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -24,9 +26,11 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.DatabaseCatalog;
+import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.MigrationRunner;
@@ -44,6 +48,7 @@ import ai.singlr.sail.sync.SyncWire;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -337,6 +342,172 @@ class MainRebuiltRoundTest {
   }
 
   @Test
+  void aMainRestoredInPlaceThatRevisedTheReadSpecPastHistoryAndCompactedItStillTakesTheLostSpecs()
+      throws Exception {
+    mainWrite(serving, "seed");
+    round();
+    var copy = copyOf(serving, "copy.db", serving.id());
+    mainWrite(serving, "lost");
+    Acting.as("nia", () -> new SpecStore(serving.db()).setContent("seed", "lost revision", ""));
+    round();
+    serving = copy;
+    for (var i = 0; i < ChangeLog.HISTORY_REVISIONS + 5; i++) {
+      var content = "restored revision " + i;
+      Acting.as("nia", () -> new SpecStore(serving.db()).setContent("seed", content, ""));
+    }
+    new ChangeLog(serving.db()).compact("spec", List.of("seed"), id -> null);
+
+    round();
+
+    assertEquals(specIds(serving.db()), specIds(nodeDb));
+  }
+
+  @Test
+  void aMainRestoredInPlaceThatWroteAsManyAsItLostStillTakesTheLostSpecsFromTheNode()
+      throws Exception {
+    serving = pulledAfterACopy("copy.db", serving.id(), "r-late-1", "r-late-2");
+    mainWrite(serving, "after-1");
+    mainWrite(serving, "after-2");
+
+    round();
+
+    assertEquals(
+        List.of(
+            "main no longer holds 2 spec(s) this box had pulled (r-late-1, r-late-2"
+                + RESTORED
+                + "Each stays in its history: sudo sail spec history <id>."),
+        notices);
+    assertEquals(specIds(serving.db()), specIds(nodeDb), "the node holds what main holds");
+    assertEquals("  ✓ Already in sync with main.", rendered(round()));
+    assertEquals(List.of(), notices);
+  }
+
+  @Test
+  void aMainRestoredInPlaceThatWroteFiftyAfterLosingFiftyTakesTheFiftyFromTheNode()
+      throws Exception {
+    var lost = new ArrayList<String>();
+    for (var i = 1; i <= 50; i++) {
+      lost.add("lost-%02d".formatted(i));
+    }
+    serving = pulledAfterACopy("copy.db", serving.id(), lost.toArray(String[]::new));
+    for (var i = 1; i <= 50; i++) {
+      mainWrite(serving, "after-%02d".formatted(i));
+    }
+
+    round();
+
+    assertEquals(
+        List.of(
+            "main no longer holds 50 spec(s) this box had pulled (lost-01, lost-02, lost-03,"
+                + " lost-04, lost-05 and 45 more"
+                + RESTORED
+                + "Each stays in its history: sudo sail spec history <id>."),
+        notices);
+    assertEquals(specIds(serving.db()), specIds(nodeDb), "the node holds what main holds");
+    assertEquals("  ✓ Already in sync with main.", rendered(round()));
+  }
+
+  @Test
+  void aScopedNodeThatReadNothingOfATypeStillTakesWhatAMainRestoredInPlaceWroteBelowItsCheckpoint()
+      throws Exception {
+    var fdes = new FdeStore(serving.db());
+    fdes.restrict("nia");
+    fdes.grant("nia", "gamma");
+    Acting.system(() -> new ProjectStore(serving.db()).upsert("delta", "name: delta\n"));
+    round();
+    var copy = copyOf(serving, "copy.db", serving.id());
+    Acting.as("ada", () -> new SpecStore(serving.db()).create(spec("d1", "delta")));
+    Acting.as("ada", () -> new SpecStore(serving.db()).create(spec("d2", "delta")));
+    round();
+    serving = copy;
+    for (var id : List.of("visible-1", "visible-2", "visible-3")) {
+      mainWrite(serving, id);
+    }
+
+    round();
+
+    assertEquals(
+        List.of("visible-1", "visible-2", "visible-3"),
+        specIds(nodeDb).stream().map(r -> r.split(" ")[0]).toList());
+  }
+
+  @Test
+  void aRoundCutShortBetweenAPagesAdoptionsAndItsCheckpointStillSeesTheRestoreThatLostThem()
+      throws Exception {
+    mainWrite(serving, "seed");
+    round();
+    var copy = copyOf(serving, "copy.db", serving.id());
+    mainWrite(serving, "lost-1");
+    mainWrite(serving, "lost-2");
+    nodeDb.execute(
+        "CREATE TRIGGER halt BEFORE UPDATE OF checkpoint ON sync_state"
+            + " WHEN NEW.entity_type = 'spec' AND NEW.checkpoint > OLD.checkpoint"
+            + " BEGIN SELECT RAISE(ABORT, 'halted'); END");
+    assertThrows(SyncTransportException.class, this::round);
+    nodeDb.execute("DROP TRIGGER halt");
+    assertEquals(3, specIds(nodeDb).size(), "the page was adopted, its checkpoint never moved");
+    serving = copy;
+    mainWrite(serving, "new-1");
+
+    round();
+
+    assertEquals(specIds(serving.db()), specIds(nodeDb), "the node holds what main holds");
+  }
+
+  @Test
+  void anErasureOfTheSpecAtTheNodesCheckpointIsAnOrdinaryRound() throws Exception {
+    mainWrite(serving, "g0");
+    mainWrite(serving, "g1");
+    round();
+    var erasure = new Erasure(serving.db());
+    Acting.system(
+        () -> erasure.erase(erasure.closure(List.of(new Erasure.Target("spec", "g1"))), "local"));
+
+    var round = round();
+
+    assertEquals(List.of(), notices);
+    assertEquals(specIds(serving.db()), specIds(nodeDb));
+    assertEquals(
+        List.of(1),
+        round.types().stream().filter(t -> "spec".equals(t.type())).map(t -> t.entries()).toList(),
+        "the erasure alone is paged, not every head");
+  }
+
+  @Test
+  void aProjectMigrateImportsIntoAMainRestoredInPlaceReachesTheNode() throws Exception {
+    round();
+    var copy = copyOf(serving, "copy.db", serving.id());
+    Acting.as("nia", () -> new ProjectStore(serving.db()).upsert("delta", "name: delta\n"));
+    round();
+    serving = copy;
+    var projects = tempDir.resolve("main-projects");
+    Files.createDirectories(projects.resolve("delta"));
+    Files.writeString(
+        projects.resolve("delta").resolve(SailPaths.PROJECT_DESCRIPTOR), "name: delta\n");
+    Acting.system(
+        () ->
+            new ProjectImporter(projects, new ProjectStore(serving.db()), ProjectScope.all())
+                .importAll());
+
+    round();
+
+    assertEquals(projectRows(serving.db()), projectRows(nodeDb));
+    assertNotEquals(
+        "nia",
+        nodeDb
+            .queryOne("SELECT created_by FROM projects WHERE name = 'delta'", r -> r.text(0))
+            .orElseThrow(),
+        "the node holds main's delta, not the one main lost");
+  }
+
+  private static List<String> projectRows(Sqlite db) {
+    return db.query(
+        "SELECT name || ' ' || rev || ' ' || created_by || ' ' || created_at || ' ' || updated_by"
+            + " || ' ' || updated_at || ' ' || definition FROM projects ORDER BY name",
+        r -> r.text(0));
+  }
+
+  @Test
   void aMainBuiltFromACopyOnANewBoxTakesTheSpecsItLostFromTheNode() throws Exception {
     serving = pulledAfterACopy("copy.db", "main-restored", "r-late-1", "r-late-2");
 
@@ -620,11 +791,15 @@ class MainRebuiltRoundTest {
     write("n1");
     mainWrite(serving, "g1");
 
-    round();
+    var round = round();
 
     assertEquals(List.of(), notices);
     assertEquals(
         List.of("g0", "g1", "n1"), specIds(nodeDb).stream().map(r -> r.split(" ")[0]).toList());
+    assertEquals(
+        List.of(1),
+        round.types().stream().filter(t -> "spec".equals(t.type())).map(t -> t.entries()).toList(),
+        "pulled from the checkpoint, not from the first head");
   }
 
   @Test
