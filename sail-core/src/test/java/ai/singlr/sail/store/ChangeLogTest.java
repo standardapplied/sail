@@ -353,6 +353,46 @@ class ChangeLogTest {
   }
 
   @Test
+  void aSeqEmptiedUnderManyNewerRevisionsIsNotHeldUnlessCompactionKeptThatItWasTheEntryRead() {
+    log.append("spec", "a", "1-x", "local", false, "{}");
+    var a = seqOf("a");
+    for (var i = 2; i <= ChangeLog.HISTORY_REVISIONS + 5; i++) {
+      log.append("spec", "a", i + "-x", "local", false, "{}");
+    }
+    log.compact("spec", List.of("a"), id -> null);
+
+    assertFalse(
+        log.holds("spec", new SyncState.Mark(a, a, "a", "1-other"), ProjectScope.all()),
+        "compaction dropped 1-x there, not the revision a restored copy's reader read");
+    assertTrue(log.holds("spec", new SyncState.Mark(a, a, "a", "1-x"), ProjectScope.all()));
+    log.db().execute("DELETE FROM compacted_entries");
+    assertFalse(
+        log.holds("spec", new SyncState.Mark(a, a, "a", "1-x"), ProjectScope.all()),
+        "newer revisions alone prove nothing of what sat at the seq");
+  }
+
+  @Test
+  void anErasureLeavesNothingOfWhatCompactionDroppedOfTheEntity() {
+    for (var i = 1; i <= ChangeLog.HISTORY_REVISIONS + 2; i++) {
+      log.append("spec", "a", i + "-x", "local", false, "{}");
+    }
+    log.append("spec", "b", "1-y", "local", false, "{}");
+    for (var i = 2; i <= ChangeLog.HISTORY_REVISIONS + 2; i++) {
+      log.append("spec", "b", i + "-y", "local", false, "{}");
+    }
+    log.compact("spec", List.of("a", "b"), id -> null);
+
+    log.erase("spec", "a", "erased", "local");
+    log.forget("spec", "b");
+
+    assertEquals(
+        0L,
+        log.db()
+            .queryOne("SELECT count(*) FROM compacted_entries", row -> row.integer(0))
+            .orElseThrow());
+  }
+
+  @Test
   void aSeqEmptiedWithOneLaterRevisionOfTheIdIsNotTheLogTheReaderRead() {
     log.append("spec", "a", "1-x", "local", false, "{}");
     var a = seqOf("a");

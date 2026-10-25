@@ -26,6 +26,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.DatabaseCatalog;
@@ -338,6 +339,27 @@ class MainRebuiltRoundTest {
         "the pulled version and its withdrawal stay in the spec's history");
     assertEquals("  ✓ Already in sync with main.", rendered(round()));
     assertEquals(List.of(), notices);
+  }
+
+  @Test
+  void aMainRestoredInPlaceThatRevisedTheReadSpecPastHistoryAndCompactedItStillTakesTheLostSpecs()
+      throws Exception {
+    mainWrite(serving, "seed");
+    round();
+    var copy = copyOf(serving, "copy.db", serving.id());
+    mainWrite(serving, "lost");
+    Acting.as("nia", () -> new SpecStore(serving.db()).setContent("seed", "lost revision", ""));
+    round();
+    serving = copy;
+    for (var i = 0; i < ChangeLog.HISTORY_REVISIONS + 5; i++) {
+      var content = "restored revision " + i;
+      Acting.as("nia", () -> new SpecStore(serving.db()).setContent("seed", content, ""));
+    }
+    new ChangeLog(serving.db()).compact("spec", List.of("seed"), id -> null);
+
+    round();
+
+    assertEquals(specIds(serving.db()), specIds(nodeDb));
   }
 
   @Test
