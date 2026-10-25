@@ -1322,9 +1322,13 @@ public final class Banner {
         "  @|bold,cyan \u2570" + "\u2500".repeat(Math.max(0, width)) + "\u256f|@");
   }
 
-  /** Prints a line outside any box, cut where it passes the terminal's edge. */
+  /**
+   * Prints a line outside any box as one line, whole. It carries a command, a path or a branch the
+   * operator copies, which a cut would leave unrunnable; a terminal narrower than it wraps it, and
+   * no border falls apart.
+   */
   private static void printLine(PrintStream out, Ansi ansi, String markup) {
-    out.println(Strings.fit(amber(ansi, markup), columns()));
+    out.println(Strings.oneLine(amber(ansi, markup)));
   }
 
   /**

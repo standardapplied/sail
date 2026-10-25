@@ -61,6 +61,15 @@ public final class Strings {
   }
 
   /**
+   * {@code text} as one line, whole: each tab, newline, cursor move or other control, which a
+   * terminal moves its cursor on rather than draws, has its control character made a space, so what
+   * is left of it prints as text. Style escapes are kept.
+   */
+  public static String oneLine(String text) {
+    return CONTROL.matcher(text).replaceAll(" ");
+  }
+
+  /**
    * {@code text} as one line when it spans at most {@code width} terminal columns, otherwise its
    * beginning ending in "…", at most {@code width} columns in all; nothing when there is no room. A
    * terminal's style escapes take no columns and are kept up to the cut, and a cut styled text ends
@@ -69,7 +78,7 @@ public final class Strings {
    * character made a space, so what is left of it prints and is measured as text.
    */
   public static String fit(String text, int width) {
-    var line = CONTROL.matcher(text).replaceAll(" ");
+    var line = oneLine(text);
     if (columns(line) <= width) {
       return line;
     }

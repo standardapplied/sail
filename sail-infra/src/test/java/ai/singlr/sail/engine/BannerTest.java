@@ -913,31 +913,38 @@ class BannerTest {
   }
 
   @Test
-  void aLaunchLineLongerThanTheTerminalIsCutAtItsEdge() {
+  void aLaunchLineLongerThanTheTerminalIsPrintedWholeSoItsBranchAndCommandsCopy() {
     var branch = "agent/" + "b".repeat(100);
-    for (var columns : List.of(Banner.DEFAULT_COLUMNS, 32, 7, 1)) {
-      var lines =
-          printedAt(
-              columns,
-              out ->
-                  Banner.printAgentLaunched(
-                      "acme", "t".repeat(200), branch, OperatorCommand.SUDO, out, Ansi.OFF));
+    var project = "p".repeat(60);
 
-      assertTrue(
-          widths(lines).stream().allMatch(width -> width <= columns), String.join("\n", lines));
-    }
-    var colored =
+    var lines =
         printedAt(
-            Banner.DEFAULT_COLUMNS,
+            32,
             out ->
                 Banner.printAgentLaunched(
-                    "acme", null, branch, OperatorCommand.SUDO, out, Ansi.ON));
+                    project, null, branch, OperatorCommand.SUDO, out, Ansi.ON));
+
     assertEquals(
-        List.of("    Branch:  agent/" + "b".repeat(80) + "…"),
-        colored.stream()
-            .map(line -> line.replaceAll("\033\\[[0-9;]*m", ""))
-            .filter(line -> line.contains("Branch:"))
-            .toList());
+        List.of(
+            "  ✓ Agent launched in background",
+            "    Branch:  " + branch,
+            "    Log:     sudo sail agent log " + project + " --follow",
+            "    Stop:    sudo sail agent stop " + project),
+        lines.stream().map(line -> line.replaceAll("\033\\[[0-9;]*m", "")).toList());
+  }
+
+  @Test
+  void aLineOutsideABoxPrintsAControlInAValueAsASpace() {
+    var lines =
+        printedAt(
+            100,
+            out ->
+                Banner.printAgentLaunched(
+                    "acme", "fix\033[2Jthe\tbuild", null, OperatorCommand.SUDO, out, Ansi.OFF));
+
+    assertEquals(
+        List.of("    Task:    fix [2Jthe build"),
+        lines.stream().filter(line -> line.contains("Task:")).toList());
   }
 
   @Test
