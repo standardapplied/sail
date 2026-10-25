@@ -1862,9 +1862,13 @@ class SailOperationsTest {
     var error = dispatch(operations, "acme", request("auth"));
 
     assertError(ErrorCode.SPEC_NOT_READY, error);
-    assertTrue(error.remedy().plain().contains("restart"), error.remedy().plain());
-    assertFalse(
-        error.remedy().plain().contains("--restart"), "API callers must see a lane-neutral fix");
+    assertEquals(
+        "To dispatch it again, run spec dispatch -p acme --spec auth --restart (this resets its"
+            + " status to pending and records the restart as a lifecycle event).",
+        error.remedy().described());
+    assertEquals(
+        List.of(Remedy.sail("spec dispatch", "-p", "acme", "--spec", "auth", "--restart")),
+        error.remedy().commands());
     assertEquals(SpecStatus.REVIEW, stores[0].findById("auth").orElseThrow().status());
   }
 

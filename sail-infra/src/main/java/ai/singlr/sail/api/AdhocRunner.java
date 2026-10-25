@@ -102,7 +102,12 @@ public final class AdhocRunner {
           () -> {
             preparer.prepare();
             workBranch.checkout(
-                project, config, WorkBranch.repos(config, request.path()), request.branch(), false);
+                project,
+                config,
+                WorkBranch.repos(config, request.path()),
+                request.branch(),
+                null,
+                false);
           });
       var launch =
           runLauncher.launchSession(

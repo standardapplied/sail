@@ -17,16 +17,19 @@ import java.util.Objects;
 import picocli.CommandLine.Help.Ansi;
 
 /**
- * Runs a command body and prints its failure once: the message, a refusal's fix, then, for a
- * failure sail did not decide (neither a {@link Refused} nor a client error), any hint, each
- * command in them rendered for the account reading this terminal. The top-level handler ({@link
- * ai.singlr.sail.Main#report}) prints only what was not printed here.
+ * Runs a command body and prints its failure once: the message, a refusal's fix indented as far as
+ * the message's mark, then, for a failure sail did not decide (neither a {@link Refused} nor a
+ * client error), any hint, each command in them rendered for the account reading this terminal. The
+ * top-level handler ({@link ai.singlr.sail.Main#report}) prints only what was not printed here.
  */
 public final class CliCommand {
 
   /** What a command that can rehearse itself says after a failure sail did not decide. */
   static final String DRY_RUN_HINT =
       "  If this is unexpected, re-run with --dry-run to see what would execute.";
+
+  /** How far a failure's fix is indented: as far as the {@code ✗} of the line above it. */
+  private static final String FIX_INDENT = "  ";
 
   private CliCommand() {}
 
@@ -48,7 +51,7 @@ public final class CliCommand {
     } catch (Exception e) {
       var lines = lines(e, reader());
       err.println(Banner.errorLine(lines.getFirst(), Ansi.AUTO));
-      lines.stream().skip(1).forEach(err::println);
+      lines.stream().skip(1).forEach(line -> err.println(FIX_INDENT + line));
       if (Strings.isNotBlank(failureHint) && !decided(e)) {
         err.println(failureHint);
       }

@@ -221,7 +221,7 @@ public final class RunCommand implements Runnable {
       snapshot(shell, snapshotTaken, label);
       if (!dryRun) {
         new WorkBranch(shell, listener(new AtomicReference<>()))
-            .checkout(name, config, WorkBranch.repos(config, path), branchName, false);
+            .checkout(name, config, WorkBranch.repos(config, path), branchName, null, false);
       }
     }
 

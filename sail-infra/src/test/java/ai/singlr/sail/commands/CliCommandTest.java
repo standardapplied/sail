@@ -120,7 +120,7 @@ class CliCommandTest {
 
     assertEquals(
         "  ✗ This box syncs with main but names no FDE of its own, so it cannot tell what you may"
-            + " do.\n"
+            + " do.\n  "
             + OperatorCommand.here().render(refusal.remedy())
             + "\n",
         capturedErr.toString(StandardCharsets.UTF_8));
@@ -144,7 +144,7 @@ class CliCommandTest {
                 }));
 
     assertEquals(
-        "  ✗ Purging project 'acme' is admin-only.\nAsk an admin.\n",
+        "  ✗ Purging project 'acme' is admin-only.\n  Ask an admin.\n",
         capturedErr.toString(StandardCharsets.UTF_8));
   }
 
@@ -178,6 +178,25 @@ class CliCommandTest {
 
     assertEquals(
         "  ✗ Project 'acme' is not in the catalog.\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void aFailureThatWrapsItsCauseAndNamesNoFixSaysTheCause() {
+    assertThrows(
+        CliCommand.Printed.class,
+        () ->
+            CliCommand.run(
+                () -> {
+                  throw new ApiException(
+                      ErrorCode.AGENT_LAUNCH_FAILED,
+                      "Failed to prepare the agent session.",
+                      new IOException("Failed to create branch 'x': fatal: not a git repository"));
+                }));
+
+    assertEquals(
+        "  ✗ Failed to prepare the agent session: Failed to create branch 'x': fatal: not a git"
+            + " repository\n",
         capturedErr.toString(StandardCharsets.UTF_8));
   }
 

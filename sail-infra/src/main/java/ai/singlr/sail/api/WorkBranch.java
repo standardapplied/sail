@@ -11,6 +11,7 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ShellExec;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Cuts a run's work branch in the repos it works in, and reports each to the listener: the one
@@ -47,13 +48,15 @@ public final class WorkBranch {
    * Checks out the work branch in every target repo that exists in the container: a fresh branch
    * with {@code checkout -b}, or — on a restart — a forced {@code checkout -f} onto the existing
    * branch so re-dispatch lands on the prior work even over a dirty tree the previous run left. A
-   * collision on a non-restart dispatch fails loud, pointing the operator at {@code --restart}.
+   * collision on a non-restart dispatch fails loud, naming the re-dispatch of {@code specId}; an
+   * ad-hoc run, with no spec ({@code null}), is told to delete the branch.
    */
   public boolean checkout(
       String project,
       SailYaml config,
       List<SailYaml.Repo> targetRepos,
       String branch,
+      String specId,
       boolean restarted) {
     if (Strings.isBlank(branch)) {
       return false;
@@ -80,7 +83,13 @@ public final class WorkBranch {
               .ok();
       List<String> checkoutArgs;
       if (branchExists) {
-        checkoutArgs = RestartResolution.branchCheckoutArgs(repoDir, branch, true, restarted);
+        checkoutArgs =
+            RestartResolution.branchCheckoutArgs(
+                repoDir,
+                branch,
+                true,
+                restarted,
+                Optional.ofNullable(specId).map(id -> RestartResolution.redispatch(project, id)));
       } else {
         var base = baseBranch(project, repoDir, repo);
         checkoutArgs =

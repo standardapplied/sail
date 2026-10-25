@@ -380,7 +380,8 @@ public final class BuildDispatch {
       publish(project, null, Event.WellKnownTypes.SNAPSHOT_CREATED, Map.of("label", snapshot));
     }
     var branchCreated =
-        workBranch.checkout(project, config, targetRepos, branch, resolution.restarted());
+        workBranch.checkout(
+            project, config, targetRepos, branch, taskSpec.id(), resolution.restarted());
     return new PreparedClaim(snapshot, branchCreated);
   }
 

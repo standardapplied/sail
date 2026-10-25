@@ -237,7 +237,7 @@ class RunCommandTest {
     assertEquals(1, ran.exit(), ran.out());
     assertEquals(
         "  ✗ The agent exited 1: Not logged in · Please run /login\n"
-            + "Full log: "
+            + "  Full log: "
             + OperatorCommand.here().sail("agent log test-proj")
             + "\n",
         ran.err());
