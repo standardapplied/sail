@@ -147,7 +147,7 @@ class DispatchOperationsResolveSpecTest {
   }
 
   @Test
-  void explicitPendingSpecWithRestartIsANoOp() {
+  void explicitPendingSpecWithRestartResetsNothingAndLandsOnItsBranch() {
     var store = store();
     store.create(row("oauth-flow", "pending"));
 
@@ -155,6 +155,7 @@ class DispatchOperationsResolveSpecTest {
 
     assertEquals("oauth-flow", resolution.spec().id());
     assertFalse(resolution.restarted(), "already pending — nothing to restart");
+    assertTrue(resolution.ontoExistingBranch(), "a restart lands on a branch that exists");
     assertEquals(SpecStatus.PENDING, store.findById("oauth-flow").orElseThrow().status());
   }
 

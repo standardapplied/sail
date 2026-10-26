@@ -262,6 +262,14 @@ class CliCommandTest {
                     "A sail system command failed.",
                     new IOException("Cannot run program incus")))),
         "a wrapper that repeats a wrapper says the inner line once");
+    assertEquals(
+        "Failed to prepare the agent session: ApiException: IOException",
+        CliCommand.describe(
+            new ApiException(
+                ErrorCode.AGENT_LAUNCH_FAILED,
+                "Failed to prepare the agent session.",
+                ApiException.of(ErrorCode.COMMAND_FAILED, new IOException()))),
+        "a wrapper with no message is named by its type");
   }
 
   @Test

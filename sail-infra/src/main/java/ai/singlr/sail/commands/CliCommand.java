@@ -128,7 +128,11 @@ public final class CliCommand {
         cause instanceof ApiException wrapped
                 && wrapped.remedy().isEmpty()
                 && wrapped.getCause() != null
-            ? withCause(Remedied.reasonOf(wrapped), wrapped.getCause(), reader)
+            ? withCause(
+                Objects.requireNonNullElse(
+                    wrapped.getMessage(), wrapped.getClass().getSimpleName()),
+                wrapped.getCause(),
+                reader)
             : reader.render(Remedied.whole(cause));
     var head = message.endsWith(".") ? message.substring(0, message.length() - 1) : message;
     return said.equals(message) || said.startsWith(head + ": ") ? said : head + ": " + said;

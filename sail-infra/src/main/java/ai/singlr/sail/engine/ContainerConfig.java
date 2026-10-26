@@ -20,8 +20,9 @@ import java.util.concurrent.TimeoutException;
  * one {@link ContainerSailSetup} reconciles under, for that write alone or for one
  * read-modify-write ({@link #atomically}), never across a long step: the API server's boot sweep
  * waits for one write at most, and different containers are written in parallel. A snapshot restore
- * is such a write, putting the config and devices back whole with the filesystem. A dry run changes
- * nothing and takes no lock.
+ * is such a write, putting the config and devices back whole with the filesystem, and the one that
+ * can run for minutes: a sweep that meets a container mid-restore waits for it rather than fail its
+ * write. A dry run changes nothing and takes no lock.
  */
 public final class ContainerConfig {
 
