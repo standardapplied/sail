@@ -201,6 +201,37 @@ class CliCommandTest {
   }
 
   @Test
+  void aCauseLineWalksEveryWrapperThatNamesNoFixAndStopsAtOneThatDoes() {
+    var root = new IOException("Cannot run program incus: error=2");
+    assertEquals(
+        "Failed to prepare the agent session: A sail system command failed: Cannot run program"
+            + " incus: error=2",
+        CliCommand.describe(
+            new ApiException(
+                ErrorCode.AGENT_LAUNCH_FAILED,
+                "Failed to prepare the agent session.",
+                new ApiException(
+                    ErrorCode.COMMAND_FAILED, "A sail system command failed.", root))));
+    assertEquals(
+        "Failed to prepare the agent session: The roster is unsynced.",
+        CliCommand.describe(
+            new ApiException(
+                ErrorCode.AGENT_LAUNCH_FAILED,
+                "Failed to prepare the agent session.",
+                new ApiException(
+                    ErrorCode.CONFLICT, "The roster is unsynced.", "Run 'sail sync'.", root))),
+        "a wrapper that names a fix is its message, its fix the refusal's own");
+    assertEquals(
+        "Failed to prepare the agent session: A sail system command failed.",
+        CliCommand.describe(
+            new ApiException(
+                ErrorCode.AGENT_LAUNCH_FAILED,
+                "Failed to prepare the agent session.",
+                new ApiException(ErrorCode.COMMAND_FAILED, "A sail system command failed."))),
+        "a wrapper that wraps nothing ends the line");
+  }
+
+  @Test
   void aCauseWithNoMessageIsNamedByItsType() {
     assertThrows(
         CliCommand.Printed.class,
