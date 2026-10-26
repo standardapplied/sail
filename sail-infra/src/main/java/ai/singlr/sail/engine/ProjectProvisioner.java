@@ -95,7 +95,7 @@ public final class ProjectProvisioner {
       Optional<SshPublicKey> workstationKey,
       OperatorCommand operator) {
     this.shell = shell;
-    this.containerConfig = new ContainerConfig(shell);
+    this.containerConfig = new ContainerConfig(shell, SailPaths.locksDir());
     this.tracker = tracker;
     this.listener = Objects.requireNonNullElse(listener, ProvisionListener.NOOP);
     this.skills = Objects.requireNonNull(skills, "skills");

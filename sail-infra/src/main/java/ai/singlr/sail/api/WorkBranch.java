@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.ContainerExec;
@@ -29,8 +30,9 @@ public final class WorkBranch {
   }
 
   /**
-   * The repos a run started in {@code path} branches in: the one {@code path} names, as configured
-   * when it is one of the project's, or every repo of the project when there is no path.
+   * The repos a run started in {@code path} branches in: the project's repo that holds {@code
+   * path}, or {@code path} itself when no configured repo does, or every repo of the project when
+   * there is no path.
    */
   public static List<SailYaml.Repo> repos(SailYaml config, String path) {
     var repos = Objects.requireNonNullElse(config.repos(), List.<SailYaml.Repo>of());
@@ -39,7 +41,7 @@ public final class WorkBranch {
     }
     return List.of(
         repos.stream()
-            .filter(repo -> path.equals(repo.path()))
+            .filter(repo -> path.equals(repo.path()) || path.startsWith(repo.path() + "/"))
             .findFirst()
             .orElse(new SailYaml.Repo(null, path, null)));
   }
@@ -48,15 +50,15 @@ public final class WorkBranch {
    * Checks out the work branch in every target repo that exists in the container: a fresh branch
    * with {@code checkout -b}, or — on a restart — a forced {@code checkout -f} onto the existing
    * branch so re-dispatch lands on the prior work even over a dirty tree the previous run left. A
-   * collision on a non-restart dispatch fails loud, naming the re-dispatch of {@code specId}; an
-   * ad-hoc run, with no spec ({@code null}), is told to delete the branch.
+   * collision on a non-restart dispatch fails loud, naming {@code redispatch}, the command that
+   * dispatches the spec onto the branch; a run with no spec to re-dispatch is told to delete it.
    */
   public boolean checkout(
       String project,
       SailYaml config,
       List<SailYaml.Repo> targetRepos,
       String branch,
-      String specId,
+      Optional<Remedy.Command> redispatch,
       boolean restarted) {
     if (Strings.isBlank(branch)) {
       return false;
@@ -84,12 +86,7 @@ public final class WorkBranch {
       List<String> checkoutArgs;
       if (branchExists) {
         checkoutArgs =
-            RestartResolution.branchCheckoutArgs(
-                repoDir,
-                branch,
-                true,
-                restarted,
-                Optional.ofNullable(specId).map(id -> RestartResolution.redispatch(project, id)));
+            RestartResolution.branchCheckoutArgs(repoDir, branch, true, restarted, redispatch);
       } else {
         var base = baseBranch(project, repoDir, repo);
         checkoutArgs =

@@ -381,7 +381,12 @@ public final class BuildDispatch {
     }
     var branchCreated =
         workBranch.checkout(
-            project, config, targetRepos, branch, taskSpec.id(), resolution.restarted());
+            project,
+            config,
+            targetRepos,
+            branch,
+            Optional.of(RestartResolution.redispatch(project, taskSpec.id())),
+            resolution.restarted());
     return new PreparedClaim(snapshot, branchCreated);
   }
 

@@ -26,10 +26,6 @@ public final class ContainerConfig {
   private final ShellExec shell;
   private final Path locks;
 
-  public ContainerConfig(ShellExec shell) {
-    this(shell, SailPaths.locksDir());
-  }
-
   /**
    * @param locks the box's lock directory, where the API server and a root CLI meet
    */

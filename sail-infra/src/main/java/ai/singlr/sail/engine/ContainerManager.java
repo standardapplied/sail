@@ -29,7 +29,7 @@ public final class ContainerManager {
 
   public ContainerManager(ShellExec shell) {
     this.shell = shell;
-    this.config = new ContainerConfig(shell);
+    this.config = new ContainerConfig(shell, SailPaths.locksDir());
   }
 
   /** Resource limits configured on a container (raw strings from Incus config). */

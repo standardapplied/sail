@@ -382,6 +382,69 @@ class RunCommandTest {
         json.out());
   }
 
+  @Test
+  void aTaskRunInASubdirectoryOfARepoCutsItsBranchInThatRepo() {
+    var shell = repoContainer();
+
+    var ran =
+        SailCli.run(
+            runCommand(catalog(NOCAPTCHA), shell, command -> 0),
+            "test-proj",
+            "--task",
+            "Fix the build",
+            "--path",
+            "nocaptcha/server",
+            "--no-snapshot");
+
+    assertEquals(0, ran.exit(), ran.err());
+    assertTrue(onlyBranchCutIn(shell, "/home/dev/workspace/nocaptcha").startsWith("sail/snap-"));
+  }
+
+  @Test
+  void aBackgroundRunThatCutNoBranchReportsNone() {
+    var ran =
+        SailCli.run(
+            runCommand(
+                catalog("name: test-proj\nagent:\n  type: claude-code\n  auto_branch: true\n"),
+                repoContainer(),
+                command -> 0),
+            "test-proj",
+            "--task",
+            "Fix the build",
+            "--background",
+            "--no-snapshot");
+
+    assertEquals(0, ran.exit(), ran.err());
+    assertTrue(ran.out().contains("  ✓ Agent launched in background\n    Task:"), ran.out());
+    assertFalse(ran.out().contains("    Branch:  "), ran.out());
+  }
+
+  @Test
+  void aBranchThatAlreadyExistsKeepsItsRemedyThroughThePreparation() {
+    var shell = runningContainer();
+
+    var ran =
+        SailCli.run(
+            runCommand(catalog(NOCAPTCHA), shell, command -> 0),
+            "test-proj",
+            "--task",
+            "Fix the build",
+            "--no-snapshot");
+
+    assertEquals(1, ran.exit(), ran.out());
+    var probe =
+        shell.arguments().stream()
+            .filter(command -> command.contains("--verify") && command.contains("rev-parse"))
+            .findFirst()
+            .orElseThrow();
+    var branch = probe.getLast().substring("refs/heads/".length());
+    assertEquals(
+        "  ✗ Failed to prepare the agent session: Branch '"
+            + branch
+            + "' already exists.\n  Delete it first.\n",
+        ran.err());
+  }
+
   /** A container whose repos exist and hold no branch yet. */
   private static ScriptedShellExecutor repoContainer() {
     return runningContainer().onFail("rev-parse --verify --quiet refs/heads/", "");

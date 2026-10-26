@@ -151,9 +151,9 @@ class DispatchCommandWiringTest {
 
   /**
    * {@code sail spec dispatch <args>} for {@code acme} as this box's admin runs it, its agent
-   * exiting {@code agent}: the door's own hooks, its events kept here and its watcher a pid.
+   * exiting {@code agent}: the door's own hooks, its events kept here and its watcher a pid, over
+   * the control plane a test seeded first, or a fresh one.
    */
-  /** {@code spec dispatch -p acme --spec auth} with {@code args}, over the seeded control plane. */
   private SailCli.Ran dispatch(ShellExec shell, int agent, String... args) throws Exception {
     if (db == null) {
       seed();

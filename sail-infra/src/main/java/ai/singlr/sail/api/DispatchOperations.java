@@ -56,12 +56,13 @@ public final class DispatchOperations {
       String task, String branch, String path, boolean background, boolean dryRun) {}
 
   /**
-   * A launched ad-hoc session: its minted run id and, live launches only, the probed session,
-   * foreground exit code, and watcher. A dry run carries the run id it would have used and nothing
-   * else.
+   * A launched ad-hoc session: its minted run id, the work branch it runs on (null when none was
+   * cut) and, live launches only, the probed session, foreground exit code, and watcher. A dry run
+   * carries the run id and branch it would have used and nothing else.
    */
   public record AdhocSession(
       String runId,
+      String branch,
       AgentSession.SessionInfo session,
       Integer exitCode,
       Optional<WatcherSpawner.Spawned> watcher) {}

@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
@@ -92,23 +93,14 @@ public final class AdhocRunner {
                   null,
                   Lane.ADHOC.wire(),
                   null)));
-      return new DispatchOperations.AdhocSession(runId, null, null, Optional.empty());
+      return new DispatchOperations.AdhocSession(
+          runId, request.branch(), null, null, Optional.empty());
     }
     var credential =
         reserveAdhocRun(
             runId, project, localHandle, agentType, request.branch(), request.task(), unit, config);
     try {
-      prepare(
-          () -> {
-            preparer.prepare();
-            workBranch.checkout(
-                project,
-                config,
-                WorkBranch.repos(config, request.path()),
-                request.branch(),
-                null,
-                false);
-          });
+      var branch = prepare(project, config, request, preparer) ? request.branch() : null;
       var launch =
           runLauncher.launchSession(
               new RunLauncher.LaunchSpec(
@@ -121,7 +113,7 @@ public final class AdhocRunner {
                   "",
                   agentType,
                   request.task(),
-                  request.branch(),
+                  branch,
                   List.of(),
                   background,
                   runId,
@@ -134,7 +126,7 @@ public final class AdhocRunner {
                   project, unit, runId, null, agentType, Lane.ADHOC.wire(), background),
               launch);
       return new DispatchOperations.AdhocSession(
-          runId, status, background ? null : launch.exitCode(), launch.watcher());
+          runId, branch, status, background ? null : launch.exitCode(), launch.watcher());
     } catch (RuntimeException e) {
       runReservation.releaseIfAbsent(runId, project, unit);
       throw e;
@@ -180,12 +172,33 @@ public final class AdhocRunner {
         && "full".equals(config.agent().config().get("permissions"));
   }
 
-  private static void prepare(DispatchOperations.AdhocPreparer preparer) {
+  /**
+   * Runs {@code preparer}, then cuts the work branch; whether a branch was cut. A failure of either
+   * is the launch's: a refusal keeps its reason and remedy, anything else its cause.
+   */
+  private boolean prepare(
+      String project,
+      SailYaml config,
+      DispatchOperations.AdhocRequest request,
+      DispatchOperations.AdhocPreparer preparer) {
     try {
       preparer.prepare();
+      return workBranch.checkout(
+          project,
+          config,
+          WorkBranch.repos(config, request.path()),
+          request.branch(),
+          Optional.empty(),
+          false);
     } catch (Exception e) {
-      throw new ApiException(
-          ErrorCode.AGENT_LAUNCH_FAILED, "Failed to prepare the agent session.", e);
+      throw e instanceof Remedied refused && !refused.remedy().isEmpty()
+          ? new ApiException(
+              ErrorCode.AGENT_LAUNCH_FAILED,
+              "Failed to prepare the agent session: " + refused.reason(),
+              refused.remedy(),
+              e)
+          : new ApiException(
+              ErrorCode.AGENT_LAUNCH_FAILED, "Failed to prepare the agent session.", e);
     }
   }
 }

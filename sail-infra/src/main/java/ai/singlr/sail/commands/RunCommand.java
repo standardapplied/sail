@@ -45,6 +45,7 @@ import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -221,7 +222,8 @@ public final class RunCommand implements Runnable {
       snapshot(shell, snapshotTaken, label);
       if (!dryRun) {
         new WorkBranch(shell, listener(new AtomicReference<>()))
-            .checkout(name, config, WorkBranch.repos(config, path), branchName, null, false);
+            .checkout(
+                name, config, WorkBranch.repos(config, path), branchName, Optional.empty(), false);
       }
     }
 
@@ -322,7 +324,7 @@ public final class RunCommand implements Runnable {
         }
         throw e;
       }
-      render(shell, session, launchCommand.get(), branchName, operator);
+      render(shell, session, launchCommand.get(), operator);
     }
   }
 
@@ -409,14 +411,13 @@ public final class RunCommand implements Runnable {
       ShellExec shell,
       DispatchOperations.AdhocSession session,
       List<String> command,
-      String branchName,
       OperatorCommand operator) {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
       map.put("mode", background ? "background" : "foreground");
       map.put("task", task);
-      map.put("branch", branchName);
+      map.put("branch", session.branch());
       map.put("run_id", session.runId());
       map.put("log_path", AgentUnit.forRun(session.runId()).logPath());
       map.put("ssh_command", command == null ? "" : String.join(" ", command));
@@ -428,7 +429,7 @@ public final class RunCommand implements Runnable {
       return;
     }
     if (background) {
-      Banner.printAgentLaunched(name, task, branchName, operator, System.out, Ansi.AUTO);
+      Banner.printAgentLaunched(name, task, session.branch(), operator, System.out, Ansi.AUTO);
       session
           .watcher()
           .ifPresent(
