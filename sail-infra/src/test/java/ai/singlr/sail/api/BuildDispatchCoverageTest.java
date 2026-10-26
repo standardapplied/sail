@@ -226,7 +226,8 @@ class BuildDispatchCoverageTest {
 
   @Test
   void aShellFailureWhilePreparingTheCheckoutFailsWithCommandFailed() throws IOException {
-    var shell = happyPath().throwOn("test -d /home/dev/workspace/app/.git");
+    var shell =
+        happyPath().throwOn("git -C /home/dev/workspace/app rev-parse --is-inside-work-tree");
     var ops = ops(shell, YAML, seedDb());
 
     var thrown = assertThrows(ApiException.class, () -> dispatch(ops));
@@ -440,7 +441,7 @@ class BuildDispatchCoverageTest {
         .on("incus list ^acme$", RUNNING_JSON)
         .on("mkdir -p /home/dev/.sail", "")
         .on("printf '%s'", "")
-        .on("test -d /home/dev/workspace/app/.git", "")
+        .on("git -C /home/dev/workspace/app rev-parse --is-inside-work-tree", "true\n")
         .on(REPO + " rev-parse --abbrev-ref origin/HEAD", "origin/main\n")
         .on(REPO + " fetch --quiet origin main", "")
         .on(REPO + " fetch --quiet origin develop", "")

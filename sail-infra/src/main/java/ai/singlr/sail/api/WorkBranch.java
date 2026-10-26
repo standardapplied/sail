@@ -10,6 +10,8 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ShellExec;
+import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -30,20 +32,39 @@ public final class WorkBranch {
   }
 
   /**
-   * The repos a run started in {@code path} branches in: the project's repo that holds {@code
-   * path}, or {@code path} itself when no configured repo does, or every repo of the project when
-   * there is no path.
+   * The repos a run started in {@code path} branches in: the deepest of the project's repos that
+   * holds {@code path}, or {@code path} itself when no configured repo does, or every repo of the
+   * project when there is no path. Paths compare as the filesystem resolves them, so {@code
+   * web/../api} and {@code ./api/src} branch in {@code api}, where the agent starts.
    */
   public static List<SailYaml.Repo> repos(SailYaml config, String path) {
     var repos = Objects.requireNonNullElse(config.repos(), List.<SailYaml.Repo>of());
-    if (Strings.isBlank(path)) {
+    var requested = Path.of(workspacePath(path));
+    if (requested.toString().isEmpty()) {
       return repos;
     }
     return List.of(
         repos.stream()
-            .filter(repo -> path.equals(repo.path()) || path.startsWith(repo.path() + "/"))
-            .findFirst()
-            .orElse(new SailYaml.Repo(null, path, null)));
+            .filter(repo -> requested.startsWith(Path.of(repo.path()).normalize()))
+            .max(Comparator.comparingInt(repo -> Path.of(repo.path()).normalize().getNameCount()))
+            .orElse(new SailYaml.Repo(null, requested.toString(), null)));
+  }
+
+  /**
+   * {@code path} as a normalized path relative to the workspace, empty for the workspace itself.
+   *
+   * @throws IllegalArgumentException when {@code path} leaves the workspace
+   */
+  public static String workspacePath(String path) {
+    if (Strings.isBlank(path)) {
+      return "";
+    }
+    var normalized = Path.of(path).normalize();
+    if (normalized.isAbsolute() || normalized.startsWith("..")) {
+      throw new IllegalArgumentException(
+          "--path '" + path + "' leaves the workspace. Name a directory inside it.");
+    }
+    return normalized.toString();
   }
 
   /**
@@ -66,9 +87,7 @@ public final class WorkBranch {
     var created = false;
     for (var repo : targetRepos) {
       var repoDir = "/home/" + config.sshUser() + "/workspace/" + repo.path();
-      var repoExists =
-          exec(ContainerExec.asDevUser(project, List.of("test", "-d", repoDir + "/.git")));
-      if (!repoExists.ok()) {
+      if (!insideWorkTree(project, repoDir)) {
         continue;
       }
       var branchExists =
@@ -113,6 +132,18 @@ public final class WorkBranch {
       listener.branchUnavailable(branch);
     }
     return created;
+  }
+
+  /**
+   * Whether {@code repoDir} lies in a git work tree. Git answers rather than a {@code .git}
+   * directory, which a linked worktree or a submodule holds as a file.
+   */
+  private boolean insideWorkTree(String project, String repoDir) {
+    var probe =
+        exec(
+            ContainerExec.asDevUser(
+                project, List.of("git", "-C", repoDir, "rev-parse", "--is-inside-work-tree")));
+    return probe.ok() && "true".equals(probe.stdout().strip());
   }
 
   /**

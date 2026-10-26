@@ -244,7 +244,7 @@ class DispatchCommandWiringTest {
         .on("incus list ^acme$", RUNNING_JSON)
         .on("mkdir -p /home/dev/.sail", "")
         .on("printf '%s'", "")
-        .on("test -d /home/dev/workspace/app/.git", "")
+        .on("git -C /home/dev/workspace/app rev-parse --is-inside-work-tree", "true\n")
         .on("git -C /home/dev/workspace/app checkout -b sail/auth", "");
   }
 

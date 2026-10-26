@@ -33,6 +33,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -401,6 +402,90 @@ class RunCommandTest {
   }
 
   @Test
+  void aTaskRunInAPathThroughAnotherRepoCutsItsBranchWhereTheAgentStarts() {
+    var shell = repoContainer();
+    var twoRepos = NOCAPTCHA + "  - url: https://github.com/acme/web.git\n    path: web\n";
+
+    var ran =
+        SailCli.run(
+            runCommand(catalog(twoRepos), shell, command -> 0),
+            "test-proj",
+            "--task",
+            "Fix the build",
+            "--path",
+            "nocaptcha/../web",
+            "--no-snapshot");
+
+    assertEquals(0, ran.exit(), ran.err());
+    assertTrue(onlyBranchCutIn(shell, "/home/dev/workspace/web").startsWith("sail/snap-"));
+  }
+
+  @Test
+  void aTaskRunInADotPrefixedSubdirectoryCutsItsBranchInTheDeepestRepoHoldingIt() {
+    var shell = repoContainer();
+    var nested = NOCAPTCHA + "  - url: https://github.com/acme/ui.git\n    path: nocaptcha/ui\n";
+
+    var ran =
+        SailCli.run(
+            runCommand(catalog(nested), shell, command -> 0),
+            "test-proj",
+            "--task",
+            "Fix the build",
+            "--path",
+            "./nocaptcha/ui/src",
+            "--no-snapshot");
+
+    assertEquals(0, ran.exit(), ran.err());
+    assertTrue(onlyBranchCutIn(shell, "/home/dev/workspace/nocaptcha/ui").startsWith("sail/snap-"));
+  }
+
+  @Test
+  void aPathThatLeavesTheWorkspaceIsRefusedBeforeAnythingRuns() {
+    var shell = repoContainer();
+
+    var ran =
+        SailCli.run(
+            runCommand(catalog(NOCAPTCHA), shell, command -> 0),
+            "test-proj",
+            "--task",
+            "Fix the build",
+            "--path",
+            "nocaptcha/../../etc",
+            "--no-snapshot");
+
+    assertEquals(1, ran.exit(), ran.out());
+    assertTrue(
+        ran.err()
+            .contains(
+                "--path 'nocaptcha/../../etc' leaves the workspace. Name a directory inside it."),
+        ran.err());
+    assertEquals(List.of(), checkouts(shell));
+  }
+
+  @Test
+  void aShellThatCannotRunWhilePreparingSaysWhyThroughEveryWrapper() {
+    var shell =
+        repoContainer()
+            .onThrow(
+                "rev-parse --is-inside-work-tree",
+                new IOException("Cannot run program incus: error=2, No such file or directory"));
+
+    var ran =
+        SailCli.run(
+            runCommand(catalog(NOCAPTCHA), shell, command -> 0),
+            "test-proj",
+            "--task",
+            "Fix the build",
+            "--no-snapshot");
+
+    assertEquals(1, ran.exit(), ran.out());
+    assertEquals(
+        "  ✗ Failed to prepare the agent session: A sail system command failed: Cannot run program"
+            + " incus: error=2, No such file or directory\n",
+        ran.err());
+  }
+
+  @Test
   void aBackgroundRunThatCutNoBranchReportsNone() {
     var ran =
         SailCli.run(
@@ -509,6 +594,7 @@ class RunCommandTest {
   private static ScriptedShellExecutor runningContainer() {
     return new ScriptedShellExecutor(new ScriptedShellExecutor.Result(0, "", ""))
         .onOk("incus list", "[{\"status\": \"Running\"}]")
+        .onOk("rev-parse --is-inside-work-tree", "true\n")
         .onOk("basename", "old\n");
   }
 

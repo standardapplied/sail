@@ -101,9 +101,9 @@ public final class CliCommand {
 
   /**
    * A failure as {@code reader} reads it: an API refusal's message, then its fix on a line of its
-   * own; an API failure with no fix that wraps a cause, its message and the cause's, so the line
-   * says why; a failure below the door that names a remedy, its reason and remedy on one line;
-   * anything else, its message.
+   * own; an API failure with no fix that wraps a cause, its message and the cause's, through every
+   * wrapper that names no fix, so the line says why; a failure below the door that names a remedy,
+   * its reason and remedy on one line; anything else, its message.
    */
   public static List<String> lines(Exception failure, OperatorCommand reader) {
     var e = Refusals.translated(failure);
@@ -121,9 +121,14 @@ public final class CliCommand {
 
   private static String withCause(String message, Throwable cause) {
     var head = message.endsWith(".") ? message.substring(0, message.length() - 1) : message;
+    var detail = Objects.requireNonNullElse(cause.getMessage(), cause.getClass().getSimpleName());
     return head
         + ": "
-        + Objects.requireNonNullElse(cause.getMessage(), cause.getClass().getSimpleName());
+        + (cause instanceof ApiException wrapped
+                && wrapped.remedy().isEmpty()
+                && wrapped.getCause() != null
+            ? withCause(detail, wrapped.getCause())
+            : detail);
   }
 
   private static OperatorCommand reader() {

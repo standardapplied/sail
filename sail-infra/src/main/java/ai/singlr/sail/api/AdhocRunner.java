@@ -7,7 +7,6 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentUnit;
@@ -163,7 +162,8 @@ public final class AdhocRunner {
 
   private static String adhocWorkDir(SailYaml config, String path) {
     var workDir = "/home/" + config.sshUser() + "/workspace";
-    return Strings.isBlank(path) ? workDir : workDir + "/" + path;
+    var relative = WorkBranch.workspacePath(path);
+    return relative.isEmpty() ? workDir : workDir + "/" + relative;
   }
 
   private static boolean adhocFullPermissions(SailYaml config) {

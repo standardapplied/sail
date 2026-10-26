@@ -168,6 +168,7 @@ public final class RunCommand implements Runnable {
 
     if (!path.isBlank()) {
       validateSafePath(path, "--path");
+      path = WorkBranch.workspacePath(path);
     }
 
     launchAgent(shell, config, operator);
