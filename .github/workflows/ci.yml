@@ -21,7 +21,7 @@ jobs:
   # check resolves when the suite does. No other job runs a unit test.
   verify:
     name: Unit tests and quality gates
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -60,7 +60,7 @@ jobs:
   # A job of its own, so an NVD refresh that retries for minutes never holds the unit verdict.
   dependency-scan:
     name: Dependency scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -118,7 +118,7 @@ jobs:
 
   native-fleet:
     name: Native fleet sync tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -162,7 +162,7 @@ jobs:
 
   fleet-integration:
     name: Multi-node control-plane integration tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -194,7 +194,7 @@ jobs:
 
   incus-integration:
     name: Incus-backed integration tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
