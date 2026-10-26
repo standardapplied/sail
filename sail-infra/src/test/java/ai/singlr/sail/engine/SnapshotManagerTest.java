@@ -10,9 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class SnapshotManagerTest {
+
+  @TempDir Path locks;
 
   private static final String SNAPSHOTS_JSON =
       """
@@ -60,7 +64,7 @@ class SnapshotManagerTest {
   @Test
   void restoreExecutesCorrectCommand() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
-    var mgr = new SnapshotManager(shell);
+    var mgr = new SnapshotManager(shell, locks);
 
     mgr.restore("acme-health", "pre-agent");
 
@@ -72,7 +76,7 @@ class SnapshotManagerTest {
   @Test
   void restoreThrowsOnFailure() {
     var shell = new ScriptedShellExecutor().onFail("incus snapshot restore", "no such snapshot");
-    var mgr = new SnapshotManager(shell);
+    var mgr = new SnapshotManager(shell, locks);
 
     var ex = assertThrows(IOException.class, () -> mgr.restore("acme-health", "pre-agent"));
     assertTrue(ex.getMessage().contains("Failed to restore snapshot"));

@@ -1105,6 +1105,21 @@ public final class Banner {
     table.render(out, ansi);
   }
 
+  /** Prints a work branch cut, or reused, in {@code repoPath}, as a dispatch and a run say it. */
+  public static void printBranchReady(
+      String branch, String repoPath, boolean reused, PrintStream out, Ansi ansi) {
+    var verb = reused ? "Reusing branch:" : "Creating branch:";
+    printLine(out, ansi, "  @|bold " + verb + "|@ " + branch + " in " + repoPath);
+    printLine(out, ansi, "  @|green \u2713|@ Branch " + branch + " in " + repoPath);
+    out.println();
+  }
+
+  /** Prints that no repo of the project could take {@code branch}. */
+  public static void printBranchUnavailable(String branch, PrintStream out, Ansi ansi) {
+    printLine(out, ansi, "  @|faint Branch:|@ " + branch + " (create manually in repo)");
+    out.println();
+  }
+
   /** Prints confirmation after a background agent launch. */
   public static void printAgentLaunched(
       String name,

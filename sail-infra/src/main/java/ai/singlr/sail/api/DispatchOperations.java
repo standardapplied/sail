@@ -49,27 +49,29 @@ public final class DispatchOperations {
   /**
    * One ad-hoc session launch — {@code sail agent run --task}. No spec, no policy: the operator
    * supplies the task directly, and the session reserves the whole container. {@code branch} is the
-   * already-checked-out work branch (or null), {@code path} an optional workspace subdirectory.
+   * work branch to cut (or null), in {@code path}'s repo alone when it names one and in each of the
+   * project's repos otherwise; {@code path} is also the workspace subdirectory the agent starts in.
    */
   public record AdhocRequest(
       String task, String branch, String path, boolean background, boolean dryRun) {}
 
   /**
-   * A launched ad-hoc session: its minted run id and, live launches only, the probed session,
-   * foreground exit code, and watcher. A dry run carries the run id it would have used and nothing
-   * else.
+   * A launched ad-hoc session: its minted run id, the work branch it runs on (null when none was
+   * cut) and, live launches only, the probed session, foreground exit code, and watcher. A dry run
+   * carries the run id and branch it would have used and nothing else.
    */
   public record AdhocSession(
       String runId,
+      String branch,
       AgentSession.SessionInfo session,
       Integer exitCode,
       Optional<WatcherSpawner.Spawned> watcher) {}
 
   /**
    * Container preparation that must not run until the whole-container reservation is won — the
-   * pre-launch snapshot and the work-branch checkout. A refused reservation means another agent
-   * owns the container, so no workspace mutation may precede it; a preparation failure is a launch
-   * failure and releases the reservation through the same path.
+   * pre-launch snapshot, ahead of the work-branch checkout. A refused reservation means another
+   * agent owns the container, so no workspace mutation may precede it; a preparation failure is a
+   * launch failure and releases the reservation through the same path.
    */
   @FunctionalInterface
   public interface AdhocPreparer {
@@ -228,7 +230,14 @@ public final class DispatchOperations {
             this::tellRoom);
     this.runReservation =
         new RunReservation(runStore, shell, listener, sessionYield, this::endLiveHolder);
-    this.adhocRunner = new AdhocRunner(projects, runLauncher, runReservation, runStore, listener);
+    this.adhocRunner =
+        new AdhocRunner(
+            projects,
+            runLauncher,
+            runReservation,
+            runStore,
+            listener,
+            new WorkBranch(shell, listener));
     this.roomWakeLauncher =
         new RoomWakeLauncher(
             projects,

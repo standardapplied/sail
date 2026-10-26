@@ -97,8 +97,9 @@ public final class DispatchCommand implements Runnable {
   @Option(
       names = "--restart",
       description =
-          "Re-dispatch a spec whose status is not 'pending'. Requires --spec. Resets status to"
-              + " pending and records a 'restarted' lifecycle event before dispatching.")
+          "Re-dispatch a spec onto its work branch when that already exists. Requires --spec. A"
+              + " spec whose status is not 'pending' is reset to pending, recording a 'restarted'"
+              + " lifecycle event, before dispatching.")
   private boolean restart;
 
   @Mixin private IgnoredFileOption file;
@@ -287,24 +288,16 @@ public final class DispatchCommand implements Runnable {
 
       @Override
       public void branchReady(String branch, String repoPath, boolean reused) {
-        if (json) {
-          return;
+        if (!json) {
+          Banner.printBranchReady(branch, repoPath, reused, System.out, Ansi.AUTO);
         }
-        var verb = reused ? "Reusing branch:" : "Creating branch:";
-        System.out.println(
-            Ansi.AUTO.string("  @|bold " + verb + "|@ " + branch + " in " + repoPath));
-        System.out.println(Ansi.AUTO.string("  @|green ✓|@ Branch " + branch + " in " + repoPath));
-        System.out.println();
       }
 
       @Override
       public void branchUnavailable(String branch) {
-        if (json) {
-          return;
+        if (!json) {
+          Banner.printBranchUnavailable(branch, System.out, Ansi.AUTO);
         }
-        System.out.println(
-            Ansi.AUTO.string("  @|faint Branch:|@ " + branch + " (create manually in repo)"));
-        System.out.println();
       }
 
       @Override

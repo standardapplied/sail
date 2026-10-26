@@ -63,6 +63,7 @@ public final class ProjectProvisioner {
       List.of("curl", "wget", "git", "sudo", "openssh-server", "gh", "ripgrep");
 
   private final ShellExec shell;
+  private final ContainerConfig containerConfig;
   private final ProvisionTracker<ProjectPhase> tracker;
   private final ProvisionListener listener;
   private final ProjectSkills skills;
@@ -94,6 +95,7 @@ public final class ProjectProvisioner {
       Optional<SshPublicKey> workstationKey,
       OperatorCommand operator) {
     this.shell = shell;
+    this.containerConfig = new ContainerConfig(shell, SailPaths.locksDir());
     this.tracker = tracker;
     this.listener = Objects.requireNonNullElse(listener, ProvisionListener.NOOP);
     this.skills = Objects.requireNonNull(skills, "skills");
@@ -194,7 +196,7 @@ public final class ProjectProvisioner {
    * part way leaves no record and the next apply provisions again, whatever descriptor it brings.
    */
   private void clearProvisionedInputs(String name) throws Exception {
-    var cleared = shell.exec(List.of("incus", "config", "set", name, INPUTS_KEY + "="));
+    var cleared = containerConfig.set(name, List.of(INPUTS_KEY + "="));
     if (!cleared.ok()) {
       throw new IOException(
           "Failed to clear the record of the last provisioned descriptor: " + cleared.stderr());
@@ -261,22 +263,7 @@ public final class ProjectProvisioner {
     step(2, "Setting disk quota...");
 
     var disk = config.resources().disk();
-    var result =
-        shell.exec(
-            List.of(
-                "incus", "config", "device", "override", config.name(), "root", "size=" + disk));
-    if (!result.ok()) {
-      if (result.stderr().contains("already exists")) {
-        var setResult =
-            shell.exec(
-                List.of("incus", "config", "device", "set", config.name(), "root", "size=" + disk));
-        if (!setResult.ok()) {
-          throw new IOException("Failed to set disk quota: " + setResult.stderr());
-        }
-      } else {
-        throw new IOException("Failed to set disk quota: " + result.stderr());
-      }
-    }
+    new ContainerManager(shell).setDiskQuota(config.name(), disk);
     tracker.advance(currentPhase);
     if (host.isDir()) {
       stepDone(2, "Disk quota " + disk + " (advisory)");
@@ -307,10 +294,10 @@ public final class ProjectProvisioner {
       stepDone(3, detail + " (already set)");
       return;
     }
-    var set = new ArrayList<>(List.of("incus", "config", "set", name));
-    limits.forEach((key, value) -> set.add(key + "=" + value));
-    set.add(RESTART_PENDING_KEY + "=true");
-    var result = shell.exec(set);
+    var assignments = new ArrayList<String>();
+    limits.forEach((key, value) -> assignments.add(key + "=" + value));
+    assignments.add(RESTART_PENDING_KEY + "=true");
+    var result = containerConfig.set(name, assignments);
     if (!result.ok()) {
       throw new IOException("Failed to set resource limits: " + result.stderr());
     }
@@ -318,7 +305,7 @@ public final class ProjectProvisioner {
     if (!restart.ok()) {
       throw new IOException("Failed to restart container after config: " + restart.stderr());
     }
-    var cleared = shell.exec(List.of("incus", "config", "set", name, RESTART_PENDING_KEY + "="));
+    var cleared = containerConfig.set(name, List.of(RESTART_PENDING_KEY + "="));
     if (!cleared.ok()) {
       throw new IOException("Failed to clear the pending restart: " + cleared.stderr());
     }
@@ -1308,9 +1295,7 @@ public final class ProjectProvisioner {
             .formatted(name, DateTimeUtils.now());
     pushFileToContainer(name, "/etc/sail/project.yaml", yaml);
     var recorded =
-        shell.exec(
-            List.of(
-                "incus", "config", "set", name, INPUTS_KEY + "=" + inputs(config, workstationKey)));
+        containerConfig.set(name, List.of(INPUTS_KEY + "=" + inputs(config, workstationKey)));
     if (!recorded.ok()) {
       throw new IOException("Failed to record the provisioned descriptor: " + recorded.stderr());
     }

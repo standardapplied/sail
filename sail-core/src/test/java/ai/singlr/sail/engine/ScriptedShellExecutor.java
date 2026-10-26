@@ -21,7 +21,7 @@ import java.util.function.Consumer;
 /**
  * Test double for {@link ShellExec} that returns scripted responses based on command patterns.
  * Commands are matched by checking if the joined command string contains the pattern. Also records
- * all invocations for verification.
+ * all invocations for verification, one command at a time, so threads may share it.
  */
 public final class ScriptedShellExecutor implements ShellExec {
 
@@ -142,7 +142,8 @@ public final class ScriptedShellExecutor implements ShellExec {
   }
 
   @Override
-  public Result exec(List<String> command, Path workDir, Duration timeout) throws IOException {
+  public synchronized Result exec(List<String> command, Path workDir, Duration timeout)
+      throws IOException {
     var joined = String.join(" ", command);
     invocations.add(joined);
     arguments.add(List.copyOf(command));

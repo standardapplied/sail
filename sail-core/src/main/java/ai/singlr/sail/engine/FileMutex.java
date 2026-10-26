@@ -26,9 +26,12 @@ import java.util.concurrent.locks.ReentrantLock;
  * mutex per lock file fronts it: two threads taking the same file queue on the mutex instead of
  * tripping over an overlapping lock. A lock file it creates is readable and writable by its group,
  * as the database beside it is, so whichever of the API server and a root CLI makes it first, the
- * other — sharing the data directory's group — can still take it. Released by closing: closing the
- * channel drops the file lock even when the close itself reports an error, so the release path
- * swallows that error rather than leaking the mutex.
+ * other — sharing the data directory's group — can still take it. A thread that already holds a
+ * file takes it again without a second channel, which the JVM would refuse as an overlapping lock,
+ * so a step under a lock can call code that takes the same lock; the file lock drops when the
+ * outermost hold closes. Released by closing: closing the channel drops the file lock even when the
+ * close itself reports an error, so the release path swallows that error rather than leaking the
+ * mutex.
  */
 public final class FileMutex implements AutoCloseable {
 
@@ -51,6 +54,9 @@ public final class FileMutex implements AutoCloseable {
     var normalized = file.toAbsolutePath().normalize();
     var inProcess = IN_PROCESS.computeIfAbsent(normalized, f -> new ReentrantLock());
     inProcess.lock();
+    if (inProcess.getHoldCount() > 1) {
+      return new FileMutex(inProcess, null);
+    }
     try {
       Files.createDirectories(normalized.getParent());
       var channel = open(normalized);
@@ -107,7 +113,9 @@ public final class FileMutex implements AutoCloseable {
   @Override
   public void close() {
     try {
-      channel.close();
+      if (channel != null) {
+        channel.close();
+      }
     } catch (IOException ignored) {
     } finally {
       inProcess.unlock();

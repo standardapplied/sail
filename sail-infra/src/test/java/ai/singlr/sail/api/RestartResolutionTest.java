@@ -6,15 +6,15 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -23,10 +23,13 @@ import org.junit.jupiter.params.provider.ValueSource;
 /**
  * The pure restart decision behind both dispatch lanes: the full matrix of {status} x {restart
  * on/off} x {spec id present/absent} x {branch recorded/blank}, with no store, git, or shell in
- * sight. Refusal texts must be lane-neutral — they name the {@code restart} option, never a CLI
- * flag spelling — because API callers see them verbatim.
+ * sight. A refusal that a re-dispatch would clear names that command as data, for each door to
+ * render.
  */
 class RestartResolutionTest {
+
+  private static final Remedy.Command REDISPATCH =
+      Remedy.sail("spec dispatch", "-p", "test", "--spec", "oauth-flow", "--restart");
 
   private static Spec spec(SpecStatus status, String branch) {
     return new Spec(
@@ -59,8 +62,8 @@ class RestartResolutionTest {
     assertEquals(ErrorCode.INVALID_REQUEST, refused.code());
     assertTrue(refused.message().contains("restart"));
     assertTrue(refused.message().contains("spec id"));
-    assertTrue(refused.fix().contains("spec id"));
-    assertLaneNeutral(refused);
+    assertEquals(
+        Remedy.of("Set the spec id of the non-pending spec to re-dispatch."), refused.fix());
   }
 
   @ParameterizedTest
@@ -71,7 +74,7 @@ class RestartResolutionTest {
     var refused = assertInstanceOf(RestartResolution.Refused.class, decision);
     assertEquals(ErrorCode.SPEC_NOT_FOUND, refused.code());
     assertTrue(refused.message().contains("nope"));
-    assertNull(refused.fix());
+    assertEquals(Remedy.NONE, refused.fix());
   }
 
   @ParameterizedTest
@@ -97,8 +100,11 @@ class RestartResolutionTest {
     assertEquals(ErrorCode.SPEC_NOT_READY, refused.code());
     assertTrue(refused.message().contains("oauth-flow"));
     assertTrue(refused.message().contains(status.wire()));
-    assertTrue(refused.fix().contains("restart"));
-    assertLaneNeutral(refused);
+    assertEquals(
+        "To dispatch it again, run sail spec dispatch -p test --spec oauth-flow --restart (this"
+            + " resets its status to pending and records the restart as a lifecycle event).",
+        refused.fix().plain());
+    assertEquals(List.of(REDISPATCH), refused.fix().commands());
   }
 
   @ParameterizedTest
@@ -116,14 +122,17 @@ class RestartResolutionTest {
 
   @Test
   void branchCheckoutCreatesAFreshBranchWhenItDoesNotExist() {
-    var args = RestartResolution.branchCheckoutArgs("/w/mast", "agent/x", false, false);
+    var args =
+        RestartResolution.branchCheckoutArgs("/w/mast", "agent/x", false, false, Optional.empty());
 
     assertEquals(List.of("git", "-C", "/w/mast", "checkout", "-b", "agent/x"), args);
   }
 
   @Test
   void branchCheckoutForceReusesAnExistingBranchOnRestart() {
-    var args = RestartResolution.branchCheckoutArgs("/w/mast", "agent/x", true, true);
+    var args =
+        RestartResolution.branchCheckoutArgs(
+            "/w/mast", "agent/x", true, true, Optional.of(REDISPATCH));
 
     assertEquals(
         List.of("git", "-C", "/w/mast", "checkout", "-f", "agent/x"),
@@ -134,7 +143,9 @@ class RestartResolutionTest {
 
   @Test
   void branchCheckoutStillCreatesWhenRestartingWithNoPriorBranch() {
-    var args = RestartResolution.branchCheckoutArgs("/w/mast", "agent/x", false, true);
+    var args =
+        RestartResolution.branchCheckoutArgs(
+            "/w/mast", "agent/x", false, true, Optional.of(REDISPATCH));
 
     assertEquals(List.of("git", "-C", "/w/mast", "checkout", "-b", "agent/x"), args);
   }
@@ -144,15 +155,27 @@ class RestartResolutionTest {
     var ex =
         assertThrows(
             ApiException.class,
-            () -> RestartResolution.branchCheckoutArgs("/w/mast", "agent/x", true, false));
+            () ->
+                RestartResolution.branchCheckoutArgs(
+                    "/w/mast", "agent/x", true, false, Optional.of(REDISPATCH)));
 
     assertEquals(ErrorCode.BRANCH_CREATE_FAILED, ex.failure().errorCode());
-    assertTrue(ex.getMessage().contains("agent/x"));
-    assertTrue(
-        ex.failure().remedy().plain().contains("restart"),
-        "must point the caller at the restart option");
-    assertFalse(
-        ex.failure().remedy().plain().contains("--restart"), "collision fix must be lane-neutral");
+    assertEquals("Branch 'agent/x' already exists.", ex.getMessage());
+    assertEquals(
+        Remedy.of("To dispatch onto it, run ", REDISPATCH, ", or delete it first."),
+        ex.failure().remedy());
+  }
+
+  @Test
+  void aCollisionOfARunWithNoSpecIsToldToDeleteTheBranch() {
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () ->
+                RestartResolution.branchCheckoutArgs(
+                    "/w/mast", "agent/x", true, false, Optional.empty()));
+
+    assertEquals(Remedy.of("Delete it first."), ex.failure().remedy());
   }
 
   @Test
@@ -173,10 +196,5 @@ class RestartResolutionTest {
     var localCreate = List.of("git", "-C", "/w/mast", "checkout", "-b", "agent/x");
     assertEquals(localCreate, offline, "an unreachable origin must not block the dispatch");
     assertEquals(localCreate, detached, "a blank base falls back to the current HEAD");
-  }
-
-  private static void assertLaneNeutral(RestartResolution.Refused refused) {
-    assertFalse(refused.message().contains("--"), "refusal must not name a CLI flag spelling");
-    assertFalse(refused.fix().contains("--"), "fix must not name a CLI flag spelling");
   }
 }

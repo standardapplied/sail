@@ -56,7 +56,7 @@ class ContainerSetupSweepTest {
     var commands = String.join("\n", shell.invocations());
     assertTrue(
         commands.contains("config device"),
-        "reconcile must force-refresh the socket bind mount: " + commands);
+        "reconcile must check the socket bind mount: " + commands);
     assertTrue(
         commands.contains(ContainerSailSetup.STAMP_PATH)
             && commands.contains(ContainerSailSetup.fingerprint()),

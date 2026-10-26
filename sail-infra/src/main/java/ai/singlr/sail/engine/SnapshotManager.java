@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -34,9 +35,18 @@ public final class SnapshotManager {
   public static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(10);
 
   private final ShellExec shell;
+  private final ContainerConfig config;
 
   public SnapshotManager(ShellExec shell) {
+    this(shell, SailPaths.locksDir());
+  }
+
+  /**
+   * @param locks the box's lock directory, under which a restore holds its container's lock
+   */
+  public SnapshotManager(ShellExec shell, Path locks) {
     this.shell = shell;
+    this.config = new ContainerConfig(shell, locks);
   }
 
   /** Metadata for a single Incus snapshot. */
@@ -52,7 +62,9 @@ public final class SnapshotManager {
   public void create(String containerName, String label, Duration timeout)
       throws IOException, InterruptedException, TimeoutException {
     var cmd = List.of("incus", "snapshot", "create", containerName, label);
-    var result = execMutation(cmd, timeout, "create snapshot '" + label + "'");
+    var result =
+        execMutation(
+            () -> shell.exec(cmd, null, timeout), timeout, "create snapshot '" + label + "'");
     if (!result.ok()) {
       throw new IOException(
           "Failed to create snapshot '"
@@ -73,8 +85,11 @@ public final class SnapshotManager {
   /** Restores with an explicit timeout. */
   public void restore(String containerName, String label, Duration timeout)
       throws IOException, InterruptedException, TimeoutException {
-    var cmd = List.of("incus", "snapshot", "restore", containerName, label);
-    var result = execMutation(cmd, timeout, "restore snapshot '" + label + "'");
+    var result =
+        execMutation(
+            () -> config.restore(containerName, label, timeout),
+            timeout,
+            "restore snapshot '" + label + "'");
     if (!result.ok()) {
       throw new IOException(
           "Failed to restore snapshot '"
@@ -109,7 +124,9 @@ public final class SnapshotManager {
   public void delete(String containerName, String label, Duration timeout)
       throws IOException, InterruptedException, TimeoutException {
     var cmd = List.of("incus", "snapshot", "delete", containerName, label);
-    var result = execMutation(cmd, timeout, "delete snapshot '" + label + "'");
+    var result =
+        execMutation(
+            () -> shell.exec(cmd, null, timeout), timeout, "delete snapshot '" + label + "'");
     if (!result.ok()) {
       throw new IOException(
           "Failed to delete snapshot '"
@@ -126,10 +143,11 @@ public final class SnapshotManager {
     return "snap-" + LABEL_FORMAT.format(DateTimeUtils.now());
   }
 
-  private ShellExec.Result execMutation(List<String> cmd, Duration timeout, String description)
+  private ShellExec.Result execMutation(
+      ContainerConfig.Write<ShellExec.Result> mutation, Duration timeout, String description)
       throws IOException, InterruptedException, TimeoutException {
     try {
-      return shell.exec(cmd, null, timeout);
+      return mutation.run();
     } catch (TimeoutException e) {
       throw new TimeoutException(
           "Timed out after "

@@ -17,16 +17,19 @@ import java.util.Objects;
 import picocli.CommandLine.Help.Ansi;
 
 /**
- * Runs a command body and prints its failure once: the message, a refusal's fix, then, for a
- * failure sail did not decide (neither a {@link Refused} nor a client error), any hint, each
- * command in them rendered for the account reading this terminal. The top-level handler ({@link
- * ai.singlr.sail.Main#report}) prints only what was not printed here.
+ * Runs a command body and prints its failure once: the message, a refusal's fix indented as far as
+ * the message's mark, then, for a failure sail did not decide (neither a {@link Refused} nor a
+ * client error), any hint, each command in them rendered for the account reading this terminal. The
+ * top-level handler ({@link ai.singlr.sail.Main#report}) prints only what was not printed here.
  */
 public final class CliCommand {
 
   /** What a command that can rehearse itself says after a failure sail did not decide. */
   static final String DRY_RUN_HINT =
       "  If this is unexpected, re-run with --dry-run to see what would execute.";
+
+  /** How far a failure's fix is indented: as far as the {@code ✗} of the line above it. */
+  private static final String FIX_INDENT = "  ";
 
   private CliCommand() {}
 
@@ -48,7 +51,7 @@ public final class CliCommand {
     } catch (Exception e) {
       var lines = lines(e, reader());
       err.println(Banner.errorLine(lines.getFirst(), Ansi.AUTO));
-      lines.stream().skip(1).forEach(err::println);
+      lines.stream().skip(1).forEach(line -> err.println(FIX_INDENT + line));
       if (Strings.isNotBlank(failureHint) && !decided(e)) {
         err.println(failureHint);
       }
@@ -98,8 +101,9 @@ public final class CliCommand {
 
   /**
    * A failure as {@code reader} reads it: an API refusal's message, then its fix on a line of its
-   * own; a failure below the door that names a remedy, its reason and remedy on one line; anything
-   * else, its message.
+   * own; an API failure with no fix that wraps a cause, its message and the cause's, through every
+   * wrapper that names no fix, so the line says why; a failure below the door that names a remedy,
+   * its reason and remedy on one line; anything else, its message.
    */
   public static List<String> lines(Exception failure, OperatorCommand reader) {
     var e = Refusals.translated(failure);
@@ -107,10 +111,31 @@ public final class CliCommand {
     return switch (e) {
       case ApiException refusal when !refusal.remedy().isEmpty() ->
           List.of(message, reader.render(refusal.remedy()));
+      case ApiException wrapped when wrapped.getCause() != null ->
+          List.of(withCause(message, wrapped.getCause(), reader));
       case ApiException refusal -> List.of(message);
       case Remedied remedied -> List.of(reader.render(remedied));
       default -> List.of(message);
     };
+  }
+
+  /**
+   * {@code message}, then what {@code cause} says as {@code reader} reads it, its fix included,
+   * through every wrapper that names no fix. A cause that only repeats the message adds nothing.
+   */
+  private static String withCause(String message, Throwable cause, OperatorCommand reader) {
+    var said =
+        cause instanceof ApiException wrapped
+                && wrapped.remedy().isEmpty()
+                && wrapped.getCause() != null
+            ? withCause(
+                Objects.requireNonNullElse(
+                    wrapped.getMessage(), wrapped.getClass().getSimpleName()),
+                wrapped.getCause(),
+                reader)
+            : reader.render(Remedied.whole(cause));
+    var head = message.endsWith(".") ? message.substring(0, message.length() - 1) : message;
+    return said.equals(message) || said.startsWith(head + ": ") ? said : head + ": " + said;
   }
 
   private static OperatorCommand reader() {

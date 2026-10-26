@@ -30,7 +30,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -733,6 +738,119 @@ class ProjectProvisionerTest {
     assertEquals("Failed to clear the pending restart: denied", failure.getMessage());
     assertEquals("DISK_QUOTA_SET", YamlUtil.parseFile(stateFile).get("completed_phase"));
     assertEquals("true", shell.config.get("simple user.sail.restart_pending"));
+  }
+
+  @Test
+  void anApplyWritingWhileTheSweepRepointsTheMountWaitsForItThenSucceeds() throws Exception {
+    var sweepInside = new CountDownLatch(1);
+    var applying = new AtomicReference<Thread>();
+    var incus =
+        new SharedIncus(
+            provisionedSimpleShell(),
+            () -> {
+              sweepInside.countDown();
+              SharedIncus.awaitUntil(
+                  () -> applying.get() != null && SharedIncus.parkedOrDone().test(applying.get()));
+            },
+            "simple");
+    var sweep = new FutureTask<>(() -> ContainerSetupSweep.reconcile(incus, "simple"));
+    var apply = new FutureTask<>(provision(incus, minimalConfig()));
+
+    new Thread(sweep).start();
+    assertTrue(sweepInside.await(10, TimeUnit.SECONDS), "the sweep never reached the device");
+    applying.set(new Thread(apply));
+    applying.get().start();
+
+    assertTrue(sweep.get(), "the sweep re-pointed the mount");
+    assertDoesNotThrow(() -> apply.get());
+    assertEquals(
+        List.of("remove simple", "add simple", "set simple", "set simple"), incus.writes());
+  }
+
+  @Test
+  void anApplyAndTheSweepOnAnotherContainerNeitherWaits() throws Exception {
+    var applying = new AtomicReference<Thread>();
+    var incus =
+        new SharedIncus(
+            provisionedSimpleShell(),
+            () ->
+                SharedIncus.awaitUntil(
+                    () ->
+                        applying.get() != null
+                            && applying.get().getState() == Thread.State.TERMINATED),
+            "beta");
+    var sweep = new FutureTask<>(() -> ContainerSetupSweep.reconcile(incus, "beta"));
+    var apply = new FutureTask<>(provision(incus, minimalConfig()));
+    applying.set(new Thread(apply));
+
+    new Thread(sweep).start();
+    applying.get().start();
+
+    assertDoesNotThrow(() -> apply.get());
+    assertTrue(sweep.get(), "the sweep finished once the apply had");
+  }
+
+  @Test
+  void theSweepDoesNotWaitForAnApplysLongStep() throws Exception {
+    var held = new StepHoldingShell(provisionedSimpleShell(), "dpkg -s temurin-25-jdk");
+    var incus = new SharedIncus(held, () -> {}, "simple");
+    var apply =
+        new FutureTask<>(
+            provision(incus, minimalConfigWith(new SailYaml.Runtimes(25, null, null))));
+    new Thread(apply).start();
+    assertTrue(held.reached.await(10, TimeUnit.SECONDS), "the apply never reached its JDK step");
+
+    var sweep = new FutureTask<>(() -> ContainerSetupSweep.reconcile(incus, "simple"));
+    new Thread(sweep).start();
+
+    assertTrue(sweep.get(10, TimeUnit.SECONDS), "the sweep reconciled during the JDK install");
+    held.release.countDown();
+    assertDoesNotThrow(() -> apply.get());
+  }
+
+  private Callable<Void> provision(ShellExec shell, SailYaml config) {
+    var tracker = tracker();
+    return () -> {
+      new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN)
+          .provision(config, hostYaml(), null, null);
+      return null;
+    };
+  }
+
+  /**
+   * Answers as its script, but holds the first command containing {@code pattern} until released.
+   */
+  private static final class StepHoldingShell implements ShellExec {
+    final CountDownLatch reached = new CountDownLatch(1);
+    final CountDownLatch release = new CountDownLatch(1);
+    final ShellExec script;
+    final String pattern;
+
+    StepHoldingShell(ShellExec script, String pattern) {
+      this.script = script;
+      this.pattern = pattern;
+    }
+
+    @Override
+    public Result exec(List<String> command)
+        throws IOException, InterruptedException, TimeoutException {
+      return exec(command, null, Duration.ZERO);
+    }
+
+    @Override
+    public Result exec(List<String> command, Path workDir, Duration timeout)
+        throws IOException, InterruptedException, TimeoutException {
+      if (String.join(" ", command).contains(pattern) && reached.getCount() > 0) {
+        reached.countDown();
+        assertTrue(release.await(10, TimeUnit.SECONDS), "the held step was never released");
+      }
+      return script.exec(command, workDir, timeout);
+    }
+
+    @Override
+    public boolean isDryRun() {
+      return false;
+    }
   }
 
   /** A running {@code simple} whose user, limits, Podman and cron already exist. */

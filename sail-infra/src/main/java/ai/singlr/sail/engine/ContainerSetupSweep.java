@@ -13,11 +13,11 @@ import java.util.concurrent.TimeoutException;
 
 /**
  * Boot-time reconciliation of every running project container's sail-owned surface: the socket bind
- * mount (force-refreshed, healing reboot-stranded inodes) and the sail-owned files (rewritten when
- * the machinery stamp does not match this binary). This is the eager half of an enforcement change
- * — a server that starts requiring something new must also provision it, not wait for the next
- * sail-launched session to wander by. Best-effort by design: one wedged container is reported and
- * skipped, an unlistable daemon reconciles nothing, and the server boots either way.
+ * mount (re-pointed when its source moved) and the sail-owned files (rewritten when the machinery
+ * stamp does not match this binary). This is the eager half of an enforcement change — a server
+ * that starts requiring something new must also provision it, not wait for the next sail-launched
+ * session to wander by. Best-effort by design: one wedged container is reported and skipped, an
+ * unlistable daemon reconciles nothing, and the server boots either way.
  */
 public final class ContainerSetupSweep {
 
@@ -45,10 +45,10 @@ public final class ContainerSetupSweep {
   }
 
   /**
-   * The single best-effort reconcile of one container: mount force-refresh plus stamp-gated file
-   * rewrite, a warning instead of a failure when the container is wedged. Every automatic trigger —
-   * the boot sweep here, {@code sail up} — shares this one policy; callers that need the outcome or
-   * their own error handling call {@link ContainerSailSetup#ensureInstalled} directly.
+   * The single best-effort reconcile of one container: mount check plus stamp-gated file rewrite, a
+   * warning instead of a failure when the container is wedged. Every automatic trigger — the boot
+   * sweep here, {@code sail up} — shares this one policy; callers that need the outcome or their
+   * own error handling call {@link ContainerSailSetup#ensureInstalled} directly.
    */
   public static boolean reconcile(ShellExec shell, String container) throws InterruptedException {
     return reconcile(shell, container, SailPaths.locksDir());

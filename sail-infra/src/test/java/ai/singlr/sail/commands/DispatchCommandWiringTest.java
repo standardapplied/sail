@@ -151,10 +151,13 @@ class DispatchCommandWiringTest {
 
   /**
    * {@code sail spec dispatch <args>} for {@code acme} as this box's admin runs it, its agent
-   * exiting {@code agent}: the door's own hooks, its events kept here and its watcher a pid.
+   * exiting {@code agent}: the door's own hooks, its events kept here and its watcher a pid, over
+   * the control plane a test seeded first, or a fresh one.
    */
   private SailCli.Ran dispatch(ShellExec shell, int agent, String... args) throws Exception {
-    seed();
+    if (db == null) {
+      seed();
+    }
     new FdeStore(db).add(HANDLE, null, null, "admin");
     var command =
         new DispatchCommand(
@@ -216,7 +219,7 @@ class DispatchCommandWiringTest {
     assertEquals(1, ran.exit(), ran.out());
     assertEquals(
         "  ✗ The agent exited 1: Not logged in · Please run /login\n"
-            + "Full log: "
+            + "  Full log: "
             + OperatorCommand.here().sail("agent log acme")
             + "\n",
         ran.err());
@@ -241,7 +244,7 @@ class DispatchCommandWiringTest {
         .on("incus list ^acme$", RUNNING_JSON)
         .on("mkdir -p /home/dev/.sail", "")
         .on("printf '%s'", "")
-        .on("test -d /home/dev/workspace/app/.git", "")
+        .on("git -C /home/dev/workspace/app rev-parse --is-inside-work-tree", "true\n")
         .on("git -C /home/dev/workspace/app checkout -b sail/auth", "");
   }
 
@@ -379,6 +382,56 @@ class DispatchCommandWiringTest {
     var served = server.runs("acme", null);
     assertTrue(
         served.isSuccess(), "/v1/runs answers from the rows a CLI-lane dispatch just recorded");
+  }
+
+  @Test
+  void aDraftSpecIsRefusedWithTheCommandThatDispatchesItAgain() throws Exception {
+    seed();
+    Acting.system(
+        () ->
+            new SpecStore(db).updateReposAndStatus("auth", List.of("app"), SpecStatus.DRAFT, null));
+
+    var ran = dispatch(shell(), 0, "--background");
+
+    assertEquals(1, ran.exit(), ran.out());
+    assertEquals(
+        "  ✗ Spec 'auth' is not pending (current status: draft). A spec is dispatched only when"
+            + " pending. To dispatch it again, run "
+            + OperatorCommand.here().sail("spec dispatch -p acme --spec auth --restart")
+            + " (this resets its status to pending and records the restart as a lifecycle"
+            + " event).\n",
+        ran.err());
+  }
+
+  @Test
+  void aBranchThatExistsIsRefusedWithTheCommandThatDispatchesOntoIt() throws Exception {
+    var ran =
+        dispatch(
+            shell().on("git -C /home/dev/workspace/app rev-parse --verify --quiet refs/heads/", ""),
+            0,
+            "--background");
+
+    assertEquals(1, ran.exit(), ran.out());
+    assertEquals(
+        "  ✗ Branch 'sail/auth' already exists. To dispatch onto it, run "
+            + OperatorCommand.here().sail("spec dispatch -p acme --spec auth --restart")
+            + ", or delete it first.\n",
+        ran.err());
+  }
+
+  @Test
+  void theBranchRefusalsCommandDispatchesAPendingSpecOntoItsBranch() throws Exception {
+    var ran =
+        dispatch(
+            shell()
+                .on("git -C /home/dev/workspace/app rev-parse --verify --quiet refs/heads/", "")
+                .on("git -C /home/dev/workspace/app checkout -f sail/auth", ""),
+            0,
+            "--background",
+            "--restart");
+
+    assertEquals(0, ran.exit(), ran.err());
+    assertTrue(ran.out().contains("Reusing branch: sail/auth in app"), ran.out());
   }
 
   @Test

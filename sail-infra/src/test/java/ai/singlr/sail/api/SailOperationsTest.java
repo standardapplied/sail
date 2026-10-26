@@ -1862,9 +1862,13 @@ class SailOperationsTest {
     var error = dispatch(operations, "acme", request("auth"));
 
     assertError(ErrorCode.SPEC_NOT_READY, error);
-    assertTrue(error.remedy().plain().contains("restart"), error.remedy().plain());
-    assertFalse(
-        error.remedy().plain().contains("--restart"), "API callers must see a lane-neutral fix");
+    assertEquals(
+        "To dispatch it again, run spec dispatch -p acme --spec auth --restart (this resets its"
+            + " status to pending and records the restart as a lifecycle event).",
+        error.remedy().described());
+    assertEquals(
+        List.of(Remedy.sail("spec dispatch", "-p", "acme", "--spec", "auth", "--restart")),
+        error.remedy().commands());
     assertEquals(SpecStatus.REVIEW, stores[0].findById("auth").orElseThrow().status());
   }
 
@@ -1887,7 +1891,7 @@ class SailOperationsTest {
             .on("mkdir -p /home/dev/workspace/specs", "")
             .on("printf '%s'", "")
             .on("mkdir -p /home/dev/.sail", "")
-            .on("test -d /home/dev/workspace/app/.git", "")
+            .on("git -C /home/dev/workspace/app rev-parse --is-inside-work-tree", "true\n")
             .on("rev-parse --verify --quiet refs/heads/sail/auth", "")
             .on("git -C /home/dev/workspace/app checkout -f sail/auth", "")
             .on("systemd-run --user", "")
@@ -1928,7 +1932,7 @@ class SailOperationsTest {
         operationsWithStore(
             branchYaml(),
             idleShell()
-                .on("test -d /home/dev/workspace/app/.git", "")
+                .on("git -C /home/dev/workspace/app rev-parse --is-inside-work-tree", "true\n")
                 .on("rev-parse --verify --quiet refs/heads/sail/auth", "")
                 .on("git -C /home/dev/workspace/app checkout -f sail/auth", ""),
             store -> {
@@ -2266,7 +2270,7 @@ class SailOperationsTest {
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
-                .on("test -d /home/dev/workspace/app/.git", "")
+                .on("git -C /home/dev/workspace/app rev-parse --is-inside-work-tree", "true\n")
                 .on("git -C /home/dev/workspace/app checkout -b sail/auth", ""));
 
     var result = dispatch(operations, "acme", request("auth", "background", true));
@@ -2285,7 +2289,7 @@ class SailOperationsTest {
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
-                .on("test -d /home/dev/workspace/app/.git", "")
+                .on("git -C /home/dev/workspace/app rev-parse --is-inside-work-tree", "true\n")
                 .on("git -C /home/dev/workspace/app checkout -b feat/custom", ""),
             store ->
                 seedSpec(
@@ -2316,7 +2320,7 @@ class SailOperationsTest {
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
                 .on(
-                    "test -d /home/dev/workspace/app/.git",
+                    "git -C /home/dev/workspace/app rev-parse --is-inside-work-tree",
                     new ShellExec.Result(1, "", "missing")));
 
     var result = dispatch(operations, "acme", request("auth", "background", true));
@@ -2334,7 +2338,7 @@ class SailOperationsTest {
                 .on("cat /home/dev/.sail/agent.pid", new ShellExec.Result(1, "", "missing"))
                 .on("mkdir -p /home/dev/workspace/specs", "")
                 .on("printf '%s'", "")
-                .on("test -d /home/dev/workspace/app/.git", "")
+                .on("git -C /home/dev/workspace/app rev-parse --is-inside-work-tree", "true\n")
                 .on(
                     "git -C /home/dev/workspace/app checkout -b sail/auth",
                     new ShellExec.Result(1, "", "exists")));

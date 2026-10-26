@@ -15,20 +15,14 @@ import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BooleanSupplier;
-import java.util.function.Predicate;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -39,6 +33,7 @@ class ContainerSailSetupTest {
 
   private static final String CONTAINER = "light-grid";
   private static final String PROBE = "cmp -s --";
+  private static final ShellExec.Result OK = new ShellExec.Result(0, "", "");
 
   @Test
   void aVerifiedContainerIsAlreadyPresentAndRunsNoInstaller() throws Exception {
@@ -279,23 +274,26 @@ class ContainerSailSetupTest {
   }
 
   @Test
-  void refreshHappensEvenWhenSourcePathUnchanged() throws Exception {
-    var hostDir = SailPaths.apiSocketHostDir().toString();
+  void aMountAlreadyPointingAtTheSocketIsNotWritten() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-            .onOk("config device get " + CONTAINER, hostDir + "\n")
+            .onOk("config device get " + CONTAINER, SailPaths.apiSocketHostDir() + "\n")
             .onOk(PROBE);
 
     ContainerSailSetup.ensureInstalled(shell, shell, CONTAINER, locks);
 
-    var commands = shell.invocations();
-    assertTrue(
-        commands.stream().anyMatch(c -> c.contains("config device remove")),
-        "identical source paths must NOT short-circuit the refresh — Incus tracks the bind by"
-            + " inode, and the source directory can be recreated under the same path");
-    assertTrue(
-        commands.stream().anyMatch(c -> c.contains("config device add")),
-        "the bind mount must be re-added after removal");
+    assertEquals(
+        List.of("incus config device get " + CONTAINER + " sail-api-sock source"),
+        shell.invocations().stream().filter(c -> c.startsWith("incus config")).toList());
+  }
+
+  @Test
+  void aMountWhoseSourceMovedIsRemovedThenAdded() throws Exception {
+    var incus = new SharedIncus(new ScriptedShellExecutor(OK), () -> {}, CONTAINER);
+
+    ContainerSailSetup.ensureInstalled(incus, incus, CONTAINER, locks);
+
+    assertEquals(List.of("remove " + CONTAINER, "add " + CONTAINER), incus.writes());
   }
 
   @Test
@@ -365,7 +363,11 @@ class ContainerSailSetupTest {
     var threads = new ArrayList<Thread>();
     var incus =
         new SharedIncus(
-            () -> awaitUntil(() -> otherThan(threads).allMatch(parkedOrDone())), CONTAINER);
+            new ScriptedShellExecutor(OK),
+            () ->
+                SharedIncus.awaitUntil(
+                    () -> otherThan(threads).allMatch(SharedIncus.parkedOrDone())),
+            CONTAINER);
     var first =
         new FutureTask<>(() -> ContainerSailSetup.ensureInstalled(incus, incus, CONTAINER, locks));
     var second =
@@ -378,9 +380,9 @@ class ContainerSailSetupTest {
         Set.of(ContainerSailSetup.Result.UPDATED, ContainerSailSetup.Result.ALREADY_PRESENT),
         Set.of(first.get(), second.get()));
     assertEquals(
-        List.of(
-            "remove " + CONTAINER, "add " + CONTAINER, "remove " + CONTAINER, "add " + CONTAINER),
-        incus.devices());
+        List.of("remove " + CONTAINER, "add " + CONTAINER),
+        incus.writes(),
+        "the second finds the mount the first re-pointed");
     assertEquals(
         1, incus.stampWrites(), "the helpers are written by the call that found them stale");
   }
@@ -391,9 +393,11 @@ class ContainerSailSetupTest {
     var applying = new AtomicReference<Thread>();
     var incus =
         new SharedIncus(
+            new ScriptedShellExecutor(OK),
             () -> {
               sweepInside.countDown();
-              awaitUntil(() -> applying.get() != null && parkedOrDone().test(applying.get()));
+              SharedIncus.awaitUntil(
+                  () -> applying.get() != null && SharedIncus.parkedOrDone().test(applying.get()));
             },
             CONTAINER);
     var sweep = new FutureTask<>(() -> ContainerSetupSweep.reconcile(incus, CONTAINER, locks));
@@ -414,8 +418,9 @@ class ContainerSailSetupTest {
     var threads = new ArrayList<Thread>();
     var incus =
         new SharedIncus(
+            new ScriptedShellExecutor(OK),
             () ->
-                awaitUntil(
+                SharedIncus.awaitUntil(
                     () ->
                         otherThan(threads)
                             .allMatch(thread -> thread.getState() == Thread.State.TERMINATED)),
@@ -435,99 +440,5 @@ class ContainerSailSetupTest {
 
   private static Stream<Thread> otherThan(List<Thread> threads) {
     return threads.stream().filter(thread -> thread != Thread.currentThread());
-  }
-
-  private static Predicate<Thread> parkedOrDone() {
-    return thread ->
-        thread.getState() == Thread.State.WAITING || thread.getState() == Thread.State.TERMINATED;
-  }
-
-  private static void awaitUntil(BooleanSupplier condition) {
-    var horizon = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-    while (!condition.getAsBoolean()) {
-      if (System.nanoTime() > horizon) {
-        throw new AssertionError("the other reconcile neither ran nor waited");
-      }
-      Thread.yield();
-    }
-  }
-
-  /**
-   * Incus as every sail process on the box sees it: each container's {@code sail-api-sock} device
-   * and machinery stamp are shared state, read and written one call at a time, and refused as Incus
-   * refuses them — a remove of a device that is gone, an add of one that is there. The first remove
-   * runs {@code afterFirstRemove} before it answers, so a test can hold one reconcile inside the
-   * device refresh while another starts.
-   */
-  private static final class SharedIncus implements ShellExec {
-
-    private final Set<String> attached = ConcurrentHashMap.newKeySet();
-    private final Set<String> stamped = ConcurrentHashMap.newKeySet();
-    private final List<String> devices = new CopyOnWriteArrayList<>();
-    private final AtomicInteger stampWrites = new AtomicInteger();
-    private final AtomicInteger removes = new AtomicInteger();
-    private final Runnable afterFirstRemove;
-
-    SharedIncus(Runnable afterFirstRemove, String... containers) {
-      this.afterFirstRemove = afterFirstRemove;
-      attached.addAll(List.of(containers));
-    }
-
-    List<String> devices() {
-      return List.copyOf(devices);
-    }
-
-    int stampWrites() {
-      return stampWrites.get();
-    }
-
-    @Override
-    public Result exec(List<String> command) {
-      var joined = String.join(" ", command);
-      if (joined.startsWith("incus config device get")) {
-        return attached.contains(command.get(4))
-            ? new Result(0, SailPaths.apiSocketHostDir() + "\n", "")
-            : new Result(1, "", "Error: Device not found");
-      }
-      if (joined.startsWith("incus config device remove")) {
-        return remove(command.get(4));
-      }
-      if (joined.startsWith("incus config device add")) {
-        if (!attached.add(command.get(4))) {
-          return new Result(1, "", "Error: The device already exists");
-        }
-        devices.add("add " + command.get(4));
-        return new Result(0, "", "");
-      }
-      if (joined.contains(PROBE)) {
-        return new Result(stamped.contains(command.get(2)) ? 0 : 1, "", "");
-      }
-      if (joined.contains(ContainerSailSetup.STAMP_PATH)) {
-        stamped.add(command.get(2));
-        stampWrites.incrementAndGet();
-      }
-      return new Result(0, "", "");
-    }
-
-    private Result remove(String container) {
-      if (!attached.remove(container)) {
-        return new Result(1, "", "Error: Device \u201csail-api-sock\u201d doesn't exist");
-      }
-      devices.add("remove " + container);
-      if (removes.getAndIncrement() == 0) {
-        afterFirstRemove.run();
-      }
-      return new Result(0, "", "");
-    }
-
-    @Override
-    public Result exec(List<String> command, Path workDir, Duration timeout) {
-      return exec(command);
-    }
-
-    @Override
-    public boolean isDryRun() {
-      return false;
-    }
   }
 }

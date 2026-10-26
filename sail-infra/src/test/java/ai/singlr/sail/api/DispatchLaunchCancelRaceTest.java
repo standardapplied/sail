@@ -209,7 +209,7 @@ class DispatchLaunchCancelRaceTest {
       if (joined.contains("mkdir -p /home/dev/.sail")
           || joined.contains("printf '%s'")
           || joined.contains("incus config device add")
-          || joined.contains("test -d /home/dev/workspace/app/.git")
+          || joined.contains("git -C /home/dev/workspace/app rev-parse --is-inside-work-tree")
           || joined.contains("git -C /home/dev/workspace/app checkout -b sail/auth")
           || joined.contains("claude")) {
         return new Result(0, "", "");

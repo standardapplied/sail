@@ -27,9 +27,9 @@ import java.util.concurrent.TimeoutException;
  *
  * <ol>
  *   <li><b>Event-socket bind mount.</b> {@link IncusDeviceManager#ensureEventSocket} runs every
- *       time so the mount always points at the current {@link SailPaths#apiSocketHostDir()} inode.
- *       Incus tracks the bind by inode and the source directory can be recreated under the same
- *       path, so the mount is force-refreshed (remove + re-add) rather than compared.
+ *       time so the mount points at {@link SailPaths#apiSocketHostDir()}, and writes the device
+ *       only when its source moved: a write on every call would race every other writer of the
+ *       container's config for nothing.
  *   <li><b>Sail-owned files.</b> Every installed payload is a pure function of this binary. A
  *       successful full install stamps {@link #STAMP_PATH} with the SHA-256 {@link #fingerprint()}
  *       of all payloads, and the staleness probe verifies observed state, not just the stamp: the
@@ -41,11 +41,12 @@ import java.util.concurrent.TimeoutException;
  * </ol>
  *
  * <p>One process at a time reconciles a container: the boot sweep, apply, rename, {@code sail up}
- * and a dispatch wait for each other on the container's lock file, while different containers
- * reconcile in parallel.
+ * and a dispatch wait for each other on the container's lock file ({@link ContainerConfig#hold}),
+ * which every write of the container's config also takes, while different containers reconcile in
+ * parallel.
  *
- * <p>Designed for the dispatch hot path: the refresh is two idempotent {@code incus} calls, the
- * probe is one shell, and only a stale container pays for the installer shells.
+ * <p>Designed for the dispatch hot path: a current mount is one {@code incus} read, the probe is
+ * one shell, and only a stale container pays for the installer shells.
  */
 public final class ContainerSailSetup {
 
@@ -97,26 +98,27 @@ public final class ContainerSailSetup {
 
   /**
    * The same reconciliation, serialised on its container's file under {@code locks}, the box's lock
-   * directory: the device refresh is a read, a remove and an add, and two of them interleaved on
-   * one container fail each other, so the API server's boot sweep and every CLI that reconciles
-   * wait for each other there. A dry run changes nothing, so it takes no lock.
+   * directory: the device check is a read, a remove and an add, and an interleaved write to the
+   * same container fails it, so the API server's boot sweep and every CLI that reconciles or writes
+   * the container's config wait for each other there. A dry run changes nothing, so it takes no
+   * lock.
    */
   public static Result ensureInstalled(
       ShellExec probe, ShellExec shell, String container, Path locks)
       throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(container);
     if (shell.isDryRun()) {
-      return reconcile(probe, shell, container);
+      return reconcile(probe, shell, container, locks);
     }
-    try (var held = FileMutex.acquire(locks.resolve(container + ".machinery.lock"))) {
-      return reconcile(probe, shell, container);
+    try (var held = ContainerConfig.hold(locks, container)) {
+      return reconcile(probe, shell, container, locks);
     }
   }
 
-  private static Result reconcile(ShellExec probe, ShellExec shell, String container)
+  private static Result reconcile(ShellExec probe, ShellExec shell, String container, Path locks)
       throws IOException, InterruptedException, TimeoutException {
-    new IncusDeviceManager(shell)
-        .refreshEventSocket(
+    new IncusDeviceManager(shell, locks)
+        .ensureEventSocket(
             container, SailPaths.apiSocketHostDir(), SailPaths.apiSocketContainerDir());
     var expected = fingerprint();
     if (stampMatches(probe, container, expected)) {
