@@ -15,6 +15,7 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.io.ByteArrayOutputStream;
@@ -213,14 +214,19 @@ class CliCommandTest {
                 new ApiException(
                     ErrorCode.COMMAND_FAILED, "A sail system command failed.", root))));
     assertEquals(
-        "Failed to prepare the agent session: The roster is unsynced.",
+        "Failed to prepare the agent session: The roster is unsynced. Run "
+            + OperatorCommand.here().sail("sync")
+            + ".",
         CliCommand.describe(
             new ApiException(
                 ErrorCode.AGENT_LAUNCH_FAILED,
                 "Failed to prepare the agent session.",
                 new ApiException(
-                    ErrorCode.CONFLICT, "The roster is unsynced.", "Run 'sail sync'.", root))),
-        "a wrapper that names a fix is its message, its fix the refusal's own");
+                    ErrorCode.CONFLICT,
+                    "The roster is unsynced.",
+                    Remedy.of("Run ", Remedy.sail("sync"), "."),
+                    root))),
+        "a wrapper that names a fix ends the line with it, rendered for the reader");
     assertEquals(
         "Failed to prepare the agent session: A sail system command failed.",
         CliCommand.describe(
@@ -229,6 +235,33 @@ class CliCommandTest {
                 "Failed to prepare the agent session.",
                 new ApiException(ErrorCode.COMMAND_FAILED, "A sail system command failed."))),
         "a wrapper that wraps nothing ends the line");
+  }
+
+  @Test
+  void aCauseThatOnlyRepeatsItsWrappersMessageIsSaidOnce() {
+    var unknown = new IllegalArgumentException("Unknown agent CLI: 'x'.");
+
+    assertEquals(
+        "Unknown agent CLI: 'x'.",
+        CliCommand.describe(ApiException.of(ErrorCode.INVALID_REQUEST, unknown)));
+    assertEquals(
+        "Failed to prepare the agent session: Unknown agent CLI: 'x'.",
+        CliCommand.describe(
+            new ApiException(
+                ErrorCode.AGENT_LAUNCH_FAILED,
+                "Failed to prepare the agent session.",
+                ApiException.of(ErrorCode.INVALID_REQUEST, unknown))),
+        "a wrapper that repeats its cause is said once, wherever it sits");
+    assertEquals(
+        "A sail system command failed: Cannot run program incus",
+        CliCommand.describe(
+            ApiException.of(
+                ErrorCode.COMMAND_FAILED,
+                new ApiException(
+                    ErrorCode.COMMAND_FAILED,
+                    "A sail system command failed.",
+                    new IOException("Cannot run program incus")))),
+        "a wrapper that repeats a wrapper says the inner line once");
   }
 
   @Test

@@ -420,6 +420,21 @@ class DispatchCommandWiringTest {
   }
 
   @Test
+  void theBranchRefusalsCommandDispatchesAPendingSpecOntoItsBranch() throws Exception {
+    var ran =
+        dispatch(
+            shell()
+                .on("git -C /home/dev/workspace/app rev-parse --verify --quiet refs/heads/", "")
+                .on("git -C /home/dev/workspace/app checkout -f sail/auth", ""),
+            0,
+            "--background",
+            "--restart");
+
+    assertEquals(0, ran.exit(), ran.err());
+    assertTrue(ran.out().contains("Reusing branch: sail/auth in app"), ran.out());
+  }
+
+  @Test
   void cliRestartWithoutASpecIsRefusedByTheSharedExecutor() throws Exception {
     var operations = cliOperations(shell(), new ArrayList<>());
     new FdeStore(db).add(HANDLE, null, null, "admin");

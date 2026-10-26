@@ -81,18 +81,23 @@ public final class BuildDispatch {
     this.workBranch = new WorkBranch(shell, listener);
   }
 
-  /** Outcome of {@link #resolveSpec}: the chosen spec, and whether {@code restart} reset it. */
-  record SpecResolution(Spec spec, boolean restarted, String previousStatus) {
+  /**
+   * Outcome of {@link #resolveSpec}: the chosen spec, whether {@code restart} reset it, and whether
+   * the dispatch lands on the spec's work branch when that already exists, as every {@code restart}
+   * does, a pending spec's included.
+   */
+  record SpecResolution(
+      Spec spec, boolean restarted, String previousStatus, boolean ontoExistingBranch) {
     static SpecResolution none() {
-      return new SpecResolution(null, false, null);
+      return new SpecResolution(null, false, null, false);
     }
 
-    static SpecResolution of(Spec spec) {
-      return new SpecResolution(spec, false, null);
+    static SpecResolution of(Spec spec, boolean restart) {
+      return new SpecResolution(spec, false, null, restart);
     }
 
     static SpecResolution restarted(Spec spec, String previousStatus) {
-      return new SpecResolution(spec, true, previousStatus);
+      return new SpecResolution(spec, true, previousStatus, true);
     }
   }
 
@@ -289,7 +294,7 @@ public final class BuildDispatch {
         return SpecResolution.none();
       }
       LaunchAdmission.requireAllowed(next, localHandle);
-      return SpecResolution.of(next);
+      return SpecResolution.of(next, false);
     }
     LaunchAdmission.requireAllowed(spec, localHandle);
     return switch (RestartResolution.decide(specId, spec, restart)) {
@@ -301,7 +306,7 @@ public final class BuildDispatch {
               "Spec '" + specId + "' is not ready for dispatch.",
               "Resolve dependencies or choose a ready spec.");
         }
-        yield SpecResolution.of(spec);
+        yield SpecResolution.of(spec, restart);
       }
       case RestartResolution.Restarted restarted ->
           SpecResolution.restarted(spec, restarted.previousStatus());
@@ -386,7 +391,7 @@ public final class BuildDispatch {
             targetRepos,
             branch,
             Optional.of(RestartResolution.redispatch(project, taskSpec.id())),
-            resolution.restarted());
+            resolution.ontoExistingBranch());
     return new PreparedClaim(snapshot, branchCreated);
   }
 

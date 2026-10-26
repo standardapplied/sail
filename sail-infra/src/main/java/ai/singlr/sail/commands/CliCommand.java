@@ -112,23 +112,26 @@ public final class CliCommand {
       case ApiException refusal when !refusal.remedy().isEmpty() ->
           List.of(message, reader.render(refusal.remedy()));
       case ApiException wrapped when wrapped.getCause() != null ->
-          List.of(withCause(message, wrapped.getCause()));
+          List.of(withCause(message, wrapped.getCause(), reader));
       case ApiException refusal -> List.of(message);
       case Remedied remedied -> List.of(reader.render(remedied));
       default -> List.of(message);
     };
   }
 
-  private static String withCause(String message, Throwable cause) {
-    var head = message.endsWith(".") ? message.substring(0, message.length() - 1) : message;
-    var detail = Objects.requireNonNullElse(cause.getMessage(), cause.getClass().getSimpleName());
-    return head
-        + ": "
-        + (cause instanceof ApiException wrapped
+  /**
+   * {@code message}, then what {@code cause} says as {@code reader} reads it, its fix included,
+   * through every wrapper that names no fix. A cause that only repeats the message adds nothing.
+   */
+  private static String withCause(String message, Throwable cause, OperatorCommand reader) {
+    var said =
+        cause instanceof ApiException wrapped
                 && wrapped.remedy().isEmpty()
                 && wrapped.getCause() != null
-            ? withCause(detail, wrapped.getCause())
-            : detail);
+            ? withCause(Remedied.reasonOf(wrapped), wrapped.getCause(), reader)
+            : reader.render(Remedied.whole(cause));
+    var head = message.endsWith(".") ? message.substring(0, message.length() - 1) : message;
+    return said.equals(message) || said.startsWith(head + ": ") ? said : head + ": " + said;
   }
 
   private static OperatorCommand reader() {

@@ -80,7 +80,7 @@ public final class WorkBranch {
       List<SailYaml.Repo> targetRepos,
       String branch,
       Optional<Remedy.Command> redispatch,
-      boolean restarted) {
+      boolean restart) {
     if (Strings.isBlank(branch)) {
       return false;
     }
@@ -105,7 +105,7 @@ public final class WorkBranch {
       List<String> checkoutArgs;
       if (branchExists) {
         checkoutArgs =
-            RestartResolution.branchCheckoutArgs(repoDir, branch, true, restarted, redispatch);
+            RestartResolution.branchCheckoutArgs(repoDir, branch, true, restart, redispatch);
       } else {
         var base = baseBranch(project, repoDir, repo);
         checkoutArgs =

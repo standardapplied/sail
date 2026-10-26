@@ -23,7 +23,8 @@ class ContainerConfigTest {
   private static final ShellExec.Result OK = new ShellExec.Result(0, "", "");
   private static final Pattern WRITE =
       Pattern.compile(
-          "\"config\",\\s*(\"(set|unset|edit)\"|\"device\",\\s*(\"(add|remove|set|unset|override)\"|verb))");
+          "\"config\",\\s*(\"(set|unset|edit)\"|\"device\",\\s*(\"(add|remove|set|unset|override)\"|verb))"
+              + "|\"snapshot\",\\s*\"restore\"");
 
   @TempDir Path locks;
 
@@ -42,6 +43,27 @@ class ContainerConfigTest {
 
     assertTrue(writer.get().ok());
     assertEquals(List.of("incus config set acme user.sail.inputs="), shell.invocations());
+  }
+
+  @Test
+  void aRestoreWaitsWhileAnotherHoldsTheContainer() throws Exception {
+    var shell = new ScriptedShellExecutor(OK);
+    var restorer =
+        new FutureTask<>(
+            () -> {
+              new SnapshotManager(shell, locks).restore("acme", "pre-agent");
+              return null;
+            });
+    var thread = new Thread(restorer);
+
+    try (var held = ContainerConfig.hold(locks, "acme")) {
+      thread.start();
+      SharedIncus.awaitUntil(() -> SharedIncus.parkedOrDone().test(thread));
+      assertEquals(List.of(), shell.invocations(), "the restore waits for the holder");
+    }
+
+    restorer.get();
+    assertEquals(List.of("incus snapshot restore acme pre-agent"), shell.invocations());
   }
 
   @Test
