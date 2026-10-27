@@ -2356,11 +2356,11 @@ operator's login and home are the JVM's `user.name` and `user.home`.
 - **C4. Containers trust the paired key.** The pairing's public key becomes the box's
   workstation key (above), so every project provisioned or applied afterwards lets it into its
   containers, and once the code is printed the pairing writes it into the container of every
-  project the box already runs, running or stopped, a stopped one left stopped, and a
-  container bearing a project's name that sail did not make left alone, as `project apply --all`
-  leaves it (`ContainerAuthorizedKeys.add`): the
-  `authorized_keys` of the `/home` account at uid 1000, the SSH user step 6 makes, kept at 0600 and
-  owned by it, a line already holding the key left alone and every other line kept. A container
+  project the box already runs, running or stopped, a stopped one left stopped
+  (`ContainerAuthorizedKeys.add`): the `authorized_keys` of the `/home` account at uid 1000, the
+  SSH user step 6 makes, kept at 0600 and owned by it, a line already holding the key left alone
+  and every other line kept. A container bearing a project's name without the `sail-api-sock`
+  device is not written but named, as `project apply --all` names it. A container
   that cannot be written, or has no SSH user or file yet, stops neither the code nor the other
   containers: the command names it after the code with the `project apply` that makes it trust the
   key (`FdeCommandTest`). Containers that cannot be listed are named once, as the box's, with

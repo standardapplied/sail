@@ -1090,7 +1090,7 @@ class FdeCommandTest {
   }
 
   @Test
-  void aContainerSailDidNotMakeIsLeftAloneThoughItBearsAProjectsName() throws Exception {
+  void aContainerBearingAProjectsNameThatSailDidNotMakeIsNamedNotWritten() throws Exception {
     appliedContainers(ENGINEER.line() + "\n");
     keygen.incus.unmanaged.add("web");
 
@@ -1100,7 +1100,15 @@ class FdeCommandTest {
         ENGINEER.line() + "\n" + keygen.made.getFirst().line() + "\n",
         keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
     assertEquals(ENGINEER.line() + "\n", keygen.incus.file("web", "/home/dev" + AUTHORIZED));
-    assertEquals(printedCode(), printed().getLast(), "a container not sail's is not named");
+    assertEquals(
+        List.of(
+            printedCode(),
+            "",
+            "  ⚠ web does not trust this key yet: it carries no sail-api-sock device, so it is not"
+                + " sail's or its setup did not finish. Make it: '"
+                + OperatorCommand.here().sail("project apply web")
+                + "'."),
+        printed().subList(printed().size() - 3, printed().size()));
     var asked = new ArrayList<>(trusting(true).subList(0, 5));
     asked.add(managedQuery("web"));
     assertEquals(asked, incusCommands());

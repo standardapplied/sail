@@ -21,13 +21,14 @@ import java.util.stream.Stream;
 
 /**
  * The {@code authorized_keys} of the accounts in each of this box's containers, which provisioning
- * fills from the project's {@code ssh.authorized_keys}. Both edits reach every container, running
- * or not, since {@code incus file pull} and {@code push} reach a stopped container's filesystem.
- * The accounts are read from the container's own {@code /etc/passwd}, never from the catalog, which
- * may name another user than the one a container was provisioned with. A removal edits the file of
- * every account whose home is under {@code /home}, where provisioning creates the SSH user; an
- * addition only the SSH user's, the account at uid 1000 provisioning requires. Only the lines whose
- * key is the exact key are matched, so the other keys an engineer put there stay.
+ * fills from the project's {@code ssh.authorized_keys}. A removal reaches every container, an
+ * addition each container sail made for the projects it is given, running or not alike, since
+ * {@code incus file pull} and {@code push} reach a stopped container's filesystem. The accounts are
+ * read from the container's own {@code /etc/passwd}, never from the catalog, which may name another
+ * user than the one a container was provisioned with. A removal edits the file of every account
+ * whose home is under {@code /home}, where provisioning creates the SSH user; an addition only the
+ * SSH user's, the account at uid 1000 provisioning requires. Only the lines whose key is the exact
+ * key are matched, so the other keys an engineer put there stay.
  */
 public final class ContainerAuthorizedKeys {
 
@@ -79,8 +80,9 @@ public final class ContainerAuthorizedKeys {
   /**
    * Adds {@code key} to the SSH user's file in each container of {@code projects} this box runs
    * that does not hold it yet, and returns those it could not, each with why: one container that
-   * cannot be written stops none of the others. A container bearing a project's name that sail did
-   * not make is left alone, as {@code project apply --all} leaves it.
+   * cannot be written stops none of the others. A container bearing a project's name that carries
+   * no sail-api-sock device is not written but returned, as {@code project apply --all} names it:
+   * sail did not make it, or did not finish.
    */
   public List<Unreached> add(SshPublicKey key, Collection<String> projects)
       throws IOException, InterruptedException, TimeoutException {
@@ -90,9 +92,12 @@ public final class ContainerAuthorizedKeys {
     return each(
         ofProjects,
         container -> {
-          if (devices.sailManaged(container)) {
-            addTo(container, homeAccounts(container), key, entry);
+          if (!devices.sailManaged(container)) {
+            throw new IOException(
+                "it carries no sail-api-sock device, so it is not sail's or its setup did not"
+                    + " finish");
           }
+          addTo(container, homeAccounts(container), key, entry);
         });
   }
 
