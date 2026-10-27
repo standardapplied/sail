@@ -550,8 +550,8 @@ class FdeCommandTest {
     assertEquals("ada", handleOf(apiToken));
 
     var keygenCommand = keygen.commands.getFirst();
-    assertEquals(List.of(List.of("incus", "list", "--format", "json")), incusCommands());
-    assertEquals(2, keygen.commands.size());
+    assertEquals(List.of(), incusCommands(), "a box with no project has no container to ask");
+    assertEquals(1, keygen.commands.size());
     assertEquals(
         List.of("ssh-keygen", "-t", "ed25519", "-N", "", "-C", "sail-mast:ada", "-f"),
         keygenCommand.subList(0, 8));
@@ -992,7 +992,7 @@ class FdeCommandTest {
         List.of(
             printedCode(),
             "",
-            "  ⚠ web does not trust this key yet (it has no SSH user at uid 1000). Make it: '"
+            "  ⚠ web does not trust this key yet: it has no SSH user at uid 1000. Make it: '"
                 + OperatorCommand.here().sail("project apply web")
                 + "'."),
         printed().subList(printed().size() - 3, printed().size()));
@@ -1140,8 +1140,8 @@ class FdeCommandTest {
             "",
             "  ⚠ acme may still trust the replaced workstation key "
                 + LAPTOP.fingerprint()
-                + " (me@mac) (Failed to push file to /home/ubuntu/.ssh/authorized_keys: Error: I/O"
-                + " error). Take its line out of every /home account's .ssh/authorized_keys"
+                + " (me@mac): Failed to push file to /home/ubuntu/.ssh/authorized_keys: Error: I/O"
+                + " error. Take its line out of every /home account's .ssh/authorized_keys"
                 + " there."),
         printed().subList(printed().size() - 3, printed().size()));
   }
@@ -1163,11 +1163,11 @@ class FdeCommandTest {
             "",
             "  ⚠ This box's containers may still trust the replaced workstation key "
                 + LAPTOP.fingerprint()
-                + " (me@mac) (incus list failed: Error: unreachable). Take its line out of every"
+                + " (me@mac): incus list failed: Error: unreachable. Take its line out of every"
                 + " /home account's .ssh/authorized_keys there.",
-            "  ⚠ acme does not trust this key yet (incus list failed: Error: unreachable). Make"
-                + " it: '"
-                + OperatorCommand.here().sail("project apply acme")
+            "  ⚠ This box's containers do not trust this key yet: incus list failed: Error:"
+                + " unreachable. Once incus answers, make them: '"
+                + OperatorCommand.here().sail("project apply --all")
                 + "'."),
         printed().subList(printed().size() - 4, printed().size()));
   }
@@ -1198,11 +1198,11 @@ class FdeCommandTest {
             "",
             "  ⚠ web may still trust the replaced workstation key "
                 + LAPTOP.fingerprint()
-                + " (me@mac) (could not read /home/dev/.ssh/authorized_keys in web: Error: I/O"
-                + " error). Take its line out of every /home account's .ssh/authorized_keys"
+                + " (me@mac): could not read /home/dev/.ssh/authorized_keys in web: Error: I/O"
+                + " error. Take its line out of every /home account's .ssh/authorized_keys"
                 + " there.",
-            "  ⚠ web does not trust this key yet (could not read /home/dev/.ssh/authorized_keys"
-                + " in web: Error: I/O error). Make it: '"
+            "  ⚠ web does not trust this key yet: could not read /home/dev/.ssh/authorized_keys"
+                + " in web: Error: I/O error. Make it: '"
                 + OperatorCommand.here().sail("project apply web")
                 + "'."),
         printed().subList(printed().size() - 4, printed().size()));
@@ -1227,8 +1227,8 @@ class FdeCommandTest {
             "",
             printedCode(),
             "",
-            "  ⚠ acme does not trust this key yet (Failed to push file to"
-                + " /home/dev/.ssh/authorized_keys: Error: I/O error). Make it: '"
+            "  ⚠ acme does not trust this key yet: Failed to push file to"
+                + " /home/dev/.ssh/authorized_keys: Error: I/O error. Make it: '"
                 + OperatorCommand.here().sail("project apply acme")
                 + "'."),
         printed().subList(printed().size() - 5, printed().size()));
@@ -1247,15 +1247,15 @@ class FdeCommandTest {
 
     assertEquals(
         List.of(
-            "  ⚠ acme does not trust this key yet (it has no /home/dev/.ssh/authorized_keys yet)."
+            "  ⚠ acme does not trust this key yet: it has no /home/dev/.ssh/authorized_keys yet."
                 + " Make it: '"
                 + OperatorCommand.here().sail("project apply acme")
                 + "'.",
-            "  ⚠ web does not trust this key yet (it has no SSH user at uid 1000). Make it: '"
+            "  ⚠ web does not trust this key yet: it has no SSH user at uid 1000. Make it: '"
                 + OperatorCommand.here().sail("project apply web")
                 + "'.",
-            "  ⚠ docs does not trust this key yet (could not read /home/dev/.ssh/authorized_keys"
-                + " in docs: Error: I/O error). Make it: '"
+            "  ⚠ docs does not trust this key yet: could not read /home/dev/.ssh/authorized_keys"
+                + " in docs: Error: I/O error. Make it: '"
                 + OperatorCommand.here().sail("project apply docs")
                 + "'."),
         printed().subList(printed().size() - 3, printed().size()));
@@ -1263,7 +1263,8 @@ class FdeCommandTest {
   }
 
   @Test
-  void containersThatCannotBeListedAreNamedByTheCatalogAfterTheCode() throws Exception {
+  void containersThatCannotBeListedAreNamedAsTheBoxsWithTheApplyOfEveryContainerItRuns()
+      throws Exception {
     catalog("acme", "beta");
     keygen.incus.failures.put("list --format", new ShellExec.Result(1, "", "Error: unreachable\n"));
 
@@ -1273,15 +1274,11 @@ class FdeCommandTest {
         List.of(
             printedCode(),
             "",
-            "  ⚠ acme does not trust this key yet (incus list failed: Error: unreachable). Make"
-                + " it: '"
-                + OperatorCommand.here().sail("project apply acme")
-                + "'.",
-            "  ⚠ beta does not trust this key yet (incus list failed: Error: unreachable). Make"
-                + " it: '"
-                + OperatorCommand.here().sail("project apply beta")
+            "  ⚠ This box's containers do not trust this key yet: incus list failed: Error:"
+                + " unreachable. Once incus answers, make them: '"
+                + OperatorCommand.here().sail("project apply --all")
                 + "'."),
-        printed().subList(printed().size() - 4, printed().size()));
+        printed().subList(printed().size() - 3, printed().size()));
   }
 
   @Test
@@ -2749,8 +2746,10 @@ class FdeCommandTest {
             "FDE 'ada' already exists. Change it with 'sudo sail fde update ada'.",
             "  ✓ FDE added: ada (member, scoped: grant projects with 'sudo sail fde grant')",
             "Unknown project 'ghost'. List the catalog with 'sudo sail project list'.",
-            "acme does not trust this key yet (Error: I/O error). Make it: 'sudo sail project apply"
+            "acme does not trust this key yet: Error: I/O error. Make it: 'sudo sail project apply"
                 + " acme'.",
+            "This box's containers do not trust this key yet: Error: I/O error. Once incus answers,"
+                + " make them: 'sudo sail project apply --all'.",
             "FDE 'ada' is disabled on this box, so a code for it would open nothing. Remove it with"
                 + " 'sudo sail fde rm ada' and pair again.",
             "  No FDEs. Add one with 'sudo sail fde add <handle>'.",
@@ -2767,6 +2766,7 @@ class FdeCommandTest {
             Ansi.OFF.string(FdeCommand.added(ada, true, sudo)),
             unknownProject,
             FdeCommand.notTrustedYet("acme", "Error: I/O error", sudo),
+            FdeCommand.noneTrustYet("Error: I/O error", sudo),
             FdeCommand.disabledForPairing("ada", sudo),
             FdeCommand.noFdes(sudo),
             FdeCommand.unknownFde("ada", sudo),

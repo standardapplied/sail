@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.auth.EnrollmentService;
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
@@ -232,17 +233,25 @@ public final class FdeCommand implements Runnable {
     return where
         + " may still trust the replaced workstation key "
         + Pair.describe(replaced)
-        + " ("
+        + ": "
         + why
-        + "). Take its line out of every /home account's .ssh/authorized_keys there.";
+        + ". Take its line out of every /home account's .ssh/authorized_keys there.";
   }
 
   static String notTrustedYet(String container, String why, OperatorCommand operator) {
     return container
-        + " does not trust this key yet ("
+        + " does not trust this key yet: "
         + why
-        + "). Make it: '"
+        + ". Make it: '"
         + operator.sail("project apply " + container)
+        + "'.";
+  }
+
+  static String noneTrustYet(String why, OperatorCommand operator) {
+    return "This box's containers do not trust this key yet: "
+        + why
+        + ". Once incus answers, make them: '"
+        + operator.sail("project apply --all")
         + "'.";
   }
 
@@ -1130,10 +1139,7 @@ public final class FdeCommand implements Runnable {
         var unreached =
             Stream.concat(
                     untrustReplaced(box, replaced).stream(),
-                    trustInContainers(box, db, key.publicKey()).stream()
-                        .map(
-                            container ->
-                                notTrustedYet(container.container(), container.reason(), operator)))
+                    trustInContainers(box, db, key.publicKey(), operator).stream())
                 .toList();
         if (!unreached.isEmpty()) {
           System.out.println();
@@ -1144,8 +1150,8 @@ public final class FdeCommand implements Runnable {
 
     /**
      * Takes the workstation key this pairing {@code replaced} out of every container of this box,
-     * as unpair does, and names each that may still trust it. No apply finishes this: apply writes
-     * only the SSH user's file, and the workstation key file names the new key by now.
+     * as unpair does, and names each that may still trust it. An apply would take it out of the SSH
+     * user's file alone, so the line it names is the one to take out by hand.
      */
     private static List<String> untrustReplaced(Box box, Optional<SshPublicKey> replaced)
         throws InterruptedException {
@@ -1159,27 +1165,32 @@ public final class FdeCommand implements Runnable {
                 .map(container -> stillTrusts(container.container(), container.reason(), old))
                 .toList();
       } catch (IOException | TimeoutException failure) {
-        return List.of(stillTrusts("This box's containers", failure.getMessage().strip(), old));
+        return List.of(
+            stillTrusts("This box's containers", Remedied.reasonOf(failure).strip(), old));
       }
     }
 
     /**
      * Writes {@code key} into the container of each project this box runs once its code is shown,
-     * and returns those that do not trust it yet. A box whose containers cannot be listed names
-     * each project instead.
+     * and names each that does not trust it yet. The catalog holds projects this box never ran, so
+     * a box whose containers cannot be listed names the apply of every container it runs instead.
      */
-    private static List<ContainerAuthorizedKeys.Unreached> trustInContainers(
-        Box box, Sqlite db, SshPublicKey key) throws InterruptedException {
+    private static List<String> trustInContainers(
+        Box box, Sqlite db, SshPublicKey key, OperatorCommand operator)
+        throws InterruptedException {
       var projects =
           new ProjectStore(db).list().stream().map(ProjectStore.ProjectRow::name).toList();
+      if (projects.isEmpty()) {
+        return List.of();
+      }
       try {
-        return new ContainerAuthorizedKeys(box.shell()).add(key, projects);
+        return new ContainerAuthorizedKeys(box.shell())
+            .add(key, projects).stream()
+                .map(
+                    container -> notTrustedYet(container.container(), container.reason(), operator))
+                .toList();
       } catch (IOException | TimeoutException failure) {
-        return projects.stream()
-            .map(
-                project ->
-                    new ContainerAuthorizedKeys.Unreached(project, failure.getMessage().strip()))
-            .toList();
+        return List.of(noneTrustYet(Remedied.reasonOf(failure).strip(), operator));
       }
     }
 

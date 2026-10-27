@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -94,7 +95,7 @@ public final class ContainerAuthorizedKeys {
       try {
         edit.apply(container);
       } catch (IOException | TimeoutException failure) {
-        unreached.add(new Unreached(container, failure.getMessage().strip()));
+        unreached.add(new Unreached(container, Remedied.reasonOf(failure).strip()));
       }
     }
     return List.copyOf(unreached);
@@ -112,7 +113,7 @@ public final class ContainerAuthorizedKeys {
       try {
         removed |= removeFrom(container, account, entry);
       } catch (IOException | TimeoutException failure) {
-        first = first != null ? first : new IOException(failure.getMessage(), failure);
+        first = first != null ? first : new IOException(Remedied.reasonOf(failure), failure);
       }
     }
     if (first != null) {

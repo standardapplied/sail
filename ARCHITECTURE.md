@@ -2362,7 +2362,9 @@ operator's login and home are the JVM's `user.name` and `user.home`.
   owned by it, a line already holding the key left alone and every other line kept. A container
   that cannot be written, or has no SSH user or file yet, stops neither the code nor the other
   containers: the command names it after the code with the `project apply` that makes it trust the
-  key (`FdeCommandTest`). Step 6 writes the workstation key whatever the definition
+  key (`FdeCommandTest`). Containers that cannot be listed are named once, as the box's, with
+  `project apply --all`: the catalog holds projects a box never ran, and applying one of those
+  would create it. Step 6 writes the workstation key whatever the definition
   says, first, then the definition's own keys, each key once (`ProjectProvisioner.trustedKeys`),
   and its fingerprint is an input of the run's digest (`ProjectProvisioner.inputs`), so
   registering, replacing or revoking it makes the next apply of every project revisit step 6
@@ -2373,7 +2375,9 @@ operator's login and home are the JVM's `user.name` and `user.home`.
   including those no project names (`ContainerAuthorizedKeys.removeFromEach`). A container it could
   not edit is named with the replaced key's fingerprint and comment and the line to take out by
   hand, never an apply: apply writes only the SSH user's file, and the workstation key file names
-  the new key by then. Revoking the pairing takes
+  the new key by then. A replaced key a definition names as text, not through
+  `${SSH_PUBLIC_KEY}`, comes back with that project's next apply, which writes the definition's
+  keys. Revoking the pairing takes
   its key back out of the workstation key and the containers (C3); a key set by `sail host
   config set ssh-public-key` is never touched.
 - **C5. The code is a secret, handled as one.** It is printed to the terminal and nowhere else:
