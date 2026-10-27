@@ -219,9 +219,11 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   /**
    * Where the live member of {@code roomId} stands, as a room's stream is first told: its run, its
    * turn, whether that turn is open, and what the turn's end carried when it is not. Read under the
-   * member's lock, which every event it tells is published under, so a stream that subscribed first
-   * is sent every event after this state and none it contradicts. A room with no live member is
-   * told its turn is not open; a room this box does not know is told nothing.
+   * member's lock, which every event it tells is published under, so the state is one moment of the
+   * member. A stream subscribes before it reads this, so it misses no event after it; one published
+   * while it was read follows it too, older than it says, and a reader takes nothing of a turn the
+   * state names over. A room with no live member is told its turn is not open; a room this box does
+   * not know is told nothing.
    */
   public Optional<Event> turnState(String roomId) {
     return Actor.call(

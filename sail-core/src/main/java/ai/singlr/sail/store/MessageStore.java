@@ -649,7 +649,17 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         required(snapshot, "created_at"),
         null,
         null,
-        Mark.of(flag(snapshot, "question"), flag(snapshot, "error")));
+        markOf(snapshot));
+  }
+
+  /** The one mark a snapshot carries; one that claims both was never written by sail. */
+  private static Mark markOf(Map<String, Object> snapshot) {
+    var question = flag(snapshot, "question");
+    var error = flag(snapshot, "error");
+    if (question && error) {
+      throw new IllegalArgumentException("message is marked both a question and an error");
+    }
+    return Mark.of(question, error);
   }
 
   private static boolean flag(Map<String, Object> snapshot, String key) {

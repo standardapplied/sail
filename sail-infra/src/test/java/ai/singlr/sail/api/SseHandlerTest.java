@@ -36,6 +36,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -456,6 +457,43 @@ class SseHandlerTest {
                       List.of("id: " + inKitchen.id(), "data: " + inKitchen.toJsonLine()),
                       frame(everything),
                       "nor a stream of no room");
+                });
+          }
+        });
+  }
+
+  @Test
+  void anEventPublishedWhileARoomsStateIsReadFollowsTheStateAndIsNotLost() {
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(BusTesting.DELIVERY_TIMEOUT_SECONDS),
+        () -> {
+          try (var bus = new EventBus()) {
+            var during = new AtomicReference<Event>();
+            var state =
+                Event.of(
+                    "light",
+                    "lounge",
+                    Event.WellKnownTypes.AGENT_TURN_STATE,
+                    "claude-code",
+                    "h",
+                    Map.of("run_id", "r1", "turn", 3, "open", false));
+            SseHandler.RoomTurns turns =
+                room -> {
+                  during.set(
+                      bus.publish(
+                          Event.of("light", "lounge", "agent_turn_ended", "claude-code", "h")));
+                  return Optional.of(state);
+                };
+            served(
+                bus,
+                turns,
+                port -> {
+                  var lounge = open(port, "all", "?room=lounge");
+                  assertEquals(List.of("data: " + state.toJsonLine()), frame(lounge));
+                  assertEquals(
+                      List.of("id: " + during.get().id(), "data: " + during.get().toJsonLine()),
+                      frame(lounge),
+                      "the stream subscribed before it read the state, so nothing is lost");
                 });
           }
         });

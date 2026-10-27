@@ -53,6 +53,7 @@ class GlobalSpecViewTest {
 
     assertEquals("mention", view.wake());
     assertEquals("claude-code", view.engagement().get("agent"));
+    assertEquals("Claude Code", view.engagement().get("agent_name"));
     assertEquals("full", view.engagement().get("mode"));
     assertEquals("opus-x", view.engagement().get("model"));
     assertEquals("t0", view.engagement().get("engaged_at"));

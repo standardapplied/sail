@@ -1356,7 +1356,9 @@ class is `LiveMemberTest`'s):
   the turn: the turn's text is posted through `postRoomMessage` as the run's principal under
   the run's actor — the door and the actor the `spec` CLI gets, so the message rule, the
   announcement and the sync trigger are the same — and `agent_turn_ended` names the message.
-  A turn failed exactly when the harness flags its result `is_error`: its text is still posted,
+  A turn failed when the harness flags its result `is_error`, or when it ended before its
+  answer because the process died or sail ended the member (stop, `max_idle`, `max_duration`,
+  a membership change): its text is still posted,
   in the agent's own words, marked `error` on the message row (a synced mark beside `question`),
   and the end's `reason` is the result's subtype only when it names a failure, never `success`.
   Nothing reads the text.
@@ -1383,7 +1385,8 @@ class is `LiveMemberTest`'s):
   may publish one (they are absent from `EventAuthority`'s list, so an admin's and a run's
   publish are both refused). `GET /v1/events/stream?room=<id>` scopes a stream to one room beside `project` and
   `type`, and its first frame, with no `id`, is `agent_turn_state`: where the room's live member
-  stands, read under the member's lock after the stream subscribed — `{run_id, turn, principal,
+  stands, read under the member's lock after the stream subscribed (an event published while it is
+  read follows it, older than it says; Mast takes nothing of a turn the frame names over) — `{run_id, turn, principal,
   open}` and, when the turn is not open, what its `agent_turn_ended` carried; `{open: false}`
   alone for a room with no live member. A reader who opens the room mid-turn, or reconnects
   after missing a turn's end, is told the truth rather than left to infer it. A stream the bus
@@ -1396,6 +1399,7 @@ class is `LiveMemberTest`'s):
   `SseHandlerTest.parseFilterScopesByRoomBesideProjectAndType`,
   `SseHandlerTest.aRoomsStreamIsFirstToldWhereItsMemberStandsWithNoIdAndOnlyWhatItsReaderMaySee`,
   `SseHandlerTest.aStreamTheBusDropsAnEventForIsEndedSoItsClientReconnects`,
+  `SseHandlerTest.anEventPublishedWhileARoomsStateIsReadFollowsTheStateAndIsNotLost`,
   `LiveMemberTest.aRoomsStreamIsToldWhereItsMemberStandsAsItsLastEventLeftIt`,
   `RoomStreamIT`.*
 - **L4. A live member is one run.** One row (`room` or `room-full`), one credential, one

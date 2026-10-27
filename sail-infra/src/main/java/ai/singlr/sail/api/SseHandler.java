@@ -44,8 +44,9 @@ import java.util.function.Predicate;
  *   [blank line]
  * </pre>
  *
- * The {@code id} field lets clients resume via {@code Last-Event-ID} (best-effort; events the
- * subscriber dropped while behind are reconcilable via {@code GET /v1/events/recent}).
+ * The {@code id} field lets clients resume via {@code Last-Event-ID} (best-effort). A stream that
+ * falls behind far enough for the bus to drop one of its events is ended: its client reconnects,
+ * and reconciles what it missed through {@code GET /v1/events/recent}.
  *
  * <p>A stream with a {@code room} filter is first sent where the room's live member stands ({@link
  * Event.WellKnownTypes#AGENT_TURN_STATE}), with no {@code id}: its turn events are never stored, so

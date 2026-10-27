@@ -550,7 +550,7 @@ class SchemaManagerTest {
   }
 
   @Test
-  void aMessageFromAReleaseWithNoErrorMarkKeepsWhatItWasAndReadsAsNoError() {
+  void aMessageFromAReleaseWithNoErrorMarkKeepsWhatItWasAndTakesBackAMarkItsJournalHeld() {
     stageAtBaseline();
     var prior = migrationIndex("ALTER TABLE room_messages ADD COLUMN error");
     db.execute("PRAGMA foreign_keys = OFF");
@@ -561,7 +561,14 @@ class SchemaManagerTest {
         SchemaManager.V1_VERSION + prior);
     var plain = "00000000-0000-7000-8000-000000000001";
     var asked = "00000000-0000-7000-8000-000000000002";
-    for (var row : List.of(List.of(plain, "Morning.", 0), List.of(asked, "Which flow?", 1))) {
+    var failedUnread = "00000000-0000-7000-8000-000000000003";
+    var askedUnread = "00000000-0000-7000-8000-000000000004";
+    for (var row :
+        List.of(
+            List.of(plain, "Morning.", 0),
+            List.of(asked, "Which flow?", 1),
+            List.of(failedUnread, "Not logged in", 0),
+            List.of(askedUnread, "Ship it?", 0))) {
       db.execute(
           "INSERT INTO room_messages (id, room_id, author, body, reply_to, created_at, rev,"
               + " base_rev, question) VALUES (?, 'lounge', 'claude/r1', ?, NULL,"
@@ -570,15 +577,34 @@ class SchemaManagerTest {
           row.get(1),
           row.get(2));
     }
+    for (var journaled :
+        List.of(
+            List.of(failedUnread, "\"error\": true"), List.of(askedUnread, "\"question\": true"))) {
+      db.execute(
+          "INSERT INTO change_log (entity_type, entity_id, rev, actor, recorded_at, origin,"
+              + " snapshot) VALUES ('message', ?, '1-a', 'claude/r1', '2026-10-01T00:00:00Z',"
+              + " 'remote', ?)",
+          journaled.get(0),
+          "{\"id\": \"" + journaled.get(0) + "\", " + journaled.get(1) + "}");
+    }
 
     new SchemaManager(db).migrate();
 
     var messages = new MessageStore(db);
-    var before = Acting.system(() -> List.of(messages.findById(plain), messages.findById(asked)));
+    var before =
+        Acting.system(
+            () ->
+                List.of(
+                    messages.findById(plain),
+                    messages.findById(asked),
+                    messages.findById(failedUnread),
+                    messages.findById(askedUnread)));
     assertEquals(
         List.of(
             List.of("Morning.", MessageStore.Mark.PLAIN, "1-a"),
-            List.of("Which flow?", MessageStore.Mark.QUESTION, "1-a")),
+            List.of("Which flow?", MessageStore.Mark.QUESTION, "1-a"),
+            List.of("Not logged in", MessageStore.Mark.ERROR, "1-a"),
+            List.of("Ship it?", MessageStore.Mark.QUESTION, "1-a")),
         before.stream()
             .map(Optional::orElseThrow)
             .map(row -> List.<Object>of(row.body(), row.mark(), row.rev()))

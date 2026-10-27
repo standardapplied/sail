@@ -164,6 +164,29 @@ class MessageSyncTest {
   }
 
   @Test
+  void aSnapshotMarkedBothAQuestionAndAnErrorIsRefusedNotResolved() {
+    var snapshot =
+        new LinkedHashMap<String, Object>(
+            Map.of(
+                "room_id", "room",
+                "author", "claude/r1",
+                "body", "Which flow?",
+                "created_at", "2026-10-01T00:00:00Z",
+                "question", true,
+                "error", true));
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                main.messages.applyRevision(
+                    "019fee00-0000-7000-8000-0000000000dd", snapshot, "1-a"));
+
+    assertEquals("message is marked both a question and an error", refused.getMessage());
+    assertTrue(main.messages.findById("019fee00-0000-7000-8000-0000000000dd").isEmpty());
+  }
+
+  @Test
   void syncedMessagesCannotBeChangedOrDeleted() {
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var row = node.messages.append("room", "node", "original", null);

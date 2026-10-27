@@ -49,6 +49,7 @@ class RoomViewTest {
     @SuppressWarnings("unchecked")
     var members = (List<Map<String, Object>>) map.get("members");
     assertEquals("claude-code", members.getFirst().get("agent"));
+    assertEquals("Claude Code", members.getFirst().get("agent_name"));
     assertEquals("opus-x", members.getFirst().get("model"));
     assertEquals("t2", members.getFirst().get("engaged_at"));
     assertEquals(List.of("attached-spec"), map.get("spec_ids"));

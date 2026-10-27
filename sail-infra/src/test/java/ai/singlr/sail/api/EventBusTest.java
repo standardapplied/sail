@@ -280,6 +280,50 @@ class EventBusTest {
     }
   }
 
+  @Test
+  void aSubscriberIsToldOfEveryEventItsFullQueueDropped() throws Exception {
+    try (var bus = new EventBus()) {
+      var block = new CountDownLatch(1);
+      var started = new CountDownLatch(1);
+      var missed = new AtomicInteger();
+      var sub =
+          bus.subscribe(
+              new EventSubscriber() {
+                @Override
+                public String name() {
+                  return "slow";
+                }
+
+                @Override
+                public Predicate<Event> filter() {
+                  return EventSubscriber.all();
+                }
+
+                @Override
+                public void onEvent(Event event) throws InterruptedException {
+                  started.countDown();
+                  block.await();
+                }
+
+                @Override
+                public void missed() {
+                  missed.incrementAndGet();
+                }
+              },
+              2);
+      bus.publish(Event.of("p", null, "t", "a", "h"));
+      BusTesting.awaitDelivery(started);
+
+      for (var i = 0; i < 10; i++) {
+        bus.publish(Event.of("p", null, "t", "a", "h"));
+      }
+
+      assertEquals(sub.droppedCount(), missed.get());
+      assertTrue(missed.get() > 0, "the queue of two dropped some of ten");
+      block.countDown();
+    }
+  }
+
   private static EventSubscriber subscriber(
       String name, Predicate<Event> filter, Consumer<Event> sink) {
     return new EventSubscriber() {

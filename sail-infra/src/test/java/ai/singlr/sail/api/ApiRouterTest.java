@@ -1868,6 +1868,7 @@ class ApiRouterTest {
     assertEquals(42, view.pid());
     var map = view.toMap();
     assertEquals("claude-code", map.get("agent"));
+    assertEquals("Claude Code", map.get("agent_name"));
     assertEquals("node-a", map.get("node"));
     assertEquals(7, map.get("exit_code"));
     assertTrue(map.containsKey("completed_at"));
