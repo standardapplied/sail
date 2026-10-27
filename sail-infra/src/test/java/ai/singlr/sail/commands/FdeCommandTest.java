@@ -59,9 +59,11 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.function.Function;
@@ -375,6 +377,7 @@ class FdeCommandTest {
     private final Map<String, String> types = new LinkedHashMap<>();
     private final Map<String, String> files = new LinkedHashMap<>();
     private final Map<String, ShellExec.Result> failures = new LinkedHashMap<>();
+    private final Set<String> unmanaged = new HashSet<>();
     private Runnable beforePull = () -> {};
     private boolean interrupted;
 
@@ -436,6 +439,10 @@ class FdeCommandTest {
           files.put(command.getLast(), Files.readString(Path.of(command.get(command.size() - 2))));
           yield new ShellExec.Result(0, "", "");
         }
+        case "config device" ->
+            unmanaged.contains(command.get(4))
+                ? new ShellExec.Result(1, "", "Error: Device doesn't exist\n")
+                : new ShellExec.Result(0, "/var/lib/sail/run\n", "");
         default -> throw new IllegalArgumentException("Unexpected " + command);
       };
     }
@@ -1027,12 +1034,17 @@ class FdeCommandTest {
     keygen.incus.files.put("stray/home/dev" + AUTHORIZED, trusted);
   }
 
+  private static List<String> managedQuery(String container) {
+    return List.of("incus", "config", "device", "get", container, "sail-api-sock", "source");
+  }
+
   /** The incus it takes to give acme and web a key, each written or each already holding it. */
   private static List<List<String>> trusting(boolean written) {
     var commands = new ArrayList<List<String>>();
     commands.add(List.of("incus", "list", "--format", "json"));
     for (var container : List.of("acme", "web")) {
       var file = container + "/home/dev" + AUTHORIZED;
+      commands.add(managedQuery(container));
       commands.add(List.of("incus", "file", "pull", container + PASSWD, "-"));
       commands.add(List.of("incus", "file", "pull", file, "-"));
       if (written) {
@@ -1075,6 +1087,23 @@ class FdeCommandTest {
         "a stopped container is written where it stands, never started, and one no project names is"
             + " not read");
     assertEquals(printedCode(), printed().getLast(), "nothing is left for an apply to do");
+  }
+
+  @Test
+  void aContainerSailDidNotMakeIsLeftAloneThoughItBearsAProjectsName() throws Exception {
+    appliedContainers(ENGINEER.line() + "\n");
+    keygen.incus.unmanaged.add("web");
+
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"), refusal);
+
+    assertEquals(
+        ENGINEER.line() + "\n" + keygen.made.getFirst().line() + "\n",
+        keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
+    assertEquals(ENGINEER.line() + "\n", keygen.incus.file("web", "/home/dev" + AUTHORIZED));
+    assertEquals(printedCode(), printed().getLast(), "a container not sail's is not named");
+    var asked = new ArrayList<>(trusting(true).subList(0, 5));
+    asked.add(managedQuery("web"));
+    assertEquals(asked, incusCommands());
   }
 
   @Test

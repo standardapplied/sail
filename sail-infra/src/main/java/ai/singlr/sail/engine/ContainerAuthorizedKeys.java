@@ -79,13 +79,21 @@ public final class ContainerAuthorizedKeys {
   /**
    * Adds {@code key} to the SSH user's file in each container of {@code projects} this box runs
    * that does not hold it yet, and returns those it could not, each with why: one container that
-   * cannot be written stops none of the others.
+   * cannot be written stops none of the others. A container bearing a project's name that sail did
+   * not make is left alone, as {@code project apply --all} leaves it.
    */
   public List<Unreached> add(SshPublicKey key, Collection<String> projects)
       throws IOException, InterruptedException, TimeoutException {
     var entry = entry(key);
+    var devices = new IncusDeviceManager(shell);
     var ofProjects = containers().stream().filter(projects::contains).toList();
-    return each(ofProjects, container -> addTo(container, homeAccounts(container), key, entry));
+    return each(
+        ofProjects,
+        container -> {
+          if (devices.sailManaged(container)) {
+            addTo(container, homeAccounts(container), key, entry);
+          }
+        });
   }
 
   private static List<Unreached> each(List<String> containers, Edit edit)
