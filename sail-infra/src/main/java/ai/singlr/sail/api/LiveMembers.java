@@ -93,6 +93,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   private static final Duration PID_ASK_GAP = Duration.ofMillis(100);
 
   private static final String MEMBERSHIP_CHANGED = "membership changed";
+  private static final String OPEN = "open";
   private static final int ROOM_TAIL = 20;
   private static final int DELTA_CODE_POINTS = 8_000;
   private static final int REASON_CODE_POINTS = 500;
@@ -210,6 +211,34 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   @Override
   public boolean serves(String agent) {
     return Harnesses.of(agent).liveSettings().isPresent();
+  }
+
+  /**
+   * Where the live member of {@code roomId} stands, as a room's stream is first told: its run, its
+   * turn, whether that turn is open, and what the turn's end carried when it is not. Read under the
+   * member's lock, which every event it tells is published under, so a stream that subscribed first
+   * is sent every event after this state and none it contradicts. A room with no live member is
+   * told its turn is not open; a room this box does not know is told nothing.
+   */
+  public Optional<Event> turnState(String roomId) {
+    return Actor.call(
+        Actor.system(),
+        () -> {
+          var member = members.get(roomId);
+          if (member != null) {
+            return Optional.of(member.state());
+          }
+          return seat(roomId)
+              .map(
+                  seat ->
+                      Event.of(
+                          seat.project(),
+                          seat.roomId(),
+                          Event.WellKnownTypes.AGENT_TURN_STATE,
+                          Event.SAIL_AGENT,
+                          HostInfo.hostname(),
+                          Map.of(OPEN, false)));
+        });
   }
 
   /** Holds every member to its lane's limits at {@code interval}. */
@@ -724,6 +753,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     private final StringBuilder said = new StringBuilder();
     private final StringBuilder unsent = new StringBuilder();
     private final Map<String, String> calls = new LinkedHashMap<>();
+    private Map<String, Object> lastEnd = Map.of();
     private Instant lastLine;
     private Instant lastDelta = Instant.MIN;
     private Instant lastStamp = Instant.MIN;
@@ -1038,20 +1068,34 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         data.put(Event.WellKnownData.REASON, Strings.clip(why, REASON_CODE_POINTS));
       }
       tell(Event.WellKnownTypes.AGENT_TURN_ENDED, data);
+      lastEnd = Map.copyOf(data);
       turnOpen = false;
       said.setLength(0);
       calls.clear();
     }
 
     private void tell(String type, Map<String, Object> more) {
+      events.publish(told(type, more));
+    }
+
+    /** Its turn as a room's stream is first told it: open, or closed as its end said. */
+    private synchronized Event state() {
+      var data = new LinkedHashMap<String, Object>();
+      data.put(OPEN, turnOpen);
+      if (!turnOpen) {
+        data.putAll(lastEnd);
+      }
+      return told(Event.WellKnownTypes.AGENT_TURN_STATE, data);
+    }
+
+    private Event told(String type, Map<String, Object> more) {
       var data = new LinkedHashMap<String, Object>();
       data.put(Event.WellKnownData.RUN_ID, runId);
       data.put(Event.WellKnownData.ROOM_ID, seat.roomId());
       data.put(Event.WellKnownData.PRINCIPAL, run.principal());
       data.put(Event.WellKnownData.TURN, turn);
       data.putAll(more);
-      events.publish(
-          Event.of(seat.project(), seat.roomId(), type, run.agent(), HostInfo.hostname(), data));
+      return Event.of(seat.project(), seat.roomId(), type, run.agent(), HostInfo.hostname(), data);
     }
 
     /**

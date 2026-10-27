@@ -27,6 +27,12 @@ public interface EventSubscriber {
   /** Called once per delivered event, on the subscriber's drain thread. */
   void onEvent(Event event) throws Exception;
 
+  /**
+   * Called on the publisher's thread when an event this subscriber admits was dropped because its
+   * queue was full. Must not block. A subscriber that is told nothing it can rebuild ignores it.
+   */
+  default void missed() {}
+
   /** Convenience filter that accepts every event. */
   static Predicate<Event> all() {
     return e -> true;

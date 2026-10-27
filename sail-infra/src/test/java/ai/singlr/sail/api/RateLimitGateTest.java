@@ -377,7 +377,8 @@ class RateLimitGateTest {
         null,
         null,
         gate,
-        project -> null);
+        project -> null,
+        SseHandler.RoomTurns.NONE);
   }
 
   private static HttpRequest.Builder streamRequest(SailApiServer server) {

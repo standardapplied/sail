@@ -84,7 +84,10 @@ class OpenStreamRecheckTest {
           holdIfClient(exchange);
         };
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-    PrivateAttributes.context(server, "/v1/events/stream", new SseHandler(bus, counted, 4, clock));
+    PrivateAttributes.context(
+        server,
+        "/v1/events/stream",
+        new SseHandler(bus, counted, SseHandler.RoomTurns.NONE, 4, clock));
     server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
     server.start();
   }

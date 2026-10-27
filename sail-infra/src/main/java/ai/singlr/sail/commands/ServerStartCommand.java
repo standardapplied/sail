@@ -285,7 +285,8 @@ public final class ServerStartCommand implements Runnable {
             specStore,
             reviewController,
             new RateLimitGate(),
-            notifications);
+            notifications,
+            operations.liveMembers()::turnState);
     var sweeper = new ExpiredRowSweeper(dbPath);
     var eventSweeper = new EventRetentionSweeper(eventStore);
     var retentionSweeper = operations.retentionSweeper();

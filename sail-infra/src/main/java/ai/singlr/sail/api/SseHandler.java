@@ -46,6 +46,11 @@ import java.util.function.Predicate;
  *
  * The {@code id} field lets clients resume via {@code Last-Event-ID} (best-effort; events the
  * subscriber dropped while behind are reconcilable via {@code GET /v1/events/recent}).
+ *
+ * <p>A stream with a {@code room} filter is first sent where the room's live member stands ({@link
+ * Event.WellKnownTypes#AGENT_TURN_STATE}), with no {@code id}: its turn events are never stored, so
+ * that frame is what a reader who connects mid-turn, or reconnects after missing a turn's end, is
+ * told. A stream the bus drops an event for is ended, so its client reconnects and is told again.
  */
 public final class SseHandler implements HttpHandler {
 
@@ -61,25 +66,38 @@ public final class SseHandler implements HttpHandler {
   /** Poll timeout when draining the per-connection queue. */
   static final long POLL_MILLIS = 1_000L;
 
+  /** Where a room's live member stands, as a room's stream is first told it. */
+  @FunctionalInterface
+  public interface RoomTurns {
+
+    /** Knows no room: a stream is told nothing first. */
+    RoomTurns NONE = roomId -> Optional.empty();
+
+    /** The state of {@code roomId}'s live member; empty for a room this box does not know. */
+    Optional<Event> stateOf(String roomId);
+  }
+
   private final EventBus bus;
   private final ApiAuth auth;
+  private final RoomTurns turns;
   private final Semaphore connectionPermits;
   private final int maxConnections;
   private final InstantSource clock;
   private final LongAdder rejected = new LongAdder();
 
-  public SseHandler(EventBus bus, ApiAuth auth) {
-    this(bus, auth, DEFAULT_MAX_CONNECTIONS);
+  public SseHandler(EventBus bus, ApiAuth auth, RoomTurns turns) {
+    this(bus, auth, turns, DEFAULT_MAX_CONNECTIONS, InstantSource.system());
   }
 
-  public SseHandler(EventBus bus, ApiAuth auth, int maxConnections) {
-    this(bus, auth, maxConnections, InstantSource.system());
+  SseHandler(EventBus bus, ApiAuth auth, int maxConnections) {
+    this(bus, auth, RoomTurns.NONE, maxConnections, InstantSource.system());
   }
 
   /** As above, timing heartbeats and re-checks by {@code clock}. */
-  SseHandler(EventBus bus, ApiAuth auth, int maxConnections, InstantSource clock) {
+  SseHandler(EventBus bus, ApiAuth auth, RoomTurns turns, int maxConnections, InstantSource clock) {
     this.bus = Objects.requireNonNull(bus, "bus");
     this.auth = Objects.requireNonNull(auth, "auth");
+    this.turns = Objects.requireNonNull(turns, "turns");
     this.clock = Objects.requireNonNull(clock, "clock");
     if (maxConnections <= 0) {
       throw new IllegalArgumentException("maxConnections must be positive");
@@ -150,6 +168,10 @@ public final class SseHandler implements HttpHandler {
     var filter = parseFilter(uri, ApiRouter.actorOf(exchange));
     try (var out = exchange.getResponseBody()) {
       writeComment(out, "subscribed");
+      var state = roomOf(uri).flatMap(turns::stateOf);
+      if (state.isPresent() && filter.test(state.get())) {
+        writeEvent(out, state.get());
+      }
       var lastHeartbeat = clock.instant();
       try {
         while (true) {
@@ -158,6 +180,9 @@ public final class SseHandler implements HttpHandler {
             event = streamSubscriber.queue.poll(POLL_MILLIS, TimeUnit.MILLISECONDS);
           } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            break;
+          }
+          if (streamSubscriber.missed) {
             break;
           }
           if (event != null) {
@@ -198,7 +223,9 @@ public final class SseHandler implements HttpHandler {
 
   private static void writeEvent(OutputStream out, Event event) throws IOException {
     var buf = new StringBuilder(256);
-    buf.append("id: ").append(event.id()).append('\n');
+    if (event.id() > 0) {
+      buf.append("id: ").append(event.id()).append('\n');
+    }
     buf.append("data: ").append(event.toJsonLine()).append("\n\n");
     out.write(buf.toString().getBytes(StandardCharsets.UTF_8));
     out.flush();
@@ -229,6 +256,14 @@ public final class SseHandler implements HttpHandler {
     return scoped.and(queryFilter(uri));
   }
 
+  /** The room the query narrows the stream to, if it does. */
+  private static Optional<String> roomOf(URI uri) {
+    var query = uri.getRawQuery();
+    return Strings.isBlank(query)
+        ? Optional.empty()
+        : Optional.ofNullable(parseQuery(query).get("room")).filter(Strings::isNotBlank);
+  }
+
   /** The events the query asks for, whoever asks. */
   private static Predicate<Event> queryFilter(URI uri) {
     Predicate<Event> result = event -> true;
@@ -241,9 +276,9 @@ public final class SseHandler implements HttpHandler {
     if (Strings.isNotBlank(projectFilter)) {
       result = result.and(EventSubscriber.byProject(projectFilter));
     }
-    var roomFilter = values.get("room");
-    if (Strings.isNotBlank(roomFilter)) {
-      result = result.and(e -> roomFilter.equals(e.spec()));
+    var roomFilter = roomOf(uri);
+    if (roomFilter.isPresent()) {
+      result = result.and(e -> roomFilter.get().equals(e.spec()));
     }
     var typeFilter = values.get("type");
     if (Strings.isNotBlank(typeFilter)) {
@@ -273,6 +308,9 @@ public final class SseHandler implements HttpHandler {
     final ArrayBlockingQueue<Event> queue =
         new ArrayBlockingQueue<>(DEFAULT_PER_CONNECTION_CAPACITY);
 
+    /** An event was dropped for this stream: what follows would mislead, so the stream ends. */
+    volatile boolean missed;
+
     StreamSubscriber(Predicate<Event> filter) {
       this.filter = filter;
     }
@@ -289,7 +327,14 @@ public final class SseHandler implements HttpHandler {
 
     @Override
     public void onEvent(Event event) {
-      queue.offer(event);
+      if (!queue.offer(event)) {
+        missed = true;
+      }
+    }
+
+    @Override
+    public void missed() {
+      missed = true;
     }
   }
 }
