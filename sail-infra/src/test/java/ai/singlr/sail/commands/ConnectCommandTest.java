@@ -29,7 +29,6 @@ class ConnectCommandTest {
             "mainbox", "10.0.0.1", "uday", "acme", "10.1.1.5", "engineer", "~/.ssh/id_ed25519");
 
     assertTrue(snippet.contains("User engineer"), "container ssh user from the definition");
-    assertTrue(snippet.contains("zed ssh://engineer@acme/home/engineer/workspace"));
     assertFalse(snippet.contains("dev@"), "no hardcoded dev user");
   }
 
@@ -73,7 +72,6 @@ class ConnectCommandTest {
 
         # Then connect:
         #   ssh acme
-        #   zed ssh://dev@acme/home/dev/workspace
         #
         # Agent auth (port forwarding for subscription login):
         #   ssh -N -L 3000:localhost:3000 acme""",
@@ -100,7 +98,6 @@ class ConnectCommandTest {
 
         # Then connect:
         #   ssh gamma.project
-        #   zed ssh://dev@gamma.project/home/dev/workspace
         #
         # Agent auth (port forwarding for subscription login):
         #   ssh -N -L 3000:localhost:3000 gamma.project""",

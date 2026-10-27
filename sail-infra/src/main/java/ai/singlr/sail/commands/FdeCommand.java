@@ -12,6 +12,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.ContainerAuthorizedKeys;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorAuthorizedKeys;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -51,6 +52,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -225,11 +227,13 @@ public final class FdeCommand implements Runnable {
         + "|@";
   }
 
-  static String trustedAfterApply(String projects, OperatorCommand operator) {
-    return "  Containers of "
-        + projects
-        + " trust this key only after their next '"
-        + operator.sail("project apply")
+  static String notTrustedYet(String container, String why, OperatorCommand operator) {
+    return "  @|yellow ⚠|@ "
+        + container
+        + " does not trust this key yet ("
+        + why
+        + "). Make it: '"
+        + operator.sail("project apply " + container)
         + "'.";
   }
 
@@ -1073,6 +1077,7 @@ public final class FdeCommand implements Runnable {
         var replaced =
             replacedWorkstationKey(
                 box, existing.flatMap(fde -> new FdePairingStore(db).find(fde.id())), operator);
+        var untrusted = replaced.map(old -> untrustReplaced(box, old)).orElse(List.of());
         var key = mintKey(box.shell());
         var fde = box.node() ? existing.orElseThrow() : rosterRow(fdes, existing);
         if (existing.isEmpty()) {
@@ -1109,17 +1114,69 @@ public final class FdeCommand implements Runnable {
             Ansi.AUTO.string(
                 "  @|green ✓|@ Workstation key "
                     + replaced.map(old -> "replaced: it was " + describe(old)).orElse("set")
-                    + "."));
+                    + "."
+                    + (untrusted.isEmpty()
+                        ? ""
+                        : " Containers of "
+                            + String.join(", ", untrusted)
+                            + " no longer trust it.")));
         System.out.println();
         System.out.println("  Paste this code into Mast. It is a secret, and it is shown once:");
         System.out.println();
         System.out.println(code(box, address, pinned, key.privateKey(), token.token()));
-        var projects = new ProjectStore(db).list().stream().map(ProjectStore.ProjectRow::name);
-        var stale = projects.collect(Collectors.joining(", "));
-        if (!stale.isEmpty()) {
+        var refusing = trustInContainers(box, db, key.publicKey());
+        if (!refusing.isEmpty()) {
           System.out.println();
-          System.out.println(trustedAfterApply(stale, operator));
+          refusing.forEach(
+              container ->
+                  System.out.println(
+                      Ansi.AUTO.string(
+                          notTrustedYet(container.container(), container.reason(), operator))));
         }
+      }
+    }
+
+    /**
+     * Takes the workstation key this pairing replaces out of every container, as unpair takes a
+     * pairing's, before anything of the pairing is written: one that cannot be taken out refuses
+     * the pairing, and running it again tries again.
+     */
+    private static List<String> untrustReplaced(Box box, SshPublicKey replaced) {
+      try {
+        return new ContainerAuthorizedKeys(box.shell()).remove(replaced);
+      } catch (IOException | TimeoutException failure) {
+        throw new IllegalStateException(
+            "Could not take the workstation key "
+                + describe(replaced)
+                + " out of this box's containers ("
+                + failure.getMessage().strip()
+                + "), so nothing is paired: check that 'incus list' answers, then run the command"
+                + " again.",
+            failure);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException(
+            "Interrupted while taking the workstation key out of this box's containers.",
+            interrupted);
+      }
+    }
+
+    /**
+     * Writes {@code key} into every container of this box once its code is shown, and returns those
+     * that do not trust it. A box whose containers cannot be listed names each project instead.
+     */
+    private static List<ContainerAuthorizedKeys.Untrusted> trustInContainers(
+        Box box, Sqlite db, SshPublicKey key) throws InterruptedException {
+      try {
+        return new ContainerAuthorizedKeys(box.shell()).add(key);
+      } catch (IOException | TimeoutException failure) {
+        return new ProjectStore(db)
+            .list().stream()
+                .map(
+                    project ->
+                        new ContainerAuthorizedKeys.Untrusted(
+                            project.name(), failure.getMessage().strip()))
+                .toList();
       }
     }
 

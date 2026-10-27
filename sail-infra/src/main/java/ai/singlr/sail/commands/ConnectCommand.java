@@ -201,8 +201,7 @@ public final class ConnectCommand implements Runnable {
             IdentityFile %s
 
         # Then connect:
-        #   ssh %s
-        #   zed ssh://%s@%s/home/%s/workspace"""
+        #   ssh %s"""
             .formatted(
                 boxHost,
                 serverIp,
@@ -213,10 +212,7 @@ public final class ConnectCommand implements Runnable {
                 containerUser,
                 boxHost,
                 identityFile,
-                alias,
-                containerUser,
-                alias,
-                containerUser);
+                alias);
     return snippet + agentAuth(Harnesses.all(), alias);
   }
 

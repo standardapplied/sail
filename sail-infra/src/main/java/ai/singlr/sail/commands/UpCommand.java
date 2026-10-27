@@ -60,7 +60,7 @@ public final class UpCommand implements Runnable {
         Banner.printBranding(System.out, Ansi.AUTO);
         System.out.println();
         Banner.printContainerStatus(name, r, System.out, Ansi.AUTO);
-        Banner.printZedConnect(name, operator, System.out, Ansi.AUTO);
+        Banner.printConnect(name, operator, System.out, Ansi.AUTO);
         printTunnelHints(shell);
         printOvercommitHints(mgr, operator);
       }
@@ -79,7 +79,7 @@ public final class UpCommand implements Runnable {
         Banner.printBranding(System.out, Ansi.AUTO);
         System.out.println();
         Banner.printContainerStatus(name, new ContainerState.Running(ip), System.out, Ansi.AUTO);
-        Banner.printZedConnect(name, operator, System.out, Ansi.AUTO);
+        Banner.printConnect(name, operator, System.out, Ansi.AUTO);
         printTunnelHints(shell);
         printOvercommitHints(mgr, operator);
       }

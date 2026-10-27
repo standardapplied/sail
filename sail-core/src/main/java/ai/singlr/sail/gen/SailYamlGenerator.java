@@ -202,7 +202,7 @@ public final class SailYamlGenerator {
     sb.append(
         """
         # SSH access configuration. The user is created inside the container.
-        # Add your public key(s) for Zed remote dev access.
+        # Add the public key(s) that may log in to it.
         ssh:
         """);
     sb.append("  user: ").append(ssh.user()).append("\n");

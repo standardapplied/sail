@@ -393,9 +393,16 @@ class SailYamlGeneratorTest {
 
     var yaml = SailYamlGenerator.generate(config);
 
-    assertTrue(yaml.contains("ssh:"));
-    assertTrue(yaml.contains("user: dev"));
-    assertTrue(yaml.contains("ssh-ed25519 AAAA..."));
+    assertTrue(
+        yaml.contains(
+            """
+            # SSH access configuration. The user is created inside the container.
+            # Add the public key(s) that may log in to it.
+            ssh:
+              user: dev
+              authorized_keys:
+                - "ssh-ed25519 AAAA..."
+            """));
   }
 
   @Test

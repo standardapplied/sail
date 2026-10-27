@@ -500,11 +500,11 @@ public final class Banner {
     out.println();
   }
 
-  /** Prints the project creation success message with Zed connect hint. */
+  /** Prints the project creation success message with the connect hint. */
   public static void printProjectCreated(
       String name, OperatorCommand operator, PrintStream out, Ansi ansi) {
     printLine(out, ansi, "  @|bold,green \u2713 Project " + name + " created.|@");
-    printZedConnect(name, operator, out, ansi);
+    printConnect(name, operator, out, ansi);
   }
 
   /**
@@ -537,8 +537,6 @@ public final class Banner {
     printLine(out, ansi, "    @|faint     ProxyJump " + boxHost + "|@");
     printLine(out, ansi, "    @|faint     IdentityFile " + identityFile + "|@");
     out.println();
-    printLine(
-        out, ansi, "    @|bold \u2192 Zed:|@     zed ssh://dev@" + alias + "/home/dev/workspace");
     printLine(out, ansi, "    @|bold \u2192 SSH:|@     ssh " + alias);
     printLine(out, ansi, "    @|bold \u2192 Shell:|@   " + operator.sail("project shell " + name));
   }
@@ -571,7 +569,7 @@ public final class Banner {
   }
 
   /** Prints the connect and shell hints after a container starts. */
-  public static void printZedConnect(
+  public static void printConnect(
       String name, OperatorCommand operator, PrintStream out, Ansi ansi) {
     printLine(
         out, ansi, "    @|bold \u2192 Connect:|@ " + operator.sail("project connect " + name));
