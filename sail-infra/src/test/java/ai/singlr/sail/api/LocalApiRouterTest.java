@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
@@ -544,7 +545,7 @@ class LocalApiRouterTest {
                 "body=Progress%20update&reply_to=01900000-0000-7000-8000-000000000001"));
     assertEquals(201, posted.status());
     assertEquals("Progress update", ops.lastMessage.body());
-    assertFalse(ops.lastMessage.question());
+    assertEquals(MessageStore.Mark.PLAIN, ops.lastMessage.mark());
     assertEquals(TestOperations.PRINCIPAL, ops.lastMessageAuthor);
     assertEquals(TestOperations.PRINCIPAL, ops.lastActor.handle());
     assertEquals(TestOperations.OWNER, ops.lastActor.owner());
@@ -554,7 +555,8 @@ class LocalApiRouterTest {
         router.handle(
             form("POST", "/v1/specs/oauth/messages", "body=Which%20flow%3F&question=true"));
     assertEquals(201, asked.status());
-    assertTrue(ops.lastMessage.question(), "the form flag reaches the request");
+    assertEquals(
+        MessageStore.Mark.QUESTION, ops.lastMessage.mark(), "the form flag reaches the request");
 
     assertEquals(
         200,

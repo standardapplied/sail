@@ -220,13 +220,20 @@ class SpecMessageOperationsTest {
     var emptyRequest = SpecMessageRequest.fromMap(Map.of());
     assertEquals(null, emptyRequest.body());
     assertEquals(null, emptyRequest.replyTo());
-    assertFalse(emptyRequest.question());
+    assertEquals(MessageStore.Mark.PLAIN, emptyRequest.mark());
     var request = SpecMessageRequest.fromMap(Map.of("body", 42, "reply_to", 7));
     assertEquals("42", request.body());
     assertEquals("7", request.replyTo());
-    assertTrue(SpecMessageRequest.fromMap(Map.of("question", true)).question());
-    assertTrue(SpecMessageRequest.fromMap(Map.of("question", "true")).question());
-    assertFalse(SpecMessageRequest.fromMap(Map.of("question", "nonsense")).question());
+    assertEquals(
+        List.of(MessageStore.Mark.QUESTION, MessageStore.Mark.QUESTION, MessageStore.Mark.PLAIN),
+        List.of(
+            SpecMessageRequest.fromMap(Map.of("question", true)).mark(),
+            SpecMessageRequest.fromMap(Map.of("question", "true")).mark(),
+            SpecMessageRequest.fromMap(Map.of("question", "nonsense")).mark()));
+    assertEquals(
+        MessageStore.Mark.PLAIN,
+        SpecMessageRequest.fromMap(Map.of("error", true)).mark(),
+        "no client marks its own post an error");
 
     var view =
         new SpecMessageView(

@@ -462,6 +462,11 @@ class SseHandlerTest {
   }
 
   @Test
+  void aBoxThatKnowsNoRoomTellsAStreamNothingFirst() {
+    assertEquals(Optional.empty(), SseHandler.RoomTurns.NONE.stateOf("lounge"));
+  }
+
+  @Test
   void aStreamTheBusDropsAnEventForIsEndedSoItsClientReconnects() {
     var payload = "x".repeat(64 * 1024);
     var flood = 2_000;

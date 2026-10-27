@@ -328,7 +328,7 @@ public final class SseHandler implements HttpHandler {
     @Override
     public void onEvent(Event event) {
       if (!queue.offer(event)) {
-        missed = true;
+        missed();
       }
     }
 

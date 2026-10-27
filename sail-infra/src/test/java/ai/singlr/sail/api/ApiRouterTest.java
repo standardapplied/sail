@@ -28,6 +28,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -2001,7 +2002,7 @@ class ApiRouterTest {
       this.actor = actor;
       this.author = author;
       this.body = request.body();
-      this.question = request.question();
+      this.question = request.mark() == MessageStore.Mark.QUESTION;
       return Actor.call(actor, () -> super.postRoomMessage(specId, request, author));
     }
   }

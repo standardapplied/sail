@@ -1448,10 +1448,6 @@ record SpecMessageRequest(String body, String replyTo, MessageStore.Mark mark) {
         replyTo,
         Boolean.parseBoolean(question) ? MessageStore.Mark.QUESTION : MessageStore.Mark.PLAIN);
   }
-
-  boolean question() {
-    return mark == MessageStore.Mark.QUESTION;
-  }
 }
 
 record SpecMessageView(
