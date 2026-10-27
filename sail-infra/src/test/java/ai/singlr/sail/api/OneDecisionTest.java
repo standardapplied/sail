@@ -239,7 +239,7 @@ class OneDecisionTest {
             CliOperator.of(ADAS_NODE, new FdeStore(db)),
             () ->
                 operations.postRoomMessage(
-                    "den", new SpecMessageRequest("hi", null, false), "ada"));
+                    "den", new SpecMessageRequest("hi", null, MessageStore.Mark.PLAIN), "ada"));
     var failure = assertInstanceOf(Result.Failure.class, cli, "the host CLI");
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, failure.errorCode());
     assertEquals(NOT_ADAS_ROOM, failure.errorMessage());

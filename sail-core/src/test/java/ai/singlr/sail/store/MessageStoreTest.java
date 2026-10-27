@@ -92,11 +92,15 @@ class MessageStoreTest {
   void aConversationIsReadMessageByMessageByTheProjectEachWasFiledUnder() {
     var specs = new SpecStore(db);
     specs.create(spec("mover", "beta"));
-    var asked = messages.append("mover", "claude/a1b2c3", "Which, in beta?", null, true);
+    var asked =
+        messages.append(
+            "mover", "claude/a1b2c3", "Which, in beta?", null, MessageStore.Mark.QUESTION);
     var beta = messages.append("mover", "bea", "said in beta", null);
     specs.update(spec("mover", "alpha"));
     var first = messages.append("mover", "ann", "said in alpha", null);
-    var second = messages.append("mover", "claude/a1b2c3", "Which, in alpha?", null, true);
+    var second =
+        messages.append(
+            "mover", "claude/a1b2c3", "Which, in alpha?", null, MessageStore.Mark.QUESTION);
     specs.update(spec("mover", "beta"));
     var back = messages.append("mover", "bea", "said in beta again", null);
     var ann = reader("alpha");
@@ -344,7 +348,9 @@ class MessageStoreTest {
 
   @Test
   void questionFlagRoundTripsAndStaysOutOfPlainSnapshots() {
-    var question = messages.append("room", "claude/run-1", "Which auth flow?", null, true);
+    var question =
+        messages.append(
+            "room", "claude/run-1", "Which auth flow?", null, MessageStore.Mark.QUESTION);
     assertTrue(question.question());
     assertTrue(messages.findById(question.id()).orElseThrow().question());
     assertEquals(Boolean.TRUE, messages.comparableSnapshot(question.id()).get("question"));
@@ -358,10 +364,13 @@ class MessageStoreTest {
   void openQuestionsFlagsTheLatestAgentQuestionUntilAHumanReplies() {
     assertEquals(Map.of(), messages.openQuestions());
 
-    var first = messages.append("room", "claude/run-1", "Which db?", null, true);
+    var first =
+        messages.append("room", "claude/run-1", "Which db?", null, MessageStore.Mark.QUESTION);
     assertEquals(Map.of("room", first.id()), messages.openQuestions());
 
-    var second = messages.append("room", "claude/run-1", "And which cache?", null, true);
+    var second =
+        messages.append(
+            "room", "claude/run-1", "And which cache?", null, MessageStore.Mark.QUESTION);
     assertEquals(Map.of("room", second.id()), messages.openQuestions());
 
     messages.append("room", "codex/run-2", "agent chatter", null);
@@ -377,7 +386,7 @@ class MessageStoreTest {
 
   @Test
   void aHumanQuestionNeverNeedsAReply() {
-    messages.append("room", "ada", "what did you ship?", null, true);
+    messages.append("room", "ada", "what did you ship?", null, MessageStore.Mark.QUESTION);
     assertEquals(Map.of(), messages.openQuestions());
   }
 

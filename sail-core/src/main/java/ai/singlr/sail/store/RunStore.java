@@ -1389,17 +1389,30 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         parameters.toArray());
   }
 
-  /** Runs for a spec, optionally scoped to a project — the read behind {@code GET /v1/runs}. */
-  public List<RunRow> list(String project, String specId) {
-    if (project != null && specId != null) {
+  /**
+   * Runs of a conversation, optionally scoped to a project — the read behind {@code GET /v1/runs}.
+   * {@code conversationId} names a spec's runs, or a room's that serve no spec ({@link
+   * RunRow#conversationId}), so a room with no spec lists the members that spoke in it.
+   */
+  public List<RunRow> list(String project, String conversationId) {
+    var ofConversation = "(spec_id = ?1 OR (spec_id IS NULL AND room_id = ?1))";
+    if (project != null && conversationId != null) {
       return db.query(
-          "SELECT " + COLUMNS + " FROM runs WHERE project = ? AND spec_id = ? ORDER BY id DESC",
+          "SELECT "
+              + COLUMNS
+              + " FROM runs WHERE "
+              + ofConversation
+              + " AND project = ?2"
+              + " ORDER BY id DESC",
           this::mapRow,
-          project,
-          specId);
+          conversationId,
+          project);
     }
-    if (specId != null) {
-      return listForSpec(specId);
+    if (conversationId != null) {
+      return db.query(
+          "SELECT " + COLUMNS + " FROM runs WHERE " + ofConversation + " ORDER BY id DESC",
+          this::mapRow,
+          conversationId);
     }
     if (project != null) {
       return listForProject(project);

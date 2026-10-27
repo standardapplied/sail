@@ -835,7 +835,8 @@ public final class SchemaManager {
           "ALTER TABLE sync_state ADD COLUMN read_rev TEXT",
           CHECKPOINTS_READ_AGAIN,
           COMPACTED_ENTRIES,
-          "CREATE INDEX idx_compacted_entries_entity ON compacted_entries(entity_type, entity_id)");
+          "CREATE INDEX idx_compacted_entries_entity ON compacted_entries(entity_type, entity_id)",
+          "ALTER TABLE room_messages ADD COLUMN error INTEGER NOT NULL DEFAULT 0");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

@@ -28,6 +28,18 @@ public final class Harnesses {
   }
 
   /**
+   * What the agent {@code yamlName} is called wherever a reader sees it: its harness's {@link
+   * Harness#displayName()}, or the name itself for an agent this binary does not know.
+   */
+  public static String displayName(String yamlName) {
+    return ALL.stream()
+        .filter(harness -> harness.yamlName().equals(yamlName))
+        .findFirst()
+        .map(Harness::displayName)
+        .orElse(yamlName);
+  }
+
+  /**
    * The harness named {@code yamlName} in {@code sail.yaml}.
    *
    * @throws IllegalArgumentException if no harness has that name

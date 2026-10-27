@@ -34,6 +34,8 @@ public final class LiveStream {
 
   private static final int TOOL_NAME_CODE_POINTS = 64;
 
+  private static final String SUCCESS = "success";
+
   private LiveStream() {}
 
   /** What one line of a live member's stdout says. */
@@ -55,8 +57,9 @@ public final class LiveStream {
     record ToolResults(List<String> callIds) implements Step {}
 
     /**
-     * The turn is over. {@code reason} is why it failed, {@code null} for a turn that did not;
-     * {@code text} is the turn's final text as the harness reports it.
+     * The turn is over. {@code reason} is why it failed, {@code null} for a turn that did not or
+     * whose harness named no failure; {@code text} is the turn's final text as the harness reports
+     * it.
      */
     record Result(boolean error, String reason, String text) implements Step {}
 
@@ -110,11 +113,17 @@ public final class LiveStream {
     };
   }
 
+  /**
+   * A turn's result: it failed when the harness flags it an error, whatever its subtype says, and
+   * the subtype is its reason only when it names a failure. A harness can flag a turn failed under
+   * the subtype {@value #SUCCESS}, and a failure is never told as a success.
+   */
   private static Step result(Map<String, Object> event) {
     var error = Boolean.TRUE.equals(event.get("is_error"));
+    var subtype = event.get("subtype") instanceof String named ? named : "";
     return new Step.Result(
         error,
-        error ? Objects.toString(event.get("subtype"), "error") : null,
+        error && !subtype.isBlank() && !SUCCESS.equals(subtype) ? subtype : null,
         event.get("result") instanceof String text ? text : "");
   }
 

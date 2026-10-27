@@ -99,10 +99,13 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   private static final int REASON_CODE_POINTS = 500;
   private static final String LOG_TAIL_BYTES = "2000";
 
-  /** The door a member's reply is posted through: returns the id of the message it became. */
+  /**
+   * The door a member's reply is posted through, marked an error when its turn failed: returns the
+   * id of the message it became.
+   */
   @FunctionalInterface
   public interface Room {
-    String post(RunStore.RunRow run, String roomId, String text);
+    String post(RunStore.RunRow run, String roomId, String text, MessageStore.Mark mark);
   }
 
   /**
@@ -1057,7 +1060,11 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         try {
           data.put(
               Event.WellKnownData.MESSAGE_ID,
-              room.post(run, seat.roomId(), MessageStore.fitted(text)));
+              room.post(
+                  run,
+                  seat.roomId(),
+                  MessageStore.fitted(text),
+                  error ? MessageStore.Mark.ERROR : MessageStore.Mark.PLAIN));
         } catch (RuntimeException refused) {
           failed = true;
           why = "reply not posted: " + refused.getMessage();

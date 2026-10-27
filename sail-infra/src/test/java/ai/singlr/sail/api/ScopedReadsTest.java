@@ -585,7 +585,13 @@ class ScopedReadsTest {
     var asked =
         Acting.system(
             () ->
-                new MessageStore(db).append("wander", "claude-code/" + run, "Which?", null, true));
+                new MessageStore(db)
+                    .append(
+                        "wander",
+                        "claude-code/" + run,
+                        "Which?",
+                        null,
+                        MessageStore.Mark.QUESTION));
     for (var read : List.of("/v1/specs/wander", "/v1/specs?project=alpha", "/v1/specs")) {
       assertEquals(false, ask(sam, read).contains(asked.id()), read);
       assertEquals(true, ask(ada, read).contains(asked.id()), read);
@@ -810,7 +816,13 @@ class ScopedReadsTest {
     var messages = new MessageStore(db);
     var asked =
         Acting.system(
-            () -> messages.append("bravo-spec", "claude-code/" + B_RUN, "Bravo's?", null, true));
+            () ->
+                messages.append(
+                    "bravo-spec",
+                    "claude-code/" + B_RUN,
+                    "Bravo's?",
+                    null,
+                    MessageStore.Mark.QUESTION));
     assertEquals(
         "200",
         send(ada, "PUT", "/v1/specs/bravo-spec", "{\"project\": \"alpha\", \"assignee\": \"sam\"}")
@@ -1349,7 +1361,12 @@ class ScopedReadsTest {
                 null));
     var messages = new MessageStore(db);
     messages.append(room, owner, "A word about " + project, null);
-    messages.append(room, "claude-code/" + run, "A question about " + project + "?", null, true);
+    messages.append(
+        room,
+        "claude-code/" + run,
+        "A question about " + project + "?",
+        null,
+        MessageStore.Mark.QUESTION);
     messages.append(spec, owner, "Talk in the " + project + " spec", null);
     var runs = new RunStore(db);
     runs.create(

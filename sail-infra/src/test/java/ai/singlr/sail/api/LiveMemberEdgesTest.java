@@ -117,6 +117,7 @@ class LiveMemberEdgesTest {
 
     assertEquals(
         "claude/" + process.runId + ": API Error: overloaded", room.conversation(SPEC).getLast());
+    assertEquals(MessageStore.Mark.ERROR, room.messages.list(SPEC, null, 20).getLast().mark());
     assertEquals(true, turnEnded().get("is_error"));
     assertEquals("error_during_execution", turnEnded().get("reason"));
 
@@ -127,6 +128,36 @@ class LiveMemberEdgesTest {
     assertFalse(turnEnded().containsKey("message_id"));
     assertEquals(false, turnEnded().get("is_error"));
     assertEquals(List.of(1, 2), room.turns());
+  }
+
+  @Test
+  void aTurnItsHarnessSaysFailedIsKeptInItsOwnWordsAndMarkedAnErrorAndAnAnswerIsNot() {
+    var process = room.prompted(SPEC, "full", "first");
+    var run = room.memberRun();
+
+    room.says(process, Lines.failure("success", "Not logged in · Please run /login"));
+
+    var failed = room.messages.list(SPEC, null, 20).getLast();
+    assertEquals(
+        List.of("claude/" + run.id(), "Not logged in · Please run /login", MessageStore.Mark.ERROR),
+        List.of(failed.author(), failed.body(), failed.mark()));
+    assertEquals(
+        LiveRoom.live(run, SPEC, 1, Map.of("message_id", failed.id(), "is_error", true)),
+        turnEnded(),
+        "no reason is told, and never 'success'");
+    assertEquals(true, SpecMessageView.from(failed).toMap().get("error"), "and a reader is told");
+
+    room.says(SPEC, "again?");
+    room.says(process, Lines.delta("Half way"), Lines.failure("error_max_turns", ""));
+    var cut = room.messages.list(SPEC, null, 20).getLast();
+    assertEquals(List.of("Half way", MessageStore.Mark.ERROR), List.of(cut.body(), cut.mark()));
+    assertEquals("error_max_turns", turnEnded().get("reason"), "a subtype naming a failure is it");
+
+    room.says(SPEC, "and now?");
+    room.says(process, Lines.delta("Fine."), Lines.result("Fine."));
+    var answer = room.messages.list(SPEC, null, 20).getLast();
+    assertEquals(List.of("Fine.", MessageStore.Mark.PLAIN), List.of(answer.body(), answer.mark()));
+    assertFalse(SpecMessageView.from(answer).toMap().containsKey("error"));
   }
 
   @Test
@@ -167,7 +198,7 @@ class LiveMemberEdgesTest {
   void aRoomThatRefusesTheReplyEndsTheTurnInError() {
     var process = room.prompted(SPEC, "full", "first");
     room.live.useRoom(
-        (run, roomId, text) -> {
+        (run, roomId, text, mark) -> {
           throw new ApiException(ErrorCode.FORBIDDEN, "no voice in this room");
         });
 

@@ -42,7 +42,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   private static final String ENTITY = "message";
 
   private static final String COLUMNS =
-      "id, room_id, author, body, reply_to, created_at, rev, base_rev, question";
+      "id, room_id, author, body, reply_to, created_at, rev, base_rev, question, error";
 
   private final Sqlite db;
   private final ChangeLog changeLog;
@@ -61,14 +61,39 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
       String createdAt,
       String rev,
       String baseRev,
-      boolean question) {}
+      Mark mark) {
 
-  public MessageRow append(String roomId, String author, String body, String replyTo) {
-    return append(roomId, author, body, replyTo, false);
+    /** Whether the message is an agent's question, waiting for a human's answer. */
+    public boolean question() {
+      return mark == Mark.QUESTION;
+    }
+
+    /** Whether the message is what an agent's failed turn left: its own words, not an answer. */
+    public boolean error() {
+      return mark == Mark.ERROR;
+    }
   }
 
-  public MessageRow append(
-      String roomId, String author, String body, String replyTo, boolean question) {
+  /**
+   * What a message is beside its text, synced with it: an agent's question, or the words of an
+   * agent's turn whose harness said it failed. Each is its own column and its own snapshot key,
+   * written only when set, so a plain message's revision is what it always was.
+   */
+  public enum Mark {
+    PLAIN,
+    QUESTION,
+    ERROR;
+
+    static Mark of(boolean question, boolean error) {
+      return error ? ERROR : question ? QUESTION : PLAIN;
+    }
+  }
+
+  public MessageRow append(String roomId, String author, String body, String replyTo) {
+    return append(roomId, author, body, replyTo, Mark.PLAIN);
+  }
+
+  public MessageRow append(String roomId, String author, String body, String replyTo, Mark mark) {
     requireBody(body);
     if (Strings.isBlank(author)) {
       throw new IllegalArgumentException("message author is required");
@@ -89,7 +114,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
                   DateTimeUtils.now().toString(),
                   null,
                   null,
-                  question);
+                  Objects.requireNonNull(mark, "mark"));
           requireReplyTarget(row);
           var snapshot = snapshot(row);
           WriteAuthority.admit(db, decide(id, snapshot));
@@ -542,12 +567,13 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     db.execute(
         """
         INSERT INTO room_messages
-            (id, room_id, author, body, reply_to, created_at, rev, base_rev, question)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, room_id, author, body, reply_to, created_at, rev, base_rev, question, error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             room_id = excluded.room_id, author = excluded.author, body = excluded.body,
             reply_to = excluded.reply_to, created_at = excluded.created_at,
-            rev = excluded.rev, base_rev = excluded.base_rev, question = excluded.question""",
+            rev = excluded.rev, base_rev = excluded.base_rev, question = excluded.question,
+            error = excluded.error""",
         row.id(),
         row.roomId(),
         row.author(),
@@ -556,15 +582,16 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         row.createdAt(),
         rev,
         rev,
-        row.question() ? 1 : 0);
+        row.question() ? 1 : 0,
+        row.error() ? 1 : 0);
   }
 
   private void write(MessageRow row, String rev, String baseRev) {
     db.execute(
         """
         INSERT INTO room_messages
-            (id, room_id, author, body, reply_to, created_at, rev, base_rev, question)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, room_id, author, body, reply_to, created_at, rev, base_rev, question, error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET rev = excluded.rev, base_rev = excluded.base_rev""",
         row.id(),
         row.roomId(),
@@ -574,7 +601,8 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         row.createdAt(),
         rev,
         baseRev,
-        row.question() ? 1 : 0);
+        row.question() ? 1 : 0,
+        row.error() ? 1 : 0);
   }
 
   private void requireReplyTarget(MessageRow row) {
@@ -621,7 +649,11 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         required(snapshot, "created_at"),
         null,
         null,
-        Boolean.parseBoolean(Objects.toString(snapshot.get("question"), "false")));
+        Mark.of(flag(snapshot, "question"), flag(snapshot, "error")));
+  }
+
+  private static boolean flag(Map<String, Object> snapshot, String key) {
+    return Boolean.parseBoolean(Objects.toString(snapshot.get(key), "false"));
   }
 
   /**
@@ -646,6 +678,9 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     if (row.question()) {
       map.put("question", true);
     }
+    if (row.error()) {
+      map.put("error", true);
+    }
     return map;
   }
 
@@ -659,7 +694,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         row.text(5),
         row.text(6),
         row.text(7),
-        row.integer(8) != 0);
+        Mark.of(row.integer(8) != 0, row.integer(9) != 0));
   }
 
   /**

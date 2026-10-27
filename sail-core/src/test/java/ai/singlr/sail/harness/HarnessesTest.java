@@ -26,6 +26,16 @@ class HarnessesTest {
   }
 
   @Test
+  void anAgentIsCalledWhatItsHarnessGoesByAndAnUnknownOneItsOwnName() {
+    assertEquals(
+        List.of("Claude Code", "Codex CLI", "aider"),
+        List.of(
+            Harnesses.displayName("claude-code"),
+            Harnesses.displayName("codex"),
+            Harnesses.displayName("aider")));
+  }
+
+  @Test
   void ofResolvesClaudeCode() {
     assertEquals("claude-code", CLAUDE_CODE.yamlName());
     assertEquals("claude", CLAUDE_CODE.binaryName());

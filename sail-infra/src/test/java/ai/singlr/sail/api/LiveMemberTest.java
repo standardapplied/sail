@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.store.MessageStore;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -373,6 +374,7 @@ class LiveMemberTest {
     assertEquals(1, failed.exitCode());
     var partial = room.messages.list(SPEC, null, 20).getLast();
     assertEquals("Half", partial.body());
+    assertEquals(MessageStore.Mark.ERROR, partial.mark(), "what a dead turn wrote is no answer");
     assertEquals(
         List.of(
             LiveRoom.live(

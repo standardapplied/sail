@@ -16,6 +16,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Capability;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
@@ -837,19 +838,7 @@ record RoomView(
     if (assignee != null) m.put("assignee", assignee);
     if (wake != null) m.put("wake", wake);
     m.put("effective_wake", effectiveWake);
-    m.put(
-        "members",
-        members.stream()
-            .map(
-                member -> {
-                  var one = new LinkedHashMap<String, Object>();
-                  one.put("agent", member.agent());
-                  one.put("mode", member.mode());
-                  if (member.model() != null) one.put("model", member.model());
-                  one.put("engaged_at", member.engagedAt());
-                  return one;
-                })
-            .toList());
+    m.put("members", members.stream().map(GlobalSpecView::engagementMap).toList());
     m.put("spec_ids", specIds);
     if (createdBy != null) m.put("created_by", createdBy);
     m.put("created_at", createdAt);
@@ -919,21 +908,7 @@ record RoomMembersResponse(List<Engagement> members) implements Mappable {
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
-    m.put(
-        "members",
-        members.stream()
-            .map(
-                member -> {
-                  var one = new LinkedHashMap<String, Object>();
-                  one.put("agent", member.agent());
-                  one.put("mode", member.mode());
-                  if (member.model() != null) {
-                    one.put("model", member.model());
-                  }
-                  one.put("engaged_at", member.engagedAt());
-                  return one;
-                })
-            .toList());
+    m.put("members", members.stream().map(GlobalSpecView::engagementMap).toList());
     m.put("count", members.size());
     return m;
   }
@@ -1291,12 +1266,14 @@ record GlobalSpecView(
         spec.roomId());
   }
 
-  private static Map<String, Object> engagementMap(Engagement engagement) {
+  /** A room member as every view renders one: the agent, and the name its harness goes by. */
+  static Map<String, Object> engagementMap(Engagement engagement) {
     if (engagement == null) {
       return null;
     }
     var m = new LinkedHashMap<String, Object>();
     m.put("agent", engagement.agent());
+    m.put("agent_name", Harnesses.displayName(engagement.agent()));
     m.put("mode", engagement.mode());
     if (engagement.model() != null) m.put("model", engagement.model());
     m.put("engaged_at", engagement.engagedAt());
@@ -1452,12 +1429,28 @@ record GlobalSpecContentResponse(String specId, String body, String plan) implem
   }
 }
 
-record SpecMessageRequest(String body, String replyTo, boolean question) {
+/**
+ * A post to a room. A client may ask that it be a question; only sail marks a message an error, for
+ * a live member's turn whose harness said it failed, so no door reads that mark off a request.
+ */
+record SpecMessageRequest(String body, String replyTo, MessageStore.Mark mark) {
   static SpecMessageRequest fromMap(Map<String, Object> map) {
-    return new SpecMessageRequest(
+    return of(
         map.get("body") == null ? null : map.get("body").toString(),
         map.get("reply_to") == null ? null : map.get("reply_to").toString(),
-        Boolean.parseBoolean(Objects.toString(map.get("question"), "false")));
+        Objects.toString(map.get("question"), "false"));
+  }
+
+  /** A client's post: a question when {@code question} reads {@code true}, plain otherwise. */
+  static SpecMessageRequest of(String body, String replyTo, String question) {
+    return new SpecMessageRequest(
+        body,
+        replyTo,
+        Boolean.parseBoolean(question) ? MessageStore.Mark.QUESTION : MessageStore.Mark.PLAIN);
+  }
+
+  boolean question() {
+    return mark == MessageStore.Mark.QUESTION;
   }
 }
 
@@ -1468,7 +1461,8 @@ record SpecMessageView(
     String body,
     String replyTo,
     String createdAt,
-    boolean question)
+    boolean question,
+    boolean error)
     implements Mappable {
   static SpecMessageView from(MessageStore.MessageRow row) {
     return new SpecMessageView(
@@ -1478,7 +1472,8 @@ record SpecMessageView(
         row.body(),
         row.replyTo(),
         row.createdAt(),
-        row.question());
+        row.question(),
+        row.error());
   }
 
   @Override
@@ -1491,6 +1486,7 @@ record SpecMessageView(
     if (replyTo != null) map.put("reply_to", replyTo);
     map.put("created_at", createdAt);
     if (question) map.put("question", true);
+    if (error) map.put("error", true);
     return map;
   }
 }
@@ -1770,6 +1766,7 @@ record RunView(
     m.put("node", node);
     m.put("role", role);
     m.put("agent", agent);
+    m.put("agent_name", Harnesses.displayName(agent));
     if (branch != null) m.put("branch", branch);
     if (pid != null) m.put("pid", pid);
     m.put("status", status);

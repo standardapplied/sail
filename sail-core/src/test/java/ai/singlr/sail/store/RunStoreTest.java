@@ -943,6 +943,17 @@ class RunStoreTest {
     assertEquals(List.of(second, first), ids(store.listForRoom("chat-room")));
   }
 
+  @Test
+  void aRoomWithNoSpecListsTheRunsThatSpokeInItAsASpecListsItsOwn() {
+    var turn = roomTurn("chat-room");
+    roomTurn("other-room");
+
+    assertEquals(List.of(turn), ids(store.list(null, "chat-room")));
+    assertEquals(List.of(turn), ids(store.list("acme", "chat-room")));
+    assertEquals(List.of(), ids(store.list("elsewhere", "chat-room")));
+    assertEquals(List.of(), ids(store.list(null, "no-such-room")));
+  }
+
   @ParameterizedTest
   @MethodSource("ai.singlr.sail.store.FixedInstants#textSortsBackwards")
   void aReviewerLaunchedAfterAFixAgentIsTheLoopsNewestRun(String earlier, String later) {

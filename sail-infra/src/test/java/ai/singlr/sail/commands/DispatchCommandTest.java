@@ -265,7 +265,7 @@ class DispatchCommandTest {
             "2026-07-28T00:00:00Z",
             "1-a",
             null,
-            false);
+            MessageStore.Mark.PLAIN);
 
     var prompt = WorkPrompt.build(spec, "Implement the flow", List.of(message), List.of()).prompt();
 

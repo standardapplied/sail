@@ -32,7 +32,7 @@ class WorkPromptGoldenTest {
           "2026-07-28T00:00:00Z",
           "1-a",
           null,
-          false);
+          MessageStore.Mark.PLAIN);
 
   static final Spec SPEC =
       new Spec(
