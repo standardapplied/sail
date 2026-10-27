@@ -271,7 +271,8 @@ public final class SchemaManager {
           error = CASE WHEN id IN (SELECT entity_id FROM change_log WHERE entity_type = 'message'
               AND json_extract(snapshot, '$.error') = 1) THEN 1 ELSE error END,
           question = CASE WHEN id IN (SELECT entity_id FROM change_log WHERE entity_type = 'message'
-              AND json_extract(snapshot, '$.question') = 1) THEN 1 ELSE question END
+              AND json_extract(snapshot, '$.question') = 1
+              AND json_extract(snapshot, '$.error') IS NOT 1) THEN 1 ELSE question END
       WHERE error = 0 AND question = 0""";
 
   /**

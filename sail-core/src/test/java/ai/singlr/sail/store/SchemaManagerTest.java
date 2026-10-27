@@ -563,12 +563,14 @@ class SchemaManagerTest {
     var asked = "00000000-0000-7000-8000-000000000002";
     var failedUnread = "00000000-0000-7000-8000-000000000003";
     var askedUnread = "00000000-0000-7000-8000-000000000004";
+    var claimsBoth = "00000000-0000-7000-8000-000000000005";
     for (var row :
         List.of(
             List.of(plain, "Morning.", 0),
             List.of(asked, "Which flow?", 1),
             List.of(failedUnread, "Not logged in", 0),
-            List.of(askedUnread, "Ship it?", 0))) {
+            List.of(askedUnread, "Ship it?", 0),
+            List.of(claimsBoth, "Both?", 0))) {
       db.execute(
           "INSERT INTO room_messages (id, room_id, author, body, reply_to, created_at, rev,"
               + " base_rev, question) VALUES (?, 'lounge', 'claude/r1', ?, NULL,"
@@ -579,7 +581,9 @@ class SchemaManagerTest {
     }
     for (var journaled :
         List.of(
-            List.of(failedUnread, "\"error\": true"), List.of(askedUnread, "\"question\": true"))) {
+            List.of(failedUnread, "\"error\": true"),
+            List.of(askedUnread, "\"question\": true"),
+            List.of(claimsBoth, "\"question\": true, \"error\": true"))) {
       db.execute(
           "INSERT INTO change_log (entity_type, entity_id, rev, actor, recorded_at, origin,"
               + " snapshot) VALUES ('message', ?, '1-a', 'claude/r1', '2026-10-01T00:00:00Z',"
@@ -598,17 +602,27 @@ class SchemaManagerTest {
                     messages.findById(plain),
                     messages.findById(asked),
                     messages.findById(failedUnread),
-                    messages.findById(askedUnread)));
+                    messages.findById(askedUnread),
+                    messages.findById(claimsBoth)));
     assertEquals(
         List.of(
             List.of("Morning.", MessageStore.Mark.PLAIN, "1-a"),
             List.of("Which flow?", MessageStore.Mark.QUESTION, "1-a"),
             List.of("Not logged in", MessageStore.Mark.ERROR, "1-a"),
-            List.of("Ship it?", MessageStore.Mark.QUESTION, "1-a")),
+            List.of("Ship it?", MessageStore.Mark.QUESTION, "1-a"),
+            List.of("Both?", MessageStore.Mark.ERROR, "1-a")),
         before.stream()
             .map(Optional::orElseThrow)
             .map(row -> List.<Object>of(row.body(), row.mark(), row.rev()))
             .toList());
+    assertEquals(
+        List.of(false, true),
+        db.queryOne(
+                "SELECT question, error FROM room_messages WHERE id = ?",
+                row -> List.of(row.integer(0) != 0, row.integer(1) != 0),
+                claimsBoth)
+            .orElseThrow(),
+        "a journal that claims both marks gives the error one alone");
     assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
   }
 
