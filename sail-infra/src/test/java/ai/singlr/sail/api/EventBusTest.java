@@ -139,8 +139,9 @@ class EventBusTest {
       for (var i = 0; i < 10; i++) {
         bus.publish(Event.of("p", null, "t", "a", "h"));
       }
-      assertTrue(sub.droppedCount() > 0, "slow subscriber should have drops");
+      var dropped = sub.droppedCount();
       block.countDown();
+      assertTrue(dropped > 0, "slow subscriber should have drops");
     }
   }
 
@@ -318,9 +319,11 @@ class EventBusTest {
         bus.publish(Event.of("p", null, "t", "a", "h"));
       }
 
-      assertEquals(sub.droppedCount(), missed.get());
-      assertTrue(missed.get() > 0, "the queue of two dropped some of ten");
+      var dropped = sub.droppedCount();
+      var told = missed.get();
       block.countDown();
+      assertEquals(dropped, told);
+      assertTrue(told > 0, "the queue of two dropped some of ten");
     }
   }
 
