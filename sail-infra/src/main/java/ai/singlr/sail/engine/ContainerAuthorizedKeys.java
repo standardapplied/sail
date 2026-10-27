@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -34,8 +35,6 @@ public final class ContainerAuthorizedKeys {
 
   /** An {@code authorized_keys} options field: unquoted characters, escapes and quoted strings. */
   static final String OPTIONS = "(?:[^\\s\"\\\\]|\\\\.|\"(?:[^\"\\\\]|\\\\.)*\")+";
-
-  private static final String SSH_USER_UID = "1000";
 
   private final ShellExec shell;
 
@@ -66,17 +65,29 @@ public final class ContainerAuthorizedKeys {
   }
 
   /**
-   * Adds {@code key} to the SSH user's file in every container of this box that does not hold it
-   * yet, and returns those it could not, each with why: one container that cannot be written stops
-   * none of the others.
+   * Adds {@code key} to the SSH user's file in each container of {@code projects} this box runs
+   * that does not hold it yet, first taking {@code replaced} out of every account there as {@link
+   * #remove} does, and returns those it could not, each with why: one container that cannot be
+   * written stops none of the others.
    */
-  public List<Untrusted> add(SshPublicKey key)
+  public List<Untrusted> add(
+      SshPublicKey key, Optional<SshPublicKey> replaced, Collection<String> projects)
       throws IOException, InterruptedException, TimeoutException {
     var entry = entry(key);
+    var stale = replaced.map(ContainerAuthorizedKeys::entry);
     var untrusted = new ArrayList<Untrusted>();
     for (var container : containers()) {
+      if (!projects.contains(container)) {
+        continue;
+      }
       try {
-        addTo(container, key, entry);
+        var accounts = homeAccounts(container);
+        if (stale.isPresent()) {
+          for (var account : accounts) {
+            removeFrom(container, account, stale.get());
+          }
+        }
+        addTo(container, accounts, key, entry);
       } catch (IOException | TimeoutException failure) {
         untrusted.add(new Untrusted(container, failure.getMessage().strip()));
       }
@@ -136,13 +147,14 @@ public final class ContainerAuthorizedKeys {
     return true;
   }
 
-  private void addTo(String container, SshPublicKey key, Pattern entry)
+  private void addTo(String container, List<Account> accounts, SshPublicKey key, Pattern entry)
       throws IOException, InterruptedException, TimeoutException {
     var account =
-        homeAccounts(container).stream()
-            .filter(held -> held.uid().equals(SSH_USER_UID))
+        accounts.stream()
+            .filter(held -> held.uid().equals(ProjectProvisioner.SSH_UID))
             .findFirst()
-            .orElseThrow(() -> new IOException("it has no SSH user at uid " + SSH_USER_UID));
+            .orElseThrow(
+                () -> new IOException("it has no SSH user at uid " + ProjectProvisioner.SSH_UID));
     var lines =
         read(container, account)
             .orElseThrow(() -> new IOException("it has no " + account.authorizedKeys() + " yet"));

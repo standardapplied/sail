@@ -50,13 +50,13 @@ class ScopedRosterApiTest {
     fdes = new FdeStore(db);
     fdes.add("ada", "Ada", "ada@x.dev", "admin");
     fdes.add("uma", "Uma", "uma@x.dev", "member");
-    for (var scoped : List.of("nia", "sam", "zed")) {
+    for (var scoped : List.of("nia", "sam", "yan")) {
       fdes.add(scoped, scoped, scoped + "@x.dev", "member");
       fdes.restrict(scoped);
     }
     fdes.grant("nia", "alpha");
     fdes.grant("sam", "alpha");
-    fdes.grant("zed", "beta");
+    fdes.grant("yan", "beta");
     var operations =
         new SailOperations(
             new ScriptedShellExecutor(),
@@ -136,11 +136,11 @@ class ScopedRosterApiTest {
                 "all"),
             Map.of(
                 "handle",
-                "zed",
+                "yan",
                 "display_name",
-                "zed",
+                "yan",
                 "email",
-                "zed@x.dev",
+                "yan@x.dev",
                 "role",
                 "member",
                 "scope",
@@ -155,10 +155,10 @@ class ScopedRosterApiTest {
     var roster = roster(sessionOf("uma"));
 
     assertEquals(
-        List.of("ada", "nia", "sam", "uma", "zed"),
+        List.of("ada", "nia", "sam", "uma", "yan"),
         roster.stream().map(fde -> fde.get("handle")).toList());
     assertEquals(
-        List.of("ada@x.dev", "nia@x.dev", "sam@x.dev", "uma@x.dev", "zed@x.dev"),
+        List.of("ada@x.dev", "nia@x.dev", "sam@x.dev", "uma@x.dev", "yan@x.dev"),
         roster.stream().map(fde -> fde.get("email")).toList());
     assertEquals(
         List.of(false, false, false, false, false),
@@ -187,7 +187,7 @@ class ScopedRosterApiTest {
     var machine = new TokenStore(db).create("ci-bot", "member").token();
 
     assertEquals(
-        List.of("ada", "nia", "sam", "uma", "zed"),
+        List.of("ada", "nia", "sam", "uma", "yan"),
         roster(machine).stream().map(fde -> fde.get("handle")).toList());
   }
 

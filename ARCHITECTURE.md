@@ -2355,8 +2355,9 @@ operator's login and home are the JVM's `user.name` and `user.home`.
     `FdeCommandTest`).
 - **C4. Containers trust the paired key.** The pairing's public key becomes the box's
   workstation key (above), so every project provisioned or applied afterwards lets it into its
-  containers, and once the code is printed the pairing writes it into every container the box
-  already has, running or stopped, a stopped one left stopped (`ContainerAuthorizedKeys.add`): the
+  containers, and once the code is printed the pairing writes it into the container of every
+  project the box already runs, running or stopped, a stopped one left stopped
+  (`ContainerAuthorizedKeys.add`): the
   `authorized_keys` of the `/home` account at uid 1000, the SSH user step 6 makes, kept at 0600 and
   owned by it, a line already holding the key left alone and every other line kept. A container
   that cannot be written, or has no SSH user or file yet, stops neither the code nor the other
@@ -2368,7 +2369,8 @@ operator's login and home are the JVM's `user.name` and `user.home`.
   (`ProjectProvisionerTest`). A box trusts one workstation key: a pairing replaces the
   key of the same FDE's earlier pairing, and refuses to replace any other, naming its
   fingerprint and comment, unless `--as-workstation-key` is passed, which takes the replaced key
-  out of every container as unpairing does, before anything of the pairing is written. Revoking the pairing takes
+  out of those containers in the same step, after the new key is the workstation key, so the apply
+  a container that could not be edited is named with leaves the old key out. Revoking the pairing takes
   its key back out of the workstation key and the containers (C3); a key set by `sail host
   config set ssh-public-key` is never touched.
 - **C5. The code is a secret, handled as one.** It is printed to the terminal and nowhere else:

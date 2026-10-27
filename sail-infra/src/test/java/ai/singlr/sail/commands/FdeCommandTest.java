@@ -62,6 +62,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.function.Function;
@@ -1003,7 +1004,10 @@ class FdeCommandTest {
         keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
     assertEquals(LAPTOP.line() + "\n", keygen.incus.file("web", "/home/eng" + AUTHORIZED));
     assertEquals(renewed.line() + "\n", keygen.incus.file("docs", "/home/dev" + AUTHORIZED));
-    assertEquals(renewed.line() + "\n", keygen.incus.file("stray", "/home/dev" + AUTHORIZED));
+    assertEquals(
+        "",
+        keygen.incus.file("stray", "/home/dev" + AUTHORIZED),
+        "a container no project names is not given the key");
   }
 
   private static final SshPublicKey ENGINEER =
@@ -1011,13 +1015,17 @@ class FdeCommandTest {
 
   /**
    * Two containers an apply provisioned before any pairing: acme running and web stopped, each
-   * taking SSH logins as dev at uid 1000 and trusting the lines {@code trusted} holds.
+   * taking SSH logins as dev at uid 1000 and trusting the lines {@code trusted} holds, beside one
+   * no project of the catalog names.
    */
   private void appliedContainers(String trusted) {
+    catalog("acme", "web");
     keygen.incus.container("acme", "Running", PASSWD, accounts("dev:x:1000:1000"));
     keygen.incus.files.put("acme/home/dev" + AUTHORIZED, trusted);
     keygen.incus.container("web", "Stopped", PASSWD, accounts("dev:x:1000:1000"));
     keygen.incus.files.put("web/home/dev" + AUTHORIZED, trusted);
+    keygen.incus.container("stray", "Running", PASSWD, accounts("dev:x:1000:1000"));
+    keygen.incus.files.put("stray/home/dev" + AUTHORIZED, trusted);
   }
 
   /** The incus it takes to give acme and web a key, each written or each already holding it. */
@@ -1061,10 +1069,12 @@ class FdeCommandTest {
         ENGINEER.line() + "\n" + key.line() + "\n",
         keygen.incus.file("web", "/home/dev" + AUTHORIZED));
     assertEquals("Stopped", keygen.incus.states.get("web"));
+    assertEquals(ENGINEER.line() + "\n", keygen.incus.file("stray", "/home/dev" + AUTHORIZED));
     assertEquals(
         trusting(true),
         incusCommands(),
-        "a stopped container is written where it stands, never started");
+        "a stopped container is written where it stands, never started, and one no project names is"
+            + " not read");
     assertEquals(printedCode(), printed().getLast(), "nothing is left for an apply to do");
   }
 
@@ -1073,7 +1083,9 @@ class FdeCommandTest {
     var held = ENGINEER.line() + "\nno-pty " + LAPTOP.type() + " " + LAPTOP.blob() + " by-hand\n";
     appliedContainers(held);
 
-    assertEquals(List.of(), new ContainerAuthorizedKeys(keygen).add(LAPTOP));
+    assertEquals(
+        List.of(),
+        new ContainerAuthorizedKeys(keygen).add(LAPTOP, Optional.empty(), List.of("acme", "web")));
 
     assertEquals(held, keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
     assertEquals(held, keygen.incus.file("web", "/home/dev" + AUTHORIZED));
@@ -1097,15 +1109,13 @@ class FdeCommandTest {
           keygen.incus.file(container, "/home/dev" + AUTHORIZED));
     }
     assertEquals(
-        "  ✓ Workstation key replaced: it was "
-            + LAPTOP.fingerprint()
-            + " (me@mac). Containers of acme, web no longer trust it.",
+        "  ✓ Workstation key replaced: it was " + LAPTOP.fingerprint() + " (me@mac).",
         printed().get(2));
     assertEquals(printedCode(), printed().getLast());
   }
 
   @Test
-  void aReplacedKeyThatCannotBeTakenOutRefusesThePairingBeforeAnythingIsWritten() throws Exception {
+  void aReplacedKeyThatCannotBeTakenOutOfAContainerNamesItWithTheApplyThatDoes() throws Exception {
     Files.createDirectories(workstationKey().getParent());
     Files.writeString(workstationKey(), LAPTOP.line() + "\n");
     appliedContainers(LAPTOP.line() + "\n");
@@ -1115,31 +1125,23 @@ class FdeCommandTest {
     var exit =
         fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com", "--as-workstation-key");
 
-    assertEquals(1, exit);
+    assertEquals(0, exit, refusal);
+    var key = keygen.made.getFirst();
     assertEquals(
-        "Could not take the workstation key "
-            + LAPTOP.fingerprint()
-            + " (me@mac) out of this box's containers (could not read"
-            + " /home/dev/.ssh/authorized_keys in web: Error: I/O error), so nothing is paired:"
-            + " check that 'incus list' answers, then run the command again.",
-        refusal);
-    assertEquals(LAPTOP.line() + "\n", Files.readString(workstationKey()));
-    assertTrue(inDb(db -> new FdeStore(db).byHandle("ada")).isEmpty(), "no FDE is added");
-    assertFalse(Files.exists(authorizedKeys()), "the operator's login is untouched");
-    assertEquals(List.of(), tokens());
-    assertEquals(List.of(), keygen.made, "no key is made for a pairing that is refused");
-
-    keygen.incus.interrupted = true;
-    try {
-      assertEquals(
-          1,
-          fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com", "--as-workstation-key"));
-      assertTrue(Thread.currentThread().isInterrupted(), "the interrupt is kept");
-    } finally {
-      Thread.interrupted();
-    }
+        key.line() + "\n",
+        Files.readString(workstationKey()),
+        "the next apply provisions the new key and leaves the old one out");
+    assertEquals(key.line() + "\n", keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
+    assertEquals(LAPTOP.line() + "\n", keygen.incus.file("web", "/home/dev" + AUTHORIZED));
     assertEquals(
-        "Interrupted while taking the workstation key out of this box's containers.", refusal);
+        List.of(
+            printedCode(),
+            "",
+            "  ⚠ web does not trust this key yet (could not read /home/dev/.ssh/authorized_keys"
+                + " in web: Error: I/O error). Make it: '"
+                + OperatorCommand.here().sail("project apply web")
+                + "'."),
+        printed().subList(printed().size() - 3, printed().size()));
   }
 
   @Test
@@ -1170,6 +1172,7 @@ class FdeCommandTest {
 
   @Test
   void containersThatHaveNoSshUserYetAreNamedWithTheApplyThatMakesThem() throws Exception {
+    catalog("acme", "web", "docs");
     keygen.incus.container("acme", "Running", PASSWD, accounts("dev:x:1000:1000"));
     keygen.incus.container("web", "Stopped", PASSWD, "root:x:0:0:root:/root:/bin/bash\n");
     keygen.incus.container("docs", "Running", PASSWD, accounts("dev:x:1000:1000"));
@@ -1227,6 +1230,7 @@ class FdeCommandTest {
     assertEquals(ENGINEER.line() + "\n", keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
     assertEquals(ENGINEER.line() + "\n", keygen.incus.file("web", "/home/dev" + AUTHORIZED));
     assertTrue(printed().getLast().endsWith(" Containers of acme, web no longer trust it."));
+    assertEquals(ENGINEER.line() + "\n", keygen.incus.file("stray", "/home/dev" + AUTHORIZED));
   }
 
   @Test
@@ -2681,8 +2685,8 @@ class FdeCommandTest {
             "FDE 'ada' already exists. Change it with 'sudo sail fde update ada'.",
             "  ✓ FDE added: ada (member, scoped: grant projects with 'sudo sail fde grant')",
             "Unknown project 'ghost'. List the catalog with 'sudo sail project list'.",
-            "  ⚠ acme does not trust this key yet (Error: I/O error). Make it: 'sudo sail project"
-                + " apply acme'.",
+            "acme does not trust this key yet (Error: I/O error). Make it: 'sudo sail project apply"
+                + " acme'.",
             "FDE 'ada' is disabled on this box, so a code for it would open nothing. Remove it with"
                 + " 'sudo sail fde rm ada' and pair again.",
             "  No FDEs. Add one with 'sudo sail fde add <handle>'.",
@@ -2698,7 +2702,7 @@ class FdeCommandTest {
             FdeCommand.alreadyExists("ada", sudo),
             Ansi.OFF.string(FdeCommand.added(ada, true, sudo)),
             unknownProject,
-            Ansi.OFF.string(FdeCommand.notTrustedYet("acme", "Error: I/O error", sudo)),
+            FdeCommand.notTrustedYet("acme", "Error: I/O error", sudo),
             FdeCommand.disabledForPairing("ada", sudo),
             FdeCommand.noFdes(sudo),
             FdeCommand.unknownFde("ada", sudo),

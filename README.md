@@ -136,7 +136,7 @@ unless `--ttl-days` or `--no-expiry` says otherwise, and its login and its token
 The pairing's key also becomes the workstation key the box's containers trust, from the moment
 it is paired, with no second apply; a container it cannot reach is named with the apply that
 fixes it. A box that already has a workstation key refuses unless `--as-workstation-key` says to
-replace it, which takes the old key out of every container. Unpairing takes the key back out of
+replace it, which takes the old key out of the containers too. Unpairing takes the key back out of
 the login, the workstation key and every container.
 
 A client, or any other engineer, gets a box of their own: set it up with
