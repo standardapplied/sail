@@ -139,8 +139,9 @@ class EventBusTest {
       for (var i = 0; i < 10; i++) {
         bus.publish(Event.of("p", null, "t", "a", "h"));
       }
-      assertTrue(sub.droppedCount() > 0, "slow subscriber should have drops");
+      var dropped = sub.droppedCount();
       block.countDown();
+      assertTrue(dropped > 0, "slow subscriber should have drops");
     }
   }
 
@@ -277,6 +278,52 @@ class EventBusTest {
       bus.publish(Event.of("p", null, "t", "a", "h"));
       bus.publish(Event.of("p", null, "t", "a", "h"));
       BusTesting.awaitDelivery(seen);
+    }
+  }
+
+  @Test
+  void aSubscriberIsToldOfEveryEventItsFullQueueDropped() throws Exception {
+    try (var bus = new EventBus()) {
+      var block = new CountDownLatch(1);
+      var started = new CountDownLatch(1);
+      var missed = new AtomicInteger();
+      var sub =
+          bus.subscribe(
+              new EventSubscriber() {
+                @Override
+                public String name() {
+                  return "slow";
+                }
+
+                @Override
+                public Predicate<Event> filter() {
+                  return EventSubscriber.all();
+                }
+
+                @Override
+                public void onEvent(Event event) throws InterruptedException {
+                  started.countDown();
+                  block.await();
+                }
+
+                @Override
+                public void missed() {
+                  missed.incrementAndGet();
+                }
+              },
+              2);
+      bus.publish(Event.of("p", null, "t", "a", "h"));
+      BusTesting.awaitDelivery(started);
+
+      for (var i = 0; i < 10; i++) {
+        bus.publish(Event.of("p", null, "t", "a", "h"));
+      }
+
+      var dropped = sub.droppedCount();
+      var told = missed.get();
+      block.countDown();
+      assertEquals(dropped, told);
+      assertTrue(told > 0, "the queue of two dropped some of ten");
     }
   }
 

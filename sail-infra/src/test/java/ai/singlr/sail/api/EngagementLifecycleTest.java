@@ -488,7 +488,9 @@ class EngagementLifecycleTest {
               Actor.cliOperator(HANDLE),
               () ->
                   sailOps.postRoomMessage(
-                      "auth", new SpecMessageRequest("hello room", null, false), HANDLE));
+                      "auth",
+                      new SpecMessageRequest("hello room", null, MessageStore.Mark.PLAIN),
+                      HANDLE));
       assertTrue(posted instanceof Result.Success<SpecMessageResponse>);
       var roomList = sailOps.roomMessages("auth", null, null, 10);
       assertTrue(roomList instanceof Result.Success<SpecMessagesResponse>);

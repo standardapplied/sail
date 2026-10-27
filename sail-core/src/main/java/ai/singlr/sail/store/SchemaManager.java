@@ -261,6 +261,21 @@ public final class SchemaManager {
       "CREATE TABLE catalog AS SELECT lower(hex(randomblob(16))) AS id, NULL AS main";
 
   /**
+   * A box that ran a release with no column for a message's mark took a marked message in unmarked,
+   * and sync never reads a revision it holds again; the journal kept the snapshot whole, so the
+   * mark comes back from it. A message is a question or an error, never both.
+   */
+  static final String MESSAGE_MARKS_FROM_THE_JOURNAL =
+      """
+      UPDATE room_messages SET
+          error = CASE WHEN id IN (SELECT entity_id FROM change_log WHERE entity_type = 'message'
+              AND json_extract(snapshot, '$.error') = 1) THEN 1 ELSE error END,
+          question = CASE WHEN id IN (SELECT entity_id FROM change_log WHERE entity_type = 'message'
+              AND json_extract(snapshot, '$.question') = 1
+              AND json_extract(snapshot, '$.error') IS NOT 1) THEN 1 ELSE question END
+      WHERE error = 0 AND question = 0""";
+
+  /**
    * A checkpoint a node kept before it kept what it read there ({@link SyncState.Mark}) cannot be
    * told from the same seq in a main restored in place and grown past it, so each node walks main's
    * heads once more and keeps, from then on, what it read beside every checkpoint.
@@ -835,7 +850,9 @@ public final class SchemaManager {
           "ALTER TABLE sync_state ADD COLUMN read_rev TEXT",
           CHECKPOINTS_READ_AGAIN,
           COMPACTED_ENTRIES,
-          "CREATE INDEX idx_compacted_entries_entity ON compacted_entries(entity_type, entity_id)");
+          "CREATE INDEX idx_compacted_entries_entity ON compacted_entries(entity_type, entity_id)",
+          "ALTER TABLE room_messages ADD COLUMN error INTEGER NOT NULL DEFAULT 0",
+          MESSAGE_MARKS_FROM_THE_JOURNAL);
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

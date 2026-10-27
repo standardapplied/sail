@@ -1783,7 +1783,9 @@ class SailOperationsTest {
             new Actor("sail", Role.ADMIN, Actor.Lane.API),
             () ->
                 operations.postRoomMessage(
-                    "auth", new SpecMessageRequest("Ready", null, false), "sail"));
+                    "auth",
+                    new SpecMessageRequest("Ready", null, MessageStore.Mark.PLAIN),
+                    "sail"));
 
     assertTrue(result.isSuccess());
   }

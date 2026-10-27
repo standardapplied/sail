@@ -343,10 +343,7 @@ final class LocalApiRouter implements LocalApiHandler {
         yield ApiResponse.fromCreated(
             operations.postRoomMessage(
                 id,
-                new SpecMessageRequest(
-                    form.get("body"),
-                    form.get("reply_to"),
-                    Boolean.parseBoolean(form.get("question"))),
+                SpecMessageRequest.of(form.get("body"), form.get("reply_to"), form.get("question")),
                 caller.actor().handle()));
       }
       default -> problem(405, "messages accepts GET or POST");

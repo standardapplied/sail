@@ -294,7 +294,9 @@ class SpecPruneTest {
     var running = run(runs, "running", null);
     var recent = run(runs, "failed", "2026-09-22T00:00:00Z");
 
-    var question = messages.append("lobby", "claude/r1", "old, and still waiting", null, true);
+    var question =
+        messages.append(
+            "lobby", "claude/r1", "old, and still waiting", null, MessageStore.Mark.QUESTION);
     db.execute(
         "UPDATE room_messages SET created_at = '2025-01-01T00:00:00Z' WHERE id = ?", question.id());
 

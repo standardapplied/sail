@@ -728,7 +728,8 @@ public final class SailOperations implements HostOperations {
    *
    * @throws ApiException when the run's FDE holds no role any more, or the room refuses the post
    */
-  private String postAsRun(RunStore.RunRow run, String roomId, String text) {
+  private String postAsRun(
+      RunStore.RunRow run, String roomId, String text, MessageStore.Mark mark) {
     var actor =
         runActor(run)
             .orElseThrow(
@@ -740,7 +741,7 @@ public final class SailOperations implements HostOperations {
         Actor.call(
             actor,
             () ->
-                postRoomMessage(roomId, new SpecMessageRequest(text, null, false), actor.handle()));
+                postRoomMessage(roomId, new SpecMessageRequest(text, null, mark), actor.handle()));
     return switch (posted) {
       case Result.Success<SpecMessageResponse> landed -> landed.value().message().id();
       case Result.Failure<SpecMessageResponse> refused -> throw ApiException.of(refused);
@@ -912,7 +913,7 @@ public final class SailOperations implements HostOperations {
     var store = requireMessageStore();
     MessageStore.MessageRow row;
     try {
-      row = store.append(roomId, author, request.body(), request.replyTo(), request.question());
+      row = store.append(roomId, author, request.body(), request.replyTo(), request.mark());
     } catch (IllegalArgumentException invalid) {
       throw ApiException.of(ErrorCode.BAD_REQUEST, invalid);
     }

@@ -356,7 +356,9 @@ final class LiveRoom implements AutoCloseable {
             owner(),
             () ->
                 sail.postRoomMessage(
-                    conversation, new SpecMessageRequest(body, null, false), HANDLE))
+                    conversation,
+                    new SpecMessageRequest(body, null, MessageStore.Mark.PLAIN),
+                    HANDLE))
         .orThrow()
         .message()
         .id();

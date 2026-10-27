@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
@@ -26,11 +27,16 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.InstantSource;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -42,13 +48,15 @@ class SseHandlerTest {
 
   @Test
   void constructorRejectsNullBus() {
-    assertThrows(NullPointerException.class, () -> new SseHandler(null, AUTH));
+    assertThrows(
+        NullPointerException.class, () -> new SseHandler(null, AUTH, SseHandler.RoomTurns.NONE));
   }
 
   @Test
   void constructorRejectsNullAuth() {
     try (var bus = new EventBus()) {
-      assertThrows(NullPointerException.class, () -> new SseHandler(bus, null));
+      assertThrows(
+          NullPointerException.class, () -> new SseHandler(bus, null, SseHandler.RoomTurns.NONE));
     }
   }
 
@@ -161,7 +169,8 @@ class SseHandlerTest {
         };
     try (var bus = new EventBus()) {
       var httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-      httpServer.createContext("/v1/events/stream", new SseHandler(bus, auth));
+      httpServer.createContext(
+          "/v1/events/stream", new SseHandler(bus, auth, SseHandler.RoomTurns.NONE));
       httpServer.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
       httpServer.start();
       try {
@@ -399,5 +408,195 @@ class SseHandlerTest {
         httpServer.stop(0);
       }
     }
+  }
+
+  @Test
+  void aRoomsStreamIsFirstToldWhereItsMemberStandsWithNoIdAndOnlyWhatItsReaderMaySee() {
+    var state =
+        Event.of(
+            "light",
+            "lounge",
+            Event.WellKnownTypes.AGENT_TURN_STATE,
+            "claude-code",
+            "h",
+            Map.of("run_id", "r1", "turn", 3, "open", true));
+    SseHandler.RoomTurns turns =
+        room -> "lounge".equals(room) ? Optional.of(state) : Optional.empty();
+    var later = Event.of("light", "lounge", "agent_turn_began", "claude-code", "h");
+
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(BusTesting.DELIVERY_TIMEOUT_SECONDS),
+        () -> {
+          try (var bus = new EventBus()) {
+            served(
+                bus,
+                turns,
+                port -> {
+                  var lounge = open(port, "all", "?room=lounge");
+                  assertEquals(List.of("data: " + state.toJsonLine()), frame(lounge));
+                  var stamped = bus.publish(later);
+                  assertEquals(
+                      List.of("id: " + stamped.id(), "data: " + stamped.toJsonLine()),
+                      frame(lounge),
+                      "what the bus publishes follows, with its id");
+
+                  var kitchen = open(port, "all", "?room=kitchen");
+                  var shut = open(port, "dark-only", "?room=lounge");
+                  var everything = open(port, "all", "");
+                  var inKitchen = bus.publish(Event.of("light", "kitchen", "t", "a", "h"));
+                  var darkInLounge = bus.publish(Event.of("dark", "lounge", "t", "a", "h"));
+                  assertEquals(
+                      List.of("id: " + inKitchen.id(), "data: " + inKitchen.toJsonLine()),
+                      frame(kitchen),
+                      "a room this box does not know is told nothing first");
+                  assertEquals(
+                      List.of("id: " + darkInLounge.id(), "data: " + darkInLounge.toJsonLine()),
+                      frame(shut),
+                      "nor is a reader whose scope keeps the room's project out");
+                  assertEquals(
+                      List.of("id: " + inKitchen.id(), "data: " + inKitchen.toJsonLine()),
+                      frame(everything),
+                      "nor a stream of no room");
+                });
+          }
+        });
+  }
+
+  @Test
+  void anEventPublishedWhileARoomsStateIsReadFollowsTheStateAndIsNotLost() {
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(BusTesting.DELIVERY_TIMEOUT_SECONDS),
+        () -> {
+          try (var bus = new EventBus()) {
+            var during = new AtomicReference<Event>();
+            var state =
+                Event.of(
+                    "light",
+                    "lounge",
+                    Event.WellKnownTypes.AGENT_TURN_STATE,
+                    "claude-code",
+                    "h",
+                    Map.of("run_id", "r1", "turn", 3, "open", false));
+            SseHandler.RoomTurns turns =
+                room -> {
+                  during.set(
+                      bus.publish(
+                          Event.of("light", "lounge", "agent_turn_ended", "claude-code", "h")));
+                  return Optional.of(state);
+                };
+            served(
+                bus,
+                turns,
+                port -> {
+                  var lounge = open(port, "all", "?room=lounge");
+                  assertEquals(List.of("data: " + state.toJsonLine()), frame(lounge));
+                  assertEquals(
+                      List.of("id: " + during.get().id(), "data: " + during.get().toJsonLine()),
+                      frame(lounge),
+                      "the stream subscribed before it read the state, so nothing is lost");
+                });
+          }
+        });
+  }
+
+  @Test
+  void aBoxThatKnowsNoRoomTellsAStreamNothingFirst() {
+    assertEquals(Optional.empty(), SseHandler.RoomTurns.NONE.stateOf("lounge"));
+  }
+
+  @Test
+  void aStreamTheBusDropsAnEventForIsEndedSoItsClientReconnects() {
+    var payload = "x".repeat(64 * 1024);
+    var flood = 2_000;
+
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(BusTesting.DELIVERY_TIMEOUT_SECONDS),
+        () -> {
+          try (var bus = new EventBus()) {
+            served(
+                bus,
+                SseHandler.RoomTurns.NONE,
+                port -> {
+                  var reader = open(port, "all", "");
+                  for (var i = 0; i < flood; i++) {
+                    bus.publish(Event.of("light", null, "t", "a", "h", Map.of("text", payload)));
+                  }
+                  var delivered = 0;
+                  String line;
+                  while ((line = reader.readLine()) != null) {
+                    if (line.startsWith("data: ")) {
+                      delivered++;
+                    }
+                  }
+                  assertTrue(
+                      delivered < flood,
+                      "the stream ended behind what was published: " + delivered + " of " + flood);
+                });
+          }
+        });
+  }
+
+  @FunctionalInterface
+  private interface Streams {
+    void at(int port) throws Exception;
+  }
+
+  /**
+   * Serves {@code bus}'s stream to {@code streams}: token {@code all} reads every project, token
+   * {@code dark-only} reads {@code dark} alone.
+   */
+  private static void served(EventBus bus, SseHandler.RoomTurns turns, Streams streams)
+      throws Exception {
+    ApiAuth auth =
+        exchange -> {
+          exchange.setAttribute("token.role", "member");
+          exchange.setAttribute(ApiAuth.SCOPE, ProjectScope.all());
+          if ("Bearer dark-only".equals(exchange.getRequestHeaders().getFirst("Authorization"))) {
+            exchange.setAttribute("token.fde", "sam");
+            exchange.setAttribute(ApiAuth.SCOPE, ProjectScope.of(List.of("dark")));
+          }
+        };
+    var httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    httpServer.createContext(
+        "/v1/events/stream", new SseHandler(bus, auth, turns, 8, InstantSource.system()));
+    httpServer.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
+    httpServer.start();
+    try {
+      streams.at(httpServer.getAddress().getPort());
+    } finally {
+      httpServer.stop(0);
+    }
+  }
+
+  /** A stream opened with {@code query} as {@code token}, read past its subscribed comment. */
+  private static BufferedReader open(int port, String token, String query) throws Exception {
+    var request =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/v1/events/stream" + query))
+            .header("Authorization", "Bearer " + token)
+            .GET()
+            .build();
+    var response =
+        HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofInputStream());
+    assertEquals(200, response.statusCode());
+    var reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8));
+    assertEquals(": subscribed", reader.readLine());
+    assertEquals("", reader.readLine());
+    return reader;
+  }
+
+  /** The lines of the next frame on {@code reader}, comments skipped. */
+  private static List<String> frame(BufferedReader reader) throws IOException {
+    var lines = new ArrayList<String>();
+    String line;
+    while ((line = reader.readLine()) != null) {
+      if (line.isEmpty()) {
+        if (!lines.isEmpty()) {
+          return lines;
+        }
+      } else if (!line.startsWith(":")) {
+        lines.add(line);
+      }
+    }
+    return lines;
   }
 }

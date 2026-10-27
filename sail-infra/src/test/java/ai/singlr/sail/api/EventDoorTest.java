@@ -378,7 +378,11 @@ class EventDoorTest {
   @Test
   void anAnnouncedMessageIsRebuiltFromTheStoredRowNeverFromTheBody() throws Exception {
     var message =
-        Acting.as("bob", () -> new MessageStore(db).append("den", "bob", "ship it?", null, true));
+        Acting.as(
+            "bob",
+            () ->
+                new MessageStore(db)
+                    .append("den", "bob", "ship it?", null, MessageStore.Mark.QUESTION));
     var forged =
         Map.<String, Object>of(
             "message_id", message.id(), "preview", "forged words", "question", false);

@@ -99,7 +99,9 @@ class SpecMessageOperationsTest {
                 member("ada"),
                 () ->
                     operations.postRoomMessage(
-                        "room", new SpecMessageRequest("Progress\n  update", null, false), "ada"))
+                        "room",
+                        new SpecMessageRequest("Progress\n  update", null, MessageStore.Mark.PLAIN),
+                        "ada"))
             .orThrow();
 
     assertEquals("ada", posted.message().author());
@@ -123,7 +125,9 @@ class SpecMessageOperationsTest {
                 member("ada"),
                 () ->
                     operations.postRoomMessage(
-                        "missing", new SpecMessageRequest("body", null, false), "ada"))
+                        "missing",
+                        new SpecMessageRequest("body", null, MessageStore.Mark.PLAIN),
+                        "ada"))
             .asFailure()
             .errorCode());
     assertEquals(
@@ -132,7 +136,7 @@ class SpecMessageOperationsTest {
                 member("ada"),
                 () ->
                     operations.postRoomMessage(
-                        "room", new SpecMessageRequest(" ", null, false), "ada"))
+                        "room", new SpecMessageRequest(" ", null, MessageStore.Mark.PLAIN), "ada"))
             .asFailure()
             .errorCode());
     assertEquals(
@@ -147,7 +151,9 @@ class SpecMessageOperationsTest {
             member("ada"),
             () ->
                 operations.postRoomMessage(
-                    "room", new SpecMessageRequest(longMessage, null, false), "ada"))
+                    "room",
+                    new SpecMessageRequest(longMessage, null, MessageStore.Mark.PLAIN),
+                    "ada"))
         .orThrow();
     assertEquals(1, operations.roomMessages("room", null, null, 50).orThrow().messages().size());
   }
@@ -160,7 +166,8 @@ class SpecMessageOperationsTest {
                 () ->
                     operations.postRoomMessage(
                         "room",
-                        new SpecMessageRequest("foreign instruction", null, false),
+                        new SpecMessageRequest(
+                            "foreign instruction", null, MessageStore.Mark.PLAIN),
                         "mallory"))
             .asFailure();
 
@@ -174,7 +181,7 @@ class SpecMessageOperationsTest {
                 () ->
                     operations.postRoomMessage(
                         "room",
-                        new SpecMessageRequest("owner update", null, false),
+                        new SpecMessageRequest("owner update", null, MessageStore.Mark.PLAIN),
                         agent.handle()))
             .orThrow();
     assertEquals(agent.handle(), posted.message().author());
@@ -193,7 +200,9 @@ class SpecMessageOperationsTest {
                 member("ada"),
                 () ->
                     operations.postRoomMessage(
-                        "room", new SpecMessageRequest("activity", null, false), "ada"))
+                        "room",
+                        new SpecMessageRequest("activity", null, MessageStore.Mark.PLAIN),
+                        "ada"))
             .orThrow();
 
     var listed = operations.globalSpecs(new SpecStore.SpecFilter(null, null, null, null, null));
@@ -211,24 +220,33 @@ class SpecMessageOperationsTest {
     var emptyRequest = SpecMessageRequest.fromMap(Map.of());
     assertEquals(null, emptyRequest.body());
     assertEquals(null, emptyRequest.replyTo());
-    assertFalse(emptyRequest.question());
+    assertEquals(MessageStore.Mark.PLAIN, emptyRequest.mark());
     var request = SpecMessageRequest.fromMap(Map.of("body", 42, "reply_to", 7));
     assertEquals("42", request.body());
     assertEquals("7", request.replyTo());
-    assertTrue(SpecMessageRequest.fromMap(Map.of("question", true)).question());
-    assertTrue(SpecMessageRequest.fromMap(Map.of("question", "true")).question());
-    assertFalse(SpecMessageRequest.fromMap(Map.of("question", "nonsense")).question());
+    assertEquals(
+        List.of(MessageStore.Mark.QUESTION, MessageStore.Mark.QUESTION, MessageStore.Mark.PLAIN),
+        List.of(
+            SpecMessageRequest.fromMap(Map.of("question", true)).mark(),
+            SpecMessageRequest.fromMap(Map.of("question", "true")).mark(),
+            SpecMessageRequest.fromMap(Map.of("question", "nonsense")).mark()));
+    assertEquals(
+        MessageStore.Mark.PLAIN,
+        SpecMessageRequest.fromMap(Map.of("error", true)).mark(),
+        "no client marks its own post an error");
 
     var view =
-        new SpecMessageView("id", "room", "ada", "body", "parent", "2026-07-28T00:00:00Z", false);
+        new SpecMessageView(
+            "id", "room", "ada", "body", "parent", "2026-07-28T00:00:00Z", false, false);
     assertEquals("parent", view.toMap().get("reply_to"));
     assertFalse(view.toMap().containsKey("question"));
     var withoutReply =
-        new SpecMessageView("id", "room", "ada", "body", null, "2026-07-28T00:00:00Z", false);
+        new SpecMessageView(
+            "id", "room", "ada", "body", null, "2026-07-28T00:00:00Z", false, false);
     assertFalse(withoutReply.toMap().containsKey("reply_to"));
     var asQuestion =
         new SpecMessageView(
-            "id", "room", "claude/r1", "stuck?", null, "2026-07-28T00:00:00Z", true);
+            "id", "room", "claude/r1", "stuck?", null, "2026-07-28T00:00:00Z", true, false);
     assertEquals(Boolean.TRUE, asQuestion.toMap().get("question"));
     assertTrue(new SpecMessageResponse(view).toMap().containsKey("message"));
     assertEquals(1, new SpecMessagesResponse("room", List.of(view)).toMap().get("total"));
@@ -264,7 +282,9 @@ class SpecMessageOperationsTest {
                 agent,
                 () ->
                     operations.postRoomMessage(
-                        "room", new SpecMessageRequest("Which flow?", null, true), agent.handle()))
+                        "room",
+                        new SpecMessageRequest("Which flow?", null, MessageStore.Mark.QUESTION),
+                        agent.handle()))
             .orThrow();
 
     assertTrue(posted.message().question());
@@ -287,7 +307,9 @@ class SpecMessageOperationsTest {
             member("ada"),
             () ->
                 operations.postRoomMessage(
-                    "room", new SpecMessageRequest("use PKCE", null, false), "ada"))
+                    "room",
+                    new SpecMessageRequest("use PKCE", null, MessageStore.Mark.PLAIN),
+                    "ada"))
         .orThrow();
 
     var answeredList =
@@ -358,7 +380,9 @@ class SpecMessageOperationsTest {
                 member("ada"),
                 () ->
                     withRooms.postRoomMessage(
-                        "born", new SpecMessageRequest("home sweet home", null, false), "ada"))
+                        "born",
+                        new SpecMessageRequest("home sweet home", null, MessageStore.Mark.PLAIN),
+                        "ada"))
             .orThrow();
 
     BusTesting.awaitDelivery(delivered);

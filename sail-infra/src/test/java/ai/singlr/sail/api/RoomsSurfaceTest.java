@@ -113,7 +113,7 @@ class RoomsSurfaceTest {
             () ->
                 ops.postRoomMessage(
                     "design-room",
-                    new SpecMessageRequest("hello chat-only world", null, false),
+                    new SpecMessageRequest("hello chat-only world", null, MessageStore.Mark.PLAIN),
                     HANDLE));
     assertTrue(posted instanceof Result.Success<SpecMessageResponse>, posted.toString());
 
@@ -283,7 +283,9 @@ class RoomsSurfaceTest {
             admin(),
             () ->
                 ops.postRoomMessage(
-                    "ghost-room", new SpecMessageRequest("hi", null, false), HANDLE));
+                    "ghost-room",
+                    new SpecMessageRequest("hi", null, MessageStore.Mark.PLAIN),
+                    HANDLE));
     assertEquals(
         ErrorCode.ROOM_NOT_FOUND, ((Result.Failure<SpecMessageResponse>) missingPost).errorCode());
   }
@@ -427,7 +429,9 @@ class RoomsSurfaceTest {
             admin(),
             () ->
                 bare.postRoomMessage(
-                    "anywhere", new SpecMessageRequest("hi", null, false), HANDLE));
+                    "anywhere",
+                    new SpecMessageRequest("hi", null, MessageStore.Mark.PLAIN),
+                    HANDLE));
     assertEquals(
         ErrorCode.ROOM_NOT_FOUND, ((Result.Failure<SpecMessageResponse>) posted).errorCode());
 
@@ -480,7 +484,9 @@ class RoomsSurfaceTest {
             admin(),
             () ->
                 ops.postRoomMessage(
-                    "legacy", new SpecMessageRequest("via room door", null, false), HANDLE));
+                    "legacy",
+                    new SpecMessageRequest("via room door", null, MessageStore.Mark.PLAIN),
+                    HANDLE));
 
     assertTrue(
         posted instanceof Result.Success<SpecMessageResponse>,

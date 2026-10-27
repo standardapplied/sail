@@ -40,7 +40,15 @@ class RoomWakePromptTest {
 
   private static MessageStore.MessageRow message(String id, String author, String body) {
     return new MessageStore.MessageRow(
-        id, "auth", author, body, null, "2026-08-11T12:00:00Z", "1-a", null, false);
+        id,
+        "auth",
+        author,
+        body,
+        null,
+        "2026-08-11T12:00:00Z",
+        "1-a",
+        null,
+        MessageStore.Mark.PLAIN);
   }
 
   @Test

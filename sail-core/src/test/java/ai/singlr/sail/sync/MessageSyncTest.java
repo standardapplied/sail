@@ -113,7 +113,8 @@ class MessageSyncTest {
     var runs = new RunStore(main.db);
     ReviewRuns.reserve(runs, runId, runId, "acme", "room", "node", Lane.REVIEW, "codex", List.of());
     var principal = runs.findById(runId).orElseThrow().principal();
-    var question = node.messages.append("room", principal, "Which flow?", null, true);
+    var question =
+        node.messages.append("room", principal, "Which flow?", null, MessageStore.Mark.QUESTION);
     var engine = new SyncEngine();
 
     Actor.call(Actor.sync("node", Role.MEMBER), () -> engine.reconcile(node.replica, main.replica));
@@ -128,6 +129,61 @@ class MessageSyncTest {
     assertEquals(Map.of(), node.messages.openQuestions());
 
     assertConverged();
+  }
+
+  @Test
+  void theErrorMarkRidesTheSnapshotToEveryBoxAndAPlainRevisionIsWhatItWas() {
+    var runId = "019fee00-0000-7000-8000-0000000000cc";
+    main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
+    var runs = new RunStore(main.db);
+    ReviewRuns.reserve(runs, runId, runId, "acme", "room", "node", Lane.REVIEW, "codex", List.of());
+    var principal = runs.findById(runId).orElseThrow().principal();
+    var failed =
+        node.messages.append("room", principal, "Not logged in", null, MessageStore.Mark.ERROR);
+    var plain = node.messages.append("room", principal, "Fine.", null);
+
+    Actor.call(
+        Actor.sync("node", Role.MEMBER),
+        () -> new SyncEngine().reconcile(node.replica, main.replica));
+
+    assertEquals(MessageStore.Mark.ERROR, main.messages.findById(failed.id()).orElseThrow().mark());
+    assertEquals(MessageStore.Mark.PLAIN, main.messages.findById(plain.id()).orElseThrow().mark());
+    assertEquals(
+        Map.of(
+            "room_id",
+            "room",
+            "author",
+            principal,
+            "body",
+            "Fine.",
+            "created_at",
+            plain.createdAt()),
+        main.messages.comparableSnapshot(plain.id()),
+        "a message with no mark carries no key for one");
+    assertConverged();
+  }
+
+  @Test
+  void aSnapshotMarkedBothAQuestionAndAnErrorIsRefusedNotResolved() {
+    var snapshot =
+        new LinkedHashMap<String, Object>(
+            Map.of(
+                "room_id", "room",
+                "author", "claude/r1",
+                "body", "Which flow?",
+                "created_at", "2026-10-01T00:00:00Z",
+                "question", true,
+                "error", true));
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                main.messages.applyRevision(
+                    "019fee00-0000-7000-8000-0000000000dd", snapshot, "1-a"));
+
+    assertEquals("message is marked both a question and an error", refused.getMessage());
+    assertTrue(main.messages.findById("019fee00-0000-7000-8000-0000000000dd").isEmpty());
   }
 
   @Test

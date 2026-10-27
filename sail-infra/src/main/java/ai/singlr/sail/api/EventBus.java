@@ -16,7 +16,8 @@ import java.util.concurrent.atomic.LongAdder;
 
 /**
  * In-process pub/sub bus for {@link Event}s. Lock-light and lossy-by-design: publishers never
- * block, subscribers have bounded queues, overflow is counted and dropped.
+ * block, subscribers have bounded queues, overflow is counted, dropped and told to the subscriber
+ * ({@link EventSubscriber#missed}).
  *
  * <p>One drain virtual thread per subscriber pulls from that subscriber's queue and invokes {@link
  * EventSubscriber#onEvent(Event)}. Subscribers are independent — a slow subscriber affects only its
@@ -65,6 +66,7 @@ public final class EventBus implements AutoCloseable {
       }
       if (!sub.queue.offer(stamped)) {
         sub.dropped.increment();
+        sub.subscriber.missed();
       }
     }
     return stamped;

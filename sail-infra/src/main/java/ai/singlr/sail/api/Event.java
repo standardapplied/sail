@@ -175,6 +175,13 @@ public record Event(
     /** A live member's turn ended; {@code data.message_id} is the reply sail posted for it. */
     public static final String AGENT_TURN_ENDED = "agent_turn_ended";
 
+    /**
+     * Where a room's live member stands, written first on a room's stream and never published:
+     * {@code data.open} says whether its turn is open, and a turn that is not carries what its
+     * {@link #AGENT_TURN_ENDED} did. A room with no live member is told {@code open: false} alone.
+     */
+    public static final String AGENT_TURN_STATE = "agent_turn_state";
+
     /** A host-owned terminal session started; emitted by the pty host, room-scoped when bound. */
     public static final String PTY_SESSION_STARTED = "pty_session_started";
 

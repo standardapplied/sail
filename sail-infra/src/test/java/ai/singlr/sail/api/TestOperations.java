@@ -202,7 +202,7 @@ class TestOperations implements Operations {
                         "2026-07-28T00:00:00Z",
                         "1-a",
                         null,
-                        false)))));
+                        MessageStore.Mark.PLAIN)))));
   }
 
   @Override
@@ -220,7 +220,7 @@ class TestOperations implements Operations {
                     "2026-07-28T00:00:00Z",
                     "1-a",
                     null,
-                    request.question()))));
+                    request.mark()))));
   }
 
   @Override
@@ -537,6 +537,7 @@ class TestOperations implements Operations {
                     "please also update the docs",
                     null,
                     "2026-07-28T00:01:00Z",
+                    false,
                     false)),
             false));
   }

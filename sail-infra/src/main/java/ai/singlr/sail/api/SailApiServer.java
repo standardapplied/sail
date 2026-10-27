@@ -105,12 +105,14 @@ public final class SailApiServer implements AutoCloseable {
         specStore,
         reviewController,
         new RateLimitGate(),
-        project -> null);
+        project -> null,
+        SseHandler.RoomTurns.NONE);
   }
 
   /**
    * The constructor the server runs: {@code rateLimits} gates every context served over TCP (a test
-   * pins a tiny budget), and {@code notifications} says what each project wants sent by webhook.
+   * pins a tiny budget), {@code notifications} says what each project wants sent by webhook, and
+   * {@code turns} is what a room's stream is first told.
    */
   public SailApiServer(
       String host,
@@ -124,7 +126,8 @@ public final class SailApiServer implements AutoCloseable {
       SpecStore specStore,
       ReviewPipelineController reviewController,
       RateLimitGate rateLimits,
-      ProjectNotificationsResolver notifications)
+      ProjectNotificationsResolver notifications,
+      SseHandler.RoomTurns turns)
       throws IOException {
     this.eventBus = eventBus;
     this.auditPersister = auditSubscriber instanceof AuditPersister ap ? ap : null;
@@ -149,7 +152,7 @@ public final class SailApiServer implements AutoCloseable {
       PrivateAttributes.context(server, "/enroll", pages);
     }
     if (eventBus != null) {
-      sseHandler = new SseHandler(eventBus, auth);
+      sseHandler = new SseHandler(eventBus, auth, turns);
       PrivateAttributes.context(server, "/v1/events/stream", rateLimits.wrap(sseHandler));
       socketListener = socketPath == null ? null : new LocalApiSocket(operations, socketPath);
     } else {

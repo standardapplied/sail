@@ -489,7 +489,9 @@ public final class Fleet implements AutoCloseable {
                       Actor.cliOperator(handle),
                       () ->
                           operations.postRoomMessage(
-                              specId, new SpecMessageRequest(body, null, false), handle)))
+                              specId,
+                              new SpecMessageRequest(body, null, MessageStore.Mark.PLAIN),
+                              handle)))
           .orThrow()
           .message();
     }

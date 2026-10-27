@@ -19,10 +19,12 @@ import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.store.MessageStore;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -372,6 +374,7 @@ class LiveMemberTest {
     assertEquals(1, failed.exitCode());
     var partial = room.messages.list(SPEC, null, 20).getLast();
     assertEquals("Half", partial.body());
+    assertEquals(MessageStore.Mark.ERROR, partial.mark(), "what a dead turn wrote is no answer");
     assertEquals(
         List.of(
             LiveRoom.live(
@@ -399,6 +402,55 @@ class LiveMemberTest {
     assertEquals(
         LiveRoom.invocation("--dangerously-skip-permissions", "--resume", "sess-1"),
         room.processes.starts.getLast().command());
+  }
+
+  @Test
+  void aRoomsStreamIsToldWhereItsMemberStandsAsItsLastEventLeftIt() {
+    assertEquals(Optional.empty(), room.live.turnState("no-such-room"), "a room unknown: nothing");
+    var before = room.live.turnState(SPEC).orElseThrow();
+    assertEquals(
+        List.of(LiveRoom.PROJECT, SPEC, "agent_turn_state", "sail"),
+        List.of(before.project(), before.spec(), before.type(), before.agent()));
+    assertEquals(Map.of("open", false), before.data(), "no member: no turn is open");
+
+    var process = room.prompted(SPEC, "full", "first");
+    var run = room.memberRun();
+    assertEquals(
+        LiveRoom.live(run, SPEC, 0, Map.of("open", false)),
+        state(),
+        "prompted, but nothing of the turn is told yet");
+
+    room.says(process, Lines.init("sess-1"), Lines.delta("One"));
+    assertEquals(LiveRoom.live(run, SPEC, 1, Map.of("open", true)), state());
+
+    room.says(process, Lines.result("One"));
+    var reply = room.messages.list(SPEC, null, 20).getLast();
+    assertEquals(
+        LiveRoom.live(
+            run, SPEC, 1, Map.of("open", false, "message_id", reply.id(), "is_error", false)),
+        state(),
+        "a turn that is over carries what its end said");
+    assertEquals(
+        room.data(Event.WellKnownTypes.AGENT_TURN_ENDED).getLast().get("message_id"),
+        state().get("message_id"));
+
+    room.says(SPEC, "second");
+    room.says(process, Lines.failure("error_max_turns", ""));
+    assertEquals(
+        LiveRoom.live(
+            run, SPEC, 2, Map.of("open", false, "is_error", true, "reason", "error_max_turns")),
+        state());
+
+    process.exits(0);
+    room.awaitStopped(process);
+    assertEquals(Map.of("open", false), state(), "a member that ended is no member");
+  }
+
+  private Map<String, Object> state() {
+    var state = room.live.turnState(SPEC).orElseThrow();
+    assertEquals(Event.WellKnownTypes.AGENT_TURN_STATE, state.type());
+    assertEquals(SPEC, state.spec());
+    return state.data();
   }
 
   private static final String HANDLE = LiveRoom.HANDLE;

@@ -1356,6 +1356,12 @@ class is `LiveMemberTest`'s):
   the turn: the turn's text is posted through `postRoomMessage` as the run's principal under
   the run's actor — the door and the actor the `spec` CLI gets, so the message rule, the
   announcement and the sync trigger are the same — and `agent_turn_ended` names the message.
+  A turn failed when the harness flags its result `is_error`, or when it ended before its
+  answer because the process died or sail ended the member (stop, `max_idle`, `max_duration`,
+  a membership change): its text is still posted,
+  in the agent's own words, marked `error` on the message row (a synced mark beside `question`),
+  and the end's `reason` is the result's subtype only when it names a failure, never `success`.
+  Nothing reads the text.
   Every live event's `spec` is the room id and its data carries `run_id`, `room_id`,
   `principal` and `turn`. A subagent's lines, a line over 1 MiB and a line that is not one of
   these say nothing. The member's settings file (`~/.sail/claude-live.json`) carries the
@@ -1368,6 +1374,9 @@ class is `LiveMemberTest`'s):
   `LiveMemberEdgesTest.whatTheAgentWritesIsBoundedWhereItEnters`,
   `LiveMemberEdgesTest.aFragmentHeldBackIsToldWhenItsWindowElapses`,
   `LiveMemberEdgesTest.aRoomThatRefusesTheReplyEndsTheTurnInError`,
+  `LiveMemberEdgesTest.aTurnItsHarnessSaysFailedIsKeptInItsOwnWordsAndMarkedAnErrorAndAnAnswerIsNot`,
+  `LiveStreamTest.aResultTheHarnessFlagsAnErrorFailedWhateverItsSubtypeSays`,
+  `MessageSyncTest.theErrorMarkRidesTheSnapshotToEveryBoxAndAPlainRevisionIsWhatItWas`,
   `LiveMemberPromptGoldenTest`, `HarnessGoldenTest.claudeCodeLiveFullMember`,
   `HarnessHooksGoldenTest.claudeCodeLiveSettingsNameNoHook`,
   `ContainerSailSetupTest.fingerprintCoversEveryInstalledFile`.*
@@ -1375,13 +1384,24 @@ class is `LiveMemberTest`'s):
   `agent_turn_ended` are `EPHEMERAL`: on the bus and the stream, never persisted, and no client
   may publish one (they are absent from `EventAuthority`'s list, so an admin's and a run's
   publish are both refused). `GET /v1/events/stream?room=<id>` scopes a stream to one room beside `project` and
-  `type`.
+  `type`, and its first frame, with no `id`, is `agent_turn_state`: where the room's live member
+  stands, read under the member's lock after the stream subscribed (an event published while it is
+  read follows it, older than it says; Mast takes nothing of a turn the frame names over) — `{run_id, turn, principal,
+  open}` and, when the turn is not open, what its `agent_turn_ended` carried; `{open: false}`
+  alone for a room with no live member. A reader who opens the room mid-turn, or reconnects
+  after missing a turn's end, is told the truth rather than left to infer it. A stream the bus
+  drops an event for is ended, so its client reconnects and is told again.
   *`EventTest.aLiveMembersStreamIsEphemeralAndNothingElseIs`,
   `SpecStoreAuditPersisterTest.aLiveMembersStreamIsNeverPersisted`,
   `EventDoorTest.aTypeTheRuleDoesNotListIsRefusedFromEveryone`,
   `EventDoorTest.aRunPublishesNothingButItsHooksOverTheSocket`,
   `EventAuthorityTest.aTypeTheRuleDoesNotListIsNoClients`,
-  `SseHandlerTest.parseFilterScopesByRoomBesideProjectAndType`.*
+  `SseHandlerTest.parseFilterScopesByRoomBesideProjectAndType`,
+  `SseHandlerTest.aRoomsStreamIsFirstToldWhereItsMemberStandsWithNoIdAndOnlyWhatItsReaderMaySee`,
+  `SseHandlerTest.aStreamTheBusDropsAnEventForIsEndedSoItsClientReconnects`,
+  `SseHandlerTest.anEventPublishedWhileARoomsStateIsReadFollowsTheStateAndIsNotLost`,
+  `LiveMemberTest.aRoomsStreamIsToldWhereItsMemberStandsAsItsLastEventLeftIt`,
+  `RoomStreamIT`.*
 - **L4. A live member is one run.** One row (`room` or `room-full`), one credential, one
   reservation and one pid file for the life of the process, under `AgentUnit.live(runId)`
   (`live-<runId>`), so no watcher is armed for it and the missed-stop reconciler, which reads

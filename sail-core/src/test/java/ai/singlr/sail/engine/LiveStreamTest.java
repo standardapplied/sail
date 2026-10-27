@@ -169,7 +169,21 @@ class LiveStreamTest {
         new Step.Result(true, "error_max_turns", ""),
         LiveStream.read("{\"type\":\"result\",\"subtype\":\"error_max_turns\",\"is_error\":true}"));
     assertEquals(
-        new Step.Result(true, "error", ""),
-        LiveStream.read("{\"type\":\"result\",\"is_error\":true,\"result\":7}"));
+        new Step.Result(true, null, ""),
+        LiveStream.read("{\"type\":\"result\",\"is_error\":true,\"result\":7}"),
+        "a failure that names no reason is told with none");
+  }
+
+  @Test
+  void aResultTheHarnessFlagsAnErrorFailedWhateverItsSubtypeSays() {
+    assertEquals(
+        new Step.Result(true, null, "Not logged in · Please run /login"),
+        LiveStream.read(
+            "{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,"
+                + "\"result\":\"Not logged in · Please run /login\"}"),
+        "failed, in its own words, and never for the reason 'success'");
+    assertEquals(
+        new Step.Result(true, null, ""),
+        LiveStream.read("{\"type\":\"result\",\"subtype\":\" \",\"is_error\":true}"));
   }
 }
