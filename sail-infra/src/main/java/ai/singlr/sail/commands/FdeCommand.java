@@ -57,6 +57,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -225,6 +226,15 @@ public final class FdeCommand implements Runnable {
         + " Make it admin: @|bold "
         + operator.sail("fde update " + fde.handle() + " --role admin")
         + "|@";
+  }
+
+  static String stillTrusts(String where, String why, SshPublicKey replaced) {
+    return where
+        + " may still trust the replaced workstation key "
+        + Pair.describe(replaced)
+        + " ("
+        + why
+        + "). Take its line out of every /home account's .ssh/authorized_keys there.";
   }
 
   static String notTrustedYet(String container, String why, OperatorCommand operator) {
@@ -1117,37 +1127,58 @@ public final class FdeCommand implements Runnable {
         System.out.println("  Paste this code into Mast. It is a secret, and it is shown once:");
         System.out.println();
         System.out.println(code(box, address, pinned, key.privateKey(), token.token()));
-        var refusing = trustInContainers(box, db, key.publicKey(), replaced);
-        if (!refusing.isEmpty()) {
+        var unreached =
+            Stream.concat(
+                    untrustReplaced(box, replaced).stream(),
+                    trustInContainers(box, db, key.publicKey()).stream()
+                        .map(
+                            container ->
+                                notTrustedYet(container.container(), container.reason(), operator)))
+                .toList();
+        if (!unreached.isEmpty()) {
           System.out.println();
-          refusing.forEach(
-              container ->
-                  System.out.println(
-                      Ansi.AUTO.string("  @|yellow ⚠|@ ")
-                          + notTrustedYet(container.container(), container.reason(), operator)));
+          unreached.forEach(line -> System.out.println(Ansi.AUTO.string("  @|yellow ⚠|@ ") + line));
         }
       }
     }
 
     /**
-     * Writes {@code key} into the container of each project this box runs once its code is shown,
-     * taking out the workstation key it {@code replaced}, and returns those that do not trust it
-     * yet. The workstation key file names the new key by now, so the apply each is named with puts
-     * it there and leaves the old one out. A box whose containers cannot be listed names each
-     * project instead.
+     * Takes the workstation key this pairing {@code replaced} out of every container of this box,
+     * as unpair does, and names each that may still trust it. No apply finishes this: apply writes
+     * only the SSH user's file, and the workstation key file names the new key by now.
      */
-    private static List<ContainerAuthorizedKeys.Untrusted> trustInContainers(
-        Box box, Sqlite db, SshPublicKey key, Optional<SshPublicKey> replaced)
+    private static List<String> untrustReplaced(Box box, Optional<SshPublicKey> replaced)
         throws InterruptedException {
+      if (replaced.isEmpty()) {
+        return List.of();
+      }
+      var old = replaced.get();
+      try {
+        return new ContainerAuthorizedKeys(box.shell())
+            .removeFromEach(old).stream()
+                .map(container -> stillTrusts(container.container(), container.reason(), old))
+                .toList();
+      } catch (IOException | TimeoutException failure) {
+        return List.of(stillTrusts("This box's containers", failure.getMessage().strip(), old));
+      }
+    }
+
+    /**
+     * Writes {@code key} into the container of each project this box runs once its code is shown,
+     * and returns those that do not trust it yet. A box whose containers cannot be listed names
+     * each project instead.
+     */
+    private static List<ContainerAuthorizedKeys.Unreached> trustInContainers(
+        Box box, Sqlite db, SshPublicKey key) throws InterruptedException {
       var projects =
           new ProjectStore(db).list().stream().map(ProjectStore.ProjectRow::name).toList();
       try {
-        return new ContainerAuthorizedKeys(box.shell()).add(key, replaced, projects);
+        return new ContainerAuthorizedKeys(box.shell()).add(key, projects);
       } catch (IOException | TimeoutException failure) {
         return projects.stream()
             .map(
                 project ->
-                    new ContainerAuthorizedKeys.Untrusted(project, failure.getMessage().strip()))
+                    new ContainerAuthorizedKeys.Unreached(project, failure.getMessage().strip()))
             .toList();
       }
     }

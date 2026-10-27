@@ -2369,8 +2369,11 @@ operator's login and home are the JVM's `user.name` and `user.home`.
   (`ProjectProvisionerTest`). A box trusts one workstation key: a pairing replaces the
   key of the same FDE's earlier pairing, and refuses to replace any other, naming its
   fingerprint and comment, unless `--as-workstation-key` is passed, which takes the replaced key
-  out of those containers in the same step, after the new key is the workstation key, so the apply
-  a container that could not be edited is named with leaves the old key out. Revoking the pairing takes
+  out of every `/home` account of every container of the box in the same step, as unpair does,
+  including those no project names (`ContainerAuthorizedKeys.removeFromEach`). A container it could
+  not edit is named with the replaced key's fingerprint and comment and the line to take out by
+  hand, never an apply: apply writes only the SSH user's file, and the workstation key file names
+  the new key by then. Revoking the pairing takes
   its key back out of the workstation key and the containers (C3); a key set by `sail host
   config set ssh-public-key` is never touched.
 - **C5. The code is a secret, handled as one.** It is printed to the terminal and nowhere else:

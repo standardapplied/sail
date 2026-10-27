@@ -62,7 +62,6 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.function.Function;
@@ -1084,8 +1083,7 @@ class FdeCommandTest {
     appliedContainers(held);
 
     assertEquals(
-        List.of(),
-        new ContainerAuthorizedKeys(keygen).add(LAPTOP, Optional.empty(), List.of("acme", "web")));
+        List.of(), new ContainerAuthorizedKeys(keygen).add(LAPTOP, List.of("acme", "web")));
 
     assertEquals(held, keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
     assertEquals(held, keygen.incus.file("web", "/home/dev" + AUTHORIZED));
@@ -1109,13 +1107,74 @@ class FdeCommandTest {
           keygen.incus.file(container, "/home/dev" + AUTHORIZED));
     }
     assertEquals(
+        ENGINEER.line() + "\n",
+        keygen.incus.file("stray", "/home/dev" + AUTHORIZED),
+        "a container no project names loses the replaced key and is not given the new one");
+    assertEquals(
         "  ✓ Workstation key replaced: it was " + LAPTOP.fingerprint() + " (me@mac).",
         printed().get(2));
     assertEquals(printedCode(), printed().getLast());
   }
 
   @Test
-  void aReplacedKeyThatCannotBeTakenOutOfAContainerNamesItWithTheApplyThatDoes() throws Exception {
+  void aReplacedKeyLeftInAnotherAccountIsNamedWithTheLineToTakeOutNotAnApply() throws Exception {
+    Files.createDirectories(workstationKey().getParent());
+    Files.writeString(workstationKey(), LAPTOP.line() + "\n");
+    appliedContainers(LAPTOP.line() + "\n");
+    keygen.incus.files.put("acme/home/ubuntu" + AUTHORIZED, LAPTOP.line() + "\n");
+    keygen.incus.failures.put(
+        "file push acme/home/ubuntu" + AUTHORIZED,
+        new ShellExec.Result(1, "", "Error: I/O error\n"));
+
+    var exit =
+        fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com", "--as-workstation-key");
+
+    assertEquals(0, exit, refusal);
+    var key = keygen.made.getFirst();
+    assertEquals(key.line() + "\n", keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
+    assertEquals(LAPTOP.line() + "\n", keygen.incus.file("acme", "/home/ubuntu" + AUTHORIZED));
+    assertEquals("", keygen.incus.file("stray", "/home/dev" + AUTHORIZED));
+    assertEquals(
+        List.of(
+            printedCode(),
+            "",
+            "  ⚠ acme may still trust the replaced workstation key "
+                + LAPTOP.fingerprint()
+                + " (me@mac) (Failed to push file to /home/ubuntu/.ssh/authorized_keys: Error: I/O"
+                + " error). Take its line out of every /home account's .ssh/authorized_keys"
+                + " there."),
+        printed().subList(printed().size() - 3, printed().size()));
+  }
+
+  @Test
+  void aReplacedKeyThatCannotBeSoughtInAnyContainerIsNamedWithTheLineToTakeOut() throws Exception {
+    Files.createDirectories(workstationKey().getParent());
+    Files.writeString(workstationKey(), LAPTOP.line() + "\n");
+    catalog("acme");
+    keygen.incus.failures.put("list --format", new ShellExec.Result(1, "", "Error: unreachable\n"));
+
+    var exit =
+        fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com", "--as-workstation-key");
+
+    assertEquals(0, exit, refusal);
+    assertEquals(
+        List.of(
+            printedCode(),
+            "",
+            "  ⚠ This box's containers may still trust the replaced workstation key "
+                + LAPTOP.fingerprint()
+                + " (me@mac) (incus list failed: Error: unreachable). Take its line out of every"
+                + " /home account's .ssh/authorized_keys there.",
+            "  ⚠ acme does not trust this key yet (incus list failed: Error: unreachable). Make"
+                + " it: '"
+                + OperatorCommand.here().sail("project apply acme")
+                + "'."),
+        printed().subList(printed().size() - 4, printed().size()));
+  }
+
+  @Test
+  void aReplacedKeyThatCannotBeTakenOutOfAContainerIsNamedBesideTheApplyThatTrustsTheNewOne()
+      throws Exception {
     Files.createDirectories(workstationKey().getParent());
     Files.writeString(workstationKey(), LAPTOP.line() + "\n");
     appliedContainers(LAPTOP.line() + "\n");
@@ -1137,11 +1196,16 @@ class FdeCommandTest {
         List.of(
             printedCode(),
             "",
+            "  ⚠ web may still trust the replaced workstation key "
+                + LAPTOP.fingerprint()
+                + " (me@mac) (could not read /home/dev/.ssh/authorized_keys in web: Error: I/O"
+                + " error). Take its line out of every /home account's .ssh/authorized_keys"
+                + " there.",
             "  ⚠ web does not trust this key yet (could not read /home/dev/.ssh/authorized_keys"
                 + " in web: Error: I/O error). Make it: '"
                 + OperatorCommand.here().sail("project apply web")
                 + "'."),
-        printed().subList(printed().size() - 3, printed().size()));
+        printed().subList(printed().size() - 4, printed().size()));
   }
 
   @Test

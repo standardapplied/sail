@@ -42,8 +42,13 @@ public final class ContainerAuthorizedKeys {
     this.shell = shell;
   }
 
-  /** A container that does not trust a key, and why. */
-  public record Untrusted(String container, String reason) {}
+  /** A container an edit did not reach, and why. */
+  public record Unreached(String container, String reason) {}
+
+  @FunctionalInterface
+  private interface Edit {
+    void apply(String container) throws IOException, InterruptedException, TimeoutException;
+  }
 
   /**
    * Removes {@code key} from every container of this box, and returns those whose files it changed.
@@ -53,11 +58,7 @@ public final class ContainerAuthorizedKeys {
     var entry = entry(key);
     var changed = new ArrayList<String>();
     for (var container : containers()) {
-      var removed = false;
-      for (var account : homeAccounts(container)) {
-        removed |= removeFrom(container, account, entry);
-      }
-      if (removed) {
+      if (removeFromEvery(container, entry)) {
         changed.add(container);
       }
     }
@@ -65,34 +66,59 @@ public final class ContainerAuthorizedKeys {
   }
 
   /**
-   * Adds {@code key} to the SSH user's file in each container of {@code projects} this box runs
-   * that does not hold it yet, first taking {@code replaced} out of every account there as {@link
-   * #remove} does, and returns those it could not, each with why: one container that cannot be
-   * written stops none of the others.
+   * Removes {@code key} from every container of this box as {@link #remove} does, and returns those
+   * it could not, each with why: one container that cannot be written stops none of the others.
    */
-  public List<Untrusted> add(
-      SshPublicKey key, Optional<SshPublicKey> replaced, Collection<String> projects)
+  public List<Unreached> removeFromEach(SshPublicKey key)
       throws IOException, InterruptedException, TimeoutException {
     var entry = entry(key);
-    var stale = replaced.map(ContainerAuthorizedKeys::entry);
-    var untrusted = new ArrayList<Untrusted>();
-    for (var container : containers()) {
-      if (!projects.contains(container)) {
-        continue;
-      }
+    return each(containers(), container -> removeFromEvery(container, entry));
+  }
+
+  /**
+   * Adds {@code key} to the SSH user's file in each container of {@code projects} this box runs
+   * that does not hold it yet, and returns those it could not, each with why: one container that
+   * cannot be written stops none of the others.
+   */
+  public List<Unreached> add(SshPublicKey key, Collection<String> projects)
+      throws IOException, InterruptedException, TimeoutException {
+    var entry = entry(key);
+    var ofProjects = containers().stream().filter(projects::contains).toList();
+    return each(ofProjects, container -> addTo(container, homeAccounts(container), key, entry));
+  }
+
+  private static List<Unreached> each(List<String> containers, Edit edit)
+      throws InterruptedException {
+    var unreached = new ArrayList<Unreached>();
+    for (var container : containers) {
       try {
-        var accounts = homeAccounts(container);
-        if (stale.isPresent()) {
-          for (var account : accounts) {
-            removeFrom(container, account, stale.get());
-          }
-        }
-        addTo(container, accounts, key, entry);
+        edit.apply(container);
       } catch (IOException | TimeoutException failure) {
-        untrusted.add(new Untrusted(container, failure.getMessage().strip()));
+        unreached.add(new Unreached(container, failure.getMessage().strip()));
       }
     }
-    return List.copyOf(untrusted);
+    return List.copyOf(unreached);
+  }
+
+  /**
+   * Removes {@code entry} from each account of {@code container}, one that cannot be edited
+   * stopping none of the others, then fails with the first that could not.
+   */
+  private boolean removeFromEvery(String container, Pattern entry)
+      throws IOException, InterruptedException, TimeoutException {
+    var removed = false;
+    IOException first = null;
+    for (var account : homeAccounts(container)) {
+      try {
+        removed |= removeFrom(container, account, entry);
+      } catch (IOException | TimeoutException failure) {
+        first = first != null ? first : new IOException(failure.getMessage(), failure);
+      }
+    }
+    if (first != null) {
+      throw first;
+    }
+    return removed;
   }
 
   private List<String> containers() throws IOException, InterruptedException, TimeoutException {
