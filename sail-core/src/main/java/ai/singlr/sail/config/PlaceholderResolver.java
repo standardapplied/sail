@@ -35,7 +35,7 @@ public final class PlaceholderResolver {
       Map.of(
           GIT_NAME, "Your name (for git commits)",
           GIT_EMAIL, "Your email (for git commits)",
-          SSH_PUBLIC_KEY, "Your SSH public key (for Zed remote access)");
+          SSH_PUBLIC_KEY, "Your SSH public key (to log in to the container)");
 
   private PlaceholderResolver() {}
 

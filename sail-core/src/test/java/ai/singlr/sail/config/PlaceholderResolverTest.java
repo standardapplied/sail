@@ -122,6 +122,9 @@ class PlaceholderResolverTest {
   void promptForReturnsTheHumanPromptOfAKnownPlaceholder() {
     assertTrue(PlaceholderResolver.promptFor(PlaceholderResolver.GIT_NAME).contains("name"));
     assertTrue(PlaceholderResolver.promptFor(PlaceholderResolver.GIT_EMAIL).contains("email"));
+    assertEquals(
+        "Your SSH public key (to log in to the container)",
+        PlaceholderResolver.promptFor(PlaceholderResolver.SSH_PUBLIC_KEY));
   }
 
   @Test

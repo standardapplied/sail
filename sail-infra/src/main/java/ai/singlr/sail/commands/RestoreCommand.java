@@ -99,7 +99,7 @@ public final class RestoreCommand implements Runnable {
     }
 
     Banner.printSnapshotRestored(name, label, System.out, Ansi.AUTO);
-    Banner.printZedConnect(name, operator, System.out, Ansi.AUTO);
+    Banner.printConnect(name, operator, System.out, Ansi.AUTO);
     try {
       var ports = ContainerExec.queryServicePorts(shell, name);
       Banner.printSshTunnels(name, null, ports, System.out, Ansi.AUTO);

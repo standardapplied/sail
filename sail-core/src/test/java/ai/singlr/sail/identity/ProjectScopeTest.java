@@ -169,14 +169,14 @@ class ProjectScopeTest {
   void aScopedReaderReadsOnlyTheFdesWhoShareAProjectWithItAndNoEmailButItsOwn() {
     fdes.add("ada", "Ada", "ada@x.dev", "admin");
     fdes.add("uma", "Uma", "uma@x.dev", "member");
-    for (var scoped : List.of("nia", "sam", "zed", "bob")) {
+    for (var scoped : List.of("nia", "sam", "yan", "bob")) {
       fdes.add(scoped, scoped.toUpperCase(), scoped + "@x.dev", "member");
       fdes.restrict(scoped);
     }
     fdes.grant("nia", "alpha");
     fdes.grant("sam", "alpha");
     fdes.grant("sam", "beta");
-    fdes.grant("zed", "beta");
+    fdes.grant("yan", "beta");
 
     var roster = fdes.visibleTo("nia", fdes.scopeOf("nia"));
 

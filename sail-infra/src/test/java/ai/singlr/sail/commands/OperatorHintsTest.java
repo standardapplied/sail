@@ -50,14 +50,14 @@ class OperatorHintsTest {
   private static final OperatorCommand PLAIN = OperatorCommand.PLAIN;
 
   private static List<String> hints(OperatorCommand operator) {
-    var zed = new ByteArrayOutputStream();
-    Banner.printZedConnect("gamma", operator, new PrintStream(zed), Ansi.OFF);
+    var connect = new ByteArrayOutputStream();
+    Banner.printConnect("gamma", operator, new PrintStream(connect), Ansi.OFF);
     var launched = new ByteArrayOutputStream();
     Banner.printAgentLaunched("gamma", null, null, operator, new PrintStream(launched), Ansi.OFF);
     return List.of(
         HostSyncCommand.roleLines(new SyncConfig(null, null, null), operator, Ansi.OFF),
         Ansi.OFF.string(HostSshIdentityCommand.enabledLine(operator)),
-        zed.toString(StandardCharsets.UTF_8),
+        connect.toString(StandardCharsets.UTF_8),
         Ansi.OFF.string(ProjectApplyCommand.serverIpUnsetLines("gamma", operator)),
         ConnectCommand.serverIpUnset("gamma", operator),
         Ansi.OFF.string(HostInitCommand.nextStep(true, true, operator).orElseThrow()),

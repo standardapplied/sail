@@ -95,7 +95,7 @@ public final class SwitchCommand implements Runnable {
       return;
     }
 
-    Banner.printZedConnect(name, operator, System.out, Ansi.AUTO);
+    Banner.printConnect(name, operator, System.out, Ansi.AUTO);
     try {
       var ports = ContainerExec.queryServicePorts(shell, name);
       Banner.printSshTunnels(name, null, ports, System.out, Ansi.AUTO);

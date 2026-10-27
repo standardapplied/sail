@@ -492,6 +492,9 @@ public final class ProjectProvisioner {
     execInContainer(name, List.of("chown", "-R", user + ":" + user, sshDir));
   }
 
+  /** The uid of the SSH user step 6 makes, the one account sail works in. */
+  static final String SSH_UID = "1000";
+
   /**
    * Every agent, shell and hook runs as uid 1000 with {@code HOME=/home/dev} ({@link
    * ContainerExec}), so a {@code dev} at any other uid is a container nothing of sail's can work
@@ -508,7 +511,7 @@ public final class ProjectProvisioner {
           "Failed to look up user '" + user + "' in " + name + ": " + uid.stderr());
     }
     var actual = uid.stdout().strip();
-    if (!"1000".equals(actual)) {
+    if (!SSH_UID.equals(actual)) {
       throw new IOException(
           "User '"
               + user

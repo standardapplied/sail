@@ -133,9 +133,11 @@ pairing, and an API token for `ada`. It logs in as the account `sail-api` runs a
 every project, container and secret on the box, so a box mints it for its own FDE and no other.
 It is a secret that opens a shell on the box, so send it as you would a password. It lasts a year
 unless `--ttl-days` or `--no-expiry` says otherwise, and its login and its token end together.
-The pairing's key also becomes the workstation key the box's containers trust; a box that
-already has one refuses unless `--as-workstation-key` says to replace it. Unpairing takes the key
-back out of the login, the workstation key and every container.
+The pairing's key also becomes the workstation key the box's containers trust, from the moment
+it is paired, with no second apply; a container it cannot reach is named with the apply that
+fixes it. A box that already has a workstation key refuses unless `--as-workstation-key` says to
+replace it, which takes the old key out of the containers too. Unpairing takes the key back out of
+the login, the workstation key and every container.
 
 A client, or any other engineer, gets a box of their own: set it up with
 `sudo sail init --main <main>`, grant it its projects on main (`sudo sail fde grant <handle>

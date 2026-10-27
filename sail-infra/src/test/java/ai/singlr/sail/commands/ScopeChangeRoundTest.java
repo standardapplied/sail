@@ -84,8 +84,8 @@ class ScopeChangeRoundTest {
     fdes = new FdeStore(mainDb);
     fdes.add("ada", "Ada", "ada@x.dev", "admin");
     var nia = fdes.add("nia", "Nia", "nia@x.dev", "member");
-    fdes.add("zed", "Zed", "zed@x.dev", "member");
-    fdes.restrict("zed");
+    fdes.add("yan", "Yan", "yan@x.dev", "member");
+    fdes.restrict("yan");
     Acting.system(
         () -> {
           var projects = new ProjectStore(mainDb);
@@ -95,7 +95,7 @@ class ScopeChangeRoundTest {
           specs.create(spec("a1", "acme"));
           specs.create(spec("b1", "beta"));
         });
-    fdes.grant("zed", "beta");
+    fdes.grant("yan", "beta");
     var token = new AuthSessionStore(mainDb).create(nia.id(), Duration.ofHours(1)).token();
     nodeDb = Sqlite.open(tempDir.resolve("node.db"));
     new SchemaManager(nodeDb).migrate();
@@ -341,7 +341,7 @@ class ScopeChangeRoundTest {
 
     assertEquals(List.of("a1", "b1"), nodeSpecs());
     assertEquals(
-        List.of("ada|ada@x.dev|active", "nia|nia@x.dev|active", "zed|zed@x.dev|active"),
+        List.of("ada|ada@x.dev|active", "nia|nia@x.dev|active", "yan|yan@x.dev|active"),
         nodeRoster());
     assertEquals(ProjectScope.all(), new SyncScope(nodeDb).held());
     assertTrue(

@@ -528,7 +528,6 @@ class BannerTest {
                 ProxyJump mainbox
                 IdentityFile ~/.ssh/id_ed25519
 
-            \u2192 Zed:     zed ssh://dev@acme/home/dev/workspace
             \u2192 SSH:     ssh acme
             \u2192 Shell:   sudo sail project shell acme
         """,
@@ -566,7 +565,6 @@ class BannerTest {
                 ProxyJump gamma
                 IdentityFile ~/.ssh/id_ed25519
 
-            \u2192 Zed:     zed ssh://dev@gamma.project/home/dev/workspace
             \u2192 SSH:     ssh gamma.project
             \u2192 Shell:   sail project shell gamma
         """,

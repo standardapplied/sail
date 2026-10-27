@@ -72,19 +72,19 @@ class ScopedSyncServerTest {
     fdes = new FdeStore(mainDb);
     fdes.add("ada", "Ada", "ada@x.dev", "admin");
     fdes.add("uma", "Uma", "uma@x.dev", "member");
-    for (var scoped : List.of("nia", "sam", "zed", "bob")) {
+    for (var scoped : List.of("nia", "sam", "yan", "bob")) {
       fdes.add(scoped, scoped, scoped + "@x.dev", "member");
       fdes.restrict(scoped);
     }
     fdes.grant("nia", "alpha");
     fdes.grant("sam", "alpha");
     fdes.grant("sam", "beta");
-    fdes.grant("zed", "beta");
+    fdes.grant("yan", "beta");
     Acting.system(
         () -> {
           var specs = new SpecStore(mainDb);
           specs.create(spec("a1", "alpha", "sam"));
-          specs.create(spec("b1", "beta", "zed"));
+          specs.create(spec("b1", "beta", "yan"));
         });
   }
 
@@ -97,7 +97,7 @@ class ScopedSyncServerTest {
   @Test
   void aScopedFdesSessionPullsItsProjectsAndTheRosterOfThoseWhoShareThem() throws Exception {
     var node = new FdeStore(nodeDb);
-    for (var known : List.of("ada", "sam", "zed")) {
+    for (var known : List.of("ada", "sam", "yan")) {
       node.add(known, known, known + "@old.dev", "member");
     }
 
@@ -117,7 +117,7 @@ class ScopedSyncServerTest {
 
     assertTrue(node.byHandle("sam").orElseThrow().active(), "an assignee in alpha stays enabled");
     assertTrue(node.byHandle("ada").orElseThrow().active());
-    assertTrue(node.byHandle("zed").isEmpty(), "no one outside alpha stays on a scoped box");
+    assertTrue(node.byHandle("yan").isEmpty(), "no one outside alpha stays on a scoped box");
     assertEquals("", node.byHandle("sam").orElseThrow().email());
     assertEquals("nia@x.dev", node.byHandle("nia").orElseThrow().email());
     assertEquals(ProjectScope.all(), node.scopeOf("nia"), "a node scopes no one");
@@ -128,14 +128,14 @@ class ScopedSyncServerTest {
       throws Exception {
     var node = new FdeStore(nodeDb);
     var own = node.add("nia", "Nia", "nia@old.dev", "member");
-    var zed = node.add("zed", "Zed", "zed@x.dev", "member");
+    var yan = node.add("yan", "Yan", "yan@x.dev", "member");
     node.add("eng", "Eng", "eng@x.dev", "member");
     node.add("sam", "Sam", "sam@x.dev", "member");
-    new TokenStore(nodeDb).create("mast-zed", "member", zed.id(), null);
+    new TokenStore(nodeDb).create("mast-yan", "member", yan.id(), null);
     new WebauthnCredentialStore(nodeDb)
         .save(
             new RegisteredCredential(new byte[] {7}, new byte[] {1}, -7, 0, null, false, false),
-            zed.id(),
+            yan.id(),
             "laptop");
     new TokenStore(nodeDb).create("mast-nia", "member", own.id(), null);
     node.disableUnlisted(List.of("nia", "sam"));
@@ -205,7 +205,7 @@ class ScopedSyncServerTest {
         List.of("a1", "b1"), nodeDb.query("SELECT id FROM specs ORDER BY id", row -> row.text(0)));
     assertEquals(SyncServerCommand.roster(mainDb, Actor.main()), round.roster());
     assertEquals(
-        List.of("ada@x.dev", "bob@x.dev", "nia@x.dev", "sam@x.dev", "uma@x.dev", "zed@x.dev"),
+        List.of("ada@x.dev", "bob@x.dev", "nia@x.dev", "sam@x.dev", "uma@x.dev", "yan@x.dev"),
         round.roster().stream().map(fde -> fde.get("email")).toList());
   }
 
