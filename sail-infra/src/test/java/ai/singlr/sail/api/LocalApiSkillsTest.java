@@ -167,7 +167,7 @@ class LocalApiSkillsTest {
 
       assertEquals(200, listed.status(), credential);
       assertEquals(
-          List.of("java", "spec-board", "lint"),
+          List.of("java", "sail-portal", "spec-board", "lint"),
           ((List<?>) listed.body().get("skills"))
               .stream().map(row -> ((Map<?, ?>) row).get("name")).toList(),
           credential);

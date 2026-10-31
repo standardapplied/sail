@@ -261,11 +261,20 @@ class ProjectSkillLaunchTest {
     var commands = loop.container.commands().stream().map(c -> String.join(" ", c)).toList();
     var helpers = indexOf(commands, "incus config device add");
     var stamp = indexOf(commands, CODEX_SKILLS + "spec-board/.sail-skill");
-    var placed = indexOf(commands, "mv -T \"$2\" \"$1\"");
+    var placed = lastIndexOf(commands, "mv -T \"$2\" \"$1\"");
     var staged = indexOf(commands, "/home/dev/.sail/runs/" + reviewer.id());
 
     assertTrue(helpers < stamp, "ensureSailSetup runs first");
     assertTrue(stamp < placed && placed < staged, "and the run's directory is made after");
+  }
+
+  private static int lastIndexOf(List<String> commands, String fragment) {
+    for (var i = commands.size() - 1; i >= 0; i--) {
+      if (commands.get(i).contains(fragment)) {
+        return i;
+      }
+    }
+    throw new AssertionError("never ran: " + fragment);
   }
 
   private static int indexOf(List<String> commands, String fragment) {
@@ -312,6 +321,9 @@ class ProjectSkillLaunchTest {
             CLAUDE_SKILLS + "e2e/SKILL.md",
             CLAUDE_SKILLS + "e2e/reference/cases.md",
             CLAUDE_SKILLS + "e2e/scripts/run.sh",
+            CLAUDE_SKILLS + "sail-portal/.sail-skill",
+            CLAUDE_SKILLS + "sail-portal/SKILL.md",
+            CLAUDE_SKILLS + "sail-portal/scripts/portal",
             CLAUDE_SKILLS + "spec-board/.sail-skill",
             CLAUDE_SKILLS + "spec-board/SKILL.md",
             CLAUDE_SKILLS + "spec-board/spec-template.md"),
