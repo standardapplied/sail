@@ -31,7 +31,9 @@ public final class SkillFolders {
 
   /**
    * Lists the folder's entries that are not folders, no more than {@code $2} of them, so a folder
-   * that could never be a skill is refused without the host holding its whole listing.
+   * that could never be a skill is refused without the host holding its whole listing. The pipe's
+   * status is {@code head}'s, so a {@code find} that could not read part of the folder is known by
+   * what it wrote to stderr, where it writes nothing when it succeeds or when {@code head} closes.
    */
   private static final String LIST =
       """
@@ -109,7 +111,7 @@ public final class SkillFolders {
     if (listed.exitCode() == NOT_WHAT_IT_WAS) {
       throw new IllegalArgumentException("Not a folder: " + folder);
     }
-    if (!listed.ok()) {
+    if (!listed.ok() || !listed.stderr().isBlank()) {
       throw new IOException(
           "Failed to list " + folder + " in " + project + ": " + listed.stderr().strip());
     }
@@ -147,7 +149,7 @@ public final class SkillFolders {
           "Skill '%s' changed while it was being read: %s is no longer a regular file. Share it again."
               .formatted(name, path));
     }
-    if (!read.ok()) {
+    if (!read.ok() || !read.stderr().isBlank()) {
       throw new IOException(
           "Failed to read " + path + " in " + project + ": " + read.stderr().strip());
     }

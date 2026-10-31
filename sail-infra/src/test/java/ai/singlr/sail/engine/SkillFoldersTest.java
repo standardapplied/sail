@@ -284,6 +284,36 @@ class SkillFoldersTest {
   }
 
   @Test
+  void aFolderOrFileTheContainerCouldReadOnlyInPartIsAFailureNotAShorterSkill() {
+    var partList =
+        new ScriptedShellExecutor()
+            .on(
+                "find",
+                new ShellExec.Result(
+                    0, "f 4 644 SKILL.md\0", "find: './scripts': Permission denied\n"));
+    var partRead =
+        new ScriptedShellExecutor()
+            .onOk("find", "f 4 644 SKILL.md\0")
+            .on(
+                "base64",
+                new ShellExec.Result(0, "", "head: cannot open 'SKILL.md': Permission denied\n"));
+
+    assertEquals(
+        "Failed to list /home/dev/java in acme: find: './scripts': Permission denied",
+        assertThrows(
+                IOException.class,
+                () -> SkillFolders.inContainer(partList, "acme", "/home/dev/java", "java"))
+            .getMessage());
+    assertEquals(
+        "Failed to read /home/dev/java/SKILL.md in acme: head: cannot open 'SKILL.md': Permission"
+            + " denied",
+        assertThrows(
+                IOException.class,
+                () -> SkillFolders.inContainer(partRead, "acme", "/home/dev/java", "java"))
+            .getMessage());
+  }
+
+  @Test
   void aFileThatChangedBetweenTheListingAndItsReadIsRefused() {
     var changed =
         new ScriptedShellExecutor().onOk("find", "f 9 644 SKILL.md\0").onOk("base64", "LS0tCg==\n");

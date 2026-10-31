@@ -21,12 +21,15 @@ import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -173,12 +176,82 @@ class SkillOperationsTest {
         List.of(
             "Claude Code: Failed to put in place skill 'java' in acme: /home/dev/.claude/skills/java"
                 + " holds a skill sail did not install (no .sail-skill in it). Move it aside, or give"
-                + " the project's skill another name."),
+                + " the project's skill another name. Its skills are installed at the next launch or"
+                + " apply once that is fixed."),
         shared.problems());
+    assertEquals(false, shared.installed());
     assertEquals(
         List.of("/home/dev/.claude/skills/java", "/home/dev/.agents/skills/java"),
         placed(),
         "Codex is installed whatever stood in Claude Code's way");
+  }
+
+  @Test
+  void anInstallThatFailsAnyWayIsAProblemOfTheShareNotItsFailure() throws Exception {
+    containerHolds(JAVA_MD);
+    shell.onThrow("flock", new IOException("incus went away"));
+
+    var shared =
+        Acting.as(
+            "uday", () -> skills.shareFromContainer("acme", "/home/dev/.agents/skills/java", null));
+
+    assertEquals(List.of(".sail/skills/java/SKILL.md"), shared());
+    assertEquals(
+        List.of(
+            "Claude Code: incus went away Its skills are installed at the next launch or apply once"
+                + " that is fixed.",
+            "Codex CLI: incus went away Its skills are installed at the next launch or apply once"
+                + " that is fixed."),
+        shared.problems());
+  }
+
+  @Test
+  void anInstallInterruptedStopsInstallingKeepsTheInterruptAndTheShare() throws Exception {
+    containerHolds(JAVA_MD);
+    var interrupting =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command)
+              throws IOException, InterruptedException, TimeoutException {
+            if (command.contains("flock")) {
+              throw new InterruptedException();
+            }
+            return shell.exec(command);
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout)
+              throws IOException, InterruptedException, TimeoutException {
+            return exec(command);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+    var interrupted =
+        new SkillOperations(
+            new ProjectSkills(
+                project ->
+                    new SharedProjectFiles(
+                        files, dir.resolve("projects"), project, FileLimits.defaults())),
+            interrupting,
+            new ProjectLoader(
+                shell, project -> Optional.of(SailYaml.fromMap(YamlUtil.parseMap(ACME)))));
+
+    var shared =
+        Acting.as(
+            "uday",
+            () -> interrupted.shareFromContainer("acme", "/home/dev/.agents/skills/java", null));
+
+    assertEquals(
+        List.of(
+            "Claude Code: InterruptedException Its skills are installed at the next launch or apply"
+                + " once that is fixed."),
+        shared.problems());
+    assertEquals(true, Thread.interrupted());
+    assertEquals(List.of(".sail/skills/java/SKILL.md"), shared());
   }
 
   private void containerHolds(String skillMd) {

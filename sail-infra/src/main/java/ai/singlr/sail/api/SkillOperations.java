@@ -183,11 +183,15 @@ public final class SkillOperations {
     for (var harness : harnesses) {
       try {
         ProjectSkillInstaller.installProject(shell, project, harness, skills);
-      } catch (IOException blocked) {
-        problems.add(harness.displayName() + ": " + blocked.getMessage());
+      } catch (IOException | TimeoutException | RuntimeException blocked) {
+        problems.add(notInstalled(harness, blocked));
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        problems.add(notInstalled(harness, interrupted));
+        break;
       }
     }
-    return shared(skill, harnesses, true, problems);
+    return shared(skill, harnesses, problems.isEmpty(), problems);
   }
 
   /** Shares the folder at {@code folder} on this box as skill {@code name}, or its own name. */
@@ -217,6 +221,17 @@ public final class SkillOperations {
   /** The {@code SKILL.md} of {@code project}'s skill {@code name}, or of sail's own. */
   public String manifest(String project, String name) throws IOException {
     return skills.manifest(project, name);
+  }
+
+  /**
+   * Why {@code harness} was not installed now: an install stops at the first skill it cannot put in
+   * place, so the agent's skills after it wait too.
+   */
+  private static String notInstalled(Harness harness, Exception why) {
+    return harness.displayName()
+        + ": "
+        + Objects.requireNonNullElse(why.getMessage(), why.getClass().getSimpleName()).strip()
+        + " Its skills are installed at the next launch or apply once that is fixed.";
   }
 
   private static Shared shared(

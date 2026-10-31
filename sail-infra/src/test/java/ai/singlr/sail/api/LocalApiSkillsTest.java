@@ -26,6 +26,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -325,7 +326,7 @@ class LocalApiSkillsTest {
           }
 
           @Override
-          public Result exec(List<String> command, Path workDir, java.time.Duration timeout)
+          public Result exec(List<String> command, Path workDir, Duration timeout)
               throws InterruptedException {
             throw new InterruptedException("stopping");
           }
