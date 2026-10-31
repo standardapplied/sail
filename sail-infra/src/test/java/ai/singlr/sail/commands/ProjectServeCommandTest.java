@@ -93,7 +93,7 @@ class ProjectServeCommandTest {
 
   @Test
   void aPortThatExitedExitsOneWithItsLastLine() {
-    shell.onOk("ss -ltnH", EXITED).onOk("tail -n 1", "Error: Cannot find module 'next'\n");
+    shell.onOk("ss -ltnH", EXITED).onOk("awk -v mark", "Error: Cannot find module 'next'\n");
 
     var ran = serve("acme");
 

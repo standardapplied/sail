@@ -986,9 +986,20 @@ verb; Mast's Portal forwards what it reports. Each row with the tests that prove
   or the next free one above it, on `127.0.0.1` and pipes each connection over the container's
   session to `localhost:<port>` inside; its backend's retirement closes them. *Mast
   `forward.rs` tests, `PortalPanel.test.tsx`.*
+- **I5. The portal is one click and tells the truth.** Mast's Portal brings the stack up, opens
+  the browser at the first process that listens, once, looks again while a port is starting or
+  has not listened yet, shows an exited port's line with a Copy for it, and shows the box's
+  own sentence for a refusal, a stopped container's included. *`PortalPanel.test.tsx`.*
+- **I6. A scoped FDE sees their projects' ports and no other**, at both doors.
+  *`StackOperationsTest.aProjectOutsideTheCallersScopeIsOneTheCatalogDoesNotHold`,
+  `LocalApiStackTest.aRunReachesOnlyItsOwnProjectsStack`.*
+- **I7. A project that declares no process port serves its services as before**, and nothing
+  starts a process but `serve`. *`ProjectServerTest.aDefinitionWithoutProcessesServesItsServicesAsBefore`.*
 - **I8. Any agent can bring the stack up, see it fail and fix it.** Sail's `sail-portal` skill
   (`scripts/portal up|ports|log|stop`) is installed beside `spec-board` for every harness.
   *`PortalSkillTest`, `SailSkillsTest`, `ProjectSkillLaunchTest`.*
+- **I9. The socket serves the stack to the project's own agents only**: a run reaches its own
+  project, a read-only room member reads the ports and may not serve or stop. *`LocalApiStackTest`.*
 
 **The `sail-api` service** (`SystemdServiceInstaller`) is the per-box control plane: a `sail
 server start` systemd unit, in system scope under root (`/etc/systemd/system`, which `sail

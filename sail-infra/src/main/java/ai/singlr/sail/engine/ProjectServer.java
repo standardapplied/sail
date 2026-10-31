@@ -17,6 +17,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
+import java.util.function.LongSupplier;
 
 /**
  * Brings a project's stack up in its container and says what listens where: its services, the
@@ -42,15 +43,42 @@ public final class ProjectServer {
   static final String UNITS_DIR = ContainerExec.DEV_HOME + "/.config/systemd/user";
   static final String PROCESSES_DIR = ContainerExec.DEV_HOME + "/.sail/processes";
 
+  /**
+   * Writes {@code $1} to {@code $2} unless the file already holds it byte for byte, saying which:
+   * the comparison is {@code cmp}'s, so a trailing newline counts as the text does.
+   */
   private static final String WRITE =
-      "mkdir -p \"$(dirname \"$2\")\" && { [ -f \"$2\" ] && [ \"$(cat \"$2\")\" = \"$1\" ] && echo"
-          + " same || { printf '%s' \"$1\" > \"$2\" && echo written; }; }";
+      """
+      mkdir -p "$(dirname "$2")" || exit 1
+      if [ -f "$2" ] && printf '%s' "$1" | cmp -s - "$2"; then echo same; exit 0; fi
+      printf '%s' "$1" > "$2" && echo written
+      """;
+
   private static final String LOOK =
       """
+      command -v ss >/dev/null || { echo "ss is not installed in the container" >&2; exit 127; }
       ss -ltnH
       echo ---
       [ "$#" -eq 0 ] || systemctl --user show -p Id -p ActiveState -p SubState -p ExecMainStatus "$@"
       """;
+
+  /**
+   * The line a failed process wrote that says why: in what it wrote since it last started, the last
+   * line naming an error, else its last line. A runtime that prints its version after the error
+   * (Node's) is read as the error.
+   */
+  private static final String LAST_LINE =
+      """
+      [ -f "$1" ] || exit 0
+      awk -v mark="$2" '
+        index($0, mark) == 1 { n = 0; next }
+        NF { lines[++n] = $0 }
+        END {
+          for (i = n; i > 0; i--) if (tolower(lines[i]) ~ /(error|exception|fatal|cannot|not found)/) { print lines[i]; exit }
+          if (n) print lines[n]
+        }' "$1"
+      """;
+
   private static final String DECLARED_UNITS =
       "for f in \"$1\"/"
           + UNIT_PREFIX
@@ -103,11 +131,20 @@ public final class ProjectServer {
     }
   }
 
-  /** Every declared port, services first, each in the order the definition declares it. */
-  public record Report(List<Port> ports) {
+  /**
+   * Every declared port, services first, each in the order the definition declares it, and the
+   * processes this serve restarted because their unit or script changed.
+   */
+  public record Report(List<Port> ports, List<String> restarted) {
 
     public Report {
       ports = List.copyOf(ports);
+      restarted = List.copyOf(restarted);
+    }
+
+    /** Where {@code ports} stand, with nothing restarted. */
+    public static Report of(List<Port> ports) {
+      return new Report(ports, List.of());
     }
 
     /** Whether every declared port listens. */
@@ -130,11 +167,16 @@ public final class ProjectServer {
   private final ShellExec shell;
   private final ProjectApplier applier;
   private final Pause pause;
+  private final LongSupplier nanos;
 
-  public ProjectServer(ShellExec shell, ProjectApplier applier, Pause pause) {
+  /**
+   * @param nanos the clock a serve's wait is measured on, {@code System::nanoTime} outside tests
+   */
+  public ProjectServer(ShellExec shell, ProjectApplier applier, Pause pause, LongSupplier nanos) {
     this.shell = shell;
     this.applier = applier;
     this.pause = pause;
+    this.nanos = nanos;
   }
 
   /**
@@ -143,26 +185,25 @@ public final class ProjectServer {
    */
   public Report serve(String project, SailYaml config, Duration timeout)
       throws IOException, InterruptedException, TimeoutException {
+    var deadline = nanos.getAsLong() + timeout.toNanos();
     startServices(project, config);
-    startProcesses(project, config);
-    var looks = Math.max(1, (int) Math.ceil(timeout.toMillis() / (double) LOOK_EVERY.toMillis()));
-    Report report = null;
-    for (var look = 0; look < looks; look++) {
-      report = look(project, config);
+    var restarted = startProcesses(project, config);
+    while (true) {
+      var report = look(project, config, true);
       if (settled(report)) {
-        return report;
+        return new Report(report.ports(), restarted);
       }
-      if (look + 1 < looks) {
-        pause.pause(LOOK_EVERY);
+      if (nanos.getAsLong() + LOOK_EVERY.toNanos() > deadline) {
+        return new Report(timedOut(report).ports(), restarted);
       }
+      pause.pause(LOOK_EVERY);
     }
-    return timedOut(report);
   }
 
   /** Where each declared port of {@code config} stands now, starting nothing. */
   public Report ports(String project, SailYaml config)
       throws IOException, InterruptedException, TimeoutException {
-    return look(project, config);
+    return look(project, config, false);
   }
 
   /** Stops and disables every process unit of {@code project}, declared or not; services stay. */
@@ -186,7 +227,8 @@ public final class ProjectServer {
     run(project, "start the services", start);
   }
 
-  private void startProcesses(String project, SailYaml config)
+  /** Starts every declared process and returns the names of those it restarted. */
+  private List<String> startProcesses(String project, SailYaml config)
       throws IOException, InterruptedException, TimeoutException {
     var declared = processes(config);
     var changed = new ArrayList<String>();
@@ -194,8 +236,8 @@ public final class ProjectServer {
     for (var entry : declared.entrySet()) {
       var name = entry.getKey();
       var wrote =
-          write(project, scriptPath(name), script(config, entry.getValue()))
-              | write(project, unitPath(name), unit(name));
+          writeOnce(shell, project, scriptPath(name), script(config, entry.getValue()))
+              | writeOnce(shell, project, unitPath(name), unit(name));
       (wrote ? changed : unchanged).add(unitOf(name));
     }
     var gone = new ArrayList<String>();
@@ -216,13 +258,17 @@ public final class ProjectServer {
       run(project, "remove the processes no longer declared", remove);
     }
     if (declared.isEmpty()) {
-      return;
+      return List.of();
     }
     run(project, "reload the user units", List.of("systemctl", "--user", "daemon-reload"));
     var all = new ArrayList<String>();
     all.addAll(changed);
     all.addAll(unchanged);
     run(project, "enable the processes", withUnits(List.of("systemctl", "--user", "enable"), all));
+    run(
+        project,
+        "clear the processes' failures",
+        withUnits(List.of("systemctl", "--user", "reset-failed"), all));
     if (!changed.isEmpty()) {
       run(
           project,
@@ -235,9 +281,14 @@ public final class ProjectServer {
           "start the processes",
           withUnits(List.of("systemctl", "--user", "start"), unchanged));
     }
+    return changed.stream().map(unit -> unit.substring(UNIT_PREFIX.length())).toList();
   }
 
-  private Report look(String project, SailYaml config)
+  /**
+   * Where every declared port stands. {@code started}: the processes were started by this serve, so
+   * one that is no longer running exited, whatever its status.
+   */
+  private Report look(String project, SailYaml config, boolean started)
       throws IOException, InterruptedException, TimeoutException {
     var declared = processes(config);
     var command = new ArrayList<>(List.of("sh", "-c", LOOK, "sh"));
@@ -271,13 +322,19 @@ public final class ProjectServer {
       }
       var port = process.getValue().port();
       var unit = units.getOrDefault(unitOf(process.getKey()) + ".service", Map.of());
-      ports.add(processPort(project, process.getKey(), port, listening.contains(port), unit));
+      ports.add(
+          processPort(project, process.getKey(), port, listening.contains(port), unit, started));
     }
-    return new Report(ports);
+    return Report.of(ports);
   }
 
   private Port processPort(
-      String project, String name, int port, boolean listens, Map<String, String> unit)
+      String project,
+      String name,
+      int port,
+      boolean listens,
+      Map<String, String> unit,
+      boolean started)
       throws IOException, InterruptedException, TimeoutException {
     if (listens) {
       return new Port(name, port, Kind.PROCESS, State.LISTENING, null, "");
@@ -288,7 +345,10 @@ public final class ProjectServer {
         Strings.isBlank(unit.get("ExecMainStatus"))
             ? 0
             : Integer.parseInt(unit.get("ExecMainStatus"));
-    var exited = active.equals("failed") || sub.equals("auto-restart");
+    var exited =
+        active.equals("failed")
+            || sub.equals("auto-restart")
+            || (started && active.equals("inactive"));
     if (exited) {
       return new Port(name, port, Kind.PROCESS, State.EXITED, status, lastLine(project, name));
     }
@@ -299,16 +359,17 @@ public final class ProjectServer {
 
   private String lastLine(String project, String name)
       throws IOException, InterruptedException, TimeoutException {
+    return lastLine(shell, project, logPath(name), startMark(name));
+  }
+
+  /**
+   * The line of {@code log} that says why its process failed ({@code LAST_LINE}); empty if none.
+   */
+  static String lastLine(ShellExec shell, String project, String log, String mark)
+      throws IOException, InterruptedException, TimeoutException {
     var tail =
         shell.exec(
-            ContainerExec.asDevUser(
-                project,
-                List.of(
-                    "sh",
-                    "-c",
-                    "[ -f \"$1\" ] && grep -v '^[[:space:]]*$' \"$1\" | tail -n 1; :",
-                    "sh",
-                    logPath(name))));
+            ContainerExec.asDevUser(project, List.of("sh", "-c", LAST_LINE, "sh", log, mark)));
     return tail.ok() ? tail.stdout().strip() : "";
   }
 
@@ -318,7 +379,7 @@ public final class ProjectServer {
   }
 
   private static Report timedOut(Report report) {
-    return new Report(
+    return Report.of(
         report.ports().stream()
             .map(
                 port ->
@@ -374,7 +435,7 @@ public final class ProjectServer {
    * its last line, read by a login shell so the project's runtimes are on the PATH.
    */
   static String script(SailYaml config, SailYaml.Process process) {
-    var script = new StringBuilder("# Generated by sail: sail project serve writes it again.\n");
+    var script = new StringBuilder("# Generated by sail: every serve writes it again.\n");
     script
         .append("cd ")
         .append(Strings.shellWord(workdirOf(config, process)))
@@ -400,6 +461,7 @@ public final class ProjectServer {
         Description=sail process %1$s
 
         [Service]
+        ExecStartPre=/bin/echo %4$s
         ExecStart=/bin/bash -l %2$s
         Restart=on-failure
         RestartSec=2
@@ -409,7 +471,7 @@ public final class ProjectServer {
         [Install]
         WantedBy=default.target
         """
-        .formatted(name, scriptPath(name), logPath(name));
+        .formatted(name, scriptPath(name), logPath(name), startMark(name));
   }
 
   /** Where {@code process} runs: its workdir under the workspace, else the first repo's path. */
@@ -429,6 +491,11 @@ public final class ProjectServer {
   /** The log a process's unit appends to. */
   public static String logPath(String name) {
     return PROCESSES_DIR + "/" + name + ".log";
+  }
+
+  /** The line a process's unit writes into its log before each start. */
+  static String startMark(String name) {
+    return "sail: starting " + name;
   }
 
   static String scriptPath(String name) {
@@ -460,7 +527,7 @@ public final class ProjectServer {
   }
 
   /** Writes {@code content} to {@code path} unless it already holds it; whether it wrote. */
-  private boolean write(String project, String path, String content)
+  static boolean writeOnce(ShellExec shell, String project, String path, String content)
       throws IOException, InterruptedException, TimeoutException {
     var wrote =
         shell.exec(

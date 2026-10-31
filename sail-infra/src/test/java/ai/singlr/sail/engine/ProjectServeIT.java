@@ -83,7 +83,8 @@ class ProjectServeIT extends AbstractIncusIT {
               new ProjectApplier(
                   shell,
                   new PrintStream(OutputStream.nullOutputStream(), true, StandardCharsets.UTF_8)),
-              duration -> Thread.sleep(duration));
+              duration -> Thread.sleep(duration),
+              System::nanoTime);
       var web =
           "  web:\n    command: python3 -m http.server 8000\n    workdir: .\n    port: 8000\n";
 

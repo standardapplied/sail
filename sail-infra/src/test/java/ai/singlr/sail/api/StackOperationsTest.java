@@ -47,7 +47,8 @@ class StackOperationsTest {
         shell,
         new ProjectLoader(
             shell, project -> "acme".equals(project) ? Optional.of(definition) : Optional.empty()),
-        pause);
+        pause,
+        System::nanoTime);
   }
 
   private StackOperations stack() {
@@ -70,6 +71,8 @@ class StackOperationsTest {
             "acme",
             "all_listening",
             true,
+            "restarted",
+            List.of(),
             "ports",
             List.of(
                 port("postgres", 5432, "service", "listening"),

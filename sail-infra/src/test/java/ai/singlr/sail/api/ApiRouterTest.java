@@ -1077,9 +1077,12 @@ class ApiRouterTest {
       var stopped = delete(server, "/v1/projects/acme/serve", "token");
 
       assertEquals(200, served.statusCode(), served.body());
-      assertTrue(served.body().contains("\"all_listening\": true"), served.body());
+      assertEquals(true, YamlUtil.parseMap(served.body()).get("all_listening"));
       assertEquals(200, ports.statusCode(), ports.body());
-      assertTrue(ports.body().contains("\"name\": \"web\""), ports.body());
+      assertEquals(
+          List.of("postgres", "web"),
+          ((List<?>) YamlUtil.parseMap(ports.body()).get("ports"))
+              .stream().map(row -> ((Map<?, ?>) row).get("name")).toList());
       assertEquals(200, stopped.statusCode(), stopped.body());
     }
   }

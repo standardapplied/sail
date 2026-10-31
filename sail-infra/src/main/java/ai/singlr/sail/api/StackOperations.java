@@ -20,6 +20,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
+import java.util.function.LongSupplier;
 
 /**
  * A project's stack, its services and processes, as every door brings it up and reads it: {@code
@@ -35,11 +36,14 @@ public final class StackOperations {
   private final ShellExec shell;
   private final ProjectLoader projects;
   private final ProjectServer.Pause pause;
+  private final LongSupplier nanos;
 
-  StackOperations(ShellExec shell, ProjectLoader projects, ProjectServer.Pause pause) {
+  StackOperations(
+      ShellExec shell, ProjectLoader projects, ProjectServer.Pause pause, LongSupplier nanos) {
     this.shell = Objects.requireNonNull(shell, "shell");
     this.projects = Objects.requireNonNull(projects, "projects");
     this.pause = Objects.requireNonNull(pause, "pause");
+    this.nanos = Objects.requireNonNull(nanos, "nanos");
   }
 
   /**
@@ -47,11 +51,12 @@ public final class StackOperations {
    *
    * @param allListening whether every declared port listens
    */
-  public record Ports(String project, List<ProjectServer.Port> ports, boolean allListening)
+  public record Ports(
+      String project, List<ProjectServer.Port> ports, List<String> restarted, boolean allListening)
       implements Mappable {
 
     static Ports of(String project, ProjectServer.Report report) {
-      return new Ports(project, report.ports(), report.allListening());
+      return new Ports(project, report.ports(), report.restarted(), report.allListening());
     }
 
     @Override
@@ -73,6 +78,7 @@ public final class StackOperations {
                     return (Object) row;
                   })
               .toList());
+      map.put("restarted", restarted);
       map.put("all_listening", allListening);
       return map;
     }
@@ -119,7 +125,8 @@ public final class StackOperations {
         shell,
         new ProjectApplier(
             shell, new PrintStream(OutputStream.nullOutputStream(), true, StandardCharsets.UTF_8)),
-        pause);
+        pause,
+        nanos);
   }
 
   private static void requireReadable(String project) {

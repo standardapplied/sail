@@ -99,8 +99,15 @@ public final class ProjectServeCommand implements Callable<Integer> {
                   + " definition.|@"));
       return;
     }
-    new ProjectServer.Report(ports.ports())
-        .lines()
-        .forEach(line -> System.out.println("  " + line));
+    ProjectServer.Report.of(ports.ports()).lines().forEach(line -> System.out.println("  " + line));
+    ports
+        .restarted()
+        .forEach(
+            name ->
+                System.out.println(
+                    Ansi.AUTO.string(
+                        "  @|faint Restarted "
+                            + name
+                            + ": its command or environment changed.|@")));
   }
 }

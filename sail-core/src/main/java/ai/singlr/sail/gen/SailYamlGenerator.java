@@ -159,7 +159,7 @@ public final class SailYamlGenerator {
     sb.append(
         """
         # Apps the project runs in its container. The portal brings each up and opens the
-        # first with a port: sudo sail project serve <project>.
+        # first one with a port.
         processes:
         """);
     for (var entry : processes.entrySet()) {

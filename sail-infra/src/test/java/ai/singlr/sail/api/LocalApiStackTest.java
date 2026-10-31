@@ -78,6 +78,13 @@ class LocalApiStackTest {
   }
 
   @Test
+  void aRequestWithoutACredentialIsRefused() {
+    var unknown = ask("GET", "/v1/projects/acme/ports", "sailrun_unknown", "");
+
+    assertEquals(401, unknown.status());
+  }
+
+  @Test
   void aRunReachesOnlyItsOwnProjectsStack() {
     var other = ask("GET", "/v1/projects/zeta/ports", TestOperations.RUN_CREDENTIAL, "");
 
