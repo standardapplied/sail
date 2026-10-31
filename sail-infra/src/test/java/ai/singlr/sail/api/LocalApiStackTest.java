@@ -8,11 +8,14 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
+import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -28,7 +31,18 @@ class LocalApiStackTest {
   private final LocalApiRouter router =
       new LocalApiRouter(
           new TestOperations() {
-            private final StackOperations stack = StackOperationsTest.stack(shell, duration -> {});
+            private final StackOperations stack =
+                new StackOperations(
+                    shell,
+                    new ProjectLoader(
+                        shell,
+                        project ->
+                            Optional.of(
+                                SailYaml.fromMap(
+                                    YamlUtil.parseMap(
+                                        StackOperationsTest.ACME.replace("acme", project))))),
+                    duration -> {},
+                    System::nanoTime);
 
             @Override
             public StackOperations stack() {

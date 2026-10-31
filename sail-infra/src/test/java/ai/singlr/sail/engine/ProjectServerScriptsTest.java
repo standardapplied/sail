@@ -54,7 +54,9 @@ class ProjectServerScriptsTest {
         "Error: Cannot find module 'next'",
         ProjectServer.lastLine(shell, "acme", log.toString(), "sail: starting web"));
 
-    Files.writeString(log, "sail: starting web\nlistening soon\nbye\n");
+    Files.writeString(
+        log,
+        "sail: starting web\nError: from the run before\nsail: starting web\nlistening soon\nbye\n");
     assertEquals(
         "bye", ProjectServer.lastLine(shell, "acme", log.toString(), "sail: starting web"));
     assertEquals(
