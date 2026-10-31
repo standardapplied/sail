@@ -738,7 +738,8 @@ class ProjectApplierTest {
   }
 
   @Test
-  void applySkillsInstallsTheProjectsSkillsAndWarnsOfAFolderThatIsNone() throws Exception {
+  void applySkillsInstallsTheProjectsSkillsAndWarnsOfAFolderThatIsNoneAndALongBody()
+      throws Exception {
     try (var db = Sqlite.open(tempDir.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
       var files = new FileStore(db);
@@ -747,7 +748,10 @@ class ProjectApplierTest {
             files.put(
                 "test",
                 ".sail/skills/e2e/SKILL.md",
-                new ByteArrayInputStream("Run the suite.\n".getBytes(StandardCharsets.UTF_8)),
+                new ByteArrayInputStream(
+                    ("---\nname: e2e\ndescription: Runs the suite.\n---\nRun the suite.\n"
+                            + "step\n".repeat(StageSkill.ADVISED_LINES))
+                        .getBytes(StandardCharsets.UTF_8)),
                 0644);
             files.put(
                 "test",
@@ -775,7 +779,9 @@ class ProjectApplierTest {
       assertEquals(
           List.of(
               "skill folder 'broken' skipped: .sail/skills/broken/SKILL.md is missing or is not a"
-                  + " text file."),
+                  + " text file.",
+              "Skill 'e2e' has a SKILL.md body of 501 lines; the Agent Skills standard advises under"
+                  + " 500, with detail moved to files under references/."),
           result.warnings());
       assertTrue(
           shell.invocations().stream()

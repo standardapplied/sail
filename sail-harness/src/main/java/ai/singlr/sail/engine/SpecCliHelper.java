@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.common.Remedy;
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
@@ -50,23 +49,8 @@ public final class SpecCliHelper {
       # unless --room says otherwise.
       set -euo pipefail
 
-      SOCKET="__SAIL_API_SOCKET__"
+      __PREAMBLE__
       BASE="http://sail/v1/specs"
-      PROJECT="$(hostname)"
-      CREDENTIAL="${SAIL_RUN_CREDENTIAL:-}"
-      BOX_CREDENTIAL_FILE="$(dirname "$SOCKET")/box.credential"
-
-      die() { echo "spec: $*" >&2; exit 1; }
-      [ -S "$SOCKET" ] || die "API socket not found at $SOCKET (is the project running?)"
-      if [ -z "$CREDENTIAL" ] && [ -r "$BOX_CREDENTIAL_FILE" ]; then
-        CREDENTIAL="$(tr -d '[:space:]' < "$BOX_CREDENTIAL_FILE")"
-      fi
-      [ -n "$CREDENTIAL" ] || die "no credential: SAIL_RUN_CREDENTIAL is unset and $BOX_CREDENTIAL_FILE is unreadable: this box has no sync handle. Give it one on the host: __SAIL_SET_HANDLE__"
-
-      api() {
-        curl --silent --show-error --fail-with-body --max-time 20 --unix-socket "$SOCKET" \\
-          -H "Authorization: Bearer $CREDENTIAL" "$@"
-      }
 
       # Maps --flag values from "$@" into curl --data-urlencode fields. Knows the spec fields;
       # --body-file/--plan-file are read and url-encoded from a file by curl itself.
@@ -196,11 +180,7 @@ public final class SpecCliHelper {
 
   /** Returns the script content that {@link #install(String)} writes. Pure function. */
   public static String scriptContent() {
-    return SCRIPT
-        .replace("__SAIL_API_SOCKET__", SailPaths.apiSocketContainerPath().toString())
-        .replace(
-            "__SAIL_SET_HANDLE__",
-            Remedy.of(Remedy.sail("host config set sync-handle", "<handle>")).plain());
+    return SCRIPT.replace("__PREAMBLE__\n", SocketPreamble.of("spec"));
   }
 
   /** Returns the PATH line that {@link #install(String)} appends to {@link #PROFILE_PATH}. */
@@ -214,30 +194,7 @@ public final class SpecCliHelper {
    * agent can run {@code spec} by name) by adding an export to {@link #PROFILE_PATH} when absent.
    */
   public void install(String container) throws IOException, InterruptedException, TimeoutException {
-    NameValidator.requireValidProjectName(container);
-
-    var mkdir = shell.exec(ContainerExec.asDevUser(container, List.of("mkdir", "-p", SCRIPT_DIR)));
-    if (!mkdir.ok()) {
-      throw new IOException(
-          "Failed to create " + SCRIPT_DIR + " in " + container + ": " + mkdir.reason());
-    }
-
-    var write =
-        shell.exec(
-            ContainerExec.asDevUser(
-                container,
-                List.of(
-                    "bash",
-                    "-c",
-                    "printf '%s' \"$1\" > \"$2\" && chmod 0755 \"$2\"",
-                    "bash",
-                    scriptContent(),
-                    SCRIPT_PATH)));
-    if (!write.ok()) {
-      throw new IOException(
-          "Failed to install " + SCRIPT_PATH + " in " + container + ": " + write.reason());
-    }
-
+    installOnPath(shell, container, SCRIPT_PATH, scriptContent());
     var onPath =
         shell.exec(
             ContainerExec.asDevUser(
@@ -252,6 +209,35 @@ public final class SpecCliHelper {
     if (!onPath.ok()) {
       throw new IOException(
           "Failed to add " + SCRIPT_DIR + " to PATH in " + container + ": " + onPath.reason());
+    }
+  }
+
+  /**
+   * Writes {@code content} to {@code path} under {@link #SCRIPT_DIR} in {@code container}, chmod
+   * 0755, as the dev user: the one way a helper on the PATH is installed.
+   */
+  static void installOnPath(ShellExec shell, String container, String path, String content)
+      throws IOException, InterruptedException, TimeoutException {
+    NameValidator.requireValidProjectName(container);
+    var mkdir = shell.exec(ContainerExec.asDevUser(container, List.of("mkdir", "-p", SCRIPT_DIR)));
+    if (!mkdir.ok()) {
+      throw new IOException(
+          "Failed to create " + SCRIPT_DIR + " in " + container + ": " + mkdir.reason());
+    }
+    var write =
+        shell.exec(
+            ContainerExec.asDevUser(
+                container,
+                List.of(
+                    "bash",
+                    "-c",
+                    "printf '%s' \"$1\" > \"$2\" && chmod 0755 \"$2\"",
+                    "bash",
+                    content,
+                    path)));
+    if (!write.ok()) {
+      throw new IOException(
+          "Failed to install " + path + " in " + container + ": " + write.reason());
     }
   }
 }

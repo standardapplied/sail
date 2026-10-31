@@ -258,7 +258,9 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
             files.put(
                 CONTAINER,
                 StageSkill.PROJECT_ROOT + "e2e/SKILL.md",
-                new ByteArrayInputStream("Run the e2e suite.\n".getBytes(StandardCharsets.UTF_8)),
+                new ByteArrayInputStream(
+                    "---\nname: e2e\ndescription: Runs the e2e suite.\n---\nRun the e2e suite.\n"
+                        .getBytes(StandardCharsets.UTF_8)),
                 0644));
     var skills =
         new ProjectSkills(
@@ -269,7 +271,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
       var report = ProjectSkillInstaller.installProject(shell, CONTAINER, harness, skills);
       assertEquals(List.of("e2e", SpecSkillGenerator.NAME), report.installed());
       assertEquals(
-          "Run the e2e suite.\n",
+          "---\nname: e2e\ndescription: Runs the e2e suite.\n---\nRun the e2e suite.\n",
           exec(CONTAINER, List.of("cat", "/home/dev/" + harness.skillFolder("e2e") + "/SKILL.md"))
               .stdout(),
           harness.yamlName());

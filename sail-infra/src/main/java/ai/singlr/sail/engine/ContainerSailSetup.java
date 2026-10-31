@@ -129,6 +129,7 @@ public final class ContainerSailSetup {
     new SailRoomRelay(shell).install(container);
     new SailSessionReport(shell).install(container);
     new SpecCliHelper(shell).install(container);
+    new SkillCliHelper(shell).install(container);
     var hooks = new HarnessHooks(shell);
     for (var harness : Harnesses.all()) {
       hooks.install(container, harness);
@@ -170,6 +171,7 @@ public final class ContainerSailSetup {
     files.put(SailRoomRelay.SCRIPT_PATH, SailRoomRelay.scriptContent());
     files.put(SailSessionReport.SCRIPT_PATH, SailSessionReport.scriptContent());
     files.put(SpecCliHelper.SCRIPT_PATH, SpecCliHelper.scriptContent());
+    files.put(SkillCliHelper.SCRIPT_PATH, SkillCliHelper.scriptContent());
     files.put(SpecCliHelper.PROFILE_PATH, SpecCliHelper.profileLine());
     for (var harness : Harnesses.all()) {
       files.put(harness.hooks().path(), HarnessHooks.render(harness));

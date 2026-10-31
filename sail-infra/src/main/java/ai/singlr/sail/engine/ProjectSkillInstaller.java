@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.TreeSet;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -30,11 +31,14 @@ import java.util.stream.Collectors;
  * longer holds is removed; a folder without a stamp is not sail's and is left alone — and one that
  * stands where a held skill's folder goes is not replaced either: the install fails, naming it, so
  * a person's own skill under a name the project later takes is never deleted. The one unstamped
- * folder sail replaces is the {@code spec-board} it wrote before it stamped (0.46 and earlier),
- * known by its content: nothing in it but regular files, no link or folder among them, of the
- * skill's own names, each holding byte for byte what a release of sail wrote ({@link
- * SpecSkillGenerator#UNSTAMPED_HASHES}). A file of another content, a name sail never wrote, or a
- * folder or link under one of its names is someone's, and the folder is refused.
+ * folder sail replaces is a copy of the skill itself, known by its content: nothing in it but
+ * folders and regular files, each file at a path the skill holds and byte for byte that file, so
+ * the person who shared a skill from where they made it, or copied it into another harness's
+ * folder, loses nothing when the stamped one takes its place. For {@code spec-board} the files of
+ * the releases that wrote it before it stamped (0.46 and earlier, {@link
+ * SpecSkillGenerator#UNSTAMPED_HASHES}) count as its own too. A file of another content, a path the
+ * skill does not hold, or a link or special file anywhere in it is someone's, and the folder is
+ * refused.
  *
  * <p>A replacement is built outside the skills directory, beside it in a folder of the install's
  * own, stamped last and put in place in one step — so a harness never opens a folder half-written
@@ -71,27 +75,39 @@ public final class ProjectSkillInstaller {
         exit 1
       }
       if { [ -e "$1" ] || [ -L "$1" ]; } && [ ! -f "$1/$3" ]; then
-        if [ -z "$4" ] || [ -L "$1" ] || [ ! -d "$1" ]; then refuse "$1" "$3"; fi
-        for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
-          if [ -e "$entry" ] || [ -L "$entry" ]; then
-            if [ -L "$entry" ] || [ ! -f "$entry" ]; then refuse "$1" "$3"; fi
-            sum=$(sha256sum < "$entry") || refuse "$1" "$3"
-            case " $4 " in *" ${entry##*/}=${sum%% *} "*) ;; *) refuse "$1" "$3" ;; esac
-          fi
-        done
+        if [ -L "$1" ] || [ ! -d "$1" ]; then refuse "$1" "$3"; fi
+        if [ -n "$(find "$1" -mindepth 1 ! -type d ! -type f -print)" ]; then refuse "$1" "$3"; fi
+        find "$1" -type f -exec sh -c '
+          root=$1
+          allowed=$2
+          shift 2
+          for entry do
+            sum=$(sha256sum < "$entry") || exit 1
+            case "$allowed" in *"
+      ${entry#"$root/"}=${sum%% *}
+      "*) ;; *) exit 1 ;; esac
+          done
+        ' sh "$1" "$4" {} + || refuse "$1" "$3"
       fi
       rm -rf "$1" && mv -T "$2" "$1"
       """;
   private static final String STAMPED =
       "for d in \"$1\"/*/; do [ -f \"$d" + StageSkill.STAMP + "\" ] && basename \"$d\"; done; :";
+  private static final String UNSTAMPED =
+      "for d in \"$1\"/*/; do [ -f \"${d}"
+          + StageSkill.MANIFEST
+          + "\" ] && [ ! -f \"${d}"
+          + StageSkill.STAMP
+          + "\" ] && basename \"$d\"; done; :";
 
   private ProjectSkillInstaller() {}
 
   /**
    * What one install of a project's skills did: the names it installed (the project's valid folders
-   * and {@code spec-board}) and, for each folder skipped, one sentence naming it and why.
+   * and {@code spec-board}), for each folder skipped one sentence naming it and why, and for each
+   * installed skill the standard advises against, one sentence saying what it advises.
    */
-  public record Report(List<String> installed, List<String> skipped) {}
+  public record Report(List<String> installed, List<String> skipped, List<String> advised) {}
 
   /**
    * Installs {@code project}'s skills, as {@code skills} reads them now, and {@code spec-board} for
@@ -117,7 +133,10 @@ public final class ProjectSkillInstaller {
         skillsDirOf(harness),
         held,
         (skill, file) -> skills.open(project, skill, file));
-    return new Report(held.stream().map(StageSkill::name).toList(), List.copyOf(skipped));
+    return new Report(
+        held.stream().map(StageSkill::name).toList(),
+        List.copyOf(skipped),
+        held.stream().flatMap(skill -> skill.advice().stream()).toList());
   }
 
   /** The absolute skills directory of {@code harness} in a container, without a trailing slash. */
@@ -167,14 +186,33 @@ public final class ProjectSkillInstaller {
     }
   }
 
+  /**
+   * The skills someone made by hand in a harness's {@code skillsDir} ({@link #skillsDirOf}): each
+   * folder directly under it, not hidden, holding a {@code SKILL.md} and no stamp, under a name a
+   * skill can take, in name order. None when the folder does not exist.
+   */
+  public static List<String> local(ShellExec shell, String project, String skillsDir)
+      throws IOException, InterruptedException, TimeoutException {
+    return folders(shell, project, skillsDir, UNSTAMPED, "skills made by hand").stream()
+        .filter(StageSkill::isName)
+        .sorted()
+        .toList();
+  }
+
   /** The names of the folders sail stamped under {@code skillsDir}. */
   private static List<String> stamped(ShellExec shell, String project, String skillsDir)
       throws IOException, InterruptedException, TimeoutException {
+    return folders(shell, project, skillsDir, STAMPED, "installed skills");
+  }
+
+  private static List<String> folders(
+      ShellExec shell, String project, String skillsDir, String script, String what)
+      throws IOException, InterruptedException, TimeoutException {
     var listed =
-        shell.exec(ContainerExec.asDevUser(project, List.of("sh", "-c", STAMPED, "sh", skillsDir)));
+        shell.exec(ContainerExec.asDevUser(project, List.of("sh", "-c", script, "sh", skillsDir)));
     if (!listed.ok()) {
       throw new IOException(
-          "Failed to list the installed skills in " + project + ": " + listed.stderr());
+          "Failed to list the " + what + " in " + project + ": " + listed.stderr());
     }
     return listed.stdout().lines().map(String::strip).filter(name -> !name.isEmpty()).toList();
   }
@@ -238,7 +276,7 @@ public final class ProjectSkillInstaller {
               folder,
               build,
               StageSkill.STAMP,
-              legacyFilesOf(skill)));
+              ownFilesOf(skill)));
     } catch (IOException | InterruptedException | TimeoutException | RuntimeException failure) {
       discard(shell, project, build, failure);
       throw failure;
@@ -246,18 +284,21 @@ public final class ProjectSkillInstaller {
   }
 
   /**
-   * The files an unstamped folder of {@code skill} may hold and still be the one sail wrote before
-   * it stamped, each as {@code <name>=<sha256>}: {@code spec-board}'s own, and none for any other
-   * skill.
+   * The files an unstamped folder of {@code skill} may hold and still be a copy of it, one {@code
+   * <path>=<sha256>} a line between newlines: the skill's own, and for {@code spec-board} the ones
+   * releases wrote before it stamped. A skill's paths hold no control character, so a line is one
+   * file.
    */
-  private static String legacyFilesOf(StageSkill skill) {
-    if (!skill.name().equals(SpecSkillGenerator.NAME)) {
-      return "";
+  static String ownFilesOf(StageSkill skill) {
+    var files =
+        skill.files().stream()
+            .map(file -> file.path() + "=" + file.contentHash())
+            .collect(Collectors.toCollection(TreeSet::new));
+    if (skill.name().equals(SpecSkillGenerator.NAME)) {
+      SpecSkillGenerator.UNSTAMPED_HASHES.forEach(
+          (path, hashes) -> hashes.forEach(hash -> files.add(path + "=" + hash)));
     }
-    return SpecSkillGenerator.UNSTAMPED_HASHES.entrySet().stream()
-        .flatMap(file -> file.getValue().stream().map(hash -> file.getKey() + "=" + hash))
-        .sorted()
-        .collect(Collectors.joining(" "));
+    return "\n" + String.join("\n", files) + "\n";
   }
 
   /**

@@ -65,6 +65,22 @@ class SpecSkillGeneratorTest {
   }
 
   @Test
+  void theSkillPassesTheStandardsRulesAndFailsThemWithoutItsDescription() {
+    var files = SpecSkillGenerator.skill().files();
+    var described = SpecSkillGenerator.skillMd();
+    var undescribed = described.replaceFirst("description: >\n(  .*\n)+", "");
+
+    assertEquals(SpecSkillGenerator.skill(), StageSkill.of("spec-board", described, files));
+    assertEquals(
+        "Skill 'spec-board' has no description in its front matter: the Agent Skills standard"
+            + " requires one.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> StageSkill.of("spec-board", undescribed, files))
+            .getMessage());
+  }
+
+  @Test
   void aFileTheSkillDoesNotHoldIsRefusedNamingIt() {
     var refused =
         assertThrows(

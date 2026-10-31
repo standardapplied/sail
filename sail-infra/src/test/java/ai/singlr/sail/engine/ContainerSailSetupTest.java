@@ -228,6 +228,7 @@ class ContainerSailSetupTest {
             SailRoomRelay.SCRIPT_PATH,
             SailSessionReport.SCRIPT_PATH,
             SpecCliHelper.SCRIPT_PATH,
+            SkillCliHelper.SCRIPT_PATH,
             SpecCliHelper.PROFILE_PATH,
             Harnesses.of("claude-code").hooks().path(),
             "/home/dev/.sail/claude-live.json",

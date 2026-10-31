@@ -40,7 +40,7 @@ final class ProjectLoader {
     }
   }
 
-  private SailYaml definition(String project) {
+  SailYaml definition(String project) {
     try {
       return definitions.require(project);
     } catch (ProjectReader.Unreadable e) {

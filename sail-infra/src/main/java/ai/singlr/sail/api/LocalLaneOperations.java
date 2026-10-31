@@ -52,6 +52,12 @@ public interface LocalLaneOperations {
   Optional<Actor> runActor(RunStore.RunRow run);
 
   /**
+   * A project's skills, as the container's {@code skill} shows and changes them: the same
+   * operations the devbox's {@code sail project skills} runs.
+   */
+  SkillOperations skills();
+
+  /**
    * Resolves the box's ambient credential to the FDE actor it stands for, or empty when the
    * credential is unknown or its handle has left the roster. Serves the local socket's interactive
    * lane; run credentials are resolved first and never reach this.
