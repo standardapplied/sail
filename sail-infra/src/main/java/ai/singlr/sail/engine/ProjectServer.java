@@ -68,7 +68,10 @@ public final class ProjectServer {
     LISTENING,
     /** Its process is running and does not listen yet. */
     STARTING,
-    /** Its process exited, or keeps exiting, before it listened. */
+    /**
+     * Its process exited before it listened and systemd gave up on it, or is waiting to start it
+     * again: a stopped unit that once failed is {@link #STOPPED}.
+     */
     EXITED,
     /** Nothing runs that would listen on it. */
     STOPPED,
@@ -285,10 +288,7 @@ public final class ProjectServer {
         Strings.isBlank(unit.get("ExecMainStatus"))
             ? 0
             : Integer.parseInt(unit.get("ExecMainStatus"));
-    var exited =
-        active.equals("failed")
-            || sub.equals("auto-restart")
-            || (active.equals("inactive") && status != 0);
+    var exited = active.equals("failed") || sub.equals("auto-restart");
     if (exited) {
       return new Port(name, port, Kind.PROCESS, State.EXITED, status, lastLine(project, name));
     }

@@ -400,6 +400,19 @@ class ProjectServerTest {
   }
 
   @Test
+  void aStoppedUnitThatOnceFailedIsStoppedNotExited() throws Exception {
+    var container =
+        new Container()
+            .looking(
+                look(
+                    "", unit("web", "inactive", "dead", 1), unit("worker", "inactive", "dead", 0)));
+
+    var web = server(container).ports("acme", acme()).ports().getLast();
+
+    assertEquals(new Port("web", 3000, Kind.PROCESS, State.STOPPED, null, ""), web);
+  }
+
+  @Test
   void aDefinitionWithoutProcessesServesItsServicesAsBefore() throws Exception {
     var container = new Container().looking(look("LISTEN 0 4096 *:5432 *:*\n"));
     var config =
