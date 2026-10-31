@@ -768,8 +768,7 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public StackOperations stack() {
-    return new StackOperations(
-        shell, projects, duration -> Thread.sleep(duration), System::nanoTime);
+    return new StackOperations(shell, projects, Thread::sleep, System::nanoTime);
   }
 
   /** The review and fix lanes the review pipeline launches through — see {@code reviewLanes}. */

@@ -66,6 +66,20 @@ class LocalApiStackTest {
   }
 
   @Test
+  void aPersonsSessionStopsTheProjectsProcesses() {
+    shell.onOk("basename", "sail-process-web\n");
+
+    var stopped = ask("DELETE", "/v1/projects/acme/serve", TestOperations.BOX_CREDENTIAL, "");
+
+    assertEquals(200, stopped.status(), stopped.body().toString());
+    assertEquals(
+        1,
+        shell.invocations().stream()
+            .filter(c -> c.contains("systemctl --user disable --now sail-process-web.service"))
+            .count());
+  }
+
+  @Test
   void aReadOnlyRoomMemberMayNotServeOrStopNamingWhy() {
     var served = ask("POST", "/v1/projects/acme/serve", TestOperations.ROOM_RUN_CREDENTIAL, "");
     var stopped = ask("DELETE", "/v1/projects/acme/serve", TestOperations.ROOM_RUN_CREDENTIAL, "");
