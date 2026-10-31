@@ -11,10 +11,12 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /** Root model for {@code sail.yaml} project descriptor. */
@@ -82,35 +84,75 @@ public record SailYaml(
     var sshRaw = (Map<String, Object>) map.get("ssh");
 
     var agent = agentRaw != null ? Agent.fromMap(agentRaw, descriptor(name)) : null;
-    return new SailYaml(
-        name,
-        (String) map.get("description"),
-        resourcesRaw != null ? Resources.fromMap(resourcesRaw) : null,
-        (String) map.get("image"),
-        (List<String>) map.get("packages"),
-        runtimesRaw != null ? Runtimes.fromMap(runtimesRaw) : null,
-        gitRaw != null ? Git.fromMap(gitRaw) : null,
-        reposRaw != null ? reposRaw.stream().map(Repo::fromMap).toList() : null,
-        servicesRaw != null
-            ? servicesRaw.entrySet().stream()
-                .collect(
-                    Collectors.toMap(
-                        Map.Entry::getKey,
-                        e -> Service.fromMap((Map<String, Object>) e.getValue()),
-                        (a, b) -> a,
-                        LinkedHashMap::new))
-            : null,
-        processesRaw != null
-            ? processesRaw.entrySet().stream()
-                .collect(
-                    Collectors.toMap(
-                        Map.Entry::getKey,
-                        e -> Process.fromMap((Map<String, Object>) e.getValue()),
-                        (a, b) -> a,
-                        LinkedHashMap::new))
-            : null,
-        agent,
-        sshRaw != null ? Ssh.fromMap(sshRaw) : null);
+    var config =
+        new SailYaml(
+            name,
+            (String) map.get("description"),
+            resourcesRaw != null ? Resources.fromMap(resourcesRaw) : null,
+            (String) map.get("image"),
+            (List<String>) map.get("packages"),
+            runtimesRaw != null ? Runtimes.fromMap(runtimesRaw) : null,
+            gitRaw != null ? Git.fromMap(gitRaw) : null,
+            reposRaw != null ? reposRaw.stream().map(Repo::fromMap).toList() : null,
+            servicesRaw != null
+                ? servicesRaw.entrySet().stream()
+                    .collect(
+                        Collectors.toMap(
+                            Map.Entry::getKey,
+                            e -> Service.fromMap((Map<String, Object>) e.getValue()),
+                            (a, b) -> a,
+                            LinkedHashMap::new))
+                : null,
+            processesRaw != null
+                ? processesRaw.entrySet().stream()
+                    .collect(
+                        Collectors.toMap(
+                            Map.Entry::getKey,
+                            e -> Process.fromMap(e.getKey(), (Map<String, Object>) e.getValue()),
+                            (a, b) -> a,
+                            LinkedHashMap::new))
+                : null,
+            agent,
+            sshRaw != null ? Ssh.fromMap(sshRaw) : null);
+    config.requirePortsClaimedOnce();
+    return config;
+  }
+
+  /**
+   * Refuses a definition where two processes, or a process and a service, claim one port: the
+   * portal forwards a declared port to exactly one app.
+   */
+  private void requirePortsClaimedOnce() {
+    var claimed = new LinkedHashMap<Integer, String>();
+    if (services != null) {
+      services.forEach(
+          (service, declared) -> {
+            if (declared != null && declared.ports() != null) {
+              declared
+                  .ports()
+                  .forEach(port -> claimed.putIfAbsent(port, "service '" + service + "'"));
+            }
+          });
+    }
+    if (processes != null) {
+      processes.forEach(
+          (process, declared) -> {
+            if (declared.port() == null) {
+              return;
+            }
+            var other = claimed.putIfAbsent(declared.port(), "process '" + process + "'");
+            if (other != null) {
+              throw new IllegalArgumentException(
+                  "Port "
+                      + declared.port()
+                      + " is claimed by both "
+                      + other
+                      + " and process '"
+                      + process
+                      + "'. Give one of them another port.");
+            }
+          });
+    }
   }
 
   private static String descriptor(String name) {
@@ -330,15 +372,99 @@ public record SailYaml(
     }
   }
 
-  public record Process(String command, String workdir) {
-    public static Process fromMap(Map<String, Object> map) {
-      return new Process((String) map.get("command"), (String) map.get("workdir"));
+  /**
+   * An app the project runs in its container as the dev user, from its working directory.
+   *
+   * @param workdir relative to the workspace, {@code .} for the workspace itself; null for the
+   *     first repo's path
+   * @param port the port it listens on, which the portal forwards and opens; null for none
+   * @param env what it adds to its environment, by name; empty for nothing
+   */
+  public record Process(String command, String workdir, Integer port, Map<String, String> env) {
+
+    /** The lowest port a process may claim: below it a port needs root. */
+    public static final int MIN_PORT = 1024;
+
+    /** The highest port there is. */
+    public static final int MAX_PORT = 65535;
+
+    /** The workdir that is the workspace itself. */
+    public static final String WORKSPACE = ".";
+
+    private static final Pattern ENV_NAME = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
+
+    public Process {
+      env = env == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(env));
+    }
+
+    /** The process named {@code name} as {@code processes.<name>} declares it, checked whole. */
+    @SuppressWarnings("unchecked")
+    public static Process fromMap(String name, Map<String, Object> map) {
+      NameValidator.requireValidProcessName(name);
+      var field = "processes." + name;
+      if (map == null || !(map.get("command") instanceof String command) || command.isBlank()) {
+        throw new IllegalArgumentException(
+            field + ".command is required: the command that starts it.");
+      }
+      var workdir = map.get("workdir");
+      if (workdir != null && !(workdir instanceof String)) {
+        throw new IllegalArgumentException(field + ".workdir must be text when set.");
+      }
+      if (workdir != null && !inWorkspace((String) workdir).isEmpty()) {
+        NameValidator.requireSafePath(inWorkspace((String) workdir), field + ".workdir");
+      }
+      var port = map.get("port");
+      if (port != null
+          && (!(port instanceof Integer number) || number < MIN_PORT || number > MAX_PORT)) {
+        throw new IllegalArgumentException(
+            field
+                + ".port must be a whole number from "
+                + MIN_PORT
+                + " to "
+                + MAX_PORT
+                + ", got: "
+                + port);
+      }
+      var env = new LinkedHashMap<String, String>();
+      var envRaw = map.get("env");
+      if (envRaw != null && !(envRaw instanceof Map<?, ?>)) {
+        throw new IllegalArgumentException(field + ".env must be a map of names to values.");
+      }
+      if (envRaw != null) {
+        for (var entry : ((Map<Object, Object>) envRaw).entrySet()) {
+          if (!(entry.getKey() instanceof String key) || !ENV_NAME.matcher(key).matches()) {
+            throw new IllegalArgumentException(
+                field
+                    + ".env has the name '"
+                    + entry.getKey()
+                    + "'; a name is letters, digits and _, not starting with a digit.");
+          }
+          if (entry.getValue() == null
+              || entry.getValue() instanceof Map
+              || entry.getValue() instanceof List) {
+            throw new IllegalArgumentException(field + ".env." + key + " must be a single value.");
+          }
+          env.put(key, String.valueOf(entry.getValue()));
+        }
+      }
+      return new Process(command, (String) workdir, (Integer) port, env);
+    }
+
+    /**
+     * The path {@code workdir} names under the workspace, without the {@code ./} it may start with;
+     * empty for the workspace itself.
+     */
+    public static String inWorkspace(String workdir) {
+      var path = workdir.replaceFirst("^(\\./)+", "");
+      return WORKSPACE.equals(path) ? "" : path;
     }
 
     public Map<String, Object> toMap() {
       var map = new LinkedHashMap<String, Object>();
       if (command != null) map.put("command", command);
       if (workdir != null) map.put("workdir", workdir);
+      if (port != null) map.put("port", port);
+      if (!env.isEmpty()) map.put("env", new LinkedHashMap<>(env));
       return map;
     }
   }

@@ -57,13 +57,16 @@ services:
     volumes:
       - msdata:/meili_data
 
+# Apps the project runs in its container; the portal forwards a process's port and opens it.
 processes:
   app:
     command: "java -jar target/app.jar"
     workdir: "backend"
+    port: 8080
   web:
     command: "npm run dev"
     workdir: "webapp"
+    port: 3000
 
 agent:
   type: claude-code

@@ -645,4 +645,32 @@ class SailYamlGeneratorTest {
         null,
         null);
   }
+
+  @Test
+  void writesProcessesSoTheyReadBackAsDeclared() {
+    var config =
+        SailYaml.fromMap(
+            YamlUtil.parseMap(
+                """
+                name: acme
+                resources:
+                  cpu: 2
+                  memory: 4GB
+                  disk: 50GB
+                processes:
+                  web:
+                    command: "npm run dev -- --port $PORT"
+                    workdir: app
+                    port: 3000
+                    env:
+                      PORT: "3000"
+                  worker:
+                    command: node worker.js
+                """));
+
+    var yaml = SailYamlGenerator.generate(config);
+
+    assertEquals(config.processes(), SailYaml.fromMap(YamlUtil.parseMap(yaml)).processes());
+    assertTrue(yaml.contains("# Apps the project runs in its container."), yaml);
+  }
 }

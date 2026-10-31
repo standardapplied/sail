@@ -55,7 +55,7 @@ class ProjectProvisionerTest {
         null,
         Map.of(
             "postgres", new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null)),
-        Map.of("app", new SailYaml.Process("java -jar app.jar", ".")),
+        Map.of("app", new SailYaml.Process("java -jar app.jar", ".", null, Map.of())),
         new SailYaml.Agent("claude-code", true, "sail/", true, null, Map.of(), null, null),
         new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA... alice@laptop")));
   }

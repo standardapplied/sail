@@ -1075,4 +1075,105 @@ class SailYamlTest {
     assertEquals(List.of(), none.installs());
     assertEquals(List.of("codex"), empty.installs());
   }
+
+  private static SailYaml withProcesses(String processes) {
+    return SailYaml.fromMap(
+        YamlUtil.parseMap(
+            "name: acme\nservices:\n  postgres:\n    image: postgres:16\n    ports: [5432]\nprocesses:\n"
+                + processes));
+  }
+
+  private static String processRefusal(String processes) {
+    return assertThrows(IllegalArgumentException.class, () -> withProcesses(processes))
+        .getMessage();
+  }
+
+  @Test
+  void aProcessDeclaresTheCommandItsWorkdirThePortItListensOnAndItsEnvironment() {
+    var config =
+        withProcesses(
+            """
+              web:
+                command: npm run dev
+                workdir: app/web
+                port: 3000
+                env:
+                  NODE_ENV: development
+                  WORKERS: 2
+              worker:
+                command: node worker.js
+            """);
+
+    var web = config.processes().get("web");
+    assertEquals(
+        new SailYaml.Process(
+            "npm run dev", "app/web", 3000, Map.of("NODE_ENV", "development", "WORKERS", "2")),
+        web);
+    assertEquals(
+        new SailYaml.Process("node worker.js", null, null, Map.of()),
+        config.processes().get("worker"));
+    assertEquals(config, SailYaml.fromMap(config.toMap()), "it survives a round trip");
+    assertEquals(Map.of("command", "node worker.js"), config.processes().get("worker").toMap());
+  }
+
+  @Test
+  void aWorkdirIsAPathUnderTheWorkspaceWithOrWithoutDotSlash() {
+    assertEquals("", SailYaml.Process.inWorkspace("."));
+    assertEquals("", SailYaml.Process.inWorkspace("./"));
+    assertEquals("webapp", SailYaml.Process.inWorkspace("./webapp"));
+    assertEquals("a/b", SailYaml.Process.inWorkspace("././a/b"));
+    assertEquals("a/b", SailYaml.Process.inWorkspace("a/b"));
+  }
+
+  @Test
+  void aPortIsClaimedByOneProcessOrServiceOnly() {
+    assertEquals(
+        "Port 5432 is claimed by both service 'postgres' and process 'web'. Give one of them another"
+            + " port.",
+        processRefusal("  web:\n    command: x\n    port: 5432\n"));
+    assertEquals(
+        "Port 3000 is claimed by both process 'web' and process 'admin'. Give one of them another"
+            + " port.",
+        processRefusal(
+            "  web:\n    command: x\n    port: 3000\n  admin:\n    command: y\n    port: 3000\n"));
+  }
+
+  @Test
+  void aProcessThatCannotRunAsDeclaredIsRefusedNamingItsField() {
+    assertEquals(
+        "processes.web.command is required: the command that starts it.",
+        processRefusal("  web:\n    port: 3000\n"));
+    assertEquals(
+        "processes.web.command is required: the command that starts it.",
+        processRefusal("  web:\n    command: \"  \"\n"));
+    assertEquals(
+        "processes.web.port must be a whole number from 1024 to 65535, got: 80",
+        processRefusal("  web:\n    command: x\n    port: 80\n"));
+    assertEquals(
+        "processes.web.port must be a whole number from 1024 to 65535, got: 70000",
+        processRefusal("  web:\n    command: x\n    port: 70000\n"));
+    assertEquals(
+        "processes.web.port must be a whole number from 1024 to 65535, got: 3000a",
+        processRefusal("  web:\n    command: x\n    port: 3000a\n"));
+    assertEquals(
+        "Invalid processes.web.workdir: '../etc'. Must match [a-zA-Z0-9][a-zA-Z0-9._/-]* with no"
+            + " '..' segments.",
+        processRefusal("  web:\n    command: x\n    workdir: ../etc\n"));
+    assertEquals(
+        "processes.web.workdir must be text when set.",
+        processRefusal("  web:\n    command: x\n    workdir: 3\n"));
+    assertEquals(
+        "processes.web.env has the name '1X'; a name is letters, digits and _, not starting with a"
+            + " digit.",
+        processRefusal("  web:\n    command: x\n    env:\n      1X: a\n"));
+    assertEquals(
+        "processes.web.env.LIST must be a single value.",
+        processRefusal("  web:\n    command: x\n    env:\n      LIST: [a, b]\n"));
+    assertEquals(
+        "processes.web.env must be a map of names to values.",
+        processRefusal("  web:\n    command: x\n    env: [a]\n"));
+    assertEquals(
+        "Invalid process name: 'my app'. Must match [a-zA-Z0-9][a-zA-Z0-9._-]*, max 63 characters.",
+        processRefusal("  my app:\n    command: x\n"));
+  }
 }
