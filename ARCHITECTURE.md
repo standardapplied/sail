@@ -962,6 +962,34 @@ container, which may hold work: one whose `origin` is not the definition's repos
 is no git checkout, is refused before the step is recorded (`RepoOrigin`, which reads the same
 host and path as one repository whatever the scheme, user, port or `.git`).
 
+**The stack** (`ProjectServer`, `StackOperations`): a project's services and its processes,
+each process an app the dev user runs, declared with the port it listens on. `sudo sail project
+serve`, `POST /v1/projects/{p}/serve` and the container's `portal` run one `StackOperations`
+verb; Mast's Portal forwards what it reports. Each row with the tests that prove it:
+
+- **I1. The definition says how the project comes up.** `processes.<name>` holds `command`,
+  `workdir`, `port` and `env`, checked when it is read: a port is 1024 to 65535 and claimed by
+  one process or service. *`SailYamlTest.aPortIsClaimedByOneProcessOrServiceOnly`,
+  `SailYamlTest.aProcessThatCannotRunAsDeclaredIsRefusedNamingItsField`.*
+- **I2. `serve` brings the stack up and says what listens where.** Services start as apply
+  starts them; each process is a script and a `systemd --user` unit `sail-process-<name>`
+  whose command is the script's last line, so systemd never expands it; a changed unit restarts,
+  an unchanged one only starts, an undeclared one is removed; every port is watched, one
+  container command a look, until it listens or its process exits. Only `serve` starts a
+  process. *`ProjectServerTest`, `ProjectServeIT`.*
+- **I3. Both doors serve the same.** The API and the container's socket answer `serve`,
+  `DELETE serve` and `ports` through `StackOperations`, for a project the caller may read;
+  serving and stopping are writes, refused to a read-only caller.
+  *`StackOperationsTest`, `ApiRouterTest.aViewerReadsThePortsButMayNotServe`,
+  `LocalApiStackTest`, `ScopedReadsTest`.*
+- **I4. A forward lives in Mast and needs nothing on the Mac.** Mast binds each listening port,
+  or the next free one above it, on `127.0.0.1` and pipes each connection over the container's
+  session to `localhost:<port>` inside; its backend's retirement closes them. *Mast
+  `forward.rs` tests, `PortalPanel.test.tsx`.*
+- **I8. Any agent can bring the stack up, see it fail and fix it.** Sail's `sail-portal` skill
+  (`scripts/portal up|ports|log|stop`) is installed beside `spec-board` for every harness.
+  *`PortalSkillTest`, `SailSkillsTest`, `ProjectSkillLaunchTest`.*
+
 **The `sail-api` service** (`SystemdServiceInstaller`) is the per-box control plane: a `sail
 server start` systemd unit, in system scope under root (`/etc/systemd/system`, which `sail
 init` always installs) or in user scope (`systemctl --user` with linger) for an account that
