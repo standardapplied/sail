@@ -35,6 +35,7 @@ import picocli.CommandLine.Command;
       ProjectDemoCommand.class,
       ProjectFilesCommand.class,
       ProjectSkillsCommand.class,
+      ProjectServeCommand.class,
     })
 public final class ProjectCommand implements Runnable {
 

@@ -21,10 +21,13 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.FileMaterializer;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.SharedProjectFiles;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
@@ -1049,6 +1052,64 @@ class ApiRouterTest {
 
       assertEquals(405, response.statusCode());
       assertTrue(response.body().contains("method_not_allowed"));
+    }
+  }
+
+  private static Operations withStack() {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus list", StackOperationsTest.RUNNING)
+            .onOk("ss -ltnH", StackOperationsTest.LISTENING);
+    var stack = StackOperationsTest.stack(shell, duration -> {});
+    return new TestOperations() {
+      @Override
+      public StackOperations stack() {
+        return stack;
+      }
+    };
+  }
+
+  @Test
+  void servePortsAndStopAnswerTheStacksPorts() throws Exception {
+    try (var server = serverWith(withStack(), true)) {
+      var served = post(server, "/v1/projects/acme/serve?timeout=5", "token", "");
+      var ports = get(server, "/v1/projects/acme/ports", "token");
+      var stopped = delete(server, "/v1/projects/acme/serve", "token");
+
+      assertEquals(200, served.statusCode(), served.body());
+      assertTrue(served.body().contains("\"all_listening\": true"), served.body());
+      assertEquals(200, ports.statusCode(), ports.body());
+      assertTrue(ports.body().contains("\"name\": \"web\""), ports.body());
+      assertEquals(200, stopped.statusCode(), stopped.body());
+    }
+  }
+
+  @Test
+  void aViewerReadsThePortsButMayNotServe() throws Exception {
+    ApiAuth viewer =
+        exchange -> {
+          exchange.setAttribute("token.role", "viewer");
+          exchange.setAttribute(ApiAuth.SCOPE, ProjectScope.all());
+        };
+    try (var server = serverWith(withStack(), true, viewer)) {
+      assertEquals(200, get(server, "/v1/projects/acme/ports", "token").statusCode());
+      assertEquals(403, post(server, "/v1/projects/acme/serve", "token", "").statusCode());
+      assertEquals(403, delete(server, "/v1/projects/acme/serve", "token").statusCode());
+    }
+  }
+
+  @Test
+  void serveAndPortsRefuseOtherMethodsShapesAndTimeouts() throws Exception {
+    try (var server = serverWith(withStack(), true)) {
+      assertEquals(405, get(server, "/v1/projects/acme/serve", "token").statusCode());
+      assertEquals(405, post(server, "/v1/projects/acme/ports", "token", "").statusCode());
+      assertEquals(404, get(server, "/v1/projects/acme/ports/web", "token").statusCode());
+      assertEquals(404, post(server, "/v1/projects/acme/serve/web", "token", "").statusCode());
+      var badTimeout = post(server, "/v1/projects/acme/serve?timeout=soon", "token", "");
+      assertEquals(422, badTimeout.statusCode());
+      assertTrue(
+          badTimeout.body().contains("timeout must be whole seconds, got: soon"),
+          badTimeout.body());
     }
   }
 

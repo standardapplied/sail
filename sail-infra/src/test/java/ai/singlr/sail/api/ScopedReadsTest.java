@@ -152,6 +152,7 @@ class ScopedReadsTest {
           "/v1/projects/{project}/agent",
           "POST /v1/projects/{project}/agent/report",
           "/v1/projects/{project}/connect",
+          "/v1/projects/{project}/ports",
           "/v1/projects/{project}/snapshots",
           "/v1/projects/{project}/files",
           "/v1/projects/{project}/files/{file}");
@@ -1527,6 +1528,9 @@ class ScopedReadsTest {
       }
       if (asked.contains(" tail -n ")) {
         return new Result(0, "one\ntwo\n", "");
+      }
+      if (asked.contains("ss -ltnH")) {
+        return new Result(0, "---\n", "");
       }
       return new Result(1, "", "no script for " + asked);
     }

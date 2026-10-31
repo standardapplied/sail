@@ -58,6 +58,12 @@ public interface LocalLaneOperations {
   SkillOperations skills();
 
   /**
+   * A project's stack, as the container's {@code portal} brings it up and reads it: the same
+   * operations {@code sail project serve} runs.
+   */
+  StackOperations stack();
+
+  /**
    * Resolves the box's ambient credential to the FDE actor it stands for, or empty when the
    * credential is unknown or its handle has left the roster. Serves the local socket's interactive
    * lane; run credentials are resolved first and never reach this.
