@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -33,9 +34,19 @@ public abstract class AbstractIncusIT {
 
   protected final ShellExec shell = new ShellExecutor(false);
 
+  /**
+   * Skips the test where no incus daemon answers, and otherwise makes this machine a box whose
+   * sail-api has run: its socket directory exists, which every container's sail machinery mounts.
+   * Each test gets it here, so none depends on another having created it first.
+   */
   protected void ensureIncusOrSkip() {
     var unreachable = incusUnreachableReason();
     if (unreachable == null) {
+      try {
+        Files.createDirectories(SailPaths.apiSocketHostDir());
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
       return;
     }
     if (Boolean.getBoolean("sail.it.requireIncus")) {
