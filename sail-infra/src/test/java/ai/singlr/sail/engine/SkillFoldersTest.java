@@ -13,9 +13,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -310,6 +313,76 @@ class SkillFoldersTest {
         assertThrows(
                 IOException.class,
                 () -> SkillFolders.inContainer(partRead, "acme", "/home/dev/java", "java"))
+            .getMessage());
+  }
+
+  /**
+   * The container as it was when listed and as it is when read: the listing is the one given, the
+   * reads run here for real, and every read's answer is kept.
+   */
+  private static final class ListedThenChanged implements ShellExec {
+    private final String listing;
+    private final Here here = new Here();
+    final List<Result> reads = new ArrayList<>();
+
+    ListedThenChanged(String listing) {
+      this.listing = listing;
+    }
+
+    @Override
+    public Result exec(List<String> command)
+        throws IOException, InterruptedException, TimeoutException {
+      if (String.join(" ", command).contains("find")) {
+        return new Result(0, listing, "");
+      }
+      var read = here.exec(command);
+      reads.add(read);
+      return read;
+    }
+
+    @Override
+    public Result exec(List<String> command, Path workDir, Duration timeout)
+        throws IOException, InterruptedException, TimeoutException {
+      return exec(command);
+    }
+
+    @Override
+    public boolean isDryRun() {
+      return false;
+    }
+  }
+
+  @Test
+  void aFileThatGrewSinceItWasListedIsReadNoFurtherThanItsListedSizeAndOneByte() throws Exception {
+    var folder = folder(Map.of("SKILL.md", "x".repeat(100_000)));
+    var shell = new ListedThenChanged("f 2 644 SKILL.md\0");
+
+    assertEquals(
+        "Skill 'java' changed while it was being read: "
+            + folder
+            + "/SKILL.md is no longer 2 bytes. Share it again.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> SkillFolders.inContainer(shell, "acme", folder.toString(), "java"))
+            .getMessage());
+    assertEquals("eHh4", shell.reads.getFirst().stdout().strip(), "three bytes were read");
+  }
+
+  @Test
+  void aFileSwappedForALinkToOneOfTheSameSizeIsRefusedNotFollowed() throws Exception {
+    var folder = folder(Map.of());
+    Files.createDirectories(folder);
+    var elsewhere = Files.writeString(dir.resolve("secret"), "abc");
+    Files.createSymbolicLink(folder.resolve("SKILL.md"), elsewhere);
+    var shell = new ListedThenChanged("f 3 644 SKILL.md\0");
+
+    assertEquals(
+        "Skill 'java' changed while it was being read: "
+            + folder
+            + "/SKILL.md is no longer a regular file. Share it again.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> SkillFolders.inContainer(shell, "acme", folder.toString(), "java"))
             .getMessage());
   }
 
