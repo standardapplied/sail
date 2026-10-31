@@ -10,14 +10,18 @@ import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Routes requests arriving over the local Unix-domain socket to a deliberately small surface: event
@@ -43,6 +47,8 @@ final class LocalApiRouter implements LocalApiHandler {
   private static final String WHOAMI = "/v1/whoami";
   private static final String RUN_MESSAGES = "/v1/run/messages";
   private static final String RUN_SESSION = "/v1/run/session";
+  private static final String PROJECTS = "/v1/projects/";
+  private static final String SKILLS = "skills";
 
   private final LocalLaneOperations operations;
 
@@ -191,6 +197,16 @@ final class LocalApiRouter implements LocalApiHandler {
     if (RUN_SESSION.equals(path)) {
       return runSession(request, caller);
     }
+    if (path.startsWith(PROJECTS)) {
+      try {
+        return projectSkills(request, caller, path.substring(PROJECTS.length()).split("/", -1));
+      } catch (IOException | TimeoutException failed) {
+        throw ApiException.of(ErrorCode.CONTAINER_ERROR, failed);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw ApiException.of(ErrorCode.CONTAINER_ERROR, interrupted);
+      }
+    }
     if (SPECS.equals(path)) {
       return specsCollection(request);
     }
@@ -282,6 +298,77 @@ final class LocalApiRouter implements LocalApiHandler {
           new ApiResponse(202, Map.of("id", published.value().id()));
       case Result.Failure<EventPublishResponse> refused -> ApiResponse.error(refused);
     };
+  }
+
+  /**
+   * A project's skills, the one project surface of this socket: {@code GET} lists every skill an
+   * agent of the project can see and reads one's {@code SKILL.md}; {@code POST} shares a folder in
+   * the container, {@code DELETE} stops sharing one. A run reaches only its own project. Sharing
+   * and removing are a person's: a shared skill is instructions every other agent and every other
+   * box will follow, so a run's credential, whatever its lane, is refused them, and the box
+   * credential writes as the box's FDE, whose write the journal decides.
+   */
+  private ApiResponse projectSkills(LocalApiRequest request, Caller caller, String[] segments)
+      throws IOException, InterruptedException, TimeoutException {
+    if (segments.length < 2 || segments.length > 3 || !SKILLS.equals(segments[1])) {
+      return problem(404, "No route for " + request.path());
+    }
+    var project = segments[0];
+    NameValidator.requireValidProjectName(project);
+    if (caller instanceof Caller.Run(var run, _) && !project.equals(run.project())
+        || !caller.actor().scope().admits(project)) {
+      throw ProjectReader.absent(project);
+    }
+    var skills = operations.skills();
+    if (segments.length == 2) {
+      return switch (request.method()) {
+        case "GET" -> ApiResponse.ok(skills.rows(project));
+        case "POST" -> {
+          var form = request.form();
+          var folder = Objects.requireNonNullElse(form.get("folder"), "");
+          requirePerson(
+              caller,
+              "share",
+              Remedy.of(
+                  "Ask them to run 'skill add ",
+                  folder.isBlank() ? "<folder>" : folder,
+                  "' in their own session."));
+          yield ApiResponse.ok(skills.shareFromContainer(project, folder, form.get("name")));
+        }
+        default -> problem(405, "skills accepts GET or POST");
+      };
+    }
+    var name = segments[2];
+    return switch (request.method()) {
+      case "GET" ->
+          ApiResponse.ok(Map.of("name", name, "skill_md", skills.manifest(project, name)));
+      case "DELETE" -> {
+        requirePerson(
+            caller,
+            "remove",
+            Remedy.of(
+                "Ask them to run 'skill rm ",
+                name,
+                "' in their own session, or '",
+                Remedy.sail("project skills rm", name, "-p", project),
+                "' on the devbox."));
+        yield ApiResponse.ok(Map.of("name", name, "files", skills.remove(project, name)));
+      }
+      default -> problem(405, "a skill accepts GET or DELETE");
+    };
+  }
+
+  /**
+   * Refuses a run's credential a write only a person makes, naming the line the person types: in
+   * their own session in the container, or, for a removal, on the devbox too.
+   */
+  private static void requirePerson(Caller caller, String verb, Remedy remedy) {
+    if (caller instanceof Caller.Run) {
+      throw new ApiException(
+          ErrorCode.FORBIDDEN,
+          "A skill is shared by a person, so an agent sail launched may not " + verb + " one.",
+          remedy);
+    }
   }
 
   /**

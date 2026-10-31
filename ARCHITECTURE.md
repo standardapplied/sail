@@ -1831,15 +1831,22 @@ project replaces it. A *brief* is the one paragraph of a judging stage that says
 stage judges, the project's, as text in its definition
 (`agent.review_pipeline.stages[].brief`), sail's default when a stage names none. `AGENTS.md`
 is how this codebase is built, tested and verified, the project's, in its repo, loaded by the
-harness. A *skill* is a folder with a `SKILL.md` and scripts, the project's, installed where
-the harness looks and invoked when the agent judges it relevant, so no loop rule lives in
+harness. A *skill* is an [Agent Skills](https://agentskills.io/specification) folder, a
+`SKILL.md` whose front matter names it and describes it, and scripts, the project's, installed
+where the harness looks and invoked when the agent judges it relevant, so no loop rule lives in
 one; a brief that orders a skill ("run the project's `e2e` skill") makes a validation stage.
 The test: if it must happen every run, prompt; if it is about this codebase, `AGENTS.md`; if
 it is a runbook you would hand a new hire, skill. The two prompts are `WorkPrompt`
 (sail-core), read by the build and by the fix run, and `JudgePrompt`, read by every agent
-stage; `StageSkill` is the validated value and the only parser of a `SKILL.md`,
-`ProjectSkills` (`ai.singlr.sail.api`) reads a project's folders, `ProjectSkillInstaller`
-puts them where a harness looks, and `sail project skills ls|add|rm|show` manages them. The
+stage; `StageSkill` is the validated value and the only parser of a `SKILL.md`, holding it to the
+standard's rules (a `name` that is its folder's by the standard's name rule, a `description` of
+1 to 1024 characters, a `compatibility` of at most 500, `metadata` of text to text) and passing
+every other key through untouched, `ProjectSkills` (`ai.singlr.sail.api`) reads, shares and
+removes a project's folders, `ProjectSkillInstaller` puts them where a harness looks, and two
+doors manage them through one `SkillOperations`: `sail project skills ls|add|rm|show` on the
+devbox and `skill ls|show|add|rm` in the container, which sends a folder's path over the socket
+for the host to read there. Sharing and removing are a person's: the socket refuses them to a
+run's credential, whatever its lane. The
 contract, each row with the tests that prove it (`ProjectSkillLaunchTest` drives a dispatch,
 a reviewer and a fix agent through the production launch path over the real stores and a
 fake container that keeps what is pushed into it; `ProjectSkillInstallerTest` runs every
@@ -1899,10 +1906,12 @@ command the installer sends against a real shell under a temporary directory;
   the project no longer holds is removed and an unstamped one is left alone — and never
   replaced: a held skill whose folder is unstamped fails the install naming the folder, so a
   person's own skill under a name the project later takes is not deleted. The one unstamped
-  folder sail replaces is the `spec-board` it wrote before it stamped, known by its content:
-  nothing in it but regular files of the skill's own names, each holding what a release of sail
-  wrote (`SpecSkillGenerator.UNSTAMPED_HASHES`); a file of other content, a name sail never
-  wrote, or a folder or link under one of its names makes it someone's, and it is refused.
+  folder sail replaces is a copy of the skill, known by its content: nothing in it but folders
+  and regular files, each at a path the skill holds and byte for byte that file, so sharing a
+  skill from the agent's folder it was made in, or copying it into another's, loses nothing;
+  for `spec-board` the files releases wrote before it stamped count as its own
+  (`SpecSkillGenerator.UNSTAMPED_HASHES`). A file of other content, a path the skill does not
+  hold, or a link anywhere in it makes it someone's, and it is refused.
   An interactive `agent run` installs the same way before its
   `ssh`; a preview installs nothing. A folder that is
   no skill — no `SKILL.md`, over its bounds, a reserved name (`spec-board`, `sail-*`) — is

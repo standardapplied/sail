@@ -692,6 +692,139 @@ class ProjectSkillInstallerTest {
     assertEquals(List.of("skills"), entriesOf(skillsDir.getParent()), "no build is left beside");
   }
 
+  private static final Map<String, String> E2E =
+      Map.of("SKILL.md", "Run it.\n", "scripts/run.sh", "#!/bin/sh\n");
+
+  private void installE2e() throws Exception {
+    ProjectSkillInstaller.installAll(
+        container,
+        PROJECT,
+        skillsDir.toString(),
+        List.of(named("e2e", E2E)),
+        (skill, file) -> new ByteArrayInputStream(E2E.get(file.path()).getBytes(UTF_8)));
+  }
+
+  private Path handMade(Map<String, String> files) throws IOException {
+    var copy = skillsDir.resolve("e2e");
+    for (var file : files.entrySet()) {
+      Files.createDirectories(copy.resolve(file.getKey()).getParent());
+      Files.writeString(copy.resolve(file.getKey()), file.getValue());
+    }
+    return copy;
+  }
+
+  @Test
+  void aCopyOfTheSkillMadeByHandIsTakenOverWholeAndStamped() throws Exception {
+    var copy = handMade(E2E);
+    Files.createDirectories(copy.resolve("empty"));
+
+    installE2e();
+
+    assertEquals(with(E2E, ProjectSkillInstaller.fingerprint(named("e2e", E2E))), read(copy));
+    assertFalse(Files.exists(copy.resolve("empty")));
+    assertEquals(List.of("skills"), entriesOf(skillsDir.getParent()), "no build is left beside");
+  }
+
+  @Test
+  void aCopyHoldingSomeOfTheSkillsFilesLosesNothingAndIsTakenOver() throws Exception {
+    var copy = handMade(Map.of("scripts/run.sh", "#!/bin/sh\n"));
+
+    installE2e();
+
+    assertEquals(with(E2E, ProjectSkillInstaller.fingerprint(named("e2e", E2E))), read(copy));
+  }
+
+  @Test
+  void aCopyWithAFileAtAPathTheSkillDoesNotHoldIsSomeonesAndIsLeft() throws Exception {
+    var files = new LinkedHashMap<>(E2E);
+    files.put("scripts/mine.sh", "#!/bin/sh\n");
+    var copy = handMade(files);
+
+    var refused = assertThrows(IOException.class, this::installE2e);
+
+    assertEquals(
+        "Failed to put in place skill 'e2e' in acme: "
+            + copy
+            + " holds a skill sail did not install (no .sail-skill in it). Move it aside, or give"
+            + " the project's skill another name.\n",
+        refused.getMessage());
+    assertEquals(files, read(copy));
+  }
+
+  @Test
+  void aCopyHoldingALinkAtAnyDepthIsSomeonesWhateverItPointsAt() throws Exception {
+    var copy = handMade(Map.of("SKILL.md", "Run it.\n"));
+    var elsewhere = home.resolve("run.sh");
+    Files.writeString(elsewhere, "#!/bin/sh\n");
+    Files.createDirectories(copy.resolve("scripts"));
+    Files.createSymbolicLink(copy.resolve("scripts/run.sh"), elsewhere);
+
+    var refused = assertThrows(IOException.class, this::installE2e);
+
+    assertEquals(
+        "Failed to put in place skill 'e2e' in acme: "
+            + copy
+            + " holds a skill sail did not install (no .sail-skill in it). Move it aside, or give"
+            + " the project's skill another name.\n",
+        refused.getMessage());
+    assertTrue(Files.isSymbolicLink(copy.resolve("scripts/run.sh")));
+  }
+
+  @Test
+  void aSkillsOwnFilesAreItsPathsAndHashesOneALineAndSpecBoardsIncludeItsUnstampedReleases() {
+    var e2e = named("e2e", E2E);
+
+    assertEquals(
+        "\nSKILL.md="
+            + BlobStore.hash("Run it.\n".getBytes(UTF_8))
+            + "\nscripts/run.sh="
+            + BlobStore.hash("#!/bin/sh\n".getBytes(UTF_8))
+            + "\n",
+        ProjectSkillInstaller.ownFilesOf(e2e));
+    var specBoard = ProjectSkillInstaller.ownFilesOf(SpecSkillGenerator.skill());
+    for (var file : SpecSkillGenerator.skill().files()) {
+      assertTrue(specBoard.contains("\n" + file.path() + "=" + file.contentHash() + "\n"));
+    }
+    SpecSkillGenerator.UNSTAMPED_HASHES.forEach(
+        (path, hashes) ->
+            hashes.forEach(
+                hash -> assertTrue(specBoard.contains("\n" + path + "=" + hash + "\n"))));
+  }
+
+  @Test
+  void theSkillsMadeByHandAreTheVisibleUnstampedFoldersHoldingAManifestUnderASkillsName()
+      throws Exception {
+    installE2e();
+    for (var made : List.of("java", "zeta", ".hidden", "Not A Name", "no-manifest", "synced")) {
+      Files.createDirectories(skillsDir.resolve(made));
+    }
+    for (var made : List.of("java", "zeta", ".hidden", "Not A Name")) {
+      Files.writeString(skillsDir.resolve(made + "/SKILL.md"), "---\n");
+    }
+    Files.createDirectories(skillsDir.resolve("synced/inner"));
+    Files.writeString(skillsDir.resolve("synced/inner/SKILL.md"), "---\n");
+    Files.writeString(skillsDir.resolve("loose.md"), "not a folder\n");
+
+    assertEquals(
+        List.of("java", "zeta"),
+        ProjectSkillInstaller.local(container, PROJECT, skillsDir.toString()));
+    assertEquals(
+        List.of(),
+        ProjectSkillInstaller.local(container, PROJECT, home.resolve("none").toString()));
+  }
+
+  @Test
+  void aSkillsFolderThatCannotBeListedFailsSayingWhatWasBeingListed() {
+    var refusing = new ScriptedShellExecutor(new ShellExec.Result(1, "", "refused"));
+
+    var failed =
+        assertThrows(
+            IOException.class,
+            () -> ProjectSkillInstaller.local(refusing, PROJECT, skillsDir.toString()));
+
+    assertEquals("Failed to list the skills made by hand in acme: refused", failed.getMessage());
+  }
+
   /** The {@code spec-board} files sail 0.46.5 wrote into a box, unstamped. */
   private Path legacySpecBoard(String... files) throws Exception {
     var folder = skillsDir.resolve("spec-board");

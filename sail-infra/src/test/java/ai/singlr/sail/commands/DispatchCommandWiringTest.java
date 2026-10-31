@@ -304,7 +304,9 @@ class DispatchCommandWiringTest {
               .put(
                   "acme",
                   ".sail/skills/e2e/SKILL.md",
-                  new ByteArrayInputStream("Run the e2e suite.\n".getBytes(UTF_8)),
+                  new ByteArrayInputStream(
+                      "---\nname: e2e\ndescription: Runs the e2e suite.\n---\nRun the e2e suite.\n"
+                          .getBytes(UTF_8)),
                   0644);
         });
     operations.useControlPlane(

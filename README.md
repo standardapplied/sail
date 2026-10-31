@@ -263,19 +263,31 @@ agent:
 
 ### Project skills
 
-A skill is a folder with a `SKILL.md` and optional scripts, installed where both harnesses
-look for skills and invoked when the agent judges it relevant: a runbook you would hand a new
-hire. Share one from a local folder and sail installs it whole, for every harness the project
-installs, at provisioning, at `project apply` and before every launch:
+A skill is an [Agent Skills](https://agentskills.io/specification) folder: a `SKILL.md` whose
+front matter names it and says what it does and when to use it, plus any scripts, references
+and assets. Sail installs a project's skills whole, for every agent the project installs, at
+provisioning, at `project apply` and before every launch, and syncs them to every box with the
+project. A folder that breaks the standard's rules is refused where it is added, naming the
+field. Share one from the devbox:
 
 ```bash
 sail project skills add ./e2e --project web        # .sail/skills/e2e/<every file>
-sail project skills ls --project web               # name, files, ok or invalid: <why>
+sail project skills ls --project web               # every skill an agent sees: shared, sail's, made by hand
 sail project skills show e2e --project web         # its SKILL.md
 sail project skills rm e2e --project web           # the folder goes at the next launch or apply
 ```
 
-Sail ships one skill, `spec-board`, so an interactive session finds the `spec` CLI.
+Or from inside the project, where the work happens, with the `skill` command beside `spec`:
+
+```bash
+skill add ~/.agents/skills/java     # a skill one agent had, now every agent's and every box's
+skill ls                            # the same rows as above
+```
+
+Only a person shares or removes a skill: an agent sail launched is refused and asks you. A
+copy of a shared skill made by hand in an agent's folder, holding nothing but the skill's own
+files, is taken over by the next install. Sail ships one skill, `spec-board`, so an interactive
+session finds the `spec` CLI.
 
 ## Going deeper
 

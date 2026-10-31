@@ -166,6 +166,7 @@ class ScopedReadsTest {
   private static final Set<String> NOT_READ_OVER_HTTP =
       Set.of(
           "sync",
+          "skills",
           "resolveConflict",
           "approveReview",
           "dismissFinding",
@@ -256,6 +257,7 @@ class ScopedReadsTest {
   private static final Set<String> NEVER_ADDRESSED_OVER_HTTP =
       Set.of(
           "sync",
+          "skills",
           "runForCredential",
           "runActor",
           "boxActorForCredential",

@@ -11,10 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.api.ProjectSkills;
-import ai.singlr.sail.config.FileLimits;
+import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.SharedProjectFiles;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.identity.Acting;
@@ -28,6 +28,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -67,9 +68,16 @@ class ProjectSkillsCommandTest {
     db.close();
   }
 
+  private ScriptedShellExecutor shell = new ScriptedShellExecutor();
+
   private HostOperations operations() {
-    return OperationsFactory.open(database);
+    return OperationsFactory.create(
+        db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE);
   }
+
+  private static final String UNLISTED =
+      "  Failed to list the skills made by hand in acme: command not found, so they are not"
+          + " listed.\n";
 
   private void share(String path, String content) {
     Acting.system(
@@ -155,20 +163,27 @@ class ProjectSkillsCommandTest {
   }
 
   @Test
-  void aProjectWithNoSkillsSaysSo() {
+  void aProjectWithNoSkillsOfItsOwnShowsSailsAndSaysHowToShareOne() {
     var ran = ls("-p", "acme");
 
     assertEquals(0, ran.exit(), ran.err());
     assertEquals(
-        "  No skills: share one with 'sail project skills add <folder>'.\n",
+        """
+          Skills: acme
+          SKILL       FROM  AGENTS       STATUS
+          spec-board  sail  Claude Code  ok
+        """
+            + UNLISTED
+            + "  Share one with 'sail project skills add <folder>'.\n",
         CommandLine.Help.Ansi.OFF.string(ran.out()));
   }
 
   @Test
-  void lsShowsEachFolderWithItsFilesAndWhetherItIsASkill() {
+  void lsShowsEverySkillAnAgentSeesSharedSailsAndMadeByHand() {
     share(".sail/skills/e2e/SKILL.md", E2E);
     share(".sail/skills/e2e/scripts/run.sh", "#!/bin/sh\n");
     share(".sail/skills/broken/notes.md", "no manifest");
+    shell.onOk("for d in", "java\ne2e\n");
 
     var ran = ls("-p", "acme");
 
@@ -176,9 +191,11 @@ class ProjectSkillsCommandTest {
     assertEquals(
         """
           Skills: acme
-          SKILL   FILES  STATUS
-          broken      1  invalid: .sail/skills/broken/SKILL.md is missing or is not a text file.
-          e2e         2  ok
+          SKILL       FROM    AGENTS       STATUS
+          broken      shared               invalid: .sail/skills/broken/SKILL.md is missing or is not a text file.
+          e2e         shared  Claude Code  ok
+          spec-board  sail    Claude Code  ok
+          java        local   Claude Code  not synced: share it with 'skill add ~/.claude/skills/java' in the container
         """,
         CommandLine.Help.Ansi.OFF.string(ran.out()));
   }
@@ -186,12 +203,31 @@ class ProjectSkillsCommandTest {
   @Test
   void jsonIsTheSameRows() {
     share(".sail/skills/e2e/SKILL.md", E2E);
+    shell.onOk("for d in", "java\n");
 
     var ran = ls("-p", "acme", "--json");
 
     assertEquals(0, ran.exit(), ran.err());
+    var parsed = YamlUtil.parseMap(ran.out());
     assertEquals(
-        List.of(Map.of("name", "e2e", "files", 1, "status", "ok")), YamlUtil.parseList(ran.out()));
+        List.of(
+            row("e2e", "shared", 1, "ok", null),
+            row("spec-board", "sail", 2, "ok", null),
+            row("java", "local", 0, "not synced", "skill add ~/.claude/skills/java")),
+        parsed.get("skills"));
+    assertNull(parsed.get("note"));
+  }
+
+  private static Map<String, Object> row(
+      String name, String kind, int files, String status, String share) {
+    var row = new LinkedHashMap<String, Object>();
+    row.put("name", name);
+    row.put("kind", kind);
+    row.put("files", files);
+    row.put("agents", List.of("Claude Code"));
+    row.put("status", status);
+    row.put("share", share);
+    return row;
   }
 
   @Test
@@ -213,15 +249,29 @@ class ProjectSkillsCommandTest {
     assertEquals(
         0755,
         new FileStore(db).find("acme", ".sail/skills/e2e/scripts/run.sh").orElseThrow().mode());
-    assertTrue(ran.out().contains("Shared skill e2e (3 files) on acme"), ran.out());
-    assertEquals("ok", ProjectSkillsCommand.rows("acme", skills()).getFirst().status());
+    assertEquals(
+        "  ✓ Shared skill e2e (3 files) on acme; it is installed for Claude Code at the next"
+            + " launch or apply.\n",
+        CommandLine.Help.Ansi.OFF.string(ran.out()));
   }
 
-  private ProjectSkills skills() {
-    return new ProjectSkills(
-        project ->
-            new SharedProjectFiles(
-                new FileStore(db), dir.resolve("projects"), project, FileLimits.defaults()));
+  @Test
+  void addAgainSharesExactlyTheFolderAsItIsNowAndAdvisesOnALongBody() throws Exception {
+    var folder = localSkill("e2e", Map.of("SKILL.md", E2E, "scripts/run.sh", "#!/bin/sh\n"));
+    add("-p", "acme", folder.toString());
+    Files.delete(folder.resolve("scripts/run.sh"));
+    Files.writeString(folder.resolve("SKILL.md"), E2E + "line\n".repeat(500));
+
+    var ran = add("-p", "acme", folder.toString());
+
+    assertEquals(0, ran.exit(), ran.err() + ran.escaped());
+    assertEquals(List.of(".sail/skills/e2e/SKILL.md"), shared());
+    assertEquals(
+        "  ✓ Shared skill e2e (1 file) on acme; it is installed for Claude Code at the next launch"
+            + " or apply.\n"
+            + "  ⚠ Skill 'e2e' has a SKILL.md body of 501 lines; the Agent Skills standard advises"
+            + " under 500, with detail moved to files under references/.\n",
+        CommandLine.Help.Ansi.OFF.string(ran.out()));
   }
 
   @Test
@@ -256,7 +306,7 @@ class ProjectSkillsCommandTest {
   @Test
   void addRefusesAFolderThatIsNoSkillBeforeSharingAnything() throws Exception {
     var noManifest = localSkill("notes", Map.of("notes.md", "x"));
-    var blank = localSkill("blank", Map.of("SKILL.md", "---\nname: blank\n---\n"));
+    var blank = localSkill("blank", Map.of("SKILL.md", "---\nname: blank\ndescription: d\n---\n"));
 
     var ranNoManifest = add("-p", "acme", noManifest.toString());
     var ranBlank = add("-p", "acme", blank.toString());
@@ -276,14 +326,14 @@ class ProjectSkillsCommandTest {
     var ran = add("-p", "acme", file.toString());
 
     assertEquals(1, ran.exit());
-    assertTrue(ran.err().contains("Not a folder: " + file), ran.err());
+    assertEquals("Not a folder: " + file, ran.escaped().getMessage());
   }
 
   @Test
   void rmStopsSharingEveryFileOfTheSkillAndNothingElse() {
     share(".sail/skills/e2e/SKILL.md", E2E);
     share(".sail/skills/e2e/scripts/run.sh", "#!/bin/sh\n");
-    share(".sail/skills/release/SKILL.md", "Cut it.\n");
+    share(".sail/skills/release/SKILL.md", "---\nname: release\ndescription: d\n---\nCut it.\n");
     share("README.md", "hello");
 
     var ran = rm("-p", "acme", "e2e");
@@ -298,7 +348,8 @@ class ProjectSkillsCommandTest {
     var ran = rm("-p", "acme", "e2e");
 
     assertEquals(1, ran.exit());
-    assertTrue(ran.err().contains("No skill 'e2e' on acme."), ran.err());
+    assertEquals(
+        "  ✗ No skill 'e2e' is shared on acme.\n", CommandLine.Help.Ansi.OFF.string(ran.err()));
   }
 
   @Test

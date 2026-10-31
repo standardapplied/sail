@@ -21,6 +21,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Stream;
 
 /**
  * Applies incremental changes to an already-provisioned project container. Detects what is already
@@ -272,7 +273,9 @@ public final class ProjectApplier {
               + String.join(", ", report.installed())
               + ")");
       installed += report.installed().size();
-      report.skipped().stream().filter(note -> !warnings.contains(note)).forEach(warnings::add);
+      Stream.concat(report.skipped().stream(), report.advised().stream())
+          .filter(note -> !warnings.contains(note))
+          .forEach(warnings::add);
     }
     return new ApplyResult(installed, 0, 0, List.copyOf(warnings));
   }

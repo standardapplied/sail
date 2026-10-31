@@ -5,14 +5,17 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.engine.SkillFolders;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +28,10 @@ import java.util.function.Function;
  * opened, never installed beside files that did not. A folder that is not a skill is reported, not
  * fatal: the valid ones are installed and whoever asked is told which folder was skipped and why. A
  * box with no project files wired holds no project skill.
+ *
+ * <p>A skill is shared and removed here, whichever door asked: the devbox's {@code sail project
+ * skills} and the container's {@code skill} write through these, as the actor their door bound, so
+ * the journal decides each write and it syncs to every box with the project.
  */
 public final class ProjectSkills {
 
@@ -185,6 +192,109 @@ public final class ProjectSkills {
               + notHeld.getMessage()
               + ").");
     }
+  }
+
+  /**
+   * Shares {@code entries}, a folder read whole, as {@code project}'s skill {@code name}: refused
+   * as {@link StageSkill} refuses it, or for a file over the project's size cap, before anything is
+   * written; then every file is put under the skill's folder and every file the folder held before
+   * and does not now is removed, so the shared skill is exactly the folder.
+   */
+  public StageSkill share(String project, String name, List<SkillFolders.Entry> entries)
+      throws IOException {
+    requireOwnName(name);
+    var manifest =
+        entries.stream()
+            .filter(entry -> entry.path().equals(StageSkill.MANIFEST))
+            .findFirst()
+            .orElseThrow(
+                () ->
+                    new IllegalArgumentException(
+                        "Skill '" + name + "' has no " + StageSkill.MANIFEST + "."));
+    var skill =
+        StageSkill.of(
+            name,
+            new String(manifest.bytes(), StandardCharsets.UTF_8),
+            entries.stream()
+                .map(
+                    entry ->
+                        new StageSkill.File(
+                            entry.path(),
+                            BlobStore.hash(entry.bytes()),
+                            entry.bytes().length,
+                            entry.mode()))
+                .toList());
+    var shared = files.apply(project);
+    for (var entry : entries) {
+      shared
+          .limits()
+          .problem(entry.bytes().length)
+          .ifPresent(
+              problem -> {
+                throw new IllegalArgumentException(entry.path() + ": " + problem);
+              });
+    }
+    var folder = StageSkill.projectFolder(name);
+    var kept = new HashSet<String>();
+    for (var entry : entries) {
+      kept.add(folder + entry.path());
+      shared.put(
+          folder + entry.path(),
+          new ByteArrayInputStream(entry.bytes()),
+          entry.bytes().length,
+          entry.mode());
+    }
+    for (var path : pathsOf(shared, name)) {
+      if (!kept.contains(path)) {
+        shared.remove(path);
+      }
+    }
+    shared.materialize();
+    return skill;
+  }
+
+  /**
+   * Stops sharing {@code project}'s skill {@code name}: every file under its folder is removed, and
+   * the deletion syncs. Returns how many files it held; none when it was not shared.
+   */
+  public int remove(String project, String name) throws IOException {
+    StageSkill.requireName(name);
+    var shared = files.apply(project);
+    var paths = pathsOf(shared, name);
+    for (var path : paths) {
+      shared.remove(path);
+    }
+    return paths.size();
+  }
+
+  /**
+   * The {@code SKILL.md} of {@code project}'s skill {@code name}, or of sail's {@code spec-board}.
+   */
+  public String manifest(String project, String name) throws IOException {
+    if (name.equals(SpecSkillGenerator.NAME)) {
+      return SpecSkillGenerator.skillMd();
+    }
+    StageSkill.requireName(name);
+    var path = StageSkill.projectFolder(name) + StageSkill.MANIFEST;
+    var manifest =
+        files
+            .apply(project)
+            .get(path)
+            .orElseThrow(
+                () ->
+                    new IllegalArgumentException(
+                        "No skill '" + name + "' on " + project + ": it has no " + path + "."));
+    try (manifest) {
+      return new String(manifest.readAllBytes(), StandardCharsets.UTF_8);
+    }
+  }
+
+  private static List<String> pathsOf(ProjectFiles shared, String name) {
+    var folder = StageSkill.projectFolder(name);
+    return shared.list().stream()
+        .map(FileStore.FileRow::path)
+        .filter(path -> path.startsWith(folder))
+        .toList();
   }
 
   /** The manifest's text, read no further than a skill's folder may be large. */

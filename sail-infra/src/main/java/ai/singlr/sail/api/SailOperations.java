@@ -761,6 +761,11 @@ public final class SailOperations implements HostOperations {
     return projectSkills;
   }
 
+  @Override
+  public SkillOperations skills() {
+    return new SkillOperations(projectSkills, shell, projects);
+  }
+
   /** The review and fix lanes the review pipeline launches through — see {@code reviewLanes}. */
   public ReviewLanes reviewLanes() {
     return dispatchOps.reviewLanes();

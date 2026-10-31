@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.api.ProjectSkills.Folder;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.engine.SharedProjectFiles;
+import ai.singlr.sail.engine.SkillFolders;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.identity.Acting;
@@ -92,6 +93,34 @@ class ProjectSkillsTest {
   }
 
   @Test
+  void aFileOverTheProjectsSizeCapIsRefusedBeforeAnythingIsShared() {
+    var capped =
+        new ProjectSkills(
+            project ->
+                new SharedProjectFiles(
+                    files, dir.resolve("projects"), project, new FileLimits(60)));
+    var manifest =
+        "---\nname: e2e\ndescription: Runs it.\n---\nRun.\n".getBytes(StandardCharsets.UTF_8);
+    var big = new byte[61];
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                Acting.system(
+                    () ->
+                        capped.share(
+                            "acme",
+                            "e2e",
+                            List.of(
+                                new SkillFolders.Entry("SKILL.md", manifest, 0644),
+                                new SkillFolders.Entry("big.bin", big, 0644)))));
+
+    assertEquals("big.bin: " + new FileLimits(60).problem(61).orElseThrow(), refused.getMessage());
+    assertEquals(List.of(), files.list("acme"));
+  }
+
+  @Test
   void aProjectWithNoSkillsHoldsNoFolderAndEveryOtherFileIsLeftAlone() {
     share("README.md", "hello");
     share(".sail/other.md", "not a skill");
@@ -103,7 +132,9 @@ class ProjectSkillsTest {
 
   @Test
   void everyFolderIsReadWithItsFilesHashesSizesAndModesInNameOrder() {
-    share(".sail/skills/release/SKILL.md", "Cut a release.\n");
+    share(
+        ".sail/skills/release/SKILL.md",
+        "---\nname: release\ndescription: Cuts a release.\n---\nCut a release.\n");
     share(".sail/skills/e2e/SKILL.md", SKILL_MD);
     share(".sail/skills/e2e/scripts/run.sh", "#!/bin/sh\n".getBytes(StandardCharsets.UTF_8), 0755);
     share(".sail/skills/e2e/reference/cases.md", "Cases.\n");
@@ -145,7 +176,7 @@ class ProjectSkillsTest {
 
   @Test
   void aFolderStageSkillRefusesIsInvalidWithItsOwnMessage() {
-    share(".sail/skills/blank/SKILL.md", "---\nname: blank\n---\n");
+    share(".sail/skills/blank/SKILL.md", "---\nname: blank\ndescription: d\n---\n");
 
     assertEquals(
         new Folder.Invalid(
@@ -155,7 +186,7 @@ class ProjectSkillsTest {
 
   @Test
   void aFolderOverItsBoundsIsInvalidNamingTheLimit() {
-    share(".sail/skills/big/SKILL.md", "Body.\n");
+    share(".sail/skills/big/SKILL.md", "---\nname: big\ndescription: d\n---\nBody.\n");
     for (var i = 0; i < StageSkill.MAX_FILES; i++) {
       share(".sail/skills/big/f" + i + ".md", "x");
     }
@@ -181,7 +212,8 @@ class ProjectSkillsTest {
             + " Give the skill another name.",
         invalid("sail-review").why());
     assertEquals(
-        "Skill name 'Bad Name' must match [a-z0-9][a-z0-9-]{0,63}.", invalid("Bad Name").why());
+        "Skill name 'Bad Name' must be 1 to 64 lowercase letters, digits and hyphens, with no hyphen first, last or next to another.",
+        invalid("Bad Name").why());
     assertEquals(List.of(), skills.held("acme"), "none of them is installed");
   }
 
@@ -277,7 +309,7 @@ class ProjectSkillsTest {
                 IllegalArgumentException.class, () -> ProjectSkills.requireOwnName("spec-board"))
             .getMessage());
     assertEquals(
-        "Skill name '../x' must match [a-z0-9][a-z0-9-]{0,63}.",
+        "Skill name '../x' must be 1 to 64 lowercase letters, digits and hyphens, with no hyphen first, last or next to another.",
         assertThrows(IllegalArgumentException.class, () -> ProjectSkills.requireOwnName("../x"))
             .getMessage());
   }
