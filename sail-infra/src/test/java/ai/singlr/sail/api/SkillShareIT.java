@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.SkillOperations.Kind;
@@ -116,6 +117,24 @@ class SkillShareIT extends AbstractIncusIT {
       assertEquals(
           List.of(Kind.SHARED, Kind.SAIL),
           skills.rows(CONTAINER).rows().stream().map(SkillOperations.Row::kind).toList());
+
+      var crowded =
+          exec(
+              CONTAINER,
+              List.of(
+                  "su",
+                  "dev",
+                  "-c",
+                  "mkdir -p ~/crowded && for i in $(seq 1 40); do echo x > ~/crowded/f$i.md; done"));
+      assertTrue(crowded.ok(), crowded.stderr());
+      var refused =
+          assertThrows(
+              IllegalArgumentException.class,
+              () ->
+                  Acting.as(
+                      "uday", () -> skills.shareFromContainer(CONTAINER, "/home/dev/crowded", "")));
+      assertEquals(
+          "Skill 'crowded' has more than 32 files; the limit is 32.", refused.getMessage());
 
       assertEquals(2, (int) Acting.as("uday", () -> skills.remove(CONTAINER, "java")));
       for (var harness : List.of(Harnesses.of("codex"), Harnesses.of("claude-code"))) {
