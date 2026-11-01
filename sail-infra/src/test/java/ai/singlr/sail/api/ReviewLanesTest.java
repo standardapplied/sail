@@ -676,7 +676,7 @@ class ReviewLanesTest {
             .findFirst()
             .orElseThrow();
     assertEquals("time limit (45m)", stop.data().get(Event.WellKnownData.REASON));
-    var held = Duration.between(Instant.parse(reviewer.startedAt()), loop.watchEndedAt());
+    var held = Duration.between(reviewer.startedAt(), loop.watchEndedAt());
     assertFalse(held.compareTo(Duration.ofMinutes(45)) < 0, held.toString());
     assertTrue(
         held.compareTo(Duration.ofMinutes(46)) < 0,

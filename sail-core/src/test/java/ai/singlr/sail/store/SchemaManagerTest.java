@@ -193,17 +193,15 @@ class SchemaManagerTest {
     new SchemaManager(db).migrate();
     db.execute(
         "INSERT INTO specs (id, title, status, created_at, updated_at) VALUES ('s', 's',"
-            + " 'archived', 't0', '2026-01-01T00:00:00Z')");
+            + " 'archived', 't0', 1767225600000)");
     assertEquals("2026-01-01T00:00:00Z", since("archived_at"));
 
-    db.execute(
-        "UPDATE specs SET title = 'renamed', updated_at = '2026-01-02T00:00:00Z' WHERE id = 's'");
+    db.execute("UPDATE specs SET title = 'renamed', updated_at = 1767312000000 WHERE id = 's'");
     assertEquals(
         "2026-01-01T00:00:00Z", since("archived_at"), "an edit that keeps the status keeps it");
 
     db.execute(
-        "UPDATE specs SET status = 'cancelled', updated_at = '2026-01-03T00:00:00Z'"
-            + " WHERE id = 's'");
+        "UPDATE specs SET status = 'cancelled', updated_at = 1767398400000" + " WHERE id = 's'");
     assertNull(since("archived_at"));
     assertEquals("2026-01-03T00:00:00Z", since("cancelled_at"));
 

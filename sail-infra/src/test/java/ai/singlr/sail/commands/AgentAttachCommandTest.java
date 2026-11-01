@@ -33,6 +33,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
@@ -406,7 +407,7 @@ class AgentAttachCommandTest {
         null,
         "l",
         "u",
-        "t0",
+        Instant.EPOCH,
         null,
         repos,
         null,

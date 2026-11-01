@@ -24,6 +24,7 @@ import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -262,7 +263,7 @@ class DispatchCommandTest {
             "ada",
             "Use PKCE",
             null,
-            "2026-07-28T00:00:00Z",
+            Instant.parse("2026-07-28T00:00:00Z"),
             "1-a",
             null,
             MessageStore.Mark.PLAIN);

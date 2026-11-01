@@ -242,8 +242,8 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                     "feat/test",
                     0,
                     null,
-                    "",
-                    "",
+                    null,
+                    null,
                     null,
                     List.of(),
                     List.of())));
@@ -601,7 +601,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
             reviewer.id(),
             AgentUnit.forRun(reviewer.id()),
             new Guardrails("5m", "2s", "stop"),
-            Instant.parse(reviewer.startedAt()),
+            reviewer.startedAt(),
             false,
             shell,
             new RunWatch.Feed() {

@@ -96,8 +96,8 @@ class ResourceAuthzTest {
                     null,
                     0,
                     createdBy,
-                    "",
-                    "",
+                    null,
+                    null,
                     createdBy,
                     List.of(),
                     List.of())));

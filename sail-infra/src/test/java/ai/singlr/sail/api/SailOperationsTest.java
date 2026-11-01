@@ -2123,7 +2123,7 @@ class SailOperationsTest {
         null,
         "/home/dev/.sail/runs/" + runId + "/agent.log",
         unit,
-        "t0",
+        Instant.EPOCH,
         null,
         List.of(),
         null,
@@ -2181,7 +2181,7 @@ class SailOperationsTest {
             null,
             null,
             "sail-agent-" + R1,
-            "t0",
+            Instant.EPOCH,
             null,
             List.of(),
             null,
@@ -2751,7 +2751,7 @@ class SailOperationsTest {
 
   private static EventStore.EventRow eventRow(String type, String specId, String data) {
     return new EventStore.EventRow(
-        0, "2026-08-17T00:00:00Z", type, "acme", specId, "sail", "host-01", data);
+        0, Instant.parse("2026-08-17T00:00:00Z"), type, "acme", specId, "sail", "host-01", data);
   }
 
   @Test

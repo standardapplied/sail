@@ -1748,7 +1748,7 @@ class RunStoreTest {
     db.execute(
         "INSERT INTO container_leases (project, node, action, created_at)"
             + " VALUES ('backend', 'node-a', 'restore', ?)",
-        DateTimeUtils.now().minus(RunStore.LEASE_TTL).minus(Duration.ofMinutes(1)).toString());
+        DateTimeUtils.now().minus(RunStore.LEASE_TTL).minus(Duration.ofMinutes(1)));
 
     var reviewId = DateTimeUtils.newId().toString();
     reserveReview(reviewId, "node-a");
@@ -1811,7 +1811,7 @@ class RunStoreTest {
     db.execute(
         "INSERT INTO container_leases (project, node, action, created_at)"
             + " VALUES ('backend', 'node-a', 'restore', ?)",
-        DateTimeUtils.now().minus(RunStore.LEASE_TTL).minus(Duration.ofMinutes(1)).toString());
+        DateTimeUtils.now().minus(RunStore.LEASE_TTL).minus(Duration.ofMinutes(1)));
 
     assertInstanceOf(
         RunStore.ContainerLease.Acquired.class,
@@ -1823,7 +1823,7 @@ class RunStoreTest {
     db.execute(
         "INSERT INTO container_leases (project, node, action, created_at)"
             + " VALUES ('backend', 'node-a', 'restore', ?)",
-        DateTimeUtils.now().minus(RunStore.LEASE_TTL).minus(Duration.ofMinutes(1)).toString());
+        DateTimeUtils.now().minus(RunStore.LEASE_TTL).minus(Duration.ofMinutes(1)));
 
     assertTrue(
         reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of("app"))

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.RunStore;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -32,7 +33,7 @@ class WatcherCoverageTest {
         null,
         "/home/dev/.sail/runs/" + RUN + "/agent.log",
         "sail-agent-" + RUN,
-        "2026-10-03T12:00:00Z",
+        Instant.parse("2026-10-03T12:00:00Z"),
         null,
         List.of("api"),
         null,

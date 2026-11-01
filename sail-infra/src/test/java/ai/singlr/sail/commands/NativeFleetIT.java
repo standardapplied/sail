@@ -693,11 +693,11 @@ class NativeFleetIT {
   private static final String RUN_OF_DOOMED =
       """
       INSERT INTO runs (id, project, spec_id, agent, status, started_at, node, role, rev)
-      VALUES ('%1$s', 'demo', 'doomed-1', 'claude', 'completed', '2026-09-01T00:00:00Z',
+      VALUES ('%1$s', 'demo', 'doomed-1', 'claude', 'completed', 1788220800000,
           'uday', 'build', '1-d00d');
       INSERT INTO change_log (entity_type, entity_id, rev, actor, recorded_at, origin, deleted,
           snapshot)
-      VALUES ('run', '%1$s', '1-d00d', 'uday', '2026-09-01T00:00:00Z', 'local', 0,
+      VALUES ('run', '%1$s', '1-d00d', 'uday', 1788220800000, 'local', 0,
           '{"id": "%1$s", "project": "demo", "spec_id": "doomed-1", "node": "uday",
             "role": "build", "agent": "claude", "status": "completed",
             "started_at": "2026-09-01T00:00:00Z", "repos": [], "principals": []}');

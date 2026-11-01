@@ -27,6 +27,7 @@ import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
@@ -134,8 +135,8 @@ class MissedStopReconcilerTest {
                     "feat/test",
                     0,
                     null,
-                    "",
-                    "",
+                    null,
+                    null,
                     null,
                     List.of(),
                     List.of())));
@@ -162,8 +163,8 @@ class MissedStopReconcilerTest {
                     "feat/test",
                     0,
                     null,
-                    "",
-                    "",
+                    null,
+                    null,
                     null,
                     List.of(),
                     List.of())));
@@ -605,11 +606,11 @@ class MissedStopReconcilerTest {
                     "role", "build",
                     "agent", "claude-code",
                     "status", "running",
-                    "started_at", startedAt.toString()),
+                    "started_at", Snapshots.millis(startedAt)),
                 "1-foreign"));
   }
 
-  private void recordEvent(String specId, String type, String timestamp) {
+  private void recordEvent(String specId, String type, Instant timestamp) {
     Acting.system(
         () ->
             eventStore.insert(
@@ -624,7 +625,7 @@ class MissedStopReconcilerTest {
                     "{}")));
   }
 
-  private void recordStopEvent(String specId, String timestamp, Map<String, Object> data) {
+  private void recordStopEvent(String specId, Instant timestamp, Map<String, Object> data) {
     Acting.system(
         () ->
             eventStore.insert(
@@ -875,7 +876,7 @@ class MissedStopReconcilerTest {
   void aSpecWhoseLatestReviewErroredGetsItsStopReplayed() {
     createReviewSpec("auth");
     finishedSession("auth", "stopped", 0);
-    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    recordEvent("auth", "review_stage_started", Instant.now());
     erroredReview("auth");
 
     assertEquals(
@@ -888,7 +889,7 @@ class MissedStopReconcilerTest {
   void anErroredReviewEarnsExactlyOneReplay() {
     createReviewSpec("auth");
     finishedSession("auth", "stopped", 0);
-    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    recordEvent("auth", "review_stage_started", Instant.now());
     erroredReview("auth");
     var rec = reconciler(new CountingProbe(false), Instant::now);
 
@@ -900,7 +901,7 @@ class MissedStopReconcilerTest {
   void aFreshErroredRetryEarnsItsOwnReplay() {
     createReviewSpec("auth");
     finishedSession("auth", "stopped", 0);
-    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    recordEvent("auth", "review_stage_started", Instant.now());
     erroredReview("auth");
     var rec = reconciler(new CountingProbe(false), Instant::now);
 
@@ -917,7 +918,7 @@ class MissedStopReconcilerTest {
   void anEscalatedReviewIsNeverReplayed() {
     createReviewSpec("auth");
     finishedSession("auth", "stopped", 0);
-    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    recordEvent("auth", "review_stage_started", Instant.now());
     Acting.system(() -> reviewStore.updateReviewStatus(erroredReview("auth"), "escalated"));
 
     assertEquals(
@@ -957,7 +958,7 @@ class MissedStopReconcilerTest {
   void aRunningReviewALiveReviewerServesIsLeftAlone() {
     createReviewSpec("auth");
     finishedSession("auth", "stopped", 0);
-    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    recordEvent("auth", "review_stage_started", Instant.now());
     erroredReview("auth");
     reviewerOf(runningReview("auth"), "auth");
 
@@ -971,7 +972,7 @@ class MissedStopReconcilerTest {
   void aRunningReviewNoRunServesHasItsNewestLoopStopReplayedOnce() throws Exception {
     createReviewSpec("auth");
     var build = finishedSession("auth", "stopped", 0);
-    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    recordEvent("auth", "review_stage_started", Instant.now());
     var review = runningReview("auth");
     var latch = new CountDownLatch(1);
     var replayed = captureStops(latch);
@@ -1005,7 +1006,7 @@ class MissedStopReconcilerTest {
   void aWaitingReviewIsRescuedOncePerRunItWaitedOnAndOnlyOnceThatRunHasEnded() {
     createReviewSpec("auth");
     finishedSession("auth", "stopped", 0);
-    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    recordEvent("auth", "review_stage_started", Instant.now());
     var review = runningReview("auth");
     var holder = finishedSession("billing", "completed", 0);
     Acting.system(() -> reviewStore.waitOn(review, holder, () -> {}));
@@ -1029,7 +1030,7 @@ class MissedStopReconcilerTest {
   void aReviewWhoseReviewerOnlyJustEndedIsNotRescuedWhileItsStopIsStillBeingActedOn() {
     createReviewSpec("auth");
     finishedSession("auth", "stopped", 0);
-    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    recordEvent("auth", "review_stage_started", Instant.now());
     var reviewer = reviewerOf(runningReview("auth"), "auth");
     Acting.system(() -> sessionStore.complete(reviewer, "stopped", 0));
 
@@ -1047,7 +1048,7 @@ class MissedStopReconcilerTest {
   void aReviewWaitingOnAPersonIsNeverRescued() {
     createReviewSpec("auth");
     finishedSession("auth", "stopped", 0);
-    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    recordEvent("auth", "review_stage_started", Instant.now());
     Acting.system(
         () -> {
           var id = reviewStore.createReview("auth", 1);
@@ -1130,8 +1131,8 @@ class MissedStopReconcilerTest {
                     "feat/test",
                     0,
                     null,
-                    "",
-                    "",
+                    null,
+                    null,
                     null,
                     List.of(),
                     List.of())));
@@ -1316,7 +1317,7 @@ class MissedStopReconcilerTest {
     var sessionId = runningSession("auth");
     recordStopEvent(
         "auth",
-        Instant.now().plusSeconds(1).toString(),
+        Instant.now().plusSeconds(1),
         Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_RECONCILE));
     var probe = new CountingProbe(false);
     var reconciler = reconciler(probe, PAST_GRACE);
@@ -1351,8 +1352,8 @@ class MissedStopReconcilerTest {
                 "host",
                 stop));
     assertEquals("running", sessionStore.findById(run).orElseThrow().status(), "stale: dropped");
-    recordStopEvent("auth", Instant.now().plusSeconds(1).toString(), stop);
-    recordEvent("auth", Event.WellKnownTypes.AGENT_FAILED, Instant.now().plusSeconds(2).toString());
+    recordStopEvent("auth", Instant.now().plusSeconds(1), stop);
+    recordEvent("auth", Event.WellKnownTypes.AGENT_FAILED, Instant.now().plusSeconds(2));
     Acting.system(() -> sessionStore.stamp("node-a", sessionStore.unacknowledged()));
     var reconciler = reconciler(new CountingProbe(false), PAST_GRACE);
 
@@ -1472,7 +1473,7 @@ class MissedStopReconcilerTest {
     var build = runningSession("auth");
     recordStopEvent(
         "auth",
-        Instant.now().plusSeconds(1).toString(),
+        Instant.now().plusSeconds(1),
         Map.of(
             Event.WellKnownData.SOURCE,
             Event.WellKnownData.SOURCE_WATCHER,
@@ -1501,7 +1502,7 @@ class MissedStopReconcilerTest {
     var build = runningSession("auth");
     recordStopEvent(
         "auth",
-        Instant.now().plusSeconds(1).toString(),
+        Instant.now().plusSeconds(1),
         Map.of(
             Event.WellKnownData.SOURCE,
             Event.WellKnownData.SOURCE_WATCHER,
@@ -1529,7 +1530,7 @@ class MissedStopReconcilerTest {
     Acting.system(() -> sessionStore.transition(room, "running", "stopped", 1));
     recordStopEvent(
         "auth",
-        Instant.now().plusSeconds(1).toString(),
+        Instant.now().plusSeconds(1),
         Map.of(
             Event.WellKnownData.SOURCE,
             Event.WellKnownData.SOURCE_WATCHER,
@@ -1604,7 +1605,7 @@ class MissedStopReconcilerTest {
     finishedSession("auth", "stopped", 137);
     recordStopEvent(
         "auth",
-        Instant.now().plusSeconds(1).toString(),
+        Instant.now().plusSeconds(1),
         Map.of(
             Event.WellKnownData.EXIT_CODE,
             137,
@@ -1622,7 +1623,7 @@ class MissedStopReconcilerTest {
     finishedSession("auth", "stopped", 0);
     recordStopEvent(
         "auth",
-        Instant.now().plusSeconds(1).toString(),
+        Instant.now().plusSeconds(1),
         Map.of(
             Event.WellKnownData.EXIT_CODE,
             0,
@@ -1640,9 +1641,9 @@ class MissedStopReconcilerTest {
     finishedSession("auth", "stopped", 0);
     recordStopEvent(
         "auth",
-        Instant.now().plusSeconds(1).toString(),
+        Instant.now().plusSeconds(1),
         Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER));
-    recordEvent("auth", "review_stage_started", Instant.now().plusSeconds(2).toString());
+    recordEvent("auth", "review_stage_started", Instant.now().plusSeconds(2));
 
     var replayed = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
 
@@ -1655,13 +1656,13 @@ class MissedStopReconcilerTest {
     finishedSession("auth", "stopped", 137);
     recordStopEvent(
         "auth",
-        Instant.now().plusSeconds(1).toString(),
+        Instant.now().plusSeconds(1),
         Map.of(
             Event.WellKnownData.EXIT_CODE,
             137,
             Event.WellKnownData.SOURCE,
             Event.WellKnownData.SOURCE_WATCHER));
-    recordEvent("auth", Event.WellKnownTypes.AGENT_FAILED, Instant.now().plusSeconds(2).toString());
+    recordEvent("auth", Event.WellKnownTypes.AGENT_FAILED, Instant.now().plusSeconds(2));
 
     var replayed = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
 
@@ -1671,12 +1672,11 @@ class MissedStopReconcilerTest {
   @Test
   void evidenceFromBeforeTheSessionNeverCountsAsActedOn() {
     createInProgressSpec("auth");
-    recordEvent(
-        "auth", "review_stage_started", Instant.now().minus(Duration.ofHours(2)).toString());
+    recordEvent("auth", "review_stage_started", Instant.now().minus(Duration.ofHours(2)));
     finishedSession("auth", "stopped", 0);
     recordStopEvent(
         "auth",
-        Instant.now().plusSeconds(1).toString(),
+        Instant.now().plusSeconds(1),
         Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER));
 
     var replayed = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
@@ -1688,7 +1688,7 @@ class MissedStopReconcilerTest {
   void aRawTurnEndStopDoesNotBlockTheReplay() {
     createInProgressSpec("auth");
     finishedSession("auth", "stopped", null);
-    recordStopEvent("auth", Instant.now().plusSeconds(1).toString(), Map.of());
+    recordStopEvent("auth", Instant.now().plusSeconds(1), Map.of());
 
     var replayed = reconciler(new CountingProbe(false), Instant::now).sweep();
 
@@ -1700,7 +1700,7 @@ class MissedStopReconcilerTest {
     createInProgressSpec("auth");
     recordStopEvent(
         "auth",
-        Instant.now().minus(Duration.ofHours(2)).toString(),
+        Instant.now().minus(Duration.ofHours(2)),
         Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER));
     finishedSession("auth", "stopped", 0);
 
@@ -1718,7 +1718,7 @@ class MissedStopReconcilerTest {
             eventStore.insert(
                 new EventStore.EventRow(
                     0,
-                    Instant.now().plusSeconds(1).toString(),
+                    Instant.now().plusSeconds(1),
                     Event.WellKnownTypes.AGENT_SESSION_STOPPED,
                     "test-project",
                     "auth",
@@ -1736,7 +1736,9 @@ class MissedStopReconcilerTest {
     createInProgressSpec("auth");
     finishedSession("auth", "stopped", 0);
     recordStopEvent(
-        "auth", "garbage", Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER));
+        "auth",
+        Instant.EPOCH,
+        Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER));
 
     var replayed = reconciler(new CountingProbe(true), Instant::now).sweep();
 
@@ -1912,7 +1914,7 @@ class MissedStopReconcilerTest {
         null,
         null,
         "u",
-        "t0",
+        Instant.EPOCH,
         null,
         List.of(),
         null,

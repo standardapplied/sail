@@ -29,6 +29,7 @@ import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.Snapshots;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -750,7 +751,7 @@ class ReviewLoopRecoveryTest {
     var holder = holderOf("billing", "build");
     var build = loop.built("auth");
     endsWithNoStop(holder);
-    var ended = Instant.parse(loop.runs.findById(holder).orElseThrow().completedAt());
+    var ended = loop.runs.findById(holder).orElseThrow().completedAt();
     var insideTheGrace = ended.plus(MissedStopReconciler.LAUNCH_GRACE).minusSeconds(1);
 
     assertEquals(
@@ -1808,7 +1809,7 @@ class ReviewLoopRecoveryTest {
     pushed.put("role", "fix");
     pushed.put("agent", "claude-code");
     pushed.put("status", "running");
-    pushed.put("started_at", Instant.now().plus(Duration.ofMinutes(1)).toString());
+    pushed.put("started_at", Snapshots.millis(Instant.now().plus(Duration.ofMinutes(1))));
     pushed.put("repos", List.of());
     pushed.put("principal", "claude/fix-" + foreign);
     pushed.put("review_id", reviewer.reviewId());
@@ -1838,7 +1839,7 @@ class ReviewLoopRecoveryTest {
     copy.put("spec_id", "theirs");
     copy.put("iteration", 1);
     copy.put("status", "running");
-    copy.put("created_at", Instant.now().minus(Duration.ofHours(1)).toString());
+    copy.put("created_at", Snapshots.millis(Instant.now().minus(Duration.ofHours(1))));
     copy.put("stages", List.of());
     Acting.system(() -> loop.reviews.applyRevision(synced, copy, "1-abcdef"));
     loop.built("auth");
@@ -1969,7 +1970,7 @@ class ReviewLoopRecoveryTest {
     loop = ReviewLoop.staged(tempDir, "codex");
     failedOnAFindingNothingCanRead("broken");
     loop.db.execute(
-        "UPDATE specs SET status = 'review', created_at = '2026-01-01T00:00:00Z' WHERE id = 'broken'");
+        "UPDATE specs SET status = 'review', created_at = 1767225600000 WHERE id = 'broken'");
     var holder = holderOf("billing", "build");
     loop.built("auth");
     var review = loop.reviewOf("auth");

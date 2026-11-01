@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
@@ -27,7 +28,7 @@ class AgentReporterTest {
   private static final AgentUnit RUN_UNIT = AgentUnit.forRun(RUN_ID);
 
   private static RunStore.RunRow sessionRow(
-      String unit, String status, Integer exitCode, String startedAt, String completedAt) {
+      String unit, String status, Integer exitCode, Instant startedAt, Instant completedAt) {
     return new RunStore.RunRow(
         RUN_ID,
         CONTAINER,
@@ -81,7 +82,7 @@ class AgentReporterTest {
                 null,
                 null,
                 null));
-    var session = sessionRow(RUN_UNIT.unitName(), "completed", 0, startedAt, null);
+    var session = sessionRow(RUN_UNIT.unitName(), "completed", 0, Instant.parse(startedAt), null);
     var shell =
         new ScriptedShellExecutor()
             .onOk("cat " + RUN_UNIT.pidPath(), "12345\n")
@@ -118,7 +119,7 @@ class AgentReporterTest {
   void runningSessionReportsRunning(@TempDir java.nio.file.Path stateDir) throws Exception {
     var startedAt = Instant.now().minusSeconds(1800).toString();
     var lastCommit = String.valueOf(Instant.now().minusSeconds(60).getEpochSecond());
-    var session = sessionRow(RUN_UNIT.unitName(), "running", null, startedAt, null);
+    var session = sessionRow(RUN_UNIT.unitName(), "running", null, Instant.parse(startedAt), null);
     var shell =
         new ScriptedShellExecutor()
             .onOk("cat " + RUN_UNIT.pidPath(), "9999\n")
@@ -147,7 +148,7 @@ class AgentReporterTest {
   void aForegroundSessionWithABlankUnitStillProbesItsRunScopedPidFile(
       @TempDir java.nio.file.Path stateDir) throws Exception {
     var startedAt = Instant.now().minusSeconds(600).toString();
-    var session = sessionRow("", "running", null, startedAt, null);
+    var session = sessionRow("", "running", null, Instant.parse(startedAt), null);
     var shell =
         new ScriptedShellExecutor()
             .onOk("cat " + RUN_UNIT.pidPath(), "4242\n")
@@ -175,7 +176,7 @@ class AgentReporterTest {
   @Test
   void guardrailTriggeredSession(@TempDir java.nio.file.Path stateDir) throws Exception {
     var startedAt = Instant.now().minusSeconds(3600 * 5).toString();
-    var session = sessionRow(RUN_UNIT.unitName(), "stopped", null, startedAt, null);
+    var session = sessionRow(RUN_UNIT.unitName(), "stopped", null, Instant.parse(startedAt), null);
     var shell =
         new ScriptedShellExecutor()
             .onOk("cat " + RUN_UNIT.pidPath(), "12345\n")
@@ -235,7 +236,7 @@ class AgentReporterTest {
             + "\"\nexit_code: 1\nsnapshot_restored: pre-agent-20260302\ntask: implement auth\n";
     Files.writeString(stateDir.resolve("last-rollback.yaml"), rollbackYaml);
 
-    var session = sessionRow(RUN_UNIT.unitName(), "stopped", null, startedAt, null);
+    var session = sessionRow(RUN_UNIT.unitName(), "stopped", null, Instant.parse(startedAt), null);
     var shell =
         new ScriptedShellExecutor()
             .onOk("cat " + RUN_UNIT.pidPath(), "12345\n")
@@ -290,7 +291,7 @@ class AgentReporterTest {
                 null,
                 null,
                 null));
-    var session = sessionRow(RUN_UNIT.unitName(), "completed", 0, startedAt, null);
+    var session = sessionRow(RUN_UNIT.unitName(), "completed", 0, Instant.parse(startedAt), null);
     var shell =
         new ScriptedShellExecutor()
             .onOk("cat " + RUN_UNIT.pidPath(), "12345\n")
@@ -321,7 +322,7 @@ class AgentReporterTest {
       throws Exception {
     var start = Instant.now().minusSeconds(7200);
     var end = Instant.now().minusSeconds(3600);
-    var session = sessionRow(RUN_UNIT.unitName(), "completed", 0, start.toString(), end.toString());
+    var session = sessionRow(RUN_UNIT.unitName(), "completed", 0, start, end);
     var shell =
         new ScriptedShellExecutor()
             .onFail("cat " + RUN_UNIT.pidPath(), "No such file")
@@ -332,16 +333,15 @@ class AgentReporterTest {
     var report =
         new AgentReporter(shell).generate(CONTAINER, buildConfig(), List.of(), session, stateDir);
 
-    assertEquals(start.toString(), report.startedAt());
-    assertEquals(end.toString(), report.endedAt());
+    assertEquals(DateTimeUtils.format(start), report.startedAt());
+    assertEquals(DateTimeUtils.format(end), report.endedAt());
     assertTrue(report.duration().startsWith("1h"), "duration must be run-time, not since-dispatch");
   }
 
   @Test
   void aNonZeroExitIsReportedAsFailed(@TempDir java.nio.file.Path stateDir) throws Exception {
     var start = Instant.now().minusSeconds(120);
-    var session =
-        sessionRow(RUN_UNIT.unitName(), "stopped", 137, start.toString(), Instant.now().toString());
+    var session = sessionRow(RUN_UNIT.unitName(), "stopped", 137, start, Instant.now());
     var shell =
         new ScriptedShellExecutor()
             .onFail("cat " + RUN_UNIT.pidPath(), "No such file")

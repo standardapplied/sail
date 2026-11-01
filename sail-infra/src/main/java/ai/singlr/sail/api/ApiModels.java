@@ -960,7 +960,13 @@ record SpecRevisionView(
     implements Mappable {
   static SpecRevisionView from(ChangeLog.Entry e) {
     return new SpecRevisionView(
-        e.rev(), e.actor(), DateTimeUtils.format(e.recordedAt()), e.origin(), e.deleted(), e.peer(), e.kind().wire());
+        e.rev(),
+        e.actor(),
+        DateTimeUtils.format(e.recordedAt()),
+        e.origin(),
+        e.deleted(),
+        e.peer(),
+        e.kind().wire());
   }
 
   @Override

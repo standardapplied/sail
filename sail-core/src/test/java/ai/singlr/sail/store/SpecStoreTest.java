@@ -664,7 +664,7 @@ class SpecStoreTest {
   @Test
   void aReprojectIsStampedWhenItIsMade() {
     store.create(spec("a", "old", "A", "pending"));
-    db.execute("UPDATE specs SET updated_at = '2020-01-01T00:00:00Z' WHERE id = 'a'");
+    db.execute("UPDATE specs SET updated_at = 1577836800000 WHERE id = 'a'");
 
     store.reproject("old", "renamed");
 

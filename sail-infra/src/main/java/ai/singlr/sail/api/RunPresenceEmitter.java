@@ -99,7 +99,7 @@ public final class RunPresenceEmitter implements AutoCloseable {
     data.put("presence", presence);
     data.put(Event.WellKnownData.RUN_ID, run.id());
     data.put(Event.WellKnownData.RUN_ROLE, run.role());
-    data.put("last_activity_at", run.lastActivityAt());
+    data.put("last_activity_at", DateTimeUtils.format(run.lastActivityAt()));
     return Event.of(
         run.project(),
         run.specId(),

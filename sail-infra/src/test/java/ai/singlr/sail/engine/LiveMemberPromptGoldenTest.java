@@ -11,6 +11,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.PromptConversation.Rendered;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SpecStore;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -83,8 +84,8 @@ class LiveMemberPromptGoldenTest {
         null,
         0,
         "uday",
-        "",
-        "",
+        null,
+        null,
         null,
         List.of(),
         List.of());
@@ -97,7 +98,7 @@ class LiveMemberPromptGoldenTest {
         author,
         body,
         null,
-        "2026-08-11T12:00:00Z",
+        Instant.parse("2026-08-11T12:00:00Z"),
         "1-a",
         null,
         MessageStore.Mark.PLAIN);

@@ -300,7 +300,7 @@ class RecordTimesSyncTest {
     ada.create(SyncBox.spec("e-acme", "Ada's", "pending"));
     SyncBox.quiesce(main, ada, bob);
     var mains = times(main, "e-acme").getFirst();
-    ada.db.execute("UPDATE specs SET created_at = '2020-01-01T00:00:00Z' WHERE id = 'e-acme'");
+    ada.db.execute("UPDATE specs SET created_at = 1577836800000 WHERE id = 'e-acme'");
 
     Acting.as("ada", () -> ada.specs.updateStatus("e-acme", SpecStatus.IN_PROGRESS));
     SyncBox.quiesce(main, ada, bob);
@@ -316,7 +316,7 @@ class RecordTimesSyncTest {
     SyncBox.quiesce(main, ada, bob);
 
     Acting.as("ada", () -> ada.specs.setContent("e-acme", "Edited offline.", ""));
-    ada.db.execute("UPDATE specs SET updated_at = '2020-01-01T00:00:00Z' WHERE id = 'e-acme'");
+    ada.db.execute("UPDATE specs SET updated_at = 1577836800000 WHERE id = 'e-acme'");
     Acting.as("ada", () -> main.specs.updateStatus("e-acme", SpecStatus.IN_PROGRESS));
     var mainsEdit = times(main, "e-acme").getLast();
     SyncBox.quiesce(main, ada, bob);
@@ -333,7 +333,7 @@ class RecordTimesSyncTest {
     ada.create(SyncBox.spec("e-acme", "Ada's", "pending"));
     SyncBox.quiesce(main, ada, bob);
     var mains = times(main, "e-acme").getFirst();
-    ada.db.execute("UPDATE specs SET created_at = '2020-01-01T00:00:00Z' WHERE id = 'e-acme'");
+    ada.db.execute("UPDATE specs SET created_at = 1577836800000 WHERE id = 'e-acme'");
     Acting.as("ada", () -> ada.specs.updateStatus("e-acme", SpecStatus.IN_PROGRESS));
     Acting.as("ada", () -> main.specs.updateStatus("e-acme", SpecStatus.REVIEW));
     SyncBox.round(main, ada);
@@ -352,7 +352,7 @@ class RecordTimesSyncTest {
   void aRestoredRoomIsStampedWhenItIsRestored() {
     var rooms = new RoomStore(main.db);
     Acting.as("main", () -> rooms.create(room("lounge")));
-    main.db.execute("UPDATE rooms SET updated_at = '2020-01-01T00:00:00Z' WHERE id = 'lounge'");
+    main.db.execute("UPDATE rooms SET updated_at = 1577836800000 WHERE id = 'lounge'");
     Acting.as("main", () -> rooms.delete("lounge"));
 
     Acting.as("main", () -> rooms.restoreDeleted("lounge"));

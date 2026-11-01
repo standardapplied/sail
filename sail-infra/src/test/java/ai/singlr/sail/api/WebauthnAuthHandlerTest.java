@@ -33,6 +33,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -510,7 +511,7 @@ class WebauthnAuthHandlerTest {
       if ("ghost".equals(fdeHandle)) {
         throw new PasskeyException(PasskeyException.Kind.NOT_FOUND, "no such fde");
       }
-      return new Ticket("enr_fake", fdeHandle, "2026-06-01T00:00:00Z");
+      return new Ticket("enr_fake", fdeHandle, Instant.parse("2026-06-01T00:00:00Z"));
     }
 
     @Override
@@ -566,7 +567,7 @@ class WebauthnAuthHandlerTest {
       }
       this.lastUserHandle = userHandle;
       this.userHandleSeen = true;
-      return new LoginResult("sess_fake", "uday", "2026-06-01T00:00:00Z");
+      return new LoginResult("sess_fake", "uday", Instant.parse("2026-06-01T00:00:00Z"));
     }
   }
 }

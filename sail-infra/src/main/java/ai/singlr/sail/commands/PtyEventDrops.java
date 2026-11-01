@@ -51,7 +51,7 @@ final class PtyEventDrops {
         map.put("count", read(file).count() + 1);
         map.put("last_type", type);
         map.put("last_cause", cause);
-        map.put("last_at", DateTimeUtils.now().toString());
+        map.put("last_at", DateTimeUtils.format(DateTimeUtils.now()));
         var tmp = file.resolveSibling(FILE_NAME + ".tmp");
         Files.writeString(tmp, YamlUtil.dumpJson(map));
         try {

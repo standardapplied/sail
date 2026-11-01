@@ -217,7 +217,7 @@ class RetentionSweeperTest {
     Acting.system(
         () -> {
           specs.create(row(id, id, SpecStatus.ARCHIVED));
-          db.execute("UPDATE specs SET archived_at = ? WHERE id = ?", since.toString(), id);
+          db.execute("UPDATE specs SET archived_at = ? WHERE id = ?", since, id);
         });
   }
 
@@ -235,7 +235,7 @@ class RetentionSweeperTest {
 
   private static SpecStore.SpecRow row(String id, String title, SpecStatus status) {
     return new SpecStore.SpecRow(
-        id, "proj", title, status, "uday", null, null, null, null, 0, "uday", "", "", "uday",
+        id, "proj", title, status, "uday", null, null, null, null, 0, "uday", null, null, "uday",
         List.of(), List.of());
   }
 

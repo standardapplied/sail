@@ -420,8 +420,8 @@ class ScopeChangeRoundTest {
         null,
         0,
         "nia",
-        "",
-        "",
+        null,
+        null,
         "nia",
         List.of(),
         List.of());

@@ -289,8 +289,8 @@ class ScopedSyncServerTest {
         null,
         0,
         owner,
-        "",
-        "",
+        null,
+        null,
         owner,
         List.of(),
         List.of());

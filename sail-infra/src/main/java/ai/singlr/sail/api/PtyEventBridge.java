@@ -8,7 +8,6 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.EventStore;
 import java.time.Duration;
-import java.time.Instant;
 
 /**
  * Completes the live half of the pty event lane. The pty host persists its session facts straight

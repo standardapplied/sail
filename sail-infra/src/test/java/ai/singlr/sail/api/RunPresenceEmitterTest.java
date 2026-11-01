@@ -77,7 +77,7 @@ class RunPresenceEmitterTest {
   }
 
   private void stampAt(String id, Instant at) {
-    db.execute("UPDATE runs SET last_activity_at = ? WHERE id = ?", at.toString(), id);
+    db.execute("UPDATE runs SET last_activity_at = ? WHERE id = ?", at, id);
   }
 
   private Instant now() {

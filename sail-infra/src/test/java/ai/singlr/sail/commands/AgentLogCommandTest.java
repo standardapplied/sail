@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.singlr.sail.store.RunStore;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -41,7 +42,7 @@ class AgentLogCommandTest {
         null,
         logPath,
         null,
-        "t0",
+        Instant.EPOCH,
         null,
         List.of(),
         null,

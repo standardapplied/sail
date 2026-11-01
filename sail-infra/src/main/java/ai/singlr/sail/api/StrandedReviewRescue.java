@@ -7,14 +7,13 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.store.MissedStops;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
-import java.util.Objects;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -255,7 +254,9 @@ final class StrandedReviewRescue {
     return loop.ended(holderRunId)
         && sessionStore
             .findById(holderRunId)
-            .map(holder -> Objects.requireNonNullElse(holder.completedAt(), Instant.MAX).isBefore(cutoff))
+            .map(
+                holder ->
+                    Objects.requireNonNullElse(holder.completedAt(), Instant.MAX).isBefore(cutoff))
             .orElse(true);
   }
 

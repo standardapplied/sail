@@ -63,7 +63,7 @@ public final class ProvisionTracker<P extends Enum<P>> {
     var loaded = ProvisionState.fromMap(YamlUtil.parseFile(stateFile));
     if (!Objects.equals(loaded.inputs(), inputs)) {
       superseded = loaded;
-      var now = DateTimeUtils.now().toString();
+      var now = DateTimeUtils.format(DateTimeUtils.now());
       this.state =
           new ProvisionState(
               null, Objects.requireNonNullElse(loaded.startedAt(), now), now, null, inputs);
@@ -135,7 +135,7 @@ public final class ProvisionTracker<P extends Enum<P>> {
         throw new IllegalStateException("Cannot regress from " + current + " to " + completedPhase);
       }
     }
-    var now = DateTimeUtils.now().toString();
+    var now = DateTimeUtils.format(DateTimeUtils.now());
     this.state =
         new ProvisionState(
             completedPhase.name(),
@@ -151,7 +151,7 @@ public final class ProvisionTracker<P extends Enum<P>> {
    * field is NOT updated — it still reflects the last successfully completed phase.
    */
   public void recordFailure(P failedPhase, String message) throws IOException {
-    var now = DateTimeUtils.now().toString();
+    var now = DateTimeUtils.format(DateTimeUtils.now());
     this.state =
         new ProvisionState(
             state.completedPhase(),

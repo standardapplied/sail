@@ -13,6 +13,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
@@ -65,7 +66,14 @@ class PtyEventBridgeTest {
   private long insert(String type, String project, String specId, String data) {
     return events.insert(
         new EventStore.EventRow(
-            0, "2026-09-01T12:00:00Z", type, project, specId, "uday", "box-1", data));
+            0,
+            Instant.parse("2026-09-01T12:00:00Z"),
+            type,
+            project,
+            specId,
+            "uday",
+            "box-1",
+            data));
   }
 
   @Test

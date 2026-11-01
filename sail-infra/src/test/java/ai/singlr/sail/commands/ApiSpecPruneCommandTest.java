@@ -140,7 +140,7 @@ class ApiSpecPruneCommandTest {
 
   @Test
   void aPolicyChoosesByStatusAndWholeDays() {
-    db.execute("UPDATE specs SET archived_at = '2026-01-01T00:00:00Z'");
+    db.execute("UPDATE specs SET archived_at = 1767225600000");
 
     var run = run("prune", "--status", "archived", "--older-than", "30d", "-p", "proj", "--json");
 
@@ -211,8 +211,8 @@ class ApiSpecPruneCommandTest {
         null,
         0,
         "uday",
-        "",
-        "",
+        null,
+        null,
         "uday",
         List.of(),
         List.of());

@@ -1437,7 +1437,14 @@ class SailOperationsSeamTest {
           .pty()
           .recordEvent(
               new EventStore.EventRow(
-                  0, "now", "pty_session_started", "proj", "auth", "owner", "node", "{}"));
+                  0,
+                  DateTimeUtils.now(),
+                  "pty_session_started",
+                  "proj",
+                  "auth",
+                  "owner",
+                  "node",
+                  "{}"));
       assertEquals(
           1L, box.db.queryOne("SELECT count(*) FROM events", row -> row.integer(0)).orElseThrow());
       assertTrue(operations.catalog().demoDefinition().contains("demo"));

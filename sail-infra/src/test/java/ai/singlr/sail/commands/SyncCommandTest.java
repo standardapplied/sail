@@ -38,6 +38,7 @@ import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
@@ -648,7 +649,7 @@ class SyncCommandTest {
                       "spec_id", "auth",
                       "author", "raj",
                       "body", "hello from main",
-                      "created_at", DateTimeUtils.now().toString()),
+                      "created_at", Snapshots.millis(DateTimeUtils.now())),
                   "r1"));
 
       var events = SyncCommand.pulledMessageEvents(messages, specs, known, "devbox");
@@ -687,7 +688,7 @@ class SyncCommandTest {
                       "spec_id", "ghost",
                       "author", "raj",
                       "body", "orphaned on main",
-                      "created_at", DateTimeUtils.now().toString()),
+                      "created_at", Snapshots.millis(DateTimeUtils.now())),
                   "r1"));
 
       assertTrue(SyncCommand.pulledMessageEvents(messages, specs, Set.of(), "devbox").isEmpty());
@@ -711,8 +712,8 @@ class SyncCommandTest {
                     null,
                     0,
                     "uday",
-                    "",
-                    "",
+                    null,
+                    null,
                     null,
                     List.of(),
                     List.of("app"))));

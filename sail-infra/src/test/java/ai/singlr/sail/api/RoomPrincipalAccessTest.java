@@ -141,8 +141,8 @@ class RoomPrincipalAccessTest {
                     null,
                     0,
                     HANDLE,
-                    "",
-                    "",
+                    null,
+                    null,
                     null,
                     List.of(),
                     List.of())));

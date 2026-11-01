@@ -96,7 +96,7 @@ class RoomCommitGuardTest {
     return new RoomCommitGuard(store, null, events::add, shell);
   }
 
-  private static RunStore.RunRow run(String status, String startedAt, String completedAt) {
+  private static RunStore.RunRow run(String status, Instant startedAt, Instant completedAt) {
     return new RunStore.RunRow(
         "cand",
         "acme",
@@ -134,9 +134,7 @@ class RoomCommitGuardTest {
   void aRunStartedAfterTheGuardCheckCannotHaveOverlapped() {
     var started = Instant.parse("2026-01-01T00:05:00Z");
     var guardAt = Instant.parse("2026-01-01T00:00:00Z");
-    assertFalse(
-        RoomCommitGuard.overlapsRoomInterval(
-            run("running", started.toString(), null), null, guardAt));
+    assertFalse(RoomCommitGuard.overlapsRoomInterval(run("running", started, null), null, guardAt));
   }
 
   @Test
@@ -144,21 +142,29 @@ class RoomCommitGuardTest {
     var guardAt = Instant.parse("2026-01-01T01:00:00Z");
     assertTrue(
         RoomCommitGuard.overlapsRoomInterval(
-            run("running", "2026-01-01T00:00:00Z", null), null, guardAt));
+            run("running", Instant.parse("2026-01-01T00:00:00Z"), null), null, guardAt));
   }
 
   @Test
   void aRunThatFinishedBeforeTheRoomStartedDidNotOverlap() {
     var roomStarted = Instant.parse("2026-01-01T00:30:00Z");
     var guardAt = Instant.parse("2026-01-01T01:00:00Z");
-    var candidate = run("completed", "2026-01-01T00:00:00Z", "2026-01-01T00:10:00Z");
+    var candidate =
+        run(
+            "completed",
+            Instant.parse("2026-01-01T00:00:00Z"),
+            Instant.parse("2026-01-01T00:10:00Z"));
     assertFalse(RoomCommitGuard.overlapsRoomInterval(candidate, roomStarted, guardAt));
   }
 
   @Test
   void aCompletedRunWithoutAKnownRoomStartCountsAsOverlapping() {
     var guardAt = Instant.parse("2026-01-01T01:00:00Z");
-    var candidate = run("completed", "2026-01-01T00:00:00Z", "2026-01-01T00:10:00Z");
+    var candidate =
+        run(
+            "completed",
+            Instant.parse("2026-01-01T00:00:00Z"),
+            Instant.parse("2026-01-01T00:10:00Z"));
     assertTrue(RoomCommitGuard.overlapsRoomInterval(candidate, null, guardAt));
   }
 

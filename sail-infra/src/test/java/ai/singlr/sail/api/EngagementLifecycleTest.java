@@ -139,8 +139,8 @@ class EngagementLifecycleTest {
                     null,
                     0,
                     HANDLE,
-                    "",
-                    "",
+                    null,
+                    null,
                     null,
                     List.of(),
                     List.of("app"))));
@@ -614,8 +614,8 @@ class EngagementLifecycleTest {
                         null,
                         0,
                         HANDLE,
-                        "",
-                        "",
+                        null,
+                        null,
                         null,
                         List.of(),
                         List.of("app"))
@@ -856,8 +856,8 @@ class EngagementLifecycleTest {
             null,
             0,
             HANDLE,
-            "",
-            "",
+            null,
+            null,
             HANDLE,
             List.of(),
             List.of());
