@@ -1334,9 +1334,7 @@ class ScopedReadsTest {
     var spec = project + "-spec";
     var room = project + "-room";
     new ProjectStore(db)
-        .upsert(
-            TestDefinitions.yaml(
-                "name: " + project + "\nagent:\n  type: claude-code\n"));
+        .upsert(TestDefinitions.yaml("name: " + project + "\nagent:\n  type: claude-code\n"));
     containers.add(project);
     var specs = new SpecStore(db);
     specs.create(

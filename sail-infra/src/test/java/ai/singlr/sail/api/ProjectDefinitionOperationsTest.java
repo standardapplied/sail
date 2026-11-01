@@ -39,8 +39,7 @@ class ProjectDefinitionOperationsTest {
     new SchemaManager(db).migrate();
     projects = new ProjectStore(db);
     operations = new ProjectDefinitionOperations(projects);
-    Acting.system(
-        () -> projects.upsert(TestDefinitions.yaml("name: acme\nimage: ubuntu/24.04\n")));
+    Acting.system(() -> projects.upsert(TestDefinitions.yaml("name: acme\nimage: ubuntu/24.04\n")));
   }
 
   @AfterEach
@@ -53,8 +52,7 @@ class ProjectDefinitionOperationsTest {
     var read = operations.definition("acme");
 
     assertEquals("acme", read.name());
-    assertEquals(
-        Map.of("name", "acme", "image", "ubuntu/24.04"), read.toMap().get("definition"));
+    assertEquals(Map.of("name", "acme", "image", "ubuntu/24.04"), read.toMap().get("definition"));
     assertEquals(ProjectStore.tagOf("\"ubuntu/24.04\""), read.tags().get("image"));
     assertEquals(ProjectStore.tagOf(null), read.tags().get("pipeline"));
     assertEquals("sail", read.updatedBy());
@@ -71,10 +69,8 @@ class ProjectDefinitionOperationsTest {
 
     assertEquals("{\"name\": \"acme\", \"image\": \"debian/12\"}", written.document());
     assertEquals(ErrorCode.PRECONDITION_FAILED, stale.failure().errorCode());
-    assertEquals(
-        "The image section of 'acme' changed since you read it.", stale.getMessage());
-    assertEquals(
-        "debian/12", projects.findByName("acme").orElseThrow().definition().image());
+    assertEquals("The image section of 'acme' changed since you read it.", stale.getMessage());
+    assertEquals("debian/12", projects.findByName("acme").orElseThrow().definition().image());
     assertEquals(
         "x/1",
         read(operations.writeSection("acme", "image", "x/1", "*")).image(),
@@ -97,8 +93,7 @@ class ProjectDefinitionOperationsTest {
   @Test
   void aProjectIsCreatedOnceAndAnExistingNameIsAConflict() {
     var created = operations.create(Map.of("name", "beta", "description", "Second"));
-    var taken =
-        assertThrows(ApiException.class, () -> operations.create(Map.of("name", "beta")));
+    var taken = assertThrows(ApiException.class, () -> operations.create(Map.of("name", "beta")));
 
     assertEquals("beta", created.name());
     assertEquals(ErrorCode.CONFLICT, taken.failure().errorCode());

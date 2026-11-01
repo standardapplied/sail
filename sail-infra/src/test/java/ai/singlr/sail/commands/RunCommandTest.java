@@ -38,7 +38,6 @@ import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -112,8 +111,7 @@ class RunCommandTest {
     var cmd = command(tempDir.resolve("control-plane.db"));
     cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
 
-    var exitCode =
-        cmd.execute("test-project", "--dry-run");
+    var exitCode = cmd.execute("test-project", "--dry-run");
 
     assertNotEquals(0, exitCode);
     var errOutput = capturedErr.toString(StandardCharsets.UTF_8);

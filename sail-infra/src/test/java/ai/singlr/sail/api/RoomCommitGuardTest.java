@@ -220,9 +220,7 @@ class RoomCommitGuardTest {
   void guardTreatsUnreadableOrStatelessBaselineEntriesAsUntouched() throws IOException {
     var yaml = tempDir.resolve("sail.yaml");
     Files.writeString(
-        yaml,
-        "name: acme\nrepos:\n  - url: https://example.com/app.git\n    path:"
-            + " app\n");
+        yaml, "name: acme\nrepos:\n  - url: https://example.com/app.git\n    path:" + " app\n");
     runStore.create(
         "run-1", "acme", "auth", "node", "room", "codex", "b", "t", null, null, "log", "unit");
     runStore.saveRoomGuardBaseline(

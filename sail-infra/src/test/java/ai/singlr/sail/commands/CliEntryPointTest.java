@@ -16,7 +16,6 @@ import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -259,7 +258,6 @@ class CliEntryPointTest {
     assertTrue(output.contains("--yes"));
   }
 
-
   @Test
   void projectDemoHelpShowsDescription() {
     var cmd = new CommandLine(new Sail());
@@ -306,7 +304,6 @@ class CliEntryPointTest {
     assertTrue(output.contains("--json"));
   }
 
-
   @Test
   void projectApplyInvalidNameFails() {
     var cmd = new CommandLine(new Sail());
@@ -334,6 +331,4 @@ class CliEntryPointTest {
     }
     assertFalse(output.contains("sail.yaml"));
   }
-
-
 }

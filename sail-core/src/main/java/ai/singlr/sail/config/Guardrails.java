@@ -17,12 +17,12 @@ import java.util.regex.Pattern;
  * The limits one agent run is held to: a hard wall-clock ceiling ({@code max_duration}) and an
  * idle/stall window ({@code max_idle}), with what to do when either is crossed. The one limits type
  * every lane reads: {@code agent.guardrails} in the definition bounds a build, an ad-hoc run and a
- * chat turn, {@code pipeline.guardrails} a reviewer and a fix agent, and both blocks
- * parse here. The stall window measures time since the agent's last <em>progress event</em> (a tool
- * call or log chunk) — not git activity. The earlier git-based idle timeout was removed because an
- * agent working without committing looked idle; the agent event stream does not have that blind
- * spot, so it distinguishes a long build from a hung agent. Quality assessment still happens
- * post-task via {@code agent review}.
+ * chat turn, {@code pipeline.guardrails} a reviewer and a fix agent, and both blocks parse here.
+ * The stall window measures time since the agent's last <em>progress event</em> (a tool call or log
+ * chunk) — not git activity. The earlier git-based idle timeout was removed because an agent
+ * working without committing looked idle; the agent event stream does not have that blind spot, so
+ * it distinguishes a long build from a hung agent. Quality assessment still happens post-task via
+ * {@code agent review}.
  *
  * @param maxDuration hard wall-clock stop (e.g. "4h", "90m"); null for none
  * @param maxIdle stall window — act when no progress event arrives for this long (e.g. "15m"); null
@@ -45,9 +45,8 @@ public record Guardrails(String maxDuration, String maxIdle, String action) {
 
   /**
    * The supervision a reviewer and a fix agent get when the definition sets no {@code
-   * pipeline.guardrails} block: 45 minutes of wall clock, enough for a fix that runs the
-   * project's full verification, and the build lane's 20m stall window, stopping the agent on
-   * either.
+   * pipeline.guardrails} block: 45 minutes of wall clock, enough for a fix that runs the project's
+   * full verification, and the build lane's 20m stall window, stopping the agent on either.
    */
   public static Guardrails reviewDefaults() {
     return new Guardrails("45m", "20m", "stop");

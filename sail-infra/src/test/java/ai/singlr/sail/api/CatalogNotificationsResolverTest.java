@@ -130,7 +130,8 @@ class CatalogNotificationsResolverTest {
     Acting.system(
         () ->
             store.upsert(
-                TestDefinitions.yaml(definition.replaceFirst("(?m)^name: .*$", "name: " + project))));
+                TestDefinitions.yaml(
+                    definition.replaceFirst("(?m)^name: .*$", "name: " + project))));
   }
 
   private static String captureStderr(Runnable work) {

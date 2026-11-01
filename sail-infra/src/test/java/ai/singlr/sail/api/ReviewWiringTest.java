@@ -165,10 +165,10 @@ class ReviewWiringTest {
     var sail =
         yaml(
             Map.of(
-                    "type",
-                    "claude-code",
-                    "review_pipeline",
-                    Map.of("guardrails", Map.of("max_duration", "90m"))));
+                "type",
+                "claude-code",
+                "review_pipeline",
+                Map.of("guardrails", Map.of("max_duration", "90m"))));
 
     var resolved = ReviewWiring.configResolver(p -> sail).apply("acme");
 

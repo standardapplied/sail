@@ -57,9 +57,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -1084,7 +1084,8 @@ class ApiRouterTest {
               .PUT(HttpRequest.BodyPublishers.ofString("{\"value\": \"ubuntu/24.04\"}"))
               .build();
       var section = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
-      var unset = put(server, "/v1/projects/acme/definition/pipeline", "token", "{\"value\": null}");
+      var unset =
+          put(server, "/v1/projects/acme/definition/pipeline", "token", "{\"value\": null}");
       var valueless = put(server, "/v1/projects/acme/definition/image", "token", "{}");
       var posted = post(server, "/v1/projects/acme/definition/image", "token", "{}");
       var deeper = get(server, "/v1/projects/acme/definition/image/x", "token");

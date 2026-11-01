@@ -17,10 +17,10 @@ import java.util.function.Supplier;
 /**
  * Builds the per-project resolvers the {@link ReviewPipelineController} needs from a loader that
  * maps a project to its {@link ProjectDefinition}. Encodes two product decisions so the controller
- * stays mechanism-only: review is on by default — a project that configures no {@code
- * pipeline} still gets {@link ReviewPipelineConfig#mandatoryDefault()} — and a stage that
- * names no agent is reviewed by the project's roster reviewer ({@link AgentRoster#reviewer}, i.e.
- * the other installed agent when there is one, else the coder itself in a fresh session).
+ * stays mechanism-only: review is on by default — a project that configures no {@code pipeline}
+ * still gets {@link ReviewPipelineConfig#mandatoryDefault()} — and a stage that names no agent is
+ * reviewed by the project's roster reviewer ({@link AgentRoster#reviewer}, i.e. the other installed
+ * agent when there is one, else the coder itself in a fresh session).
  */
 public final class ReviewWiring {
 
