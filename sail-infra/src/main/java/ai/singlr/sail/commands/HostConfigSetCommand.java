@@ -478,7 +478,8 @@ public final class HostConfigSetCommand implements Runnable {
                   webauthn.origins(),
                   parseSessionTtlHours(value)));
       case "sync-role" ->
-          current.withSync(new SyncConfig(value, sync.main(), sync.handle(), sync.boxId()));
+          HostSyncCommand.withBoxId(
+              current.withSync(new SyncConfig(value, sync.main(), sync.handle(), sync.boxId())));
       case "sync-main" ->
           current.withSync(new SyncConfig(sync.role(), value, sync.handle(), sync.boxId()));
       case "sync-handle" ->

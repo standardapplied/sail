@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
@@ -273,6 +274,18 @@ class HostConfigSetCommandTest {
 
     assertEquals("10.0.0.2", updated.serverIp());
     assertEquals("localhost", updated.webauthn().rpId());
+  }
+
+  @Test
+  void aRoleSetByHandMintsTheBoxIdOnceSoTheBoxNeverSyncsAsItsHostname() {
+    assertNull(BASE.sync().boxId());
+
+    var roled = HostConfigSetCommand.applyChange(BASE, "sync-role", "node");
+    var again = HostConfigSetCommand.applyChange(roled, "sync-role", "main");
+
+    assertNotNull(roled.sync().boxId());
+    assertEquals(roled.sync().boxId(), again.sync().boxId(), "an id, once held, is kept");
+    assertEquals(roled.sync().boxId(), HostSyncCommand.withBoxId(again).sync().boxId());
   }
 
   @Test

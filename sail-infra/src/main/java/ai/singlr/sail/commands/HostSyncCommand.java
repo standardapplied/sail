@@ -209,7 +209,9 @@ public final class HostSyncCommand implements Runnable {
 
   /**
    * This box's stable sync identity. A box that already has one keeps it: every checkpoint a peer
-   * holds is keyed by it. A box taking its first role mints a fresh one.
+   * holds is keyed by it. A box taking its first role mints a fresh one, however it takes it
+   * ({@code sail join}, {@code sail host sync} or {@code sail host config set sync-role}), so no
+   * box syncs as its hostname and later answers as another id.
    */
   static HostYaml withBoxId(HostYaml host) {
     var sync = host.sync();

@@ -67,7 +67,7 @@ import picocli.CommandLine.Help.Ansi;
 class SyncCommandTest {
 
   @Test
-  void aStoreFailureMainServesKeepsItsRemedyForTheNodesReader() throws Exception {
+  void aStoreFailureMainServesReachesTheNodesReaderWithItsReason() throws Exception {
     try (var main = new SyncBox("main");
         var node = new SyncBox("node")) {
       main.create(SyncBox.spec("taken", "Taken", "pending"));
@@ -81,22 +81,10 @@ class SyncCommandTest {
       }
 
       assertEquals("store", failed.kind());
+      assertEquals(List.of(), failed.remedy().commands());
       assertEquals(
-          List.of(
-              Remedy.sail("spec content", "taken"),
-              Remedy.sail("spec content", "taken", "--body-file", "<file>")),
-          failed.remedy().commands());
-      var reason = "spec: spec: Spec taken has no content hash.";
-      assertEquals(
-          reason
-              + " Print its content with 'sudo sail spec content taken' and write it back with"
-              + " 'sudo sail spec content taken --body-file <file>'.",
+          "spec: spec: Spec taken has no content hash.",
           SyncCommand.reason(failed, OperatorCommand.SUDO));
-      assertEquals(
-          reason
-              + " Print its content with 'sail spec content taken' and write it back with"
-              + " 'sail spec content taken --body-file <file>'.",
-          SyncCommand.reason(failed, OperatorCommand.PLAIN));
     }
   }
 

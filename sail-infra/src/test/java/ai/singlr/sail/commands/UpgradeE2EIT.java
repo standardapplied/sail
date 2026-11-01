@@ -214,6 +214,7 @@ class UpgradeE2EIT extends AbstractIncusIT {
       throws Exception {
     var hostState = hostState();
     var services = serviceStates();
+    var stamped = query("SELECT applied_at FROM schema_version");
 
     var refused = root(STAGED + " migrate");
 
@@ -221,6 +222,10 @@ class UpgradeE2EIT extends AbstractIncusIT {
     assertTrue(
         refused.stderr().contains("sudo " + INSTALLED + " upgrade --binary " + STAGED),
         refused::stderr);
+    assertEquals(
+        stamped,
+        query("SELECT applied_at FROM schema_version"),
+        "the staged build opened the database");
     assertEquals(hostState, hostState(), "the staged candidate rewrote host state");
     assertEquals(services, serviceStates(), "the staged candidate restarted a service");
     assertSessionAlive(socket, pid);

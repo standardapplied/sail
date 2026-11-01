@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.commands.CliCommand;
@@ -153,7 +154,7 @@ class RemedyOverHttpTest {
   }
 
   @Test
-  void aStoreRefusalReachesTheReaderWithItsRemedyAsData() throws Exception {
+  void aStoreIntegrityFailureIsAnInternalErrorThatNamesNoRepair() throws Exception {
     db.execute("UPDATE specs SET body_hash = NULL WHERE id = 'taken'");
     var response =
         HttpClient.newHttpClient()
@@ -166,42 +167,21 @@ class RemedyOverHttpTest {
                 HttpResponse.BodyHandlers.ofString());
 
     assertEquals(500, response.statusCode());
-    assertEquals(
-        List.of(
-            Map.of("text", "Print its content with '"),
-            Map.of("run", "sail", "verb", "spec content", "args", List.of("taken")),
-            Map.of("text", "' and write it back with '"),
-            Map.of(
-                "run",
-                "sail",
-                "verb",
-                "spec content",
-                "args",
-                List.of("taken", "--body-file", "<file>")),
-            Map.of("text", "'.")),
-        ((Map<?, ?>) YamlUtil.parseMap(response.body()).get("error")).get("remedy"));
+    assertNull(
+        ((Map<?, ?>) YamlUtil.parseMap(response.body()).get("error")).get("remedy"),
+        "an integrity failure names no command that would repair it");
     SailApiClient.Refused refused;
     try (var client = client()) {
       refused =
           assertThrows(SailApiClient.Refused.class, () -> client.get("/v1/specs/taken/content"));
     }
-    var reason = "Spec taken has no content hash.";
     assertEquals(
-        List.of(
-            reason
-                + " Print its content with 'sudo sail spec content taken' and write it back with"
-                + " 'sudo sail spec content taken --body-file <file>'. (HTTP 500)"),
+        List.of("sail API operation failed. (HTTP 500)"),
         CliCommand.lines(refused, OperatorCommand.SUDO));
-    assertEquals(
-        List.of(
-            reason
-                + " Print its content with 'sail spec content taken' and write it back with"
-                + " 'sail spec content taken --body-file <file>'. (HTTP 500)"),
-        CliCommand.lines(refused, OperatorCommand.PLAIN));
   }
 
   @Test
-  void anIfMatchCheckRefusedBelowTheDoorKeepsItsRemedy() throws Exception {
+  void anIfMatchCheckFailingBelowTheDoorReachesTheReaderWithItsReason() throws Exception {
     db.execute("UPDATE specs SET body_hash = NULL WHERE id = 'taken'");
     var response =
         HttpClient.newHttpClient()
@@ -216,20 +196,9 @@ class RemedyOverHttpTest {
                 HttpResponse.BodyHandlers.ofString());
 
     assertEquals(500, response.statusCode(), response.body());
-    assertEquals(
-        List.of(
-            Map.of("text", "Print its content with '"),
-            Map.of("run", "sail", "verb", "spec content", "args", List.of("taken")),
-            Map.of("text", "' and write it back with '"),
-            Map.of(
-                "run",
-                "sail",
-                "verb",
-                "spec content",
-                "args",
-                List.of("taken", "--body-file", "<file>")),
-            Map.of("text", "'.")),
-        ((Map<?, ?>) YamlUtil.parseMap(response.body()).get("error")).get("remedy"));
+    assertNull(
+        ((Map<?, ?>) YamlUtil.parseMap(response.body()).get("error")).get("remedy"),
+        "an integrity failure names no command that would repair it");
   }
 
   @Test
