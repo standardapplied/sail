@@ -115,8 +115,10 @@ class SkillShareIT extends AbstractIncusIT {
             skillsDir);
       }
       assertEquals(
-          List.of(Kind.SHARED, Kind.SAIL),
-          skills.rows(CONTAINER).rows().stream().map(SkillOperations.Row::kind).toList());
+          List.of("java SHARED", "sail-portal SAIL", "spec-board SAIL"),
+          skills.rows(CONTAINER).rows().stream()
+              .map(row -> row.name() + " " + row.kind())
+              .toList());
 
       var crowded =
           exec(

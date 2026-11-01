@@ -63,6 +63,8 @@ class ProjectServeIT extends AbstractIncusIT {
                   "userdel -r ubuntu 2>/dev/null || true;"
                       + " id -u dev >/dev/null 2>&1 || useradd -m -u 1000 -s /bin/bash dev;"
                       + " mkdir -p /home/dev/workspace && chown dev:dev /home/dev/workspace;"
+                      + " for i in $(seq 1 30); do"
+                      + " loginctl enable-linger dev 2>/dev/null && exit 0; sleep 1; done;"
                       + " loginctl enable-linger dev"));
       assertTrue(user.ok(), "the dev user and its manager: " + user.stderr());
       var manager =
