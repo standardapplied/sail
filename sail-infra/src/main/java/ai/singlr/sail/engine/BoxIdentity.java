@@ -12,14 +12,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * This box's sync configuration with its identity resolved: the box id {@code sail join} minted or
- * {@code sail migrate} persisted, and — until one has been persisted — the hostname, which is
- * exactly the value the migration writes, so a box keeps the identity every checkpoint on every
- * peer already carries. A box with no {@code host.yaml} at all has declared nothing and is known by
- * its hostname alone. The only place sync identity meets the hostname. A {@code host.yaml} that
- * exists but cannot be read is a loud failure, never a silent fallback: answering with the hostname
- * while the file names another id would let this box's identity flip with a permission bit and
- * orphan every peer's checkpoints.
+ * This box's sync configuration with its identity resolved: the box id {@code sail join} or {@code
+ * sail host sync} minted, and the hostname for a box that has taken no role and so minted none. A
+ * box with no {@code host.yaml} at all has declared nothing and is known by its hostname alone. The
+ * only place sync identity meets the hostname. A {@code host.yaml} that exists but cannot be read
+ * is a loud failure, never a silent fallback: answering with the hostname while the file names
+ * another id would let this box's identity flip with a permission bit and orphan every peer's
+ * checkpoints.
  */
 public final class BoxIdentity {
 

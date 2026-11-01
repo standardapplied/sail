@@ -279,7 +279,7 @@ class HostConfigSetCommandTest {
   void syncRoleAndMainComposeAndPreserveOtherFields() {
     var asNode = HostConfigSetCommand.applyChange(BASE, "sync-role", "node");
     var pointed = HostConfigSetCommand.applyChange(asNode, "sync-main", "sail@maindevbox");
-    var minted = HostSyncCommand.withBoxId(pointed, "devbox");
+    var minted = HostSyncCommand.withBoxId(pointed);
     var identified = HostConfigSetCommand.applyChange(minted, "sync-handle", "mady");
     assertEquals(minted.sync().boxId(), identified.sync().boxId());
 
@@ -293,7 +293,7 @@ class HostConfigSetCommandTest {
       @TempDir Path dir) throws Exception {
     var hostYaml = dir.resolve("host.yaml");
     var dbPath = dir.resolve("sail.db");
-    var standalone = HostSyncCommand.withBoxId(BASE, "devbox");
+    var standalone = HostSyncCommand.withBoxId(BASE);
     YamlUtil.dumpToFile(standalone.toMap(), hostYaml);
     String run;
     try (var db = Sqlite.open(dbPath)) {

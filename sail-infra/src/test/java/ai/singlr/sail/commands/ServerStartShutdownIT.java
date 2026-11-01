@@ -5,11 +5,8 @@
 
 package ai.singlr.sail.commands;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.identity.Acting;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -85,67 +82,6 @@ class ServerStartShutdownIT {
               + transcript);
     } finally {
       process.destroyForcibly();
-    }
-  }
-
-  @Test
-  void theServerCannotListenUntilContentMigrationFinishes(
-      @org.junit.jupiter.api.io.TempDir Path directory) throws Exception {
-    var data = Files.createDirectories(directory.resolve("data"));
-    var database = data.resolve("sail.db");
-    try (var db = ai.singlr.sail.store.Sqlite.open(database)) {
-      new ai.singlr.sail.store.SchemaManager(db).migrate();
-      var specs = new ai.singlr.sail.store.SpecStore(db);
-      Acting.system(
-          () -> specs.create(ai.singlr.sail.sync.SyncBox.spec("waiting", "Waiting", "pending")));
-      Acting.system(() -> specs.setContent("waiting", "must be migrated", ""));
-      db.execute("UPDATE specs SET body_hash = NULL, plan_hash = NULL");
-      db.execute(
-          "CREATE TRIGGER block_content BEFORE UPDATE OF body_hash ON specs BEGIN SELECT RAISE(ABORT, 'migration blocked'); END");
-    }
-    var home = Files.createDirectories(directory.resolve("home"));
-    var port = freePort();
-    var refused = startServer(home, data, port);
-    var failedLog = directory.resolve("failed.log");
-    try {
-      assertTrue(refused.waitFor(20, TimeUnit.SECONDS));
-      try (var output = Files.newOutputStream(failedLog)) {
-        refused.getInputStream().transferTo(output);
-      }
-      var transcript = Files.readString(failedLog);
-      assertTrue(transcript.contains("migration blocked"), transcript);
-      assertFalse(transcript.contains("Sail server listening"), transcript);
-    } finally {
-      refused.destroyForcibly();
-    }
-    try (var db = ai.singlr.sail.store.Sqlite.open(database)) {
-      db.execute("DROP TRIGGER block_content");
-    }
-    var resumed = startServer(home, data, port);
-    var lines = new LinkedBlockingQueue<String>();
-    Thread.ofVirtual().start(() -> drainInto(resumed, lines));
-    var transcript = new StringBuilder();
-    try {
-      assertTrue(awaitLine(lines, transcript, "Sail server listening", 30), transcript.toString());
-      try (var db = ai.singlr.sail.store.Sqlite.open(database)) {
-        assertEquals(
-            0,
-            db.queryOne(
-                    "SELECT COUNT(*) FROM specs WHERE body_hash IS NULL OR plan_hash IS NULL",
-                    row -> row.integer(0))
-                .orElseThrow());
-        assertEquals(
-            "must be migrated",
-            new ai.singlr.sail.store.BlobStore(db)
-                .text(
-                    new ai.singlr.sail.store.SpecStore(db)
-                        .comparableSnapshot("waiting")
-                        .get("body_hash")
-                        .toString()));
-      }
-    } finally {
-      resumed.destroy();
-      if (!resumed.waitFor(20, TimeUnit.SECONDS)) resumed.destroyForcibly();
     }
   }
 

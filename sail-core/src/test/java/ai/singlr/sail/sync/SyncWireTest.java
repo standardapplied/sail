@@ -183,7 +183,10 @@ class SyncWireTest {
             + " \"main-box\", \"handle\": \"ada\", \"file_max\": 4096, \"catalog\": \"c0ffee\"}",
         SyncWire.encode(catalogued));
     assertEquals(catalogued, SyncWire.decodeResponse(SyncWire.encode(catalogued)));
-    assertFalse(SyncWire.encode(uncatalogued).contains("catalog"));
+    assertEquals(
+        "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.53.0\", \"mainId\":"
+            + " \"main-box\", \"handle\": \"ada\", \"file_max\": 4096}",
+        SyncWire.encode(uncatalogued));
     assertNull(
         ((SyncWire.Welcome) SyncWire.decodeResponse(SyncWire.encode(uncatalogued))).catalog());
   }

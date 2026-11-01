@@ -12,12 +12,9 @@ import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 
 /**
- * Converges the schema and verifies the v1 data floor before a sync path touches replicated data.
- * Exists because of the in-sync self-update incident where a freshly-replaced binary kept syncing
- * against the previous release's schema and aborted on a stale CHECK constraint — both sync entry
- * points go through {@link #prepare}; {@link #converge} also owns the RPC server's database handle.
- * Schema and pending data migrations finish before the handle can serve or synchronize content,
- * including resuming a migration interrupted by an older release's upgrade timeout.
+ * Opens the schema before a sync path touches replicated data: both sync entry points go through
+ * {@link #prepare}, so a database of another release is refused before anything is served or
+ * synchronized; {@link #converge} also owns the RPC server's database handle.
  */
 public final class SyncDatabase implements AutoCloseable {
 

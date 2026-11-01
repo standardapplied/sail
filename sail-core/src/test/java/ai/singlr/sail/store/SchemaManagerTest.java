@@ -148,7 +148,7 @@ class SchemaManagerTest {
             + SchemaManager.CURRENT_VERSION
             + ").",
         refusal.reason());
-    assertEquals(List.of(Remedy.sail("upgrade")), refusal.remedy().commands());
+    assertEquals("Run 'sail upgrade' before opening this database.", refusal.remedy().plain());
     assertEquals(newer, schema.currentVersion());
   }
 

@@ -37,18 +37,18 @@ import java.util.Set;
 
 /**
  * Main's side of one sync session: a request loop over the SSH channel's stdio. Nothing is served
- * before a {@link SyncWire.Hello} has been welcomed — the protocol and the fleet floor are checked
- * there, once. It then answers {@link SyncWire.Heads} with every type's high-water, pages the
- * change log for {@link SyncWire.Pull}, reads current rows for {@link SyncWire.Need}, routes each
- * offer of a {@link SyncWire.Push} to the authoritative {@link MainReplica} for its entity type,
- * serves the node's roster pull, and returns at {@link SyncWire.Bye} or end of stream. The
- * session's {@link Actor}, on the {@link Actor.Lane#SYNC} lane, is the pusher every offer is
- * decided for, by its type's {@code WriteAuthority} — the same rule a node's journal decided the
- * write by: a {@code viewer} opens a session and pulls every type, but its offers are denied; a
- * member changes only what is theirs, names only themselves, their box's machinery or their runs as
- * its author, and creates only as themselves; and a run is only ever its executing box's. Every
- * such decision is a {@link SyncWire.Denied} for that one offer, carrying main's version, so the
- * node settles it instead of offering the same change again every round.
+ * before a {@link SyncWire.Hello} has been welcomed — the protocol is checked there, once. It then
+ * answers {@link SyncWire.Heads} with every type's high-water, pages the change log for {@link
+ * SyncWire.Pull}, reads current rows for {@link SyncWire.Need}, routes each offer of a {@link
+ * SyncWire.Push} to the authoritative {@link MainReplica} for its entity type, serves the node's
+ * roster pull, and returns at {@link SyncWire.Bye} or end of stream. The session's {@link Actor},
+ * on the {@link Actor.Lane#SYNC} lane, is the pusher every offer is decided for, by its type's
+ * {@code WriteAuthority} — the same rule a node's journal decided the write by: a {@code viewer}
+ * opens a session and pulls every type, but its offers are denied; a member changes only what is
+ * theirs, names only themselves, their box's machinery or their runs as its author, and creates
+ * only as themselves; and a run is only ever its executing box's. Every such decision is a {@link
+ * SyncWire.Denied} for that one offer, carrying main's version, so the node settles it instead of
+ * offering the same change again every round.
  *
  * <p>An offer carrying {@code erase} asks main to prune: main decides it on its own copy ({@link
  * EraseAuthority}), erases the entity and what belongs to it in one transaction, and answers the

@@ -364,7 +364,7 @@ public final class SyncOperations {
     if (Strings.isBlank(config.boxId())) {
       throw Remedied.state(
           "This box has no sync box id.",
-          Remedy.of("Run '", Remedy.sail("migrate"), "' to assign one, then sync again."));
+          Remedy.of("Join main again to mint one: '", Remedy.sail("join", "<main>"), "'."));
     }
     return config.boxId();
   }

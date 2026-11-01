@@ -7,7 +7,6 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
@@ -66,20 +65,36 @@ class SyncSchemaConvergenceTest {
   }
 
   @Test
-  void aSchemaThatCannotBeCreatedNamesTheBoxToUpgradeAndAborts() {
-    var path = tempDir.resolve("broken.db");
+  void aDatabaseSailDidNotMakeIsRefusedNamingAFreshOne() {
+    var path = tempDir.resolve("foreign.db");
     try (var db = Sqlite.open(path)) {
       db.execute("CREATE TABLE specs (id TEXT PRIMARY KEY, project TEXT)");
     }
 
+    var failure = assertThrows(Remedied.State.class, () -> SyncDatabase.converge(path, "box"));
+
+    assertEquals(
+        "Database " + path + " holds tables but no schema version: Sail did not make it.",
+        failure.reason());
+    assertEquals(List.of(Remedy.sail("init")), failure.remedy().commands());
+  }
+
+  @Test
+  void aSchemaThatCannotBeWrittenNamesTheBoxToUpgradeAndAborts() {
+    var path = tempDir.resolve("broken.db");
+    try (var db = Sqlite.open(path)) {
+      db.execute(
+          "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
+      db.execute(
+          "CREATE TRIGGER no_stamp BEFORE INSERT ON schema_version"
+              + " BEGIN SELECT RAISE(ABORT, 'stamp refused'); END");
+    }
+
     var failure = assertThrows(Remedied.State.class, () -> SyncDatabase.converge(path, "devbox-7"));
 
-    assertTrue(
-        failure
-            .reason()
-            .startsWith(
-                "Sync aborted before touching data: could not converge the database schema on"
-                    + " 'devbox-7': "),
+    assertEquals(
+        "Sync aborted before touching data: could not converge the database schema on"
+            + " 'devbox-7': stamp refused.",
         failure.reason());
     assertEquals(List.of(Remedy.sail("upgrade")), failure.remedy().commands());
   }

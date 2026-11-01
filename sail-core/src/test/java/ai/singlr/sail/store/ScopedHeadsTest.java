@@ -172,51 +172,6 @@ class ScopedHeadsTest {
     assertEquals(Optional.of("alpha"), log.headProject("room", "alpha-work"));
   }
 
-  @Test
-  void theBackfillFillsEveryLiveHeadAndLeavesAPrunedOneUnknown() {
-    var kept = seed("alpha");
-    var gone = seed("beta");
-    specs.updateStatus("beta-work", SpecStatus.ARCHIVED);
-    var erasure = new Erasure(db);
-    erasure.erase(erasure.closure(List.of(new Erasure.Target("spec", "beta-work"))), "local");
-    specs.delete("alpha-work");
-    db.execute("UPDATE change_heads SET project = NULL");
-
-    var filed = log.backfillProjects();
-
-    assertEquals(Optional.of("alpha"), log.headProject("spec", "alpha-work"));
-    assertEquals(Optional.of("alpha"), log.headProject("room", "alpha-work"));
-    assertEquals(Optional.of("alpha"), log.headProject("message", kept.message()));
-    assertEquals(Optional.of("alpha"), log.headProject("run", kept.run()));
-    assertEquals(Optional.of("alpha"), log.headProject("review", kept.review()));
-    assertEquals(Optional.of("alpha"), log.headProject("file", "alpha/notes.md"));
-    assertEquals(Optional.of("alpha"), log.headProject("project", "alpha"));
-    assertEquals(Optional.of("beta"), log.headProject("project", "beta"));
-    assertEquals(Optional.of("beta"), log.headProject("file", "beta/notes.md"));
-    for (var target :
-        List.of(
-            new Erasure.Target("spec", "beta-work"),
-            new Erasure.Target("room", "beta-work"),
-            new Erasure.Target("message", gone.message()),
-            new Erasure.Target("run", gone.run()),
-            new Erasure.Target("review", gone.review()))) {
-      assertEquals(
-          Optional.empty(),
-          log.headProject(target.type(), target.id()),
-          target + ": pruned before its head was filed");
-    }
-    assertEquals(10L, filed);
-  }
-
-  @Test
-  void theBackfillCountsEveryHeadThatCarriesAProject() {
-    seed("alpha");
-    db.execute("UPDATE change_heads SET project = NULL");
-
-    assertEquals(8L, log.backfillProjects());
-    assertEquals(8L, log.backfillProjects());
-  }
-
   private record Seeded(String message, String run, String review) {}
 
   private Seeded seed(String project) {

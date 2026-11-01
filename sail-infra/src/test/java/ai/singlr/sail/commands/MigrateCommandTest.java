@@ -38,6 +38,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import picocli.CommandLine.Help.Ansi;
 
 class MigrateCommandTest {
 
@@ -118,7 +119,7 @@ class MigrateCommandTest {
                     fresh,
                     true,
                     new MigrateCommand.Scope.Refused("staged"),
-                    json -> steps.add("host")));
+                    (db, json) -> steps.add("host")));
 
     assertEquals("staged", refused.getMessage());
     assertFalse(Files.exists(fresh.getParent()));
@@ -137,7 +138,7 @@ class MigrateCommandTest {
                     copy,
                     true,
                     new MigrateCommand.Scope.DatabaseOnly("only the copy"),
-                    json -> steps.add("host")));
+                    (db, json) -> steps.add("host")));
 
     assertEquals(List.of(), steps);
     assertEquals("only the copy\n", err);
@@ -156,13 +157,30 @@ class MigrateCommandTest {
         path,
         true,
         new MigrateCommand.Scope.Box(),
-        json -> {
-          try (var prepared = Sqlite.open(path)) {
-            steps.add("host at v" + new SchemaManager(prepared).currentVersion());
-          }
-        });
+        (db, json) -> steps.add("host at v" + new SchemaManager(db).currentVersion()));
 
     assertEquals(List.of("host at v" + SchemaManager.CURRENT_VERSION), steps);
+  }
+
+  @Test
+  void aReaderIsToldWhichDatabaseWasPreparedAtWhichSchema() {
+    var path = tempDir.resolve("told/sail.db");
+
+    var out =
+        captureStdout(
+            () ->
+                MigrateCommand.converge(
+                    path, false, new MigrateCommand.Scope.Box(), (db, json) -> {}));
+
+    assertEquals(
+        Ansi.AUTO.string(
+                "  @|green ✓|@ Database: "
+                    + path
+                    + " @|faint (schema v"
+                    + SchemaManager.CURRENT_VERSION
+                    + ")|@")
+            + "\n",
+        out);
   }
 
   @Test
@@ -182,7 +200,7 @@ class MigrateCommandTest {
             Remedied.State.class,
             () ->
                 MigrateCommand.converge(
-                    path, true, new MigrateCommand.Scope.Box(), json -> steps.add("host")));
+                    path, true, new MigrateCommand.Scope.Box(), (db, json) -> steps.add("host")));
 
     assertEquals(List.of(Remedy.sail("init")), refused.remedy().commands());
     assertEquals(List.of(), steps);

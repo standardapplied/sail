@@ -57,8 +57,7 @@ class ApiOperatorHintsTest {
     assertEquals(
         List.of(
             "Start it with sudo sail project start gamma.",
-            "If its descriptor is on this box, import it with 'sudo sail migrate'. To create the"
-                + " project, run 'sudo sail project apply -f <file>'.",
+            "To create the project, run 'sudo sail project apply -f <file>'.",
             "Claim it first: sudo sail spec update auth --assignee ada",
             "Reassign it to dispatch here: sudo sail spec update auth --assignee ada",
             "Set it with: sudo sail host config set sync-handle <handle>",
@@ -73,8 +72,7 @@ class ApiOperatorHintsTest {
     assertEquals(
         List.of(
             "Start it with sail project start gamma.",
-            "If its descriptor is on this box, import it with 'sail migrate'. To create the"
-                + " project, run 'sail project apply -f <file>'.",
+            "To create the project, run 'sail project apply -f <file>'.",
             "Claim it first: sail spec update auth --assignee ada",
             "Reassign it to dispatch here: sail spec update auth --assignee ada",
             "Set it with: sail host config set sync-handle <handle>",

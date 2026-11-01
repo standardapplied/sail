@@ -52,9 +52,8 @@ whether it works. Each of these is a finding at review and a reason not to merge
   second catch ladder. One seam, used from both sides.
 - A test fake that re-implements a support class (`ScriptedShellExecutor`, `ManualClock`,
   `SyncBox`, `Fleet`), a private row builder, a copied preamble.
-- Compatibility with an older release added anywhere but the places that already hold it; the
-  fleet is upgraded to latest and the migration code deleted before v1, so a new tolerance is
-  debt with a known end date.
+- Compatibility with an older release: a box of another release is refused at its database
+  and at the sync hello, so nothing reads what an older one wrote.
 
 A refactor spec is behaviour-preserving and its bar is the net deletion it names; a feature spec
 names the mechanism its behaviour folds into. Before merge: a full verify logged to a file, an

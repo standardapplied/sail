@@ -5,8 +5,11 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.engine.AuthorizedKeysSync;
+import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.HostDropIn;
 import ai.singlr.sail.engine.HostPackages;
+import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.NeedrestartPolicy;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PtyHostUnit;
@@ -19,13 +22,14 @@ import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.store.BoxDatabase;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -62,7 +66,7 @@ public final class MigrateCommand implements Runnable {
             dbPath,
             SailPaths.binaryPath(),
             SailPaths.findInstalledBinary()),
-        jsonOutput -> convergeHost(jsonOutput, operator));
+        (db, jsonOutput) -> convergeHost(db, jsonOutput, operator));
   }
 
   /**
@@ -122,9 +126,10 @@ public final class MigrateCommand implements Runnable {
 
   /**
    * Prepares the database at {@code dbPath}, then, when {@code scope} is the whole box, converges
-   * the host with {@code host}.
+   * the host around it with {@code host}.
    */
-  static void converge(Path dbPath, boolean jsonOutput, Scope scope, Consumer<Boolean> host) {
+  static void converge(
+      Path dbPath, boolean jsonOutput, Scope scope, BiConsumer<Sqlite, Boolean> host) {
     if (scope instanceof Scope.Refused refused) {
       throw new IllegalStateException(refused.why());
     }
@@ -144,18 +149,68 @@ public final class MigrateCommand implements Runnable {
                     + new SchemaManager(db).currentVersion()
                     + ")|@"));
       }
+      if (scope instanceof Scope.DatabaseOnly databaseOnly) {
+        (jsonOutput ? System.err : System.out).println(Ansi.AUTO.string(databaseOnly.why()));
+        return;
+      }
+      host.accept(db, jsonOutput);
     }
-    if (scope instanceof Scope.DatabaseOnly databaseOnly) {
-      (jsonOutput ? System.err : System.out).println(Ansi.AUTO.string(databaseOnly.why()));
-      return;
-    }
-    host.accept(jsonOutput);
   }
 
-  private static void convergeHost(boolean jsonOutput, OperatorCommand operator) {
+  private static void convergeHost(Sqlite db, boolean jsonOutput, OperatorCommand operator) {
+    ensureHostToken(db, jsonOutput, operator);
+    syncAuthorizedKeys(db, jsonOutput, operator);
     ensureHostDropIns(jsonOutput);
     ensureIncusHold(jsonOutput, operator);
     ensurePtyHostService(jsonOutput);
+  }
+
+  /**
+   * Re-issues this box's host token when its client config holds one the database does not ({@link
+   * HostToken#ensure}): a database restored from another box's copy holds that box's tokens, and
+   * every host CLI call would be refused until the token is minted here.
+   */
+  private static void ensureHostToken(Sqlite db, boolean jsonOutput, OperatorCommand operator) {
+    var configPath = SailPaths.clientConfigPath();
+    try {
+      var said =
+          HostToken.said(
+              HostToken.ensure(new TokenStore(db), configPath), configPath, BoxIdentity.config());
+      if (!jsonOutput) {
+        said.ifPresent(line -> System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + line)));
+      }
+    } catch (Exception e) {
+      System.err.println(
+          "  API token in "
+              + configPath
+              + " not checked: "
+              + e.getMessage()
+              + ". Run '"
+              + operator.sail("migrate")
+              + "' again.");
+    }
+  }
+
+  /**
+   * Converges the {@code sail} user's {@code authorized_keys} with the SSH-key registry on
+   * provisioned hosts: a main set up again from a copy of its database holds its FDEs' keys, and
+   * this is what lets their boxes in. Quiet when there is nothing to do (unprovisioned host,
+   * non-root) and never fatal.
+   */
+  private static void syncAuthorizedKeys(Sqlite db, boolean jsonOutput, OperatorCommand operator) {
+    try {
+      if (new AuthorizedKeysSync().sync(db) instanceof AuthorizedKeysSync.Synced synced
+          && !jsonOutput) {
+        System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + synced.describe()));
+      }
+    } catch (Exception e) {
+      System.err.println(
+          "  authorized_keys sync failed: "
+              + e.getMessage()
+              + ". Converge manually with '"
+              + operator.sail("host keys sync")
+              + "'.");
+    }
   }
 
   /**

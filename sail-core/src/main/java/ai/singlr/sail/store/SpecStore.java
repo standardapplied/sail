@@ -877,7 +877,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   /**
    * Writes when the spec entered its status as {@code since}, the transition's own time a revision
    * carries, over what the status trigger stamped from this revision's time. A revision that
-   * carries none — a restore, or one from a box that predates carrying it — leaves the trigger's.
+   * carries none, as a restore's does, leaves the trigger's.
    */
   private void applyStatusSince(String id, SpecStatus status, String since) {
     if (Strings.isBlank(since)) {

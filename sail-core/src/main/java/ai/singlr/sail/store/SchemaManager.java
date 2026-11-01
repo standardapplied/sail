@@ -282,12 +282,6 @@ public final class SchemaManager {
           "CREATE INDEX idx_change_log_tombstones"
               + " ON change_log(entity_type) WHERE kind = 'tombstone'",
           """
-          CREATE TRIGGER change_log_kind_from_deleted AFTER INSERT ON change_log
-          WHEN NEW.deleted = 1 AND NEW.kind = 'revision'
-          BEGIN
-              UPDATE change_log SET kind = 'tombstone' WHERE seq = NEW.seq;
-          END""",
-          """
           CREATE TABLE sync_conflicts (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               entity_type TEXT NOT NULL,
@@ -565,7 +559,8 @@ public final class SchemaManager {
   /**
    * Creates the schema on a fresh database and stamps it, atomically; does nothing on a database
    * this release made. Any other database is refused naming what to do: an older one was made by a
-   * release before v1 and is replaced, a newer one needs a newer binary.
+   * release before v1 and is replaced, as is one holding tables but no version, and a newer one
+   * needs a newer binary.
    */
   public void migrate() {
     db.execute(SCHEMA_VERSION_TABLE);
@@ -577,9 +572,30 @@ public final class SchemaManager {
           var current = currentVersion();
           if (current == CURRENT_VERSION) return;
           if (current != 0) throw refused(current);
+          if (holdsOtherTables()) throw unversioned();
           BASELINE.forEach(db::execute);
           stamp(CURRENT_VERSION);
         });
+  }
+
+  private boolean holdsOtherTables() {
+    return db.queryOne(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'"
+                    + " AND name NOT IN ('schema_version', 'sqlite_sequence')",
+                row -> row.integer(0))
+            .orElse(0L)
+        > 0;
+  }
+
+  private IllegalStateException unversioned() {
+    return Remedied.state(
+        "Database " + db.path() + " holds tables but no schema version: Sail did not make it.",
+        freshStart());
+  }
+
+  private Remedy freshStart() {
+    return Remedy.of(
+        "Move " + db.path() + " aside and run '", Remedy.sail("init"), "' to make a fresh one.");
   }
 
   private IllegalStateException refused(int version) {
@@ -598,10 +614,7 @@ public final class SchemaManager {
             + " was made by a Sail release before v1; this release opens only v"
             + CURRENT_VERSION
             + ".",
-        Remedy.of(
-            "Move " + db.path() + " aside and run '",
-            Remedy.sail("init"),
-            "' to make a fresh one."));
+        freshStart());
   }
 
   private void stamp(int version) {

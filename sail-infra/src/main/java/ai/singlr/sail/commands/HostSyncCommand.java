@@ -10,7 +10,6 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HandleChange;
-import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
@@ -101,7 +100,6 @@ public final class HostSyncCommand implements Runnable {
             asMain,
             mainTarget,
             handle == null ? null : new OwnFde(handle, displayName, email),
-            HostInfo.hostname(),
             SshSyncChannel::open,
             operator);
     if (!json) {
@@ -154,12 +152,11 @@ public final class HostSyncCommand implements Runnable {
       boolean asMain,
       String mainTarget,
       OwnFde own,
-      String hostname,
       SyncOperations.Channels channels,
       OperatorCommand operator)
       throws Exception {
     var handle = own == null ? null : own.handle();
-    var updated = withHandle(configure(host, asMain, mainTarget, hostname), handle, operator);
+    var updated = withHandle(configure(host, asMain, mainTarget), handle, operator);
     HandleChange.write(hostYamlPath, db, host, updated, channels, operator);
     var enrolled =
         own == null
@@ -198,8 +195,8 @@ public final class HostSyncCommand implements Runnable {
   /**
    * Applies the chosen role to {@code host}, reusing the validated {@code config set} primitives.
    */
-  static HostYaml configure(HostYaml host, boolean asMain, String mainTarget, String hostname) {
-    var identified = withBoxId(host, hostname);
+  static HostYaml configure(HostYaml host, boolean asMain, String mainTarget) {
+    var identified = withBoxId(host);
     if (asMain) {
       var sync = identified.sync();
       return identified.withSync(
@@ -212,18 +209,11 @@ public final class HostSyncCommand implements Runnable {
 
   /**
    * This box's stable sync identity. A box that already has one keeps it: every checkpoint a peer
-   * holds is keyed by it. A box that took its role before ids existed has been known to its peers
-   * by its hostname all along — the value {@code sail migrate} persists and the runtime falls back
-   * to — so re-declaring its role adopts the hostname rather than minting an id that would orphan
-   * every checkpoint. Only a box taking its first role mints a fresh id.
+   * holds is keyed by it. A box taking its first role mints a fresh one.
    */
-  static HostYaml withBoxId(HostYaml host, String hostname) {
+  static HostYaml withBoxId(HostYaml host) {
     var sync = host.sync();
-    if (sync.boxId() != null) {
-      return host;
-    }
-    var boxId = sync.role() != null ? hostname : Ids.newId().toString();
-    return host.withSync(sync.withBoxId(boxId));
+    return sync.boxId() != null ? host : host.withSync(sync.withBoxId(Ids.newId().toString()));
   }
 
   private void printRole(SyncConfig sync, OperatorCommand operator) {

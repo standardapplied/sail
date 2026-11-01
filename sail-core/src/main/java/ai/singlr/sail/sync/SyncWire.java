@@ -30,11 +30,11 @@ import java.util.TreeMap;
 import java.util.function.BiFunction;
 
 /**
- * The line protocol of one sync session over a Door-2 SSH channel, protocol 4: the node and main
- * exchange one JSON object per line, never spanning lines because {@link YamlUtil#dumpJson} escapes
- * newlines. Every message, request or response, carries {@code op}, and each decodes into exactly
- * one record here — nothing else sniffs keys. Both sides share this single definition so the encode
- * and decode never drift.
+ * The line protocol of one sync session over a Door-2 SSH channel, {@link #PROTOCOL}: the node and
+ * main exchange one JSON object per line, never spanning lines because {@link YamlUtil#dumpJson}
+ * escapes newlines. Every message, request or response, carries {@code op}, and each decodes into
+ * exactly one record here — nothing else sniffs keys. Both sides share this single definition so
+ * the encode and decode never drift.
  *
  * <p>A session opens with {@link Hello} and is answered {@link Welcome} or {@link Refuse}. The node
  * then reads main's change log since its checkpoint one {@link Page} at a time ({@link Pull}), asks
@@ -442,12 +442,11 @@ public final class SyncWire {
    * One change of one entity at its head. A tombstone and an erasure carry {@code deleted} and no
    * snapshot; {@code kind} says which, so no reader infers one from the other. Having no snapshot
    * to name its author in, a tombstone or an erasure carries the {@code author} main recorded, so
-   * the node records the same one; an older main sends none. A revision's author rides in its
-   * snapshot. Every entry carries the {@code project} main's head files it in, and the node files
-   * its own head there: a tombstone or an erasure has no snapshot to name one, and a review or a
-   * message names none either, so a node left to work it out from the parent it holds could file
-   * the row elsewhere than main does and drop, or keep, what main does not. An older main sends
-   * none, and a version outside any page names none.
+   * the node records the same one. A revision's author rides in its snapshot. Every entry carries
+   * the {@code project} main's head files it in, and the node files its own head there: a tombstone
+   * or an erasure has no snapshot to name one, and a review or a message names none either, so a
+   * node left to work it out from the parent it holds could file the row elsewhere than main does
+   * and drop, or keep, what main does not. A version outside any page names none.
    */
   public record Entry(
       long seq,
@@ -484,7 +483,7 @@ public final class SyncWire {
           author);
     }
 
-    /** An entry naming no project: a version outside any page, or what an older main sent. */
+    /** An entry naming no project: a version outside any page. */
     public Entry(
         long seq,
         String id,
@@ -507,7 +506,7 @@ public final class SyncWire {
    * maxSeq} is main's high-water for the type. A need's page also names, in {@code accepted}, the
    * latest revision main took from the asking box of each id it answers — the node's own offer as
    * main recorded it — so a node whose answer to that offer was lost knows exactly which of its
-   * states main holds. Optional: an older main sends none, and a pull's page never does.
+   * states main holds. A pull's page names none.
    */
   public record Page(
       List<Entry> entries, long next, boolean done, long maxSeq, List<Entry> accepted)
@@ -516,9 +515,7 @@ public final class SyncWire {
       accepted = List.copyOf(accepted);
     }
 
-    /**
-     * A page naming nothing main took from the asking box: every pull, and an older main's need.
-     */
+    /** A page naming nothing main took from the asking box: every pull's. */
     public Page(List<Entry> entries, long next, boolean done, long maxSeq) {
       this(entries, next, done, maxSeq, List.of());
     }
@@ -534,7 +531,7 @@ public final class SyncWire {
    * offer named, or the pusher when it named none; {@code creator} as the creator main holds, which
    * may not be the one the offer named, and may be none; and {@code createdAt} as the creation time
    * main holds, null when the entity carries none. The node records the same ones when it settles
-   * its offer; an older main sends none of them.
+   * its offer.
    */
   public record Accepted(
       String id, String rev, String author, Snapshots.Creator creator, String createdAt)
@@ -562,10 +559,10 @@ public final class SyncWire {
    * Main decided this principal may not make this change, naming why, and answers with its current
    * version of the entity: a revision, a tombstone ({@code rev} with a null {@code snapshot}, and
    * the {@code author} main recorded for it), or nothing when main holds none. The node adopts it
-   * and keeps its own in history. It travels as a {@code refused} result marked {@code denied}, so
-   * a node that predates it reads the {@link Refused} it knows, naming the same reason. A version
-   * that would take the answer past its offer's {@link #resultBound} is not {@code carried}: the
-   * node fetches it through the bounded {@link Need} path, as it does for a {@link Stale} offer.
+   * and keeps its own in history. It travels as a {@code refused} result marked {@code denied}. A
+   * version that would take the answer past its offer's {@link #resultBound} is not {@code
+   * carried}: the node fetches it through the bounded {@link Need} path, as it does for a {@link
+   * Stale} offer.
    */
   public record Denied(
       String id,
@@ -605,8 +602,7 @@ public final class SyncWire {
 
   /**
    * Main could not serve a request: a store failure, a malformed frame, an unknown type. Its {@code
-   * detail} keeps any command it names as data; on the wire its plain reading rides beside it, the
-   * message a node that predates remedies reads.
+   * detail} keeps any command it names as data; on the wire its plain reading rides beside it.
    */
   public record Failed(Remedy detail, String kind) implements Response {
     public Failed(String message, String kind) {

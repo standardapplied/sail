@@ -447,25 +447,6 @@ public final class ChangeLog {
     return projectOf("message", roomId, Map.of("room_id", roomId));
   }
 
-  /**
-   * Fills the project of every head that carries none, from the state its entry keeps, parents
-   * before the reviews and messages that read theirs. A head whose entity is gone — an erasure, or
-   * a deletion of a row this box never held — names no project and stays unknown. Returns how many
-   * heads carry a project afterwards.
-   */
-  public long backfillProjects() {
-    return db.transaction(
-        () -> {
-          for (var children : List.of(0, 1)) {
-            db.execute(BACKFILL_PROJECTS, children);
-          }
-          return db.queryOne(
-                  "SELECT COUNT(*) FROM change_heads WHERE project IS NOT NULL",
-                  row -> row.integer(0))
-              .orElse(0L);
-        });
-  }
-
   /** The SQL of {@link #projectOf} over the type, id and snapshot expressions it is given. */
   private static String projectExpression(String type, String id, String snapshot) {
     return """
@@ -491,12 +472,6 @@ public final class ChangeLog {
 
   private static final String PROJECT_OF =
       "SELECT COALESCE(" + projectExpression("?1", "?2", "?3") + ", '')";
-
-  private static final String BACKFILL_PROJECTS =
-      "UPDATE change_heads SET project = "
-          + projectExpression("change_heads.entity_type", "change_heads.entity_id", "l.snapshot")
-          + " FROM change_log l WHERE l.seq = change_heads.seq AND change_heads.project IS NULL"
-          + " AND (change_heads.entity_type IN ('review', 'message')) = ?";
 
   /** The erasure that is an entity's latest entry here, if it was erased. */
   public Optional<Entry> erasure(String entityType, String entityId) {

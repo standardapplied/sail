@@ -104,8 +104,8 @@ public final class Snapshots {
   }
 
   /**
-   * The time {@code snapshot} names under {@code key}, or {@code now} when it names none: a
-   * revision from a box that predates carrying it.
+   * The time {@code snapshot} names under {@code key}, or {@code now} when it names none, as a
+   * restore's state does.
    */
   public static String timeOr(Map<String, Object> snapshot, String key, String now) {
     var time = text(snapshot, key);

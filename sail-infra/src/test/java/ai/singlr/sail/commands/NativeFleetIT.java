@@ -478,7 +478,7 @@ class NativeFleetIT {
       assertEquals(
           "a-1\na-2",
           ole.query("SELECT id FROM specs ORDER BY id").strip(),
-          "main scopes a node of the last release all the same");
+          "main scopes a second scoped node to its own grant");
       assertEquals(
           "0", ole.query("SELECT count(*) FROM blobs WHERE hash = '" + betaFile + "'").strip());
       fleet.assertScopedTo(nia, "alpha");
@@ -568,7 +568,7 @@ class NativeFleetIT {
       assertEquals(
           "",
           ole.query("SELECT id FROM specs ORDER BY id").strip(),
-          "a node of the last release drops the project main revoked, as one of this build does");
+          "a scoped node drops the project main revoked from it");
     }
   }
 
