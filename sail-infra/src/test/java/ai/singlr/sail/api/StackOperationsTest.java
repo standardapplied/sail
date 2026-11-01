@@ -8,8 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ai.singlr.sail.config.ProjectDefinition;
-import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ProjectServer;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -42,7 +41,7 @@ class StackOperationsTest {
   private final List<Duration> paused = new ArrayList<>();
 
   static StackOperations stack(ShellExec shell, ProjectServer.Pause pause) {
-    var definition = ProjectDefinition.fromMap(YamlUtil.parseMap(ACME));
+    var definition = TestDefinitions.yaml(ACME);
     return new StackOperations(
         shell,
         new ProjectLoader(

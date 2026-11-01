@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,6 +12,7 @@ import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;

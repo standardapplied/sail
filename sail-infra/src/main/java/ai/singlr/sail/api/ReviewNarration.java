@@ -132,7 +132,7 @@ final class ReviewNarration {
 
   /** Why a review whose project has no pipeline stages left is a person's. */
   static String noStages() {
-    return "the project's review pipeline has no stages; set agent.review_pipeline.stages, then"
+    return "the project's review pipeline has no stages; set pipeline.stages, then"
         + " re-dispatch with --restart";
   }
 

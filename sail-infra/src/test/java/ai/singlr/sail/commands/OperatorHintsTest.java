@@ -61,7 +61,7 @@ class OperatorHintsTest {
         Ansi.OFF.string(ProjectApplyCommand.serverIpUnsetLines("gamma", operator)),
         ConnectCommand.serverIpUnset("gamma", operator),
         Ansi.OFF.string(HostInitCommand.nextStep(true, true, operator).orElseThrow()),
-        ProjectApplyCommand.descriptorNotFound(Path.of("/srv/gamma/sail.yaml"), false, operator),
+        ProjectMutations.notFound("gamma", operator).getMessage(),
         HostInitCommand.notInitialized(operator).getMessage(),
         operator.render((Remedied) ContainerStateGuard.notCreated("gamma")),
         launched.toString(StandardCharsets.UTF_8),
@@ -90,9 +90,8 @@ class OperatorHintsTest {
                 + "  - Or pass: sudo sail project connect gamma --server-ip <your-server-ip>",
             "  ✓ sail API service already installed — nothing to do here; 'sudo sail upgrade'"
                 + " keeps it current.",
-            "Project descriptor not found: /srv/gamma/sail.yaml\n"
-                + "  Run 'sudo sail project init' to author one, sync it from main with 'sudo sail"
-                + " sync', or specify one with --file.",
+            "No project 'gamma' in the catalog. Create it with 'sudo sail project create gamma', or"
+                + " sync it from main with 'sudo sail sync'.",
             "Server not initialized. Run 'sudo sail host init' first.",
             "Project 'gamma' has no container on this box. Create it: sudo sail project apply gamma",
             "  ✓ Agent launched in background\n"
@@ -130,9 +129,8 @@ class OperatorHintsTest {
                 + "  - Or pass: sail project connect gamma --server-ip <your-server-ip>",
             "  ✓ sail API service already installed — nothing to do here; 'sail upgrade' keeps it"
                 + " current.",
-            "Project descriptor not found: /srv/gamma/sail.yaml\n"
-                + "  Run 'sail project init' to author one, sync it from main with 'sail sync', or"
-                + " specify one with --file.",
+            "No project 'gamma' in the catalog. Create it with 'sail project create gamma', or sync"
+                + " it from main with 'sail sync'.",
             "Server not initialized. Run 'sail host init' first.",
             "Project 'gamma' has no container on this box. Create it: sail project apply gamma",
             "  ✓ Agent launched in background\n"

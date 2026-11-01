@@ -15,7 +15,7 @@ import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -125,7 +125,7 @@ class HomeRoomTest {
   }
 
   private static ProjectDefinition definition(String text) {
-    return ProjectDefinition.fromMap(YamlUtil.parseMap(text));
+    return TestDefinitions.yaml(text);
   }
 
   private static Actor fde(String handle) {
@@ -216,7 +216,8 @@ class HomeRoomTest {
 
     assertEquals("Agent 'claude-code' is not installed in project 'acme'.", refused.getMessage());
     assertEquals(
-        "Add claude-code to sail.yaml's agent.install list and run 'sail project apply acme'.",
+        "Add claude-code to the agent's install list with 'sail project edit acme --section agent',"
+            + " then run 'sail project apply acme'.",
         refused.failure().remedy().plain());
     assertTrue(roomStore.findById("acme--ada").isEmpty(), "a refused member leaves no room");
     assertTrue(

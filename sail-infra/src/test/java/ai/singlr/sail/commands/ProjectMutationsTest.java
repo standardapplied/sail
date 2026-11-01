@@ -6,17 +6,19 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinition.Section;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -33,58 +35,40 @@ class ProjectMutationsTest {
   }
 
   @Test
-  void currentDefinitionReadsAnExplicitFile() throws Exception {
-    var file = dir.resolve("custom.yaml");
-    Files.writeString(file, "name: acme\n");
-    assertEquals(
-        "name: acme\n", ProjectMutations.currentDefinition("acme", file, OperatorCommand.PLAIN));
-  }
-
-  @Test
-  void currentDefinitionFailsWithGuidanceWhenAbsent() {
-    var error =
+  void anEditIsCheckedWholeBeforeAnythingItWouldFollow() {
+    var clash =
+        TestDefinitions.yaml(
+            "name: acme\nservices:\n  db:\n    image: postgres:16\n    ports: [5432]\n");
+    var refused =
         assertThrows(
-            IllegalStateException.class,
+            IllegalArgumentException.class,
             () ->
-                ProjectMutations.currentDefinition(
-                    "ghost", dir.resolve("absent.yaml"), OperatorCommand.PLAIN));
-    assertTrue(error.getMessage().contains("sail project apply"));
-    assertTrue(error.getMessage().contains("sail sync"));
+                ProjectMutations.checked(
+                    clash.withRepos(
+                        List.of(new ProjectDefinition.Repo("git@github.com:a/b.git", "b", null)))));
+    assertTrue(refused.getMessage().startsWith("repos[].url 'git@github.com:a/b.git'"));
+    assertEquals(clash, ProjectMutations.checked(clash));
   }
 
   @Test
-  void persistWritesTheExplicitFileWhenOneIsGiven() throws Exception {
-    var file = dir.resolve("custom.yaml");
-    Files.writeString(file, "name: acme\n");
+  void aDryRunPrintsTheIntentAndWritesNothing() {
+    var acme = TestDefinitions.named("acme");
 
-    ProjectMutations.persist(
-        "acme", file, "name: acme\nimage: ubuntu/24.04\n", false, out, "x", null);
+    ProjectMutations.write(Section.IMAGE, acme, acme, true, out, "record repo 'x'", null);
 
-    assertEquals("name: acme\nimage: ubuntu/24.04\n", Files.readString(file));
+    assertEquals("[dry-run] record repo 'x'\n", captured.toString(StandardCharsets.UTF_8));
   }
 
   @Test
-  void persistUnderDryRunPrintsTheIntentAndWritesNothing() throws Exception {
-    var file = dir.resolve("custom.yaml");
-    Files.writeString(file, "original\n");
-
-    ProjectMutations.persist("acme", file, "changed\n", true, out, "record repo 'x'", null);
-
-    assertEquals("original\n", Files.readString(file), "dry-run must not write");
-    assertTrue(captured.toString(StandardCharsets.UTF_8).contains("[dry-run] record repo 'x'"));
-  }
-
-  @Test
-  void onlyACatalogWriteNeedsTheOperator() {
-    assertNull(ProjectMutations.catalogOperator("acme", dir.resolve("custom.yaml"), false));
-    assertNull(ProjectMutations.catalogOperator("acme", null, true));
+  void aDryRunNeedsNoOperator() {
+    assertNull(ProjectMutations.catalogOperator("acme", true));
   }
 
   @Test
   void notFoundNamesBothRemedies() {
-    var message = ProjectMutations.notFound("acme", OperatorCommand.PLAIN).getMessage();
-    assertTrue(message.contains("sail project apply"));
-    assertTrue(message.contains("sail sync"));
-    assertFalse(message.contains("null"));
+    assertEquals(
+        "No project 'acme' in the catalog. Create it with 'sail project create acme', or sync it"
+            + " from main with 'sail sync'.",
+        ProjectMutations.notFound("acme", OperatorCommand.PLAIN).getMessage());
   }
 }

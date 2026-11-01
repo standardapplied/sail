@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,8 +13,8 @@ import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.PipedSyncChannel;
-import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -202,7 +201,6 @@ class ScopeChangeRoundTest {
     assertTrue(new SpecStore(mainDb).findById("b2").isEmpty(), "beta's never did");
     assertEquals(List.of("acme"), incus.names());
     assertFalse(Files.exists(projectsDir.resolve("beta")));
-    assertTrue(Files.isRegularFile(projectsDir.resolve("acme").resolve("sail.yaml")));
     assertEquals(
         List.of(
             "incus list --format json",
@@ -311,7 +309,6 @@ class ScopeChangeRoundTest {
             "  roster: removed 1 FDE(s) main no longer lists to this box"),
         round());
     assertEquals(List.of("beta"), incus.names());
-    assertTrue(Files.isRegularFile(projectsDir.resolve("beta").resolve("sail.yaml")));
 
     Acting.system(() -> new RunStore(nodeDb).complete(run, "completed", 0));
     var after = round();
@@ -355,7 +352,7 @@ class ScopeChangeRoundTest {
     narrowTo("acme");
     round();
     Files.createDirectories(projectsDir.resolve("beta"));
-    Files.writeString(projectsDir.resolve("beta").resolve("sail.yaml"), "name: beta\n");
+    Files.writeString(projectsDir.resolve("beta").resolve("leftover"), "x\n");
     incus.sail("beta");
     new FdeStore(nodeDb).add("client2", "Client 2", "client2@rehearsal.invalid", "member");
     new FdeStore(nodeDb).disableUnlisted(List.of("ada", "nia"));
@@ -367,7 +364,7 @@ class ScopeChangeRoundTest {
                 + WHY),
         round());
 
-    assertEquals(List.of("acme"), childrenOf(projectsDir));
+    assertEquals(List.of(), childrenOf(projectsDir));
     assertEquals(List.of(), incus.names());
     assertEquals(List.of("ada||active", "nia|nia@x.dev|active"), nodeRoster());
   }
@@ -494,27 +491,5 @@ class ScopeChangeRoundTest {
     public boolean isDryRun() {
       return false;
     }
-  }
-
-  @Test
-  void aLeftoverDescriptorIsNeverImportedAndTheNextRoundTakesItWithNoDrop() throws Exception {
-    narrowTo("beta");
-    round();
-    Files.createDirectories(projectsDir.resolve("acme"));
-    Files.writeString(projectsDir.resolve("acme").resolve("sail.yaml"), "name: acme\n");
-
-    for (var migrate = 0; migrate < 2; migrate++) {
-      var report =
-          Actor.call(
-              Actor.system(),
-              () ->
-                  new ProjectImporter(
-                          projectsDir, new ProjectStore(nodeDb), new SyncScope(nodeDb).held())
-                      .importAll());
-      assertEquals(new ProjectImporter.Report(0, 2, List.of()), report);
-    }
-
-    assertEquals(List.of(), round());
-    assertEquals(List.of("beta"), childrenOf(projectsDir));
   }
 }

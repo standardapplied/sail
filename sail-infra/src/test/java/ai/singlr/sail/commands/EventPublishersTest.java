@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,6 +29,7 @@ import ai.singlr.sail.api.TestControlPlane;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -79,8 +79,6 @@ class EventPublishersTest {
   private static final String YAML =
       """
       name: acme
-      ssh:
-        user: dev
       repos:
         - url: https://github.com/acme/app.git
           path: app

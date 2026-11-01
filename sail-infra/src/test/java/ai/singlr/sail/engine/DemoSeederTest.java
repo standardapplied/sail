@@ -5,17 +5,15 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.SyncRequest;
-import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
-import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -110,7 +108,7 @@ class DemoSeederTest {
 
     assertFalse(DemoSeeder.unseed(db));
     assertEquals(
-        "name: demo\ndescription: mine\n",
+        TestDefinitions.described("demo", "mine"),
         store.findByName(DemoProject.NAME).orElseThrow().definition());
   }
 
@@ -159,7 +157,7 @@ class DemoSeederTest {
 
     assertFalse(DemoSeeder.seedIfAbsent(db, true), "must not re-seed when a demo already exists");
     assertEquals(
-        "name: demo\ndescription: mine\n",
+        TestDefinitions.described("demo", "mine"),
         store.findByName(DemoProject.NAME).orElseThrow().definition(),
         "a customised demo is left untouched");
   }
@@ -181,10 +179,9 @@ class DemoSeederTest {
   @Test
   void seededDemoDefinitionParsesAsAValidProject() {
     DemoSeeder.seedIfAbsent(db, true);
-    var definition = store.findByName(DemoProject.NAME).orElseThrow().definition();
+    var config = store.findByName(DemoProject.NAME).orElseThrow().definition();
 
-    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(definition));
-    assertEquals("demo", config.name());
+    assertEquals(DemoProject.DEFINITION, config);
   }
 
   @Test

@@ -5,8 +5,8 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ProjectStore;
@@ -38,10 +39,12 @@ class AgentReportCommandTest {
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
       Acting.system(
-          () -> new ProjectStore(db).upsert(TestDefinitions.yaml("name: acme\nagent:\n  type: codex\n")));
+          () ->
+              new ProjectStore(db)
+                  .upsert(TestDefinitions.yaml("name: acme\nagent:\n  type: codex\n")));
     }
     var acme = new AgentReportCommand(operator -> OperationsFactory.open(dbPath));
-    new CommandLine(acme).parseArgs("acme", "-f", "/abs/sail.yaml");
+    new CommandLine(acme).parseArgs("acme");
     var absent = new AgentReportCommand(operator -> OperationsFactory.open(dbPath));
     new CommandLine(absent).parseArgs("absent");
 
@@ -58,7 +61,7 @@ class AgentReportCommandTest {
     assertTrue(usage.contains("report"));
     assertTrue(usage.contains("morning-after"));
     assertTrue(usage.contains("--json"));
-    assertTrue(usage.contains("--file"));
+    assertFalse(usage.contains("--file"));
   }
 
   @Test

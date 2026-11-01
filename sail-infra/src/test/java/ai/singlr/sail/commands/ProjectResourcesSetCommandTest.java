@@ -9,7 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ShellExec;
 import java.io.ByteArrayOutputStream;
@@ -90,12 +96,12 @@ class ProjectResourcesSetCommandTest {
             .onOk("incus restart");
     var stdout = new ByteArrayOutputStream();
     var stderr = new ByteArrayOutputStream();
-    var yamlPath = writeProjectYaml();
+    var catalog = catalogue();
 
-    var exitCode = execute(shell, stdout, stderr, yamlPath, "--memory", "16GB");
+    var exitCode = execute(shell, stdout, stderr, catalog, "--memory", "16GB");
 
-    assertEquals(0, exitCode);
-    var updated = loadProjectYaml(yamlPath);
+    assertEquals(0, exitCode, stderr.toString());
+    var updated = held(catalog);
     assertEquals("16GB", updated.resources().memory());
     assertTrue(shell.invocations().stream().anyMatch(cmd -> cmd.contains("limits.memory=16GB")));
     assertTrue(
@@ -110,12 +116,12 @@ class ProjectResourcesSetCommandTest {
             .onOk("incus config set");
     var stdout = new ByteArrayOutputStream();
     var stderr = new ByteArrayOutputStream();
-    var yamlPath = writeProjectYaml();
+    var catalog = catalogue();
 
-    var exitCode = execute(shell, stdout, stderr, yamlPath, "--cpu", "4");
+    var exitCode = execute(shell, stdout, stderr, catalog, "--cpu", "4");
 
-    assertEquals(0, exitCode);
-    var updated = loadProjectYaml(yamlPath);
+    assertEquals(0, exitCode, stderr.toString());
+    var updated = held(catalog);
     assertEquals(4, updated.resources().cpu());
     assertTrue(shell.invocations().stream().anyMatch(cmd -> cmd.contains("limits.cpu=4")));
     assertFalse(shell.invocations().stream().anyMatch(cmd -> cmd.contains("incus restart")));
@@ -125,17 +131,18 @@ class ProjectResourcesSetCommandTest {
   void setRequiresAtLeastOneResourceFlag() throws Exception {
     var stdout = new ByteArrayOutputStream();
     var stderr = new ByteArrayOutputStream();
-    var yamlPath = writeProjectYaml();
+    var catalog = catalogue();
 
     var command =
         new ProjectResourcesSetCommand(
             new TestShell().onOk("incus list ^resource-test-project$", STOPPED_INFO_JSON),
             () -> true,
             new PrintStream(stdout),
-            new PrintStream(stderr));
+            new PrintStream(stderr),
+            catalog);
     var cli = new CommandLine(command);
     cli.setExecutionExceptionHandler((ex, cl, parseResult) -> 1);
-    var exitCode = cli.execute(PROJECT_NAME, "--file", yamlPath.toString());
+    var exitCode = cli.execute(PROJECT_NAME);
 
     assertEquals(1, exitCode);
   }
@@ -144,39 +151,43 @@ class ProjectResourcesSetCommandTest {
       TestShell shell,
       ByteArrayOutputStream stdout,
       ByteArrayOutputStream stderr,
-      Path yamlPath,
+      ProjectResourcesSetCommand.Catalog catalog,
       String... args) {
     var command =
         new ProjectResourcesSetCommand(
-            shell, () -> true, new PrintStream(stdout), new PrintStream(stderr));
+            shell, () -> true, new PrintStream(stdout), new PrintStream(stderr), catalog);
     var cli = new CommandLine(command);
-    var fullArgs = new String[args.length + 3];
+    var fullArgs = new String[args.length + 1];
     fullArgs[0] = PROJECT_NAME;
-    fullArgs[1] = "--file";
-    fullArgs[2] = yamlPath.toString();
-    System.arraycopy(args, 0, fullArgs, 3, args.length);
+    System.arraycopy(args, 0, fullArgs, 1, args.length);
     return cli.execute(fullArgs);
   }
 
-  private Path writeProjectYaml() throws Exception {
-    var yamlPath = tempDir.resolve(PROJECT_NAME).resolve("sail.yaml");
-    Files.createDirectories(yamlPath.getParent());
-    Files.writeString(
-        yamlPath,
-        """
-        name: resource-test-project
-        resources:
-          cpu: 2
-          memory: 8GB
-          disk: 50GB
-        ssh:
-          user: dev
-        """);
-    return yamlPath;
+  /** A catalog holding the project, written as its CLI operator. */
+  private ProjectResourcesSetCommand.Catalog catalogue() {
+    var database = tempDir.resolve("sail.db");
+    try (var db = Sqlite.open(database)) {
+      new SchemaManager(db).migrate();
+      Acting.system(
+          () ->
+              new ProjectStore(db)
+                  .upsert(
+                      TestDefinitions.yaml(
+                          """
+                          name: resource-test-project
+                          resources:
+                            cpu: 2
+                            memory: 8GB
+                            disk: 50GB
+                          """)));
+    }
+    return new ProjectResourcesSetCommand.Catalog(database, () -> Actor.cliOperator("uday"));
   }
 
-  private ProjectDefinition loadProjectYaml(Path yamlPath) throws Exception {
-    return ProjectDefinition.fromMap(YamlUtil.parseFile(yamlPath));
+  private static ProjectDefinition held(ProjectResourcesSetCommand.Catalog catalog) {
+    try (var db = Sqlite.open(catalog.database())) {
+      return new ProjectStore(db).findByName(PROJECT_NAME).orElseThrow().definition();
+    }
   }
 
   private static final class TestShell implements ShellExec {

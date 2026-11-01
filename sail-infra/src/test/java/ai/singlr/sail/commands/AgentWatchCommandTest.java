@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -18,6 +17,7 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.QuietNarrator;
 import ai.singlr.sail.api.RunWatch;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
@@ -45,7 +45,7 @@ class AgentWatchCommandTest {
   @TempDir Path dir;
 
   @Test
-  void theNotificationsAreTheCatalogRowsAndTheArgumentsAServerBuiltWithTheFileStillStart() {
+  void theNotificationsAreTheCatalogRows() {
     var dbPath =
         seeded(
             "acme",
@@ -61,8 +61,6 @@ class AgentWatchCommandTest {
             "sail-agent-" + RUN_ID,
             "--started-at",
             STARTED_AT,
-            "-f",
-            "/home/uday/.sail/projects/acme/sail.yaml",
             "--action",
             "stop");
 

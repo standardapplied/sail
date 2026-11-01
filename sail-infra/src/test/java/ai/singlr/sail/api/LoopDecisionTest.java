@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -47,7 +48,7 @@ class LoopDecisionTest {
   private static final RunStore.RunRow REVIEWER = ended("reviewer-1", "review", REVIEW);
   private static final RunStore.RunRow FIXER = ended("fix-1", "fix", REVIEW);
   private static final ReviewPipelineConfig TWO_AGENTS =
-      ReviewPipelineConfig.fromMap(
+      TestDefinitions.pipeline(
           Map.of(
               "stages",
               List.of(
@@ -471,7 +472,8 @@ class LoopDecisionTest {
             new LoopStep.ErrorReview(
                 RUNNING,
                 0,
-                "no reviewer agent resolved; set stages[].agent or agent.install in sail.yaml",
+                "no reviewer agent resolved; set pipeline.stages[].agent or agent.install in the"
+                    + " definition",
                 false)),
         row(
             "G7 a person's stage not yet opened",

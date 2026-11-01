@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -14,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -114,7 +114,7 @@ class ProjectCatalogTest {
     var catalog = dir.resolve("sail.db");
     var mady = new Actor("mady", Role.MEMBER, Actor.Lane.CLI);
 
-    assertDoesNotThrow(() -> ProjectCatalog.record(catalog, "web", "name: web\n", mady));
+    assertDoesNotThrow(() -> ProjectCatalog.record(catalog, TestDefinitions.named("web"), mady));
 
     try (var db = Sqlite.open(catalog)) {
       assertEquals("mady", new ProjectStore(db).findByName("web").orElseThrow().updatedBy());
@@ -130,7 +130,8 @@ class ProjectCatalogTest {
         assertThrows(
             IllegalStateException.class,
             () ->
-                ProjectCatalog.record(unopenable, "web", "name: web\n", Actor.cliOperator("uday")));
+                ProjectCatalog.record(
+                    unopenable, TestDefinitions.named("web"), Actor.cliOperator("uday")));
 
     assertTrue(
         failed.getMessage().startsWith("Project 'web' was not recorded in the catalog: "),

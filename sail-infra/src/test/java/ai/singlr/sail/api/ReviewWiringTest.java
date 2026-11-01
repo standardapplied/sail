@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ReviewPipelineConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -27,13 +28,19 @@ import org.junit.jupiter.api.io.TempDir;
 
 class ReviewWiringTest {
 
-  private static ProjectDefinition yaml(Map<String, Object> agent) {
+  /** The definition of acme with {@code sections}' {@code review_pipeline} as its pipeline. */
+  private static ProjectDefinition yaml(Map<String, Object> sections) {
     var map = new HashMap<String, Object>();
     map.put("name", "acme");
-    if (agent != null) {
+    if (sections != null) {
+      var agent = new HashMap<>(sections);
+      var pipeline = agent.remove("review_pipeline");
       map.put("agent", agent);
+      if (pipeline != null) {
+        map.put("pipeline", pipeline);
+      }
     }
-    return ProjectDefinition.fromMap(map);
+    return TestDefinitions.map(map);
   }
 
   @Test
@@ -119,7 +126,7 @@ class ReviewWiringTest {
 
     var config = ReviewWiring.configResolver(p -> sail).apply("acme");
 
-    assertSame(sail.agent().reviewPipeline(), config);
+    assertSame(sail.pipeline(), config);
     assertEquals("Judge the security surface.", config.stages().getFirst().brief());
     assertEquals(9, config.maxIterations());
   }
@@ -156,16 +163,12 @@ class ReviewWiringTest {
   @Test
   void aBlockThatNamesNoStagesGetsTheDefaultReview() {
     var sail =
-        ProjectDefinition.fromMap(
+        yaml(
             Map.of(
-                "name",
-                "acme",
-                "agent",
-                Map.of(
                     "type",
                     "claude-code",
                     "review_pipeline",
-                    Map.of("guardrails", Map.of("max_duration", "90m")))));
+                    Map.of("guardrails", Map.of("max_duration", "90m"))));
 
     var resolved = ReviewWiring.configResolver(p -> sail).apply("acme");
 

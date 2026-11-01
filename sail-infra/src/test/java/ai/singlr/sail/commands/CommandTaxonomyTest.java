@@ -85,7 +85,7 @@ class CommandTaxonomyTest {
             .keySet()
             .containsAll(
                 Set.of(
-                    "init",
+                    "create",
                     "apply",
                     "start",
                     "stop",
@@ -105,10 +105,10 @@ class CommandTaxonomyTest {
   void applyIsTheOneConvergenceVerb() {
     var project = new CommandLine(new ProjectCommand());
 
-    for (var deleted : Set.of("create", "reconfigure", "sync")) {
+    for (var deleted : Set.of("init", "reconfigure", "sync")) {
       assertFalse(
           project.getSubcommands().containsKey(deleted),
-          deleted + " was folded into 'apply' and must no longer parse");
+          deleted + " must no longer parse: create writes the catalog, apply converges");
     }
   }
 

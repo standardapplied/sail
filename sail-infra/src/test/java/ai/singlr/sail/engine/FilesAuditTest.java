@@ -5,11 +5,11 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.BlobStore;

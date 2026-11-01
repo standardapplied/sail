@@ -18,7 +18,7 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.HomeRoom;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.config.ProjectDefinition;
-import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
@@ -27,8 +27,12 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.ProvisionState;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -205,8 +209,7 @@ class ProjectApplyCommandTest {
   }
 
   private static ProjectDefinition claudeProject() {
-    return ProjectDefinition.fromMap(
-        YamlUtil.parseMap("name: acme\nagent:\n  type: claude-code\n"));
+    return TestDefinitions.yaml("name: acme\nagent:\n  type: claude-code\n");
   }
 
   @Test
@@ -225,15 +228,10 @@ class ProjectApplyCommandTest {
   @Test
   void anApplyOnABoxWhereOnlyHostInitRanIsRefusedBeforeItTouchesIncus(@TempDir Path dir)
       throws Exception {
-    var descriptor = dir.resolve("acme.yaml");
-    Files.writeString(
-        descriptor, "name: acme\nresources:\n  cpu: 2\n  memory: 4GB\n  disk: 50GB\n");
-
     var box = hostInitOnly(dir);
+    catalogue(box.database(), "name: acme\nresources:\n  cpu: 2\n  memory: 4GB\n  disk: 50GB\n");
 
-    for (var args :
-        List.of(
-            new String[] {"-f", descriptor.toString(), "--yes"}, new String[] {"--all", "--yes"})) {
+    for (var args : List.of(new String[] {"acme", "--yes"}, new String[] {"--all", "--yes"})) {
       var ran = SailCli.run(new ProjectApplyCommand(() -> box), args);
 
       assertEquals(1, ran.exit());
@@ -249,6 +247,14 @@ class ProjectApplyCommandTest {
                   Ansi.AUTO)
               + System.lineSeparator(),
           ran.err());
+    }
+  }
+
+  /** Records {@code yaml}'s definition in the catalog at {@code database}. */
+  private static void catalogue(Path database, String yaml) {
+    try (var db = Sqlite.open(database)) {
+      new SchemaManager(db).migrate();
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.yaml(yaml)));
     }
   }
 
@@ -294,21 +300,21 @@ class ProjectApplyCommandTest {
   @Timeout(60)
   void anApplyReadsNothingWhileAPairingIsMadeOrRevoked(@TempDir Path dir) throws Exception {
     var database = dir.resolve("sail.db");
-    var descriptor = dir.resolve("acme.yaml");
     var errors = new ByteArrayOutputStream();
     var originalErr = System.err;
     System.setErr(new PrintStream(errors, true, StandardCharsets.UTF_8));
     try {
-      var apply = applying(database, "-f", descriptor.toString(), "--yes");
+      var apply = applying(database, "acme", "--yes");
 
       try (var pairing = PairingTrust.hold(database)) {
         FileMutexTest.awaitParked(Thread.ofPlatform().start(apply));
-        assertFalse(apply.isDone(), "the apply waits before it reads the workstation key");
+        assertFalse(apply.isDone(), "the apply waits before it reads the catalog");
       }
 
       assertEquals(1, apply.get());
       assertEquals(
-          Banner.errorLine("Project descriptor not found: " + descriptor, Ansi.AUTO)
+          Banner.errorLine(
+                  ProjectMutations.notFound("acme", OperatorCommand.here()).getMessage(), Ansi.AUTO)
               + System.lineSeparator(),
           errors.toString(StandardCharsets.UTF_8));
     } finally {
@@ -317,7 +323,7 @@ class ProjectApplyCommandTest {
   }
 
   @Test
-  void anApplyGivenNoFileNamesEveryWayToADescriptor(@TempDir Path dir) throws Exception {
+  void anApplyNamingNoProjectIsRefusedNamingBothWays(@TempDir Path dir) throws Exception {
     var errors = new ByteArrayOutputStream();
     var originalErr = System.err;
     System.setErr(new PrintStream(errors, true, StandardCharsets.UTF_8));
@@ -331,12 +337,7 @@ class ProjectApplyCommandTest {
     }
 
     assertEquals(
-        Banner.errorLine(
-                "Project descriptor not found: "
-                    + Path.of("sail.yaml").toAbsolutePath()
-                    + "\n  Run 'sail project init' to author one, sync it from main with 'sail"
-                    + " sync', or specify one with --file.",
-                Ansi.AUTO)
+        Banner.errorLine("Name the project to apply, or pass --all.", Ansi.AUTO)
             + System.lineSeparator(),
         errors.toString(StandardCharsets.UTF_8));
   }
@@ -348,7 +349,7 @@ class ProjectApplyCommandTest {
     var originalErr = System.err;
     System.setErr(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
     try (var pairing = PairingTrust.hold(database)) {
-      var apply = applying(database, "-f", dir.resolve("acme.yaml").toString(), "--dry-run");
+      var apply = applying(database, "acme", "--dry-run");
       Thread.ofPlatform().start(apply);
 
       assertEquals(1, apply.get());
@@ -358,87 +359,17 @@ class ProjectApplyCommandTest {
   }
 
   @Test
-  @Timeout(60)
-  void aDescriptorNamingAnotherUserIsRefusedBeforeAnythingIsCreated(@TempDir Path dir)
-      throws Exception {
-    var project = "refuse-" + Long.toHexString(System.nanoTime());
-    var descriptor = dir.resolve(project + ".yaml");
-    Files.writeString(
-        descriptor,
-        """
-        name: %s
-        resources:
-          cpu: 2
-          memory: 4GB
-          disk: 50GB
-        ssh:
-          user: bob
-        """
-            .formatted(project));
-    var errors = new ByteArrayOutputStream();
-    var originalErr = System.err;
-    System.setErr(new PrintStream(errors, true, StandardCharsets.UTF_8));
-    try {
-      var apply = applying(dir.resolve("sail.db"), "-f", descriptor.toString(), "--yes");
-      apply.run();
-
-      assertEquals(1, apply.get());
-      assertEquals(
-          Banner.errorLine(otherUserRefusal(project, "bob", OperatorCommand.here()), Ansi.AUTO)
-              + System.lineSeparator(),
-          errors.toString(StandardCharsets.UTF_8));
-      assertFalse(Files.exists(SailPaths.projectDir(project)), "nothing is recorded for it");
-    } finally {
-      System.setErr(originalErr);
-    }
-  }
-
-  @Test
-  void planTargetRefusesAnotherUserBeforeTheContainerIsStarted() {
-    var thrown =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                ProjectApplyCommand.planTarget(
-                    "alpha",
-                    new ContainerState.Stopped(),
-                    "name: alpha\nssh:\n  user: bob\n",
-                    OperatorCommand.PLAIN));
-
-    assertEquals(otherUserRefusal("alpha", "bob", OperatorCommand.PLAIN), thrown.getMessage());
-  }
-
-  @Test
-  void planTargetAcceptsDevAndAnSshBlockThatNamesNoUser() {
-    var dev =
-        ProjectApplyCommand.planTarget(
-            "alpha",
-            new ContainerState.Stopped(),
-            "name: alpha\nssh:\n  user: dev\n",
-            OperatorCommand.PLAIN);
-    var keysOnly =
-        ProjectApplyCommand.planTarget(
-            "alpha",
-            new ContainerState.Stopped(),
-            "name: alpha\nssh:\n  authorized_keys:\n    - ssh-ed25519 AAAA alice@laptop\n",
-            OperatorCommand.PLAIN);
-
-    assertEquals("dev", dev.config().sshUser());
-    assertEquals("dev", keysOnly.config().sshUser());
-  }
-
-  @Test
   void theRecheckLineSaysWhyAnExistingContainerIsProvisionedAgain() {
     var interrupted = new ProvisionState("SSH_CONFIGURED", null, null, null, "inputs-x");
     var finished = new ProvisionState("COMPLETE", null, null, null, "inputs-x");
     var changedSinceInterrupted =
-        "The descriptor or this box's workstation key changed since the interrupted run: every"
+        "The definition or this box's workstation key changed since the interrupted run: every"
             + " step is checked again.";
     var changedSinceFinished =
-        "The descriptor or this box's workstation key changed since the last provisioning run:"
+        "The definition or this box's workstation key changed since the last provisioning run:"
             + " every step is checked again.";
     var noRecord =
-        "No record of the descriptor this container was provisioned from: every step is checked"
+        "No record of the definition this container was provisioned from: every step is checked"
             + " again.";
 
     assertEquals(changedSinceInterrupted, ProjectApplyCommand.recheckLine(interrupted, true));
@@ -447,23 +378,6 @@ class ProjectApplyCommandTest {
     assertEquals(changedSinceFinished, ProjectApplyCommand.recheckLine(finished, true));
     assertEquals(noRecord, ProjectApplyCommand.recheckLine(null, false));
     assertEquals(noRecord, ProjectApplyCommand.recheckLine(finished, false));
-  }
-
-  private static String otherUserRefusal(String project, String user, OperatorCommand operator) {
-    return "ssh.user is '"
-        + user
-        + "', but sail runs every agent, shell and hook as 'dev' (uid 1000, /home/dev). Remove"
-        + " 'ssh.user' from "
-        + project
-        + "'s descriptor (or set it to dev) with 'sail project edit "
-        + project
-        + "', then apply again. A container already created as '"
-        + user
-        + "' must be recreated: '"
-        + operator.sail("project destroy " + project)
-        + "', then '"
-        + operator.sail("project apply " + project)
-        + "'.";
   }
 
   private static FutureTask<Integer> applying(Path database, String... args) {
@@ -490,7 +404,7 @@ class ProjectApplyCommandTest {
     assertTrue(help.contains("--all"));
     assertTrue(help.contains("--dry-run"));
     assertTrue(help.contains("--json"));
-    assertTrue(help.contains("--file"));
+    assertFalse(help.contains("--file"), "a definition is read from the catalog alone");
     assertTrue(help.contains("--yes"));
   }
 
@@ -517,135 +431,16 @@ class ProjectApplyCommandTest {
   }
 
   @Test
-  void dryRunSkipsCanonicalBundlePersistenceEntirely() {
-    var missingSource = Path.of("/definitely/not/there/sail.yaml");
-
-    assertDoesNotThrow(
-        () ->
-            ProjectApplyCommand.persistCanonicalBundle(
-                "web", missingSource, true, OperatorCommand.PLAIN),
-        "a source that cannot even be read is never touched under dry-run");
-  }
-
-  @Test
-  void rejectsFileWithAll() {
-    var cmd = new CommandLine(new Sail());
-    cmd.setErr(new PrintWriter(new StringWriter()));
-
-    var exit = cmd.execute("project", "apply", "--all", "-f", "custom.yaml");
-
-    assertNotEquals(0, exit);
-  }
-
-  @Test
-  void aDescriptorNameMismatchFailsBeforeAnyContainerWork() {
-    var thrown =
-        assertThrows(
-            IllegalStateException.class,
-            () -> ProjectApplyCommand.requireMatchingName("alpha", "beta", Path.of("sail.yaml")));
-
-    assertTrue(thrown.getMessage().contains("alpha"));
-    assertTrue(thrown.getMessage().contains("beta"));
-    assertTrue(thrown.getMessage().contains("sail.yaml"));
-  }
-
-  @Test
-  void aMatchingOrOmittedNamePassesTheMismatchGate() {
-    ProjectApplyCommand.requireMatchingName("alpha", "alpha", Path.of("sail.yaml"));
-    ProjectApplyCommand.requireMatchingName(null, "beta", null);
-    ProjectApplyCommand.requireMatchingName("", "beta", null);
-  }
-
-  @Test
-  void applyRefusesADescriptorThatRedirectsToAnotherProject(@TempDir Path dir) throws Exception {
-    var yaml = dir.resolve("sail.yaml");
-    Files.writeString(yaml, "name: beta\n");
-    var cmd = new CommandLine(new Sail());
-    cmd.setErr(new PrintWriter(new StringWriter()));
-
-    var exit = cmd.execute("project", "apply", "alpha", "-f", yaml.toString());
-
-    assertNotEquals(0, exit, "a descriptor naming a different project must never be applied");
-  }
-
-  @Test
-  void planTargetValidatesTheDescriptorBeforeAnyLifecycleMutation() {
-    var thrown =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                ProjectApplyCommand.planTarget(
-                    "alpha", new ContainerState.Stopped(), "name: beta\n", OperatorCommand.PLAIN));
-    assertTrue(
-        thrown.getMessage().contains("beta"),
-        "a bad descriptor must fail before bulk apply starts the container, leaving observed"
-            + " state untouched — the single-project path already behaves this way");
-  }
-
-  @Test
-  void planTargetRefusesADeletedKeyNamingWhereItsTextGoes() {
-    var thrown =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                ProjectApplyCommand.planTarget(
-                    "alpha",
-                    new ContainerState.Stopped(),
-                    """
-                    name: alpha
-                    agent:
-                      type: codex
-                      review_pipeline:
-                        stages:
-                          - name: sign-off
-                            type: human
-                            skill: acme-review
-                    """,
-                    OperatorCommand.PLAIN));
-    assertTrue(
-        thrown
-            .getMessage()
-            .startsWith("agent.review_pipeline.stages[sign-off].skill is no longer read"),
-        thrown.getMessage());
-  }
-
-  @Test
   void planTargetResolvesActionAndConfigForAValidTarget() {
-    var plan =
-        ProjectApplyCommand.planTarget(
-            "alpha", new ContainerState.Stopped(), "name: alpha\n", OperatorCommand.PLAIN);
+    var alpha = TestDefinitions.named("alpha");
+    var plan = ProjectApplyCommand.planTarget(new ContainerState.Stopped(), alpha);
     assertEquals(ProjectApplyCommand.Action.STARTED, plan.action());
-    assertEquals("alpha", plan.config().name());
+    assertEquals(alpha, plan.config());
 
     var machineryOnly =
-        ProjectApplyCommand.planTarget(
-            "legacy", new ContainerState.Running("10.0.0.4"), null, OperatorCommand.PLAIN);
+        ProjectApplyCommand.planTarget(new ContainerState.Running("10.0.0.4"), null);
     assertEquals(ProjectApplyCommand.Action.CONVERGED, machineryOnly.action());
-    assertEquals(null, machineryOnly.config(), "no descriptor means machinery-only convergence");
-  }
-
-  @Test
-  void rejectsLiteralSailYamlFileWithAll() {
-    var cmd = new CommandLine(new Sail());
-    cmd.setErr(new PrintWriter(new StringWriter()));
-
-    var exit = cmd.execute("project", "apply", "--all", "-f", "sail.yaml");
-
-    assertNotEquals(
-        0,
-        exit,
-        "this command's -f has no default, so the literal 'sail.yaml' is an explicit override"
-            + " and must hit the same --all incompatibility as any other path");
-  }
-
-  @Test
-  void anExplicitFileIsNeverReinterpretedAsAbsent() {
-    assertFalse(
-        ProjectApplyCommand.usesCatalog("sail.yaml", "alpha"),
-        "an operator who typed -f sail.yaml named a file; the legacy default-value mapping of"
-            + " older commands must not silently redirect apply to the catalog");
-    assertTrue(ProjectApplyCommand.usesCatalog(null, "alpha"));
-    assertFalse(ProjectApplyCommand.usesCatalog(null, null));
+    assertEquals(null, machineryOnly.config(), "no definition means machinery-only convergence");
   }
 
   @Test
@@ -677,17 +472,6 @@ class ProjectApplyCommandTest {
         null,
         ProjectApplyCommand.unmanagedSkipWarning("stranger", false, OperatorCommand.PLAIN),
         "a foreign container with no catalog row is not Sail's to narrate");
-  }
-
-  @Test
-  void aDryRunResolvesTheCanonicalPathWithoutMaterializing() throws Exception {
-    var project = "dry-run-materialize-proof";
-
-    var path =
-        ProjectApplyCommand.materializeUnlessDryRun(project, "name: " + project + "\n", true);
-
-    assertEquals(ProjectApplyCommand.defaultDescriptorPath(project), path);
-    assertFalse(Files.exists(path), "a dry run must never write the canonical descriptor");
   }
 
   @Test

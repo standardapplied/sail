@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -16,6 +15,7 @@ import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;

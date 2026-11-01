@@ -64,8 +64,6 @@ class AdhocDispatchTest {
   private static final String YAML =
       """
       name: acme
-      ssh:
-        user: dev
       repos:
         - url: https://github.com/acme/app.git
           path: app
@@ -168,8 +166,6 @@ class AdhocDispatchTest {
     var guardrailed =
         """
         name: acme
-        ssh:
-          user: dev
         agent:
           type: claude-code
           guardrails:

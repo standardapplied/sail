@@ -5,6 +5,12 @@
 
 package ai.singlr.sail.commands;
 
+import java.nio.file.Path;
+import java.util.function.Supplier;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ProjectCatalog;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.config.DefinitionEdits;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
@@ -58,19 +64,32 @@ public final class ProjectResourcesSetCommand implements Runnable {
 
   private final ShellExec shellOverride;
   private final BooleanSupplier rootChecker;
+  private final Catalog catalog;
   private final PrintStream out;
   private final PrintStream err;
 
+  /** The catalog this command writes, and the operator a write is made as. */
+  record Catalog(Path database, Supplier<Actor> operator) {
+    static Catalog here() {
+      return new Catalog(SailPaths.controlPlaneDb(), CliOperator::current);
+    }
+  }
+
   public ProjectResourcesSetCommand() {
-    this(null, ConsoleHelper::isRoot, System.out, System.err);
+    this(null, ConsoleHelper::isRoot, System.out, System.err, Catalog.here());
   }
 
   ProjectResourcesSetCommand(
-      ShellExec shellOverride, BooleanSupplier rootChecker, PrintStream out, PrintStream err) {
+      ShellExec shellOverride,
+      BooleanSupplier rootChecker,
+      PrintStream out,
+      PrintStream err,
+      Catalog catalog) {
     this.shellOverride = shellOverride;
     this.rootChecker = rootChecker;
     this.out = out;
     this.err = err;
+    this.catalog = catalog;
   }
 
   @Override
@@ -87,8 +106,11 @@ public final class ProjectResourcesSetCommand implements Runnable {
       throw RootRequired.refusal(spec);
     }
 
-    var actor = ProjectMutations.catalogOperator(name, dryRun);
-    var config = ProjectMutations.current(name, operator);
+    var actor = dryRun ? null : catalog.operator().get();
+    if (actor != null) {
+      ProjectCatalog.requireRecordable(catalog.database(), name, actor);
+    }
+    var config = ProjectMutations.current(catalog.database(), name, operator);
     if (config.resources() == null) {
       throw new IllegalStateException(
           "Project '" + name + "' sets no resources: set cpu, memory and disk in its definition.");
@@ -121,6 +143,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
 
     if (descriptorChanged) {
       ProjectMutations.write(
+          catalog.database(),
           Section.RESOURCES,
           config,
           ProjectMutations.checked(DefinitionEdits.updateResources(config, cpu, memory, disk)),

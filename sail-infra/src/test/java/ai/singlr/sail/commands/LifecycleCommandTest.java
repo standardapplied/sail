@@ -371,13 +371,13 @@ class LifecycleCommandTest {
     var sw = new StringWriter();
     cmd.setOut(new PrintWriter(sw));
 
-    var exitCode = cmd.execute("project", "config", "--help");
+    var exitCode = cmd.execute("project", "config", "show", "--help");
 
     assertEquals(0, exitCode);
     var output = sw.toString();
     assertTrue(output.contains("--json"));
-    assertTrue(output.contains("--file"));
-    assertTrue(output.contains("Show project configuration"));
+    assertFalse(output.contains("--file"));
+    assertTrue(output.contains("Show a project's definition"));
   }
 
   @Test
@@ -386,7 +386,7 @@ class LifecycleCommandTest {
     cmd.setOut(new PrintWriter(new StringWriter()));
     cmd.setErr(new PrintWriter(new StringWriter()));
 
-    var exitCode = cmd.execute("project", "config");
+    var exitCode = cmd.execute("project", "config", "show");
 
     assertNotEquals(0, exitCode);
   }
@@ -630,7 +630,7 @@ class LifecycleCommandTest {
 
     assertEquals(0, exitCode);
     var output = sw.toString();
-    assertTrue(output.contains("Make a project match its descriptor"));
+    assertTrue(output.contains("Make a project's container match its definition"));
     assertTrue(output.contains("--dry-run"));
     assertTrue(output.contains("--json"));
     assertTrue(output.contains("--git-token"));

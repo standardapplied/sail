@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -20,6 +19,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ProjectFileFixtures;
@@ -1373,7 +1373,9 @@ class SailOperationsSeamTest {
       assertTrue(operations.catalog().project("new").isPresent());
       assertEquals("config", operations.projectFiles("new").list().getFirst().path());
       operations.catalog().undoRename(renamed);
-      assertEquals(definition, operations.catalog().project("old").orElseThrow().definition());
+      assertEquals(
+          TestDefinitions.yaml(definition),
+          operations.catalog().project("old").orElseThrow().definition());
       assertEquals(1, operations.catalog().projects().size());
       assertEquals(
           "0 specs, 0 rooms, 0 messages, 0 runs, 0 reviews, 1 files, 1 projects, 0 events and 0"
@@ -1449,7 +1451,7 @@ class SailOperationsSeamTest {
                   "{}"));
       assertEquals(
           1L, box.db.queryOne("SELECT count(*) FROM events", row -> row.integer(0)).orElseThrow());
-      assertTrue(operations.catalog().demoDefinition().contains("demo"));
+      assertEquals("demo", operations.catalog().demoDefinition().name());
       assertEquals("demo", operations.catalog().definitions().require("demo").name());
       assertTrue(operations.catalog().destroy("demo", true).purged());
       assertTrue(operations.catalog().definitions().read("demo").isEmpty());

@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.JudgePrompt;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.StageSkill;
@@ -65,7 +66,7 @@ class ProjectSkillLaunchTest {
   }
 
   private static ReviewPipelineConfig pipeline(Map<String, Object>... stages) {
-    return ReviewPipelineConfig.fromMap(Map.of("stages", List.of(stages)));
+    return TestDefinitions.pipeline(Map.of("stages", List.of(stages)));
   }
 
   private static String stampOf(StageSkill skill) {
@@ -228,8 +229,8 @@ class ProjectSkillLaunchTest {
 
     assertEquals(ErrorCode.BAD_REQUEST, refused.failure().errorCode());
     assertEquals(
-        "Unknown agent CLI: 'gemini'. Known agents: claude-code, codex.\n  Check the 'install'"
-            + " list in your sail.yaml agent section.",
+        "Unknown agent CLI: 'gemini'. Known agents: claude-code, codex.\n  Check the install list"
+            + " in the project's agent section.",
         refused.getMessage());
     assertEquals(SpecStatus.PENDING, loop.specStatus("auth"));
     assertTrue(loop.runs.listForProject(PROJECT).isEmpty());

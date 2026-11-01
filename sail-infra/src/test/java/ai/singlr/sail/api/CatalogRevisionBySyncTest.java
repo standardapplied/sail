@@ -5,10 +5,10 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -47,7 +47,9 @@ class CatalogRevisionBySyncTest {
       assertEquals("https://ntfy.sh/zenith", notifications.resolve("zenith").url());
 
       Acting.system(
-          () -> authored.upsert(TestDefinitions.yaml(ZENITH.replace("ntfy.sh/zenith", "ntfy.sh/moved"))));
+          () ->
+              authored.upsert(
+                  TestDefinitions.yaml(ZENITH.replace("ntfy.sh/zenith", "ntfy.sh/moved"))));
       SyncBox.round(main, node);
 
       assertEquals("https://ntfy.sh/moved", reader.require("zenith").agent().notifications().url());

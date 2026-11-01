@@ -143,7 +143,7 @@ public final class ProjectCreateCommand implements Runnable {
   }
 
   /** The definition this create was given, by stdin, by its questions, or by its flags. */
-  private ProjectDefinition definition(PrintStream out, Ansi ansi) throws Exception {
+  ProjectDefinition definition(PrintStream out, Ansi ansi) throws Exception {
     if (definition != null) {
       return fromStdin();
     }

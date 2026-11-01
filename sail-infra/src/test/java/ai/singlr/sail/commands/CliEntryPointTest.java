@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,6 +18,7 @@ import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -253,24 +255,10 @@ class CliEntryPointTest {
     var output = sw.toString();
     assertTrue(output.contains("--dry-run"));
     assertTrue(output.contains("--json"));
-    assertTrue(output.contains("--file"));
+    assertFalse(output.contains("--file"));
     assertTrue(output.contains("--yes"));
   }
 
-  @Test
-  void projectInitHelpShowsOptions() {
-    var cmd = new CommandLine(new Sail());
-    var sw = new StringWriter();
-    cmd.setOut(new PrintWriter(sw));
-
-    var exitCode = cmd.execute("project", "init", "--help");
-
-    assertEquals(0, exitCode);
-    var output = sw.toString();
-    assertTrue(output.contains("--json"));
-    assertTrue(output.contains("--output"));
-    assertTrue(output.contains("sail.yaml"));
-  }
 
   @Test
   void projectDemoHelpShowsDescription() {
@@ -318,40 +306,13 @@ class CliEntryPointTest {
     assertTrue(output.contains("--json"));
   }
 
+
   @Test
-  void projectApplyMissingDescriptorFails() {
+  void projectApplyInvalidNameFails() {
     var cmd = new CommandLine(new Sail());
     cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
 
-    var exitCode =
-        cmd.execute(
-            "project",
-            "apply",
-            "--dry-run",
-            "--file",
-            tempDir.resolve("nonexistent.yaml").toString());
-
-    assertNotEquals(0, exitCode);
-    var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
-    assertTrue(errOutput.contains("not found"), "Should report missing sail.yaml");
-  }
-
-  @Test
-  void projectApplyInvalidNameFails() throws Exception {
-    var yamlFile = tempDir.resolve("sail.yaml");
-    Files.writeString(
-        yamlFile,
-        """
-            name: "INVALID NAME!"
-            resources:
-              cpu: 2
-              memory: 4GB
-              disk: 50GB
-            """);
-    var cmd = new CommandLine(new Sail());
-    cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
-
-    var exitCode = cmd.execute("project", "apply", "--dry-run", "--file", yamlFile.toString());
+    var exitCode = cmd.execute("project", "apply", "INVALID NAME!", "--dry-run");
 
     assertNotEquals(0, exitCode);
     var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
@@ -359,41 +320,20 @@ class CliEntryPointTest {
   }
 
   @Test
-  void projectApplyMissingNameFails() throws Exception {
-    var yamlFile = tempDir.resolve("sail.yaml");
-    Files.writeString(
-        yamlFile,
-        """
-            resources:
-              cpu: 2
-              memory: 4GB
-              disk: 50GB
-            """);
+  void projectCreateHelpShowsItsSectionsAndItsDefinitionFromStdin() {
     var cmd = new CommandLine(new Sail());
-    cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
+    var sw = new StringWriter();
+    cmd.setOut(new PrintWriter(sw));
 
-    var exitCode = cmd.execute("project", "apply", "--dry-run", "--file", yamlFile.toString());
+    var exitCode = cmd.execute("project", "create", "--help");
 
-    assertNotEquals(0, exitCode);
-    var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
-    assertTrue(errOutput.contains("name"), "Should report missing name");
+    assertEquals(0, exitCode);
+    var output = sw.toString();
+    for (var option : List.of("--definition", "--cpu", "--repo", "--service", "--agent")) {
+      assertTrue(output.contains(option), option);
+    }
+    assertFalse(output.contains("sail.yaml"));
   }
 
-  @Test
-  void projectApplyMissingResourcesFails() throws Exception {
-    var yamlFile = tempDir.resolve("sail.yaml");
-    Files.writeString(
-        yamlFile,
-        """
-            name: test-proj
-            """);
-    var cmd = new CommandLine(new Sail());
-    cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
 
-    var exitCode = cmd.execute("project", "apply", "--dry-run", "--file", yamlFile.toString());
-
-    assertNotEquals(0, exitCode);
-    var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
-    assertTrue(errOutput.contains("resources"), "Should report missing resources");
-  }
 }

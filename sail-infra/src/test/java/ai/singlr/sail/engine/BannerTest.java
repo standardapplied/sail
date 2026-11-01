@@ -428,7 +428,8 @@ class BannerTest {
             null,
             null,
             null,
-            null, null);
+            null,
+            null);
     var out = new ByteArrayOutputStream();
     Banner.printProjectSummary(config, new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
@@ -823,17 +824,7 @@ class BannerTest {
   void aTabOrLineBreakInAValueIsASpaceTheRowFits() {
     var config =
         new ProjectDefinition(
-            "acme",
-            "a\tb\nc\r".repeat(30),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null);
+            "acme", "a\tb\nc\r".repeat(30), null, null, null, null, null, null, null, null, null);
 
     var lines =
         printedAt(
@@ -1290,7 +1281,8 @@ class BannerTest {
             null,
             services,
             null,
-            new ProjectDefinition.Agent("claude-code", true, "sail/", true, null, null, null, null), null);
+            new ProjectDefinition.Agent("claude-code", true, "sail/", true, null, null, null, null),
+            null);
     var state = new ContainerState.Running("10.0.0.42");
     var out = new ByteArrayOutputStream();
     Banner.printProjectConfig(config, state, new PrintStream(out), Ansi.OFF);
@@ -1358,7 +1350,7 @@ class BannerTest {
     assertTrue(output.contains("Not created"));
     assertFalse(output.contains("JDK:"));
     assertFalse(output.contains("Agent:"));
-    assertFalse(output.contains("SSH user:"));
+    assertTrue(output.contains("SSH user:    dev"));
   }
 
   @Test
@@ -1374,7 +1366,8 @@ class BannerTest {
             null,
             null,
             null,
-            new ProjectDefinition.Agent("claude-code", false, null, true, null, null, null, null), null);
+            new ProjectDefinition.Agent("claude-code", false, null, true, null, null, null, null),
+            null);
     var state = new ContainerState.Running("10.0.0.1");
     var out = new ByteArrayOutputStream();
     Banner.printProjectConfig(config, state, new PrintStream(out), Ansi.OFF);
@@ -1389,7 +1382,7 @@ class BannerTest {
   }
 
   @Test
-  void anSshBlockWithKeysAndNoUserSummarizesAsDev() {
+  void everyProjectSummarizesItsSshUserAsDev() {
     var config =
         new ProjectDefinition(
             "acme",
@@ -1401,7 +1394,8 @@ class BannerTest {
             null,
             null,
             null,
-            null, null);
+            null,
+            null);
     var summary = new ByteArrayOutputStream();
     var projectConfig = new ByteArrayOutputStream();
 

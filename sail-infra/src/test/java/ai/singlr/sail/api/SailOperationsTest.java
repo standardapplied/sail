@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -15,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
@@ -2160,9 +2160,9 @@ class SailOperationsTest {
               type: claude-code
               guardrails:
                 max_duration: 6h
-              review_pipeline:
-                guardrails:
-                  max_duration: 90m
+            pipeline:
+              guardrails:
+                max_duration: 90m
             """,
             shell,
             (command, logPath) -> 4242L);
@@ -2233,8 +2233,6 @@ class SailOperationsTest {
         operations(
             """
             name: acme
-            ssh:
-              user: dev
             """,
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
@@ -3392,8 +3390,6 @@ class SailOperationsTest {
   private static String baseYaml() {
     return """
         name: acme
-        ssh:
-          user: dev
         agent:
           type: claude-code
         """;
@@ -3402,8 +3398,6 @@ class SailOperationsTest {
   private static String multiRepoYaml() {
     return """
         name: acme
-        ssh:
-          user: dev
         repos:
           - url: https://github.com/acme/app.git
             path: app
@@ -3417,16 +3411,12 @@ class SailOperationsTest {
   private static String noAgentYaml() {
     return """
         name: acme
-        ssh:
-          user: dev
         """;
   }
 
   private static String branchYaml() {
     return """
         name: acme
-        ssh:
-          user: dev
         repos:
           - url: https://github.com/acme/app.git
             path: app
@@ -3440,8 +3430,6 @@ class SailOperationsTest {
   private static String snapshotYaml() {
     return """
         name: acme
-        ssh:
-          user: dev
         agent:
           type: claude-code
           auto_snapshot: true
@@ -3451,8 +3439,6 @@ class SailOperationsTest {
   private static String guardrailsYaml() {
     return """
         name: acme
-        ssh:
-          user: dev
         agent:
           type: claude-code
           guardrails:

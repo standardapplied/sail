@@ -77,7 +77,8 @@ public final class ProjectCatalog {
     requireRecordable(SailPaths.controlPlaneDb(), name, operator);
   }
 
-  static void requireRecordable(Path catalog, String name, Actor operator) {
+  /** As {@link #requireRecordable(String, Actor)}, asked of the catalog at {@code catalog}. */
+  public static void requireRecordable(Path catalog, String name, Actor operator) {
     if (!Files.isRegularFile(catalog)) {
       return;
     }
@@ -128,7 +129,8 @@ public final class ProjectCatalog {
     return read(SailPaths.controlPlaneDb(), name);
   }
 
-  static Optional<ProjectDefinition> read(Path catalog, String name) {
+  /** The definition project {@code name} holds in the catalog at {@code catalog}, or empty. */
+  public static Optional<ProjectDefinition> read(Path catalog, String name) {
     if (!Files.isRegularFile(catalog)) {
       return Optional.empty();
     }
@@ -146,8 +148,11 @@ public final class ProjectCatalog {
    * with its fix.
    */
   public static void record(ProjectDefinition definition, Actor operator) {
-    write(
-        SailPaths.controlPlaneDb(), definition.name(), operator, store -> store.upsert(definition));
+    record(SailPaths.controlPlaneDb(), definition, operator);
+  }
+
+  static void record(Path catalog, ProjectDefinition definition, Actor operator) {
+    write(catalog, definition.name(), operator, store -> store.upsert(definition));
   }
 
   /** Creates the project {@code definition} names as {@code operator}; refused when it exists. */
@@ -167,8 +172,19 @@ public final class ProjectCatalog {
       ProjectDefinition read,
       ProjectDefinition edited,
       Actor operator) {
+    writeSection(SailPaths.controlPlaneDb(), name, section, read, edited, operator);
+  }
+
+  /** As {@link #writeSection(String, Section, ProjectDefinition, ProjectDefinition, Actor)}. */
+  public static void writeSection(
+      Path catalog,
+      String name,
+      Section section,
+      ProjectDefinition read,
+      ProjectDefinition edited,
+      Actor operator) {
     write(
-        SailPaths.controlPlaneDb(),
+        catalog,
         name,
         operator,
         store ->

@@ -444,6 +444,7 @@ class AgentReporterTest {
         null,
         null,
         null,
-        new ProjectDefinition.Agent("claude-code", true, "sail/", true, null, null, null, null), null);
+        new ProjectDefinition.Agent("claude-code", true, "sail/", true, null, null, null, null),
+        null);
   }
 }

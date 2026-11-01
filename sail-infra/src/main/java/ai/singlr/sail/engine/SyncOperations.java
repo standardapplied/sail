@@ -47,6 +47,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
@@ -217,6 +218,7 @@ public final class SyncOperations {
     var types = new ArrayList<SyncSession.TypeReport>();
     var failures = new ArrayList<SyncTransportException>();
     var knownMessages = messages.syncEntityIds();
+    var knownProjects = names(projects);
     for (var entity : SyncedEntities.all()) {
       try {
         types.add(session.reconcile(entity.type(), replicas.get(entity.type())));
@@ -236,6 +238,7 @@ public final class SyncOperations {
       failures.add(transportFailure("fde", e));
     }
     materialize(files);
+    announceNewProjects(projects, knownProjects);
     reconcileLiveResources(projects, reportFor(types, "project"));
     tearDownOutOfScope(dropped(settled));
     var summed =
@@ -602,6 +605,35 @@ public final class SyncOperations {
           .sorted()
           .toList();
     }
+  }
+
+  private static Set<String> names(ProjectStore projects) {
+    return projects.list().stream()
+        .map(ProjectStore.ProjectRow::name)
+        .collect(Collectors.toCollection(TreeSet::new));
+  }
+
+  /**
+   * Names the projects this round brought to the catalog that it did not hold before, each with
+   * the command that makes its container here.
+   */
+  private void announceNewProjects(ProjectStore projects, Set<String> known) {
+    var created = names(projects);
+    created.removeAll(known);
+    if (created.isEmpty()) {
+      return;
+    }
+    var applies =
+        created.stream()
+            .map(name -> Remedy.of("\n    ", Remedy.sail("project apply", name)))
+            .toArray();
+    notice.accept(
+        Remedy.of(
+                created.size()
+                    + " new project(s) synced from main: "
+                    + String.join(", ", created)
+                    + ". Provision each with:")
+            .then(applies));
   }
 
   /** Projects the synced files onto disk, warning about any local edits it deliberately left. */

@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -16,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -55,7 +55,7 @@ class AgentAttachCommandTest {
     var acme = new AgentAttachCommand(operator -> OperationsFactory.open(dbPath));
     new CommandLine(acme).parseArgs("acme");
     var absent = new AgentAttachCommand(operator -> OperationsFactory.open(dbPath));
-    new CommandLine(absent).parseArgs("absent", "-f", "/abs/sail.yaml");
+    new CommandLine(absent).parseArgs("absent");
 
     assertEquals("codex", acme.resolveHarness(OperatorCommand.PLAIN).yamlName());
     assertSame(Harnesses.DEFAULT, absent.resolveHarness(OperatorCommand.PLAIN));

@@ -255,7 +255,7 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
-    var result = applier.applyRepos(CONTAINER, repos, "dev", null, null);
+    var result = applier.applyRepos(CONTAINER, repos, "dev", null);
 
     assertEquals(1, result.added());
     assertTrue(shell.invocations().stream().anyMatch(c -> c.contains("git clone")));
@@ -274,7 +274,7 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
-    var result = applier.applyRepos(CONTAINER, repos, "dev", null, null);
+    var result = applier.applyRepos(CONTAINER, repos, "dev", null);
 
     assertEquals(0, result.added());
     assertEquals(1, result.skipped());
@@ -296,7 +296,7 @@ class ProjectApplierTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null, null));
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null));
 
     assertEquals(
         "Repo 'backend' is a clone of https://github.com/org/old.git, but the definition says"
@@ -319,7 +319,7 @@ class ProjectApplierTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null, null));
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null));
 
     assertEquals(
         "Repo 'backend' is not a git checkout, but the definition says"
@@ -336,7 +336,7 @@ class ProjectApplierTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null, null));
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null));
 
     assertEquals(
         "Repo 'backend' is a clone with no origin, but the definition says"
@@ -355,7 +355,7 @@ class ProjectApplierTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null, null));
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null));
 
     assertEquals(
         "Repo 'backend' is a clone of https://github.com/org/old, but the definition says"
@@ -369,7 +369,7 @@ class ProjectApplierTest {
     var repos =
         List.of(new ProjectDefinition.Repo("git@github.com:org/backend.git", "backend", null));
 
-    var result = applier(shell).applyRepos(CONTAINER, repos, "dev", null, null);
+    var result = applier(shell).applyRepos(CONTAINER, repos, "dev", null);
 
     assertEquals(1, result.skipped());
   }
@@ -389,7 +389,7 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://github.com/org/private.git", "private", null));
-    applier.applyRepos(CONTAINER, repos, "dev", Map.of("*", "ghp_secret123"), null);
+    applier.applyRepos(CONTAINER, repos, "dev", Map.of("*", "ghp_secret123"));
 
     var cloneCmd = shell.invocations().stream().filter(c -> c.contains("git clone")).findFirst();
     assertTrue(cloneCmd.isPresent());
@@ -447,8 +447,7 @@ class ProjectApplierTest {
                 "https://git.example.com/org/api.git", "api", null, "github"),
             new ProjectDefinition.Repo("https://gitlab.com/org/web.git", "web", null)),
         "dev",
-        Map.of("*", "tok_wild"),
-        null);
+        Map.of("*", "tok_wild"));
 
     assertGhLoggedIn(shell, "git.example.com", "tok_wild");
     assertEquals(
@@ -467,8 +466,7 @@ class ProjectApplierTest {
         CONTAINER,
         List.of(new ProjectDefinition.Repo("https://gitlab.com/org/web.git", "web", null)),
         "dev",
-        Map.of("gitlab.com", "glpat_x"),
-        null);
+        Map.of("gitlab.com", "glpat_x"));
 
     assertTrue(shell.invocations().stream().noneMatch(c -> c.contains("gh auth login")));
     assertTrue(shell.invocations().stream().noneMatch(c -> c.contains("gh-token-")));
@@ -490,8 +488,7 @@ class ProjectApplierTest {
                     List.of(
                         new ProjectDefinition.Repo("https://github.com/org/api.git", "api", null)),
                     "dev",
-                    Map.of("*", "ghp_bad"),
-                    null));
+                    Map.of("*", "ghp_bad")));
 
     assertEquals(
         "Failed to log gh in for github.com in acme-health: The token in GH_TOKEN is invalid.",
@@ -505,7 +502,7 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://github.com/org/repo.git", "repo", "develop"));
-    applier.applyRepos(CONTAINER, repos, "dev", null, null);
+    applier.applyRepos(CONTAINER, repos, "dev", null);
 
     var cloneCmd = shell.invocations().stream().filter(c -> c.contains("git clone")).findFirst();
     assertTrue(cloneCmd.isPresent());
@@ -517,7 +514,7 @@ class ProjectApplierTest {
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
 
-    var result = applier.applyRepos(CONTAINER, null, "dev", null, null);
+    var result = applier.applyRepos(CONTAINER, null, "dev", null);
 
     assertEquals(0, result.added());
   }
@@ -592,8 +589,7 @@ class ProjectApplierTest {
     var applier = applier(shell);
 
     var result =
-        applier.applyGitConfig(
-            CONTAINER, new ProjectDefinition.Git("John", "john@acme.com", "token", null), "dev");
+        applier.applyGitConfig(CONTAINER, new LocalIdentity.GitIdentity("John", "john@acme.com"));
 
     assertEquals(1, result.added());
     assertTrue(
@@ -613,8 +609,7 @@ class ProjectApplierTest {
     var applier = new ProjectApplier(shell, new PrintStream(out));
 
     var result =
-        applier.applyGitConfig(
-            CONTAINER, new ProjectDefinition.Git("John", "john@acme.com", "token", null), "dev");
+        applier.applyGitConfig(CONTAINER, new LocalIdentity.GitIdentity("John", "john@acme.com"));
 
     assertEquals(new ProjectApplier.ApplyResult(0, 0, 1, List.of()), result);
     assertEquals("  [skip] Git config already current\n", out.toString());
@@ -633,8 +628,7 @@ class ProjectApplierTest {
     var applier = new ProjectApplier(shell, new PrintStream(out));
 
     var result =
-        applier.applyGitConfig(
-            CONTAINER, new ProjectDefinition.Git("John", "john@acme.com", "token", null), "dev");
+        applier.applyGitConfig(CONTAINER, new LocalIdentity.GitIdentity("John", "john@acme.com"));
 
     assertEquals(new ProjectApplier.ApplyResult(1, 0, 0, List.of()), result);
     assertEquals("  [apply] Git config (name=John, email=john@acme.com)\n", out.toString());
@@ -650,8 +644,7 @@ class ProjectApplierTest {
     var applier = new ProjectApplier(shell, new PrintStream(out));
 
     var result =
-        applier.applyGitConfig(
-            CONTAINER, new ProjectDefinition.Git("John ", "john@acme.com", "token", null), "dev");
+        applier.applyGitConfig(CONTAINER, new LocalIdentity.GitIdentity("John ", "john@acme.com"));
 
     assertEquals(new ProjectApplier.ApplyResult(1, 0, 0, List.of()), result);
     assertEquals("  [apply] Git config (name=John , email=john@acme.com)\n", out.toString());
@@ -667,8 +660,7 @@ class ProjectApplierTest {
     var applier = new ProjectApplier(shell, new PrintStream(out));
 
     var result =
-        applier.applyGitConfig(
-            CONTAINER, new ProjectDefinition.Git("John", "john@acme.com", "token", null), "dev");
+        applier.applyGitConfig(CONTAINER, new LocalIdentity.GitIdentity("John", "john@acme.com"));
 
     assertEquals(new ProjectApplier.ApplyResult(1, 0, 0, List.of()), result);
     assertEquals("  [apply] Git config (name=John, email=john@acme.com)\n", out.toString());
@@ -677,16 +669,6 @@ class ProjectApplierTest {
         shell.invocations().stream()
             .filter(c -> c.endsWith("git config --global user.name John"))
             .count());
-  }
-
-  @Test
-  void applyGitConfigReturnsEmptyWhenNull() throws Exception {
-    var shell = new ScriptedShellExecutor();
-    var applier = applier(shell);
-
-    var result = applier.applyGitConfig(CONTAINER, null, "dev");
-
-    assertEquals(0, result.added());
   }
 
   @Test
@@ -885,9 +867,7 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
-    var ex =
-        assertThrows(
-            Exception.class, () -> applier.applyRepos(CONTAINER, repos, "dev", null, null));
+    var ex = assertThrows(Exception.class, () -> applier.applyRepos(CONTAINER, repos, "dev", null));
 
     assertTrue(ex.getMessage().contains("Failed to clone"));
   }
@@ -897,7 +877,7 @@ class ProjectApplierTest {
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
 
-    var result = applier.applyRepos(CONTAINER, List.of(), "dev", null, null);
+    var result = applier.applyRepos(CONTAINER, List.of(), "dev", null);
 
     assertEquals(0, result.added());
   }
@@ -915,70 +895,12 @@ class ProjectApplierTest {
 
     var repos =
         List.of(new ProjectDefinition.Repo("https://gitlab.com/org/repo.git", "repo", null));
-    applier.applyRepos(CONTAINER, repos, "dev", Map.of("*", "ghp_token"), null);
+    applier.applyRepos(CONTAINER, repos, "dev", Map.of("*", "ghp_token"));
 
     var cloneCmd = shell.invocations().stream().filter(c -> c.contains("git clone")).findFirst();
     assertTrue(cloneCmd.isPresent());
     assertFalse(cloneCmd.get().contains("ghp_token"));
     assertTrue(cloneCmd.get().contains("gitlab.com"));
-  }
-
-  @Test
-  void applyReposPushesSshKeyWhenGitAuthIsSsh() throws Exception {
-    var keyFile = tempDir.resolve("id_ed25519");
-    Files.writeString(keyFile, "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END-----\n");
-    var pubFile = tempDir.resolve("id_ed25519.pub");
-    Files.writeString(pubFile, "ssh-ed25519 AAAA... test@host");
-
-    var shell =
-        new ScriptedShellExecutor()
-            .onOk("mkdir")
-            .onOk("chmod")
-            .onOk("incus file push")
-            .onOk("chown")
-            .onFail("test -d", "not found")
-            .onOk("git clone");
-    var applier = applier(shell);
-
-    var repos = List.of(new ProjectDefinition.Repo("git@github.com:org/repo.git", "repo", null));
-    var git = new ProjectDefinition.Git("Dev", "dev@test.com", "ssh", keyFile.toString());
-    applier.applyRepos(CONTAINER, repos, "dev", null, git);
-
-    var cmds = shell.invocations();
-    assertTrue(
-        cmds.stream().anyMatch(c -> c.contains("incus file push") && c.contains("id_ed25519")),
-        "Should push SSH private key into container");
-    assertTrue(
-        cmds.stream().anyMatch(c -> c.contains("id_ed25519.pub")),
-        "Should push public key when .pub file exists");
-  }
-
-  @Test
-  void applyReposThrowsWhenSshKeyMissing() {
-    var shell = new ScriptedShellExecutor();
-    var applier = applier(shell);
-
-    var repos = List.of(new ProjectDefinition.Repo("git@github.com:org/repo.git", "repo", null));
-    var git = new ProjectDefinition.Git("Dev", "dev@test.com", "ssh", "/nonexistent/key");
-    var ex =
-        assertThrows(Exception.class, () -> applier.applyRepos(CONTAINER, repos, "dev", null, git));
-    assertTrue(ex.getMessage().contains("SSH key not found"));
-  }
-
-  @Test
-  void applyReposSkipsSshKeyWhenAuthIsToken() throws Exception {
-    var shell = new ScriptedShellExecutor().onFail("test -d", "not found").onOk("git clone");
-    var applier = applier(shell);
-
-    var repos =
-        List.of(new ProjectDefinition.Repo("https://github.com/org/repo.git", "repo", null));
-    var git = new ProjectDefinition.Git("Dev", "dev@test.com", "token", null);
-    applier.applyRepos(CONTAINER, repos, "dev", null, git);
-
-    var cmds = shell.invocations();
-    assertFalse(
-        cmds.stream().anyMatch(c -> c.contains("id_ed25519")),
-        "Should NOT push SSH key when auth is token");
   }
 
   @Test
@@ -1060,8 +982,7 @@ class ProjectApplierTest {
         new ProjectDefinition.Agent(
             "claude-code", true, "sail/", true, null, null, null, null, null);
     var config =
-        new ProjectDefinition(
-            "test", null, null, null, null, null, null, null, null, agent, null);
+        new ProjectDefinition("test", null, null, null, null, null, null, null, null, agent, null);
 
     var warnings = applier.checkUnsupportedChanges(config, null, OperatorCommand.PLAIN);
 
@@ -1226,13 +1147,11 @@ class ProjectApplierTest {
     Files.writeString(filesDir.resolve("outline/.env"), "KEY=VALUE");
     Files.writeString(filesDir.resolve("setup.sh"), "#!/bin/bash");
     WorkspaceFiles.mode(filesDir.resolve("setup.sh"), 0755);
-    var sailYaml = projectDir.resolve("sail.yaml");
-    Files.writeString(sailYaml, "name: test");
 
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var applier = applier(shell);
 
-    var result = applier.applyWorkspaceFiles(CONTAINER, sailYaml, "dev");
+    var result = applier.applyWorkspaceFiles(CONTAINER, projectDir.resolve("files"), "dev");
 
     assertEquals(2, result.added());
     assertTrue(
@@ -1267,11 +1186,9 @@ class ProjectApplierTest {
     Files.createDirectories(filesDir.resolve(".sail/skills/acme-review"));
     Files.writeString(filesDir.resolve(".sail/skills/acme-review/SKILL.md"), "Judge.");
     Files.writeString(filesDir.resolve("notes.md"), "Notes.");
-    var sailYaml = projectDir.resolve("sail.yaml");
-    Files.writeString(sailYaml, "name: test");
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
 
-    var result = applier(shell).applyWorkspaceFiles(CONTAINER, sailYaml, "dev");
+    var result = applier(shell).applyWorkspaceFiles(CONTAINER, projectDir.resolve("files"), "dev");
 
     var pushes = shell.invocations().stream().filter(c -> c.contains("incus file push")).toList();
     assertEquals(1, result.added());
@@ -1288,11 +1205,9 @@ class ProjectApplierTest {
     var filesDir = projectDir.resolve("files");
     Files.createDirectories(filesDir.resolve(".sail/skills/acme-review"));
     Files.writeString(filesDir.resolve(".sail/skills/acme-review/SKILL.md"), "Judge.");
-    var sailYaml = projectDir.resolve("sail.yaml");
-    Files.writeString(sailYaml, "name: test");
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
 
-    var result = applier(shell).applyWorkspaceFiles(CONTAINER, sailYaml, "dev");
+    var result = applier(shell).applyWorkspaceFiles(CONTAINER, projectDir.resolve("files"), "dev");
 
     assertEquals(0, result.added());
     assertTrue(shell.invocations().isEmpty(), shell.invocations().toString());
@@ -1300,13 +1215,10 @@ class ProjectApplierTest {
 
   @Test
   void applyWorkspaceFilesReturnsEmptyWhenNoFilesDir() throws Exception {
-    var sailYaml = tempDir.resolve("sail.yaml");
-    Files.writeString(sailYaml, "name: test");
-
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
 
-    var result = applier.applyWorkspaceFiles(CONTAINER, sailYaml, "dev");
+    var result = applier.applyWorkspaceFiles(CONTAINER, tempDir.resolve("files"), "dev");
 
     assertEquals(0, result.added());
     assertTrue(shell.invocations().isEmpty());
@@ -1315,19 +1227,16 @@ class ProjectApplierTest {
   @Test
   void applyWorkspaceFilesReturnsEmptyWhenFilesDirEmpty() throws Exception {
     Files.createDirectories(tempDir.resolve("files"));
-    var sailYaml = tempDir.resolve("sail.yaml");
-    Files.writeString(sailYaml, "name: test");
-
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
 
-    var result = applier.applyWorkspaceFiles(CONTAINER, sailYaml, "dev");
+    var result = applier.applyWorkspaceFiles(CONTAINER, tempDir.resolve("files"), "dev");
 
     assertEquals(0, result.added());
   }
 
   @Test
-  void applyWorkspaceFilesReturnsEmptyWhenSailYamlPathNull() throws Exception {
+  void applyWorkspaceFilesReturnsEmptyWhenNoFolderIsNamed() throws Exception {
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
 
@@ -1341,13 +1250,11 @@ class ProjectApplierTest {
     var filesDir = tempDir.resolve("files");
     Files.createDirectories(filesDir);
     Files.writeString(filesDir.resolve("config.env"), "X=1");
-    var sailYaml = tempDir.resolve("sail.yaml");
-    Files.writeString(sailYaml, "name: test");
 
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var applier = applier(shell);
 
-    applier.applyWorkspaceFiles(CONTAINER, sailYaml, "dev");
+    applier.applyWorkspaceFiles(CONTAINER, filesDir, "dev");
 
     assertTrue(
         shell.invocations().stream()
@@ -1481,8 +1388,7 @@ class ProjectApplierTest {
 
   private static ProjectDefinition minimalConfig(String agentType) {
     var agent =
-        new ProjectDefinition.Agent(
-            agentType, true, "sail/", true, null, null, null, null, null);
+        new ProjectDefinition.Agent(agentType, true, "sail/", true, null, null, null, null, null);
     return new ProjectDefinition(
         "test",
         null,

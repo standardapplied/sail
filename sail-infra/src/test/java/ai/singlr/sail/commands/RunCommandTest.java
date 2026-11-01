@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -20,9 +19,9 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerExec;
-import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -109,13 +108,12 @@ class RunCommandTest {
   }
 
   @Test
-  void aProjectNotInTheCatalogFailsSayingSoWhateverFileIsNamed() {
+  void aProjectNotInTheCatalogFailsSayingSo() {
     var cmd = command(tempDir.resolve("control-plane.db"));
     cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
 
     var exitCode =
-        cmd.execute(
-            "test-project", "--dry-run", "--file", tempDir.resolve("nonexistent.yaml").toString());
+        cmd.execute("test-project", "--dry-run");
 
     assertNotEquals(0, exitCode);
     var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
@@ -123,22 +121,11 @@ class RunCommandTest {
   }
 
   @Test
-  void invalidProjectNameFails() throws Exception {
-    var yamlFile = tempDir.resolve("sail.yaml");
-    Files.writeString(
-        yamlFile,
-        """
-            name: test-proj
-            resources:
-              cpu: 2
-              memory: 4GB
-              disk: 50GB
-            """);
+  void invalidProjectNameFails() {
     var cmd = new CommandLine(new Sail());
     cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
 
-    var exitCode =
-        cmd.execute("agent", "run", "INVALID NAME!", "--dry-run", "--file", yamlFile.toString());
+    var exitCode = cmd.execute("agent", "run", "INVALID NAME!", "--dry-run");
 
     assertNotEquals(0, exitCode);
     var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
@@ -153,7 +140,9 @@ class RunCommandTest {
       Acting.system(
           () ->
               new ProjectStore(db)
-                  .upsert(TestDefinitions.yaml("""
+                  .upsert(
+                      TestDefinitions.yaml(
+                          """
                       name: test-proj
                       resources:
                         cpu: 2
@@ -166,7 +155,7 @@ class RunCommandTest {
     var cmd = command(dbPath);
     cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
 
-    var exitCode = cmd.execute("test-proj", "--dry-run", "--file", "ignored.yaml");
+    var exitCode = cmd.execute("test-proj", "--dry-run");
 
     assertNotEquals(0, exitCode);
     var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
@@ -199,7 +188,6 @@ class RunCommandTest {
    */
   private RunCommand runCommand(
       Path dbPath, ScriptedShellExecutor shell, DispatchOperations.AgentLauncher terminal) {
-    var noGit = new ScriptedShellExecutor();
     return new RunCommand(
         operator -> OperationsFactory.open(dbPath),
         (host, hooks) -> {
@@ -217,7 +205,6 @@ class RunCommandTest {
                   hooks.stopListener()),
               SessionYield.NONE);
         },
-        operator -> new LocalIdentity(noGit, dbPath.resolveSibling("none.pub"), operator),
         dryRun -> shell,
         terminal);
   }

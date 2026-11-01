@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -130,7 +131,7 @@ class DispatchReposTest {
   }
 
   private static ProjectDefinition config(String... paths) {
-    return ProjectDefinition.fromMap(
+    return TestDefinitions.map(
         Map.of(
             "name",
             "workspace",

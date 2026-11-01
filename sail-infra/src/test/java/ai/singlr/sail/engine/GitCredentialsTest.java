@@ -13,25 +13,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectDefinition;
-import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class GitCredentialsTest {
-
-  @Test
-  void resolveHostPathExpandsTildeToTheInvokingHome() {
-    assertEquals(
-        SailPaths.invokingHome().resolve(".ssh/id_ed25519"),
-        GitCredentials.resolveHostPath("~/.ssh/id_ed25519"));
-  }
-
-  @Test
-  void resolveHostPathReturnsAbsolutePathUnchanged() {
-    var path = GitCredentials.resolveHostPath("/tmp/my-key");
-    assertEquals(Path.of("/tmp/my-key"), path);
-  }
 
   @Test
   void buildCredentialStoreEmptyWhenNoRepos() {
@@ -135,34 +121,6 @@ class GitCredentialsTest {
             new ProjectDefinition.Repo("git@bitbucket.org:team/lib.git", "lib", null));
     var hosts = GitCredentials.extractHttpsHosts(repos);
     assertEquals(List.of("github.com", "gitlab.com"), hosts);
-  }
-
-  @Test
-  void extractSshHostsIncludesDefaults() {
-    var hosts = GitCredentials.extractSshHosts(null);
-    assertTrue(hosts.contains("github.com"));
-    assertTrue(hosts.contains("gitlab.com"));
-  }
-
-  @Test
-  void extractSshHostsFromMixedUrls() {
-    var repos =
-        List.of(
-            new ProjectDefinition.Repo("git@bitbucket.org:team/app.git", "app", null),
-            new ProjectDefinition.Repo("https://gitlab.example.com/org/repo.git", "repo", null));
-    var hosts = GitCredentials.extractSshHosts(repos);
-    assertTrue(hosts.contains("github.com"), "Default github.com");
-    assertTrue(hosts.contains("gitlab.com"), "Default gitlab.com");
-    assertTrue(hosts.contains("bitbucket.org"), "SSH URL host");
-    assertTrue(hosts.contains("gitlab.example.com"), "HTTPS URL host");
-  }
-
-  @Test
-  void extractSshHostsRejectsUnsafeHost() {
-    var repos =
-        List.of(new ProjectDefinition.Repo("https://github.com;touch/tmp/pwned", "app", null));
-
-    assertThrows(IllegalArgumentException.class, () -> GitCredentials.extractSshHosts(repos));
   }
 
   @Test

@@ -317,6 +317,7 @@ public final class Banner {
       labelRow(out, ansi, w, "Disk:", config.resources().disk(), null, null);
     }
     labelRow(out, ansi, w, "Packages:", pkgCount + " user + 5 baseline", null, null);
+    labelRow(out, ansi, w, "SSH user:", ProjectDefinition.USER, null, null);
     if (config.repos() != null && !config.repos().isEmpty()) {
       labelRow(out, ansi, w, "Repos:", config.repos().size() + " repositories", null, null);
     }
@@ -451,6 +452,9 @@ public final class Banner {
           out, ansi, w, "Auto-branch:", String.valueOf(config.agent().autoBranch()), null, null);
       emptyRow(out, ansi, w);
     }
+
+    labelRow(out, ansi, w, "SSH user:", ProjectDefinition.USER, null, null);
+    emptyRow(out, ansi, w);
 
     bottomBorder(out, ansi, w);
     out.println();

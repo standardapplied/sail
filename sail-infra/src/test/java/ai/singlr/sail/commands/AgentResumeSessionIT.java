@@ -15,6 +15,7 @@ import ai.singlr.sail.api.RunReservation;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.AgentUnit;
@@ -53,12 +54,10 @@ class AgentResumeSessionIT extends AbstractIncusIT {
   private static final String CONTAINER = "sail-it-agent-resume";
   private static final String ROOM = "resume-talk";
   private static final ProjectDefinition CONFIG =
-      ProjectDefinition.fromMap(
+      TestDefinitions.map(
           Map.of(
               "name",
               CONTAINER,
-              "ssh",
-              Map.of("user", "dev"),
               "repos",
               List.of(Map.of("url", "https://example.com/app.git", "path", "app"))));
 

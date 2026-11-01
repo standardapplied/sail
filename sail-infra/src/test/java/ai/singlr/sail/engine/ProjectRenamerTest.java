@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -18,6 +17,7 @@ import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
@@ -42,7 +42,7 @@ class ProjectRenamerTest {
   private static final String DEFINITION =
       "name: old\nimage: ubuntu/24.04\n"
           + "resources:\n  cpu: 2\n  memory: 4GB\n  disk: 20GB\n"
-          + "agent:\n  type: claude-code\nssh:\n  user: dev\n";
+          + "agent:\n  type: claude-code\n";
 
   @TempDir Path tempDir;
   private Sqlite db;

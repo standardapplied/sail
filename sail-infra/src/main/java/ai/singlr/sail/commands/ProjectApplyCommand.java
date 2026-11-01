@@ -173,7 +173,8 @@ public final class ProjectApplyCommand implements Runnable {
   private void applyOne(OperatorCommand operator) throws Exception {
     NameValidator.requireValidProjectName(name);
     var config =
-        ProjectCatalog.read(name).orElseThrow(() -> ProjectMutations.notFound(name, operator));
+        ProjectCatalog.read(box.get().database(), name)
+            .orElseThrow(() -> ProjectMutations.notFound(name, operator));
     if (config.resources() == null) {
       throw new IllegalStateException(
           "Project '"
@@ -182,9 +183,8 @@ public final class ProjectApplyCommand implements Runnable {
               + operator.sail("project resources set " + name)
               + "'.");
     }
-    var git = LocalIdentity.detect().git();
-
     requireReadyBox(operator);
+    var git = LocalIdentity.detect().git();
 
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);
@@ -397,9 +397,9 @@ public final class ProjectApplyCommand implements Runnable {
     return new TargetPlan(plan(state), config);
   }
 
-  private static Optional<ProjectDefinition> definitionFor(String project) {
+  private Optional<ProjectDefinition> definitionFor(String project) {
     return NameValidator.isValidProjectName(project)
-        ? ProjectCatalog.read(project)
+        ? ProjectCatalog.read(box.get().database(), project)
         : Optional.empty();
   }
 

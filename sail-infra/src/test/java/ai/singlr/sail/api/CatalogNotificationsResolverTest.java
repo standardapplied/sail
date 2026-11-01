@@ -5,12 +5,12 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -125,8 +125,12 @@ class CatalogNotificationsResolverTest {
     assertThrows(NullPointerException.class, () -> new CatalogNotificationsResolver(null));
   }
 
+  /** Records {@code definition} as project {@code project}'s, whatever name it carries. */
   private void describe(String project, String definition) {
-    Acting.system(() -> store.upsert(TestDefinitions.yaml(definition)));
+    Acting.system(
+        () ->
+            store.upsert(
+                TestDefinitions.yaml(definition.replaceFirst("(?m)^name: .*$", "name: " + project))));
   }
 
   private static String captureStderr(Runnable work) {

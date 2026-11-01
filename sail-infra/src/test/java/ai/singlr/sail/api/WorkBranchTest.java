@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.io.IOException;
@@ -58,7 +59,7 @@ class WorkBranchTest {
             reported.add(branch + " in " + repoPath);
           }
         };
-    var config = ProjectDefinition.fromMap(Map.of("name", "acme"));
+    var config = TestDefinitions.map(Map.of("name", "acme"));
 
     var cut =
         new WorkBranch(new LocalGit(tempDir), listener)
@@ -87,7 +88,7 @@ class WorkBranchTest {
             unavailable.add(branch);
           }
         };
-    var config = ProjectDefinition.fromMap(Map.of("name", "acme"));
+    var config = TestDefinitions.map(Map.of("name", "acme"));
 
     var cut =
         new WorkBranch(new LocalGit(tempDir), listener)
@@ -106,7 +107,7 @@ class WorkBranchTest {
   @Test
   void aPathBranchesInTheDeepestRepoHoldingItAsTheFilesystemResolvesIt() {
     var config =
-        ProjectDefinition.fromMap(
+        TestDefinitions.map(
             Map.of(
                 "name",
                 "acme",

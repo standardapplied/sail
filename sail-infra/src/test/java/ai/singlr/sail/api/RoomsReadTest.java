@@ -5,10 +5,10 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;

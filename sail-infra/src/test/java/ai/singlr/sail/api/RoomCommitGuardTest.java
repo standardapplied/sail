@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.RunStore;
@@ -56,12 +57,10 @@ class RoomCommitGuardTest {
   }
 
   private static final ProjectDefinition CONFIG =
-      ProjectDefinition.fromMap(
+      TestDefinitions.map(
           Map.of(
               "name",
               "acme",
-              "ssh",
-              Map.of("user", "dev"),
               "repos",
               List.of(Map.of("url", "https://example.com/app.git", "path", "app"))));
 
@@ -222,7 +221,7 @@ class RoomCommitGuardTest {
     var yaml = tempDir.resolve("sail.yaml");
     Files.writeString(
         yaml,
-        "name: acme\nssh:\n  user: dev\nrepos:\n  - url: https://example.com/app.git\n    path:"
+        "name: acme\nrepos:\n  - url: https://example.com/app.git\n    path:"
             + " app\n");
     runStore.create(
         "run-1", "acme", "auth", "node", "room", "codex", "b", "t", null, null, "log", "unit");

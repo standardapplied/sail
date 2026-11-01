@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -25,6 +24,7 @@ import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
@@ -87,8 +87,6 @@ class DispatchCommandWiringTest {
   private static final String YAML =
       """
       name: acme
-      ssh:
-        user: dev
       repos:
         - url: https://github.com/acme/app.git
           path: app

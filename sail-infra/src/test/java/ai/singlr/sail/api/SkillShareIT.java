@@ -11,8 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.SkillOperations.Kind;
 import ai.singlr.sail.config.FileLimits;
-import ai.singlr.sail.config.ProjectDefinition;
-import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.SharedProjectFiles;
@@ -56,7 +55,7 @@ class SkillShareIT extends AbstractIncusIT {
               project ->
                   new SharedProjectFiles(
                       files, dir.resolve("projects"), project, FileLimits.defaults()));
-      var definition = ProjectDefinition.fromMap(YamlUtil.parseMap(DEFINITION));
+      var definition = TestDefinitions.yaml(DEFINITION);
       var skills =
           new SkillOperations(
               projectSkills, shell, new ProjectLoader(shell, project -> Optional.of(definition)));

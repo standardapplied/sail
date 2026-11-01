@@ -11,8 +11,10 @@ import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.identity.Actor;
 import java.io.PrintStream;
+import java.nio.file.Path;
 
 /**
  * Shared read/write seam for the commands that change one section of a project's definition (add a
@@ -26,7 +28,12 @@ final class ProjectMutations {
 
   /** The definition project {@code name} holds, or a refusal naming how to make one. */
   static ProjectDefinition current(String name, OperatorCommand operator) {
-    return ProjectCatalog.read(name).orElseThrow(() -> notFound(name, operator));
+    return current(SailPaths.controlPlaneDb(), name, operator);
+  }
+
+  /** As {@link #current(String, OperatorCommand)}, read from the catalog at {@code catalog}. */
+  static ProjectDefinition current(Path catalog, String name, OperatorCommand operator) {
+    return ProjectCatalog.read(catalog, name).orElseThrow(() -> notFound(name, operator));
   }
 
   /**
@@ -61,11 +68,24 @@ final class ProjectMutations {
       PrintStream out,
       String dryRunLabel,
       Actor operator) {
+    write(SailPaths.controlPlaneDb(), section, read, edited, dryRun, out, dryRunLabel, operator);
+  }
+
+  /** As the overload without {@code catalog}, written to the catalog at {@code catalog}. */
+  static void write(
+      Path catalog,
+      Section section,
+      ProjectDefinition read,
+      ProjectDefinition edited,
+      boolean dryRun,
+      PrintStream out,
+      String dryRunLabel,
+      Actor operator) {
     if (dryRun) {
       out.println("[dry-run] " + dryRunLabel);
       return;
     }
-    ProjectCatalog.writeSection(read.name(), section, read, edited, operator);
+    ProjectCatalog.writeSection(catalog, read.name(), section, read, edited, operator);
   }
 
   static IllegalStateException notFound(String name, OperatorCommand operator) {

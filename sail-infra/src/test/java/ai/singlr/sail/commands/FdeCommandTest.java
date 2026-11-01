@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -15,11 +14,11 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.ContainerAuthorizedKeys;
 import ai.singlr.sail.engine.FileMutexTest;
-import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.SailPaths;
@@ -785,15 +784,9 @@ class FdeCommandTest {
           Acting.system(
               () -> {
                 var projects = new ProjectStore(db);
-                for (var project : List.of("acme:dev", "web:newuser")) {
-                  var nameAndUser = project.split(":");
-                  projects.upsert(TestDefinitions.yaml("name: "
-                          + nameAndUser[0]
-                          + "\nssh:\n  user: "
-                          + nameAndUser[1]
-                          + "\n  authorized_keys:\n    - ${SSH_PUBLIC_KEY}\n"));
+                for (var project : List.of("acme", "web", "docs")) {
+                  projects.upsert(TestDefinitions.named(project));
                 }
-                projects.upsert(TestDefinitions.named("docs"));
               });
           return null;
         });
@@ -2506,10 +2499,6 @@ class FdeCommandTest {
     assertEquals(Path.of(System.getProperty("user.home")), box.home());
     assertEquals(Path.of("/etc/ssh/ssh_host_ed25519_key.pub"), box.hostKey());
     assertEquals(SailPaths.workstationPublicKeyPath(), box.workstationKey());
-    assertEquals(
-        LocalIdentity.detect(OperatorCommand.PLAIN).sshPublicKeyPath(),
-        box.workstationKey(),
-        "a pairing writes the key ${SSH_PUBLIC_KEY} resolves from");
     assertEquals(SailPaths.controlPlaneDb(), box.database());
     assertFalse(box.shell().isDryRun());
     assertEquals(HostSync.isNode(HostSync.config()), box.node());

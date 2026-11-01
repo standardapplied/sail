@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
  * The limits one agent run is held to: a hard wall-clock ceiling ({@code max_duration}) and an
  * idle/stall window ({@code max_idle}), with what to do when either is crossed. The one limits type
  * every lane reads: {@code agent.guardrails} in the definition bounds a build, an ad-hoc run and a
- * chat turn, {@code agent.review_pipeline.guardrails} a reviewer and a fix agent, and both blocks
+ * chat turn, {@code pipeline.guardrails} a reviewer and a fix agent, and both blocks
  * parse here. The stall window measures time since the agent's last <em>progress event</em> (a tool
  * call or log chunk) — not git activity. The earlier git-based idle timeout was removed because an
  * agent working without committing looked idle; the agent event stream does not have that blind
@@ -45,7 +45,7 @@ public record Guardrails(String maxDuration, String maxIdle, String action) {
 
   /**
    * The supervision a reviewer and a fix agent get when the definition sets no {@code
-   * review_pipeline.guardrails} block: 45 minutes of wall clock, enough for a fix that runs the
+   * pipeline.guardrails} block: 45 minutes of wall clock, enough for a fix that runs the
    * project's full verification, and the build lane's 20m stall window, stopping the agent on
    * either.
    */

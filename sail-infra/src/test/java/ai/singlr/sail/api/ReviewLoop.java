@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.Guardrails;
@@ -14,6 +13,7 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SlackNotifications;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.SharedProjectFiles;
@@ -75,8 +75,6 @@ final class ReviewLoop implements AutoCloseable {
   static final String YAML =
       """
       name: test-project
-      ssh:
-        user: dev
       repos:
         - url: https://github.com/acme/api.git
           path: api
@@ -272,7 +270,7 @@ final class ReviewLoop implements AutoCloseable {
 
   /** One agent stage per name, each reviewed by the agent of that name, gated on no critical. */
   static ReviewPipelineConfig stages(String... names) {
-    return ReviewPipelineConfig.fromMap(
+    return TestDefinitions.pipeline(
         Map.of(
             "max_iterations",
             3,

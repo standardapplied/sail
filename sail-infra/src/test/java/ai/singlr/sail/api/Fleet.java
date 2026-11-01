@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static ai.singlr.sail.api.ReviewScripts.CLEAN_REVIEW;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -19,6 +18,7 @@ import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SlackNotifications;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -60,7 +60,7 @@ public final class Fleet implements AutoCloseable {
   private static final Notifications SLACK =
       new Notifications(null, null, new SlackNotifications("#sail-activity"));
   private static final ReviewPipelineConfig REVIEW =
-      ReviewPipelineConfig.fromMap(
+      TestDefinitions.pipeline(
           Map.of(
               "max_iterations",
               1,
@@ -78,8 +78,6 @@ public final class Fleet implements AutoCloseable {
   private static final String PROJECT_YAML =
       """
       name: acme
-      ssh:
-        user: dev
       agent:
         type: codex
         auto_branch: true

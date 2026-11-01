@@ -419,11 +419,11 @@ class ReviewLanesTest {
             + """
                 guardrails:
                   max_duration: 6h
-                review_pipeline:
-                  guardrails:
-                    max_duration: 90m
-                    max_idle: 30m
-                    action: snapshot-and-stop
+              pipeline:
+                guardrails:
+                  max_duration: 90m
+                  max_idle: 30m
+                  action: snapshot-and-stop
               """);
     loop.finish(reviewer.id(), CRITICAL_FINDING);
 

@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -14,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.HostAccess;
@@ -154,6 +154,7 @@ class ScopedReadsTest {
           "/v1/projects/{project}/agent",
           "POST /v1/projects/{project}/agent/report",
           "/v1/projects/{project}/connect",
+          "/v1/projects/{project}/definition",
           "/v1/projects/{project}/ports",
           "/v1/projects/{project}/snapshots",
           "/v1/projects/{project}/files",
@@ -170,6 +171,8 @@ class ScopedReadsTest {
       Set.of(
           "sync",
           "skills",
+          "createProject",
+          "writeProjectSection",
           "resolveConflict",
           "approveReview",
           "dismissFinding",
@@ -229,6 +232,8 @@ class ScopedReadsTest {
           List.of("POST", "/v1/events", event("{project}", "\"spec\": \"{spec}\", ", "")),
           List.of("POST", "/v1/events", event("alpha", "\"spec\": \"{spec}\", ", "")),
           List.of("POST", "/v1/events", event("alpha", "", ", \"run_id\": \"{run}\"")),
+          List.of("POST", "/v1/projects", "{\"name\": \"{project}\"}"),
+          List.of("PUT", "/v1/projects/{project}/definition/image", "{\"value\": \"x/1\"}"),
           List.of("PUT", "/v1/projects/{project}/files/{file}", "sneaked in"),
           List.of("DELETE", "/v1/projects/{project}/files/{file}", ""),
           List.of("POST", "/v1/projects/{project}/dispatch", "{}"),
@@ -1329,7 +1334,9 @@ class ScopedReadsTest {
     var spec = project + "-spec";
     var room = project + "-room";
     new ProjectStore(db)
-        .upsert(TestDefinitions.yaml("name: " + project + "\nssh:\n  user: dev\nagent:\n  type: claude-code\n"));
+        .upsert(
+            TestDefinitions.yaml(
+                "name: " + project + "\nagent:\n  type: claude-code\n"));
     containers.add(project);
     var specs = new SpecStore(db);
     specs.create(

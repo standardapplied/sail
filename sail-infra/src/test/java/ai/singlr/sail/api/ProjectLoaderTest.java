@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -21,7 +22,7 @@ import org.junit.jupiter.api.Test;
 
 class ProjectLoaderTest {
 
-  private static final ProjectDefinition ACME = ProjectDefinition.fromMap(Map.of("name", "acme"));
+  private static final ProjectDefinition ACME = TestDefinitions.map(Map.of("name", "acme"));
 
   @Test
   void aProjectIsItsDefinitionAndItsContainerState() {

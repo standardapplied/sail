@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -16,6 +15,7 @@ import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
@@ -80,7 +80,8 @@ class CatalogAuthorityAuditTest {
             WriteRefused.class, () -> ProjectCatalog.requireRecordable(catalog, "acme", viewer));
     var atTheWrite =
         assertThrows(
-            WriteRefused.class, () -> ProjectCatalog.record(catalog, "acme", DEFINITION, viewer));
+            WriteRefused.class,
+            () -> ProjectCatalog.record(catalog, TestDefinitions.yaml(DEFINITION), viewer));
 
     assertEquals(readOnly, upFront.refusal(), "asked before a command changes anything");
     assertEquals(readOnly, atTheWrite.refusal(), "and decided where the revision is recorded");
@@ -92,9 +93,11 @@ class CatalogAuthorityAuditTest {
     var member = operatorWithRole("member");
 
     ProjectCatalog.requireRecordable(catalog, "acme", member);
-    ProjectCatalog.record(catalog, "acme", DEFINITION, member);
+    ProjectCatalog.record(catalog, TestDefinitions.yaml(DEFINITION), member);
 
-    assertEquals(DEFINITION, new ProjectStore(db).findByName("acme").orElseThrow().definition());
+    assertEquals(
+        TestDefinitions.yaml(DEFINITION),
+        new ProjectStore(db).findByName("acme").orElseThrow().definition());
   }
 
   @Test

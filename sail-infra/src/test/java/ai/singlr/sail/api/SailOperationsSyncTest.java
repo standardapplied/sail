@@ -230,8 +230,6 @@ class SailOperationsSyncTest {
         yaml,
         """
         name: acme
-        ssh:
-          user: dev
         agent:
           type: claude-code
         """);

@@ -5,85 +5,77 @@
 
 package ai.singlr.sail.commands;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinition.Section;
+import ai.singlr.sail.config.TestDefinitions;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ProjectEditCommandTest {
 
+  private static final ProjectDefinition ACME =
+      TestDefinitions.yaml("name: acme\nimage: ubuntu/24.04\n");
+
   @Test
-  void acceptsAValidDescriptorWhoseNameMatches() {
-    assertDoesNotThrow(
-        () -> ProjectEditCommand.validate("acme", "name: acme\ndescription: edited\n"));
+  void anEditOfTheWholeDefinitionIsReadWholeAndKeepsItsName() {
+    assertEquals(
+        TestDefinitions.yaml("name: acme\ndescription: edited\n"),
+        ProjectEditCommand.edited(
+            "acme", ACME, null, "{\"name\": \"acme\", \"description\": \"edited\"}"));
+    assertEquals(
+        "The 'name' field must stay 'acme'. Renaming a project through edit is not supported.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ProjectEditCommand.edited("acme", ACME, null, "{\"name\": \"renamed\"}"))
+            .getMessage());
   }
 
   @Test
-  void rejectsRenamingTheProject() {
-    var error =
+  void anEditOfOneSectionReplacesItAndKeepsTheRest() {
+    var edited = ProjectEditCommand.edited("acme", ACME, Section.DESCRIPTION, "  \"Storefront\"\n");
+
+    assertEquals("Storefront", edited.description());
+    assertEquals("ubuntu/24.04", edited.image());
+  }
+
+  @Test
+  void anEditThatIsNoDefinitionIsRefusedNamingWhatIsWrong() {
+    var unknown =
         assertThrows(
             IllegalArgumentException.class,
-            () -> ProjectEditCommand.validate("acme", "name: renamed\n"));
-    assertTrue(error.getMessage().contains("must stay 'acme'"));
-  }
-
-  @Test
-  void rejectsADescriptorWithNoName() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ProjectEditCommand.validate("acme", "description: nameless\n"));
-  }
-
-  @Test
-  void rejectsMalformedYaml() {
-    var error =
+            () ->
+                ProjectEditCommand.edited(
+                    "acme", ACME, Section.AGENT, "{\"type\": \"codex\", \"build_skill\": \"x\"}"));
+    assertEquals(
+        "The edited definition is not valid: agent.build_skill is not a key of agent. Its keys"
+            + " are: type, auto_branch, branch_prefix, auto_snapshot, install, config, guardrails,"
+            + " notifications, member.",
+        unknown.getMessage());
+    var malformed =
         assertThrows(
             IllegalArgumentException.class,
-            () -> ProjectEditCommand.validate("acme", "name: acme\nrepos: [unclosed"));
+            () -> ProjectEditCommand.edited("acme", ACME, null, "{\"name\": \"acme\", "));
     assertTrue(
-        error
+        malformed
             .getMessage()
-            .startsWith("Edited descriptor is not valid: while parsing a flow sequence"),
-        error.getMessage());
+            .startsWith("The edited definition is not valid: A project definition is not JSON: "),
+        malformed.getMessage());
   }
 
   @Test
-  void rejectsADeletedKeyNamingWhereItsTextGoes() {
-    var error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                ProjectEditCommand.validate(
-                    "acme", "name: acme\nagent:\n  type: codex\n  build_skill: sail-x\n"));
-    assertTrue(
-        error.getMessage().contains("agent.build_skill is no longer read"), error.getMessage());
-  }
-
-  @Test
-  void aDeletedKeysRemedyReachesTheDoorAsDataAndIsRenderedForTheReader() {
-    var error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                ProjectEditCommand.validate(
-                    "acme", "name: acme\nagent:\n  type: codex\n  build_skill: sail-x\n"));
-    var sentence =
-        "Edited descriptor is not valid: agent.build_skill is no longer read: sail's work prompt"
-            + " says how a build runs. Put what the skill said in the repo's AGENTS.md, or keep it"
-            + " as a project skill (%s project skills add) the agent invokes when relevant. Then"
-            + " remove `agent.build_skill` from acme/sail.yaml.";
+  void theEditorOpensOnTheDefinitionOrOneSectionAsJsonAPersonReads() {
     assertEquals(
-        List.of(sentence.formatted("sudo sail")), CliCommand.lines(error, OperatorCommand.SUDO));
-    assertEquals(
-        List.of(sentence.formatted("sail")), CliCommand.lines(error, OperatorCommand.UNPRIVILEGED));
+        "{\n  \"name\": \"acme\",\n  \"image\": \"ubuntu/24.04\"\n}\n",
+        ProjectEditCommand.seed(ACME, null));
+    assertEquals("\"ubuntu/24.04\"\n", ProjectEditCommand.seed(ACME, Section.IMAGE));
+    assertEquals("null\n", ProjectEditCommand.seed(ACME, Section.PIPELINE));
   }
 
   @Test

@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.PromptConversation;
@@ -146,7 +147,7 @@ class ReviewPipelineControllerTest {
   }
 
   private ReviewPipelineConfig singleAgentStage(String gate) {
-    return ReviewPipelineConfig.fromMap(
+    return TestDefinitions.pipeline(
         Map.of(
             "max_iterations",
             3,
@@ -155,7 +156,7 @@ class ReviewPipelineControllerTest {
   }
 
   private ReviewPipelineConfig twoAgentStages() {
-    return ReviewPipelineConfig.fromMap(
+    return TestDefinitions.pipeline(
         Map.of(
             "max_iterations",
             3,
@@ -175,7 +176,7 @@ class ReviewPipelineControllerTest {
   }
 
   private ReviewPipelineConfig agentThenHuman() {
-    return ReviewPipelineConfig.fromMap(
+    return TestDefinitions.pipeline(
         Map.of(
             "stages",
             List.of(
@@ -185,7 +186,7 @@ class ReviewPipelineControllerTest {
   }
 
   private ReviewPipelineConfig singleStageNoAgent(String gate) {
-    return ReviewPipelineConfig.fromMap(
+    return TestDefinitions.pipeline(
         Map.of("stages", List.of(Map.of("name", "security", "type", "agent", "gate", gate))));
   }
 
@@ -834,7 +835,7 @@ class ReviewPipelineControllerTest {
   void aCarriedFindingReturnsToItsOwnStageAndFacesItsOwnGate() {
     createSpec("auth", "in_progress");
     var config =
-        ReviewPipelineConfig.fromMap(
+        TestDefinitions.pipeline(
             Map.of(
                 "stages",
                 List.of(
@@ -989,7 +990,7 @@ class ReviewPipelineControllerTest {
     createSpec("auth", "in_progress");
     var messages = loop.messages;
     var config =
-        ReviewPipelineConfig.fromMap(
+        TestDefinitions.pipeline(
             Map.of(
                 "stages",
                 List.of(
@@ -1040,7 +1041,7 @@ class ReviewPipelineControllerTest {
     createSpec("auth", "in_progress");
     var messages = loop.messages;
     var config =
-        ReviewPipelineConfig.fromMap(
+        TestDefinitions.pipeline(
             Map.of(
                 "stages",
                 List.of(
@@ -1122,7 +1123,7 @@ class ReviewPipelineControllerTest {
   @Test
   void emptyPipelineConfigSkipsReview() {
     createSpec("auth", "in_progress");
-    var emptyConfig = ReviewPipelineConfig.fromMap(Map.of());
+    var emptyConfig = TestDefinitions.pipeline(Map.of());
     var ctrl = controller(emptyConfig, (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
@@ -1245,7 +1246,7 @@ class ReviewPipelineControllerTest {
         ```
         """;
     var config =
-        ReviewPipelineConfig.fromMap(
+        TestDefinitions.pipeline(
             Map.of(
                 "max_iterations",
                 1,
@@ -2067,7 +2068,7 @@ class ReviewPipelineControllerTest {
   }
 
   private ReviewPipelineConfig noHighGate(int maxIterations) {
-    return ReviewPipelineConfig.fromMap(
+    return TestDefinitions.pipeline(
         Map.of(
             "max_iterations",
             maxIterations,
@@ -2179,7 +2180,7 @@ class ReviewPipelineControllerTest {
   void anotherStagesAgedSubGateFindingNeverTripsTheFailingStagesConvergenceCheck() {
     createSpec("auth", "in_progress");
     var config =
-        ReviewPipelineConfig.fromMap(
+        TestDefinitions.pipeline(
             Map.of(
                 "max_iterations",
                 3,
