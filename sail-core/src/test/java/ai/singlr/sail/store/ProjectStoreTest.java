@@ -190,7 +190,7 @@ class ProjectStoreTest {
     assertEquals(
         "A project named 'acme' already exists.",
         assertThrows(
-                IllegalStateException.class,
+                ProjectStore.NameTaken.class,
                 () -> store.create(TestDefinitions.described("acme", "v2")))
             .getMessage());
     assertEquals("v1", store.findByName("acme").orElseThrow().definition().description());

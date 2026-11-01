@@ -77,11 +77,12 @@ class CatalogAuthorityAuditTest {
 
     var upFront =
         assertThrows(
-            WriteRefused.class, () -> ProjectCatalog.requireRecordable(catalog, "acme", viewer));
+            WriteRefused.class,
+            () -> new ProjectCatalog(catalog).requireRecordable("acme", viewer));
     var atTheWrite =
         assertThrows(
             WriteRefused.class,
-            () -> ProjectCatalog.record(catalog, TestDefinitions.yaml(DEFINITION), viewer));
+            () -> new ProjectCatalog(catalog).create(TestDefinitions.yaml(DEFINITION), viewer));
 
     assertEquals(readOnly, upFront.refusal(), "asked before a command changes anything");
     assertEquals(readOnly, atTheWrite.refusal(), "and decided where the revision is recorded");
@@ -92,8 +93,8 @@ class CatalogAuthorityAuditTest {
   void aMemberOperatorsCatalogEditLands() {
     var member = operatorWithRole("member");
 
-    ProjectCatalog.requireRecordable(catalog, "acme", member);
-    ProjectCatalog.record(catalog, TestDefinitions.yaml(DEFINITION), member);
+    new ProjectCatalog(catalog).requireRecordable("acme", member);
+    new ProjectCatalog(catalog).create(TestDefinitions.yaml(DEFINITION), member);
 
     assertEquals(
         TestDefinitions.yaml(DEFINITION),

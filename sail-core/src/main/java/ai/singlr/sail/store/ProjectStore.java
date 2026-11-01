@@ -68,6 +68,13 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     }
   }
 
+  /** A create or rename refused because a project by that name is already catalogued. */
+  public static final class NameTaken extends IllegalStateException {
+    NameTaken(String name) {
+      super("A project named '" + name + "' already exists.");
+    }
+  }
+
   /** A section write refused because the section is no longer the one its writer last read. */
   public static final class StaleSection extends RuntimeException {
     private final transient ProjectRow current;
@@ -114,7 +121,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
         () -> {
           journal.admit(name, Map.of());
           if (findByName(name).isPresent()) {
-            throw new IllegalStateException("A project named '" + name + "' already exists.");
+            throw new NameTaken(name);
           }
           writeRow(name, document, author(), null, null, DateTimeUtils.now());
           journal.recordRevision(name, ChangeLog.Entry.LOCAL, false);
@@ -210,7 +217,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
             return;
           }
           if (findByName(renamed).isPresent()) {
-            throw new IllegalStateException("A project named '" + renamed + "' already exists.");
+            throw new NameTaken(renamed);
           }
           journal.recordTombstone(old, ChangeLog.Entry.LOCAL, BLOCKING);
           eraseRow(old);

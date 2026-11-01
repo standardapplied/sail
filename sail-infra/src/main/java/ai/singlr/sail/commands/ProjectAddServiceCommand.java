@@ -70,8 +70,9 @@ public final class ProjectAddServiceCommand implements Runnable {
     var ansi = Ansi.AUTO;
     var out = System.out;
 
-    var actor = ProjectMutations.catalogOperator(name, dryRun);
-    var config = ProjectMutations.current(name, operator);
+    var mutations = ProjectMutations.here();
+    var actor = mutations.writer(name, dryRun);
+    var config = mutations.current(name, operator);
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
@@ -99,7 +100,7 @@ public final class ProjectAddServiceCommand implements Runnable {
     var edited = ProjectMutations.checked(DefinitionEdits.addService(config, svcName, service));
     var applier = new ProjectApplier(shell, out);
     var result = applier.applyServices(name, Map.of(svcName, service));
-    ProjectMutations.write(
+    mutations.write(
         Section.SERVICES,
         config,
         edited,

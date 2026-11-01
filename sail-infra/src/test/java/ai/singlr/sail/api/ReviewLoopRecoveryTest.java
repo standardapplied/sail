@@ -1133,7 +1133,7 @@ class ReviewLoopRecoveryTest {
   }
 
   @Test
-  void aDescriptorThatCannotBeReadIsNeverTakenForAPipelineThatChanged() {
+  void aDefinitionThatCannotBeReadIsNeverTakenForAPipelineThatChanged() {
     var custom =
         ReviewLoop.YAML
             + "pipeline:\n"
@@ -1253,7 +1253,7 @@ class ReviewLoopRecoveryTest {
   }
 
   @Test
-  void aBuildThatEndsWhileItsProjectsDescriptorCannotBeReadIsHandedToAPersonNotReplayed() {
+  void aBuildThatEndsWhileItsProjectsDefinitionCannotBeReadIsHandedToAPersonNotReplayed() {
     loop = ReviewLoop.wired(tempDir, ReviewLoop.YAML);
     loop.corruptDefinition();
 

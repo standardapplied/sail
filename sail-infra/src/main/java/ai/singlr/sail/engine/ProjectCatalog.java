@@ -36,7 +36,17 @@ import java.util.function.Supplier;
  */
 public final class ProjectCatalog {
 
-  private ProjectCatalog() {}
+  private final Path database;
+
+  /** The catalog in the database at {@code database}. */
+  public ProjectCatalog(Path database) {
+    this.database = Objects.requireNonNull(database, "database");
+  }
+
+  /** This box's catalog ({@link SailPaths#controlPlaneDb()}). */
+  public static ProjectCatalog here() {
+    return new ProjectCatalog(SailPaths.controlPlaneDb());
+  }
 
   /**
    * Refuses a project name that was pruned, before anything is provisioned under it: a pruned name
@@ -44,16 +54,12 @@ public final class ProjectCatalog {
    * nothing; a catalog that is missing or cannot be read refuses nothing here, and the write that
    * follows fails on its own.
    */
-  public static void requireUnpruned(String name) {
-    requireUnpruned(SailPaths.controlPlaneDb(), name);
-  }
-
-  static void requireUnpruned(Path catalog, String name) {
-    if (!Files.isRegularFile(catalog)) {
+  public void requireUnpruned(String name) {
+    if (!Files.isRegularFile(database)) {
       return;
     }
     boolean pruned;
-    try (var db = Sqlite.open(catalog)) {
+    try (var db = Sqlite.open(database)) {
       pruned = new ChangeLog(db).isErased(Erasure.PROJECT, name);
     } catch (Exception e) {
       return;
@@ -73,16 +79,11 @@ public final class ProjectCatalog {
    * A box with no catalog yet refuses nothing here; one whose catalog cannot be read fails here, as
    * the write that follows would.
    */
-  public static void requireRecordable(String name, Actor operator) {
-    requireRecordable(SailPaths.controlPlaneDb(), name, operator);
-  }
-
-  /** As {@link #requireRecordable(String, Actor)}, asked of the catalog at {@code catalog}. */
-  public static void requireRecordable(Path catalog, String name, Actor operator) {
-    if (!Files.isRegularFile(catalog)) {
+  public void requireRecordable(String name, Actor operator) {
+    if (!Files.isRegularFile(database)) {
       return;
     }
-    try (var db = Sqlite.open(catalog)) {
+    try (var db = Sqlite.open(database)) {
       new SchemaManager(db).migrate();
       requireInScope(db, operator::actingFde, name);
       Actor.call(operator, () -> new ProjectStore(db).decide(name, Map.of()))
@@ -98,16 +99,16 @@ public final class ProjectCatalog {
    * node ({@link SyncScope}): main would deny its every row, so it could only ever exist here. A
    * box no welcome has scoped, and one with no catalog yet, refuses nothing.
    */
-  public static void requireInScope(String name) {
-    requireInScope(SailPaths.controlPlaneDb(), () -> BoxIdentity.config().handle(), name);
+  public void requireInScope(String name) {
+    requireInScope(() -> BoxIdentity.config().handle(), name);
   }
 
   /** As {@link #requireInScope(String)}, naming in its refusal the box's FDE {@code handle}. */
-  static void requireInScope(Path catalog, Supplier<String> handle, String name) {
-    if (!Files.isRegularFile(catalog)) {
+  void requireInScope(Supplier<String> handle, String name) {
+    if (!Files.isRegularFile(database)) {
       return;
     }
-    try (var db = Sqlite.open(catalog)) {
+    try (var db = Sqlite.open(database)) {
       new SchemaManager(db).migrate();
       requireInScope(db, handle, name);
     }
@@ -124,41 +125,23 @@ public final class ProjectCatalog {
     }
   }
 
-  /** The definition project {@code name} holds in this box's catalog, or empty when none. */
-  public static Optional<ProjectDefinition> read(String name) {
-    return read(SailPaths.controlPlaneDb(), name);
-  }
-
-  /** The definition project {@code name} holds in the catalog at {@code catalog}, or empty. */
-  public static Optional<ProjectDefinition> read(Path catalog, String name) {
-    if (!Files.isRegularFile(catalog)) {
+  /** The definition project {@code name} holds in this catalog, or empty when none. */
+  public Optional<ProjectDefinition> read(String name) {
+    if (!Files.isRegularFile(database)) {
       return Optional.empty();
     }
-    try (var db = Sqlite.open(catalog)) {
+    try (var db = Sqlite.open(database)) {
       new SchemaManager(db).migrate();
       return new ProjectStore(db).findByName(name).map(ProjectStore.ProjectRow::definition);
     }
   }
 
   /**
-   * Records {@code definition}, created or replaced, as {@code operator}, this box's operator
-   * ({@link CliOperator}), which the caller resolves before it writes anything, so a node that
-   * cannot name it refuses the edit rather than losing it. Throws when the definition was not
-   * recorded, naming the cause; a write the project rule refuses is thrown as the refusal it is,
-   * with its fix.
+   * Creates the project {@code definition} names as {@code operator}, this box's operator ({@link
+   * CliOperator}), which the caller resolves before it writes anything; refused when it exists.
    */
-  public static void record(ProjectDefinition definition, Actor operator) {
-    record(SailPaths.controlPlaneDb(), definition, operator);
-  }
-
-  static void record(Path catalog, ProjectDefinition definition, Actor operator) {
-    write(catalog, definition.name(), operator, store -> store.upsert(definition));
-  }
-
-  /** Creates the project {@code definition} names as {@code operator}; refused when it exists. */
-  public static void create(ProjectDefinition definition, Actor operator) {
-    write(
-        SailPaths.controlPlaneDb(), definition.name(), operator, store -> store.create(definition));
+  public void create(ProjectDefinition definition, Actor operator) {
+    write(definition.name(), operator, store -> store.create(definition));
   }
 
   /**
@@ -166,25 +149,13 @@ public final class ProjectCatalog {
    * operator}, only while the catalog holds the section as {@code read} did: an edit made from a
    * definition read before another write of that section is refused, never laid over it.
    */
-  public static void writeSection(
-      String name,
-      Section section,
-      ProjectDefinition read,
-      ProjectDefinition edited,
-      Actor operator) {
-    writeSection(SailPaths.controlPlaneDb(), name, section, read, edited, operator);
-  }
-
-  /** As {@link #writeSection(String, Section, ProjectDefinition, ProjectDefinition, Actor)}. */
-  public static void writeSection(
-      Path catalog,
+  public void writeSection(
       String name,
       Section section,
       ProjectDefinition read,
       ProjectDefinition edited,
       Actor operator) {
     write(
-        catalog,
         name,
         operator,
         store ->
@@ -200,7 +171,7 @@ public final class ProjectCatalog {
    * revision, only while the catalog holds each of them as {@code read} did; returns the sections
    * it wrote, none when the edit changed nothing.
    */
-  public static List<Section> writeChanged(
+  public List<Section> writeChanged(
       ProjectDefinition read, ProjectDefinition edited, Actor operator) {
     var before = ProjectDefinitionJson.sections(read);
     var after = ProjectDefinitionJson.sections(edited);
@@ -213,20 +184,21 @@ public final class ProjectCatalog {
       }
     }
     if (!values.isEmpty()) {
-      write(
-          SailPaths.controlPlaneDb(),
-          read.name(),
-          operator,
-          store -> store.writeSections(read.name(), values, tags));
+      write(read.name(), operator, store -> store.writeSections(read.name(), values, tags));
     }
     return List.copyOf(values.keySet());
   }
 
-  static void write(Path catalog, String name, Actor operator, Consumer<ProjectStore> change) {
-    try (var db = Sqlite.open(catalog)) {
+  /**
+   * Runs {@code change} on this catalog's projects as {@code operator}. Throws when it was not
+   * recorded, naming the cause; a write the project rule refuses, a name already taken and a
+   * section changed since it was read are thrown as the refusals they are.
+   */
+  private void write(String name, Actor operator, Consumer<ProjectStore> change) {
+    try (var db = Sqlite.open(database)) {
       new SchemaManager(db).migrate();
       Actor.run(operator, () -> change.accept(new ProjectStore(db)));
-    } catch (WriteRefused refused) {
+    } catch (WriteRefused | ProjectStore.NameTaken | ProjectStore.StaleSection refused) {
       throw refused;
     } catch (Exception e) {
       throw new IllegalStateException(

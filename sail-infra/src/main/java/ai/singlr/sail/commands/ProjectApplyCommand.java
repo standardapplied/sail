@@ -172,9 +172,7 @@ public final class ProjectApplyCommand implements Runnable {
 
   private void applyOne(OperatorCommand operator) throws Exception {
     NameValidator.requireValidProjectName(name);
-    var config =
-        ProjectCatalog.read(box.get().database(), name)
-            .orElseThrow(() -> ProjectMutations.notFound(name, operator));
+    var config = catalog().read(name).orElseThrow(() -> ProjectMutations.notFound(name, operator));
     if (config.resources() == null) {
       throw new IllegalStateException(
           "Project '"
@@ -398,9 +396,7 @@ public final class ProjectApplyCommand implements Runnable {
   }
 
   private Optional<ProjectDefinition> definitionFor(String project) {
-    return NameValidator.isValidProjectName(project)
-        ? ProjectCatalog.read(box.get().database(), project)
-        : Optional.empty();
+    return NameValidator.isValidProjectName(project) ? catalog().read(project) : Optional.empty();
   }
 
   static String allSummaryLine(int applied, int failed) {
@@ -602,6 +598,11 @@ public final class ProjectApplyCommand implements Runnable {
    * @param fresh whether the container is created by this run
    * @param recorded whether the container records the definition it was last provisioned from
    */
+  /** The catalog of the box this command runs on. */
+  private ProjectCatalog catalog() {
+    return new ProjectCatalog(box.get().database());
+  }
+
   private void provision(
       ProjectDefinition config,
       LocalIdentity.GitIdentity git,
@@ -612,7 +613,7 @@ public final class ProjectApplyCommand implements Runnable {
       OperatorCommand operator)
       throws Exception {
     requireRootToProvision(config.name(), dryRun, ConsoleHelper.isRoot(), spec);
-    ProjectCatalog.requireUnpruned(config.name());
+    catalog().requireUnpruned(config.name());
 
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(box.get().hostConfig()));
 

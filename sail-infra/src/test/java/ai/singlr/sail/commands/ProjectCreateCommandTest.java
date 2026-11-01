@@ -11,23 +11,29 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.gen.ServicePresets;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.identity.Actor;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 import picocli.CommandLine.Help.Ansi;
 
 class ProjectCreateCommandTest {
 
+  @TempDir Path dir;
   private PrintStream originalOut;
   private final ByteArrayOutputStream asked = new ByteArrayOutputStream();
 
@@ -120,7 +126,9 @@ class ProjectCreateCommandTest {
   private ProjectDefinition created(String stdin, String... args) throws Exception {
     var command =
         new ProjectCreateCommand(
-            () -> new ByteArrayInputStream(stdin.getBytes(StandardCharsets.UTF_8)), () -> false);
+            () -> new ByteArrayInputStream(stdin.getBytes(StandardCharsets.UTF_8)),
+            () -> false,
+            mutations());
     new CommandLine(command).parseArgs(args);
     return command.definition(new PrintStream(asked, true, StandardCharsets.UTF_8), Ansi.OFF);
   }
@@ -224,5 +232,45 @@ class ProjectCreateCommandTest {
         assertThrows(
                 IllegalArgumentException.class, () -> created(document, "--definition", "x.json"))
             .getMessage());
+  }
+
+  @Test
+  void aCreatedProjectIsInTheCatalogAndASecondOfItsNameIsRefused() {
+    var mutations = mutations();
+
+    var first = create(mutations, "acme", "--image", "x/1", "--json");
+    var second = create(mutations, "acme", "--image", "x/2");
+
+    assertEquals(0, first.exit(), first.err());
+    assertEquals(
+        ProjectDefinitionJson.write(mutations.catalog().read("acme").orElseThrow()) + "\n",
+        first.out());
+    assertEquals("x/1", mutations.catalog().read("acme").orElseThrow().image());
+    assertEquals(new CommandRun(1, "", "  ✗ A project named 'acme' already exists.\n"), second);
+    assertEquals("x/1", mutations.catalog().read("acme").orElseThrow().image());
+  }
+
+  @Test
+  void aDryRunPrintsTheDefinitionAndCreatesNothing() {
+    var mutations = mutations();
+
+    var run = create(mutations, "acme", "--cpu", "4", "--dry-run");
+
+    assertEquals(0, run.exit(), run.err());
+    assertEquals(
+        4, ProjectDefinitionJson.read(run.out().strip()).resources().cpu(), "what it would write");
+    assertTrue(mutations.catalog().read("acme").isEmpty());
+  }
+
+  private static CommandRun create(ProjectMutations mutations, String... args) {
+    return CommandRun.of(
+        new ProjectCreateCommand(
+            () -> new ByteArrayInputStream(new byte[0]), () -> false, mutations),
+        args);
+  }
+
+  private ProjectMutations mutations() {
+    return new ProjectMutations(
+        new ProjectCatalog(dir.resolve("sail.db")), () -> Actor.cliOperator("uday"));
   }
 }

@@ -12,8 +12,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.ProjectCatalog;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.ProjectStore;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -54,14 +58,68 @@ class ProjectMutationsTest {
   void aDryRunPrintsTheIntentAndWritesNothing() {
     var acme = TestDefinitions.named("acme");
 
-    ProjectMutations.write(Section.IMAGE, acme, acme, true, out, "record repo 'x'", null);
+    mutations().write(Section.IMAGE, acme, acme, true, out, "record repo 'x'", null);
 
     assertEquals("[dry-run] record repo 'x'\n", captured.toString(StandardCharsets.UTF_8));
   }
 
   @Test
   void aDryRunNeedsNoOperator() {
-    assertNull(ProjectMutations.catalogOperator("acme", true));
+    var mutations =
+        new ProjectMutations(
+            new ProjectCatalog(dir.resolve("sail.db")),
+            () -> {
+              throw new AssertionError("a dry run asks for no operator");
+            });
+
+    assertNull(mutations.writer("acme", true));
+  }
+
+  @Test
+  void aWriteIsMadeAsTheOperatorOverTheSectionItRead() {
+    var mutations = mutations();
+    var acme = TestDefinitions.named("acme");
+    mutations.catalog().create(acme, mutations.writer("acme", false));
+    var read = mutations.current("acme", OperatorCommand.PLAIN);
+
+    mutations.write(
+        Section.IMAGE,
+        read,
+        ProjectDefinitionJson.withSection(read, Section.IMAGE, "\"x/1\""),
+        false,
+        out,
+        "unused",
+        mutations.writer("acme", false));
+
+    assertEquals("x/1", mutations.current("acme", OperatorCommand.PLAIN).image());
+    assertEquals("", captured.toString(StandardCharsets.UTF_8));
+    assertEquals(
+        "The image section of project 'acme' changed since it was read. Read it again, then write"
+            + " it.",
+        assertThrows(
+                ProjectStore.StaleSection.class,
+                () ->
+                    mutations.write(
+                        Section.IMAGE,
+                        read,
+                        ProjectDefinitionJson.withSection(read, Section.IMAGE, "\"x/2\""),
+                        false,
+                        out,
+                        "unused",
+                        mutations.writer("acme", false)))
+            .getMessage());
+    assertEquals(
+        "No project 'ghost' in the catalog. Create it with 'sail project create ghost', or sync"
+            + " it from main with 'sail sync'.",
+        assertThrows(
+                IllegalStateException.class,
+                () -> mutations.current("ghost", OperatorCommand.PLAIN))
+            .getMessage());
+  }
+
+  private ProjectMutations mutations() {
+    return new ProjectMutations(
+        new ProjectCatalog(dir.resolve("sail.db")), () -> Actor.cliOperator("uday"));
   }
 
   @Test

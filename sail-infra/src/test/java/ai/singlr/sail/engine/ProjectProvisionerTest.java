@@ -528,7 +528,7 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void aRuntimeAddedToAnInterruptedRunsDescriptorIsInstalledAndTheRestIsAlreadyThere()
+  void aRuntimeAddedToAnInterruptedRunsDefinitionIsInstalledAndTheRestIsAlreadyThere()
       throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
@@ -1179,7 +1179,7 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void aDescriptorWithoutAnSshBlockProvisionsDev() throws Exception {
+  void everyContainerIsProvisionedForDev() throws Exception {
     var shell = new PushRecordingShell(minimalSuccessShell());
     var steps = new ArrayList<String>();
     var provisioner =
@@ -1204,7 +1204,7 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void aDescriptorWithoutAnSshBlockTrustsTheBoxsWorkstationKey() throws Exception {
+  void aContainerTrustsTheBoxsWorkstationKeyAlone() throws Exception {
     var shell = new PushRecordingShell(minimalSuccessShell());
 
     new ProjectProvisioner(
@@ -1346,7 +1346,7 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void anExistingDevGetsExactlyTheDescriptorsKeysWhichMayBeNone() throws Exception {
+  void anExistingDevGetsExactlyTheWorkstationKeyWhichMayBeNone() throws Exception {
     var shell =
         new PushRecordingShell(
             minimalSuccessShell().onOk("id dev", "uid=1000(dev)").onOk("id -u dev", "1000"));
@@ -2285,7 +2285,7 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void workspaceFilesSkippedWhenSailYamlPathNull() throws Exception {
+  void workspaceFilesSkippedWhenNoFilesDirIsGiven() throws Exception {
     var shell = allSuccessShell();
     var steps = new ArrayList<String>();
     var provisioner =

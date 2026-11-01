@@ -50,8 +50,9 @@ public final class ProjectRemoveServiceCommand implements Runnable {
     var ansi = Ansi.AUTO;
     var out = System.out;
 
-    var actor = ProjectMutations.catalogOperator(name, dryRun);
-    var config = ProjectMutations.current(name, operator);
+    var mutations = ProjectMutations.here();
+    var actor = mutations.writer(name, dryRun);
+    var config = mutations.current(name, operator);
     if (config.services() == null || !config.services().containsKey(serviceName)) {
       throw new IllegalStateException(
           "Service '" + serviceName + "' is not defined in project '" + name + "'.");
@@ -66,7 +67,7 @@ public final class ProjectRemoveServiceCommand implements Runnable {
     var edited = ProjectMutations.checked(DefinitionEdits.removeService(config, serviceName));
     var applier = new ProjectApplier(shell, out);
     var result = applier.removeServices(name, List.of(serviceName));
-    ProjectMutations.write(
+    mutations.write(
         Section.SERVICES,
         config,
         edited,

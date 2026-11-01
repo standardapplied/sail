@@ -2567,7 +2567,7 @@ class SailOperationsTest {
   }
 
   @Test
-  void missingDescriptorMapsToNotFound() {
+  void aProjectNotInTheCatalogMapsToNotFound() {
     var operations =
         new SailOperations(shell(), TestProjects.reading(tempDir.resolve("missail.yaml")));
 
@@ -2577,7 +2577,7 @@ class SailOperationsTest {
   }
 
   @Test
-  void malformedDescriptorMapsToProjectLoadFailure() throws Exception {
+  void anUnreadableDefinitionMapsToProjectLoadFailure() throws Exception {
     var operations = operations("name: [", shell().on("incus list ^acme$", RUNNING_JSON));
 
     var error = operations.project("acme");

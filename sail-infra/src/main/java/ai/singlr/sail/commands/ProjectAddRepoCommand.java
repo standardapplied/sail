@@ -68,8 +68,9 @@ public final class ProjectAddRepoCommand implements Runnable {
     var ansi = Ansi.AUTO;
     var out = System.out;
 
-    var actor = ProjectMutations.catalogOperator(name, dryRun);
-    var config = ProjectMutations.current(name, operator);
+    var mutations = ProjectMutations.here();
+    var actor = mutations.writer(name, dryRun);
+    var config = mutations.current(name, operator);
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
@@ -97,7 +98,7 @@ public final class ProjectAddRepoCommand implements Runnable {
     var result =
         applier.applyRepos(
             name, List.of(repo), ProjectDefinition.USER, GitCredentials.singleTokenMap(token));
-    ProjectMutations.write(
+    mutations.write(
         Section.REPOS,
         config,
         edited,

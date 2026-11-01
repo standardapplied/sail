@@ -29,6 +29,16 @@ public final class ProjectConfigGetCommand implements Runnable {
               + " agent or pipeline.")
   private String section;
 
+  private final ProjectMutations mutations;
+
+  public ProjectConfigGetCommand() {
+    this(ProjectMutations.here());
+  }
+
+  ProjectConfigGetCommand(ProjectMutations mutations) {
+    this.mutations = mutations;
+  }
+
   @Override
   public void run() {
     CliCommand.run(this::execute);
@@ -38,7 +48,7 @@ public final class ProjectConfigGetCommand implements Runnable {
     var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     var read = Section.of(section);
-    var value = ProjectDefinitionJson.section(ProjectMutations.current(name, operator), read);
+    var value = ProjectDefinitionJson.section(mutations.current(name, operator), read);
     System.out.println(value == null ? "null" : value);
   }
 }

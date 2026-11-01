@@ -40,13 +40,14 @@ final class ProjectDefinitionOperations {
     if (!Actor.reader().scope().admits(definition.name())) {
       throw ProjectReader.absent(definition.name());
     }
-    if (projects.findByName(definition.name()).isPresent()) {
+    try {
+      return response(projects.create(definition));
+    } catch (ProjectStore.NameTaken taken) {
       throw new ApiException(
           ErrorCode.CONFLICT,
-          "A project named '" + definition.name() + "' already exists.",
+          taken.getMessage(),
           Remedy.of("Choose another name, or edit that project's definition."));
     }
-    return response(projects.create(definition));
   }
 
   /**

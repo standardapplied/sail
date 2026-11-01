@@ -11,10 +11,10 @@ import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.identity.Actor;
 import java.io.PrintStream;
-import java.nio.file.Path;
+import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * Shared read/write seam for the commands that change one section of a project's definition (add a
@@ -24,16 +24,28 @@ import java.nio.file.Path;
  */
 final class ProjectMutations {
 
-  private ProjectMutations() {}
+  private final ProjectCatalog catalog;
+  private final Supplier<Actor> operator;
 
-  /** The definition project {@code name} holds, or a refusal naming how to make one. */
-  static ProjectDefinition current(String name, OperatorCommand operator) {
-    return current(SailPaths.controlPlaneDb(), name, operator);
+  /** Mutations of {@code catalog}, written as the actor {@code operator} names. */
+  ProjectMutations(ProjectCatalog catalog, Supplier<Actor> operator) {
+    this.catalog = Objects.requireNonNull(catalog, "catalog");
+    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
-  /** As {@link #current(String, OperatorCommand)}, read from the catalog at {@code catalog}. */
-  static ProjectDefinition current(Path catalog, String name, OperatorCommand operator) {
-    return ProjectCatalog.read(catalog, name).orElseThrow(() -> notFound(name, operator));
+  /** Mutations of this box's catalog, written as this box's operator ({@link CliOperator}). */
+  static ProjectMutations here() {
+    return new ProjectMutations(ProjectCatalog.here(), CliOperator::current);
+  }
+
+  /** The catalog these mutations read and write. */
+  ProjectCatalog catalog() {
+    return catalog;
+  }
+
+  /** The definition project {@code name} holds, or a refusal naming how to make one. */
+  ProjectDefinition current(String name, OperatorCommand command) {
+    return catalog.read(name).orElseThrow(() -> notFound(name, command));
   }
 
   /**
@@ -42,13 +54,13 @@ final class ProjectMutations {
    * journal will refuse that write, refuses up front, never after cloning, starting or editing.
    * Null for a dry run, which touches no catalog.
    */
-  static Actor catalogOperator(String name, boolean dryRun) {
+  Actor writer(String name, boolean dryRun) {
     if (dryRun) {
       return null;
     }
-    var operator = CliOperator.current();
-    ProjectCatalog.requireRecordable(name, operator);
-    return operator;
+    var actor = operator.get();
+    catalog.requireRecordable(name, actor);
+    return actor;
   }
 
   /** {@code edited} checked whole, before any side effect it would follow. */
@@ -57,35 +69,22 @@ final class ProjectMutations {
   }
 
   /**
-   * Writes {@code section} of {@code read}'s project as {@code edited} holds it, as {@code
-   * operator} (see {@link #catalogOperator}), or prints the intent under {@code --dry-run}.
+   * Writes {@code section} of {@code read}'s project as {@code edited} holds it, as {@code actor}
+   * (see {@link #writer}), or prints the intent under {@code --dry-run}.
    */
-  static void write(
+  void write(
       Section section,
       ProjectDefinition read,
       ProjectDefinition edited,
       boolean dryRun,
       PrintStream out,
       String dryRunLabel,
-      Actor operator) {
-    write(SailPaths.controlPlaneDb(), section, read, edited, dryRun, out, dryRunLabel, operator);
-  }
-
-  /** As the overload without {@code catalog}, written to the catalog at {@code catalog}. */
-  static void write(
-      Path catalog,
-      Section section,
-      ProjectDefinition read,
-      ProjectDefinition edited,
-      boolean dryRun,
-      PrintStream out,
-      String dryRunLabel,
-      Actor operator) {
+      Actor actor) {
     if (dryRun) {
       out.println("[dry-run] " + dryRunLabel);
       return;
     }
-    ProjectCatalog.writeSection(catalog, read.name(), section, read, edited, operator);
+    catalog.writeSection(read.name(), section, read, edited, actor);
   }
 
   static IllegalStateException notFound(String name, OperatorCommand operator) {

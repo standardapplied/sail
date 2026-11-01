@@ -47,7 +47,7 @@ public final class ProjectConfigShowCommand implements Runnable {
     var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
 
-    var config = ProjectMutations.current(name, operator);
+    var config = ProjectMutations.here().current(name, operator);
 
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);

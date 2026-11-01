@@ -10,25 +10,19 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerManager.ResourceLimits;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
-import ai.singlr.sail.engine.ProjectCatalog;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.identity.Actor;
 import java.io.PrintStream;
-import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
-import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -64,19 +58,12 @@ public final class ProjectResourcesSetCommand implements Runnable {
 
   private final ShellExec shellOverride;
   private final BooleanSupplier rootChecker;
-  private final Catalog catalog;
+  private final ProjectMutations mutations;
   private final PrintStream out;
   private final PrintStream err;
 
-  /** The catalog this command writes, and the operator a write is made as. */
-  record Catalog(Path database, Supplier<Actor> operator) {
-    static Catalog here() {
-      return new Catalog(SailPaths.controlPlaneDb(), CliOperator::current);
-    }
-  }
-
   public ProjectResourcesSetCommand() {
-    this(null, ConsoleHelper::isRoot, System.out, System.err, Catalog.here());
+    this(null, ConsoleHelper::isRoot, System.out, System.err, ProjectMutations.here());
   }
 
   ProjectResourcesSetCommand(
@@ -84,12 +71,12 @@ public final class ProjectResourcesSetCommand implements Runnable {
       BooleanSupplier rootChecker,
       PrintStream out,
       PrintStream err,
-      Catalog catalog) {
+      ProjectMutations mutations) {
     this.shellOverride = shellOverride;
     this.rootChecker = rootChecker;
     this.out = out;
     this.err = err;
-    this.catalog = catalog;
+    this.mutations = mutations;
   }
 
   @Override
@@ -106,11 +93,8 @@ public final class ProjectResourcesSetCommand implements Runnable {
       throw RootRequired.refusal(spec);
     }
 
-    var actor = dryRun ? null : catalog.operator().get();
-    if (actor != null) {
-      ProjectCatalog.requireRecordable(catalog.database(), name, actor);
-    }
-    var config = ProjectMutations.current(catalog.database(), name, operator);
+    var actor = mutations.writer(name, dryRun);
+    var config = mutations.current(name, operator);
     if (config.resources() == null) {
       throw new IllegalStateException(
           "Project '" + name + "' sets no resources: set cpu, memory and disk in its definition.");
@@ -142,8 +126,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
     }
 
     if (descriptorChanged) {
-      ProjectMutations.write(
-          catalog.database(),
+      mutations.write(
           Section.RESOURCES,
           config,
           ProjectMutations.checked(DefinitionEdits.updateResources(config, cpu, memory, disk)),

@@ -10,10 +10,8 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
-import ai.singlr.sail.engine.ProjectCatalog;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
@@ -44,13 +42,15 @@ public final class ProjectEditCommand implements Runnable {
   private boolean json;
 
   private final Editor editor;
+  private final ProjectMutations mutations;
 
   public ProjectEditCommand() {
-    this(Editor.fromEnvironment());
+    this(Editor.fromEnvironment(), ProjectMutations.here());
   }
 
-  ProjectEditCommand(Editor editor) {
+  ProjectEditCommand(Editor editor, ProjectMutations mutations) {
     this.editor = editor;
+    this.mutations = mutations;
   }
 
   @Override
@@ -62,13 +62,12 @@ public final class ProjectEditCommand implements Runnable {
     var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     var only = section == null ? null : Section.of(section);
-    var actor = CliOperator.current();
-    ProjectCatalog.requireRecordable(name, actor);
-    var current = ProjectMutations.current(name, operator);
+    var actor = mutations.writer(name, false);
+    var current = mutations.current(name, operator);
     var seed = seed(current, only);
     var text = edit(editor, name, seed);
     var edited = text.equals(seed) ? current : edited(name, current, only, text);
-    var changed = ProjectCatalog.writeChanged(current, edited, actor);
+    var changed = mutations.catalog().writeChanged(current, edited, actor);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

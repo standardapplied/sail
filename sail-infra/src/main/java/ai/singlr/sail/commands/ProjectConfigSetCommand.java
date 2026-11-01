@@ -44,13 +44,15 @@ public final class ProjectConfigSetCommand implements Runnable {
   private boolean dryRun;
 
   private final Supplier<InputStream> stdin;
+  private final ProjectMutations mutations;
 
   public ProjectConfigSetCommand() {
-    this(() -> System.in);
+    this(() -> System.in, ProjectMutations.here());
   }
 
-  ProjectConfigSetCommand(Supplier<InputStream> stdin) {
+  ProjectConfigSetCommand(Supplier<InputStream> stdin, ProjectMutations mutations) {
     this.stdin = stdin;
+    this.mutations = mutations;
   }
 
   @Override
@@ -66,11 +68,11 @@ public final class ProjectConfigSetCommand implements Runnable {
         "-".equals(value)
             ? new String(stdin.get().readAllBytes(), StandardCharsets.UTF_8).strip()
             : value;
-    var actor = ProjectMutations.catalogOperator(name, dryRun);
-    var read = ProjectMutations.current(name, operator);
+    var actor = mutations.writer(name, dryRun);
+    var read = mutations.current(name, operator);
     var edited =
         ProjectDefinitionJson.withSection(read, written, "null".equals(json) ? null : json);
-    ProjectMutations.write(
+    mutations.write(
         written,
         read,
         edited,

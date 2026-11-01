@@ -13,10 +13,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.engine.ProjectCatalog;
+import ai.singlr.sail.identity.Actor;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class ProjectEditCommandTest {
 
@@ -115,5 +118,34 @@ class ProjectEditCommandTest {
 
     assertEquals("Editor exited with status 2; no changes made.", refused.getMessage());
     assertFalse(Files.exists(opened.getFirst()));
+  }
+
+  @Test
+  void anEditWritesEachSectionItChangesAndAnEditThatChangesNothingWritesNothing(@TempDir Path dir) {
+    var mutations =
+        new ProjectMutations(
+            new ProjectCatalog(dir.resolve("sail.db")), () -> Actor.cliOperator("uday"));
+    mutations
+        .catalog()
+        .create(
+            TestDefinitions.yaml("name: acme\nimage: ubuntu/24.04\ndescription: Storefront\n"),
+            Actor.cliOperator("uday"));
+    Editor retag =
+        file -> {
+          Files.writeString(file, Files.readString(file).replace("ubuntu/24.04", "debian/12"));
+          return 0;
+        };
+
+    var edited = CommandRun.of(new ProjectEditCommand(retag, mutations), "acme", "--json");
+    var unchanged =
+        CommandRun.of(new ProjectEditCommand(file -> 0, mutations), "acme", "--section", "image");
+
+    assertEquals(
+        new CommandRun(
+            0, "{\"name\": \"acme\", \"status\": \"updated\", \"sections\": [\"image\"]}\n", ""),
+        edited);
+    assertEquals("debian/12", mutations.catalog().read("acme").orElseThrow().image());
+    assertEquals("Storefront", mutations.catalog().read("acme").orElseThrow().description());
+    assertEquals(new CommandRun(0, "  No changes.\n", ""), unchanged);
   }
 }

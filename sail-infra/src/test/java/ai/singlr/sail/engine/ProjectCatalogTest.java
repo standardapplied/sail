@@ -13,6 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinition.Section;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -27,6 +30,7 @@ import ai.singlr.sail.store.SyncScope;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -50,23 +54,23 @@ class ProjectCatalogTest {
 
     var refused =
         assertThrows(
-            IllegalStateException.class, () -> ProjectCatalog.requireUnpruned(catalog, "gone"));
+            IllegalStateException.class, () -> new ProjectCatalog(catalog).requireUnpruned("gone"));
 
     assertTrue(refused.getMessage().contains("'gone' was pruned"), refused.getMessage());
-    assertDoesNotThrow(() -> ProjectCatalog.requireUnpruned(catalog, "kept"));
-    assertDoesNotThrow(() -> ProjectCatalog.requireUnpruned(catalog, "fresh"));
+    assertDoesNotThrow(() -> new ProjectCatalog(catalog).requireUnpruned("kept"));
+    assertDoesNotThrow(() -> new ProjectCatalog(catalog).requireUnpruned("fresh"));
   }
 
   @Test
   void aNodeRefusesAProjectOutsideTheScopeMainNamedBeforeAnythingIsWritten() {
     var catalog = dir.resolve("sail.db");
     var nia = new Actor("nia", Role.ADMIN, Actor.Lane.CLI);
-    assertDoesNotThrow(() -> ProjectCatalog.requireInScope(catalog, () -> "client2", "any"));
+    assertDoesNotThrow(() -> new ProjectCatalog(catalog).requireInScope(() -> "client2", "any"));
     assertFalse(Files.exists(catalog), "a check must not create the catalog");
     try (var db = Sqlite.open(catalog)) {
       new SchemaManager(db).migrate();
     }
-    assertDoesNotThrow(() -> ProjectCatalog.requireInScope(catalog, () -> "client2", "beta"));
+    assertDoesNotThrow(() -> new ProjectCatalog(catalog).requireInScope(() -> "client2", "beta"));
     try (var db = Sqlite.open(catalog)) {
       new SyncScope(db).record(ProjectScope.of(List.of("alpha")));
     }
@@ -74,7 +78,7 @@ class ProjectCatalogTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> ProjectCatalog.requireInScope(catalog, () -> "client2", "beta"));
+            () -> new ProjectCatalog(catalog).requireInScope(() -> "client2", "beta"));
 
     assertEquals(
         "Project 'beta' is outside the projects main grants this box, so main would take nothing"
@@ -87,7 +91,7 @@ class ProjectCatalogTest {
             + " an admin to grant it on main: sail fde grant nia beta.",
         assertThrows(
                 IllegalStateException.class,
-                () -> ProjectCatalog.requireRecordable(catalog, "beta", nia))
+                () -> new ProjectCatalog(catalog).requireRecordable("beta", nia))
             .getMessage());
     assertEquals(
         "Project 'beta' is outside the projects main grants this box, so main would take nothing"
@@ -95,17 +99,17 @@ class ProjectCatalogTest {
             + " an admin to grant it on main: sail fde grant <handle> beta.",
         assertThrows(
                 IllegalStateException.class,
-                () -> ProjectCatalog.requireInScope(catalog, () -> null, "beta"))
+                () -> new ProjectCatalog(catalog).requireInScope(() -> null, "beta"))
             .getMessage());
-    assertDoesNotThrow(() -> ProjectCatalog.requireInScope(catalog, () -> "client2", "alpha"));
-    assertDoesNotThrow(() -> ProjectCatalog.requireRecordable(catalog, "alpha", nia));
+    assertDoesNotThrow(() -> new ProjectCatalog(catalog).requireInScope(() -> "client2", "alpha"));
+    assertDoesNotThrow(() -> new ProjectCatalog(catalog).requireRecordable("alpha", nia));
   }
 
   @Test
   void aBoxWithNoCatalogYetRefusesNothingAndIsLeftWithoutOne() {
     var missing = dir.resolve("none.db");
 
-    assertDoesNotThrow(() -> ProjectCatalog.requireUnpruned(missing, "any"));
+    assertDoesNotThrow(() -> new ProjectCatalog(missing).requireUnpruned("any"));
     assertFalse(Files.exists(missing), "a dry run must not create the catalog");
   }
 
@@ -114,7 +118,8 @@ class ProjectCatalogTest {
     var catalog = dir.resolve("sail.db");
     var mady = new Actor("mady", Role.MEMBER, Actor.Lane.CLI);
 
-    assertDoesNotThrow(() -> ProjectCatalog.record(catalog, TestDefinitions.named("web"), mady));
+    assertDoesNotThrow(
+        () -> new ProjectCatalog(catalog).create(TestDefinitions.named("web"), mady));
 
     try (var db = Sqlite.open(catalog)) {
       assertEquals("mady", new ProjectStore(db).findByName("web").orElseThrow().updatedBy());
@@ -130,8 +135,8 @@ class ProjectCatalogTest {
         assertThrows(
             IllegalStateException.class,
             () ->
-                ProjectCatalog.record(
-                    unopenable, TestDefinitions.named("web"), Actor.cliOperator("uday")));
+                new ProjectCatalog(unopenable)
+                    .create(TestDefinitions.named("web"), Actor.cliOperator("uday")));
 
     assertTrue(
         failed.getMessage().startsWith("Project 'web' was not recorded in the catalog: "),
@@ -143,6 +148,83 @@ class ProjectCatalogTest {
   void aCatalogThatCannotBeReadRefusesNothing() throws Exception {
     var unreadable = Files.createDirectory(dir.resolve("not-a-database"));
 
-    assertDoesNotThrow(() -> ProjectCatalog.requireUnpruned(unreadable, "any"));
+    assertDoesNotThrow(() -> new ProjectCatalog(unreadable).requireUnpruned("any"));
+  }
+
+  @Test
+  void aCatalogNotYetMadeHoldsNoDefinitionAndIsNotMadeByTheRead() {
+    var missing = dir.resolve("none.db");
+
+    assertEquals(Optional.empty(), new ProjectCatalog(missing).read("web"));
+    assertFalse(Files.exists(missing));
+  }
+
+  @Test
+  void aSecondCreateOfANameIsRefusedAsTheNameTakenAndLeavesTheFirst() {
+    var catalog = new ProjectCatalog(dir.resolve("sail.db"));
+    var uday = Actor.cliOperator("uday");
+    catalog.create(TestDefinitions.described("web", "first"), uday);
+
+    var taken =
+        assertThrows(
+            ProjectStore.NameTaken.class,
+            () -> catalog.create(TestDefinitions.described("web", "second"), uday));
+
+    assertEquals("A project named 'web' already exists.", taken.getMessage());
+    assertEquals("first", catalog.read("web").orElseThrow().description());
+  }
+
+  @Test
+  void aSectionIsWrittenOverTheVersionItWasReadFromAndRefusedOverAnyOther() {
+    var catalog = new ProjectCatalog(dir.resolve("sail.db"));
+    var uday = Actor.cliOperator("uday");
+    catalog.create(TestDefinitions.described("web", "Storefront"), uday);
+    var read = catalog.read("web").orElseThrow();
+
+    catalog.writeSection("web", Section.IMAGE, read, image(read, "x/1"), uday);
+    var stale =
+        assertThrows(
+            ProjectStore.StaleSection.class,
+            () -> catalog.writeSection("web", Section.IMAGE, read, image(read, "x/2"), uday));
+
+    assertEquals(
+        "The image section of project 'web' changed since it was read. Read it again, then write"
+            + " it.",
+        stale.getMessage());
+    assertEquals("x/1", catalog.read("web").orElseThrow().image());
+    assertEquals("Storefront", catalog.read("web").orElseThrow().description());
+  }
+
+  @Test
+  void anEditWritesTheSectionsItChangesInOneRevisionAndOneThatChangesNothingWritesNone() {
+    var catalog = new ProjectCatalog(dir.resolve("sail.db"));
+    var uday = Actor.cliOperator("uday");
+    catalog.create(TestDefinitions.described("web", "Storefront"), uday);
+    var read = catalog.read("web").orElseThrow();
+    var edited =
+        ProjectDefinitionJson.withSection(
+            image(read, "x/1"), Section.DESCRIPTION, "\"The storefront\"");
+
+    assertEquals(
+        List.of(Section.DESCRIPTION, Section.IMAGE), catalog.writeChanged(read, edited, uday));
+    var revision = revision();
+    assertEquals(List.of(), catalog.writeChanged(edited, edited, uday));
+
+    assertEquals(edited, catalog.read("web").orElseThrow());
+    assertEquals(revision, revision(), "nothing changed, so nothing was written");
+    assertThrows(
+        ProjectStore.StaleSection.class,
+        () -> catalog.writeChanged(read, image(read, "x/2"), uday),
+        "an edit of a section written since it was read is refused");
+  }
+
+  private String revision() {
+    try (var db = Sqlite.open(dir.resolve("sail.db"))) {
+      return new ChangeLog(db).head("project", "web").orElseThrow().rev();
+    }
+  }
+
+  private static ProjectDefinition image(ProjectDefinition definition, String image) {
+    return ProjectDefinitionJson.withSection(definition, Section.IMAGE, "\"" + image + "\"");
   }
 }

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -86,7 +87,7 @@ class ProjectResourcesSetCommandTest {
   }
 
   @Test
-  void setUpdatesDescriptorAndRestartsRunningProject() throws Exception {
+  void setUpdatesTheDefinitionAndRestartsARunningProject() throws Exception {
     var shell =
         new TestShell()
             .onOk("incus list ^resource-test-project$", RUNNING_INFO_JSON)
@@ -149,7 +150,7 @@ class ProjectResourcesSetCommandTest {
       TestShell shell,
       ByteArrayOutputStream stdout,
       ByteArrayOutputStream stderr,
-      ProjectResourcesSetCommand.Catalog catalog,
+      ProjectMutations catalog,
       String... args) {
     var command =
         new ProjectResourcesSetCommand(
@@ -162,7 +163,7 @@ class ProjectResourcesSetCommandTest {
   }
 
   /** A catalog holding the project, written as its CLI operator. */
-  private ProjectResourcesSetCommand.Catalog catalogue() {
+  private ProjectMutations catalogue() {
     var database = tempDir.resolve("sail.db");
     try (var db = Sqlite.open(database)) {
       new SchemaManager(db).migrate();
@@ -179,13 +180,11 @@ class ProjectResourcesSetCommandTest {
                             disk: 50GB
                           """)));
     }
-    return new ProjectResourcesSetCommand.Catalog(database, () -> Actor.cliOperator("uday"));
+    return new ProjectMutations(new ProjectCatalog(database), () -> Actor.cliOperator("uday"));
   }
 
-  private static ProjectDefinition held(ProjectResourcesSetCommand.Catalog catalog) {
-    try (var db = Sqlite.open(catalog.database())) {
-      return new ProjectStore(db).findByName(PROJECT_NAME).orElseThrow().definition();
-    }
+  private static ProjectDefinition held(ProjectMutations catalog) {
+    return catalog.catalog().read(PROJECT_NAME).orElseThrow();
   }
 
   private static final class TestShell implements ShellExec {

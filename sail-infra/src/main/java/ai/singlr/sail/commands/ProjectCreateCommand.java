@@ -9,10 +9,8 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
-import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.gen.ServicePresets;
 import ai.singlr.sail.harness.Harnesses;
 import java.io.InputStream;
@@ -99,14 +97,17 @@ public final class ProjectCreateCommand implements Runnable {
 
   private final Supplier<InputStream> stdin;
   private final BooleanSupplier console;
+  private final ProjectMutations mutations;
 
   public ProjectCreateCommand() {
-    this(() -> System.in, ConsoleHelper::hasConsole);
+    this(() -> System.in, ConsoleHelper::hasConsole, ProjectMutations.here());
   }
 
-  ProjectCreateCommand(Supplier<InputStream> stdin, BooleanSupplier console) {
+  ProjectCreateCommand(
+      Supplier<InputStream> stdin, BooleanSupplier console, ProjectMutations mutations) {
     this.stdin = stdin;
     this.console = console;
+    this.mutations = mutations;
   }
 
   @Override
@@ -119,15 +120,14 @@ public final class ProjectCreateCommand implements Runnable {
     var ansi = Ansi.AUTO;
     var out = System.out;
     var created = ProjectDefinitionJson.validated(definition(out, ansi));
-    ProjectCatalog.requireInScope(created.name());
-    ProjectCatalog.requireUnpruned(created.name());
+    var catalog = mutations.catalog();
+    catalog.requireInScope(created.name());
+    catalog.requireUnpruned(created.name());
     if (dryRun) {
       out.println(ProjectDefinitionJson.write(created));
       return;
     }
-    var actor = CliOperator.current();
-    ProjectCatalog.requireRecordable(created.name(), actor);
-    ProjectCatalog.create(created, actor);
+    catalog.create(created, mutations.writer(created.name(), false));
     if (json) {
       out.println(ProjectDefinitionJson.write(created));
       return;
