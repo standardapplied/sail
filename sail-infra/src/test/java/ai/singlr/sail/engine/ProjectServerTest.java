@@ -195,6 +195,27 @@ class ProjectServerTest {
   }
 
   @Test
+  void aDefinitionWhoseServiceAndProcessClaimOnePortIsRefusedBeforeAnythingStarts() {
+    var container = new Container().looking(BOTH_LISTEN);
+    var clash = TestDefinitions.yaml(ACME.replace("port: 3000", "port: 5432"));
+    var expected =
+        "Port 5432 is claimed by both service 'postgres' and process 'web'. Give one of them"
+            + " another port.";
+
+    assertEquals(
+        expected,
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> server(container).serve("acme", clash, Duration.ofSeconds(60)))
+            .getMessage());
+    assertEquals(
+        expected,
+        assertThrows(IllegalArgumentException.class, () -> server(container).ports("acme", clash))
+            .getMessage());
+    assertEquals(List.of(), container.ran(""));
+  }
+
+  @Test
   void theScriptRunsTheCommandFromItsWorkdirWithItsEnvironmentAndTheUnitLogsIt() throws Exception {
     var container = new Container().looking(BOTH_LISTEN);
 

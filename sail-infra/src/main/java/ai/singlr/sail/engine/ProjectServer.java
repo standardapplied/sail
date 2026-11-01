@@ -185,6 +185,7 @@ public final class ProjectServer {
    */
   public Report serve(String project, ProjectDefinition config, Duration timeout)
       throws IOException, InterruptedException, TimeoutException {
+    config.requirePortsClaimedOnce();
     var deadline = nanos.getAsLong() + timeout.toNanos();
     startServices(project, config);
     var restarted = startProcesses(project, config);
@@ -203,6 +204,7 @@ public final class ProjectServer {
   /** Where each declared port of {@code config} stands now, starting nothing. */
   public Report ports(String project, ProjectDefinition config)
       throws IOException, InterruptedException, TimeoutException {
+    config.requirePortsClaimedOnce();
     return look(project, config, false);
   }
 
@@ -511,7 +513,6 @@ public final class ProjectServer {
   }
 
   private static Map<String, ProjectDefinition.Process> processes(ProjectDefinition config) {
-    config.requirePortsClaimedOnce();
     return config.processes() == null ? Map.of() : config.processes();
   }
 

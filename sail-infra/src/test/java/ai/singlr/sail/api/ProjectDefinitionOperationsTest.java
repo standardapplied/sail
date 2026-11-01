@@ -78,6 +78,11 @@ class ProjectDefinitionOperationsTest {
         "x/1",
         read(operations.writeSection("acme", "image", "x/1", "*")).image(),
         "* writes over whatever the section holds");
+    var weak = "W/\"" + ProjectStore.tagOf("\"x/1\"") + "\"";
+    assertEquals(
+        "x/2",
+        read(operations.writeSection("acme", "image", "x/2", weak)).image(),
+        "a tag a proxy marked weak is the same tag");
   }
 
   @Test
