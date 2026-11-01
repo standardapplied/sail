@@ -94,7 +94,7 @@ class SyncSchemaConvergenceTest {
 
     assertEquals(
         "Sync aborted before touching data: could not converge the database schema on"
-            + " 'devbox-7': stamp refused.",
+            + " 'devbox-7': stamp refused (sqlite error 19).",
         failure.reason());
     assertEquals(List.of(Remedy.sail("upgrade")), failure.remedy().commands());
   }
