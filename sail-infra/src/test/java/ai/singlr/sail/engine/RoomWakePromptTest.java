@@ -13,6 +13,7 @@ import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SpecStore;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -31,8 +32,8 @@ class RoomWakePromptTest {
         null,
         0,
         "uday",
-        "",
-        "",
+        null,
+        null,
         null,
         List.of(),
         List.of());
@@ -45,7 +46,7 @@ class RoomWakePromptTest {
         author,
         body,
         null,
-        "2026-08-11T12:00:00Z",
+        Instant.parse("2026-08-11T12:00:00Z"),
         "1-a",
         null,
         MessageStore.Mark.PLAIN);

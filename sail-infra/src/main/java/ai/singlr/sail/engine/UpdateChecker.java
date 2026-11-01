@@ -11,7 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -56,7 +55,7 @@ public final class UpdateChecker {
   static String doCheck(Path cacheFile, VersionFetcher fetcher) throws Exception {
     var cached = readCache(cacheFile);
     if (cached != null) {
-      var lastChecked = Instant.ofEpochMilli((Long) cached.get("last_checked"));
+      var lastChecked = DateTimeUtils.ofMillis((Long) cached.get("last_checked"));
       if (DateTimeUtils.now().minus(CHECK_INTERVAL).isBefore(lastChecked)) {
         return (String) cached.get("latest_version");
       }
@@ -84,7 +83,7 @@ public final class UpdateChecker {
     try {
       Files.createDirectories(cacheFile.getParent());
       var map = new LinkedHashMap<String, Object>();
-      map.put("last_checked", DateTimeUtils.now().toEpochMilli());
+      map.put("last_checked", DateTimeUtils.toMillis(DateTimeUtils.now()));
       map.put("latest_version", latestVersion);
       var tmpFile = cacheFile.resolveSibling("update-check.yaml.tmp");
       YamlUtil.dumpToFile(map, tmpFile);

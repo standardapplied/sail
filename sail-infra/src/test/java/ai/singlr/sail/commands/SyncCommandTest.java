@@ -38,6 +38,7 @@ import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
@@ -241,7 +242,7 @@ class SyncCommandTest {
       assertEquals("protocol", stale.get("last_error_kind"));
       assertEquals(1, stale.get("consecutive_failures"));
       assertEquals(
-          "Stale since 2026-09-14T00:00:00Z — message: page exceeded 4 MiB",
+          "Stale since 2026-09-14T00:00:00.000Z — message: page exceeded 4 MiB",
           SyncCommand.renderStatus(stale, OperatorCommand.PLAIN));
 
       health.failed(
@@ -256,7 +257,7 @@ class SyncCommandTest {
                   null)));
       var rebuilt = nonNull(capture(() -> new CommandLine(status.get()).execute("--json")));
       assertEquals(
-          "Stale since 2026-09-14T00:00:00Z — hello: ssh said: Host key verification failed. If"
+          "Stale since 2026-09-14T00:00:00.000Z — hello: ssh said: Host key verification failed. If"
               + " main was rebuilt from a copy of its database, remove the old key with 'sudo"
               + " ssh-keygen -R main', re-run 'sudo sail init --main sail@main' and compare the"
               + " fingerprint it prints with main's ('sudo ssh-keygen -lf"
@@ -265,7 +266,7 @@ class SyncCommandTest {
           SyncCommand.renderStatus(rebuilt, OperatorCommand.SUDO),
           "a node's stored failure read through sudo");
       assertEquals(
-          "Stale since 2026-09-14T00:00:00Z — hello: ssh said: Host key verification failed. If"
+          "Stale since 2026-09-14T00:00:00.000Z — hello: ssh said: Host key verification failed. If"
               + " main was rebuilt from a copy of its database, remove the old key with 'ssh-keygen"
               + " -R main', re-run 'sail init --main sail@main' and compare the fingerprint it prints"
               + " with main's ('sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on main);"
@@ -648,7 +649,7 @@ class SyncCommandTest {
                       "spec_id", "auth",
                       "author", "raj",
                       "body", "hello from main",
-                      "created_at", DateTimeUtils.now().toString()),
+                      "created_at", Snapshots.millis(DateTimeUtils.now())),
                   "r1"));
 
       var events = SyncCommand.pulledMessageEvents(messages, specs, known, "devbox");
@@ -687,7 +688,7 @@ class SyncCommandTest {
                       "spec_id", "ghost",
                       "author", "raj",
                       "body", "orphaned on main",
-                      "created_at", DateTimeUtils.now().toString()),
+                      "created_at", Snapshots.millis(DateTimeUtils.now())),
                   "r1"));
 
       assertTrue(SyncCommand.pulledMessageEvents(messages, specs, Set.of(), "devbox").isEmpty());
@@ -711,8 +712,8 @@ class SyncCommandTest {
                     null,
                     0,
                     "uday",
-                    "",
-                    "",
+                    null,
+                    null,
                     null,
                     List.of(),
                     List.of("app"))));

@@ -51,6 +51,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -852,7 +853,8 @@ class ScopedReadsTest {
     for (var read : List.of("/v1/specs/bravo-spec", "/v1/specs?project=alpha", "/v1/specs")) {
       var asSam = ask(sam, read);
       assertEquals(false, asSam.contains(asked.id()), read + ": " + asSam);
-      assertEquals(false, asSam.contains(asked.createdAt()), read + ": " + asSam);
+      assertEquals(
+          false, asSam.contains(DateTimeUtils.format(asked.createdAt())), read + ": " + asSam);
       assertEquals(true, ask(ada, read).contains(asked.id()), read);
     }
 
@@ -1342,8 +1344,8 @@ class ScopedReadsTest {
             null,
             priority,
             null,
-            "",
-            "",
+            null,
+            null,
             null,
             List.of(),
             List.of()),
@@ -1396,7 +1398,14 @@ class ScopedReadsTest {
     new EventStore(db)
         .insert(
             new EventStore.EventRow(
-                0, "2026-10-13T00:00:00Z", "spec_dispatched", project, spec, "sail", "main", "{}"));
+                0,
+                Instant.parse("2026-10-13T00:00:00Z"),
+                "spec_dispatched",
+                project,
+                spec,
+                "sail",
+                "main",
+                "{}"));
     recent.onEvent(Event.of(project, spec, "spec_dispatched", "sail", "main"));
     var held = specs.comparableSnapshot(spec);
     var theirs = new LinkedHashMap<>(held);
@@ -1427,7 +1436,14 @@ class ScopedReadsTest {
     new EventStore(db)
         .insert(
             new EventStore.EventRow(
-                0, "2026-10-13T00:00:01Z", "unplaced", null, "alpha-spec", "sail", "main", "{}"));
+                0,
+                Instant.parse("2026-10-13T00:00:01Z"),
+                "unplaced",
+                null,
+                "alpha-spec",
+                "sail",
+                "main",
+                "{}"));
     return arrive("bravo", B_RUN, B_FILE, "elsewhere", "ada", 9);
   }
 

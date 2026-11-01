@@ -443,7 +443,7 @@ class ReviewLoopEveryStateTest {
               review,
               STATE,
               state.shape().status,
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               state.shape().error,
               holder);
           for (var place = 0; place < state.stages().size(); place++) {
@@ -498,7 +498,7 @@ class ReviewLoopEveryStateTest {
     loop.container.exited(runId, log, 0);
     loop.db.execute(
         "UPDATE runs SET status = 'stopped', exit_code = 0, completed_at = ? WHERE id = ?",
-        DateTimeUtils.now().toString(),
+        DateTimeUtils.now(),
         runId);
   }
 

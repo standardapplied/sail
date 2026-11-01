@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Engagement;
@@ -55,6 +56,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -468,7 +470,7 @@ class ApiRouterTest {
             null,
             null,
             List.of("content"),
-            "now",
+            DateTimeUtils.now(),
             "pending",
             null);
 
@@ -1439,7 +1441,7 @@ class ApiRouterTest {
   void reviewModelsCoverConstruction() {
     var stageRow =
         new ReviewStore.StageRow(
-            "s1", "r1", "security", "agent", "passed", "codex", "t1", "t2", null);
+            "s1", "r1", "security", "agent", "passed", "codex", Instant.EPOCH, Instant.EPOCH, null);
     var stageView = StageView.from(stageRow, 3);
     assertEquals("security", stageView.name());
     assertEquals(3, stageView.findingCount());
@@ -1447,7 +1449,8 @@ class ApiRouterTest {
     assertEquals("codex", map.get("reviewer"));
 
     var reviewRow =
-        new ReviewStore.ReviewRow("r1", "auth", 1, "passed", "t0", "t1", null, null, null, null);
+        new ReviewStore.ReviewRow(
+            "r1", "auth", 1, "passed", Instant.EPOCH, Instant.EPOCH, null, null, null, null);
     var reviewView = ReviewView.from(reviewRow, List.of(stageView));
     assertEquals(1, reviewView.iteration());
     var rmap = reviewView.toMap();
@@ -1920,8 +1923,8 @@ class ApiRouterTest {
             7,
             "/home/dev/.sail/runs/s1/agent.log",
             null,
-            "t0",
-            "t1",
+            Instant.EPOCH,
+            Instant.EPOCH,
             List.of(),
             null,
             "claude/abc123",
@@ -2675,8 +2678,8 @@ class ApiRouterTest {
                       null,
                       0,
                       null,
-                      "",
-                      "",
+                      null,
+                      null,
                       null,
                       List.of(),
                       List.of())),

@@ -101,7 +101,7 @@ class PasskeyServiceTest {
     assertEquals("uday", result.fdeHandle());
     assertTrue(result.sessionToken().startsWith("sess_"));
     assertTrue(sessions.validate(result.sessionToken()).isPresent());
-    var remaining = Duration.between(Instant.now(), Instant.parse(result.expiresAt()));
+    var remaining = Duration.between(Instant.now(), result.expiresAt());
     assertTrue(
         remaining.toHours() >= 29 * 24 && remaining.toHours() <= 30 * 24, remaining::toString);
   }
@@ -122,7 +122,7 @@ class PasskeyServiceTest {
             assertion.signature(),
             null);
 
-    var remaining = Duration.between(Instant.now(), Instant.parse(result.expiresAt()));
+    var remaining = Duration.between(Instant.now(), result.expiresAt());
     assertTrue(remaining.toMinutes() >= 118 && remaining.toMinutes() <= 120, remaining::toString);
   }
 

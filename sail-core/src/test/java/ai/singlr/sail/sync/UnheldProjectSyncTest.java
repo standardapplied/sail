@@ -159,8 +159,8 @@ class UnheldProjectSyncTest {
         null,
         0,
         "node",
-        "",
-        "",
+        null,
+        null,
         "node",
         List.of(),
         List.of());

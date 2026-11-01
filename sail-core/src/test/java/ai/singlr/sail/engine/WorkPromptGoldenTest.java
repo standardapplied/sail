@@ -11,6 +11,7 @@ import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -29,7 +30,7 @@ class WorkPromptGoldenTest {
           "ada",
           "Use PKCE",
           null,
-          "2026-07-28T00:00:00Z",
+          Instant.parse("2026-07-28T00:00:00Z"),
           "1-a",
           null,
           MessageStore.Mark.PLAIN);
@@ -122,7 +123,7 @@ class WorkPromptGoldenTest {
 
       ## Conversation on this spec
 
-      ada (2026-07-28T00:00:00Z):
+      ada (2026-07-28T00:00:00.000Z):
       Use PKCE
 
       Implement the flow.
@@ -143,7 +144,7 @@ class WorkPromptGoldenTest {
 
       ## Conversation on this spec
 
-      ada (2026-07-28T00:00:00Z):
+      ada (2026-07-28T00:00:00.000Z):
       Use PKCE
 
       Implement the flow.

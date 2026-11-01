@@ -308,8 +308,8 @@ final class ReviewLoop implements AutoCloseable {
                     "feat/test",
                     0,
                     null,
-                    "",
-                    "",
+                    null,
+                    null,
                     null,
                     List.of(),
                     repos)));

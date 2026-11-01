@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerExec;
@@ -16,7 +15,6 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.webauthn.Hashes;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
@@ -134,7 +132,7 @@ public final class RoomCommitGuard {
     var run = runStore.findById(runId).orElse(null);
     var specId = run != null ? run.specId() : null;
     var baseline = YamlUtil.parseMap(recorded);
-    var roomStarted = run != null ? parseInstant(run.startedAt()) : null;
+    var roomStarted = run != null ? run.startedAt() : null;
     var roomNode = run != null ? run.node() : null;
     var guardAt = DateTimeUtils.now();
     var others =
@@ -203,26 +201,15 @@ public final class RoomCommitGuard {
    */
   static boolean overlapsRoomInterval(
       RunStore.RunRow candidate, Instant roomStarted, Instant guardAt) {
-    var started = parseInstant(candidate.startedAt());
+    var started = candidate.startedAt();
     if (started != null && started.isAfter(guardAt)) {
       return false;
     }
     if (DispatchOperations.ownsLiveAgent(candidate)) {
       return true;
     }
-    var completed = parseInstant(candidate.completedAt());
+    var completed = candidate.completedAt();
     return roomStarted == null || completed == null || !completed.isBefore(roomStarted);
-  }
-
-  static Instant parseInstant(String value) {
-    if (Strings.isBlank(value)) {
-      return null;
-    }
-    try {
-      return Instant.parse(value);
-    } catch (DateTimeParseException e) {
-      return null;
-    }
   }
 
   /**

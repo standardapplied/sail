@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.PasskeyCeremonies;
 import ai.singlr.sail.auth.PasskeyException;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
@@ -123,7 +124,7 @@ public final class WebauthnAuthHandler implements HttpHandler {
     var result = new LinkedHashMap<String, Object>();
     result.put("ticket", ticket.ticket());
     result.put("fde", ticket.fdeHandle());
-    result.put("expires_at", ticket.expiresAt());
+    result.put("expires_at", DateTimeUtils.format(ticket.expiresAt()));
     if (enrollOrigin != null) {
       result.put("enroll_url", enrollOrigin + "/enroll?ticket=" + ticket.ticket());
     }
@@ -204,7 +205,7 @@ public final class WebauthnAuthHandler implements HttpHandler {
     var result = new LinkedHashMap<String, Object>();
     result.put("session_token", login.sessionToken());
     result.put("fde", login.fdeHandle());
-    result.put("expires_at", login.expiresAt());
+    result.put("expires_at", DateTimeUtils.format(login.expiresAt()));
     return ApiResponse.ok(result);
   }
 

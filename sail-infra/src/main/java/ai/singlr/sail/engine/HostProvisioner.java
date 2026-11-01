@@ -91,7 +91,7 @@ public final class HostProvisioner {
               HostYaml.DEFAULT_IMAGE,
               incusVersion,
               serverIp,
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.format(DateTimeUtils.now()),
               kept.webauthn(),
               kept.sync(),
               kept.limits(),

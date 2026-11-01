@@ -8,6 +8,7 @@ package ai.singlr.sail.store;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -62,8 +63,8 @@ class SpecStoreTest {
         null,
         0,
         null,
-        "",
-        "",
+        null,
+        null,
         null,
         List.of(),
         List.of());
@@ -115,8 +116,8 @@ class SpecStoreTest {
         null,
         0,
         createdBy,
-        "",
-        "",
+        null,
+        null,
         null,
         List.of(),
         List.of());
@@ -162,8 +163,8 @@ class SpecStoreTest {
             "feat/auth",
             40,
             "uday",
-            "",
-            "",
+            null,
+            null,
             "mady",
             List.of("base"),
             List.of("api"),
@@ -174,8 +175,8 @@ class SpecStoreTest {
     assertEquals(40, spec.priority(), "priority survives the projection");
     assertEquals("uday", spec.createdBy());
     assertEquals("uday", spec.updatedBy(), "the row's own attribution is the acting FDE's");
-    assertFalse(spec.createdAt().isBlank(), "the store's stamp rides through");
-    assertFalse(spec.updatedAt().isBlank());
+    assertNotNull(spec.createdAt(), "the store's stamp rides through");
+    assertNotNull(spec.updatedAt());
     assertEquals("lounge", spec.roomId(), "the room link is never dropped");
     assertEquals(List.of("base"), spec.dependsOn());
     assertEquals(List.of("api"), spec.repos());
@@ -236,8 +237,8 @@ class SpecStoreTest {
             "feat/derived",
             10,
             "uday",
-            "",
-            "",
+            null,
+            null,
             null,
             List.of("base"),
             List.of("backend", "frontend"));
@@ -299,8 +300,8 @@ class SpecStoreTest {
             null,
             0,
             null,
-            "",
-            "",
+            null,
+            null,
             null,
             List.of(),
             List.of());
@@ -339,8 +340,8 @@ class SpecStoreTest {
             "feat/a",
             5,
             null,
-            "",
-            "",
+            null,
+            null,
             null,
             List.of(),
             List.of("backend"));
@@ -455,8 +456,8 @@ class SpecStoreTest {
             null,
             0,
             null,
-            "",
-            "",
+            null,
+            null,
             null,
             List.of("base"),
             List.of());
@@ -483,8 +484,8 @@ class SpecStoreTest {
             null,
             0,
             null,
-            "",
-            "",
+            null,
+            null,
             null,
             List.of("base"),
             List.of());
@@ -544,8 +545,8 @@ class SpecStoreTest {
             null,
             0,
             null,
-            "",
-            "",
+            null,
+            null,
             null,
             List.of("base"),
             List.of());
@@ -579,8 +580,8 @@ class SpecStoreTest {
             null,
             0,
             null,
-            "",
-            "",
+            null,
+            null,
             null,
             List.of("base"),
             List.of());
@@ -663,7 +664,7 @@ class SpecStoreTest {
   @Test
   void aReprojectIsStampedWhenItIsMade() {
     store.create(spec("a", "old", "A", "pending"));
-    db.execute("UPDATE specs SET updated_at = '2020-01-01T00:00:00Z' WHERE id = 'a'");
+    db.execute("UPDATE specs SET updated_at = 1577836800000 WHERE id = 'a'");
 
     store.reproject("old", "renamed");
 
@@ -696,8 +697,8 @@ class SpecStoreTest {
             null,
             0,
             null,
-            "",
-            "",
+            null,
+            null,
             null,
             List.of("base"),
             List.of("backend"));
@@ -725,8 +726,8 @@ class SpecStoreTest {
             null,
             0,
             null,
-            "",
-            "",
+            null,
+            null,
             null,
             List.of("auth"),
             List.of());

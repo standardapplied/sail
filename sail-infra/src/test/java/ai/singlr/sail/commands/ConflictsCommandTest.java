@@ -18,6 +18,7 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.Resolution;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -128,7 +129,7 @@ class ConflictsCommandTest {
             null,
             null,
             List.of("title"),
-            "now",
+            DateTimeUtils.now(),
             "pending",
             null);
 
@@ -175,7 +176,7 @@ class ConflictsCommandTest {
             null,
             null,
             List.of("content"),
-            "now",
+            DateTimeUtils.now(),
             "pending",
             null);
 

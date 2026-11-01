@@ -452,7 +452,7 @@ public final class ServerStartCommand implements Runnable {
               + ") stranded in "
               + s.status().wire()
               + " since "
-              + s.updatedAt());
+              + DateTimeUtils.format(s.updatedAt()));
       bus.publish(
           Event.of(
               s.project(),
@@ -460,7 +460,7 @@ public final class ServerStartCommand implements Runnable {
               Event.WellKnownTypes.SPEC_STRANDED,
               Event.SAIL_AGENT,
               HostInfo.hostname(),
-              Map.of("status", s.status().wire(), "since", String.valueOf(s.updatedAt()))));
+              Map.of("status", s.status().wire(), "since", DateTimeUtils.format(s.updatedAt()))));
     }
   }
 }

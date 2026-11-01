@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.identity.ProjectScope;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -28,7 +29,7 @@ public final class EventStore {
    */
   public record EventRow(
       long id,
-      String timestamp,
+      Instant timestamp,
       String type,
       String project,
       String specId,
@@ -40,7 +41,7 @@ public final class EventStore {
     /** A row no client published. */
     public EventRow(
         long id,
-        String timestamp,
+        Instant timestamp,
         String type,
         String project,
         String specId,
@@ -191,7 +192,7 @@ public final class EventStore {
         });
   }
 
-  public int pruneBefore(String before, Set<String> types, int batchSize) {
+  public int pruneBefore(Instant before, Set<String> types, int batchSize) {
     if (types.isEmpty()) {
       return 0;
     }
@@ -226,7 +227,7 @@ public final class EventStore {
   private EventRow mapEvent(Sqlite.Row row) {
     return new EventRow(
         row.integer(0),
-        row.text(1),
+        row.instant(1),
         row.text(2),
         row.text(3),
         row.text(4),

@@ -17,6 +17,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -150,13 +151,13 @@ class RoomStoreTest {
             "on",
             null,
             "uday",
-            "t-created",
-            "t-updated",
+            Instant.parse("2026-01-01T00:00:00.001Z"),
+            Instant.parse("2026-01-02T00:00:00.002Z"),
             "uday"));
 
     var row = rooms.findById("seed").orElseThrow();
-    assertEquals("t-created", row.createdAt());
-    assertEquals("t-updated", row.updatedAt());
+    assertEquals(Instant.parse("2026-01-01T00:00:00.001Z"), row.createdAt());
+    assertEquals(Instant.parse("2026-01-02T00:00:00.002Z"), row.updatedAt());
     assertNotNull(rooms.latestRev("seed"));
     assertNull(rooms.baseRevOf("seed"), "a local genesis has no synced ancestor");
   }
@@ -170,14 +171,17 @@ class RoomStoreTest {
     snapshot.put("wake", "on");
     snapshot.put("roster", null);
     snapshot.put("created_by", "uday");
-    snapshot.put(Snapshots.CREATED_AT, "2026-08-01T00:00:00Z");
+    snapshot.put(Snapshots.CREATED_AT, Snapshots.millis(Instant.parse("2026-08-01T00:00:00Z")));
     snapshot.put(Snapshots.ACTOR, "sam");
 
     Actor.run(Actor.main(), () -> rooms.applyRevision("synced", snapshot, "3-abc"));
 
     var found = rooms.findById("synced").orElseThrow();
     assertEquals("Synced room", found.title());
-    assertEquals("2026-08-01T00:00:00Z", found.createdAt(), "adoption preserves creation time");
+    assertEquals(
+        Instant.parse("2026-08-01T00:00:00Z"),
+        found.createdAt(),
+        "adoption preserves creation time");
     assertEquals("sam", found.updatedBy(), "the _actor key resolves into the row's author");
     assertEquals("3-abc", rooms.latestRev("synced"));
     assertEquals("3-abc", rooms.baseRevOf("synced"), "adopting from main sets the merge base");

@@ -527,15 +527,7 @@ class LoopDecisionTest {
   private static List<ReviewStore.StageRow> runningSince(Instant started) {
     return List.of(
         new ReviewStore.StageRow(
-            "stage-codex",
-            REVIEW,
-            "codex",
-            "agent",
-            "running",
-            "codex",
-            started.toString(),
-            null,
-            null),
+            "stage-codex", REVIEW, "codex", "agent", "running", "codex", started, null, null),
         stage("approve", "human", "pending"));
   }
 

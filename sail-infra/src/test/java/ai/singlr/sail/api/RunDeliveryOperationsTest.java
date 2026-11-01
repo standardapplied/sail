@@ -23,6 +23,7 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
@@ -163,7 +164,7 @@ class RunDeliveryOperationsTest {
             "spec_id", "room",
             "author", "ada",
             "body", "minted before, synced after",
-            "created_at", "now"),
+            "created_at", Snapshots.millis(DateTimeUtils.now())),
         "1-abc");
 
     var inbox = operations.runInbox(runId).orThrow();

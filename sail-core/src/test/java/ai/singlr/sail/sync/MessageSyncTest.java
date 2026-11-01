@@ -24,11 +24,13 @@ import ai.singlr.sail.store.PushOutcome;
 import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -157,7 +159,7 @@ class MessageSyncTest {
             "body",
             "Fine.",
             "created_at",
-            plain.createdAt()),
+            Snapshots.millis(plain.createdAt())),
         main.messages.comparableSnapshot(plain.id()),
         "a message with no mark carries no key for one");
     assertConverged();
@@ -168,12 +170,18 @@ class MessageSyncTest {
     var snapshot =
         new LinkedHashMap<String, Object>(
             Map.of(
-                "room_id", "room",
-                "author", "claude/r1",
-                "body", "Which flow?",
-                "created_at", "2026-10-01T00:00:00Z",
-                "question", true,
-                "error", true));
+                "room_id",
+                "room",
+                "author",
+                "claude/r1",
+                "body",
+                "Which flow?",
+                "created_at",
+                Snapshots.millis(Instant.parse("2026-10-01T00:00:00Z")),
+                "question",
+                true,
+                "error",
+                true));
 
     var refused =
         assertThrows(
@@ -325,8 +333,8 @@ class MessageSyncTest {
                 null,
                 0,
                 null,
-                "",
-                "",
+                null,
+                null,
                 null,
                 List.of(),
                 List.of()));
@@ -501,7 +509,7 @@ class MessageSyncTest {
         "body",
         "sync message",
         "created_at",
-        "2026-07-28T00:00:00Z");
+        Snapshots.millis(Instant.parse("2026-07-28T00:00:00Z")));
   }
 
   private void assertConverged() {

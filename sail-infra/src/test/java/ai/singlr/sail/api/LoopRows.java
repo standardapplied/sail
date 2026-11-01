@@ -62,8 +62,8 @@ final class LoopRows {
         "feat/test",
         0,
         null,
-        "",
-        "",
+        null,
+        null,
         null,
         List.of(),
         List.of("api"));
@@ -75,7 +75,7 @@ final class LoopRows {
 
   static ReviewStore.ReviewRow review(int iteration, String status, String error, String holder) {
     return new ReviewStore.ReviewRow(
-        REVIEW, SPEC, iteration, status, RECORDED.toString(), null, null, null, error, holder);
+        REVIEW, SPEC, iteration, status, RECORDED, null, null, null, error, holder);
   }
 
   /** A stage row of {@link #REVIEW}; one that is {@code running} started at {@link #STARTED}. */
@@ -87,7 +87,7 @@ final class LoopRows {
         type,
         status,
         null,
-        "running".equals(status) ? STARTED.toString() : null,
+        "running".equals(status) ? STARTED : null,
         null,
         null);
   }
@@ -124,8 +124,8 @@ final class LoopRows {
         completedAt == null ? null : 0,
         null,
         null,
-        RECORDED.toString(),
-        completedAt == null ? null : completedAt.toString(),
+        RECORDED,
+        completedAt,
         List.of(),
         null,
         null,

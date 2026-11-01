@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.Settlement;
 import ai.singlr.sail.sync.SyncEngine;
@@ -70,15 +71,15 @@ public final class SyncViews {
     map.put("role", status.role());
     map.put("main", status.main());
     map.put("state", status.state());
-    map.put("last_attempt_at", status.lastAttemptAt());
-    map.put("last_success_at", status.lastSuccessAt());
+    map.put("last_attempt_at", DateTimeUtils.format(status.lastAttemptAt()));
+    map.put("last_success_at", DateTimeUtils.format(status.lastSuccessAt()));
     map.put("consecutive_failures", status.consecutiveFailures());
     map.put("last_error_kind", status.lastErrorKind());
     map.put("last_error", status.lastError() == null ? null : status.lastError().described());
     if (status.lastError() != null && !status.lastError().commands().isEmpty()) {
       map.put("last_error_remedy", status.lastError().toMaps());
     }
-    map.put("stale_since", status.staleSince());
+    map.put("stale_since", DateTimeUtils.format(status.staleSince()));
     map.put("bytes_fetched", status.fetchedBytes());
     map.put("bytes_sent", status.sentBytes());
     map.put("bytes_freed", status.freedBytes());
@@ -100,7 +101,7 @@ public final class SyncViews {
     map.put("local_snapshot", conflict.localSnapshot());
     map.put("remote_snapshot", conflict.remoteSnapshot());
     map.put("fields", conflict.fields());
-    map.put("detected_at", conflict.detectedAt());
+    map.put("detected_at", DateTimeUtils.format(conflict.detectedAt()));
     map.put("status", conflict.status());
     map.put("resolved_rev", conflict.resolvedRev());
     return map;

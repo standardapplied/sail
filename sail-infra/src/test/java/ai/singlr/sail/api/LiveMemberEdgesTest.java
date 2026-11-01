@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.LiveRoom.Lines;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.engine.AgentProcess;
@@ -292,7 +293,12 @@ class LiveMemberEdgesTest {
   /** The two prompts a message of 40,000 characters and a last instruction is written as. */
   private List<String> acrossTwoPrompts(String messageId) {
     var message = room.messages.findById(messageId).orElseThrow();
-    var written = message.author() + " (" + message.createdAt() + "):\n" + message.body();
+    var written =
+        message.author()
+            + " ("
+            + DateTimeUtils.format(message.createdAt())
+            + "):\n"
+            + message.body();
     return List.of(
         LiveStream.userMessage(written.substring(0, SLICE) + CONTINUES),
         LiveStream.userMessage(CONTINUED + written.substring(SLICE)));

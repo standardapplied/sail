@@ -24,10 +24,12 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -203,7 +205,7 @@ class ScopeRuleTest {
     state.put(conversationKey, room);
     state.put("author", "nia");
     state.put("body", "an answer");
-    state.put("created_at", "2026-10-14T00:00:00Z");
+    state.put("created_at", Snapshots.millis(Instant.parse("2026-10-14T00:00:00Z")));
     if (to != null) {
       state.put("reply_to", to);
     }
@@ -391,8 +393,8 @@ class ScopeRuleTest {
         null,
         0,
         owner,
-        "",
-        "",
+        null,
+        null,
         owner,
         List.of(),
         List.of());

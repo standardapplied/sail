@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.store.ProjectStore;
 import java.nio.file.Path;
@@ -112,7 +113,8 @@ class ProjectResourceReconcilerTest {
   }
 
   private static ProjectStore.ProjectRow row(String name, String definition) {
-    return new ProjectStore.ProjectRow(name, definition, "uday", "now", "uday", "now");
+    return new ProjectStore.ProjectRow(
+        name, definition, "uday", DateTimeUtils.now(), "uday", DateTimeUtils.now());
   }
 
   private static final class FakeShell implements ShellExec {

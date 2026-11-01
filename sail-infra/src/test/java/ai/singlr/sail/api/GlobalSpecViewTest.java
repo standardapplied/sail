@@ -14,6 +14,7 @@ import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SpecStore;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -33,8 +34,8 @@ class GlobalSpecViewTest {
         null,
         0,
         "uday",
-        "t0",
-        "t1",
+        Instant.EPOCH,
+        Instant.EPOCH,
         "uday",
         List.of(),
         List.of());
@@ -42,7 +43,16 @@ class GlobalSpecViewTest {
 
   private static RoomStore.RoomRow room(String wake, String roster) {
     return new RoomStore.RoomRow(
-        "auth", "acme", "OAuth", "uday", wake, roster, "uday", "t0", "t1", "uday");
+        "auth",
+        "acme",
+        "OAuth",
+        "uday",
+        wake,
+        roster,
+        "uday",
+        Instant.EPOCH,
+        Instant.EPOCH,
+        "uday");
   }
 
   @Test

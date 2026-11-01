@@ -165,8 +165,8 @@ class OneDecisionTest {
         null,
         0,
         null,
-        "",
-        "",
+        null,
+        null,
         null,
         List.of(),
         List.of());

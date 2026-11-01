@@ -58,7 +58,7 @@ class StuckSpecReconcilerTest {
           });
       db.execute(
           "UPDATE specs SET updated_at = ? WHERE id = ?",
-          Instant.now().minus(Duration.ofHours(7)).toString(),
+          Instant.now().minus(Duration.ofHours(7)),
           "stuck");
     }
     var captured = new AtomicReference<List<SpecStore.SpecRow>>();

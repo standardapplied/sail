@@ -353,8 +353,8 @@ class HomeRoomTest {
                     null,
                     0,
                     "ada",
-                    "",
-                    "",
+                    null,
+                    null,
                     null,
                     List.of(),
                     List.of())));

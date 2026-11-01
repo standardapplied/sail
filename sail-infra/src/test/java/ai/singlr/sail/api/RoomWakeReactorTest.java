@@ -23,8 +23,10 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -213,8 +215,8 @@ class RoomWakeReactorTest {
                           null,
                           0,
                           "uday",
-                          "",
-                          "",
+                          null,
+                          null,
                           null,
                           List.of(),
                           List.of())));
@@ -247,7 +249,7 @@ class RoomWakeReactorTest {
                 null,
                 null,
                 "sail-agent-" + id));
-    db.execute("UPDATE runs SET started_at = ? WHERE id = ?", startedAt.toString(), id);
+    db.execute("UPDATE runs SET started_at = ? WHERE id = ?", startedAt, id);
     if (!"running".equals(status)) {
       Acting.system(() -> runStore.complete(id, status, 0));
     }
@@ -282,7 +284,7 @@ class RoomWakeReactorTest {
   }
 
   private void finishAt(String runId, Instant completedAt) {
-    db.execute("UPDATE runs SET completed_at = ? WHERE id = ?", completedAt.toString(), runId);
+    db.execute("UPDATE runs SET completed_at = ? WHERE id = ?", completedAt, runId);
   }
 
   private Event message(String specId, String author, String body) {
@@ -743,6 +745,25 @@ class RoomWakeReactorTest {
   }
 
   @Test
+  void aMessageInTheMillisecondTheTurnStartedIsStillOwed() {
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+    var at = DateTimeUtils.now();
+    var clock = DateTimeUtils.clock;
+    try {
+      DateTimeUtils.clock = Clock.fixed(at, ZoneOffset.UTC);
+      Acting.system(() -> messageStore.append("chat", "uday", "sent as the turn began", null));
+    } finally {
+      DateTimeUtils.clock = clock;
+    }
+    var run = chatRun("chat", "room", "completed", at);
+
+    reactor().onEvent(roomStop("chat", run));
+
+    assertEquals(List.of("acme/chat"), launcher.woken);
+  }
+
+  @Test
   void aBuildStopFreesADeferredFullTurn() {
     seed("chat", "draft", "uday", null);
     engage("chat", "codex", "full");
@@ -817,23 +838,17 @@ class RoomWakeReactorTest {
   }
 
   @Test
-  void theOwedCheckSurvivesNullStoresCorruptTimestampsAndMultiMessageRooms() {
+  void theOwedCheckSurvivesNullStoresAndMultiMessageRooms() {
     seed("chat", "draft", "uday", null);
     engage("chat", "claude-code", "full");
     var run = chatRun("chat", "room", "completed", now.get().minus(Duration.ofMinutes(2)));
     Acting.system(() -> messageStore.append("chat", "uday", "first", null));
-    var second = Acting.system(() -> messageStore.append("chat", "uday", "second", null));
+    Acting.system(() -> messageStore.append("chat", "uday", "second", null));
 
     reactor(new DirectExecutorService(), null).onEvent(roomStop("chat", run));
     assertTrue(launcher.woken.isEmpty(), "no message store, no owed check");
 
-    db.execute("UPDATE room_messages SET created_at = 'garbage' WHERE id = ?", second.id());
-    db.execute("UPDATE room_messages SET created_at = 'garbage' WHERE room_id = 'chat'");
-    reactor().onEvent(roomStop("chat", run));
-    assertTrue(launcher.woken.isEmpty(), "an unparseable timestamp is never owed");
-
-    db.execute(
-        "UPDATE room_messages SET created_at = ? WHERE room_id = 'chat'", now.get().toString());
+    db.execute("UPDATE room_messages SET created_at = ? WHERE room_id = 'chat'", now.get());
     reactor().onEvent(roomStop("chat", run));
     assertEquals(List.of("acme/chat"), launcher.woken, "the newest of several messages decides");
   }
@@ -1119,8 +1134,8 @@ class RoomWakeReactorTest {
                     "on",
                     "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]",
                     "uday",
-                    "t0",
-                    "t0",
+                    Instant.EPOCH,
+                    Instant.EPOCH,
                     "uday")));
     Acting.system(() -> messageStore.append("lounge", "uday", "anyone around?", null));
     var executor = new ManualExecutorService();

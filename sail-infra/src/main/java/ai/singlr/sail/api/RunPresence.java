@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.common.Strings;
 import java.time.Duration;
 import java.time.Instant;
 
@@ -42,16 +41,10 @@ public final class RunPresence {
    * compare their synced stamp against the local clock, so their staleness is dominated by sync
    * cadence, not clock skew — the same freshness contract the board already has.
    */
-  public static String of(String status, String lastActivityAt, Instant now) {
-    if (!"running".equals(status) || Strings.isBlank(lastActivityAt)) {
+  public static String of(String status, Instant lastActivityAt, Instant now) {
+    if (!"running".equals(status) || lastActivityAt == null) {
       return null;
     }
-    Instant at;
-    try {
-      at = Instant.parse(lastActivityAt);
-    } catch (RuntimeException unparseable) {
-      return null;
-    }
-    return at.isBefore(now.minus(THRESHOLD)) ? QUIET : WORKING;
+    return lastActivityAt.isBefore(now.minus(THRESHOLD)) ? QUIET : WORKING;
   }
 }

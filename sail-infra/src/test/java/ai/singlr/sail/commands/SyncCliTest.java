@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SpecStatus;
@@ -46,7 +47,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -210,12 +210,13 @@ class SyncCliTest {
       var health = new SyncHealth(db);
       var peer = "sail@main";
       assertEquals(peer, HostSync.config().main());
-      var previous = Instant.now().minusSeconds(2);
+      var previous = DateTimeUtils.now().minusSeconds(2);
       health.begin(peer, previous);
       health.succeeded(peer, previous, new SyncEngine.Report(0, 0, 0, 0));
       db.execute(
-          "INSERT INTO schema_version (version, applied_at) VALUES (?, datetime('now'))",
-          schema.currentVersion() + 1);
+          "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+          schema.currentVersion() + 1,
+          DateTimeUtils.now());
 
       if ("command".equals(args[0])) {
         assertEquals(1, new SyncCommand().call());
@@ -356,8 +357,8 @@ class SyncCliTest {
         null,
         0,
         "ada",
-        "",
-        "",
+        null,
+        null,
         "ada",
         List.of(),
         List.of());

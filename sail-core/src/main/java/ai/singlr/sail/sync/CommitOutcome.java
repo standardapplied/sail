@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.store.Snapshots;
+import java.time.Instant;
 import java.util.Map;
 
 /**
@@ -30,7 +31,7 @@ public sealed interface CommitOutcome
    * holding {@code creator} and {@code createdAt}, each null when the entity carries none or main
    * did not say.
    */
-  record Accepted(String rev, String author, Snapshots.Creator creator, String createdAt)
+  record Accepted(String rev, String author, Snapshots.Creator creator, Instant createdAt)
       implements CommitOutcome {}
 
   /** Main moved since the node fetched; {@code current*} is its present state, left untouched. */

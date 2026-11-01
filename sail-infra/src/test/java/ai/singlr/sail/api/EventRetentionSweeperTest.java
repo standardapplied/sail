@@ -13,6 +13,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -50,6 +51,7 @@ class EventRetentionSweeperTest {
   }
 
   private static EventStore.EventRow row(String type) {
-    return new EventStore.EventRow(0, "2000-01-01T00:00:00Z", type, "p", "s", "sail", "h", "{}");
+    return new EventStore.EventRow(
+        0, Instant.parse("2000-01-01T00:00:00Z"), type, "p", "s", "sail", "h", "{}");
   }
 }

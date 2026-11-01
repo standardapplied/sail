@@ -37,7 +37,7 @@ public final class FdeBoxes {
         ON CONFLICT(handle) DO NOTHING""",
         handle,
         box,
-        DateTimeUtils.now().toString());
+        DateTimeUtils.now());
     return boxOf(handle).filter(recorded -> !recorded.equals(box));
   }
 

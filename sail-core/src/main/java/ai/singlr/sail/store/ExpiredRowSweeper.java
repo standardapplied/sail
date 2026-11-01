@@ -64,7 +64,7 @@ public final class ExpiredRowSweeper implements AutoCloseable {
    * Deletes every row whose expiry has passed; returns how many were removed. Visible for tests.
    */
   static int sweep(Sqlite db) {
-    var now = DateTimeUtils.now().toString();
+    var now = DateTimeUtils.now();
     var deleted = 0;
     db.execute("DELETE FROM sessions WHERE expires_at < ?", now);
     deleted += db.changes();

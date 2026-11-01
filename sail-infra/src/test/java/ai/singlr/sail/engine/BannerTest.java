@@ -21,6 +21,7 @@ import ai.singlr.sail.store.WebauthnCredentialStore;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -55,8 +56,8 @@ class BannerTest {
     var fdes =
         List.of(
             new FdeStore.Fde(
-                "id1", "uday", "Alex Morgan", "alex@example.com", "admin", "active", "t"),
-            new FdeStore.Fde("id2", "mady", null, null, "member", "active", "t"));
+                "id1", "uday", "Alex Morgan", "alex@example.com", "admin", "active", Instant.EPOCH),
+            new FdeStore.Fde("id2", "mady", null, null, "member", "active", Instant.EPOCH));
 
     Banner.printFdeTable(
         fdes,
@@ -90,9 +91,9 @@ class BannerTest {
     var keys =
         List.of(
             new FdeSshKeyStore.SshKeyInfo(
-                "SHA256:abc", "id1", "uday", "ssh-ed25519 AAAA", "laptop", "t"),
+                "SHA256:abc", "id1", "uday", "ssh-ed25519 AAAA", "laptop", Instant.EPOCH),
             new FdeSshKeyStore.SshKeyInfo(
-                "SHA256:xyz", "id2", "mady", "ssh-ed25519 BBBB", null, "t"));
+                "SHA256:xyz", "id2", "mady", "ssh-ed25519 BBBB", null, Instant.EPOCH));
 
     Banner.printFdeKeyTable(keys, new PrintStream(out, true, StandardCharsets.UTF_8), Ansi.OFF);
     var text = out.toString(StandardCharsets.UTF_8);
@@ -120,8 +121,8 @@ class BannerTest {
                 true,
                 true,
                 "uday's macbook",
-                "2026-07-06T10:15:30Z",
-                "2026-07-07T08:00:00Z"),
+                Instant.parse("2026-07-06T10:15:30Z"),
+                Instant.parse("2026-07-07T08:00:00Z")),
             new WebauthnCredentialStore.Credential(
                 "bravo".getBytes(StandardCharsets.UTF_8),
                 "id1",
@@ -132,7 +133,7 @@ class BannerTest {
                 false,
                 false,
                 null,
-                "2026-01-02T00:00:00Z",
+                Instant.parse("2026-01-02T00:00:00Z"),
                 null));
 
     Banner.printFdePasskeyTable(

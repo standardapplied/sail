@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
@@ -39,7 +40,7 @@ public record GuardrailTrigger(
   public static GuardrailTrigger of(
       GuardrailChecker.GuardrailResult.Triggered triggered, Instant at) {
     return new GuardrailTrigger(
-        at.toString(),
+        DateTimeUtils.format(at),
         triggered.reason(),
         triggered.detail(),
         triggered.action(),

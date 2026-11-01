@@ -17,11 +17,13 @@ import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -158,7 +160,8 @@ class RunSyncTest {
     var id = startRun(node, "node");
     sync(node);
     var pushedButNeverAcknowledged = new LinkedHashMap<>(node.replica.current(id));
-    pushedButNeverAcknowledged.put("last_activity_at", "2000-01-01T00:00:00Z");
+    pushedButNeverAcknowledged.put(
+        "last_activity_at", Snapshots.millis(Instant.parse("2000-01-01T00:00:00Z")));
     main.replica.commit(id, pushedButNeverAcknowledged, main.replica.currentRev(id));
     node.runs.stampActivity(id, Duration.ZERO);
     var latest = node.runs.findById(id).orElseThrow().lastActivityAt();

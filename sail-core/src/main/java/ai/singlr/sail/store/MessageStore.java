@@ -58,7 +58,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
       String author,
       String body,
       String replyTo,
-      String createdAt,
+      Instant createdAt,
       String rev,
       String baseRev,
       Mark mark) {
@@ -111,7 +111,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
                   author.strip(),
                   body,
                   replyTo,
-                  DateTimeUtils.now().toString(),
+                  DateTimeUtils.now(),
                   null,
                   null,
                   Objects.requireNonNull(mark, "mark"));
@@ -302,19 +302,19 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         """
         WITH RECURSIVE kept(id) AS (
             SELECT reply_to FROM room_messages
-            WHERE (julianday(created_at) >= julianday(?1)
+            WHERE (created_at >= ?1
                 OR id IN (SELECT value FROM json_each(?2)))
             AND reply_to IS NOT NULL
             UNION
             SELECT m.reply_to FROM room_messages m JOIN kept k ON m.id = k.id
             WHERE m.reply_to IS NOT NULL)
         SELECT id FROM room_messages
-        WHERE julianday(created_at) < julianday(?1)
+        WHERE created_at < ?1
         AND id NOT IN (SELECT id FROM kept)
         AND id NOT IN (SELECT value FROM json_each(?2))
         ORDER BY id LIMIT ?3""",
         row -> row.text(0),
-        cutoff.toString(),
+        cutoff,
         open,
         limit);
   }
@@ -323,14 +323,14 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
    * Each room's newest message timestamp among the messages its reader may see — one aggregate
    * query, keyed by spec id.
    */
-  public Map<String, String> latestByRoom() {
-    var latest = new LinkedHashMap<String, String>();
+  public Map<String, Instant> latestByRoom() {
+    var latest = new LinkedHashMap<String, Instant>();
     for (var entry :
         db.query(
             "SELECT room_id, MAX(created_at) FROM room_messages WHERE "
                 + readable("room_messages.id", 1)
                 + " GROUP BY room_id",
-            row -> Map.entry(row.text(0), row.text(1)),
+            row -> Map.entry(row.text(0), row.instant(1)),
             reader())) {
       latest.put(entry.getKey(), entry.getValue());
     }
@@ -646,7 +646,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         author,
         body,
         replyTo,
-        required(snapshot, "created_at"),
+        requiredInstant(snapshot, "created_at"),
         null,
         null,
         markOf(snapshot));
@@ -684,7 +684,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     if (row.replyTo() != null) {
       map.put("reply_to", row.replyTo());
     }
-    map.put("created_at", row.createdAt());
+    map.put("created_at", Snapshots.millis(row.createdAt()));
     if (row.question()) {
       map.put("question", true);
     }
@@ -701,7 +701,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         row.text(2),
         row.text(3),
         row.text(4),
-        row.text(5),
+        row.instant(5),
         row.text(6),
         row.text(7),
         Mark.of(row.integer(8) != 0, row.integer(9) != 0));
@@ -735,6 +735,14 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     if (body.getBytes(StandardCharsets.UTF_8).length > MAX_BODY_BYTES) {
       throw new IllegalArgumentException("message body exceeds 65536 bytes");
     }
+  }
+
+  private static Instant requiredInstant(Map<String, Object> map, String key) {
+    var value = Snapshots.instant(map, key);
+    if (value == null) {
+      throw new IllegalArgumentException("message " + key + " is required");
+    }
+    return value;
   }
 
   private static String required(Map<String, Object> map, String key) {

@@ -184,14 +184,13 @@ class AdhocDispatchTest {
     var row =
         db.queryOne(
                 "SELECT created_at, expires_at FROM run_credentials WHERE run_id = ?",
-                r -> new String[] {r.text(0), r.text(1)},
+                r -> new Instant[] {r.instant(0), r.instant(1)},
                 session.runId())
             .orElseThrow();
-    var expected =
-        Instant.parse(row[0]).plus(Duration.ofHours(169)).plus(RunStore.CREDENTIAL_GRACE);
+    var expected = row[0].plus(Duration.ofHours(169)).plus(RunStore.CREDENTIAL_GRACE);
     assertEquals(
         expected,
-        Instant.parse(row[1]),
+        row[1],
         "the credential covers the configured hard stop however long, plus the finisher grace");
   }
 

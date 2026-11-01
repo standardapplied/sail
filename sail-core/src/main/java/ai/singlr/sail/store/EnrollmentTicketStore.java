@@ -31,21 +31,21 @@ public final class EnrollmentTicketStore {
   }
 
   /** A freshly minted ticket; {@code ticket} is shown once and never stored in the clear. */
-  public record CreatedTicket(String ticket, String fdeId, String expiresAt) {}
+  public record CreatedTicket(String ticket, String fdeId, Instant expiresAt) {}
 
   /** A live ticket resolved to the FDE it enrolls. */
-  public record TicketInfo(String fdeId, String fdeHandle, String expiresAt) {}
+  public record TicketInfo(String fdeId, String fdeHandle, Instant expiresAt) {}
 
   public CreatedTicket issue(String fdeId, Duration ttl) {
     var ticket = generateTicket();
     var now = DateTimeUtils.now();
-    var expiresAt = now.plus(ttl).toString();
+    var expiresAt = now.plus(ttl);
     db.execute(
         "INSERT INTO enrollment_tickets (token_hash, fde_id, created_at, expires_at)"
             + " VALUES (?, ?, ?, ?)",
         sha256(ticket),
         fdeId,
-        now.toString(),
+        now,
         expiresAt);
     return new CreatedTicket(ticket, fdeId, expiresAt);
   }
@@ -58,12 +58,12 @@ public final class EnrollmentTicketStore {
             "SELECT t.fde_id, f.handle, t.expires_at FROM enrollment_tickets t"
                 + " JOIN fdes f ON f.id = t.fde_id"
                 + " WHERE t.token_hash = ? AND t.consumed_at IS NULL",
-            row -> new TicketInfo(row.text(0), row.text(1), row.text(2)),
+            row -> new TicketInfo(row.text(0), row.text(1), row.instant(2)),
             hash);
     if (info.isEmpty()) {
       return Optional.empty();
     }
-    if (Instant.parse(info.get().expiresAt()).isBefore(DateTimeUtils.now())) {
+    if (info.get().expiresAt().isBefore(DateTimeUtils.now())) {
       db.execute("DELETE FROM enrollment_tickets WHERE token_hash = ?", hash);
       return Optional.empty();
     }
@@ -83,7 +83,7 @@ public final class EnrollmentTicketStore {
                 + " WHERE token_hash = ? AND consumed_at IS NULL"
                 + " RETURNING token_hash",
             row -> row.text(0),
-            DateTimeUtils.now().toString(),
+            DateTimeUtils.now(),
             sha256(ticket))
         .isPresent();
   }

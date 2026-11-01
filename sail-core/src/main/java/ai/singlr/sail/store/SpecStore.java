@@ -28,6 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -39,6 +40,12 @@ import java.util.function.Supplier;
  * <p>Every mutation journals the spec's full post-state into the {@link ChangeLog} within the same
  * transaction, so history is complete and any revision is restorable (the DB-sync no-lost-work
  * guarantee). {@code specs.rev} tracks the current revision.
+ *
+ * <p>A local write moves {@code updated_at} strictly forward, to the later of now and a millisecond
+ * past the last ({@link DateTimeUtils#nowAfter}), so two writes in one millisecond are still two
+ * versions: the API's {@code ETag} is that time. A revision heard from another box keeps its
+ * author's time, so every box holds the same one; a later local write then moves past it, however
+ * far ahead that author's clock ran.
  */
 public final class SpecStore implements ConflictResolver, SyncedStore {
 
@@ -69,8 +76,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
       String branch,
       int priority,
       String createdBy,
-      String createdAt,
-      String updatedAt,
+      Instant createdAt,
+      Instant updatedAt,
       String updatedBy,
       List<String> dependsOn,
       List<String> repos,
@@ -89,8 +96,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         String branch,
         int priority,
         String createdBy,
-        String createdAt,
-        String updatedAt,
+        Instant createdAt,
+        Instant updatedAt,
         String updatedBy,
         List<String> dependsOn,
         List<String> repos) {
@@ -177,7 +184,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     }
   }
 
-  public record SpecContent(String body, String plan, String updatedAt) {}
+  public record SpecContent(String body, String plan) {}
 
   public record SpecFilter(
       String project, String status, String assignee, String repo, String search) {
@@ -211,7 +218,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    * is not assigned to.
    */
   public void create(SpecRow spec, String body, String plan) {
-    var now = DateTimeUtils.now().toString();
+    var now = DateTimeUtils.now();
     db.transaction(
         () -> {
           var author = author();
@@ -240,11 +247,10 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           insertDependencies(spec.id(), spec.dependsOn());
           insertRepos(spec.id(), spec.repos());
           db.execute(
-              "INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES (?, ?, ?, ?)",
+              "INSERT INTO spec_content (spec_id, body, plan) VALUES (?, ?, ?)",
               spec.id(),
               body,
-              plan,
-              now);
+              plan);
           setHashes(spec.id(), body, plan);
           recordRevision(spec.id(), ChangeLog.Entry.LOCAL, false);
         });
@@ -341,9 +347,9 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         () -> {
           var ids = db.query("SELECT id FROM specs WHERE project = ?", row -> row.text(0), old);
           db.execute(
-              "UPDATE specs SET project = ?, updated_at = ?, updated_by = ? WHERE project = ?",
+              "UPDATE specs SET project = ?, updated_at = MAX(?, updated_at + 1), updated_by = ? WHERE project = ?",
               renamed,
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               author(),
               old);
           ids.forEach(id -> recordRevision(id, ChangeLog.Entry.LOCAL, false));
@@ -352,13 +358,13 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
 
   /** Rewrites {@code spec}'s fields, as last updated by the bound {@link Actor}. */
   public void update(SpecRow spec) {
-    var now = DateTimeUtils.now().toString();
+    var now = DateTimeUtils.now();
     db.transaction(
         () -> {
           db.execute(
               """
               UPDATE specs SET project = ?, title = ?, status = ?, assignee = ?, agent = ?,
-                  model = ?, reasoning_effort = ?, branch = ?, priority = ?, updated_at = ?,
+                  model = ?, reasoning_effort = ?, branch = ?, priority = ?, updated_at = MAX(?, updated_at + 1),
                   updated_by = ?
               WHERE id = ?""",
               spec.project(),
@@ -397,9 +403,9 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     db.transaction(
         () -> {
           db.execute(
-              "UPDATE specs SET status = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+              "UPDATE specs SET status = ?, updated_at = MAX(?, updated_at + 1), updated_by = ? WHERE id = ?",
               status.wire(),
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               author(),
               id);
           recordRevision(id, ChangeLog.Entry.LOCAL, false);
@@ -416,10 +422,10 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     db.transaction(
         () -> {
           db.execute(
-              "UPDATE specs SET room_id = ?, updated_at = ?, updated_by = ? WHERE id = ? AND"
+              "UPDATE specs SET room_id = ?, updated_at = MAX(?, updated_at + 1), updated_by = ? WHERE id = ? AND"
                   + " COALESCE(room_id, id) <> id",
               id,
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               author(),
               id);
           if (db.changes() != 0) {
@@ -453,10 +459,10 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         () -> {
           db.execute(
               """
-              UPDATE specs SET status = ?, updated_at = ?, updated_by = ?
+              UPDATE specs SET status = ?, updated_at = MAX(?, updated_at + 1), updated_by = ?
               WHERE id = ? AND status = ?""",
               status.wire(),
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               author(),
               id,
               expected.wire());
@@ -482,12 +488,12 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         () -> {
           db.execute(
               """
-              UPDATE specs SET status = ?, branch = COALESCE(?, branch), updated_at = ?,
+              UPDATE specs SET status = ?, branch = COALESCE(?, branch), updated_at = MAX(?, updated_at + 1),
                   updated_by = ?
               WHERE id = ?""",
               status.wire(),
               Strings.isBlank(branch) ? null : branch,
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               author(),
               id);
           db.execute("DELETE FROM spec_repos WHERE spec_id = ?", id);
@@ -506,23 +512,21 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   public void setContent(String specId, String body, String plan) {
-    var now = DateTimeUtils.now().toString();
+    var now = DateTimeUtils.now();
     db.transaction(
         () -> {
           db.execute(
               """
-              INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES (?, ?, ?, ?)
-              ON CONFLICT(spec_id) DO UPDATE SET body = ?, plan = ?, updated_at = ?""",
+              INSERT INTO spec_content (spec_id, body, plan) VALUES (?, ?, ?)
+              ON CONFLICT(spec_id) DO UPDATE SET body = ?, plan = ?""",
               specId,
               body,
               plan,
-              now,
               body,
-              plan,
-              now);
+              plan);
           setHashes(specId, body, plan);
           db.execute(
-              "UPDATE specs SET updated_at = ?, updated_by = ? WHERE id = ?",
+              "UPDATE specs SET updated_at = MAX(?, updated_at + 1), updated_by = ? WHERE id = ?",
               now,
               author(),
               specId);
@@ -550,10 +554,14 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
             .filter(found -> found.kind() != ChangeLog.Kind.ERASURE)
             .orElseThrow(() -> unrestorable(id, rev));
     var snapshot = new LinkedHashMap<>(YamlUtil.parseMap(entry.snapshot()));
-    snapshot.remove("updated_at");
     snapshot.remove(STATUS_SINCE);
     db.transaction(
         () -> {
+          snapshot.put(
+              "updated_at",
+              Snapshots.millis(
+                  DateTimeUtils.nowAfter(
+                      findById(id).map(SpecStore.SpecRow::updatedAt).orElse(null))));
           applySnapshot(id, snapshot);
           stampAuthor(id);
           recordRevision(id, "restore", false);
@@ -601,7 +609,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         + "' was pruned"
         + (erasure.actor() == null ? "" : " by " + erasure.actor())
         + " at "
-        + erasure.recordedAt()
+        + DateTimeUtils.format(erasure.recordedAt())
         + ": it is erased everywhere with its history, so nothing is left to restore.";
   }
 
@@ -686,15 +694,14 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     var parameters = new ArrayList<Object>(statuses.stream().map(SpecStatus::wire).toList());
     parameters.add(project);
     parameters.add(project);
-    parameters.add(cutoff.toString());
+    parameters.add(cutoff);
     parameters.addAll(unfinished);
     parameters.add(limit);
     return db.query(
         "SELECT id FROM specs s WHERE status IN ("
             + placeholders(statuses.size())
             + ") AND (? IS NULL OR project = ?)"
-            + " AND julianday(CASE status WHEN 'archived' THEN archived_at"
-            + " ELSE cancelled_at END) < julianday(?)"
+            + " AND (CASE status WHEN 'archived' THEN archived_at ELSE cancelled_at END) < ?"
             + " AND NOT EXISTS (SELECT 1 FROM runs r WHERE (r.spec_id = s.id OR r.room_id = s.id)"
             + " AND r.status IN ("
             + placeholders(unfinished.size())
@@ -767,7 +774,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
                 row -> {
                   requireHashed(row.text(0), spec.id());
                   requireHashed(row.text(1), spec.id());
-                  return Arrays.asList(row.text(0), row.text(1), row.text(2));
+                  return Arrays.<Object>asList(
+                      row.text(0), row.text(1), Snapshots.millis(row.instant(2)));
                 },
                 spec.id())
             .orElseThrow();
@@ -783,9 +791,9 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     map.put("branch", spec.branch());
     map.put("priority", spec.priority());
     map.put("created_by", spec.createdBy());
-    map.put("created_at", spec.createdAt());
+    map.put("created_at", Snapshots.millis(spec.createdAt()));
     map.put("updated_by", spec.updatedBy());
-    map.put("updated_at", spec.updatedAt());
+    map.put("updated_at", Snapshots.millis(spec.updatedAt()));
     map.put("depends_on", spec.dependsOn());
     map.put("repos", spec.repos());
     map.put("room_id", spec.roomIdOrIdentity());
@@ -807,15 +815,15 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     var body = blobs.text(bodyHash);
     var plan = blobs.text(planHash);
     var spec = specFromSnapshot(snapshot);
-    var now = DateTimeUtils.now().toString();
-    var updatedAt = Strings.isBlank(spec.updatedAt()) ? now : spec.updatedAt();
+    var now = DateTimeUtils.now();
+    var updatedAt = Objects.requireNonNullElse(spec.updatedAt(), now);
     var held = findById(id);
     if (held.isPresent()) {
       db.execute(
           """
           UPDATE specs SET project = ?, title = ?, status = ?, assignee = ?, agent = ?, model = ?,
               reasoning_effort = ?, branch = ?, priority = ?, updated_at = ?, updated_by = ?,
-              room_id = ?, created_by = ?, created_at = COALESCE(NULLIF(?, ''), created_at)
+              room_id = ?, created_by = ?, created_at = COALESCE(?, created_at)
           WHERE id = ?""",
           spec.project(),
           spec.title(),
@@ -851,7 +859,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           spec.branch(),
           spec.priority(),
           spec.createdBy(),
-          Strings.isBlank(spec.createdAt()) ? now : spec.createdAt(),
+          Objects.requireNonNullElse(spec.createdAt(), now),
           updatedAt,
           spec.updatedBy(),
           spec.roomIdOrIdentity());
@@ -860,18 +868,16 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     insertRepos(id, spec.repos());
     db.execute(
         """
-        INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES (?, ?, ?, ?)
-        ON CONFLICT(spec_id) DO UPDATE SET body = ?, plan = ?, updated_at = ?""",
+        INSERT INTO spec_content (spec_id, body, plan) VALUES (?, ?, ?)
+        ON CONFLICT(spec_id) DO UPDATE SET body = ?, plan = ?""",
         id,
         body,
         plan,
-        updatedAt,
         body,
-        plan,
-        updatedAt);
+        plan);
     db.execute(
         "UPDATE specs SET body_hash = ?, plan_hash = ? WHERE id = ?", bodyHash, planHash, id);
-    applyStatusSince(id, spec.status(), Snapshots.text(snapshot, STATUS_SINCE));
+    applyStatusSince(id, spec.status(), Snapshots.instant(snapshot, STATUS_SINCE));
   }
 
   /**
@@ -879,8 +885,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    * carries, over what the status trigger stamped from this revision's time. A revision that
    * carries none, as a restore's does, leaves the trigger's.
    */
-  private void applyStatusSince(String id, SpecStatus status, String since) {
-    if (Strings.isBlank(since)) {
+  private void applyStatusSince(String id, SpecStatus status, Instant since) {
+    if (since == null) {
       return;
     }
     db.execute(
@@ -910,8 +916,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         Snapshots.text(s, "branch"),
         priority instanceof Number n ? n.intValue() : 0,
         Snapshots.text(s, "created_by"),
-        Snapshots.text(s, "created_at"),
-        Snapshots.text(s, "updated_at"),
+        Snapshots.instant(s, "created_at"),
+        Snapshots.instant(s, "updated_at"),
         Snapshots.text(s, "updated_by"),
         (List<String>) s.getOrDefault("depends_on", List.of()),
         (List<String>) s.getOrDefault("repos", List.of()),
@@ -1108,9 +1114,9 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     full.put("id", id);
     full.put("updated_by", Snapshots.actor(snapshot));
     full.put("created_by", Snapshots.creator(snapshot));
-    full.put("created_at", Snapshots.text(snapshot, Snapshots.CREATED_AT));
-    full.put("updated_at", Snapshots.text(snapshot, Snapshots.UPDATED_AT));
-    full.put(STATUS_SINCE, Snapshots.text(snapshot, Snapshots.STATUS_SINCE));
+    full.put("created_at", snapshot.get(Snapshots.CREATED_AT));
+    full.put("updated_at", snapshot.get(Snapshots.UPDATED_AT));
+    full.put(STATUS_SINCE, snapshot.get(Snapshots.STATUS_SINCE));
     return full;
   }
 
@@ -1167,11 +1173,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
 
   public Optional<SpecContent> getContent(String specId) {
     return db.queryOne(
-        "SELECT c.body, c.plan, c.updated_at, s.body_hash, s.plan_hash FROM spec_content c JOIN specs s ON s.id = c.spec_id WHERE c.spec_id = ?",
+        "SELECT c.body, c.plan, s.body_hash, s.plan_hash FROM spec_content c JOIN specs s ON s.id = c.spec_id WHERE c.spec_id = ?",
         row -> {
+          requireHashed(row.text(2), specId);
           requireHashed(row.text(3), specId);
-          requireHashed(row.text(4), specId);
-          return new SpecContent(row.text(0), row.text(1), row.text(2));
+          return new SpecContent(row.text(0), row.text(1));
         },
         specId);
   }
@@ -1282,8 +1288,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         row.text(8),
         row.isNull(9) ? 0 : (int) row.integer(9),
         row.text(10),
-        row.text(11),
-        row.text(12),
+        row.instant(11),
+        row.instant(12),
         row.text(13),
         List.of(),
         List.of(),

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
@@ -12,7 +13,6 @@ import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harness.Launch;
 import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
-import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -123,7 +123,7 @@ public final class AgentSession {
     map.put("run_id", Objects.requireNonNullElse(runId, ""));
     map.put("role", Objects.requireNonNullElse(role, ""));
     map.put("repos", Objects.requireNonNullElse(repos, List.<String>of()));
-    map.put("started_at", Instant.now().toString());
+    map.put("started_at", DateTimeUtils.format(DateTimeUtils.now()));
     map.put("log_path", unit.logPath());
     var json = YamlUtil.dumpJson(map);
     var cmd =

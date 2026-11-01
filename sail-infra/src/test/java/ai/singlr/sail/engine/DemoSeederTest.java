@@ -133,8 +133,8 @@ class DemoSeederTest {
                         null,
                         0,
                         "ada",
-                        "",
-                        "",
+                        null,
+                        null,
                         "ada",
                         List.of(),
                         List.of())));

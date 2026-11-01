@@ -109,8 +109,8 @@ class ReviewPipelineControllerTest {
                     "feat/test",
                     0,
                     null,
-                    "",
-                    "",
+                    null,
+                    null,
                     null,
                     List.of(),
                     repos)));

@@ -13,6 +13,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.ssh.SshPublicKey;
+import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -43,7 +44,7 @@ public final class FdeStore {
       String email,
       String role,
       String status,
-      String createdAt) {
+      Instant createdAt) {
 
     /** This FDE as the roster shows it to one who may not read its email. */
     public Fde withoutEmail() {
@@ -72,14 +73,7 @@ public final class FdeStore {
           "Invalid role: " + role + ". Must be one of " + ROLES + ".");
     }
     var fde =
-        new Fde(
-            generateId(),
-            handle,
-            displayName,
-            email,
-            role,
-            "active",
-            DateTimeUtils.now().toString());
+        new Fde(generateId(), handle, displayName, email, role, "active", DateTimeUtils.now());
     db.execute(
         "INSERT INTO fdes (id, handle, display_name, email, role, status, created_at)"
             + " VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -108,7 +102,7 @@ public final class FdeStore {
       String email,
       String role,
       String status,
-      String createdAt) {
+      Instant createdAt) {
     NameValidator.requireValidFdeHandle(handle);
     if (!ROLES.contains(role)) {
       throw new IllegalArgumentException(
@@ -129,7 +123,7 @@ public final class FdeStore {
         email,
         role,
         status,
-        Strings.isBlank(createdAt) ? DateTimeUtils.now().toString() : createdAt);
+        createdAt == null ? DateTimeUtils.now() : createdAt);
   }
 
   public Optional<Fde> byHandle(String handle) {
@@ -283,7 +277,7 @@ public final class FdeStore {
               SELECT id, ?, ? FROM fdes WHERE handle = ?
               ON CONFLICT(fde_id, project) DO NOTHING""",
               project,
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               handle);
           return null;
         });
@@ -438,7 +432,13 @@ public final class FdeStore {
 
   private static Fde map(Sqlite.Row row) {
     return new Fde(
-        row.text(0), row.text(1), row.text(2), row.text(3), row.text(4), row.text(5), row.text(6));
+        row.text(0),
+        row.text(1),
+        row.text(2),
+        row.text(3),
+        row.text(4),
+        row.text(5),
+        row.instant(6));
   }
 
   private static String generateId() {

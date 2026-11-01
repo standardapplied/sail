@@ -12,6 +12,7 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -110,7 +111,7 @@ class TestOperations implements Operations {
             null,
             null,
             null,
-            "t0",
+            Instant.EPOCH,
             null,
             List.of(),
             null,
@@ -134,7 +135,7 @@ class TestOperations implements Operations {
         null,
         null,
         null,
-        "t0",
+        Instant.EPOCH,
         null,
         List.of(),
         null,
@@ -209,7 +210,7 @@ class TestOperations implements Operations {
                         PRINCIPAL,
                         "hello",
                         null,
-                        "2026-07-28T00:00:00Z",
+                        Instant.parse("2026-07-28T00:00:00Z"),
                         "1-a",
                         null,
                         MessageStore.Mark.PLAIN)))));
@@ -227,7 +228,7 @@ class TestOperations implements Operations {
                     authorHandle,
                     request.body(),
                     request.replyTo(),
-                    "2026-07-28T00:00:00Z",
+                    Instant.parse("2026-07-28T00:00:00Z"),
                     "1-a",
                     null,
                     request.mark()))));
@@ -598,8 +599,8 @@ class TestOperations implements Operations {
                     null,
                     0,
                     null,
-                    "",
-                    "",
+                    null,
+                    null,
                     null,
                     List.of(),
                     List.of())),

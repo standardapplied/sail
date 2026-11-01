@@ -81,7 +81,7 @@ final class PtyHostEvents implements PtyEvents {
           .recordEvent(
               new EventStore.EventRow(
                   0,
-                  DateTimeUtils.now().toString(),
+                  DateTimeUtils.now(),
                   type,
                   origin.project(),
                   origin.roomBound() ? origin.room() : null,

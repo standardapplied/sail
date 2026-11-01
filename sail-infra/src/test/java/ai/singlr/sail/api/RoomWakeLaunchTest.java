@@ -399,8 +399,8 @@ class RoomWakeLaunchTest {
                           null,
                           0,
                           HANDLE,
-                          "",
-                          "",
+                          null,
+                          null,
                           null,
                           List.of(),
                           List.of("app"))));
@@ -425,8 +425,8 @@ class RoomWakeLaunchTest {
                     null,
                     0,
                     null,
-                    "",
-                    "",
+                    null,
+                    null,
                     null,
                     List.of(),
                     List.of("app"))));
@@ -1111,8 +1111,8 @@ class RoomWakeLaunchTest {
             + " completed_at, repos) VALUES (?, 'acme', 'other', 'other-node', 'build',"
             + " 'claude-code', 'completed', ?, ?, '[\"app\"]')",
         foreignBuild,
-        DateTimeUtils.now().minusSeconds(600).toString(),
-        DateTimeUtils.now().plusSeconds(60).toString());
+        DateTimeUtils.now().minusSeconds(600),
+        DateTimeUtils.now().plusSeconds(60));
 
     ops.guardRoomRun("acme", runId);
 
@@ -1153,8 +1153,8 @@ class RoomWakeLaunchTest {
             + " 'completed', ?, ?, '[\"app\"]')",
         build,
         HANDLE,
-        DateTimeUtils.now().minusSeconds(600).toString(),
-        DateTimeUtils.now().plusSeconds(60).toString());
+        DateTimeUtils.now().minusSeconds(600),
+        DateTimeUtils.now().plusSeconds(60));
 
     ops.guardRoomRun("acme", runId);
 
@@ -1197,8 +1197,8 @@ class RoomWakeLaunchTest {
             + " 'completed', ?, ?, '[\"app\"]')",
         build,
         HANDLE,
-        DateTimeUtils.now().minusSeconds(7200).toString(),
-        DateTimeUtils.now().minusSeconds(3600).toString());
+        DateTimeUtils.now().minusSeconds(7200),
+        DateTimeUtils.now().minusSeconds(3600));
 
     ops.guardRoomRun("acme", runId);
 
@@ -1240,7 +1240,7 @@ class RoomWakeLaunchTest {
             + " VALUES (?, 'acme', 'other', ?, 'room', 'claude-code', 'running', ?, '[]')",
         chat,
         HANDLE,
-        DateTimeUtils.now().toString());
+        DateTimeUtils.now());
 
     ops.guardRoomRun("acme", runId);
 

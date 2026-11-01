@@ -160,8 +160,8 @@ final class GlobalSpecOperations {
             request.branch(),
             request.priority(),
             null,
-            "",
-            "",
+            null,
+            null,
             null,
             request.dependsOn(),
             request.repos());
@@ -442,7 +442,7 @@ final class GlobalSpecOperations {
   GlobalSpecContentResponse content(String specId) {
     requireStore();
     findOrThrow(specId);
-    var content = specStore.getContent(specId).orElse(new SpecStore.SpecContent("", "", ""));
+    var content = specStore.getContent(specId).orElse(new SpecStore.SpecContent("", ""));
     return new GlobalSpecContentResponse(specId, content.body(), content.plan());
   }
 

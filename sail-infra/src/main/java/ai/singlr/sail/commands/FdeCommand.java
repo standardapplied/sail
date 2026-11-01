@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.auth.EnrollmentService;
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
@@ -44,7 +45,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -1106,9 +1106,7 @@ public final class FdeCommand implements Runnable {
         var token = mintToken(db, fde, key.publicKey(), ttl);
         new OperatorAuthorizedKeys(box.home())
             .append(
-                key.publicKey(),
-                pairingComment(handle),
-                Optional.ofNullable(token.expiresAt()).map(Instant::parse));
+                key.publicKey(), pairingComment(handle), Optional.ofNullable(token.expiresAt()));
         HostConfigSetCommand.writeWorkstationKey(box.workstationKey(), key.publicKey().line());
         System.out.println(
             Ansi.AUTO.string(
@@ -1121,7 +1119,7 @@ public final class FdeCommand implements Runnable {
                     + ". "
                     + (token.expiresAt() == null
                         ? "The code never expires."
-                        : "The code expires " + token.expiresAt() + ".")));
+                        : "The code expires " + DateTimeUtils.format(token.expiresAt()) + ".")));
         System.out.println(
             Ansi.AUTO.string(
                 "  @|green ✓|@ Workstation key "
@@ -1432,7 +1430,7 @@ public final class FdeCommand implements Runnable {
                       "  @|green ✓|@ Enrollment ticket for "
                           + ticket.fdeHandle()
                           + " (expires "
-                          + ticket.expiresAt()
+                          + DateTimeUtils.format(ticket.expiresAt())
                           + "):"));
               System.out.println("    " + ticket.ticket());
               System.out.println();
@@ -1456,7 +1454,7 @@ public final class FdeCommand implements Runnable {
       var map = new LinkedHashMap<String, Object>();
       map.put("ticket", ticket.ticket());
       map.put("fde", ticket.fdeHandle());
-      map.put("expires_at", ticket.expiresAt());
+      map.put("expires_at", DateTimeUtils.format(ticket.expiresAt()));
       if (origin != null) {
         map.put("enroll_url", origin + "/enroll?ticket=" + ticket.ticket());
       }

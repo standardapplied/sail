@@ -192,9 +192,9 @@ class SpecMessageOperationsTest {
     db.execute(
         """
         INSERT INTO specs (id, title, project, assignee, created_by, created_at, updated_at)
-        VALUES ('quiet', 'Quiet', 'acme', 'ada', 'ada', '2026-07-01T00:00:00Z',
-            '2026-07-02T00:00:00Z')""");
-    db.execute("UPDATE specs SET updated_at = '2026-07-01T00:00:00Z' WHERE id = 'room'");
+        VALUES ('quiet', 'Quiet', 'acme', 'ada', 'ada', 1782864000000,
+            1782950400000)""");
+    db.execute("UPDATE specs SET updated_at = 1782864000000 WHERE id = 'room'");
     var posted =
         Actor.call(
                 member("ada"),

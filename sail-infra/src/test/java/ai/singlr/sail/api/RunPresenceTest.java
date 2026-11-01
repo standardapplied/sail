@@ -18,45 +18,40 @@ class RunPresenceTest {
 
   @Test
   void aRunningRunWithFreshActivityIsWorking() {
-    assertEquals("working", RunPresence.of("running", "2026-08-13T11:59:00Z", NOW));
+    assertEquals("working", RunPresence.of("running", Instant.parse("2026-08-13T11:59:00Z"), NOW));
   }
 
   @Test
   void activityExactlyAtTheThresholdIsStillWorking() {
     assertEquals(
         "working",
-        RunPresence.of("running", NOW.minus(RunPresence.THRESHOLD).toString(), NOW),
+        RunPresence.of("running", NOW.minus(RunPresence.THRESHOLD), NOW),
         "the boundary reads working; quiet begins strictly past the threshold");
   }
 
   @Test
   void aRunningRunSilentPastTheThresholdIsQuiet() {
-    assertEquals("quiet", RunPresence.of("running", "2026-08-13T11:57:59Z", NOW));
+    assertEquals("quiet", RunPresence.of("running", Instant.parse("2026-08-13T11:57:59Z"), NOW));
   }
 
   @Test
   void aTerminalRunHasNoPresence() {
-    assertNull(RunPresence.of("completed", "2026-08-13T11:59:00Z", NOW));
-    assertNull(RunPresence.of("stopped", "2026-08-13T11:59:00Z", NOW));
-    assertNull(RunPresence.of("failed", "2026-08-13T11:59:00Z", NOW));
+    assertNull(RunPresence.of("completed", Instant.parse("2026-08-13T11:59:00Z"), NOW));
+    assertNull(RunPresence.of("stopped", Instant.parse("2026-08-13T11:59:00Z"), NOW));
+    assertNull(RunPresence.of("failed", Instant.parse("2026-08-13T11:59:00Z"), NOW));
   }
 
   @Test
   void aStoppingRunHasNoPresence() {
     assertNull(
-        RunPresence.of("stopping", "2026-08-13T11:59:00Z", NOW),
+        RunPresence.of("stopping", Instant.parse("2026-08-13T11:59:00Z"), NOW),
         "a run mid-stop is the stop lane's story, not a liveness question");
   }
 
   @Test
   void aRunWithNoActivityStampHasNoPresence() {
     assertNull(RunPresence.of("running", null, NOW), "pre-upgrade rows must never guess");
-    assertNull(RunPresence.of("running", "", NOW));
-  }
-
-  @Test
-  void anUnparseableStampHasNoPresence() {
-    assertNull(RunPresence.of("running", "not-a-timestamp", NOW));
+    assertNull(RunPresence.of("running", null, NOW));
   }
 
   @Test

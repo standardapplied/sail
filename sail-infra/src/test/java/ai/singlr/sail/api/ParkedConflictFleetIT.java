@@ -12,12 +12,14 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.MainVersion;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.sync.StoreReplica;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -58,7 +60,8 @@ class ParkedConflictFleetIT {
             new StoreReplica(
                 "mady-box", nodeRuns, new ChangeLog(nodeDb), conflicts, new SyncState(nodeDb));
         var pushedButNeverAcknowledged = new LinkedHashMap<>(nodeReplica.current(runId));
-        pushedButNeverAcknowledged.put("last_activity_at", "2000-01-01T00:00:00Z");
+        pushedButNeverAcknowledged.put(
+            "last_activity_at", Snapshots.millis(Instant.parse("2000-01-01T00:00:00Z")));
         Actor.call(
             Actor.sync("mady", Role.MEMBER),
             () ->

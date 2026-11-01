@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -21,6 +22,9 @@ import ai.singlr.sail.store.PushOutcome;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.function.Function;
@@ -108,9 +112,18 @@ class RecordTimesSyncTest {
     ada.create(SyncBox.spec("e-acme", "Ada's", "pending"));
     SyncBox.quiesce(main, ada, bob);
 
-    Acting.as("ada", () -> ada.specs.updateStatus("e-acme", SpecStatus.ARCHIVED));
-    var archived = archivedAt(ada, "e-acme");
-    Acting.as("ada", () -> ada.specs.setContent("e-acme", "Kept for the record.", ""));
+    var clock = DateTimeUtils.clock;
+    var later = DateTimeUtils.now().plusSeconds(60);
+    Instant archived;
+    try {
+      DateTimeUtils.clock = Clock.fixed(later, ZoneOffset.UTC);
+      Acting.as("ada", () -> ada.specs.updateStatus("e-acme", SpecStatus.ARCHIVED));
+      archived = archivedAt(ada, "e-acme");
+      DateTimeUtils.clock = Clock.fixed(later.plusMillis(1), ZoneOffset.UTC);
+      Acting.as("ada", () -> ada.specs.setContent("e-acme", "Kept for the record.", ""));
+    } finally {
+      DateTimeUtils.clock = clock;
+    }
     SyncBox.quiesce(main, ada, bob);
 
     assertNotEquals(ada.specs.findById("e-acme").orElseThrow().updatedAt(), archived);
@@ -123,8 +136,16 @@ class RecordTimesSyncTest {
     main.create(SyncBox.spec("m-acme", "Main's", "pending"));
     SyncBox.quiesce(main, ada, bob);
 
-    Acting.as("main", () -> main.specs.updateStatus("m-acme", SpecStatus.ARCHIVED));
-    Acting.as("ada", () -> ada.specs.updateStatus("m-acme", SpecStatus.ARCHIVED));
+    var clock = DateTimeUtils.clock;
+    var later = DateTimeUtils.now().plusSeconds(60);
+    try {
+      DateTimeUtils.clock = Clock.fixed(later, ZoneOffset.UTC);
+      Acting.as("main", () -> main.specs.updateStatus("m-acme", SpecStatus.ARCHIVED));
+      DateTimeUtils.clock = Clock.fixed(later.plusMillis(1), ZoneOffset.UTC);
+      Acting.as("ada", () -> ada.specs.updateStatus("m-acme", SpecStatus.ARCHIVED));
+    } finally {
+      DateTimeUtils.clock = clock;
+    }
     var mains = archivedAt(main, "m-acme");
     var adas = archivedAt(ada, "m-acme");
     SyncBox.quiesce(main, ada, bob);
@@ -172,13 +193,12 @@ class RecordTimesSyncTest {
     var created = times(main, "m-acme");
 
     Acting.as("main", () -> main.specs.setContent("m-acme", "A sharper body.", ""));
-    var edited = main.specs.getContent("m-acme").orElseThrow().updatedAt();
+    var edited = main.specs.findById("m-acme").orElseThrow().updatedAt();
     SyncBox.quiesce(main, ada, bob);
 
     assertNotEquals(created.getLast(), edited);
     assertEquals(List.of(created.getFirst(), edited), times(main, "m-acme"));
     assertSameEverywhere(box -> times(box, "m-acme"));
-    assertSameEverywhere(box -> box.specs.getContent("m-acme").orElseThrow().updatedAt());
   }
 
   @Test
@@ -281,7 +301,7 @@ class RecordTimesSyncTest {
     ada.create(SyncBox.spec("e-acme", "Ada's", "pending"));
     SyncBox.quiesce(main, ada, bob);
     var mains = times(main, "e-acme").getFirst();
-    ada.db.execute("UPDATE specs SET created_at = '2020-01-01T00:00:00Z' WHERE id = 'e-acme'");
+    ada.db.execute("UPDATE specs SET created_at = 1577836800000 WHERE id = 'e-acme'");
 
     Acting.as("ada", () -> ada.specs.updateStatus("e-acme", SpecStatus.IN_PROGRESS));
     SyncBox.quiesce(main, ada, bob);
@@ -297,7 +317,7 @@ class RecordTimesSyncTest {
     SyncBox.quiesce(main, ada, bob);
 
     Acting.as("ada", () -> ada.specs.setContent("e-acme", "Edited offline.", ""));
-    ada.db.execute("UPDATE specs SET updated_at = '2020-01-01T00:00:00Z' WHERE id = 'e-acme'");
+    ada.db.execute("UPDATE specs SET updated_at = 1577836800000 WHERE id = 'e-acme'");
     Acting.as("ada", () -> main.specs.updateStatus("e-acme", SpecStatus.IN_PROGRESS));
     var mainsEdit = times(main, "e-acme").getLast();
     SyncBox.quiesce(main, ada, bob);
@@ -314,7 +334,7 @@ class RecordTimesSyncTest {
     ada.create(SyncBox.spec("e-acme", "Ada's", "pending"));
     SyncBox.quiesce(main, ada, bob);
     var mains = times(main, "e-acme").getFirst();
-    ada.db.execute("UPDATE specs SET created_at = '2020-01-01T00:00:00Z' WHERE id = 'e-acme'");
+    ada.db.execute("UPDATE specs SET created_at = 1577836800000 WHERE id = 'e-acme'");
     Acting.as("ada", () -> ada.specs.updateStatus("e-acme", SpecStatus.IN_PROGRESS));
     Acting.as("ada", () -> main.specs.updateStatus("e-acme", SpecStatus.REVIEW));
     SyncBox.round(main, ada);
@@ -333,7 +353,7 @@ class RecordTimesSyncTest {
   void aRestoredRoomIsStampedWhenItIsRestored() {
     var rooms = new RoomStore(main.db);
     Acting.as("main", () -> rooms.create(room("lounge")));
-    main.db.execute("UPDATE rooms SET updated_at = '2020-01-01T00:00:00Z' WHERE id = 'lounge'");
+    main.db.execute("UPDATE rooms SET updated_at = 1577836800000 WHERE id = 'lounge'");
     Acting.as("main", () -> rooms.delete("lounge"));
 
     Acting.as("main", () -> rooms.restoreDeleted("lounge"));
@@ -349,7 +369,7 @@ class RecordTimesSyncTest {
     var offer = new LinkedHashMap<>(rooms.currentForSync("lounge"));
     offer.remove(Snapshots.CREATED_AT);
     offer.remove(Snapshots.UPDATED_AT);
-    offer.put("created_at", "2020-01-01T00:00:00Z");
+    offer.put("created_at", Snapshots.millis(Instant.parse("2020-01-01T00:00:00Z")));
     offer.put("title", "Renamed");
 
     var taken =
@@ -374,14 +394,14 @@ class RecordTimesSyncTest {
     assertEquals(mains, read.apply(bob), "bob differs from main");
   }
 
-  private static List<String> times(SyncBox box, String id) {
+  private static List<Instant> times(SyncBox box, String id) {
     var spec = box.specs.findById(id).orElseThrow();
     return List.of(spec.createdAt(), spec.updatedAt());
   }
 
-  private static String archivedAt(SyncBox box, String id) {
+  private static Instant archivedAt(SyncBox box, String id) {
     return box.db
-        .queryOne("SELECT COALESCE(archived_at, '') FROM specs WHERE id = ?", r -> r.text(0), id)
+        .queryOne("SELECT archived_at FROM specs WHERE id = ?", r -> r.instant(0), id)
         .orElseThrow();
   }
 

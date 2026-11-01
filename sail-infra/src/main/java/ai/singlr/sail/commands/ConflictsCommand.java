@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.Resolution;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ConflictOperations;
@@ -97,7 +98,7 @@ public final class ConflictsCommand implements Callable<Integer> {
                     row.put("type", c.entityType());
                     row.put("entity", c.entityId());
                     row.put("fields", c.fields());
-                    row.put("detected_at", c.detectedAt());
+                    row.put("detected_at", DateTimeUtils.format(c.detectedAt()));
                     return (Object) row;
                   })
               .toList();
@@ -119,7 +120,7 @@ public final class ConflictsCommand implements Callable<Integer> {
                   + "|@ — fields: "
                   + String.join(", ", c.fields())
                   + " @|faint ("
-                  + c.detectedAt()
+                  + DateTimeUtils.format(c.detectedAt())
                   + ")|@\n"));
     }
     out.append(

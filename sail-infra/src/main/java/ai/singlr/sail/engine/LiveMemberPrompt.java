@@ -114,7 +114,7 @@ public final class LiveMemberPrompt {
    * fill one, every slice but the last saying that more follows.
    */
   private static List<String> parts(MessageStore.MessageRow message) {
-    var whole = message.author() + " (" + message.createdAt() + "):\n" + message.body() + "\n\n";
+    var whole = PromptConversation.written(message);
     if (whole.codePointCount(0, whole.length()) <= PromptConversation.MAX_CODE_POINTS) {
       return List.of(whole);
     }

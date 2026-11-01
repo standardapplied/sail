@@ -54,14 +54,14 @@ public final class SyncHealth {
               row.text(6) == null ? Map.<String, Object>of() : YamlUtil.parseMap(row.text(6));
           return new Health(
               row.text(0),
-              instant(row.text(1)),
-              instant(row.text(2)),
+              row.instant(1),
+              row.instant(2),
               Math.toIntExact(row.integer(3)),
               row.text(4),
               error(row.text(5)),
               row.text(6) == null ? null : report(last),
               row.text(7),
-              instant(row.text(8)),
+              row.instant(8),
               bytes(last, "bytes_fetched"),
               bytes(last, "bytes_sent"),
               bytes(last, "bytes_freed"),
@@ -76,7 +76,7 @@ public final class SyncHealth {
         INSERT INTO sync_health (peer, last_attempt_at, state) VALUES (?, ?, 'syncing')
         ON CONFLICT(peer) DO UPDATE SET last_attempt_at = excluded.last_attempt_at, state = 'syncing'""",
         peer,
-        at.toString());
+        at);
   }
 
   /**
@@ -106,8 +106,8 @@ public final class SyncHealth {
         UPDATE sync_health SET last_attempt_at = ?, last_success_at = ?, consecutive_failures = 0,
             last_error_kind = NULL, last_error = NULL, last_report = ?, state = 'in_sync',
             stale_since = NULL WHERE peer = ?""",
-              at.toString(),
-              at.toString(),
+              at,
+              at,
               YamlUtil.dumpJson(
                   Map.of(
                       "pulled",
@@ -143,10 +143,10 @@ public final class SyncHealth {
         UPDATE sync_health SET last_attempt_at = ?, consecutive_failures = consecutive_failures + 1,
             last_error_kind = ?, last_error = ?, state = 'stale',
             stale_since = coalesce(stale_since, ?) WHERE peer = ?""",
-              at.toString(),
+              at,
               kind,
               YamlUtil.dumpJson(error.toMaps()),
-              at.toString(),
+              at,
               peer);
           return find(peer).orElseThrow().consecutiveFailures();
         });
@@ -165,10 +165,6 @@ public final class SyncHealth {
       }
     }
     return Remedy.of(stored);
-  }
-
-  private static Instant instant(String value) {
-    return value == null ? null : Instant.parse(value);
   }
 
   private static SyncEngine.Report report(Map<String, Object> last) {

@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.store.RoomStore;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -21,7 +22,16 @@ class RoomViewTest {
 
   private static RoomStore.RoomRow row(String roster, String assignee, String wake) {
     return new RoomStore.RoomRow(
-        "design-room", "acme", "Design talk", assignee, wake, roster, "uday", "t0", "t1", "sam");
+        "design-room",
+        "acme",
+        "Design talk",
+        assignee,
+        wake,
+        roster,
+        "uday",
+        Instant.parse("2026-01-01T00:00:00Z"),
+        Instant.parse("2026-01-02T00:00:00Z"),
+        "sam");
   }
 
   @Test
@@ -38,8 +48,8 @@ class RoomViewTest {
     assertEquals(1, view.members().size());
     assertEquals(List.of("attached-spec"), view.specIds());
     assertEquals("uday", view.createdBy());
-    assertEquals("t0", view.createdAt());
-    assertEquals("t1", view.updatedAt());
+    assertEquals("2026-01-01T00:00:00.000Z", view.createdAt());
+    assertEquals("2026-01-02T00:00:00.000Z", view.updatedAt());
     assertEquals("sam", view.updatedBy());
 
     var map = view.toMap();
@@ -62,7 +72,16 @@ class RoomViewTest {
     var roster = Roster.solo(Engagement.of("claude-code", "read_only", null, "t2")).toJson();
     var bare =
         new RoomStore.RoomRow(
-            "bare-room", "acme", "Bare", null, null, roster, null, "t0", "t1", null);
+            "bare-room",
+            "acme",
+            "Bare",
+            null,
+            null,
+            roster,
+            null,
+            Instant.EPOCH,
+            Instant.EPOCH,
+            null);
 
     var map = RoomView.from(bare, List.of()).toMap();
 

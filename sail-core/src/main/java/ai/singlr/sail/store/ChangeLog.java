@@ -10,6 +10,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -96,7 +97,7 @@ public final class ChangeLog {
       String entityId,
       String rev,
       String actor,
-      String recordedAt,
+      Instant recordedAt,
       String origin,
       boolean deleted,
       String snapshot,
@@ -636,7 +637,7 @@ public final class ChangeLog {
               entityId,
               rev,
               actor,
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               origin,
               deleted ? 1 : 0,
               snapshot,
@@ -943,7 +944,7 @@ public final class ChangeLog {
         row.text(2),
         row.text(3),
         row.text(4),
-        row.text(5),
+        row.instant(5),
         row.text(6),
         row.integer(7) != 0,
         row.text(8),

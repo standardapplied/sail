@@ -40,7 +40,7 @@ class PasskeysTest {
         false,
         false,
         label,
-        "2026-07-06T10:15:30Z",
+        Instant.parse("2026-07-06T10:15:30Z"),
         null);
   }
 

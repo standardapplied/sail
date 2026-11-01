@@ -5,13 +5,13 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.WebhookUrlSafety;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.time.Instant;
 
 /**
  * Sends webhook notifications for agent watch events. Auto-detects the provider from the URL and
@@ -134,7 +134,7 @@ public final class WebhookNotifier {
     sb.append(",\"project\":").append(jsonString(project));
     sb.append(",\"title\":").append(jsonString(title));
     sb.append(",\"message\":").append(jsonString(message));
-    sb.append(",\"timestamp\":").append(jsonString(Instant.now().toString()));
+    sb.append(",\"timestamp\":").append(jsonString(DateTimeUtils.format(DateTimeUtils.now())));
     sb.append("}");
     return sb.toString();
   }

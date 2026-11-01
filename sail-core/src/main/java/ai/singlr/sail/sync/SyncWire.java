@@ -20,6 +20,7 @@ import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -55,7 +56,7 @@ public final class SyncWire {
    * The protocol this build speaks; a peer announcing another is refused at the hello, so nothing
    * here reads a message another protocol wrote. Bump it with any change to what a message carries.
    */
-  public static final int PROTOCOL = 5;
+  public static final int PROTOCOL = 6;
 
   /** The byte ceiling for a JSON announcing line, including a whole blob manifest. */
   public static final int MAX_FRAME = 16 * 1024 * 1024;
@@ -534,7 +535,7 @@ public final class SyncWire {
    * its offer.
    */
   public record Accepted(
-      String id, String rev, String author, Snapshots.Creator creator, String createdAt)
+      String id, String rev, String author, Snapshots.Creator creator, Instant createdAt)
       implements Result {}
 
   /**
@@ -921,7 +922,7 @@ public final class SyncWire {
           verdict.put(CREATOR, accepted.creator().handle());
         }
         if (accepted.createdAt() != null) {
-          verdict.put(CREATED_AT, accepted.createdAt());
+          verdict.put(CREATED_AT, Snapshots.millis(accepted.createdAt()));
         }
         map.put(ACCEPTED, verdict);
       }
@@ -963,7 +964,7 @@ public final class SyncWire {
           string(accepted, REV),
           string(accepted, AUTHOR),
           creator,
-          string(accepted, CREATED_AT));
+          Snapshots.instant(accepted, CREATED_AT));
     }
     if (Boolean.TRUE.equals(map.get(STALE))) {
       return new Stale(id);

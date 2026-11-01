@@ -229,7 +229,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
             ? null
             : new Snapshots.Creator(Snapshots.text(committed, Snapshots.CREATOR));
     return new CommitOutcome.Accepted(
-        rev, author(entityId), creator, Snapshots.text(committed, Snapshots.CREATED_AT));
+        rev, author(entityId), creator, Snapshots.instant(committed, Snapshots.CREATED_AT));
   }
 
   @Override

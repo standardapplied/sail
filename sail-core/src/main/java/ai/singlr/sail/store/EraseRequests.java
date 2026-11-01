@@ -36,7 +36,7 @@ public final class EraseRequests {
         type,
         id,
         actor,
-        DateTimeUtils.now().toString());
+        DateTimeUtils.now());
   }
 
   /** The ids of {@code type} waiting for main, oldest ask first. */

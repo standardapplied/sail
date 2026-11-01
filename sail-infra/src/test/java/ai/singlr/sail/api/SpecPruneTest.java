@@ -162,9 +162,9 @@ class SpecPruneTest {
     var wake = run(new RunStore(db), "running", null);
     db.execute("UPDATE runs SET room_id = 'talking' WHERE id = ?", wake);
     db.execute(
-        "UPDATE specs SET archived_at = '2026-01-01T00:00:00Z' WHERE id IN ('ancient',"
+        "UPDATE specs SET archived_at = 1767225600000 WHERE id IN ('ancient',"
             + " 'elsewhere', 'talking')");
-    db.execute("UPDATE specs SET cancelled_at = '2026-01-01T00:00:00Z'");
+    db.execute("UPDATE specs SET cancelled_at = 1767225600000");
 
     var archivedOnly =
         Acting.by(
@@ -286,19 +286,18 @@ class SpecPruneTest {
     var oldParent = messages.append("lobby", "uday", "old, but answered lately", null);
     var youngReply = messages.append("lobby", "uday", "a young reply", oldParent.id());
     db.execute(
-        "UPDATE room_messages SET created_at = '2025-01-01T00:00:00Z' WHERE id IN (?, ?)",
+        "UPDATE room_messages SET created_at = 1735689600000 WHERE id IN (?, ?)",
         oldAlone.id(),
         oldParent.id());
     var runs = new RunStore(db);
-    var finished = run(runs, "completed", "2025-01-01T00:00:00Z");
+    var finished = run(runs, "completed", Instant.parse("2025-01-01T00:00:00Z"));
     var running = run(runs, "running", null);
-    var recent = run(runs, "failed", "2026-09-22T00:00:00Z");
+    var recent = run(runs, "failed", Instant.parse("2026-09-22T00:00:00Z"));
 
     var question =
         messages.append(
             "lobby", "claude/r1", "old, and still waiting", null, MessageStore.Mark.QUESTION);
-    db.execute(
-        "UPDATE room_messages SET created_at = '2025-01-01T00:00:00Z' WHERE id = ?", question.id());
+    db.execute("UPDATE room_messages SET created_at = 1735689600000 WHERE id = ?", question.id());
 
     var report =
         pruner.retain(new RetentionConfig(null, Duration.ofDays(180), Duration.ofDays(30)));
@@ -317,7 +316,7 @@ class SpecPruneTest {
   void aChildWrittenAfterTheDryRunGoesWithItsParentWhenTheApplyErases() {
     archived("old", "uday");
     Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("old"), true)));
-    var late = run(new RunStore(db), "completed", "2026-09-22T00:00:00Z", "old");
+    var late = run(new RunStore(db), "completed", Instant.parse("2026-09-22T00:00:00Z"), "old");
 
     var report = Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("old"), false)));
 
@@ -343,7 +342,7 @@ class SpecPruneTest {
     for (var i = 0; i < 450; i++) {
       specs.create(row("old-" + i, "uday", SpecStatus.ARCHIVED));
     }
-    db.execute("UPDATE specs SET archived_at = '2026-01-01T00:00:00Z'");
+    db.execute("UPDATE specs SET archived_at = 1767225600000");
     var policy =
         new PruneRequest(
             List.of(),
@@ -581,15 +580,15 @@ class SpecPruneTest {
           var messages = new MessageStore(db);
           var first = messages.append(id, owner, "first", null);
           messages.append(id, owner, "reply", first.id());
-          run(new RunStore(db), "completed", "2026-09-01T00:00:00Z", id);
+          run(new RunStore(db), "completed", Instant.parse("2026-09-01T00:00:00Z"), id);
         });
   }
 
-  private String run(RunStore runs, String status, String completedAt) {
+  private String run(RunStore runs, String status, Instant completedAt) {
     return run(runs, status, completedAt, null);
   }
 
-  private String run(RunStore runs, String status, String completedAt, String specId) {
+  private String run(RunStore runs, String status, Instant completedAt, String specId) {
     var id = DateTimeUtils.newId().toString();
     runs.create(id, "proj", specId, "node", "build", "claude", "b", "t", null, null, "/l", "u");
     db.execute(
@@ -603,8 +602,8 @@ class SpecPruneTest {
 
   private static SpecStore.SpecRow row(String id, String owner, SpecStatus status, String project) {
     return new SpecStore.SpecRow(
-        id, project, id, status, owner, null, null, null, null, 0, owner, "", "", owner, List.of(),
-        List.of());
+        id, project, id, status, owner, null, null, null, null, 0, owner, null, null, owner,
+        List.of(), List.of());
   }
 
   private static List<String> specIds(PruneReport report) {

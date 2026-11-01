@@ -43,14 +43,7 @@ public final class StrandedSpecs {
         .toList();
   }
 
-  private static boolean isOlderThan(String updatedAt, Instant cutoff) {
-    if (updatedAt == null || updatedAt.isBlank()) {
-      return false;
-    }
-    try {
-      return Instant.parse(updatedAt).isBefore(cutoff);
-    } catch (Exception e) {
-      return false;
-    }
+  private static boolean isOlderThan(Instant updatedAt, Instant cutoff) {
+    return updatedAt != null && updatedAt.isBefore(cutoff);
   }
 }

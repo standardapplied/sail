@@ -11,6 +11,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.PromptConversation.Rendered;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SpecStore;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -64,10 +65,10 @@ class LiveMemberPromptGoldenTest {
       """
       ## Conversation in this room
 
-      uday (2026-08-11T12:00:00Z):
+      uday (2026-08-11T12:00:00.000Z):
       what is it stuck on?
 
-      claude/room-7 (2026-08-11T12:00:00Z):
+      claude/room-7 (2026-08-11T12:00:00.000Z):
       The token refresh.""";
 
   private static SpecStore.SpecRow spec() {
@@ -83,8 +84,8 @@ class LiveMemberPromptGoldenTest {
         null,
         0,
         "uday",
-        "",
-        "",
+        null,
+        null,
         null,
         List.of(),
         List.of());
@@ -97,7 +98,7 @@ class LiveMemberPromptGoldenTest {
         author,
         body,
         null,
-        "2026-08-11T12:00:00Z",
+        Instant.parse("2026-08-11T12:00:00Z"),
         "1-a",
         null,
         MessageStore.Mark.PLAIN);
@@ -195,10 +196,10 @@ class LiveMemberPromptGoldenTest {
   void aLaterPromptIsTheNewMessagesAlone() {
     assertEquals(
         """
-        uday (2026-08-11T12:00:00Z):
+        uday (2026-08-11T12:00:00.000Z):
         what is it stuck on?
 
-        claude/room-7 (2026-08-11T12:00:00Z):
+        claude/room-7 (2026-08-11T12:00:00.000Z):
         The token refresh.""",
         only(LiveMemberPrompt.messages(conversation())));
     assertEquals(List.of(), LiveMemberPrompt.messages(List.of()));
@@ -256,21 +257,20 @@ class LiveMemberPromptGoldenTest {
                 List.of(huge, after))),
         pages);
     assertEquals(
-        List.of(48, 31_961, 31_998, 6_267),
+        List.of(52, 31_961, 31_998, 6_275),
         pages.stream().map(page -> page.text().codePointCount(0, page.text().length())).toList(),
         "a slice fills its prompt to the budget of 32,000 before its trailing blank line goes");
   }
 
   @Test
   void aSliceSharesAPromptWithWhatCameBeforeWhenItFits() {
-    var brief = message("m1", "uday", "before");
+    var brief = message("m1", "uday", "be");
     var huge = message("m2", "uday", "a".repeat(40_000));
     var written = BY + "a".repeat(40_000);
 
     assertEquals(
         List.of(
-            new Rendered<>(
-                BY + "before\n\n" + written.substring(0, SLICE) + CONTINUES, List.of(brief)),
+            new Rendered<>(BY + "be\n\n" + written.substring(0, SLICE) + CONTINUES, List.of(brief)),
             new Rendered<>(CONTINUED + written.substring(SLICE), List.of(huge))),
         LiveMemberPrompt.messages(List.of(brief, huge)));
   }
@@ -281,8 +281,8 @@ class LiveMemberPromptGoldenTest {
 
     assertEquals(
         List.of(
-            new Rendered<>(BY + "😀".repeat(SLICE - 29) + CONTINUES, List.of()),
-            new Rendered<>(CONTINUED + "😀".repeat(40_000 - (SLICE - 29)), List.of(emoji))),
+            new Rendered<>(BY + "😀".repeat(SLICE - 33) + CONTINUES, List.of()),
+            new Rendered<>(CONTINUED + "😀".repeat(40_000 - (SLICE - 33)), List.of(emoji))),
         LiveMemberPrompt.messages(List.of(emoji)));
   }
 
@@ -302,11 +302,12 @@ class LiveMemberPromptGoldenTest {
                     + "a".repeat(20_000),
                 List.of(first)),
             new Rendered<>(
-                "claude/room-7 (2026-08-11T12:00:00Z):\n" + "b".repeat(20_000), List.of(second))),
+                "claude/room-7 (2026-08-11T12:00:00.000Z):\n" + "b".repeat(20_000),
+                List.of(second))),
         pages);
   }
 
-  private static final String BY = "uday (2026-08-11T12:00:00Z):\n";
+  private static final String BY = "uday (2026-08-11T12:00:00.000Z):\n";
   private static final String CONTINUES = "\n[continues in the next prompt]";
   private static final String CONTINUED = "[continued from the previous prompt]\n";
   private static final int SLICE = 31_930;

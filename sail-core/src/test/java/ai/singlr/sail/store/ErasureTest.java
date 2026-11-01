@@ -16,6 +16,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -239,7 +240,7 @@ class ErasureTest {
     new EventStore(db)
         .insert(
             new EventStore.EventRow(
-                0, "2026-01-01T00:00:00Z", "t", "proj", "old", null, "h", "{}"));
+                0, Instant.parse("2026-01-01T00:00:00Z"), "t", "proj", "old", null, "h", "{}"));
 
     var result =
         erasure.erase(
@@ -438,8 +439,8 @@ class ErasureTest {
         null,
         0,
         "uday",
-        "",
-        "",
+        null,
+        null,
         "uday",
         List.of(),
         List.of());

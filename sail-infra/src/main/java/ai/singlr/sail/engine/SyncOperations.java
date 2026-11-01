@@ -24,6 +24,7 @@ import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MaterializedFiles;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncScope;
@@ -713,7 +714,7 @@ public final class SyncOperations {
             str(entry, "email"),
             str(entry, "role"),
             str(entry, "status"),
-            str(entry, "created_at"));
+            Snapshots.instant(entry, "created_at"));
       } catch (IllegalArgumentException invalid) {
         rejected.add(str(entry, "handle"));
       }

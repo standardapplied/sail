@@ -429,20 +429,15 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     if (newestHuman == null) {
       return null;
     }
-    var humanAt = parseInstant(newestHuman.createdAt());
-    if (humanAt == null) {
-      return null;
-    }
+    var humanAt = newestHuman.createdAt();
     var newestChatStart =
         target.runs().stream()
             .filter(RunStore.RunRow::chatRole)
             .map(RunStore.RunRow::startedAt)
-            .filter(Strings::isNotBlank)
-            .map(RoomWakeReactor::parseInstant)
             .filter(Objects::nonNull)
             .max(Instant::compareTo)
             .orElse(Instant.MIN);
-    return humanAt.isAfter(newestChatStart)
+    return !humanAt.isBefore(newestChatStart)
         ? new Message(newestHuman.author(), newestHuman.body())
         : null;
   }
@@ -473,18 +468,8 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     var now = clock.get();
     return runs.stream()
         .map(RunStore.RunRow::completedAt)
-        .filter(Strings::isNotBlank)
-        .map(RoomWakeReactor::parseInstant)
         .filter(Objects::nonNull)
         .anyMatch(completedAt -> Duration.between(completedAt, now).compareTo(cooldown) < 0);
-  }
-
-  private static Instant parseInstant(String value) {
-    try {
-      return Instant.parse(value);
-    } catch (Exception e) {
-      return null;
-    }
   }
 
   private record Message(String author, String body) {}

@@ -41,8 +41,8 @@ class ExpiredRowSweeperTest {
         "INSERT INTO sessions (token_hash, fde_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
         hash,
         fde.id(),
-        Instant.now().toString(),
-        expiresAt.toString());
+        Instant.now(),
+        expiresAt);
   }
 
   @Test
@@ -77,11 +77,11 @@ class ExpiredRowSweeperTest {
     db.execute(
         "INSERT INTO run_credentials (run_id, credential_hash, created_at, expires_at)"
             + " VALUES ('r-live', 'h1', 't0', ?)",
-        Instant.now().plus(Duration.ofDays(1)).toString());
+        Instant.now().plus(Duration.ofDays(1)));
     db.execute(
         "INSERT INTO run_credentials (run_id, credential_hash, created_at, expires_at)"
             + " VALUES ('r-dead', 'h2', 't0', ?)",
-        Instant.now().minus(Duration.ofHours(1)).toString());
+        Instant.now().minus(Duration.ofHours(1)));
     db.execute(
         "INSERT INTO run_credentials (run_id, credential_hash, created_at, expires_at)"
             + " VALUES ('r-unbounded', 'h3', 't0', NULL)");

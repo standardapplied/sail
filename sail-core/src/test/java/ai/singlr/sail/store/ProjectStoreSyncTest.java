@@ -16,6 +16,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -105,15 +106,15 @@ class ProjectStoreSyncTest {
   @ActingAs(Actor.Lane.MAIN)
   void aRevisionCarriesItsAuthorsTimesAndEveryBoxWritesThemVerbatim() {
     var authored = new LinkedHashMap<String, Object>(def("from-main", "sumesh", "carol"));
-    authored.put(Snapshots.CREATED_AT, "2026-01-01T00:00:00Z");
-    authored.put(Snapshots.UPDATED_AT, "2026-01-02T00:00:00Z");
+    authored.put(Snapshots.CREATED_AT, Snapshots.millis(Instant.parse("2026-01-01T00:00:00Z")));
+    authored.put(Snapshots.UPDATED_AT, Snapshots.millis(Instant.parse("2026-01-02T00:00:00Z")));
 
     store.applyRevision("acme", authored, "rev-xyz");
 
     var row = store.findByName("acme").orElseThrow();
     assertEquals("carol", row.createdBy());
-    assertEquals("2026-01-01T00:00:00Z", row.createdAt());
-    assertEquals("2026-01-02T00:00:00Z", row.updatedAt());
+    assertEquals(Instant.parse("2026-01-01T00:00:00Z"), row.createdAt());
+    assertEquals(Instant.parse("2026-01-02T00:00:00Z"), row.updatedAt());
     assertEquals(authored, store.comparableSnapshot("acme"));
   }
 
@@ -157,16 +158,17 @@ class ProjectStoreSyncTest {
                     "definition",
                     "v1",
                     Snapshots.CREATED_AT,
-                    "2026-01-01T00:00:00Z",
+                    Snapshots.millis(Instant.parse("2026-01-01T00:00:00Z")),
                     Snapshots.UPDATED_AT,
-                    "2026-01-02T00:00:00Z"),
+                    Snapshots.millis(Instant.parse("2026-01-02T00:00:00Z"))),
                 "rev-1"));
 
     store.upsert("acme", "v2");
 
     var row = store.findByName("acme").orElseThrow();
-    assertEquals("2026-01-01T00:00:00Z", row.createdAt());
-    assertTrue(row.updatedAt().compareTo("2026-01-02T00:00:00Z") > 0, row.updatedAt());
+    assertEquals(Instant.parse("2026-01-01T00:00:00Z"), row.createdAt());
+    assertTrue(
+        row.updatedAt().isAfter(Instant.parse("2026-01-02T00:00:00Z")), row.updatedAt()::toString);
   }
 
   @Test

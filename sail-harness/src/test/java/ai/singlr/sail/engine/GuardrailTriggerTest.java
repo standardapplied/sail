@@ -30,7 +30,7 @@ class GuardrailTriggerTest {
 
     var written = shell.invocations().getLast();
     assertTrue(written.contains(UNIT.guardrailTriggerPath()), written);
-    assertTrue(written.contains("triggered_at: 2026-10-03T12:45:01Z"), written);
+    assertTrue(written.contains("triggered_at: 2026-10-03T12:45:01.000Z"), written);
     assertTrue(written.contains("reason: max_duration"), written);
     assertTrue(written.contains("action: stop"), written);
     assertTrue(written.contains("cause: time limit (45m)"), written);
@@ -43,7 +43,7 @@ class GuardrailTriggerTest {
             .onOk(
                 "cat " + UNIT.guardrailTriggerPath(),
                 """
-                triggered_at: '2026-10-03T12:45:01Z'
+                triggered_at: 2026-10-03T12:45:01Z
                 reason: stall
                 detail: 'No progress for 21m (limit: 20m)'
                 action: snapshot-and-stop
@@ -79,7 +79,7 @@ class GuardrailTriggerTest {
             .onOk(
                 "cat " + UNIT.guardrailTriggerPath(),
                 """
-                triggered_at: '2026-10-03T12:45:01Z'
+                triggered_at: 2026-10-03T12:45:01Z
                 reason: max_duration
                 detail: 'Agent running for 46m (limit: 45m)'
                 action: stop

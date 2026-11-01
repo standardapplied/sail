@@ -18,7 +18,7 @@ class StrandedSpecsTest {
 
   private static final Instant NOW = Instant.parse("2026-06-25T12:00:00Z");
 
-  private static SpecStore.SpecRow spec(String id, SpecStatus status, String updatedAt) {
+  private static SpecStore.SpecRow spec(String id, SpecStatus status, Instant updatedAt) {
     return new SpecStore.SpecRow(
         id, "acme", "T", status, null, null, null, null, null, 0, "me", null, updatedAt, "me",
         List.of(), List.of());
@@ -26,8 +26,8 @@ class StrandedSpecsTest {
 
   @Test
   void flagsActiveSpecsOlderThanTheThreshold() {
-    var old = NOW.minus(Duration.ofHours(7)).toString();
-    var recent = NOW.minus(Duration.ofHours(1)).toString();
+    var old = NOW.minus(Duration.ofHours(7));
+    var recent = NOW.minus(Duration.ofHours(1));
     var specs =
         List.of(
             spec("stuck-ip", SpecStatus.IN_PROGRESS, old),
@@ -44,12 +44,8 @@ class StrandedSpecsTest {
   }
 
   @Test
-  void ignoresMissingOrUnparseableTimestamps() {
-    var specs =
-        List.of(
-            spec("no-ts", SpecStatus.IN_PROGRESS, null),
-            spec("blank-ts", SpecStatus.IN_PROGRESS, "  "),
-            spec("bad-ts", SpecStatus.REVIEW, "not-a-time"));
+  void ignoresASpecWithNoTimestamp() {
+    var specs = List.of(spec("no-ts", SpecStatus.IN_PROGRESS, null));
 
     assertTrue(StrandedSpecs.find(specs, NOW, Duration.ofHours(6)).isEmpty());
   }

@@ -10,8 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 
 class DateTimeUtilsTest {
@@ -52,6 +54,54 @@ class DateTimeUtilsTest {
       var refused = assertThrows(IllegalArgumentException.class, () -> DateTimeUtils.parseAge(bad));
       assertTrue(refused.getMessage().contains("Invalid age format"), refused.getMessage());
       assertTrue(refused.getMessage().contains("Examples"), refused.getMessage());
+    }
+  }
+
+  @Test
+  void anInstantLeavesAsIsoUtcAtMillisecondWidthAlways() {
+    assertEquals(
+        "2026-10-20T19:09:39.000Z", DateTimeUtils.format(Instant.parse("2026-10-20T19:09:39Z")));
+    assertEquals(
+        "2026-10-20T19:09:39.650Z", DateTimeUtils.format(Instant.parse("2026-10-20T19:09:39.65Z")));
+    assertEquals(
+        "2026-10-20T19:09:39.656Z",
+        DateTimeUtils.format(Instant.parse("2026-10-20T19:09:39.656789Z")));
+    assertEquals(null, DateTimeUtils.format(null));
+  }
+
+  @Test
+  void anInstantIsStoredAsItsMillisecondAndReadBackWhole() {
+    var at = Instant.parse("2026-10-20T19:09:39.656Z");
+
+    assertEquals(1792523379656L, DateTimeUtils.toMillis(at));
+    assertEquals(at, DateTimeUtils.ofMillis(1792523379656L));
+    assertEquals(at, DateTimeUtils.parse("2026-10-20T19:09:39.656999Z"));
+  }
+
+  @Test
+  void nowIsAtTheMillisecondEveryStoredInstantKeeps() {
+    var clock = DateTimeUtils.clock;
+    try {
+      DateTimeUtils.clock =
+          Clock.fixed(Instant.parse("2026-10-20T19:09:51.123456789Z"), ZoneOffset.UTC);
+      assertEquals(Instant.parse("2026-10-20T19:09:51.123Z"), DateTimeUtils.now());
+    } finally {
+      DateTimeUtils.clock = clock;
+    }
+  }
+
+  @Test
+  void aLocalRevisionIsNowOrAMillisecondPastTheLastWhenTheClockHasNotPassedIt() {
+    var at = Instant.parse("2026-10-20T19:09:51.123Z");
+    var clock = DateTimeUtils.clock;
+    try {
+      DateTimeUtils.clock = Clock.fixed(at, ZoneOffset.UTC);
+      assertEquals(at, DateTimeUtils.nowAfter(null));
+      assertEquals(at, DateTimeUtils.nowAfter(at.minusMillis(1)));
+      assertEquals(at.plusMillis(1), DateTimeUtils.nowAfter(at));
+      assertEquals(at.plusSeconds(60).plusMillis(1), DateTimeUtils.nowAfter(at.plusSeconds(60)));
+    } finally {
+      DateTimeUtils.clock = clock;
     }
   }
 }

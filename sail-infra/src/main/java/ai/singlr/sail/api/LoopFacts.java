@@ -11,13 +11,13 @@ import ai.singlr.sail.config.ReviewPipelineConfig.StageConfig;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.Finding;
-import ai.singlr.sail.store.MissedStops;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -186,13 +186,13 @@ record LoopFacts(
      * the run was recorded, or after it ended, is another reviewer's to judge.
      */
     Optional<Integer> stageReviewedBy(RunStore.RunRow run) {
-      var recorded = MissedStops.parseOr(run.startedAt(), Instant.MAX);
-      var ended = MissedStops.parseOr(run.completedAt(), Instant.MAX);
+      var recorded = Objects.requireNonNullElse(run.startedAt(), Instant.MAX);
+      var ended = Objects.requireNonNullElse(run.completedAt(), Instant.MAX);
       return stages.stream()
           .filter(stage -> "running".equals(stage.status()) && !"human".equals(stage.stageType()))
           .filter(
               stage -> {
-                var started = MissedStops.parseOr(stage.startedAt(), Instant.MIN);
+                var started = Objects.requireNonNullElse(stage.startedAt(), Instant.MIN);
                 return !started.isBefore(recorded) && !started.isAfter(ended);
               })
           .findFirst()

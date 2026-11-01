@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
@@ -13,6 +14,7 @@ import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -360,6 +362,8 @@ public final class Sqlite implements AutoCloseable {
           MemorySegment.copy(bytes, 0, data, ValueLayout.JAVA_BYTE, 0, bytes.length);
           rc = (int) lib.bindBlob.invokeExact(stmt, idx, data, bytes.length, SQLITE_TRANSIENT);
         }
+        case Instant instant ->
+            rc = (int) lib.bindInt64.invokeExact(stmt, idx, DateTimeUtils.toMillis(instant));
         case Integer n -> rc = (int) lib.bindInt64.invokeExact(stmt, idx, (long) n);
         case Long n -> rc = (int) lib.bindInt64.invokeExact(stmt, idx, (long) n);
         case Double d -> rc = (int) lib.bindDouble.invokeExact(stmt, idx, (double) d);
@@ -401,6 +405,11 @@ public final class Sqlite implements AutoCloseable {
     boolean isNull(int col);
 
     int columnCount();
+
+    /** The instant an integer millisecond column holds, or null. */
+    default Instant instant(int col) {
+      return isNull(col) ? null : DateTimeUtils.ofMillis(integer(col));
+    }
   }
 
   private record SqliteRow(SqliteLib lib, MemorySegment stmt) implements Row {

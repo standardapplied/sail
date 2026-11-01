@@ -257,8 +257,8 @@ class CompactionTest {
         null,
         0,
         "uday",
-        "",
-        "",
+        null,
+        null,
         "uday",
         List.of(),
         List.of());

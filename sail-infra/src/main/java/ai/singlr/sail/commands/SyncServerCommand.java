@@ -23,6 +23,7 @@ import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.ShippedFollowUps;
@@ -217,7 +218,7 @@ public final class SyncServerCommand implements Callable<Integer> {
     map.put("email", fde.email());
     map.put("role", fde.role());
     map.put("status", fde.status());
-    map.put("created_at", fde.createdAt());
+    map.put("created_at", Snapshots.millis(fde.createdAt()));
     return map;
   }
 

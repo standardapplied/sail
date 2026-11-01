@@ -92,7 +92,7 @@ public final class SyncState {
             read_id = excluded.read_id, read_rev = excluded.read_rev""",
         peer,
         entityType,
-        DateTimeUtils.now().toString(),
+        DateTimeUtils.now(),
         seq,
         id,
         rev);
@@ -128,6 +128,6 @@ public final class SyncState {
         peer,
         entityType,
         checkpoint,
-        DateTimeUtils.now().toString());
+        DateTimeUtils.now());
   }
 }

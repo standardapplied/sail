@@ -518,7 +518,7 @@ public final class RunCommand implements Runnable {
   private void autoRollback(ShellExec shell, String snapshotLabel, int exitCode) {
     try {
       var rollbackMap = new LinkedHashMap<String, Object>();
-      rollbackMap.put("rolled_back_at", DateTimeUtils.now().toString());
+      rollbackMap.put("rolled_back_at", DateTimeUtils.format(DateTimeUtils.now()));
       rollbackMap.put("exit_code", exitCode);
       rollbackMap.put("snapshot_restored", snapshotLabel);
       rollbackMap.put("task", task);

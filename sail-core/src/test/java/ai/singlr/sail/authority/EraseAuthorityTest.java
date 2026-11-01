@@ -206,8 +206,8 @@ class EraseAuthorityTest {
         null,
         0,
         OWNER,
-        "",
-        "",
+        null,
+        null,
         OWNER,
         List.of(),
         List.of());

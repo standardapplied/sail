@@ -10,6 +10,8 @@ package ai.singlr.sail.store;
  * written as rows main has taken and journaled nowhere, so no round offers or adopts them. What a
  * box must hold before it takes a spec or room into a project ({@link ProjectStore#refusesInto}).
  */
+import java.time.Instant;
+
 public final class HeldProjects {
 
   private HeldProjects() {}
@@ -22,8 +24,8 @@ public final class HeldProjects {
               + " updated_at, rev, base_rev) VALUES (?, ?, 'test', ?, 'test', ?, ?, ?)",
           name,
           "name: " + name + "\n",
-          "2026-01-01T00:00:00Z",
-          "2026-01-01T00:00:00Z",
+          Instant.parse("2026-01-01T00:00:00Z"),
+          Instant.parse("2026-01-01T00:00:00Z"),
           "1-held",
           "1-held");
     }

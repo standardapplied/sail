@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.FdeSshKeyStore;
+import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -17,7 +18,7 @@ class AuthorizedKeysRendererTest {
 
   private static FdeSshKeyStore.SshKeyInfo key(String handle, String line) {
     return new FdeSshKeyStore.SshKeyInfo(
-        "SHA256:fp", "fde_1", handle, line, "c", "2026-01-01T00:00:00Z");
+        "SHA256:fp", "fde_1", handle, line, "c", Instant.parse("2026-01-01T00:00:00Z"));
   }
 
   @Test

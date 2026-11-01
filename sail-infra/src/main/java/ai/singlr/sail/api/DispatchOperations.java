@@ -399,7 +399,7 @@ public final class DispatchOperations {
         run.project(),
         run.id(),
         run.unit(),
-        run.startedAt(),
+        DateTimeUtils.format(run.startedAt()),
         agent.guardrailsFor(run.lane().orElse(null)));
   }
 

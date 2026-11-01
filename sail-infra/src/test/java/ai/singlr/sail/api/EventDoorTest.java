@@ -436,7 +436,7 @@ class EventDoorTest {
     assertEquals(new Event.Publisher("ada", "member", "api"), landed.publisher());
     BusTesting.awaitDelivery(persisted);
     var row = new EventStore(db).forSpecAndType("mine", STOPPED).getFirst();
-    assertFalse(Instant.parse(row.timestamp()).isAfter(Instant.now().plusSeconds(1)));
+    assertFalse(row.timestamp().isAfter(Instant.now().plusSeconds(1)));
     assertEquals(
         Map.of("handle", "ada", "role", "member", "lane", "api"),
         YamlUtil.parseMap(row.publisher()));
@@ -449,7 +449,14 @@ class EventDoorTest {
     new EventStore(db)
         .insert(
             new EventStore.EventRow(
-                0, "2026-01-01T00:00:00Z", "spec_dispatched", "acme", "mine", "sail", "box", "{}"));
+                0,
+                Instant.parse("2026-01-01T00:00:00Z"),
+                "spec_dispatched",
+                "acme",
+                "mine",
+                "sail",
+                "box",
+                "{}"));
 
     var history = http("GET", "/v1/events?spec=mine", adaToken, "");
 
@@ -672,7 +679,7 @@ class EventDoorTest {
               .insert(
                   new EventStore.EventRow(
                       0,
-                      Instant.now().toString(),
+                      Instant.now(),
                       STOPPED,
                       "acme",
                       "stranded",
@@ -713,8 +720,8 @@ class EventDoorTest {
         null,
         0,
         null,
-        "",
-        "",
+        null,
+        null,
         null,
         List.of(),
         List.of());

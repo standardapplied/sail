@@ -39,9 +39,7 @@ public final class EventRetentionSweeper implements AutoCloseable {
 
   int sweep() {
     return events.pruneBefore(
-        DateTimeUtils.now().minus(retention).toString(),
-        Event.WellKnownTypes.TELEMETRY_TYPES,
-        BATCH_SIZE);
+        DateTimeUtils.now().minus(retention), Event.WellKnownTypes.TELEMETRY_TYPES, BATCH_SIZE);
   }
 
   void sweepQuietly() {

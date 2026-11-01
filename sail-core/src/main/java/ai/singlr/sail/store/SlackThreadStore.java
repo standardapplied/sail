@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import java.util.Optional;
 
 /**
@@ -28,7 +29,7 @@ public final class SlackThreadStore {
     db.execute(
         """
         INSERT INTO slack_threads (project, spec_id, channel, thread_ts, created_at)
-        VALUES (?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?)
         ON CONFLICT (project, spec_id) DO UPDATE
         SET channel = excluded.channel,
             thread_ts = excluded.thread_ts,
@@ -36,7 +37,8 @@ public final class SlackThreadStore {
         project,
         specId,
         channel,
-        threadTs);
+        threadTs,
+        DateTimeUtils.now());
   }
 
   /** Forgets the threads of an erased spec, in whichever project they were opened. */

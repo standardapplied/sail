@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.ssh.SshPublicKey;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -35,7 +36,7 @@ public final class FdeSshKeyStore {
       String fdeHandle,
       String publicKey,
       String comment,
-      String createdAt) {}
+      Instant createdAt) {}
 
   /** Registers {@code key} to {@code fdeId}. Throws if the fingerprint is already registered. */
   public void add(String fdeId, SshPublicKey key) {
@@ -46,7 +47,7 @@ public final class FdeSshKeyStore {
         fdeId,
         key.line(),
         key.comment(),
-        DateTimeUtils.now().toString());
+        DateTimeUtils.now());
   }
 
   public Optional<SshKeyInfo> findByFingerprint(String fingerprint) {
@@ -69,6 +70,6 @@ public final class FdeSshKeyStore {
 
   private static SshKeyInfo map(Sqlite.Row row) {
     return new SshKeyInfo(
-        row.text(0), row.text(1), row.text(2), row.text(3), row.text(4), row.text(5));
+        row.text(0), row.text(1), row.text(2), row.text(3), row.text(4), row.instant(5));
   }
 }

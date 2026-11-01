@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.auth;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.store.WebauthnCredentialStore.Credential;
 import java.nio.ByteBuffer;
@@ -98,13 +99,13 @@ public final class Passkeys {
 
   /** The label stored when enrollment skips the prompt: authenticator name plus enrollment date. */
   public static String defaultLabel(byte[] aaguid, Instant enrolledAt) {
-    return authenticatorName(aaguid) + " · " + enrolledAt.toString().substring(0, 10);
+    return authenticatorName(aaguid) + " · " + DateTimeUtils.format(enrolledAt).substring(0, 10);
   }
 
   /** The stored label, or the device-descriptive default for rows enrolled before labels. */
   public static String displayLabel(Credential credential) {
     return Strings.isBlank(credential.label())
-        ? defaultLabel(credential.aaguid(), Instant.parse(credential.createdAt()))
+        ? defaultLabel(credential.aaguid(), credential.createdAt())
         : credential.label();
   }
 }

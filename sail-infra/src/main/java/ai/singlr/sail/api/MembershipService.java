@@ -220,7 +220,7 @@ public final class MembershipService {
               harness.yamlName(),
               mode,
               LaunchAdmission.validateModel(model),
-              DateTimeUtils.now().toString());
+              DateTimeUtils.format(DateTimeUtils.now()));
     } catch (IllegalArgumentException e) {
       throw ApiException.of(ErrorCode.BAD_REQUEST, e);
     }

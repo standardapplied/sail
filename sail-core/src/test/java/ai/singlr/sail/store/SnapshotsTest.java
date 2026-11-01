@@ -7,10 +7,12 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -71,6 +73,22 @@ class SnapshotsTest {
   void stringListIsEmptyForAbsentOrNonList() {
     assertTrue(Snapshots.stringList(Map.of(), "k").isEmpty());
     assertTrue(Snapshots.stringList(Map.of("k", "notalist"), "k").isEmpty());
+  }
+
+  @Test
+  void anInstantIsAnIntegerMillisecondAndTextIsRefused() {
+    var at = Instant.parse("2026-10-20T19:09:51.123Z");
+    var snapshot = new HashMap<String, Object>();
+    snapshot.put("at", at.toEpochMilli());
+    snapshot.put("text", "2026-10-20T19:09:51.123Z");
+    snapshot.put("none", null);
+
+    assertEquals(at, Snapshots.instant(snapshot, "at"));
+    assertNull(Snapshots.instant(snapshot, "none"));
+    assertNull(Snapshots.instant(snapshot, "absent"));
+    var refused =
+        assertThrows(IllegalArgumentException.class, () -> Snapshots.instant(snapshot, "text"));
+    assertEquals("text must be an integer millisecond, not String", refused.getMessage());
   }
 
   @Test

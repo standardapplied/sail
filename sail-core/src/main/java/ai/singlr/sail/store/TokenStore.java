@@ -41,12 +41,12 @@ public final class TokenStore {
   public record TokenInfo(
       String name,
       String role,
-      String createdAt,
-      String lastUsedAt,
+      Instant createdAt,
+      Instant lastUsedAt,
       String fdeHandle,
-      String expiresAt) {}
+      Instant expiresAt) {}
 
-  public record CreatedToken(String name, String token, String role, String expiresAt) {}
+  public record CreatedToken(String name, String token, String role, Instant expiresAt) {}
 
   /** Creates the non-expiring, unowned token used only for break-glass server bootstrap. */
   public CreatedToken create(String name, String role) {
@@ -63,7 +63,7 @@ public final class TokenStore {
           "Invalid role: " + role + ". Must be one of " + ROLES + ".");
     }
     var token = generateToken();
-    var expiresAt = ttl == null ? null : DateTimeUtils.now().plus(ttl).toString();
+    var expiresAt = ttl == null ? null : DateTimeUtils.now().plus(ttl);
     db.execute(
         "INSERT INTO api_tokens (token_hash, name, role, fde_id, created_at, expires_at)"
             + " VALUES (?, ?, ?, ?, ?, ?)",
@@ -71,7 +71,7 @@ public final class TokenStore {
         name,
         role,
         fdeId,
-        DateTimeUtils.now().toString(),
+        DateTimeUtils.now(),
         expiresAt);
     return new CreatedToken(name, token, role, expiresAt);
   }
@@ -84,14 +84,12 @@ public final class TokenStore {
       return Optional.empty();
     }
     var expiresAt = result.get().expiresAt();
-    if (expiresAt != null && Instant.parse(expiresAt).isBefore(DateTimeUtils.now())) {
+    if (expiresAt != null && expiresAt.isBefore(DateTimeUtils.now())) {
       db.execute("DELETE FROM api_tokens WHERE token_hash = ?", hash);
       return Optional.empty();
     }
     db.execute(
-        "UPDATE api_tokens SET last_used_at = ? WHERE token_hash = ?",
-        DateTimeUtils.now().toString(),
-        hash);
+        "UPDATE api_tokens SET last_used_at = ? WHERE token_hash = ?", DateTimeUtils.now(), hash);
     return result;
   }
 
@@ -105,7 +103,7 @@ public final class TokenStore {
 
   private static TokenInfo map(Sqlite.Row row) {
     return new TokenInfo(
-        row.text(0), row.text(1), row.text(2), row.text(3), row.text(4), row.text(5));
+        row.text(0), row.text(1), row.instant(2), row.instant(3), row.text(4), row.instant(5));
   }
 
   public boolean revoke(String name) {

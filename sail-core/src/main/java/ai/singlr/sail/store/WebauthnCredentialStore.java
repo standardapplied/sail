@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.webauthn.RegisteredCredential;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
@@ -44,8 +45,8 @@ public final class WebauthnCredentialStore {
       boolean backupEligible,
       boolean backupState,
       String label,
-      String createdAt,
-      String lastUsedAt) {}
+      Instant createdAt,
+      Instant lastUsedAt) {}
 
   /** Persists a freshly registered credential for {@code fdeId} with an optional friendly label. */
   public void save(RegisteredCredential credential, String fdeId, String label) {
@@ -62,7 +63,7 @@ public final class WebauthnCredentialStore {
         credential.backupEligible() ? 1 : 0,
         credential.backupState() ? 1 : 0,
         label,
-        DateTimeUtils.now().toString());
+        DateTimeUtils.now());
   }
 
   public Optional<Credential> findByCredentialId(byte[] credentialId) {
@@ -90,7 +91,7 @@ public final class WebauthnCredentialStore {
     db.execute(
         "UPDATE webauthn_credentials SET sign_count = ?, last_used_at = ? WHERE credential_id = ?",
         signCount,
-        DateTimeUtils.now().toString(),
+        DateTimeUtils.now(),
         URL.encodeToString(credentialId));
   }
 
@@ -106,7 +107,7 @@ public final class WebauthnCredentialStore {
         row.integer(6) != 0,
         row.integer(7) != 0,
         row.text(8),
-        row.text(9),
-        row.text(10));
+        row.instant(9),
+        row.instant(10));
   }
 }

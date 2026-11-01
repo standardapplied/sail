@@ -200,11 +200,8 @@ class FdeCommandTest {
   }
 
   /** The line a pairing writes: its login ends when its token does, to the second, in UTC. */
-  private static String keyLine(SshPublicKey key, String handle, String expiresAt) {
-    var deadline =
-        expiresAt == null
-            ? ""
-            : ",expiry-time=\"" + SSHD_UTC.format(Instant.parse(expiresAt)) + "\"";
+  private static String keyLine(SshPublicKey key, String handle, Instant expiresAt) {
+    var deadline = expiresAt == null ? "" : ",expiry-time=\"" + SSHD_UTC.format(expiresAt) + "\"";
     return KEY_OPTIONS
         + deadline
         + " "
@@ -511,7 +508,7 @@ class FdeCommandTest {
         keyLine(key, "ada", token.expiresAt()),
         Files.readString(authorizedKeys()),
         "sshd refuses the code's key from the moment the box refuses its token");
-    var lifetime = Duration.between(Instant.now(), Instant.parse(token.expiresAt()));
+    var lifetime = Duration.between(Instant.now(), token.expiresAt());
     assertEquals(364, lifetime.toDays(), "a code lives a year unless the operator says otherwise");
     var pairing = inDb(db -> new FdePairingStore(db).find(ada.id())).orElseThrow();
     assertEquals(
@@ -693,7 +690,13 @@ class FdeCommandTest {
     return inDb(
         db -> {
           new FdeStore(db)
-              .replicate(handle, "Client", email, "member", "active", "2026-10-01T00:00:00Z");
+              .replicate(
+                  handle,
+                  "Client",
+                  email,
+                  "member",
+                  "active",
+                  Instant.parse("2026-10-01T00:00:00Z"));
           return new FdeStore(db).byHandle(handle).orElseThrow();
         });
   }
@@ -2433,7 +2436,7 @@ class FdeCommandTest {
         List.of(changed.displayName(), changed.email(), changed.role()));
     assertEquals(kept.id(), changed.id());
     assertEquals("viewer", tokens().getFirst().role());
-    var lifetime = Duration.between(Instant.now(), Instant.parse(tokens().getFirst().expiresAt()));
+    var lifetime = Duration.between(Instant.now(), tokens().getFirst().expiresAt());
     assertEquals(29, lifetime.toDays());
     assertEquals("a@y.org", decoded(printedCode()).get("email"));
   }
@@ -2524,7 +2527,7 @@ class FdeCommandTest {
         false,
         false,
         label,
-        "2026-07-06T10:15:30Z",
+        Instant.parse("2026-07-06T10:15:30Z"),
         null);
   }
 
@@ -2558,7 +2561,8 @@ class FdeCommandTest {
   @Test
   void everyCommandAnFdeVerbNamesIsWordedForTheOperator() {
     var sudo = OperatorCommand.SUDO;
-    var ada = new FdeStore.Fde("7", "ada", "Ada", "ada@example.com", "member", "active", "2026");
+    var ada =
+        new FdeStore.Fde("7", "ada", "Ada", "ada@example.com", "member", "active", Instant.EPOCH);
     String unknownProject;
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
@@ -2735,18 +2739,20 @@ class FdeCommandTest {
 
   @Test
   void enrollTicketJsonCarriesTicketFdeAndExpiry() {
-    var ticket = new EnrollmentTickets.Ticket("tkt_abc", "uday", "2026-07-07T10:15:30Z");
+    var ticket =
+        new EnrollmentTickets.Ticket("tkt_abc", "uday", Instant.parse("2026-07-07T10:15:30Z"));
     var json = YamlUtil.dumpJson(FdeCommand.Enroll.ticketJson(ticket, "https://sail.acme.dev"));
     var parsed = YamlUtil.parseMap(json);
     assertEquals("tkt_abc", parsed.get("ticket"));
     assertEquals("uday", parsed.get("fde"));
-    assertEquals("2026-07-07T10:15:30Z", parsed.get("expires_at"));
+    assertEquals("2026-07-07T10:15:30.000Z", parsed.get("expires_at"));
     assertEquals("https://sail.acme.dev/enroll?ticket=tkt_abc", parsed.get("enroll_url"));
   }
 
   @Test
   void enrollTicketJsonOmitsEnrollUrlWithoutAConfiguredOrigin() {
-    var ticket = new EnrollmentTickets.Ticket("tkt_abc", "uday", "2026-07-07T10:15:30Z");
+    var ticket =
+        new EnrollmentTickets.Ticket("tkt_abc", "uday", Instant.parse("2026-07-07T10:15:30Z"));
     var parsed = YamlUtil.parseMap(YamlUtil.dumpJson(FdeCommand.Enroll.ticketJson(ticket, null)));
     assertFalse(parsed.containsKey("enroll_url"));
   }

@@ -299,8 +299,8 @@ final class LiveRoom implements AutoCloseable {
                     "feat/test",
                     0,
                     HANDLE,
-                    "",
-                    "",
+                    null,
+                    null,
                     null,
                     List.of(),
                     List.of("api"))));

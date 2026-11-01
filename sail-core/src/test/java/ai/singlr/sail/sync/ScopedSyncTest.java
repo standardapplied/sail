@@ -32,6 +32,7 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncScope;
@@ -1049,7 +1050,7 @@ class ScopedSyncTest {
             "author", "nia",
             "body", "answered from alpha",
             "reply_to", asked.id(),
-            "created_at", "t");
+            "created_at", Snapshots.millis(DateTimeUtils.now()));
     var heads = count(main.db, "SELECT count(*) FROM change_heads");
 
     assertEquals(
@@ -1311,8 +1312,8 @@ class ScopedSyncTest {
         null,
         0,
         owner,
-        "",
-        "",
+        null,
+        null,
         owner,
         List.of(),
         List.of());
