@@ -295,19 +295,20 @@ class UpgradeE2EIT extends AbstractIncusIT {
 
   /**
    * The node takes its own upgrade — its binary is already the installed one, so that is its own
-   * migrate — then writes through the gateway, and main and the node hold the same specs.
+   * migrate — then writes through the gateway, and nothing conflicts on either box.
    */
   private void theNodeTakesItsOwnUpgradeAndSyncsThroughTheGateway() throws Exception {
     nodeOk("sail migrate");
     nodeOk(
         """
-        printf '# From the node\\n' > ~/node.md
-        sail spec create --id from-node --title "From the node" -p demo --body-file ~/node.md
+        printf 'from the node\\n' > ~/node.txt
+        sail project files add -p demo ~/node.txt --as node.txt
         sail sync
         """);
 
     assertEquals(List.of(), NativeFleet.jsonList(nodeOk("sail conflicts --json")));
-    assertEquals("1", query("SELECT count(*) FROM specs WHERE id = 'from-node'"));
+    assertEquals(List.of(), NativeFleet.jsonList(rootOk("sail conflicts --json")));
+    assertEquals("1", query("SELECT count(*) FROM project_files WHERE id = 'demo/node.txt'"));
     assertEquals(query(SPECS), nodeQuery(SPECS));
   }
 
