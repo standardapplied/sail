@@ -25,6 +25,7 @@ import ai.singlr.sail.engine.ContainerAgentProcess;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.LiveStream;
+import ai.singlr.sail.engine.PortalSkill;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.SailSkills;
 import ai.singlr.sail.engine.SharedProjectFiles;
@@ -270,7 +271,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                     files, stateDir.resolve("projects"), project, FileLimits.defaults()));
     for (var harness : Harnesses.all()) {
       var report = ProjectSkillInstaller.installProject(shell, CONTAINER, harness, skills);
-      assertEquals(List.of("e2e", SpecSkillGenerator.NAME), report.installed());
+      assertEquals(List.of("e2e", PortalSkill.NAME, SpecSkillGenerator.NAME), report.installed());
       assertEquals(
           "---\nname: e2e\ndescription: Runs the e2e suite.\n---\nRun the e2e suite.\n",
           exec(CONTAINER, List.of("cat", "/home/dev/" + harness.skillFolder("e2e") + "/SKILL.md"))
