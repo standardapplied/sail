@@ -29,17 +29,26 @@ final class ProjectDefinitionOperations {
     this.projects = Objects.requireNonNull(projects, "projects");
   }
 
-  /** Project {@code project}'s definition and each section's tag, or not found. */
+  /**
+   * Project {@code project}'s definition and each section's tag, or not found. Only a credential
+   * that may write the project reads it: a definition holds its services' passwords and its
+   * notification hooks, which a read-only credential is never handed.
+   */
   ProjectDefinitionResponse definition(String project) {
-    return response(held(project));
+    var row = held(project);
+    if (!Actor.current().canWrite()) {
+      throw new ApiException(
+          ErrorCode.READ_ONLY_CREDENTIAL,
+          "Your credential is read-only and cannot read a project's definition, which holds its"
+              + " services' secrets.",
+          Remedy.of("Ask an admin for a member or admin credential."));
+    }
+    return response(row);
   }
 
   /** Creates the project {@code document}, a definition document, names; refused when it exists. */
   ProjectDefinitionResponse create(Map<String, Object> document) {
     var definition = ProjectDefinitionJson.read(YamlUtil.dumpJson(document));
-    if (!Actor.reader().scope().admits(definition.name())) {
-      throw ProjectReader.absent(definition.name());
-    }
     try {
       return response(projects.create(definition));
     } catch (ProjectStore.NameTaken taken) {
@@ -88,12 +97,18 @@ final class ProjectDefinitionOperations {
         row.name(), row.document(), tags, row.updatedBy(), DateTimeUtils.format(row.updatedAt()));
   }
 
-  /** The tag an {@code If-Match} names, without the quotes HTTP wraps it in; null for none. */
+  /**
+   * The tag an {@code If-Match} names, without the quotes HTTP wraps it in or the weak mark a proxy
+   * adds; null for none or {@code *}, which write over whatever the section holds.
+   */
   private static String unquoted(String ifMatch) {
     if (ifMatch == null || ifMatch.isBlank() || "*".equals(ifMatch.strip())) {
       return null;
     }
     var tag = ifMatch.strip();
+    if (tag.startsWith("W/")) {
+      tag = tag.substring(2);
+    }
     return tag.length() >= 2 && tag.startsWith("\"") && tag.endsWith("\"")
         ? tag.substring(1, tag.length() - 1)
         : tag;

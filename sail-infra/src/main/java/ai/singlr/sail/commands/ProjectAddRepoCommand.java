@@ -21,7 +21,6 @@ import ai.singlr.sail.engine.ShellExecutor;
 import java.io.PrintStream;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Objects;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -80,7 +79,7 @@ public final class ProjectAddRepoCommand implements Runnable {
     ProjectDefinition.Repo repo;
 
     if (url != null) {
-      var path = repoPath != null ? repoPath : guessRepoPath(url);
+      var path = repoPath != null ? repoPath : ProjectDefinition.Repo.pathOf(url);
       repo = new ProjectDefinition.Repo(url, path, branch);
     } else {
       if (!json) {
@@ -129,44 +128,10 @@ public final class ProjectAddRepoCommand implements Runnable {
   }
 
   private ProjectDefinition.Repo collectRepoInteractively(PrintStream out, Ansi ansi) {
-    var repoUrl = promptRequired(out, ansi, "Repo URL");
-    var pathDefault = guessRepoPath(repoUrl);
-    var path = promptWithDefault(out, ansi, "Local path", pathDefault);
-    var branchInput = promptWithDefault(out, ansi, "Branch (blank for default)", "");
+    var repoUrl = ConsoleHelper.promptRequired(out, ansi, "Repo URL");
+    var pathDefault = ProjectDefinition.Repo.pathOf(repoUrl);
+    var path = ConsoleHelper.promptWithDefault(out, ansi, "Local path", pathDefault);
+    var branchInput = ConsoleHelper.promptWithDefault(out, ansi, "Branch (blank for default)", "");
     return new ProjectDefinition.Repo(repoUrl, path, branchInput.isEmpty() ? null : branchInput);
-  }
-
-  private static String guessRepoPath(String url) {
-    var lastSlash = url.lastIndexOf('/');
-    if (lastSlash < 0) return url;
-    var repoName = url.substring(lastSlash + 1);
-    if (repoName.endsWith(".git")) repoName = repoName.substring(0, repoName.length() - 4);
-    return repoName;
-  }
-
-  private static String promptWithDefault(PrintStream out, Ansi ansi, String label, String def) {
-    if (!Strings.isEmpty(def)) {
-      out.print(ansi.string("  @|bold " + label + "|@ @|faint [" + def + "]|@: "));
-    } else {
-      out.print(ansi.string("  @|bold " + label + "|@: "));
-    }
-    out.flush();
-    var line = ConsoleHelper.readLine();
-    if (Strings.isBlank(line)) {
-      return Objects.requireNonNullElse(def, "");
-    }
-    return line.strip();
-  }
-
-  private static String promptRequired(PrintStream out, Ansi ansi, String label) {
-    while (true) {
-      out.print(ansi.string("  @|bold " + label + "|@: "));
-      out.flush();
-      var line = ConsoleHelper.readLine();
-      if (Strings.isNotBlank(line)) {
-        return line.strip();
-      }
-      out.println(ansi.string("    @|yellow Required field. Please enter a value.|@"));
-    }
   }
 }

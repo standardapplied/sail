@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.TestDefinitions;
@@ -82,7 +84,7 @@ class ProjectEditCommandTest {
   }
 
   @Test
-  void theEditorsSaveIsTheNewDefinitionAndItsScratchFileIsGone() throws Exception {
+  void theEditorsSaveIsTheDraftAndItsScratchFileHoldsItUntilItIsSaved() throws Exception {
     var opened = new ArrayList<Path>();
 
     var edited =
@@ -96,8 +98,11 @@ class ProjectEditCommandTest {
             "acme",
             "name: acme\n");
 
-    assertEquals("name: acme\ndescription: edited\n", edited);
-    assertFalse(Files.exists(opened.getFirst()));
+    assertEquals(
+        new ProjectEditCommand.Draft(opened.getFirst(), "name: acme\ndescription: edited\n"),
+        edited);
+    assertEquals("name: acme\ndescription: edited\n", Files.readString(opened.getFirst()));
+    Files.delete(opened.getFirst());
   }
 
   @Test
@@ -147,5 +152,52 @@ class ProjectEditCommandTest {
     assertEquals("debian/12", mutations.catalog().read("acme").orElseThrow().image());
     assertEquals("Storefront", mutations.catalog().read("acme").orElseThrow().description());
     assertEquals(new CommandRun(0, "  No changes.\n", ""), unchanged);
+  }
+
+  @Test
+  void aRefusedEditKeepsWhatWasTypedAndSaysWhere(@TempDir Path dir) throws Exception {
+    var mutations =
+        new ProjectMutations(
+            new ProjectCatalog(dir.resolve("sail.db")), () -> Actor.cliOperator("uday"));
+    mutations.catalog().create(TestDefinitions.named("acme"), Actor.cliOperator("uday"));
+    var opened = new ArrayList<Path>();
+    Editor broken =
+        file -> {
+          opened.add(file);
+          Files.writeString(file, "{\"name\": \"acme\", \"resources\": {\"cpu\": \"four\"}}");
+          return 0;
+        };
+
+    var run = CommandRun.of(new ProjectEditCommand(broken, mutations), "acme");
+
+    assertEquals(1, run.exit());
+    assertEquals(
+        "  ✗ The edited definition is not valid: resources.cpu must be a whole number.\n"
+            + "  Your edit is kept at "
+            + opened.getFirst()
+            + ".\n",
+        run.err());
+    assertEquals(
+        "{\"name\": \"acme\", \"resources\": {\"cpu\": \"four\"}}",
+        Files.readString(opened.getFirst()));
+    Files.delete(opened.getFirst());
+  }
+
+  @Test
+  void aRefusalKeepsItsOwnFixAndAddsWhereTheEditIsKept(@TempDir Path dir) {
+    var stale =
+        ProjectEditCommand.kept(
+            new IllegalStateException("The image section changed."), dir.resolve("draft.json"));
+    var withFix =
+        ProjectEditCommand.kept(
+            Remedied.argument("Bad.", Remedy.of("Fix it.")), dir.resolve("draft.json"));
+
+    assertEquals(
+        "The image section changed. Your edit is kept at " + dir.resolve("draft.json") + ".",
+        stale.getMessage());
+    assertTrue(withFix instanceof IllegalArgumentException);
+    assertEquals(
+        "Bad. Fix it. Your edit is kept at " + dir.resolve("draft.json") + ".",
+        withFix.getMessage());
   }
 }

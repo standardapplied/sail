@@ -511,6 +511,7 @@ public final class ProjectServer {
   }
 
   private static Map<String, ProjectDefinition.Process> processes(ProjectDefinition config) {
+    config.requirePortsClaimedOnce();
     return config.processes() == null ? Map.of() : config.processes();
   }
 

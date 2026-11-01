@@ -481,7 +481,7 @@ against exactly that state and main's edits the offer merged in stay. The record
 when main's answer is to that offer: main answers the latest version it took from the box, which
 is an earlier offer's when the recorded one never reached it.
 
-### The wire: sync protocol 5
+### The wire: sync protocol 7
 
 A session opens with `hello` (protocol, build, box id) and is `welcome`d or `refuse`d once: a node
 on another protocol is refused, told to upgrade itself when its protocol is older and to upgrade

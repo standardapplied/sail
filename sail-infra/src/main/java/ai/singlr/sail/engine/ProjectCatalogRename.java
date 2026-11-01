@@ -34,7 +34,7 @@ public final class ProjectCatalogRename {
           if (projects.findByName(to).isPresent()) {
             throw new IllegalStateException("A project named '" + to + "' already exists.");
           }
-          projects.rename(from, to, ProjectRenamer.withName(existing.definition(), to));
+          projects.rename(from, to, existing.definition().withName(to));
           new SpecStore(db).reproject(from, to);
           new FileStore(db).reproject(from, to);
           return new HostCatalog.Renamed(from, to, existing.document());

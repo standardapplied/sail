@@ -63,9 +63,7 @@ public final class GitCredentials {
     return extractHttpsHosts(List.of(repo)).contains("github.com");
   }
 
-  /**
-   * Extracts unique HTTPS hostnames from repo URLs. Only includes hosts from repos that use HTTPS.
-   */
+  /** The unique hosts of {@code repos}, each an https URL a definition holds. */
   public static List<String> extractHttpsHosts(List<ProjectDefinition.Repo> repos) {
     var hosts = new LinkedHashSet<String>();
     if (repos != null) {

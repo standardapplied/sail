@@ -231,7 +231,6 @@ class ProjectStoreTest {
         "The image section of project 'acme' changed since it was read. Read it again, then write"
             + " it.",
         stale.getMessage());
-    assertEquals("ubuntu/24.04", stale.current().definition().image());
     assertEquals("ubuntu/24.04", store.findByName("acme").orElseThrow().definition().image());
     assertEquals(
         "debian/12",
@@ -240,6 +239,24 @@ class ProjectStoreTest {
     assertNull(
         store.writeSection("acme", Section.IMAGE, null, null).definition().image(),
         "null unsets the section");
+  }
+
+  @Test
+  void aSectionWrittenAsItAlreadyIsRecordsNothing() {
+    store.upsert(TestDefinitions.yaml(RESOURCED));
+    var held = store.findByName("acme").orElseThrow();
+    var rev = store.latestRev("acme");
+
+    var written =
+        store.writeSection(
+            "acme",
+            Section.RESOURCES,
+            ProjectDefinitionJson.section(held.definition(), Section.RESOURCES),
+            ProjectStore.tagOf(
+                ProjectDefinitionJson.section(held.definition(), Section.RESOURCES)));
+
+    assertEquals(held, written);
+    assertEquals(rev, store.latestRev("acme"));
   }
 
   @Test

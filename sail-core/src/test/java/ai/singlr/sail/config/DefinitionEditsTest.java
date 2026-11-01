@@ -52,9 +52,27 @@ class DefinitionEditsTest {
     var redis = new ProjectDefinition.Service("redis:7", List.of(6379), null, null, null);
     var updated = DefinitionEdits.addService(parse(BASE_YAML), "redis", redis);
 
-    assertEquals(2, updated.services().size());
-    assertNotNull(updated.services().get("postgres"));
+    assertEquals(List.of("postgres", "redis"), List.copyOf(updated.services().keySet()));
     assertEquals("redis:7", updated.services().get("redis").image());
+  }
+
+  @Test
+  void servicesKeepTheirOrderAcrossAddsAndRemovesSoTheirJsonAndTagNeverShuffle() {
+    var config = parse(BASE_YAML);
+    for (var name : List.of("redis", "kafka", "minio", "mailpit", "zookeeper", "elastic")) {
+      config =
+          DefinitionEdits.addService(
+              config, name, new ProjectDefinition.Service(name + ":1", null, null, null, null));
+    }
+    config = DefinitionEdits.removeService(config, "minio");
+
+    assertEquals(
+        List.of("postgres", "redis", "kafka", "mailpit", "zookeeper", "elastic"),
+        List.copyOf(config.services().keySet()));
+    assertEquals(
+        ProjectDefinitionJson.section(config, ProjectDefinition.Section.SERVICES),
+        ProjectDefinitionJson.section(
+            ProjectDefinitionJson.validated(config), ProjectDefinition.Section.SERVICES));
   }
 
   @Test

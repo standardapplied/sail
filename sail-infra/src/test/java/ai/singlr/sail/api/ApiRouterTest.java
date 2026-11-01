@@ -1058,7 +1058,7 @@ class ApiRouterTest {
       assertEquals(201, created.statusCode());
       assertEquals("acme", ((Map<?, ?>) YamlUtil.parseMap(created.body())).get("name"));
       assertEquals(405, replaced.statusCode());
-      assertTrue(replaced.body().contains("method_not_allowed"));
+      assertEquals("method_not_allowed", errorOf(replaced).get("code"));
     }
   }
 
@@ -1101,10 +1101,16 @@ class ApiRouterTest {
               Arrays.asList("acme", "pipeline", null, null)),
           written);
       assertEquals(422, valueless.statusCode(), valueless.body());
-      assertTrue(valueless.body().contains("null unsets it"), valueless.body());
+      assertEquals(
+          "The body names the section's new value as {\"value\": ...}; null unsets it.",
+          errorOf(valueless).get("message"));
       assertEquals(405, posted.statusCode());
       assertEquals(404, deeper.statusCode());
     }
+  }
+
+  private static Map<?, ?> errorOf(HttpResponse<String> response) {
+    return (Map<?, ?>) YamlUtil.parseMap(response.body()).get("error");
   }
 
   private static Operations withStack() {

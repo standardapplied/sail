@@ -44,12 +44,15 @@ final class Fields {
   }
 
   static Integer integer(Map<String, Object> map, String key, String field) {
-    return switch (map.get(key)) {
-      case null -> null;
+    return map.get(key) == null ? null : wholeNumber(map.get(key), field);
+  }
+
+  private static int wholeNumber(Object value, String field) {
+    return switch (value) {
       case Integer number -> number;
       case Long number when number >= Integer.MIN_VALUE && number <= Integer.MAX_VALUE ->
           number.intValue();
-      default -> throw wrong(field, "a whole number");
+      case null, default -> throw wrong(field, "a whole number");
     };
   }
 
@@ -116,7 +119,7 @@ final class Fields {
     }
     var numbers = new ArrayList<Integer>();
     for (var i = 0; i < list.size(); i++) {
-      numbers.add(integer(Map.of("value", list.get(i)), "value", field + "[" + i + "]"));
+      numbers.add(wholeNumber(list.get(i), field + "[" + i + "]"));
     }
     return List.copyOf(numbers);
   }

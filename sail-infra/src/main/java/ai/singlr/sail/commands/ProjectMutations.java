@@ -87,6 +87,24 @@ final class ProjectMutations {
     catalog.writeSection(read.name(), section, read, edited, actor);
   }
 
+  /**
+   * {@code config} when it sets resources, which a container is made with; else a refusal naming
+   * the line that sets them.
+   */
+  static ProjectDefinition requireResources(ProjectDefinition config, OperatorCommand operator) {
+    if (config.resources() != null) {
+      return config;
+    }
+    throw new IllegalStateException(
+        "Project '"
+            + config.name()
+            + "' sets no resources, so its container cannot be made. Set them with: "
+            + operator.sail(
+                "project config set "
+                    + config.name()
+                    + " resources '{\"cpu\": 2, \"memory\": \"8GB\", \"disk\": \"50GB\"}'"));
+  }
+
   static IllegalStateException notFound(String name, OperatorCommand operator) {
     return new IllegalStateException(
         "No project '"

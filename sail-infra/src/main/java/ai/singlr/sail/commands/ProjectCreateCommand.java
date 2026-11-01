@@ -209,15 +209,17 @@ public final class ProjectCreateCommand implements Runnable {
         description,
         new ProjectDefinition.Resources(
             cpu == null ? 2 : cpu,
-            memory == null ? "8GB" : normalizeSize(memory),
-            disk == null ? "50GB" : normalizeSize(disk)),
+            memory == null ? "8GB" : ProjectDefinition.normalizeSize(memory),
+            disk == null ? "50GB" : ProjectDefinition.normalizeSize(disk)),
         image == null ? DEFAULT_IMAGE : image,
         null,
         runtimes,
         repos == null
             ? null
             : repos.stream()
-                .map(url -> new ProjectDefinition.Repo(url, guessRepoPath(url), null))
+                .map(
+                    url ->
+                        new ProjectDefinition.Repo(url, ProjectDefinition.Repo.pathOf(url), null))
                 .toList(),
         services == null ? null : presets(services),
         null,
@@ -311,8 +313,11 @@ public final class ProjectCreateCommand implements Runnable {
     out.println();
     out.println(ansi.string("  @|bold Resources|@"));
     var cpu = promptInt(out, ansi, "CPU cores", 2);
-    var memory = normalizeSize(ConsoleHelper.promptWithDefault(out, ansi, "Memory", "8GB"));
-    var disk = normalizeSize(ConsoleHelper.promptWithDefault(out, ansi, "Disk", "50GB"));
+    var memory =
+        ProjectDefinition.normalizeSize(
+            ConsoleHelper.promptWithDefault(out, ansi, "Memory", "8GB"));
+    var disk =
+        ProjectDefinition.normalizeSize(ConsoleHelper.promptWithDefault(out, ansi, "Disk", "50GB"));
     var resources = new ProjectDefinition.Resources(cpu, memory, disk);
 
     out.println();
@@ -340,7 +345,7 @@ public final class ProjectCreateCommand implements Runnable {
       repos = new ArrayList<>();
       do {
         var url = ConsoleHelper.promptRequired(out, ansi, "Repo URL");
-        var pathDefault = guessRepoPath(url);
+        var pathDefault = ProjectDefinition.Repo.pathOf(url);
         var path = ConsoleHelper.promptWithDefault(out, ansi, "Local path", pathDefault);
         var branch = ConsoleHelper.promptWithDefault(out, ansi, "Branch (blank for default)", "");
         repos.add(new ProjectDefinition.Repo(url, path, branch.isEmpty() ? null : branch));
@@ -360,7 +365,8 @@ public final class ProjectCreateCommand implements Runnable {
       if (ConsoleHelper.confirmNo(label)) {
         var version =
             ConsoleHelper.promptWithDefault(out, ansi, "  Version", preset.defaultVersion());
-        var service = customizePresetEnv(preset.withVersion(version), out, ansi);
+        var service =
+            ProjectAddServiceCommand.customizePresetEnv(preset.withVersion(version), out, ansi);
         services.put(preset.key(), service);
       }
     }
@@ -416,36 +422,6 @@ public final class ProjectCreateCommand implements Runnable {
     return Map.of("app", new ProjectDefinition.Process(command, workdir, port, Map.of()));
   }
 
-  private static ProjectDefinition.Service customizePresetEnv(
-      ProjectDefinition.Service service, PrintStream out, Ansi ansi) {
-    var defaultEnv = service.environment();
-    var env = new LinkedHashMap<String, String>();
-    if (defaultEnv != null && !defaultEnv.isEmpty()) {
-      for (var entry : defaultEnv.entrySet()) {
-        var value =
-            ConsoleHelper.promptWithDefault(out, ansi, "  " + entry.getKey(), entry.getValue());
-        if (!value.isEmpty()) {
-          env.put(entry.getKey(), value);
-        }
-      }
-    }
-    if (ConsoleHelper.confirmNo("Add environment variables?")) {
-      do {
-        var kv = ConsoleHelper.promptRequired(out, ansi, "Environment variable as KEY=VALUE");
-        var eqIdx = kv.indexOf('=');
-        if (eqIdx > 0) {
-          env.put(kv.substring(0, eqIdx), kv.substring(eqIdx + 1));
-        }
-      } while (ConsoleHelper.confirmNo("Add another env var?"));
-    }
-    return new ProjectDefinition.Service(
-        service.image(),
-        service.ports(),
-        env.isEmpty() ? null : env,
-        service.command(),
-        service.volumes());
-  }
-
   private static int promptInt(PrintStream out, Ansi ansi, String label, int def) {
     var raw = ConsoleHelper.promptWithDefault(out, ansi, label, String.valueOf(def));
     try {
@@ -453,18 +429,6 @@ public final class ProjectCreateCommand implements Runnable {
     } catch (NumberFormatException e) {
       return def;
     }
-  }
-
-  /**
-   * Normalizes a size value: bare numbers like "4" become "4GB", values with units like "4GB" or "4
-   * GB" are normalized to remove spaces. Handles common suffixes (GB, MB, TB, GiB, MiB, TiB).
-   */
-  private static String normalizeSize(String value) {
-    var trimmed = value.strip();
-    if (trimmed.matches("^\\d+$")) {
-      return trimmed + "GB";
-    }
-    return trimmed.replaceAll("\\s+", "");
   }
 
   private static String sanitizeProjectName(String dirName) {
@@ -475,14 +439,6 @@ public final class ProjectCreateCommand implements Runnable {
             .replaceAll("-+", "-")
             .replaceAll("^-|-$", "");
     return sanitized.isEmpty() ? "my-project" : sanitized;
-  }
-
-  private static String guessRepoPath(String url) {
-    var lastSlash = url.lastIndexOf('/');
-    if (lastSlash < 0) return url;
-    var name = url.substring(lastSlash + 1);
-    if (name.endsWith(".git")) name = name.substring(0, name.length() - 4);
-    return name;
   }
 
   /**

@@ -52,8 +52,8 @@ public final class ProjectConfigShowCommand implements Runnable {
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
     var info = mgr.queryInfo(name);
-    var agentSession = loadAgentSession(shell, name, info.state(), operator);
-    var specSummary = loadSpecSummary(shell, config, info.state(), operator);
+    var agentSession = loadAgentSession(name, info.state());
+    var specSummary = loadSpecSummary(config, info.state());
 
     if (json) {
       printJson(config, info, agentSession, specSummary);
@@ -102,8 +102,7 @@ public final class ProjectConfigShowCommand implements Runnable {
   }
 
   private static AgentSession.SessionInfo loadAgentSession(
-      ShellExecutor shell, String containerName, ContainerState state, OperatorCommand operator)
-      throws Exception {
+      String containerName, ContainerState state) throws Exception {
     if (!(state instanceof ContainerState.Running)) {
       return null;
     }
@@ -112,8 +111,7 @@ public final class ProjectConfigShowCommand implements Runnable {
     }
   }
 
-  private SpecSnapshot loadSpecSummary(
-      ShellExecutor shell, ProjectDefinition config, ContainerState state, OperatorCommand operator)
+  private SpecSnapshot loadSpecSummary(ProjectDefinition config, ContainerState state)
       throws Exception {
     if (!(state instanceof ContainerState.Running)) {
       return SpecSnapshot.unavailable("project_stopped");

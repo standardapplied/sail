@@ -9,7 +9,6 @@ import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
-import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -151,22 +150,6 @@ public final class ProjectRenamer {
     var dst = projectsDir.resolve(to);
     Files.createDirectories(dst.getParent());
     Files.move(src, dst);
-  }
-
-  /** {@code definition} under the name {@code name}. */
-  static ProjectDefinition withName(ProjectDefinition definition, String name) {
-    return new ProjectDefinition(
-        name,
-        definition.description(),
-        definition.resources(),
-        definition.image(),
-        definition.packages(),
-        definition.runtimes(),
-        definition.repos(),
-        definition.services(),
-        definition.processes(),
-        definition.agent(),
-        definition.pipeline());
   }
 
   private static void attempt(Compensation step, List<String> warnings, String what) {

@@ -6,6 +6,7 @@
 package ai.singlr.sail.config;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,7 +20,10 @@ public final class DefinitionEdits {
 
   private DefinitionEdits() {}
 
-  /** Returns a copy of {@code config} with the service added. Throws if the name already exists. */
+  /**
+   * Returns a copy of {@code config} with the service added after those it holds, in their order.
+   * Throws if the name already exists.
+   */
   public static ProjectDefinition addService(
       ProjectDefinition config, String serviceName, ProjectDefinition.Service service) {
     var services =
@@ -30,7 +34,7 @@ public final class DefinitionEdits {
       throw new IllegalStateException("Service '" + serviceName + "' already exists.");
     }
     services.put(serviceName, service);
-    return config.withServices(Map.copyOf(services));
+    return config.withServices(Collections.unmodifiableMap(services));
   }
 
   /** Returns a copy of {@code config} with the service removed. Throws if it does not exist. */
@@ -43,7 +47,7 @@ public final class DefinitionEdits {
       throw new IllegalStateException("Service '" + serviceName + "' not found.");
     }
     services.remove(serviceName);
-    return config.withServices(services.isEmpty() ? null : Map.copyOf(services));
+    return config.withServices(services.isEmpty() ? null : Collections.unmodifiableMap(services));
   }
 
   /** Returns a copy of {@code config} with the repo added. Throws if its path already exists. */

@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.ProjectDefinitionJson;
@@ -14,7 +15,9 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -65,9 +68,15 @@ public final class ProjectEditCommand implements Runnable {
     var actor = mutations.writer(name, false);
     var current = mutations.current(name, operator);
     var seed = seed(current, only);
-    var text = edit(editor, name, seed);
-    var edited = text.equals(seed) ? current : edited(name, current, only, text);
-    var changed = mutations.catalog().writeChanged(current, edited, actor);
+    var draft = edit(editor, name, seed);
+    List<Section> changed;
+    try {
+      var edited = draft.text().equals(seed) ? current : edited(name, current, only, draft.text());
+      changed = mutations.catalog().writeChanged(current, edited, actor);
+    } catch (RuntimeException refused) {
+      throw kept(refused, draft.file());
+    }
+    Files.deleteIfExists(draft.file());
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();
@@ -123,8 +132,14 @@ public final class ProjectEditCommand implements Runnable {
     return edited;
   }
 
-  /** {@code seed} as the engineer left it in {@code editor}; the scratch file never outlives it. */
-  static String edit(Editor editor, String name, String seed)
+  /** What the engineer left in the editor, and the scratch file it is in until it is saved. */
+  record Draft(Path file, String text) {}
+
+  /**
+   * {@code seed} as the engineer left it in {@code editor}. The scratch file stays until the edit
+   * is saved, so a refused edit is never lost; an editor that fails takes it with it.
+   */
+  static Draft edit(Editor editor, String name, String seed)
       throws IOException, InterruptedException {
     var tmp = Files.createTempFile("sail-project-" + name + "-", ".json");
     try {
@@ -133,9 +148,20 @@ public final class ProjectEditCommand implements Runnable {
       if (exit != 0) {
         throw new IllegalStateException("Editor exited with status " + exit + "; no changes made.");
       }
-      return Files.readString(tmp);
-    } finally {
+      return new Draft(tmp, Files.readString(tmp));
+    } catch (IOException | InterruptedException | RuntimeException failed) {
       Files.deleteIfExists(tmp);
+      throw failed;
     }
+  }
+
+  /** {@code refused}, saying where the edit it refused is kept, so nothing typed is lost. */
+  static RuntimeException kept(RuntimeException refused, Path file) {
+    var note = "Your edit is kept at " + file + ".";
+    var remedy = Remedied.remedyOf(refused);
+    var fix = remedy.isEmpty() ? Remedy.of(note) : remedy.then(" " + note);
+    return refused instanceof IllegalArgumentException
+        ? Remedied.argument(Remedied.reasonOf(refused), fix)
+        : Remedied.state(Remedied.reasonOf(refused), fix, refused);
   }
 }

@@ -8,9 +8,12 @@ package ai.singlr.sail.sync;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinition.Section;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -185,6 +188,77 @@ class ProjectSyncTest {
     resolveTakingMains(other, "project", "zenith");
 
     assertConverged();
+  }
+
+  @Test
+  void editsToDifferentSectionsOfOneProjectMergeOnEveryBox() {
+    node.projects.upsert(TestDefinitions.described("zenith", "v1"));
+    sync(node);
+    sync(other);
+
+    write(node, "zenith", Section.IMAGE, "\"debian/12\"");
+    write(
+        other,
+        "zenith",
+        Section.RESOURCES,
+        "{\"cpu\": 4, \"memory\": \"16GB\", \"disk\": \"80GB\"}");
+    sync(node);
+    sync(other);
+    sync(node);
+
+    for (var box : List.of(main, node, other)) {
+      var zenith = definitionOn(box, "zenith");
+      assertEquals("debian/12", zenith.image(), box.id);
+      assertEquals(new ProjectDefinition.Resources(4, "16GB", "80GB"), zenith.resources(), box.id);
+      assertEquals("v1", zenith.description(), box.id);
+      assertTrue(box.conflicts.pending().isEmpty(), box.id);
+    }
+    assertConverged();
+  }
+
+  @Test
+  void aMergeOfSectionsThatClashOnAPortStillReplicatesAndIsRefusedOnlyWhereItIsServed() {
+    node.projects.upsert(TestDefinitions.described("zenith", "v1"));
+    sync(node);
+    sync(other);
+
+    write(
+        node,
+        "zenith",
+        Section.SERVICES,
+        "{\"pg\": {\"image\": \"postgres:16\", \"ports\": [3000]}}");
+    write(
+        other,
+        "zenith",
+        Section.PROCESSES,
+        "{\"web\": {\"command\": \"npm run dev\", \"port\": 3000}}");
+    sync(node);
+    sync(other);
+    sync(node);
+
+    for (var box : List.of(main, node, other)) {
+      var zenith = definitionOn(box, "zenith");
+      assertEquals(3000, zenith.processes().get("web").port(), box.id);
+      assertEquals(List.of(3000), zenith.services().get("pg").ports(), box.id);
+      assertTrue(box.conflicts.pending().isEmpty(), box.id);
+    }
+    assertEquals(
+        "Port 3000 is claimed by both service 'pg' and process 'web'. Give one of them another"
+            + " port.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> definitionOn(main, "zenith").requirePortsClaimedOnce())
+            .getMessage());
+    assertConverged();
+  }
+
+  private static void write(Box box, String project, Section section, String json) {
+    var held = box.projects.findByName(project).orElseThrow();
+    box.projects.writeSection(
+        project,
+        section,
+        json,
+        ProjectStore.tagOf(ProjectDefinitionJson.section(held.definition(), section)));
   }
 
   @Test

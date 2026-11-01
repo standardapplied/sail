@@ -11,15 +11,16 @@ import java.util.Map;
 
 /**
  * The one codec of a {@link ProjectDefinition}: its JSON document, and each of its sections as the
- * JSON value it holds. Every definition this reads is checked whole, a section's own invariants and
- * those across sections (a port claimed once), so whatever a door writes is a definition the
- * catalog can hold.
+ * JSON value it holds. A definition read is held to each section's own rules; one written ({@link
+ * #validated}, {@link #withSection}) is held to the rules across sections too (a port claimed
+ * once), so a door writes only what every box can serve, while a sync merge of sections each sound
+ * alone is still read.
  */
 public final class ProjectDefinitionJson {
 
   private ProjectDefinitionJson() {}
 
-  /** The definition {@code document} holds, checked whole. */
+  /** The definition {@code document} holds, each section checked against its own rules. */
   public static ProjectDefinition read(String document) {
     return ProjectDefinition.fromMap(parse(document, "A project definition"));
   }
@@ -29,9 +30,12 @@ public final class ProjectDefinitionJson {
     return YamlUtil.dumpJson(definition.toMap());
   }
 
-  /** {@code definition} as it is once written and read back: checked whole, refused if not. */
+  /**
+   * {@code definition} as it is once written and read back: checked whole, its sections' rules and
+   * those across sections, refused if not. What every local write holds a definition to.
+   */
   public static ProjectDefinition validated(ProjectDefinition definition) {
-    return ProjectDefinition.fromMap(definition.toMap());
+    return ProjectDefinition.fromMap(definition.toMap()).requirePortsClaimedOnce();
   }
 
   /** The JSON value {@code definition} holds in {@code section}, {@code null} when unset. */
@@ -79,14 +83,27 @@ public final class ProjectDefinitionJson {
     } else {
       map.put(section.key(), value);
     }
-    return ProjectDefinition.fromMap(map);
+    return ProjectDefinition.fromMap(map).requirePortsClaimedOnce();
   }
 
+  /**
+   * The one JSON value {@code json} holds, read inside a document of its own key: empty text is
+   * refused rather than read as null, and so is anything the value's own key would not hold alone,
+   * a second key smuggled after it included.
+   */
   private static Object parseValue(String json, String key) {
     if (json == null) {
       return null;
     }
-    var wrapped = parse("{\"value\": " + json + "}", "The " + key + " section");
+    if (json.isBlank()) {
+      throw new IllegalArgumentException(
+          "The " + key + " section's value is empty. Write null to unset the section.");
+    }
+    var wrapped = parse("{\"value\": " + json + "\n}", "The " + key + " section");
+    if (wrapped.size() != 1 || !wrapped.containsKey("value")) {
+      throw new IllegalArgumentException(
+          "The " + key + " section's value is not one JSON value: " + json.strip());
+    }
     return wrapped.get("value");
   }
 

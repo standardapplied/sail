@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -278,6 +279,18 @@ class ProjectDefinitionTest {
   }
 
   @Test
+  void aJdkVersionBelowOneIsRefusedRatherThanDroppedOnTheNextWrite() {
+    for (var jdk : List.of(0, -3)) {
+      assertEquals(
+          "runtimes.jdk must be a JDK major version such as 25, got: " + jdk,
+          assertThrows(
+                  IllegalArgumentException.class,
+                  () -> ProjectDefinition.Runtimes.fromMap(Map.of("jdk", jdk)))
+              .getMessage());
+    }
+  }
+
+  @Test
   void runtimesFromMapRejectsInvalidNodeVersion() {
     var ex =
         assertThrows(
@@ -486,65 +499,6 @@ class ProjectDefinitionTest {
   }
 
   @Test
-  void withNodeRuntimeAddsNodeToExistingRuntimes() throws Exception {
-    var yaml =
-        """
-        name: test
-        resources:
-          cpu: 2
-          memory: 4GB
-          disk: 20GB
-        runtimes:
-          jdk: 25
-          maven: "3.9.9"
-        agent:
-          type: codex
-        """;
-    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
-
-    var updated = config.withNodeRuntime("24.14.1");
-
-    assertEquals(25, updated.runtimes().jdk());
-    assertEquals("24.14.1", updated.runtimes().node());
-    assertEquals("3.9.9", updated.runtimes().maven());
-    assertEquals("test", updated.name());
-    assertEquals("codex", updated.agent().type());
-  }
-
-  @Test
-  void withNodeRuntimeCreatesRuntimesWhenNull() {
-    var config = ProjectDefinition.fromMap(YamlUtil.parseMap("name: test"));
-
-    var updated = config.withNodeRuntime("22.0.0");
-
-    assertNotNull(updated.runtimes());
-    assertEquals("22.0.0", updated.runtimes().node());
-    assertEquals(0, updated.runtimes().jdk());
-    assertNull(updated.runtimes().maven());
-  }
-
-  @Test
-  void withAgentInstallReplacesInstallList() throws Exception {
-    var yaml =
-        """
-        name: test
-        agent:
-          type: claude-code
-          auto_branch: true
-          install:
-            - claude-code
-            - codex
-        """;
-    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
-
-    var updated = config.withAgentInstall(List.of("claude-code"));
-
-    assertEquals(List.of("claude-code"), updated.agent().install());
-    assertEquals("claude-code", updated.agent().type());
-    assertTrue(updated.agent().autoBranch());
-  }
-
-  @Test
   void eachLaneReadsItsOwnGuardrailsAndItsOwnDefaults() {
     var bare = definition(Map.of("type", "claude-code"), null);
     var configured =
@@ -691,7 +645,6 @@ class ProjectDefinitionTest {
     @SuppressWarnings("unchecked")
     var pipeline = (Map<String, Object>) config.toMap().get("pipeline");
     var reparsed = ProjectDefinition.fromMap(config.toMap());
-    var reinstalled = reparsed.withAgentInstall(List.of("claude-code", "codex"));
 
     assertEquals(Map.of("max_duration", "90m", "action", "stop"), pipeline.get("guardrails"));
     assertFalse(config.agent().toMap().containsKey("review_pipeline"));
@@ -699,10 +652,6 @@ class ProjectDefinitionTest {
         config.pipeline(),
         reparsed.pipeline(),
         "the section a pipeline writes parses back to the same pipeline, stages included");
-    assertEquals(
-        config.pipeline(),
-        reinstalled.pipeline(),
-        "changing the install list keeps the pipeline, its stages and its limits");
   }
 
   @Test
@@ -925,16 +874,23 @@ class ProjectDefinitionTest {
   }
 
   @Test
-  void aPortIsClaimedByOneProcessOrServiceOnly() {
+  void aPortIsClaimedByOneProcessOrServiceOnlyWhereADefinitionIsWrittenNotWhereItIsRead() {
+    var clash = withProcesses("  web:\n    command: x\n    port: 5432\n");
+    var twice =
+        withProcesses(
+            "  web:\n    command: x\n    port: 3000\n  admin:\n    command: y\n    port: 3000\n");
+    var sound = withProcesses("  web:\n    command: x\n    port: 3000\n");
+
     assertEquals(
         "Port 5432 is claimed by both service 'postgres' and process 'web'. Give one of them another"
             + " port.",
-        processRefusal("  web:\n    command: x\n    port: 5432\n"));
+        assertThrows(IllegalArgumentException.class, () -> ProjectDefinitionJson.validated(clash))
+            .getMessage());
     assertEquals(
         "Port 3000 is claimed by both process 'web' and process 'admin'. Give one of them another"
             + " port.",
-        processRefusal(
-            "  web:\n    command: x\n    port: 3000\n  admin:\n    command: y\n    port: 3000\n"));
+        assertThrows(IllegalArgumentException.class, twice::requirePortsClaimedOnce).getMessage());
+    assertSame(sound, sound.requirePortsClaimedOnce());
   }
 
   @Test

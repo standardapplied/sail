@@ -172,15 +172,10 @@ public final class ProjectApplyCommand implements Runnable {
 
   private void applyOne(OperatorCommand operator) throws Exception {
     NameValidator.requireValidProjectName(name);
-    var config = catalog().read(name).orElseThrow(() -> ProjectMutations.notFound(name, operator));
-    if (config.resources() == null) {
-      throw new IllegalStateException(
-          "Project '"
-              + name
-              + "' sets no resources: set cpu, memory and disk with '"
-              + operator.sail("project resources set " + name)
-              + "'.");
-    }
+    var config =
+        ProjectMutations.requireResources(
+            catalog().read(name).orElseThrow(() -> ProjectMutations.notFound(name, operator)),
+            operator);
     requireReadyBox(operator);
     var git = LocalIdentity.detect().git();
 
@@ -288,8 +283,8 @@ public final class ProjectApplyCommand implements Runnable {
 
     for (var target : targets) {
       var project = target.name();
-      var definition = definitionFor(project);
       try {
+        var definition = definitionFor(project);
         if (!devices.sailManaged(project)) {
           var warning = unmanagedSkipWarning(project, definition.isPresent(), operator);
           if (warning != null) {
@@ -303,6 +298,9 @@ public final class ProjectApplyCommand implements Runnable {
             }
           }
           continue;
+        }
+        if (definition.isPresent()) {
+          ProjectMutations.requireResources(definition.get(), operator);
         }
         var targetPlan = planTarget(target.state(), definition.orElse(null));
         var action = targetPlan.action();
@@ -589,6 +587,11 @@ public final class ProjectApplyCommand implements Runnable {
     }
   }
 
+  /** The catalog of the box this command runs on. */
+  private ProjectCatalog catalog() {
+    return new ProjectCatalog(box.get().database());
+  }
+
   /**
    * Provisions from the definition with resumable progress: a fresh container from scratch, the
    * remaining phases of an interrupted earlier run, or every phase again for a container whose
@@ -598,11 +601,6 @@ public final class ProjectApplyCommand implements Runnable {
    * @param fresh whether the container is created by this run
    * @param recorded whether the container records the definition it was last provisioned from
    */
-  /** The catalog of the box this command runs on. */
-  private ProjectCatalog catalog() {
-    return new ProjectCatalog(box.get().database());
-  }
-
   private void provision(
       ProjectDefinition config,
       LocalIdentity.GitIdentity git,

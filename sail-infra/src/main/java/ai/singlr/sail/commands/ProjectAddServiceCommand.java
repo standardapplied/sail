@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.DefinitionEdits;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
@@ -194,13 +193,18 @@ public final class ProjectAddServiceCommand implements Runnable {
     throw new IllegalArgumentException("Invalid selection: " + input);
   }
 
-  private ProjectDefinition.Service customizePresetEnv(
+  /**
+   * {@code service}, a preset, with each of its environment values asked for, its default offered,
+   * and any further variables the engineer adds.
+   */
+  static ProjectDefinition.Service customizePresetEnv(
       ProjectDefinition.Service service, PrintStream out, Ansi ansi) {
     var defaultEnv = service.environment();
     var env = new LinkedHashMap<String, String>();
     if (defaultEnv != null && !defaultEnv.isEmpty()) {
       for (var entry : defaultEnv.entrySet()) {
-        var value = promptWithDefault(out, ansi, "  " + entry.getKey(), entry.getValue());
+        var value =
+            ConsoleHelper.promptWithDefault(out, ansi, "  " + entry.getKey(), entry.getValue());
         if (!value.isEmpty()) {
           env.put(entry.getKey(), value);
         }
@@ -208,7 +212,7 @@ public final class ProjectAddServiceCommand implements Runnable {
     }
     if (ConsoleHelper.confirmNo("Add environment variables?")) {
       do {
-        var kv = promptRequired(out, ansi, "Environment variable as KEY=VALUE");
+        var kv = ConsoleHelper.promptRequired(out, ansi, "Environment variable as KEY=VALUE");
         var eqIdx = kv.indexOf('=');
         if (eqIdx > 0) {
           env.put(kv.substring(0, eqIdx), kv.substring(eqIdx + 1));
@@ -227,12 +231,15 @@ public final class ProjectAddServiceCommand implements Runnable {
     out.println();
     out.println(ansi.string("  @|bold Custom Podman service|@"));
     var svcName =
-        promptRequired(
+        ConsoleHelper.promptRequired(
             out, ansi, "Service name \u2014 a label for this service (e.g. mysql, redis)");
     NameValidator.requireValidServiceName(svcName);
-    var img = promptRequired(out, ansi, "Podman image (e.g. mysql:8.0, mongo:7, redis:latest)");
+    var img =
+        ConsoleHelper.promptRequired(
+            out, ansi, "Podman image (e.g. mysql:8.0, mongo:7, redis:latest)");
     var portsStr =
-        promptWithDefault(out, ansi, "Host ports to expose (comma-separated, blank for none)", "");
+        ConsoleHelper.promptWithDefault(
+            out, ansi, "Host ports to expose (comma-separated, blank for none)", "");
     List<Integer> customPorts = null;
     if (!portsStr.isEmpty()) {
       customPorts = new ArrayList<>();
@@ -248,7 +255,7 @@ public final class ProjectAddServiceCommand implements Runnable {
     if (ConsoleHelper.confirmNo("Add environment variables?")) {
       env = new LinkedHashMap<>();
       do {
-        var kv = promptRequired(out, ansi, "Environment variable as KEY=VALUE");
+        var kv = ConsoleHelper.promptRequired(out, ansi, "Environment variable as KEY=VALUE");
         var eqIdx = kv.indexOf('=');
         if (eqIdx > 0) {
           env.put(kv.substring(0, eqIdx), kv.substring(eqIdx + 1));
@@ -259,37 +266,13 @@ public final class ProjectAddServiceCommand implements Runnable {
     if (ConsoleHelper.confirmNo("Add volumes?")) {
       customVolumes = new ArrayList<>();
       do {
-        var vol = promptRequired(out, ansi, "Volume as name:path (e.g. mydata:/var/lib/data)");
+        var vol =
+            ConsoleHelper.promptRequired(
+                out, ansi, "Volume as name:path (e.g. mydata:/var/lib/data)");
         customVolumes.add(vol);
       } while (ConsoleHelper.confirmNo("Add another volume?"));
     }
     return new ServiceSelection(
         svcName, new ProjectDefinition.Service(img, customPorts, env, null, customVolumes));
-  }
-
-  private static String promptWithDefault(PrintStream out, Ansi ansi, String label, String def) {
-    if (!Strings.isEmpty(def)) {
-      out.print(ansi.string("  @|bold " + label + "|@ @|faint [" + def + "]|@: "));
-    } else {
-      out.print(ansi.string("  @|bold " + label + "|@: "));
-    }
-    out.flush();
-    var line = ConsoleHelper.readLine();
-    if (Strings.isBlank(line)) {
-      return Objects.requireNonNullElse(def, "");
-    }
-    return line.strip();
-  }
-
-  private static String promptRequired(PrintStream out, Ansi ansi, String label) {
-    while (true) {
-      out.print(ansi.string("  @|bold " + label + "|@: "));
-      out.flush();
-      var line = ConsoleHelper.readLine();
-      if (Strings.isNotBlank(line)) {
-        return line.strip();
-      }
-      out.println(ansi.string("    @|yellow Required field. Please enter a value.|@"));
-    }
   }
 }

@@ -77,21 +77,13 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
 
   /** A section write refused because the section is no longer the one its writer last read. */
   public static final class StaleSection extends RuntimeException {
-    private final transient ProjectRow current;
-
-    StaleSection(String name, Section section, ProjectRow current) {
+    StaleSection(String name, Section section) {
       super(
           "The "
               + section.key()
               + " section of project '"
               + name
               + "' changed since it was read. Read it again, then write it.");
-      this.current = current;
-    }
-
-    /** The project as it is now. */
-    public ProjectRow current() {
-      return current;
     }
   }
 
@@ -149,7 +141,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   /**
    * Writes each section {@code values} names, as {@link #writeSection} writes one, all in one
    * revision or none: a section whose tag {@code expected} names and the project no longer holds
-   * refuses the whole write.
+   * refuses the whole write, and one that leaves every section as it was records nothing.
    */
   public ProjectRow writeSections(
       String name, Map<Section, String> values, Map<Section, String> expected) {
@@ -165,12 +157,15 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
           for (var tag : expected.entrySet()) {
             if (!tag.getValue()
                 .equals(tagOf(ProjectDefinitionJson.section(definition, tag.getKey())))) {
-              throw new StaleSection(name, tag.getKey(), held);
+              throw new StaleSection(name, tag.getKey());
             }
           }
           var next = definition;
           for (var value : values.entrySet()) {
             next = ProjectDefinitionJson.withSection(next, value.getKey(), value.getValue());
+          }
+          if (next.equals(definition)) {
+            return held;
           }
           writeRow(
               name, ProjectDefinitionJson.write(next), author(), null, null, DateTimeUtils.now());

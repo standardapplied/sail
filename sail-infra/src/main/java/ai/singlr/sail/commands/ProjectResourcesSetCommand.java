@@ -94,14 +94,10 @@ public final class ProjectResourcesSetCommand implements Runnable {
     }
 
     var actor = mutations.writer(name, dryRun);
-    var config = mutations.current(name, operator);
-    if (config.resources() == null) {
-      throw new IllegalStateException(
-          "Project '" + name + "' sets no resources: set cpu, memory and disk in its definition.");
-    }
+    var config = ProjectMutations.requireResources(mutations.current(name, operator), operator);
 
     var desiredResources = DefinitionEdits.mergeResources(config.resources(), cpu, memory, disk);
-    var descriptorChanged = !config.resources().equals(desiredResources);
+    var definitionChanged = !config.resources().equals(desiredResources);
 
     var queryManager = new ContainerManager(queryShell());
     var info = queryManager.queryInfo(name);
@@ -120,12 +116,12 @@ public final class ProjectResourcesSetCommand implements Runnable {
       out.println();
     }
 
-    if (!descriptorChanged && !liveLimitsChanged && !diskChanged) {
+    if (!definitionChanged && !liveLimitsChanged && !diskChanged) {
       printAlreadyCurrent(desiredResources);
       return;
     }
 
-    if (descriptorChanged) {
+    if (definitionChanged) {
       mutations.write(
           Section.RESOURCES,
           config,
@@ -153,7 +149,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
     printResult(
         config.resources(),
         desiredResources,
-        descriptorChanged,
+        definitionChanged,
         liveLimitsChanged || diskChanged,
         restarted);
   }
@@ -200,14 +196,14 @@ public final class ProjectResourcesSetCommand implements Runnable {
   private void printResult(
       ProjectDefinition.Resources previous,
       ProjectDefinition.Resources desired,
-      boolean descriptorChanged,
+      boolean definitionChanged,
       boolean liveChanged,
       boolean restarted) {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
       map.put("dry_run", dryRun);
-      map.put("updated_definition", descriptorChanged);
+      map.put("updated_definition", definitionChanged);
       map.put("applied_live", liveChanged);
       map.put("restarted", restarted);
       map.put("previous_resources", resourceMap(previous));
@@ -216,7 +212,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
       return;
     }
 
-    if (descriptorChanged) {
+    if (definitionChanged) {
       out.println(Ansi.AUTO.string("  @|green \u2713|@ Updated the project's definition"));
     }
     if (liveChanged) {

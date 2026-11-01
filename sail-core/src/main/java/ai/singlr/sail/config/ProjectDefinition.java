@@ -112,7 +112,6 @@ public record ProjectDefinition(
             processesRaw != null ? processes(processesRaw) : null,
             agentRaw != null ? Agent.fromMap(agentRaw) : null,
             pipelineRaw != null ? ReviewPipelineConfig.fromMap(pipelineRaw) : null);
-    config.requirePortsClaimedOnce();
     return config;
   }
 
@@ -144,9 +143,11 @@ public record ProjectDefinition(
 
   /**
    * Refuses a definition where two processes, or a process and a service, claim one port: the
-   * portal forwards a declared port to exactly one app.
+   * portal forwards a declared port to exactly one app. The one rule that spans sections, so a
+   * definition is read without it: a sync merge of two boxes' sections, each sound alone, stays
+   * readable and replicates, and the clash is refused where it is written and where it is served.
    */
-  private void requirePortsClaimedOnce() {
+  public ProjectDefinition requirePortsClaimedOnce() {
     var claimed = new LinkedHashMap<Integer, String>();
     if (services != null) {
       services.forEach(
@@ -177,6 +178,7 @@ public record ProjectDefinition(
             }
           });
     }
+    return this;
   }
 
   /** This definition as its document's map, a key for each section it sets. */
@@ -243,6 +245,10 @@ public record ProjectDefinition(
     static Runtimes fromMap(Map<String, Object> map) {
       Fields.only(map, "runtimes", List.of("jdk", "node", "maven"));
       var jdk = Fields.integer(map, "jdk", "runtimes.jdk");
+      if (jdk != null && jdk < 1) {
+        throw new IllegalArgumentException(
+            "runtimes.jdk must be a JDK major version such as 25, got: " + jdk);
+      }
       var node = toVersionString(map.get("node"), "runtimes.node");
       var maven = toVersionString(map.get("maven"), "runtimes.maven");
       if (node != null) {
@@ -298,6 +304,12 @@ public record ProjectDefinition(
 
     public Repo(String url, String path, String branch) {
       this(url, path, branch, null);
+    }
+
+    /** The path a repo is cloned to when none is named: its URL's last part, without .git. */
+    public static String pathOf(String url) {
+      var name = url.substring(url.lastIndexOf('/') + 1);
+      return name.endsWith(".git") ? name.substring(0, name.length() - 4) : name;
     }
 
     static Repo fromMap(Map<String, Object> map) {
@@ -727,6 +739,22 @@ public record ProjectDefinition(
         pipeline);
   }
 
+  /** This definition under the name {@code name}, every section as it is. */
+  public ProjectDefinition withName(String name) {
+    return new ProjectDefinition(
+        name,
+        description,
+        resources,
+        image,
+        packages,
+        runtimes,
+        repos,
+        services,
+        processes,
+        agent,
+        pipeline);
+  }
+
   /** This definition with {@code resources} as its resources section. */
   public ProjectDefinition withResources(Resources resources) {
     return new ProjectDefinition(
@@ -743,53 +771,6 @@ public record ProjectDefinition(
         pipeline);
   }
 
-  /** Returns a copy of this config with Node.js added to the runtimes. */
-  public ProjectDefinition withNodeRuntime(String nodeVersion) {
-    var newRuntimes =
-        runtimes != null
-            ? new Runtimes(runtimes.jdk(), nodeVersion, runtimes.maven())
-            : new Runtimes(0, nodeVersion, null);
-    return new ProjectDefinition(
-        name,
-        description,
-        resources,
-        image,
-        packages,
-        newRuntimes,
-        repos,
-        services,
-        processes,
-        agent,
-        pipeline);
-  }
-
-  /** Returns a copy of this config with the agent install list replaced. */
-  public ProjectDefinition withAgentInstall(List<String> install) {
-    var newAgent =
-        new Agent(
-            agent.type(),
-            agent.autoBranch(),
-            agent.branchPrefix(),
-            agent.autoSnapshot(),
-            install,
-            agent.config(),
-            agent.guardrails(),
-            agent.notifications(),
-            agent.member());
-    return new ProjectDefinition(
-        name,
-        description,
-        resources,
-        image,
-        packages,
-        runtimes,
-        repos,
-        services,
-        processes,
-        newAgent,
-        pipeline);
-  }
-
   /** Returns absolute repo paths inside the container for the configured repos. */
   public List<String> repoPaths() {
     var base = "/home/" + USER + "/workspace";
@@ -799,8 +780,8 @@ public record ProjectDefinition(
     return List.of(base);
   }
 
-  /** Normalizes a size value: bare numbers like {@code 4} become {@code "4GB"}. */
-  static String normalizeSize(Object val) {
+  /** A size as a definition holds it: {@code 4} and {@code "4 GB"} are {@code "4GB"}. */
+  public static String normalizeSize(Object val) {
     var s = String.valueOf(val).strip().replaceAll("\\s+", "");
     if (s.matches("^\\d+$")) {
       return s + "GB";

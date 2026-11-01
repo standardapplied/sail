@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -120,6 +121,22 @@ class ProjectMutationsTest {
   private ProjectMutations mutations() {
     return new ProjectMutations(
         new ProjectCatalog(dir.resolve("sail.db")), () -> Actor.cliOperator("uday"));
+  }
+
+  @Test
+  void aDefinitionWithoutResourcesIsRefusedNamingTheLineThatSetsThem() {
+    var bare = TestDefinitions.named("acme");
+    var sized = TestDefinitions.yaml("name: acme\nresources: {cpu: 2, memory: 8GB, disk: 50GB}\n");
+
+    assertEquals(
+        "Project 'acme' sets no resources, so its container cannot be made. Set them with: sail"
+            + " project config set acme resources '{\"cpu\": 2, \"memory\": \"8GB\", \"disk\":"
+            + " \"50GB\"}'",
+        assertThrows(
+                IllegalStateException.class,
+                () -> ProjectMutations.requireResources(bare, OperatorCommand.PLAIN))
+            .getMessage());
+    assertSame(sized, ProjectMutations.requireResources(sized, OperatorCommand.PLAIN));
   }
 
   @Test

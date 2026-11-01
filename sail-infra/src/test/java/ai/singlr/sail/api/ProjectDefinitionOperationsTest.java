@@ -8,7 +8,10 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.TestDefinitions;
@@ -109,14 +112,39 @@ class ProjectDefinitionOperationsTest {
         assertThrows(
             ApiException.class, () -> Acting.by(scoped, () -> operations.definition("acme")));
     var missing = assertThrows(ApiException.class, () -> operations.definition("ghost"));
-    var createdOutside =
-        assertThrows(
-            ApiException.class,
-            () -> Acting.by(scoped, () -> operations.create(Map.of("name", "gamma"))));
 
     assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, outside.failure().errorCode());
     assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, missing.failure().errorCode());
-    assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, createdOutside.failure().errorCode());
+  }
+
+  @Test
+  void aProjectOutsideTheCreatorsScopeIsRefusedByTheScopeRuleNamingTheGrantThatAllowsIt() {
+    var scoped =
+        new Actor("mady", Role.MEMBER, Actor.Lane.API, null, ProjectScope.of(Set.of("beta")));
+
+    var refused =
+        assertThrows(
+            WriteRefused.class,
+            () -> Acting.by(scoped, () -> operations.create(Map.of("name", "gamma"))));
+
+    assertEquals(Refusal.Kind.OUT_OF_SCOPE, refused.refusal().kind());
+    assertEquals("Project 'gamma' was not found.", refused.refusal().message());
+    assertTrue(projects.findByName("gamma").isEmpty());
+  }
+
+  @Test
+  void aReadOnlyCredentialIsNeverHandedADefinition() {
+    var viewer = new Actor("vic", Role.VIEWER, Actor.Lane.API);
+
+    var refused =
+        assertThrows(
+            ApiException.class, () -> Acting.by(viewer, () -> operations.definition("acme")));
+
+    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, refused.failure().errorCode());
+    assertEquals(
+        "Your credential is read-only and cannot read a project's definition, which holds its"
+            + " services' secrets.",
+        refused.getMessage());
   }
 
   @Test
