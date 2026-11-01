@@ -39,9 +39,13 @@ import java.util.function.Supplier;
  *
  * <p>Every mutation journals the spec's full post-state into the {@link ChangeLog} within the same
  * transaction, so history is complete and any revision is restorable (the DB-sync no-lost-work
- * guarantee). {@code specs.rev} tracks the current revision. A local write moves {@code updated_at}
- * strictly forward, to the later of now and a millisecond past the last, so two writes in one
- * millisecond still read as two versions (the API's {@code ETag} is that time).
+ * guarantee). {@code specs.rev} tracks the current revision.
+ *
+ * <p>A local write moves {@code updated_at} strictly forward, to the later of now and a millisecond
+ * past the last ({@link DateTimeUtils#nowAfter}), so two writes in one millisecond are still two
+ * versions: the API's {@code ETag} is that time. A revision heard from another box keeps its
+ * author's time, so every box holds the same one; a later local write then moves past it, however
+ * far ahead that author's clock ran.
  */
 public final class SpecStore implements ConflictResolver, SyncedStore {
 
@@ -180,7 +184,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     }
   }
 
-  public record SpecContent(String body, String plan, Instant updatedAt) {}
+  public record SpecContent(String body, String plan) {}
 
   public record SpecFilter(
       String project, String status, String assignee, String repo, String search) {
@@ -243,11 +247,10 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           insertDependencies(spec.id(), spec.dependsOn());
           insertRepos(spec.id(), spec.repos());
           db.execute(
-              "INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES (?, ?, ?, ?)",
+              "INSERT INTO spec_content (spec_id, body, plan) VALUES (?, ?, ?)",
               spec.id(),
               body,
-              plan,
-              now);
+              plan);
           setHashes(spec.id(), body, plan);
           recordRevision(spec.id(), ChangeLog.Entry.LOCAL, false);
         });
@@ -514,15 +517,13 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         () -> {
           db.execute(
               """
-              INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES (?, ?, ?, ?)
-              ON CONFLICT(spec_id) DO UPDATE SET body = ?, plan = ?, updated_at = ?""",
+              INSERT INTO spec_content (spec_id, body, plan) VALUES (?, ?, ?)
+              ON CONFLICT(spec_id) DO UPDATE SET body = ?, plan = ?""",
               specId,
               body,
               plan,
-              now,
               body,
-              plan,
-              now);
+              plan);
           setHashes(specId, body, plan);
           db.execute(
               "UPDATE specs SET updated_at = MAX(?, updated_at + 1), updated_by = ? WHERE id = ?",
@@ -553,10 +554,14 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
             .filter(found -> found.kind() != ChangeLog.Kind.ERASURE)
             .orElseThrow(() -> unrestorable(id, rev));
     var snapshot = new LinkedHashMap<>(YamlUtil.parseMap(entry.snapshot()));
-    snapshot.remove("updated_at");
     snapshot.remove(STATUS_SINCE);
     db.transaction(
         () -> {
+          snapshot.put(
+              "updated_at",
+              Snapshots.millis(
+                  DateTimeUtils.nowAfter(
+                      findById(id).map(SpecStore.SpecRow::updatedAt).orElse(null))));
           applySnapshot(id, snapshot);
           stampAuthor(id);
           recordRevision(id, "restore", false);
@@ -818,7 +823,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           """
           UPDATE specs SET project = ?, title = ?, status = ?, assignee = ?, agent = ?, model = ?,
               reasoning_effort = ?, branch = ?, priority = ?, updated_at = ?, updated_by = ?,
-              room_id = ?, created_by = ?, created_at = COALESCE(NULLIF(?, ''), created_at)
+              room_id = ?, created_by = ?, created_at = COALESCE(?, created_at)
           WHERE id = ?""",
           spec.project(),
           spec.title(),
@@ -863,15 +868,13 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     insertRepos(id, spec.repos());
     db.execute(
         """
-        INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES (?, ?, ?, ?)
-        ON CONFLICT(spec_id) DO UPDATE SET body = ?, plan = ?, updated_at = ?""",
+        INSERT INTO spec_content (spec_id, body, plan) VALUES (?, ?, ?)
+        ON CONFLICT(spec_id) DO UPDATE SET body = ?, plan = ?""",
         id,
         body,
         plan,
-        updatedAt,
         body,
-        plan,
-        updatedAt);
+        plan);
     db.execute(
         "UPDATE specs SET body_hash = ?, plan_hash = ? WHERE id = ?", bodyHash, planHash, id);
     applyStatusSince(id, spec.status(), Snapshots.instant(snapshot, STATUS_SINCE));
@@ -1170,11 +1173,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
 
   public Optional<SpecContent> getContent(String specId) {
     return db.queryOne(
-        "SELECT c.body, c.plan, c.updated_at, s.body_hash, s.plan_hash FROM spec_content c JOIN specs s ON s.id = c.spec_id WHERE c.spec_id = ?",
+        "SELECT c.body, c.plan, s.body_hash, s.plan_hash FROM spec_content c JOIN specs s ON s.id = c.spec_id WHERE c.spec_id = ?",
         row -> {
+          requireHashed(row.text(2), specId);
           requireHashed(row.text(3), specId);
-          requireHashed(row.text(4), specId);
-          return new SpecContent(row.text(0), row.text(1), row.instant(2));
+          return new SpecContent(row.text(0), row.text(1));
         },
         specId);
   }

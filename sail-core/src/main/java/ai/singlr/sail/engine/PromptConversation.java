@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.store.MessageStore;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Objects;
@@ -22,6 +24,16 @@ public final class PromptConversation {
   public static final int MAX_CODE_POINTS = 32_000;
 
   private PromptConversation() {}
+
+  /** {@code message} as a prompt writes it: its author and time, its body, then a blank line. */
+  public static String written(MessageStore.MessageRow message) {
+    return message.author()
+        + " ("
+        + DateTimeUtils.format(message.createdAt())
+        + "):\n"
+        + message.body()
+        + "\n\n";
+  }
 
   /** The rendered conversation block and the entries it contains in full, oldest first. */
   public record Rendered<T>(String text, List<T> fullyRendered) {}

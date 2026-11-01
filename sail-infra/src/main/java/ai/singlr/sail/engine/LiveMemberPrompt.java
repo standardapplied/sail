@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.PromptConversation.Rendered;
 import ai.singlr.sail.store.MessageStore;
@@ -115,13 +114,7 @@ public final class LiveMemberPrompt {
    * fill one, every slice but the last saying that more follows.
    */
   private static List<String> parts(MessageStore.MessageRow message) {
-    var whole =
-        message.author()
-            + " ("
-            + DateTimeUtils.format(message.createdAt())
-            + "):\n"
-            + message.body()
-            + "\n\n";
+    var whole = PromptConversation.written(message);
     if (whole.codePointCount(0, whole.length()) <= PromptConversation.MAX_CODE_POINTS) {
       return List.of(whole);
     }

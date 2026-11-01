@@ -23,8 +23,10 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -740,6 +742,25 @@ class RoomWakeReactorTest {
     reactor().onEvent(roomStop("chat", run));
 
     assertTrue(launcher.woken.isEmpty(), "the turn started after the newest human message");
+  }
+
+  @Test
+  void aMessageInTheMillisecondTheTurnStartedIsStillOwed() {
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+    var at = DateTimeUtils.now();
+    var clock = DateTimeUtils.clock;
+    try {
+      DateTimeUtils.clock = Clock.fixed(at, ZoneOffset.UTC);
+      Acting.system(() -> messageStore.append("chat", "uday", "sent as the turn began", null));
+    } finally {
+      DateTimeUtils.clock = clock;
+    }
+    var run = chatRun("chat", "room", "completed", at);
+
+    reactor().onEvent(roomStop("chat", run));
+
+    assertEquals(List.of("acme/chat"), launcher.woken);
   }
 
   @Test

@@ -460,11 +460,7 @@ public final class ServerStartCommand implements Runnable {
               Event.WellKnownTypes.SPEC_STRANDED,
               Event.SAIL_AGENT,
               HostInfo.hostname(),
-              Map.of(
-                  "status",
-                  s.status().wire(),
-                  "since",
-                  String.valueOf(DateTimeUtils.format(s.updatedAt())))));
+              Map.of("status", s.status().wire(), "since", DateTimeUtils.format(s.updatedAt()))));
     }
   }
 }

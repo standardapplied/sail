@@ -442,7 +442,7 @@ final class GlobalSpecOperations {
   GlobalSpecContentResponse content(String specId) {
     requireStore();
     findOrThrow(specId);
-    var content = specStore.getContent(specId).orElse(new SpecStore.SpecContent("", "", null));
+    var content = specStore.getContent(specId).orElse(new SpecStore.SpecContent("", ""));
     return new GlobalSpecContentResponse(specId, content.body(), content.plan());
   }
 

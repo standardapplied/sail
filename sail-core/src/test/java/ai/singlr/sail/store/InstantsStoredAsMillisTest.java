@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.AfterEach;
@@ -237,15 +238,48 @@ class InstantsStoredAsMillisTest {
   }
 
   @Test
-  void retentionRetiresTheMessageBeforeTheCutoffAndKeepsTheOneAfter() {
-    DateTimeUtils.clock = Clock.fixed(Instant.parse("2026-10-20T00:00:00Z"), ZoneOffset.UTC);
-    var messages = new MessageStore(db);
-    var older = messages.append("room", "uday", "older", null);
-    DateTimeUtils.clock = Clock.fixed(Instant.parse("2026-10-20T00:00:02Z"), ZoneOffset.UTC);
-    messages.append("room", "uday", "newer", null);
+  void aRestoreInTheMillisecondOfTheLastWriteIsAVersionOfItsOwn() {
+    var at = Instant.parse("2026-10-20T19:09:51.123Z");
+    DateTimeUtils.clock = Clock.fixed(at, ZoneOffset.UTC);
+    var specs = new SpecStore(db);
+    specs.create(spec("busy"));
+    var created = specs.revOf("busy");
+    specs.updateStatus("busy", SpecStatus.IN_PROGRESS);
 
-    assertEquals(
-        List.of(older.id()), messages.retiredBefore(Instant.parse("2026-10-20T00:00:01Z"), 10));
+    specs.restore("busy", created);
+
+    assertEquals(at.plusMillis(2), specs.findById("busy").orElseThrow().updatedAt());
+  }
+
+  @Test
+  void keepingMineOverMainsSideIsRevisedPastTheTimeMainsSideCarries() {
+    var at = Instant.parse("2026-10-20T19:09:51.123Z");
+    DateTimeUtils.clock = Clock.fixed(at, ZoneOffset.UTC);
+    var specs = new SpecStore(db);
+    specs.create(spec("busy"));
+    var mains = new LinkedHashMap<>(specs.comparableAtRev("busy", specs.revOf("busy")));
+    mains.put("title", "Main's");
+    mains.put(Snapshots.UPDATED_AT, Snapshots.millis(at.plusSeconds(60)));
+    var mine = new LinkedHashMap<>(mains);
+    mine.put("title", "Mine");
+
+    specs.resolveConflict("busy", mine, new MainVersion(mains, "9-main", "mady"));
+
+    var held = specs.findById("busy").orElseThrow();
+    assertEquals("Mine", held.title());
+    assertEquals(at.plusSeconds(60).plusMillis(1), held.updatedAt());
+  }
+
+  @Test
+  void retentionRetiresTheMessageOneMillisecondBeforeTheCutoffAndKeepsTheOneAtIt() {
+    var cutoff = Instant.parse("2026-10-20T00:00:01Z");
+    var messages = new MessageStore(db);
+    DateTimeUtils.clock = Clock.fixed(cutoff.minusMillis(1), ZoneOffset.UTC);
+    var older = messages.append("room", "uday", "older", null);
+    DateTimeUtils.clock = Clock.fixed(cutoff, ZoneOffset.UTC);
+    messages.append("room", "uday", "at the cutoff", null);
+
+    assertEquals(List.of(older.id()), messages.retiredBefore(cutoff, 10));
   }
 
   private static SpecStore.SpecRow spec(String id) {

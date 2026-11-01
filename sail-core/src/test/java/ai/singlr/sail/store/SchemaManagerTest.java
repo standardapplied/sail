@@ -268,9 +268,8 @@ class SchemaManagerTest {
     new SchemaManager(db).migrate();
     db.execute(
         "INSERT INTO specs (id, title, status, created_at, updated_at)"
-            + " VALUES ('auth', 'OAuth', 'pending', 't', 't')");
-    db.execute(
-        "INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES ('auth', 'b', 'p', 't')");
+            + " VALUES ('auth', 'OAuth', 'pending', 0, 0)");
+    db.execute("INSERT INTO spec_content (spec_id, body, plan) VALUES ('auth', 'b', 'p')");
 
     db.execute("DELETE FROM specs WHERE id = 'auth'");
 

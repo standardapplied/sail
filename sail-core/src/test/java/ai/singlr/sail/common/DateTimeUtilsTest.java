@@ -89,4 +89,19 @@ class DateTimeUtilsTest {
       DateTimeUtils.clock = clock;
     }
   }
+
+  @Test
+  void aLocalRevisionIsNowOrAMillisecondPastTheLastWhenTheClockHasNotPassedIt() {
+    var at = Instant.parse("2026-10-20T19:09:51.123Z");
+    var clock = DateTimeUtils.clock;
+    try {
+      DateTimeUtils.clock = Clock.fixed(at, ZoneOffset.UTC);
+      assertEquals(at, DateTimeUtils.nowAfter(null));
+      assertEquals(at, DateTimeUtils.nowAfter(at.minusMillis(1)));
+      assertEquals(at.plusMillis(1), DateTimeUtils.nowAfter(at));
+      assertEquals(at.plusSeconds(60).plusMillis(1), DateTimeUtils.nowAfter(at.plusSeconds(60)));
+    } finally {
+      DateTimeUtils.clock = clock;
+    }
+  }
 }

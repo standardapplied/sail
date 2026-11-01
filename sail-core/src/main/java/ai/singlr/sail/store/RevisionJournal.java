@@ -569,8 +569,12 @@ public final class RevisionJournal implements ConflictResolver {
       eraseRow(id);
       return rev;
     }
+    var held = schema.exists(id);
     schema.apply(
-        id, Snapshots.revisedHere(schema.exists(id) ? Snapshots.keepingCreation(state) : state));
+        id,
+        Snapshots.revisedHere(
+            held ? Snapshots.keepingCreation(state) : state,
+            held ? Snapshots.instant(schema.snapshotMap(id), "updated_at") : null));
     return recordRevision(id, origin, false);
   }
 

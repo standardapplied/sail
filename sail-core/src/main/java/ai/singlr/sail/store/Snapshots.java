@@ -139,11 +139,19 @@ public final class Snapshots {
    * from, and every box applying it writes that one time. Null stays null.
    */
   public static Map<String, Object> revisedHere(Map<String, Object> state) {
+    return revisedHere(state, null);
+  }
+
+  /**
+   * {@code state} revised here over a row last revised at {@code last}: its time moves past it
+   * ({@link DateTimeUtils#nowAfter}).
+   */
+  public static Map<String, Object> revisedHere(Map<String, Object> state, Instant last) {
     if (state == null) {
       return null;
     }
     var revised = new LinkedHashMap<>(state);
-    revised.put(UPDATED_AT, millis(DateTimeUtils.now()));
+    revised.put(UPDATED_AT, millis(DateTimeUtils.nowAfter(last)));
     return revised;
   }
 

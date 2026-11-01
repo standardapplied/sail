@@ -193,13 +193,12 @@ class RecordTimesSyncTest {
     var created = times(main, "m-acme");
 
     Acting.as("main", () -> main.specs.setContent("m-acme", "A sharper body.", ""));
-    var edited = main.specs.getContent("m-acme").orElseThrow().updatedAt();
+    var edited = main.specs.findById("m-acme").orElseThrow().updatedAt();
     SyncBox.quiesce(main, ada, bob);
 
     assertNotEquals(created.getLast(), edited);
     assertEquals(List.of(created.getFirst(), edited), times(main, "m-acme"));
     assertSameEverywhere(box -> times(box, "m-acme"));
-    assertSameEverywhere(box -> box.specs.getContent("m-acme").orElseThrow().updatedAt());
   }
 
   @Test

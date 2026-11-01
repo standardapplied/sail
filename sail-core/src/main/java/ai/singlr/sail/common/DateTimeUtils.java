@@ -62,6 +62,15 @@ public final class DateTimeUtils {
     return Instant.now(clock).truncatedTo(ChronoUnit.MILLIS);
   }
 
+  /**
+   * Now, or a millisecond past {@code last} when the clock has not yet passed it: the time of a
+   * local revision of a row last revised at {@code last}, so each revision of the row has its own.
+   */
+  public static Instant nowAfter(Instant last) {
+    var now = now();
+    return last == null || now.isAfter(last) ? now : last.plusMillis(1);
+  }
+
   /** The integer millisecond {@code instant} is stored as. */
   public static long toMillis(Instant instant) {
     return instant.toEpochMilli();

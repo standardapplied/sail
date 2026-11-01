@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.store.MessageStore;
@@ -39,16 +38,7 @@ public final class RoomWakePrompt {
       List<MessageStore.MessageRow> messages,
       boolean resumed,
       Engagement engagement) {
-    var conversation =
-        PromptConversation.renderNewest(
-            messages,
-            message ->
-                message.author()
-                    + " ("
-                    + DateTimeUtils.format(message.createdAt())
-                    + "):\n"
-                    + message.body()
-                    + "\n\n");
+    var conversation = PromptConversation.renderNewest(messages, PromptConversation::written);
     var conversationBlock =
         conversation.text().isEmpty()
             ? ""
@@ -82,16 +72,7 @@ public final class RoomWakePrompt {
    */
   public static Built buildForRoom(
       String roomId, String title, List<MessageStore.MessageRow> messages, Engagement engagement) {
-    var conversation =
-        PromptConversation.renderNewest(
-            messages,
-            message ->
-                message.author()
-                    + " ("
-                    + DateTimeUtils.format(message.createdAt())
-                    + "):\n"
-                    + message.body()
-                    + "\n\n");
+    var conversation = PromptConversation.renderNewest(messages, PromptConversation::written);
     var conversationBlock =
         conversation.text().isEmpty()
             ? ""

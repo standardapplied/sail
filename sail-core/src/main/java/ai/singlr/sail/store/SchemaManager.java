@@ -117,8 +117,7 @@ public final class SchemaManager {
           CREATE TABLE spec_content (
               spec_id TEXT PRIMARY KEY REFERENCES specs(id) ON DELETE CASCADE,
               body TEXT NOT NULL DEFAULT '',
-              plan TEXT NOT NULL DEFAULT '',
-              updated_at INTEGER NOT NULL
+              plan TEXT NOT NULL DEFAULT ''
           )""",
           """
           CREATE TABLE events (
