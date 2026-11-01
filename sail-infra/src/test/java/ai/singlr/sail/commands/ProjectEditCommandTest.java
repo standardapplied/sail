@@ -172,8 +172,8 @@ class ProjectEditCommandTest {
 
     assertEquals(1, run.exit());
     assertEquals(
-        "  ✗ The edited definition is not valid: resources.cpu must be a whole number.\n"
-            + "  Your edit is kept at "
+        "  ✗ The edited definition is not valid: resources.cpu must be a whole number. Your edit is"
+            + " kept at "
             + opened.getFirst()
             + ".\n",
         run.err());
