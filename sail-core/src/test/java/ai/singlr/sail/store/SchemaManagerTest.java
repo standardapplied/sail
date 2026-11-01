@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -337,8 +338,11 @@ class SchemaManagerTest {
   }
 
   private Instant since(String column) {
-    return db.queryOne("SELECT " + column + " FROM specs WHERE id = 's'", row -> row.instant(0))
-        .orElseThrow();
+    return db.queryOne(
+            "SELECT " + column + " FROM specs WHERE id = 's'",
+            row -> Optional.ofNullable(row.instant(0)))
+        .orElseThrow()
+        .orElse(null);
   }
 
   private void stageAtVersion(int version) {
