@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.ProjectDefinitionJson;
@@ -18,6 +20,7 @@ import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ProjectStore;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -116,6 +119,19 @@ class ProjectMutationsTest {
                 IllegalStateException.class,
                 () -> mutations.current("ghost", OperatorCommand.PLAIN))
             .getMessage());
+  }
+
+  @Test
+  void aWriterTheJournalWouldRefuseIsRefusedBeforeTheCommandChangesAnything() {
+    mutations().catalog().create(TestDefinitions.named("acme"), Actor.cliOperator("uday"));
+    var viewer =
+        new ProjectMutations(
+            new ProjectCatalog(dir.resolve("sail.db")),
+            () -> new Actor("vic", Role.VIEWER, Actor.Lane.CLI));
+
+    var refused = assertThrows(WriteRefused.class, () -> viewer.writer("acme", false));
+
+    assertEquals(Refusal.Kind.READ_ONLY, refused.refusal().kind());
   }
 
   private ProjectMutations mutations() {
