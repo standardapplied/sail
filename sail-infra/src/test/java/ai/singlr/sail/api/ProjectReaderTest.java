@@ -52,7 +52,8 @@ class ProjectReaderTest {
     assertEquals(ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND, refused.failure().errorCode());
     assertEquals("Project 'acme' is not in the catalog.", refused.getMessage());
     assertEquals(
-        "To create the project, run 'sail project apply -f <file>'.",
+        "If its descriptor is on this box, import it with 'sail migrate'. To create the project,"
+            + " run 'sail project apply -f <file>'.",
         refused.failure().remedy().plain());
   }
 

@@ -7,11 +7,13 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.BoxIdentity;
+import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.HostDropIn;
 import ai.singlr.sail.engine.HostPackages;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.NeedrestartPolicy;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.PtyHostUnit;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
@@ -19,9 +21,12 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.BoxDatabase;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -36,10 +41,12 @@ import picocli.CommandLine.Option;
 
 /**
  * Brings this box to the release it runs: creates the database's schema when it is fresh, or
- * refuses one of another release ({@link BoxDatabase}), then writes the host's drop-ins, holds
- * Incus and ensures the pty session host. {@code sail upgrade} runs the new binary's {@code
- * migrate} once it is installed, so this is where new-release code converges the host as root.
- * Idempotent: a second run changes nothing.
+ * refuses one of another release ({@link BoxDatabase}), imports the project descriptors on disk the
+ * catalog lacks and seeds the demo project; then, on the box itself, re-issues the host token,
+ * re-syncs {@code authorized_keys}, writes the host's drop-ins, holds Incus and ensures the pty
+ * session host. {@code sail upgrade} runs the new binary's {@code migrate} once it is installed, so
+ * this is where new-release code converges the host as root. Idempotent: a second run changes
+ * nothing.
  */
 @Command(
     name = "migrate",
@@ -149,11 +156,43 @@ public final class MigrateCommand implements Runnable {
                     + new SchemaManager(db).currentVersion()
                     + ")|@"));
       }
+      Actor.run(
+          Actor.system(),
+          () -> {
+            importProjects(db, jsonOutput);
+            seedDemo(db, jsonOutput);
+          });
       if (scope instanceof Scope.DatabaseOnly databaseOnly) {
         (jsonOutput ? System.err : System.out).println(Ansi.AUTO.string(databaseOnly.why()));
         return;
       }
       host.accept(db, jsonOutput);
+    }
+  }
+
+  /**
+   * Imports each project descriptor on this box's disk that the catalog does not hold yet and the
+   * box's scope admits ({@link ProjectImporter}): a project defined in a file reaches the catalog
+   * without a container.
+   */
+  private static void importProjects(Sqlite db, boolean jsonOutput) {
+    var report =
+        new ProjectImporter(SailPaths.projectsDir(), new ProjectStore(db), new SyncScope(db).held())
+            .importAll();
+    if (!jsonOutput && report.imported() > 0) {
+      System.out.println(
+          Ansi.AUTO.string("  @|green ✓|@ project catalog: " + report.imported() + " imported"));
+    }
+  }
+
+  /**
+   * Seeds the bundled demo project into the catalog so {@code sail project demo} is a
+   * database-resident project like any other. Only when the catalog never held one, so a customised
+   * or destroyed demo is never clobbered; a node, which takes main's catalog, seeds nothing.
+   */
+  private static void seedDemo(Sqlite db, boolean jsonOutput) {
+    if (DemoSeeder.seedIfAbsent(db) && !jsonOutput) {
+      System.out.println(Ansi.AUTO.string("  @|green ✓|@ demo project seeded"));
     }
   }
 

@@ -23,6 +23,9 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -149,6 +152,26 @@ class MigrateCommandTest {
   }
 
   @Test
+  void aMigratedDatabaseHoldsTheDemoOnceSeededByThisBoxsMachinery() {
+    var path = tempDir.resolve("demo/sail.db");
+
+    MigrateCommand.converge(
+        path, true, new MigrateCommand.Scope.DatabaseOnly(""), (db, json) -> {});
+    MigrateCommand.converge(
+        path, true, new MigrateCommand.Scope.DatabaseOnly(""), (db, json) -> {});
+
+    try (var migrated = Sqlite.open(path)) {
+      assertEquals(
+          List.of("demo"),
+          new ProjectStore(migrated).list().stream().map(ProjectStore.ProjectRow::name).toList());
+      assertEquals(
+          List.of(Actor.system().handle()),
+          new ChangeLog(migrated)
+              .history("project", "demo").stream().map(ChangeLog.Entry::actor).toList());
+    }
+  }
+
+  @Test
   void aBoxRunPreparesTheDatabaseThenConvergesTheHost() {
     var steps = new ArrayList<String>();
     var path = tempDir.resolve("box/sail.db");
@@ -163,7 +186,7 @@ class MigrateCommandTest {
   }
 
   @Test
-  void aReaderIsToldWhichDatabaseWasPreparedAtWhichSchema() {
+  void aReaderIsToldWhichDatabaseWasPreparedAtWhichSchemaAndThatTheDemoWasSeeded() {
     var path = tempDir.resolve("told/sail.db");
 
     var out =
@@ -179,6 +202,8 @@ class MigrateCommandTest {
                     + " @|faint (schema v"
                     + SchemaManager.CURRENT_VERSION
                     + ")|@")
+            + "\n"
+            + Ansi.AUTO.string("  @|green ✓|@ demo project seeded")
             + "\n",
         out);
   }

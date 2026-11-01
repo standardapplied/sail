@@ -14,6 +14,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.PipedSyncChannel;
+import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -492,5 +493,27 @@ class ScopeChangeRoundTest {
     public boolean isDryRun() {
       return false;
     }
+  }
+
+  @Test
+  void aLeftoverDescriptorIsNeverImportedAndTheNextRoundTakesItWithNoDrop() throws Exception {
+    narrowTo("beta");
+    round();
+    Files.createDirectories(projectsDir.resolve("acme"));
+    Files.writeString(projectsDir.resolve("acme").resolve("sail.yaml"), "name: acme\n");
+
+    for (var migrate = 0; migrate < 2; migrate++) {
+      var report =
+          Actor.call(
+              Actor.system(),
+              () ->
+                  new ProjectImporter(
+                          projectsDir, new ProjectStore(nodeDb), new SyncScope(nodeDb).held())
+                      .importAll());
+      assertEquals(new ProjectImporter.Report(0, 2, List.of()), report);
+    }
+
+    assertEquals(List.of(), round());
+    assertEquals(List.of("beta"), childrenOf(projectsDir));
   }
 }

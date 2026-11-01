@@ -35,7 +35,11 @@ public interface ProjectReader {
         ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND,
         "Project '" + project + "' is not in the catalog.",
         Remedy.of(
-            "To create the project, run '", Remedy.sail("project apply", "-f", "<file>"), "'."));
+            "If its descriptor is on this box, import it with '",
+            Remedy.sail("migrate"),
+            "'. To create the project, run '",
+            Remedy.sail("project apply", "-f", "<file>"),
+            "'."));
   }
 
   /**
