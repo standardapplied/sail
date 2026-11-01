@@ -270,8 +270,7 @@ class LiveMemberPromptGoldenTest {
 
     assertEquals(
         List.of(
-            new Rendered<>(
-                BY + "be\n\n" + written.substring(0, SLICE) + CONTINUES, List.of(brief)),
+            new Rendered<>(BY + "be\n\n" + written.substring(0, SLICE) + CONTINUES, List.of(brief)),
             new Rendered<>(CONTINUED + written.substring(SLICE), List.of(huge))),
         LiveMemberPrompt.messages(List.of(brief, huge)));
   }
