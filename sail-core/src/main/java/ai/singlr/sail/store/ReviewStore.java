@@ -11,6 +11,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -77,10 +78,10 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
       String specId,
       int iteration,
       String status,
-      String createdAt,
-      String completedAt,
+      Instant createdAt,
+      Instant completedAt,
       String decidedBy,
-      String supersededAt,
+      Instant supersededAt,
       String error,
       String waitingOn) {
 
@@ -100,8 +101,8 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
       String stageType,
       String status,
       String reviewer,
-      String startedAt,
-      String completedAt,
+      Instant startedAt,
+      Instant completedAt,
       String error) {}
 
   /**
@@ -118,7 +119,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
               id,
               specId,
               iteration,
-              DateTimeUtils.now().toString());
+              DateTimeUtils.now());
           journal(id);
         });
     return id;
@@ -229,7 +230,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
           db.execute(
               "UPDATE reviews SET superseded_at = ?, waiting_on = NULL"
                   + " WHERE spec_id = ? AND superseded_at IS NULL",
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               specId);
           affected.forEach(this::journal);
           return affected.size();
@@ -247,7 +248,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
               "UPDATE reviews SET status = 'failed', error = ?, completed_at = ?,"
                   + " waiting_on = NULL WHERE id = ?",
               error,
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               reviewId);
           journal(reviewId);
         });
@@ -292,7 +293,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   private void writeStatus(String reviewId, String status, String error) {
     var completedAt =
         "passed".equals(status) || "failed".equals(status) || "escalated".equals(status)
-            ? DateTimeUtils.now().toString()
+            ? DateTimeUtils.now()
             : null;
     db.execute(
         """
@@ -371,7 +372,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
           db.execute(
               "UPDATE review_stages SET status = 'running', reviewer = ?, started_at = ? WHERE id = ?",
               reviewer,
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               stageId);
           journal(reviewOf(stageId));
         });
@@ -393,7 +394,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
           db.execute(
               "UPDATE review_stages SET status = ?, completed_at = ?, error = ? WHERE id = ?",
               status,
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               error,
               stageId);
           journal(reviewOf(stageId));
@@ -939,10 +940,10 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
     map.put("spec_id", review.specId());
     map.put("iteration", review.iteration());
     map.put("status", review.status());
-    map.put("created_at", review.createdAt());
-    map.put("completed_at", review.completedAt());
+    map.put("created_at", Snapshots.millis(review.createdAt()));
+    map.put("completed_at", Snapshots.millis(review.completedAt()));
     map.put("decided_by", review.decidedBy());
-    map.put("superseded_at", review.supersededAt());
+    map.put("superseded_at", Snapshots.millis(review.supersededAt()));
     map.put("error", review.error());
     map.put("waiting_on", review.waitingOn());
     var stages = new ArrayList<Map<String, Object>>();
@@ -953,8 +954,8 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
       s.put("stage_type", stage.stageType());
       s.put("status", stage.status());
       s.put("reviewer", stage.reviewer());
-      s.put("started_at", stage.startedAt());
-      s.put("completed_at", stage.completedAt());
+      s.put("started_at", Snapshots.millis(stage.startedAt()));
+      s.put("completed_at", Snapshots.millis(stage.completedAt()));
       s.put("error", stage.error());
       s.put("finding_counts", new LinkedHashMap<String, Object>(findingCountsForStage(stage.id())));
       stages.add(s);
@@ -994,10 +995,10 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
         Snapshots.text(snapshot, "spec_id"),
         Snapshots.integer(snapshot, "iteration"),
         Snapshots.text(snapshot, "status"),
-        Snapshots.text(snapshot, "created_at"),
-        Snapshots.text(snapshot, "completed_at"),
+        Snapshots.instant(snapshot, "created_at"),
+        Snapshots.instant(snapshot, "completed_at"),
         Snapshots.text(snapshot, "decided_by"),
-        Snapshots.text(snapshot, "superseded_at"),
+        Snapshots.instant(snapshot, "superseded_at"),
         Snapshots.text(snapshot, "error"),
         hash,
         Snapshots.text(snapshot, "waiting_on"));
@@ -1021,8 +1022,8 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
           Snapshots.text(stage, "stage_type"),
           Snapshots.text(stage, "status"),
           Snapshots.text(stage, "reviewer"),
-          Snapshots.text(stage, "started_at"),
-          Snapshots.text(stage, "completed_at"),
+          Snapshots.instant(stage, "started_at"),
+          Snapshots.instant(stage, "completed_at"),
           Snapshots.text(stage, "error"));
     }
     db.execute(
@@ -1136,10 +1137,10 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
         row.text(1),
         (int) row.integer(2),
         row.text(3),
-        row.text(4),
-        row.text(5),
+        row.instant(4),
+        row.instant(5),
         row.text(6),
-        row.text(7),
+        row.instant(7),
         row.text(8),
         row.text(9));
   }
@@ -1152,8 +1153,8 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
         row.text(3),
         row.text(4),
         row.text(5),
-        row.text(6),
-        row.text(7),
+        row.instant(6),
+        row.instant(7),
         row.text(8));
   }
 

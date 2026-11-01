@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.store.Snapshots;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -172,7 +174,7 @@ class SyncTransitionsTest {
   void aSupersededFlagAloneEmitsNothing() {
     var before = review("escalated", stage("s1", "failed", Map.of("HIGH", 1)));
     var after = review("escalated", stage("s1", "failed", Map.of("HIGH", 1)));
-    after.put("superseded_at", "2026-07-13T00:00:00Z");
+    after.put("superseded_at", Snapshots.millis(Instant.parse("2026-07-13T00:00:00Z")));
 
     assertTrue(SyncTransitions.detect("review", "rev1", before, after).isEmpty());
   }

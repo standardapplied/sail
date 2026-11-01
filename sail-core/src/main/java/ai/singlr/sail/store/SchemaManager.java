@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import java.util.List;
@@ -37,7 +38,7 @@ public final class SchemaManager {
       """
       CREATE TABLE IF NOT EXISTS schema_version (
           version INTEGER PRIMARY KEY,
-          applied_at TEXT NOT NULL
+          applied_at INTEGER NOT NULL
       )""";
 
   /**
@@ -64,8 +65,8 @@ public final class SchemaManager {
               branch TEXT,
               priority INTEGER NOT NULL DEFAULT 0,
               created_by TEXT,
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL,
               project TEXT NOT NULL DEFAULT 'unassigned',
               updated_by TEXT,
               rev TEXT,
@@ -73,8 +74,8 @@ public final class SchemaManager {
               room_id TEXT,
               body_hash TEXT,
               plan_hash TEXT,
-              archived_at TEXT,
-              cancelled_at TEXT
+              archived_at INTEGER,
+              cancelled_at INTEGER
           )""",
           "CREATE INDEX idx_specs_project ON specs(project)",
           "CREATE INDEX idx_specs_room ON specs(room_id)",
@@ -84,9 +85,9 @@ public final class SchemaManager {
           BEGIN
               UPDATE specs SET
                   archived_at = CASE WHEN NEW.status = 'archived'
-                      THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END,
+                      THEN COALESCE(NEW.updated_at, CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)) END,
                   cancelled_at = CASE WHEN NEW.status = 'cancelled'
-                      THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END
+                      THEN COALESCE(NEW.updated_at, CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)) END
               WHERE id = NEW.id;
           END""",
           """
@@ -95,9 +96,9 @@ public final class SchemaManager {
           BEGIN
               UPDATE specs SET
                   archived_at = CASE WHEN NEW.status = 'archived'
-                      THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END,
+                      THEN COALESCE(NEW.updated_at, CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)) END,
                   cancelled_at = CASE WHEN NEW.status = 'cancelled'
-                      THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END
+                      THEN COALESCE(NEW.updated_at, CAST(unixepoch('now', 'subsec') * 1000 AS INTEGER)) END
               WHERE id = NEW.id;
           END""",
           """
@@ -117,12 +118,12 @@ public final class SchemaManager {
               spec_id TEXT PRIMARY KEY REFERENCES specs(id) ON DELETE CASCADE,
               body TEXT NOT NULL DEFAULT '',
               plan TEXT NOT NULL DEFAULT '',
-              updated_at TEXT NOT NULL
+              updated_at INTEGER NOT NULL
           )""",
           """
           CREATE TABLE events (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
-              timestamp TEXT NOT NULL,
+              timestamp INTEGER NOT NULL,
               type TEXT NOT NULL,
               project TEXT,
               spec_id TEXT,
@@ -142,7 +143,7 @@ public final class SchemaManager {
               display_name TEXT,
               email TEXT,
               status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
-              created_at TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
               role TEXT NOT NULL DEFAULT 'member',
               scope TEXT NOT NULL DEFAULT 'all' CHECK (scope IN ('all', 'granted'))
           )""",
@@ -152,9 +153,9 @@ public final class SchemaManager {
               name TEXT NOT NULL UNIQUE,
               role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member', 'viewer')),
               fde_id TEXT REFERENCES fdes(id) ON DELETE CASCADE,
-              created_at TEXT NOT NULL,
-              last_used_at TEXT,
-              expires_at TEXT
+              created_at INTEGER NOT NULL,
+              last_used_at INTEGER,
+              expires_at INTEGER
           )""",
           """
           CREATE TABLE webauthn_credentials (
@@ -167,17 +168,17 @@ public final class SchemaManager {
               backup_eligible INTEGER NOT NULL DEFAULT 0,
               backup_state INTEGER NOT NULL DEFAULT 0,
               label TEXT,
-              created_at TEXT NOT NULL,
-              last_used_at TEXT
+              created_at INTEGER NOT NULL,
+              last_used_at INTEGER
           )""",
           "CREATE INDEX idx_webauthn_credentials_fde ON webauthn_credentials(fde_id)",
           """
           CREATE TABLE sessions (
               token_hash TEXT PRIMARY KEY,
               fde_id TEXT NOT NULL REFERENCES fdes(id) ON DELETE CASCADE,
-              created_at TEXT NOT NULL,
-              expires_at TEXT NOT NULL,
-              last_used_at TEXT
+              created_at INTEGER NOT NULL,
+              expires_at INTEGER NOT NULL,
+              last_used_at INTEGER
           )""",
           """
           CREATE TABLE webauthn_challenges (
@@ -185,16 +186,16 @@ public final class SchemaManager {
               challenge TEXT NOT NULL,
               ceremony TEXT NOT NULL CHECK (ceremony IN ('register', 'assert')),
               fde_id TEXT REFERENCES fdes(id) ON DELETE CASCADE,
-              created_at TEXT NOT NULL,
-              expires_at TEXT NOT NULL
+              created_at INTEGER NOT NULL,
+              expires_at INTEGER NOT NULL
           )""",
           """
           CREATE TABLE enrollment_tickets (
               token_hash TEXT PRIMARY KEY,
               fde_id TEXT NOT NULL REFERENCES fdes(id) ON DELETE CASCADE,
-              created_at TEXT NOT NULL,
-              expires_at TEXT NOT NULL,
-              consumed_at TEXT
+              created_at INTEGER NOT NULL,
+              expires_at INTEGER NOT NULL,
+              consumed_at INTEGER
           )""",
           """
           CREATE TABLE fde_ssh_keys (
@@ -202,7 +203,7 @@ public final class SchemaManager {
               fde_id TEXT NOT NULL REFERENCES fdes(id) ON DELETE CASCADE,
               public_key TEXT NOT NULL,
               comment TEXT,
-              created_at TEXT NOT NULL
+              created_at INTEGER NOT NULL
           )""",
           """
           CREATE TABLE reviews (
@@ -211,10 +212,10 @@ public final class SchemaManager {
               iteration INTEGER NOT NULL DEFAULT 1,
               status TEXT NOT NULL DEFAULT 'pending'
                   CHECK (status IN ('pending', 'running', 'passed', 'failed', 'escalated')),
-              created_at TEXT NOT NULL,
-              completed_at TEXT,
+              created_at INTEGER NOT NULL,
+              completed_at INTEGER,
               decided_by TEXT,
-              superseded_at TEXT,
+              superseded_at INTEGER,
               error TEXT,
               rev TEXT,
               base_rev TEXT,
@@ -231,8 +232,8 @@ public final class SchemaManager {
               status TEXT NOT NULL DEFAULT 'pending'
                   CHECK (status IN ('pending', 'running', 'passed', 'failed', 'skipped')),
               reviewer TEXT,
-              started_at TEXT,
-              completed_at TEXT,
+              started_at INTEGER,
+              completed_at INTEGER,
               error TEXT
           )""",
           "CREATE INDEX idx_review_stages_review ON review_stages(review_id)",
@@ -241,9 +242,9 @@ public final class SchemaManager {
               name TEXT PRIMARY KEY,
               definition TEXT NOT NULL,
               created_by TEXT,
-              created_at TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
               updated_by TEXT,
-              updated_at TEXT NOT NULL,
+              updated_at INTEGER NOT NULL,
               rev TEXT,
               base_rev TEXT
           )""",
@@ -254,7 +255,7 @@ public final class SchemaManager {
               path TEXT NOT NULL,
               rev TEXT,
               base_rev TEXT,
-              updated_at TEXT NOT NULL,
+              updated_at INTEGER NOT NULL,
               content_hash TEXT,
               size INTEGER,
               mode INTEGER NOT NULL DEFAULT 420,
@@ -268,7 +269,7 @@ public final class SchemaManager {
               entity_id TEXT NOT NULL,
               rev TEXT NOT NULL,
               actor TEXT,
-              recorded_at TEXT NOT NULL,
+              recorded_at INTEGER NOT NULL,
               origin TEXT NOT NULL,
               deleted INTEGER NOT NULL DEFAULT 0,
               snapshot TEXT NOT NULL,
@@ -290,7 +291,7 @@ public final class SchemaManager {
               local_snapshot TEXT,
               remote_snapshot TEXT,
               fields TEXT NOT NULL,
-              detected_at TEXT NOT NULL,
+              detected_at INTEGER NOT NULL,
               status TEXT NOT NULL DEFAULT 'pending',
               resolved_rev TEXT,
               remote_rev TEXT,
@@ -304,22 +305,22 @@ public final class SchemaManager {
               spec_id TEXT NOT NULL,
               channel TEXT NOT NULL,
               thread_ts TEXT NOT NULL,
-              created_at TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
               PRIMARY KEY (project, spec_id)
           )""",
           """
           CREATE TABLE run_credentials (
               run_id TEXT PRIMARY KEY,
               credential_hash TEXT NOT NULL UNIQUE,
-              created_at TEXT NOT NULL,
-              expires_at TEXT
+              created_at INTEGER NOT NULL,
+              expires_at INTEGER
           )""",
           """
           CREATE TABLE box_credential (
               id INTEGER PRIMARY KEY CHECK (id = 1),
               handle TEXT NOT NULL,
               credential_hash TEXT NOT NULL UNIQUE,
-              created_at TEXT NOT NULL
+              created_at INTEGER NOT NULL
           )""",
           """
           CREATE TABLE runs (
@@ -332,8 +333,8 @@ public final class SchemaManager {
               pid INTEGER,
               status TEXT NOT NULL DEFAULT 'running'
                   CHECK (status IN ('running', 'stopping', 'completed', 'stopped', 'failed')),
-              started_at TEXT NOT NULL,
-              completed_at TEXT,
+              started_at INTEGER NOT NULL,
+              completed_at INTEGER,
               exit_code INTEGER,
               watcher_pid INTEGER,
               node TEXT,
@@ -350,7 +351,7 @@ public final class SchemaManager {
               session_id TEXT,
               session_source TEXT,
               transcript_path TEXT,
-              last_activity_at TEXT,
+              last_activity_at INTEGER,
               room_id TEXT,
               review_id TEXT,
               stop_source TEXT
@@ -375,7 +376,7 @@ public final class SchemaManager {
               project TEXT NOT NULL,
               node TEXT NOT NULL DEFAULT '',
               action TEXT NOT NULL,
-              created_at TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
               PRIMARY KEY (project, node)
           )""",
           """
@@ -412,8 +413,8 @@ public final class SchemaManager {
               wake TEXT CHECK (wake IN ('on', 'mention', 'off')),
               roster TEXT,
               created_by TEXT,
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL,
               updated_by TEXT,
               rev TEXT,
               base_rev TEXT
@@ -426,7 +427,7 @@ public final class SchemaManager {
               author TEXT NOT NULL,
               body TEXT NOT NULL,
               reply_to TEXT REFERENCES room_messages(id),
-              created_at TEXT NOT NULL,
+              created_at INTEGER NOT NULL,
               rev TEXT NOT NULL,
               base_rev TEXT,
               question INTEGER NOT NULL DEFAULT 0,
@@ -444,15 +445,15 @@ public final class SchemaManager {
           """
           CREATE TABLE sync_health (
               peer TEXT PRIMARY KEY,
-              last_attempt_at TEXT,
-              last_success_at TEXT,
+              last_attempt_at INTEGER,
+              last_success_at INTEGER,
               consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
               last_error_kind TEXT
                   CHECK (last_error_kind IN ('unreachable', 'refused', 'protocol', 'store')),
               last_error TEXT,
               last_report TEXT,
               state TEXT NOT NULL CHECK (state IN ('in_sync', 'syncing', 'stale')),
-              stale_since TEXT
+              stale_since INTEGER
           )""",
           """
           CREATE TABLE change_heads (
@@ -468,7 +469,7 @@ public final class SchemaManager {
               peer TEXT NOT NULL,
               entity_type TEXT NOT NULL,
               checkpoint INTEGER NOT NULL DEFAULT 0,
-              updated_at TEXT NOT NULL,
+              updated_at INTEGER NOT NULL,
               read_seq INTEGER,
               read_id TEXT,
               read_rev TEXT,
@@ -485,21 +486,21 @@ public final class SchemaManager {
               hash TEXT PRIMARY KEY,
               size INTEGER NOT NULL,
               chunks TEXT NOT NULL,
-              created_at TEXT NOT NULL
+              created_at INTEGER NOT NULL
           )""",
           """
           CREATE TABLE erase_requests (
               entity_type TEXT NOT NULL,
               entity_id TEXT NOT NULL,
               actor TEXT,
-              requested_at TEXT NOT NULL,
+              requested_at INTEGER NOT NULL,
               PRIMARY KEY (entity_type, entity_id)
           )""",
           """
           CREATE TABLE fde_boxes (
               handle TEXT PRIMARY KEY,
               box_id TEXT NOT NULL,
-              claimed_at TEXT NOT NULL
+              claimed_at INTEGER NOT NULL
           )""",
           """
           CREATE TABLE sync_offers (
@@ -526,13 +527,13 @@ public final class SchemaManager {
               fde_id TEXT PRIMARY KEY REFERENCES fdes(id) ON DELETE CASCADE,
               public_key TEXT NOT NULL,
               token_name TEXT NOT NULL,
-              created_at TEXT NOT NULL
+              created_at INTEGER NOT NULL
           )""",
           """
           CREATE TABLE project_grants (
               fde_id TEXT NOT NULL REFERENCES fdes(id) ON DELETE CASCADE,
               project TEXT NOT NULL,
-              granted_at TEXT NOT NULL,
+              granted_at INTEGER NOT NULL,
               PRIMARY KEY (fde_id, project)
           )""",
           """
@@ -619,7 +620,9 @@ public final class SchemaManager {
 
   private void stamp(int version) {
     db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, datetime('now'))", version);
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+        version,
+        DateTimeUtils.now());
   }
 
   public int currentVersion() {

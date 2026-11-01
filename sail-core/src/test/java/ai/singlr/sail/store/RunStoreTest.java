@@ -20,8 +20,10 @@ import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -268,8 +270,26 @@ class RunStoreTest {
 
   private static RunStore.RunRow runOnNode(String node) {
     return new RunStore.RunRow(
-        "r", "proj", "spec", node, "build", "codex", "b", "t", null, null, "running", null, "log",
-        "unit", "t", null, List.of(), null, null, null);
+        "r",
+        "proj",
+        "spec",
+        node,
+        "build",
+        "codex",
+        "b",
+        "t",
+        null,
+        null,
+        "running",
+        null,
+        "log",
+        "unit",
+        Instant.EPOCH,
+        null,
+        List.of(),
+        null,
+        null,
+        null);
   }
 
   @Test
@@ -1057,6 +1077,24 @@ class RunStoreTest {
         store.stampActivity(id, Duration.ofSeconds(30)),
         "a second stamp inside the floor window is skipped");
     assertEquals(first, store.findById(id).orElseThrow().lastActivityAt());
+  }
+
+  @Test
+  void aStampJustInsideTheFloorIsSkippedAndOneAtTheFloorWrites() {
+    var id = newRun("backend", "auth");
+    var clock = DateTimeUtils.clock;
+    var at = Instant.parse("2026-10-20T19:09:39.656Z");
+    try {
+      DateTimeUtils.clock = Clock.fixed(at, ZoneOffset.UTC);
+      assertTrue(store.stampActivity(id, Duration.ofSeconds(30)));
+      DateTimeUtils.clock = Clock.fixed(at.plusSeconds(30).minusMillis(1), ZoneOffset.UTC);
+      assertFalse(store.stampActivity(id, Duration.ofSeconds(30)), "just inside the floor");
+      DateTimeUtils.clock = Clock.fixed(at.plusSeconds(30), ZoneOffset.UTC);
+      assertTrue(store.stampActivity(id, Duration.ofSeconds(30)), "at the floor");
+    } finally {
+      DateTimeUtils.clock = clock;
+    }
+    assertEquals(at.plusSeconds(30), store.findById(id).orElseThrow().lastActivityAt());
   }
 
   @Test
@@ -2038,13 +2076,13 @@ class RunStoreTest {
     var row =
         db.queryOne(
                 "SELECT created_at, expires_at FROM run_credentials WHERE run_id = ?",
-                r -> new String[] {r.text(0), r.text(1)},
+                r -> new Instant[] {r.instant(0), r.instant(1)},
                 id)
             .orElseThrow();
-    var expected = Instant.parse(row[0]).plus(maxDuration).plus(RunStore.CREDENTIAL_GRACE);
+    var expected = row[0].plus(maxDuration).plus(RunStore.CREDENTIAL_GRACE);
     assertEquals(
         expected,
-        Instant.parse(row[1]),
+        row[1],
         "the credential outlives the run's configured hard stop by exactly the grace window");
     assertEquals(id, store.findByCredential(credential).orElseThrow().id());
   }
@@ -2270,7 +2308,15 @@ class RunStoreTest {
     store.markDelivered(id, List.of(rendered.id()));
     messages.applyRevision(
         lateId,
-        Map.of("spec_id", "auth", "author", "ada", "body", "late", "created_at", "now"),
+        Map.of(
+            "spec_id",
+            "auth",
+            "author",
+            "ada",
+            "body",
+            "late",
+            "created_at",
+            Snapshots.millis(DateTimeUtils.now())),
         "1-abc");
 
     assertEquals(

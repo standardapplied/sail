@@ -5,9 +5,11 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.harness.Harnesses;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,8 +54,8 @@ public record Spec(
     String branch,
     int priority,
     String createdBy,
-    String createdAt,
-    String updatedAt,
+    Instant createdAt,
+    Instant updatedAt,
     String updatedBy,
     String roomId) {
 
@@ -143,6 +145,16 @@ public record Spec(
   }
 
   @SuppressWarnings("unchecked")
+  /** The instant {@code map} carries under {@code key} as an integer millisecond, or null. */
+  private static Instant instantOf(Map<String, Object> map, String key) {
+    return switch (map.get(key)) {
+      case null -> null;
+      case Number millis -> DateTimeUtils.ofMillis(millis.longValue());
+      case Object other ->
+          throw new IllegalArgumentException(key + " must be an integer millisecond, not " + other);
+    };
+  }
+
   public static Spec fromMap(Map<String, Object> map) {
     var id = (String) map.get("id");
     if (Strings.isBlank(id)) {
@@ -175,8 +187,8 @@ public record Spec(
         branch,
         priority instanceof Number n ? n.intValue() : 0,
         (String) map.get("created_by"),
-        (String) map.get("created_at"),
-        (String) map.get("updated_at"),
+        instantOf(map, "created_at"),
+        instantOf(map, "updated_at"),
         (String) map.get("updated_by"),
         (String) map.get("room_id"));
   }

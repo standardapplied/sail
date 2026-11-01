@@ -13,10 +13,12 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -60,8 +62,8 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
       String wake,
       String roster,
       String createdBy,
-      String createdAt,
-      String updatedAt,
+      Instant createdAt,
+      Instant updatedAt,
       String updatedBy) {}
 
   /**
@@ -72,7 +74,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   public void create(RoomRow room) {
     Strings.requireNonBlank(room.id(), "A room needs an id");
     Strings.requireNonBlank(room.title(), "A room needs a title");
-    var now = DateTimeUtils.now().toString();
+    var now = DateTimeUtils.now();
     db.transaction(
         () -> {
           var author = author();
@@ -105,7 +107,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
           db.execute(
               "UPDATE rooms SET roster = ?, updated_at = ?, updated_by = ? WHERE id = ?",
               roster,
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               author(),
               id);
           journal.recordRevision(id, ChangeLog.Entry.LOCAL, false);
@@ -119,7 +121,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
           db.execute(
               "UPDATE rooms SET wake = ?, updated_at = ?, updated_by = ? WHERE id = ?",
               wake,
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               author(),
               id);
           journal.recordRevision(id, ChangeLog.Entry.LOCAL, false);
@@ -171,8 +173,8 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   public void createJournaled(RoomRow room) {
     Strings.requireNonBlank(room.id(), "A room needs an id");
     Strings.requireNonBlank(room.title(), "A room needs a title");
-    Strings.requireNonBlank(room.createdAt(), "A journaled create carries its creation time");
-    Strings.requireNonBlank(room.updatedAt(), "A journaled create carries its update time");
+    Objects.requireNonNull(room.createdAt(), "A journaled create carries its creation time");
+    Objects.requireNonNull(room.updatedAt(), "A journaled create carries its update time");
     db.transaction(
         () -> {
           db.execute(
@@ -500,8 +502,8 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
         row.text(4),
         row.text(5),
         row.text(6),
-        row.text(7),
-        row.text(8),
+        row.instant(7),
+        row.instant(8),
         row.text(9));
   }
 
@@ -514,9 +516,9 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
     map.put("wake", room.wake());
     map.put("roster", room.roster());
     map.put("created_by", room.createdBy());
-    map.put("created_at", room.createdAt());
+    map.put("created_at", Snapshots.millis(room.createdAt()));
     map.put("updated_by", room.updatedBy());
-    map.put("updated_at", room.updatedAt());
+    map.put("updated_at", Snapshots.millis(room.updatedAt()));
     return map;
   }
 
@@ -551,9 +553,9 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
      */
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
-      var now = DateTimeUtils.now().toString();
+      var now = DateTimeUtils.now();
       var adopting = Actor.current().lane() == Actor.Lane.MAIN;
-      var createdAt = Snapshots.text(snapshot, Snapshots.CREATED_AT);
+      var createdAt = Snapshots.instant(snapshot, Snapshots.CREATED_AT);
       db.execute(
           """
           INSERT INTO rooms (id, project, title, assignee, wake, roster, created_by,
@@ -571,11 +573,11 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
           Snapshots.text(snapshot, "wake"),
           Snapshots.text(snapshot, "roster"),
           creatorOf(id, snapshot),
-          Strings.isBlank(createdAt) ? now : createdAt,
+          createdAt == null ? now : createdAt,
           Snapshots.timeOr(snapshot, Snapshots.UPDATED_AT, now),
           Snapshots.actor(snapshot),
           adopting ? 1 : 0,
-          Strings.isNotBlank(createdAt) ? 1 : 0);
+          createdAt != null ? 1 : 0);
     }
 
     /**

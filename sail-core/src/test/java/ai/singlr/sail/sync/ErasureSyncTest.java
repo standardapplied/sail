@@ -33,6 +33,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -602,7 +603,14 @@ class ErasureSyncTest {
     new EventStore(box.db)
         .insert(
             new EventStore.EventRow(
-                0, "2026-09-23T00:00:00Z", "spec_updated", "proj", id, null, "h", "{}"));
+                0,
+                Instant.parse("2026-09-23T00:00:00Z"),
+                "spec_updated",
+                "proj",
+                id,
+                null,
+                "h",
+                "{}"));
     return box.db
         .queryOne("SELECT body_hash FROM specs WHERE id = ?", r -> r.text(0), id)
         .orElseThrow();
@@ -622,8 +630,8 @@ class ErasureSyncTest {
         null,
         0,
         owner,
-        "",
-        "",
+        null,
+        null,
         owner,
         List.of(),
         List.of());

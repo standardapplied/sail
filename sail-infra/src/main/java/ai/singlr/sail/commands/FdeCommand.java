@@ -1108,7 +1108,7 @@ public final class FdeCommand implements Runnable {
             .append(
                 key.publicKey(),
                 pairingComment(handle),
-                Optional.ofNullable(token.expiresAt()).map(Instant::parse));
+                Optional.ofNullable(token.expiresAt()));
         HostConfigSetCommand.writeWorkstationKey(box.workstationKey(), key.publicKey().line());
         System.out.println(
             Ansi.AUTO.string(

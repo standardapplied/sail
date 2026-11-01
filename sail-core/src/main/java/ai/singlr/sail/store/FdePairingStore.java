@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -23,7 +24,7 @@ public final class FdePairingStore {
     this.db = db;
   }
 
-  public record Pairing(String fdeId, String publicKey, String tokenName, String createdAt) {}
+  public record Pairing(String fdeId, String publicKey, String tokenName, Instant createdAt) {}
 
   /** Records {@code fdeId}'s pairing. Throws if it already has one: a pairing is revoked first. */
   public void put(String fdeId, String publicKey, String tokenName) {
@@ -33,13 +34,13 @@ public final class FdePairingStore {
         fdeId,
         publicKey,
         tokenName,
-        DateTimeUtils.now().toString());
+        DateTimeUtils.now());
   }
 
   public Optional<Pairing> find(String fdeId) {
     return db.queryOne(
         "SELECT fde_id, public_key, token_name, created_at FROM fde_pairings WHERE fde_id = ?",
-        row -> new Pairing(row.text(0), row.text(1), row.text(2), row.text(3)),
+        row -> new Pairing(row.text(0), row.text(1), row.text(2), row.instant(3)),
         fdeId);
   }
 

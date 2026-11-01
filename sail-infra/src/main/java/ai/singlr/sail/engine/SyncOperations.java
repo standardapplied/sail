@@ -17,6 +17,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FdeStore;
@@ -713,7 +714,7 @@ public final class SyncOperations {
             str(entry, "email"),
             str(entry, "role"),
             str(entry, "status"),
-            str(entry, "created_at"));
+            Snapshots.instant(entry, "created_at"));
       } catch (IllegalArgumentException invalid) {
         rejected.add(str(entry, "handle"));
       }

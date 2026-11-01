@@ -714,8 +714,8 @@ public final class Banner {
           Passkeys.shortId(credential.credentialId()),
           Passkeys.displayLabel(credential),
           Passkeys.authenticatorName(credential.aaguid()),
-          datePart(credential.createdAt()),
-          datePart(credential.lastUsedAt()),
+          datePart(DateTimeUtils.format(credential.createdAt())),
+          datePart(DateTimeUtils.format(credential.lastUsedAt())),
           credential.backupState() ? "yes" : "no");
     }
     table.render(out, ansi);

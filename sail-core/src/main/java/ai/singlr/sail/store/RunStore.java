@@ -102,8 +102,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       Integer exitCode,
       String logPath,
       String unit,
-      String startedAt,
-      String completedAt,
+      Instant startedAt,
+      Instant completedAt,
       List<String> repos,
       Long pidTicks,
       String principal,
@@ -111,7 +111,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String sessionId,
       String sessionSource,
       String transcriptPath,
-      String lastActivityAt,
+      Instant lastActivityAt,
       String roomId,
       String reviewId,
       String stopSource) {
@@ -137,8 +137,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         Integer exitCode,
         String logPath,
         String unit,
-        String startedAt,
-        String completedAt,
+        Instant startedAt,
+        Instant completedAt,
         List<String> repos,
         Long pidTicks,
         String principal,
@@ -192,8 +192,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         Integer exitCode,
         String logPath,
         String unit,
-        String startedAt,
-        String completedAt,
+        Instant startedAt,
+        Instant completedAt,
         List<String> repos,
         Long pidTicks,
         String principal,
@@ -376,7 +376,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               task,
               pid != null ? pid.longValue() : null,
               watcherPid != null ? watcherPid.longValue() : null,
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               logPath,
               unit,
               principalHandle(agent, role, id),
@@ -455,7 +455,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               project,
               ownerKey(localHandle),
               action,
-              DateTimeUtils.now().toString());
+              DateTimeUtils.now());
           return new ContainerLease.Acquired();
         });
   }
@@ -468,12 +468,12 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             .map(RunStatus::wire)
             .toList();
     var parameters = new ArrayList<Object>(terminal);
-    parameters.add(cutoff.toString());
+    parameters.add(cutoff);
     parameters.add(limit);
     return db.query(
         "SELECT id FROM runs WHERE status IN ("
             + String.join(", ", terminal.stream().map(status -> "?").toList())
-            + ") AND completed_at IS NOT NULL AND julianday(completed_at) < julianday(?)"
+            + ") AND completed_at IS NOT NULL AND completed_at < ?"
             + " ORDER BY id LIMIT ?",
         row -> row.text(0),
         parameters.toArray());
@@ -528,17 +528,17 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     var row =
         db.queryOne(
             "SELECT action, created_at FROM container_leases WHERE project = ? AND node = ?",
-            r -> new String[] {r.text(0), r.text(1)},
+            r -> new Lease(r.text(0), r.instant(1)),
             project,
             ownerKey(localHandle));
     if (row.isEmpty()) {
       return Optional.empty();
     }
-    if (Instant.parse(row.get()[1]).plus(LEASE_TTL).isBefore(DateTimeUtils.now())) {
+    if (row.get().createdAt().plus(LEASE_TTL).isBefore(DateTimeUtils.now())) {
       releaseContainerLease(project, localHandle);
       return Optional.empty();
     }
-    return Optional.of(row.get()[0]);
+    return Optional.of(row.get().action());
   }
 
   /**
@@ -778,7 +778,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               agent,
               branch,
               task,
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               logPath,
               unit,
               YamlUtil.dumpJson(reserved),
@@ -1061,10 +1061,10 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     var now = DateTimeUtils.now();
     db.execute(
         "UPDATE runs SET last_activity_at = ? WHERE id = ? AND status = 'running'"
-            + " AND (last_activity_at IS NULL OR last_activity_at < ?)",
-        now.toString(),
+            + " AND (last_activity_at IS NULL OR last_activity_at <= ?)",
+        now,
         id,
-        now.minus(floor).toString());
+        now.minus(floor));
     return db.changes() > 0;
   }
 
@@ -1124,17 +1124,17 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     var match =
         db.queryOne(
             "SELECT run_id, expires_at FROM run_credentials WHERE credential_hash = ?",
-            row -> new String[] {row.text(0), row.text(1)},
+            row -> new Credential(row.text(0), row.instant(1)),
             hash);
     if (match.isEmpty()) {
       return Optional.empty();
     }
-    var expiresAt = match.get()[1];
-    if (expiresAt != null && Instant.parse(expiresAt).isBefore(DateTimeUtils.now())) {
+    var expiresAt = match.get().expiresAt();
+    if (expiresAt != null && expiresAt.isBefore(DateTimeUtils.now())) {
       db.execute("DELETE FROM run_credentials WHERE credential_hash = ?", hash);
       return Optional.empty();
     }
-    return findById(match.get()[0]);
+    return findById(match.get().runId());
   }
 
   /**
@@ -1236,14 +1236,13 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   private String mintCredential(String id, Duration maxDuration) {
     var credential = Secrets.mint("sailrun");
     var now = DateTimeUtils.now();
-    var expiresAt =
-        maxDuration == null ? null : now.plus(maxDuration).plus(CREDENTIAL_GRACE).toString();
+    var expiresAt = maxDuration == null ? null : now.plus(maxDuration).plus(CREDENTIAL_GRACE);
     db.execute(
         "INSERT INTO run_credentials (run_id, credential_hash, created_at, expires_at)"
             + " VALUES (?, ?, ?, ?)",
         id,
         TokenStore.sha256(credential),
-        now.toString(),
+        now,
         expiresAt);
     return credential;
   }
@@ -1513,7 +1512,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
                   + " WHERE id = ? AND status = ?"
                   + alsoWhere,
               status,
-              RunStatus.isTerminal(status) ? DateTimeUtils.now().toString() : null,
+              RunStatus.isTerminal(status) ? DateTimeUtils.now() : null,
               exitCode != null ? exitCode.longValue() : null,
               id,
               expected);
@@ -1559,7 +1558,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           db.execute(
               "UPDATE runs SET status = ?, completed_at = ?, exit_code = ? WHERE id = ?",
               status,
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               exitCode != null ? exitCode.longValue() : null,
               id);
           revokeCredential(id);
@@ -1760,7 +1759,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         row.exitCode() != null ? row.exitCode().longValue() : null,
         row.logPath(),
         row.unit(),
-        Objects.requireNonNullElse(row.startedAt(), DateTimeUtils.now().toString()),
+        Objects.requireNonNullElse(row.startedAt(), DateTimeUtils.now()),
         row.completedAt(),
         YamlUtil.dumpJson(Objects.requireNonNullElse(row.repos(), List.of())),
         row.pidTicks(),
@@ -1791,8 +1790,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     map.put("exit_code", run.exitCode());
     map.put("log_path", run.logPath());
     map.put("unit", run.unit());
-    map.put("started_at", run.startedAt());
-    map.put("completed_at", run.completedAt());
+    map.put("started_at", Snapshots.millis(run.startedAt()));
+    map.put("completed_at", Snapshots.millis(run.completedAt()));
     map.put("repos", Objects.requireNonNullElse(run.repos(), List.of()));
     map.put("pid_ticks", run.pidTicks());
     map.put("principal", run.principal());
@@ -1800,7 +1799,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     map.put("session_id", run.sessionId());
     map.put("session_source", run.sessionSource());
     map.put("transcript_path", run.transcriptPath());
-    map.put("last_activity_at", run.lastActivityAt());
+    map.put("last_activity_at", Snapshots.millis(run.lastActivityAt()));
     map.put("room_id", run.roomId());
     map.put("review_id", run.reviewId());
     map.put("stop_source", run.stopSource());
@@ -1875,8 +1874,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         Snapshots.integer(snapshot, "exit_code"),
         Snapshots.text(snapshot, "log_path"),
         Snapshots.text(snapshot, "unit"),
-        Snapshots.text(snapshot, "started_at"),
-        Snapshots.text(snapshot, "completed_at"),
+        Snapshots.instant(snapshot, "started_at"),
+        Snapshots.instant(snapshot, "completed_at"),
         Snapshots.stringList(snapshot, "repos"),
         Snapshots.longValue(snapshot, "pid_ticks"),
         Snapshots.text(snapshot, "principal"),
@@ -1884,7 +1883,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         Snapshots.text(snapshot, "session_id"),
         Snapshots.text(snapshot, "session_source"),
         Snapshots.text(snapshot, "transcript_path"),
-        Snapshots.text(snapshot, "last_activity_at"),
+        Snapshots.instant(snapshot, "last_activity_at"),
         Snapshots.text(snapshot, "room_id"),
         Snapshots.text(snapshot, "review_id"),
         Snapshots.text(snapshot, "stop_source"));
@@ -1967,8 +1966,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         row.isNull(11) ? null : (int) row.integer(11),
         row.text(12),
         row.text(13),
-        row.text(14),
-        row.text(15),
+        row.instant(14),
+        row.instant(15),
         YamlUtil.parseStringList(row.text(16)),
         row.isNull(17) ? null : row.integer(17),
         row.text(18),
@@ -1976,9 +1975,13 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         row.text(20),
         row.text(21),
         row.text(22),
-        row.text(23),
+        row.instant(23),
         row.text(24),
         row.text(25),
         row.text(26));
   }
+
+  private record Credential(String runId, Instant expiresAt) {}
+
+  private record Lease(String action, Instant createdAt) {}
 }

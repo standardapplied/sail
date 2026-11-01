@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.YamlUtil;
@@ -169,7 +170,7 @@ public final class AgentReporter {
     var running = info != null && info.running();
     var startedAt =
         session != null && session.startedAt() != null
-            ? session.startedAt()
+            ? DateTimeUtils.format(session.startedAt())
             : info != null ? info.startedAt() : null;
     var branch = info != null ? info.branch() : "";
 
@@ -232,7 +233,7 @@ public final class AgentReporter {
     }
 
     if (session != null && session.completedAt() != null) {
-      endedAt = session.completedAt();
+      endedAt = DateTimeUtils.format(session.completedAt());
     }
 
     var exitCode = session != null ? session.exitCode() : null;

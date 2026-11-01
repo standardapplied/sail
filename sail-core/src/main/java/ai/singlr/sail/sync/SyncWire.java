@@ -20,6 +20,7 @@ import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -534,7 +535,7 @@ public final class SyncWire {
    * its offer.
    */
   public record Accepted(
-      String id, String rev, String author, Snapshots.Creator creator, String createdAt)
+      String id, String rev, String author, Snapshots.Creator creator, Instant createdAt)
       implements Result {}
 
   /**
@@ -921,7 +922,7 @@ public final class SyncWire {
           verdict.put(CREATOR, accepted.creator().handle());
         }
         if (accepted.createdAt() != null) {
-          verdict.put(CREATED_AT, accepted.createdAt());
+          verdict.put(CREATED_AT, Snapshots.millis(accepted.createdAt()));
         }
         map.put(ACCEPTED, verdict);
       }
@@ -963,7 +964,7 @@ public final class SyncWire {
           string(accepted, REV),
           string(accepted, AUTHOR),
           creator,
-          string(accepted, CREATED_AT));
+          Snapshots.instant(accepted, CREATED_AT));
     }
     if (Boolean.TRUE.equals(map.get(STALE))) {
       return new Stale(id);

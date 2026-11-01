@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.store.Snapshots;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,9 +49,30 @@ class ConflictMergeTest {
 
   @Test
   void metadataIsNeitherShownNorMerged() {
-    var base = map("title", "Auth", "_updated_at", "2026-01-01T00:00:00Z", "_actor", "ada");
-    var mine = map("title", "Mine", "_updated_at", "2026-01-02T00:00:00Z", "_actor", "ada");
-    var theirs = map("title", "Auth", "_updated_at", "2026-01-03T00:00:00Z", "_actor", "bob");
+    var base =
+        map(
+            "title",
+            "Auth",
+            "_updated_at",
+            Snapshots.millis(Instant.parse("2026-01-01T00:00:00Z")),
+            "_actor",
+            "ada");
+    var mine =
+        map(
+            "title",
+            "Mine",
+            "_updated_at",
+            Snapshots.millis(Instant.parse("2026-01-02T00:00:00Z")),
+            "_actor",
+            "ada");
+    var theirs =
+        map(
+            "title",
+            "Auth",
+            "_updated_at",
+            Snapshots.millis(Instant.parse("2026-01-03T00:00:00Z")),
+            "_actor",
+            "bob");
 
     var diff = ConflictMerge.diff(base, mine, theirs, List.of());
     var template = ConflictMerge.mergeTemplate(base, mine, theirs, List.of(), "c1");

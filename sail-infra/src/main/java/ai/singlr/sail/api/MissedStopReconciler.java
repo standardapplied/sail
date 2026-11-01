@@ -291,7 +291,7 @@ public final class MissedStopReconciler implements AutoCloseable {
     var released = 0;
     for (var run : sessionStore.running()) {
       if (!run.ownedBy(node)
-          || !MissedStops.parseOr(run.startedAt(), Instant.MAX).isBefore(deadline)
+          || !Objects.requireNonNullElse(run.startedAt(), Instant.MAX).isBefore(deadline)
           || reconciledBySpec(run, handledThisSweep)) {
         continue;
       }
@@ -466,7 +466,7 @@ public final class MissedStopReconciler implements AutoCloseable {
    * over acting on data it cannot interpret.
    */
   private MissedStops.StopCoverage stopCoverage(String specId, RunStore.RunRow session) {
-    var since = MissedStops.parseOr(session.startedAt(), Instant.MIN);
+    var since = Objects.requireNonNullElse(session.startedAt(), Instant.MIN);
     var newest =
         eventStore.forSpecAndType(specId, Event.WellKnownTypes.AGENT_SESSION_STOPPED).stream()
             .map(RecordedStop::of)
@@ -550,7 +550,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   private static Instant timestampOf(EventStore.EventRow row) {
-    return MissedStops.parseOr(row.timestamp(), Instant.MAX);
+    return Objects.requireNonNullElse(row.timestamp(), Instant.MAX);
   }
 
   /**

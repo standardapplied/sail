@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,14 +28,14 @@ class SpecTest {
                 "project", "test",
                 "priority", 40,
                 "created_by", "uday",
-                "created_at", "t0",
-                "updated_at", "t1",
+                "created_at", 1L,
+                "updated_at", 2L,
                 "updated_by", "mady",
                 "room_id", "lounge"));
     assertEquals(40, full.priority());
     assertEquals("uday", full.createdBy());
-    assertEquals("t0", full.createdAt());
-    assertEquals("t1", full.updatedAt());
+    assertEquals(Instant.ofEpochMilli(1), full.createdAt());
+    assertEquals(Instant.ofEpochMilli(2), full.updatedAt());
     assertEquals("mady", full.updatedBy());
     assertEquals("lounge", full.roomId());
 

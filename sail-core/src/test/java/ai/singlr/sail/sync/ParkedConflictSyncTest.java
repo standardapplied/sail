@@ -15,9 +15,11 @@ import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MainVersion;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.Snapshots;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -88,7 +90,8 @@ class ParkedConflictSyncTest {
     var mainReplica =
         new StoreReplica(main.id, mainRuns, new ChangeLog(main.db), main.conflicts, main.syncState);
     var pushedButNeverAcknowledged = new LinkedHashMap<>(nodeReplica.current(id));
-    pushedButNeverAcknowledged.put("last_activity_at", "2000-01-01T00:00:00Z");
+    pushedButNeverAcknowledged.put(
+        "last_activity_at", Snapshots.millis(Instant.parse("2000-01-01T00:00:00Z")));
     mainReplica.commit(id, pushedButNeverAcknowledged, mainReplica.currentRev(id));
     nodeRuns.stampActivity(id, Duration.ZERO);
     nodeReplica.recordConflict(

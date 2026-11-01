@@ -47,8 +47,8 @@ public final class PendingChallengeStore {
         B64URL.encodeToString(challenge),
         ceremony,
         fdeId,
-        now.toString(),
-        now.plus(ttl).toString());
+        now,
+        now.plus(ttl));
     return id;
   }
 
@@ -65,7 +65,7 @@ public final class PendingChallengeStore {
                 new Resolved(
                     new PendingChallenge(
                         r.text(0), B64URL_DEC.decode(r.text(1)), r.text(2), r.text(3)),
-                    r.text(4)),
+                    r.instant(4)),
             id);
     if (row.isEmpty()) {
       return Optional.empty();
@@ -73,13 +73,13 @@ public final class PendingChallengeStore {
     db.execute("DELETE FROM webauthn_challenges WHERE id = ?", id);
     var resolved = row.get();
     if (!ceremony.equals(resolved.challenge().ceremony())
-        || Instant.parse(resolved.expiresAt()).isBefore(DateTimeUtils.now())) {
+        || resolved.expiresAt().isBefore(DateTimeUtils.now())) {
       return Optional.empty();
     }
     return Optional.of(resolved.challenge());
   }
 
-  private record Resolved(PendingChallenge challenge, String expiresAt) {}
+  private record Resolved(PendingChallenge challenge, Instant expiresAt) {}
 
   private static String generateId() {
     return Secrets.mint("wac", 16);

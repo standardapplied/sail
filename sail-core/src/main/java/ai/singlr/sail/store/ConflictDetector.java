@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.store;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -222,7 +221,7 @@ public final class ConflictDetector {
     if (left == null || right == null) {
       return left == null ? right : left;
     }
-    return Instant.parse(left.toString()).isBefore(Instant.parse(right.toString())) ? right : left;
+    return ((Number) left).longValue() < ((Number) right).longValue() ? right : left;
   }
 
   private static LinkedHashSet<String> changedFields(

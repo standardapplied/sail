@@ -68,8 +68,8 @@ class EraseRequestTest {
         () ->
             main.specs.create(
                 new SpecStore.SpecRow(
-                    id, "acme", id, status, assignee, null, null, null, null, 0, creator, "", "",
-                    creator, List.of(), List.of())));
+                    id, "acme", id, status, assignee, null, null, null, null, 0, creator, null,
+                    null, creator, List.of(), List.of())));
   }
 
   @Test

@@ -309,7 +309,7 @@ record AgentRunView(
         run.branch(),
         info != null && info.running(),
         info != null ? info.pid() : null,
-        run.startedAt(),
+        DateTimeUtils.format(run.startedAt()),
         run.logPath());
   }
 
@@ -824,8 +824,8 @@ record RoomView(
         members,
         specIds,
         row.createdBy(),
-        row.createdAt(),
-        row.updatedAt(),
+        DateTimeUtils.format(row.createdAt()),
+        DateTimeUtils.format(row.updatedAt()),
         row.updatedBy());
   }
 
@@ -960,7 +960,7 @@ record SpecRevisionView(
     implements Mappable {
   static SpecRevisionView from(ChangeLog.Entry e) {
     return new SpecRevisionView(
-        e.rev(), e.actor(), e.recordedAt(), e.origin(), e.deleted(), e.peer(), e.kind().wire());
+        e.rev(), e.actor(), DateTimeUtils.format(e.recordedAt()), e.origin(), e.deleted(), e.peer(), e.kind().wire());
   }
 
   @Override
@@ -1260,8 +1260,8 @@ record GlobalSpecView(
         room == null ? null : room.wake(),
         engagementMap(room == null ? null : Roster.fromJson(room.roster()).standing()),
         spec.createdBy(),
-        spec.createdAt(),
-        spec.updatedAt(),
+        DateTimeUtils.format(spec.createdAt()),
+        DateTimeUtils.format(spec.updatedAt()),
         spec.updatedBy(),
         spec.roomId());
   }
@@ -1467,7 +1467,7 @@ record SpecMessageView(
         row.author(),
         row.body(),
         row.replyTo(),
-        row.createdAt(),
+        DateTimeUtils.format(row.createdAt()),
         row.question(),
         row.error());
   }
@@ -1611,10 +1611,10 @@ record ReviewView(
         row.specId(),
         row.iteration(),
         row.status(),
-        row.createdAt(),
-        row.completedAt(),
+        DateTimeUtils.format(row.createdAt()),
+        DateTimeUtils.format(row.completedAt()),
         row.decidedBy(),
-        row.supersededAt(),
+        DateTimeUtils.format(row.supersededAt()),
         row.error(),
         stages);
   }
@@ -1654,8 +1654,8 @@ record StageView(
         row.stageType(),
         row.status(),
         row.reviewer(),
-        row.startedAt(),
-        row.completedAt(),
+        DateTimeUtils.format(row.startedAt()),
+        DateTimeUtils.format(row.completedAt()),
         findingCount,
         row.error());
   }
@@ -1740,15 +1740,15 @@ record RunView(
         row.branch(),
         row.pid(),
         row.status(),
-        row.startedAt(),
-        row.completedAt(),
+        DateTimeUtils.format(row.startedAt()),
+        DateTimeUtils.format(row.completedAt()),
         row.exitCode(),
         row.logPath(),
         row.principal(),
         row.owner(),
         row.sessionId(),
         row.sessionSource(),
-        row.lastActivityAt(),
+        DateTimeUtils.format(row.lastActivityAt()),
         RunPresence.of(row.status(), row.lastActivityAt(), DateTimeUtils.now()),
         row.reviewId());
   }
@@ -1890,7 +1890,7 @@ record RunSummary(
         row.owner(),
         row.sessionId(),
         row.sessionSource(),
-        row.lastActivityAt(),
+        DateTimeUtils.format(row.lastActivityAt()),
         RunPresence.of(row.status(), row.lastActivityAt(), DateTimeUtils.now()));
   }
 

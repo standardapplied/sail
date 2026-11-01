@@ -403,7 +403,7 @@ public final class FileStore implements ConflictResolver, SyncedStore {
         row.size(),
         row.mode(),
         row.kind(),
-        DateTimeUtils.now().toString());
+        DateTimeUtils.now());
   }
 
   private FileRow rowFrom(String id, Map<String, Object> snapshot) {

@@ -326,7 +326,8 @@ public final class RunLauncher {
     return Optional.ofNullable(runStore)
         .flatMap(runs -> runs.findById(runId))
         .map(RunStore.RunRow::startedAt)
-        .orElseGet(() -> DateTimeUtils.now().toString());
+        .map(DateTimeUtils::format)
+        .orElseGet(() -> DateTimeUtils.format(DateTimeUtils.now()));
   }
 
   /**

@@ -118,8 +118,8 @@ class FleetSyncTest {
         null,
         0,
         "uday",
-        "",
-        "",
+        null,
+        null,
         "uday",
         deps,
         List.of());

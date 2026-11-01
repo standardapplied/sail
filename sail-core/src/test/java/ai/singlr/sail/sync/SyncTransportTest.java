@@ -101,8 +101,8 @@ class SyncTransportTest {
         null,
         0,
         author,
-        "",
-        "",
+        null,
+        null,
         author,
         List.of(),
         List.of());

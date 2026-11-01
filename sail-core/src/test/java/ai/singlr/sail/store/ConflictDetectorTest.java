@@ -236,9 +236,9 @@ class ConflictDetectorTest {
 
   @Test
   void aLatestWinsFieldMovedOnBothSidesMergesToTheLaterInstant() {
-    var base = Map.<String, Object>of("status", "running", "beat", "2026-09-01T00:00:00Z");
-    var earlier = Map.<String, Object>of("status", "running", "beat", "2026-09-01T00:00:41Z");
-    var later = Map.<String, Object>of("status", "running", "beat", "2026-09-01T00:00:41.5Z");
+    var base = Map.<String, Object>of("status", "running", "beat", 1788220800000L);
+    var earlier = Map.<String, Object>of("status", "running", "beat", 1788220841000L);
+    var later = Map.<String, Object>of("status", "running", "beat", 1788220841500L);
 
     var localLater =
         assertInstanceOf(
@@ -249,15 +249,15 @@ class ConflictDetectorTest {
             ConflictDetector.Merged.class,
             ConflictDetector.detect(base, earlier, later, Set.of("beat")));
 
-    assertEquals("2026-09-01T00:00:41.5Z", localLater.result().get("beat"));
-    assertEquals("2026-09-01T00:00:41.5Z", remoteLater.result().get("beat"));
+    assertEquals(1788220841500L, localLater.result().get("beat"));
+    assertEquals(1788220841500L, remoteLater.result().get("beat"));
   }
 
   @Test
   void aLatestWinsFieldNeverExcusesARealConflictBesideIt() {
-    var base = Map.<String, Object>of("status", "running", "beat", "2026-09-01T00:00:00Z");
-    var local = Map.<String, Object>of("status", "completed", "beat", "2026-09-01T00:00:05Z");
-    var remote = Map.<String, Object>of("status", "cancelled", "beat", "2026-09-01T00:00:09Z");
+    var base = Map.<String, Object>of("status", "running", "beat", 1788220800000L);
+    var local = Map.<String, Object>of("status", "completed", "beat", 1788220805000L);
+    var remote = Map.<String, Object>of("status", "cancelled", "beat", 1788220809000L);
 
     var conflict =
         assertInstanceOf(
@@ -271,17 +271,17 @@ class ConflictDetectorTest {
   void aLatestWinsFieldStampedOnOneSideOnlyBeatsAnAbsentStamp() {
     var base = new LinkedHashMap<String, Object>();
     base.put("status", "running");
-    base.put("beat", "2026-09-01T00:00:00Z");
+    base.put("beat", 1788220800000L);
     var cleared = new LinkedHashMap<String, Object>(base);
     cleared.put("beat", null);
-    var stamped = Map.<String, Object>of("status", "running", "beat", "2026-09-01T00:00:09Z");
+    var stamped = Map.<String, Object>of("status", "running", "beat", 1788220809000L);
 
     var merged =
         assertInstanceOf(
             ConflictDetector.Merged.class,
             ConflictDetector.detect(base, cleared, stamped, Set.of("beat")));
 
-    assertEquals("2026-09-01T00:00:09Z", merged.result().get("beat"));
+    assertEquals(1788220809000L, merged.result().get("beat"));
   }
 
   @Test

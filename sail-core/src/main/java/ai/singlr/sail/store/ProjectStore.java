@@ -13,6 +13,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.PersonalFields;
 import ai.singlr.sail.identity.Actor;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,9 +52,9 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
       String name,
       String definition,
       String createdBy,
-      String createdAt,
+      Instant createdAt,
       String updatedBy,
-      String updatedAt) {}
+      Instant updatedAt) {}
 
   /**
    * Inserts the project or replaces its definition as the bound {@link Actor}, preserving the
@@ -70,7 +71,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     var canonical = PersonalFields.redact(definition);
     db.transaction(
         () -> {
-          writeRow(name, canonical, author(), null, null, DateTimeUtils.now().toString());
+          writeRow(name, canonical, author(), null, null, DateTimeUtils.now());
           journal.recordRevision(name, ChangeLog.Entry.LOCAL, false);
         });
   }
@@ -109,7 +110,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
           }
           journal.recordTombstone(old, ChangeLog.Entry.LOCAL, BLOCKING);
           eraseRow(old);
-          writeRow(renamed, canonical, author(), null, null, DateTimeUtils.now().toString());
+          writeRow(renamed, canonical, author(), null, null, DateTimeUtils.now());
           journal.recordRevision(renamed, ChangeLog.Entry.LOCAL, false);
         });
   }
@@ -307,8 +308,8 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
       String definition,
       String actor,
       String creator,
-      String createdAt,
-      String updatedAt) {
+      Instant createdAt,
+      Instant updatedAt) {
     db.execute(
         "INSERT INTO projects (name, definition, created_by, created_at, updated_by, updated_at)"
             + " VALUES (?, ?, COALESCE(?, ?), COALESCE(?, ?), ?, ?) ON CONFLICT(name) DO UPDATE SET"
@@ -370,8 +371,8 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
               row -> {
                 var map = comparable(row.definition());
                 map.put("created_by", row.createdBy());
-                map.put("created_at", row.createdAt());
-                map.put("updated_at", row.updatedAt());
+                map.put("created_at", Snapshots.millis(row.createdAt()));
+                map.put("updated_at", Snapshots.millis(row.updatedAt()));
                 return map;
               })
           .orElse(null);
@@ -389,8 +390,8 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
           definitionOf(snapshot),
           Snapshots.actor(snapshot),
           Snapshots.adoptedCreator(snapshot, held),
-          Snapshots.text(snapshot, Snapshots.CREATED_AT),
-          Snapshots.timeOr(snapshot, Snapshots.UPDATED_AT, DateTimeUtils.now().toString()));
+          Snapshots.instant(snapshot, Snapshots.CREATED_AT),
+          Snapshots.timeOr(snapshot, Snapshots.UPDATED_AT, DateTimeUtils.now()));
     }
 
     @Override
@@ -426,6 +427,6 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
 
   private static ProjectRow map(Sqlite.Row row) {
     return new ProjectRow(
-        row.text(0), row.text(1), row.text(2), row.text(3), row.text(4), row.text(5));
+        row.text(0), row.text(1), row.text(2), row.instant(3), row.text(4), row.instant(5));
   }
 }

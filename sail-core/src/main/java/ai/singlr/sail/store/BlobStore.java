@@ -4,6 +4,7 @@
  */
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
@@ -278,10 +279,11 @@ public final class BlobStore {
     db.transaction(
         () ->
             db.execute(
-                "INSERT OR IGNORE INTO blobs (hash, size, chunks, created_at) VALUES (?, ?, ?, datetime('now'))",
+                "INSERT OR IGNORE INTO blobs (hash, size, chunks, created_at) VALUES (?, ?, ?, ?)",
                 manifest.hash(),
                 manifest.size(),
-                YamlUtil.dumpJson(manifest.chunkHashes())));
+                YamlUtil.dumpJson(manifest.chunkHashes()),
+                DateTimeUtils.now()));
   }
 
   /** Which entities' history a collection first compacts: none, every one, or ids of one type. */

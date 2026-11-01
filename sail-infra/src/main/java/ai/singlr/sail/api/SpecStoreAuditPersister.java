@@ -43,7 +43,7 @@ public final class SpecStoreAuditPersister implements EventSubscriber {
       eventStore.insert(
           new EventStore.EventRow(
               0,
-              event.ts().toString(),
+              event.ts(),
               event.type(),
               event.project(),
               event.spec(),

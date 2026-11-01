@@ -55,6 +55,7 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncHealth;
 import ai.singlr.sail.sync.SyncTransportException;
+import java.time.Instant;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
@@ -243,7 +244,7 @@ public final class SailOperations implements HostOperations {
           .insert(
               new EventStore.EventRow(
                   0,
-                  event.ts().toString(),
+                  event.ts(),
                   event.type(),
                   event.project(),
                   null,
@@ -1071,7 +1072,7 @@ public final class SailOperations implements HostOperations {
           }
           return new RoomsListResponse(
               views,
-              ofReadableRooms(messageStore.latestByRoom()),
+              formatted(ofReadableRooms(messageStore.latestByRoom())),
               ofReadableRooms(messageStore.openQuestions()));
         });
   }
@@ -1080,13 +1081,20 @@ public final class SailOperations implements HostOperations {
    * {@code byRoom}, a fact per room id, keyed only to the rooms the reader may see: a room is its
    * row's project, and one whose row has not arrived is its spec's.
    */
-  private Map<String, String> ofReadableRooms(Map<String, String> byRoom) {
-    var readable = new LinkedHashMap<String, String>();
+  private <T> Map<String, T> ofReadableRooms(Map<String, T> byRoom) {
+    var readable = new LinkedHashMap<String, T>();
     for (var room :
         Scoped.rows(Actor.reader(), List.copyOf(byRoom.keySet()), this::projectOfRoom)) {
       readable.put(room, byRoom.get(room));
     }
     return readable;
+  }
+
+  /** {@code byRoom}'s instants as the edge prints them. */
+  private static Map<String, String> formatted(Map<String, Instant> byRoom) {
+    var formatted = new LinkedHashMap<String, String>();
+    byRoom.forEach((room, at) -> formatted.put(room, DateTimeUtils.format(at)));
+    return formatted;
   }
 
   private String projectOfRoom(String roomId) {
@@ -1142,7 +1150,7 @@ public final class SailOperations implements HostOperations {
     }
     return new RoomDetailResponse(
         view,
-        messageStore.latestByRoom().get(row.id()),
+        DateTimeUtils.format(messageStore.latestByRoom().get(row.id())),
         messageStore.openQuestions().get(row.id()));
   }
 
@@ -1778,7 +1786,7 @@ public final class SailOperations implements HostOperations {
     var map = new LinkedHashMap<String, Object>();
     map.put("v", Event.CURRENT_VERSION);
     map.put("id", row.id());
-    map.put("ts", row.timestamp());
+    map.put("ts", DateTimeUtils.format(row.timestamp()));
     map.put("project", row.project());
     if (Strings.isNotBlank(row.specId())) {
       map.put("spec", row.specId());
@@ -1886,7 +1894,7 @@ public final class SailOperations implements HostOperations {
           return new GlobalSpecsListResponse(
               listed.specs(),
               listed.total(),
-              ofReadableRooms(messageStore.latestByRoom()),
+              formatted(ofReadableRooms(messageStore.latestByRoom())),
               ofReadableRooms(messageStore.openQuestions()));
         });
   }

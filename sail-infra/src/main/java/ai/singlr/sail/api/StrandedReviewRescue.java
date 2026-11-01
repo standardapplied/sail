@@ -11,6 +11,7 @@ import ai.singlr.sail.store.MissedStops;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.util.Objects;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -254,7 +255,7 @@ final class StrandedReviewRescue {
     return loop.ended(holderRunId)
         && sessionStore
             .findById(holderRunId)
-            .map(holder -> MissedStops.parseOr(holder.completedAt(), Instant.MAX).isBefore(cutoff))
+            .map(holder -> Objects.requireNonNullElse(holder.completedAt(), Instant.MAX).isBefore(cutoff))
             .orElse(true);
   }
 
@@ -270,12 +271,12 @@ final class StrandedReviewRescue {
     var serving = rows.serving();
     var settled =
         serving.isEmpty()
-            ? MissedStops.parseOr(review.createdAt(), Instant.MAX).isBefore(cutoff)
+            ? Objects.requireNonNullElse(review.createdAt(), Instant.MAX).isBefore(cutoff)
             : serving.stream()
                 .allMatch(
                     run ->
                         RunStatus.isTerminal(run.status())
-                            && MissedStops.parseOr(run.completedAt(), Instant.MAX)
+                            && Objects.requireNonNullElse(run.completedAt(), Instant.MAX)
                                 .isBefore(cutoff));
     return settled ? Optional.of(review) : Optional.empty();
   }

@@ -134,7 +134,7 @@ public final class RoomCommitGuard {
     var run = runStore.findById(runId).orElse(null);
     var specId = run != null ? run.specId() : null;
     var baseline = YamlUtil.parseMap(recorded);
-    var roomStarted = run != null ? parseInstant(run.startedAt()) : null;
+    var roomStarted = run != null ? run.startedAt() : null;
     var roomNode = run != null ? run.node() : null;
     var guardAt = DateTimeUtils.now();
     var others =
@@ -203,14 +203,14 @@ public final class RoomCommitGuard {
    */
   static boolean overlapsRoomInterval(
       RunStore.RunRow candidate, Instant roomStarted, Instant guardAt) {
-    var started = parseInstant(candidate.startedAt());
+    var started = candidate.startedAt();
     if (started != null && started.isAfter(guardAt)) {
       return false;
     }
     if (DispatchOperations.ownsLiveAgent(candidate)) {
       return true;
     }
-    var completed = parseInstant(candidate.completedAt());
+    var completed = candidate.completedAt();
     return roomStarted == null || completed == null || !completed.isBefore(roomStarted);
   }
 

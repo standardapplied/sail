@@ -8,6 +8,9 @@ package ai.singlr.sail.common;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -51,10 +54,39 @@ public final class DateTimeUtils {
    */
   public static volatile Clock clock = Clock.systemUTC();
 
-  /** UTC instant for "right now". An {@code Instant} is always UTC by definition. */
+  /**
+   * UTC instant for "right now", at the millisecond every stored instant keeps. An {@code Instant}
+   * is always UTC by definition.
+   */
   public static Instant now() {
-    return Instant.now(clock);
+    return Instant.now(clock).truncatedTo(ChronoUnit.MILLIS);
   }
+
+  /** The integer millisecond {@code instant} is stored as. */
+  public static long toMillis(Instant instant) {
+    return instant.toEpochMilli();
+  }
+
+  /** The instant a stored integer millisecond names. */
+  public static Instant ofMillis(long millis) {
+    return Instant.ofEpochMilli(millis);
+  }
+
+  /**
+   * {@code instant} as text leaves the process: ISO-8601 UTC at millisecond width, always three
+   * fraction digits ({@code 2026-10-20T19:09:39.656Z}); null stays null.
+   */
+  public static String format(Instant instant) {
+    return instant == null ? null : EDGE.format(instant);
+  }
+
+  /** The instant {@code text} names in ISO-8601, at the millisecond it would be stored at. */
+  public static Instant parse(String text) {
+    return Instant.parse(text).truncatedTo(ChronoUnit.MILLIS);
+  }
+
+  private static final DateTimeFormatter EDGE =
+      DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC);
 
   /** UUIDv7 identifier — time-ordered, monotonic. */
   public static UUID newId() {

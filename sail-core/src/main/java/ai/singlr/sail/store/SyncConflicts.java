@@ -8,6 +8,7 @@ package ai.singlr.sail.store;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -45,7 +46,7 @@ public final class SyncConflicts {
       String remoteRev,
       String remoteAuthor,
       List<String> fields,
-      String detectedAt,
+      Instant detectedAt,
       String status,
       String resolvedRev) {
 
@@ -108,7 +109,7 @@ public final class SyncConflicts {
               remoteRev,
               remoteAuthor,
               encodeFields(fields),
-              DateTimeUtils.now().toString(),
+              DateTimeUtils.now(),
               PENDING);
           return db.queryOne("SELECT last_insert_rowid()", row -> row.integer(0)).orElseThrow();
         });
@@ -196,7 +197,7 @@ public final class SyncConflicts {
         row.text(6),
         row.text(7),
         decodeFields(row.text(8)),
-        row.text(9),
+        row.instant(9),
         row.text(10),
         row.text(11));
   }

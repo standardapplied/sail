@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
@@ -39,7 +40,7 @@ class EventStoreTest {
 
   private EventStore.EventRow event(String type, String project, String specId) {
     return new EventStore.EventRow(
-        0, "2026-05-27T00:00:00Z", type, project, specId, "sail", "host1", "{}");
+        0, Instant.parse("2026-05-27T00:00:00Z"), type, project, specId, "sail", "host1", "{}");
   }
 
   @Test
@@ -244,7 +245,7 @@ class EventStoreTest {
     store.insert(
         new EventStore.EventRow(
             0,
-            "2026-05-27T12:34:56Z",
+            Instant.parse("2026-05-27T12:34:56Z"),
             "custom_type",
             "my-project",
             "my-spec",
@@ -255,7 +256,7 @@ class EventStoreTest {
     var events = store.recent(1);
     assertEquals(1, events.size());
     var row = events.getFirst();
-    assertEquals("2026-05-27T12:34:56Z", row.timestamp());
+    assertEquals(Instant.parse("2026-05-27T12:34:56Z"), row.timestamp());
     assertEquals("custom_type", row.type());
     assertEquals("my-project", row.project());
     assertEquals("my-spec", row.specId());
@@ -267,7 +268,8 @@ class EventStoreTest {
   @Test
   void nullFieldsHandledCorrectly() {
     store.insert(
-        new EventStore.EventRow(0, "2026-05-27T00:00:00Z", "test", null, null, null, "h", "{}"));
+        new EventStore.EventRow(
+            0, Instant.parse("2026-05-27T00:00:00Z"), "test", null, null, null, "h", "{}"));
 
     var events = store.recent(1);
     assertEquals(1, events.size());
@@ -284,14 +286,15 @@ class EventStoreTest {
     store.insert(event("record", "p", null));
     store.insert(
         new EventStore.EventRow(
-            0, "2099-01-01T00:00:00Z", "telemetry", "p", null, "sail", "h", "{}"));
+            0, Instant.parse("2099-01-01T00:00:00Z"), "telemetry", "p", null, "sail", "h", "{}"));
 
-    assertEquals(5, store.pruneBefore("2026-06-01T00:00:00Z", Set.of("telemetry"), 2));
+    assertEquals(
+        5, store.pruneBefore(Instant.parse("2026-06-01T00:00:00Z"), Set.of("telemetry"), 2));
     assertEquals(2, store.recent(10).size());
     assertTrue(store.recent(10).stream().anyMatch(row -> row.type().equals("record")));
-    assertEquals(0, store.pruneBefore("2099-12-01T00:00:00Z", Set.of(), 2));
+    assertEquals(0, store.pruneBefore(Instant.parse("2099-12-01T00:00:00Z"), Set.of(), 2));
     assertThrows(
         IllegalArgumentException.class,
-        () -> store.pruneBefore("2099-12-01T00:00:00Z", Set.of("telemetry"), 0));
+        () -> store.pruneBefore(Instant.parse("2099-12-01T00:00:00Z"), Set.of("telemetry"), 0));
   }
 }

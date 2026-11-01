@@ -33,7 +33,7 @@ class PromptCoverageTest {
 
       ## Conversation on this spec
 
-      ada (2026-07-28T00:00:00Z):
+      ada (2026-07-28T00:00:00.000Z):
       Use PKCE
 
       Implement the flow.
@@ -287,7 +287,7 @@ class PromptCoverageTest {
             + " finding's id, and leave that code alone. The re-review reads the room and rules"
             + " fixed, still_open, or disputed with your argument as evidence — a finding is"
             + " retired by argument in the open, never by omission.",
-        "## Conversation on this spec ada (2026-07-28T00:00:00Z): Use PKCE",
+        "## Conversation on this spec ada (2026-07-28T00:00:00.000Z): Use PKCE",
         "run the project's full verification (its tests, coverage and lint gates) before you"
             + " commit",
         "Never leave work uncommitted — a WIP commit beats lost work. Uncommitted files"

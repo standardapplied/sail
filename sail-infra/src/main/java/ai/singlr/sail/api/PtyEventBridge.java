@@ -71,7 +71,7 @@ public final class PtyEventBridge implements AutoCloseable {
           new Event(
               Event.CURRENT_VERSION,
               0,
-              Instant.parse(row.timestamp()),
+              row.timestamp(),
               row.project(),
               row.specId(),
               row.type(),

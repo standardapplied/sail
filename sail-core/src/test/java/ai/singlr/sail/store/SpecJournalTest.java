@@ -52,8 +52,8 @@ class SpecJournalTest {
         null,
         0,
         "uday",
-        "",
-        "",
+        null,
+        null,
         updatedBy,
         List.of(),
         List.of());

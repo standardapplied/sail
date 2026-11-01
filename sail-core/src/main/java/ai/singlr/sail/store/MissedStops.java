@@ -8,7 +8,7 @@ package ai.singlr.sail.store;
 import ai.singlr.sail.config.RunStatus;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.format.DateTimeParseException;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -132,23 +132,11 @@ public final class MissedStops {
     if (!"running".equals(session.status())) {
       return new Outcome.Skip("session status is " + session.status());
     }
-    var age = Duration.between(parseOr(session.startedAt(), now), now);
+    var age = Duration.between(Objects.requireNonNullElse(session.startedAt(), now), now);
     if (age.compareTo(grace) < 0) {
       return new Outcome.Skip("session is inside the launch grace period");
     }
     return new Outcome.ProbeUnit(
         "running session with no stop signal after " + age.toMinutes() + "m");
-  }
-
-  /** Parses an ISO instant, falling back when the value is missing or malformed. */
-  public static Instant parseOr(String iso, Instant fallback) {
-    if (iso == null || iso.isBlank()) {
-      return fallback;
-    }
-    try {
-      return Instant.parse(iso);
-    } catch (DateTimeParseException e) {
-      return fallback;
-    }
   }
 }

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.auth;
 
+import java.time.Instant;
 import java.util.Map;
 
 /**
@@ -25,7 +26,7 @@ public interface PasskeyCeremonies {
   record Registration(String fdeHandle, byte[] credentialId) {}
 
   /** A minted login session: the plaintext session token (shown once) and the FDE it represents. */
-  record LoginResult(String sessionToken, String fdeHandle, String expiresAt) {}
+  record LoginResult(String sessionToken, String fdeHandle, Instant expiresAt) {}
 
   /**
    * Begins enrolling a passkey for the FDE identified by {@code fdeHandle}. Throws {@link

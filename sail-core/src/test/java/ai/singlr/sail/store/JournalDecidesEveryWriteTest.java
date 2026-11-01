@@ -232,7 +232,16 @@ class JournalDecidesEveryWriteTest {
             f ->
                 f.rooms.createJournaled(
                     new RoomStore.RoomRow(
-                        "lounge", "acme", "lounge", null, null, null, "ada", "now", "now", null))),
+                        "lounge",
+                        "acme",
+                        "lounge",
+                        null,
+                        null,
+                        null,
+                        "ada",
+                        DateTimeUtils.now(),
+                        DateTimeUtils.now(),
+                        null))),
         write(
             "RoomStore.ensureFor", null, f -> f.rooms.ensureFor("lounge", "acme", "l", null, null)),
         owned("RoomStore.updateRoster", f -> f.rooms.updateRoster("den", "{}")),
@@ -431,8 +440,8 @@ class JournalDecidesEveryWriteTest {
             null,
             0,
             null,
-            "",
-            "",
+            null,
+            null,
             null,
             List.of(),
             List.of());
@@ -604,7 +613,7 @@ class JournalDecidesEveryWriteTest {
 
   private static SpecStore.SpecRow spec(String id, SpecStatus status) {
     return new SpecStore.SpecRow(
-        id, "acme", id, status, "bob", null, null, null, null, 0, null, "", "", null, List.of(),
+        id, "acme", id, status, "bob", null, null, null, null, 0, null, null, null, null, List.of(),
         List.of());
   }
 

@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,7 +41,8 @@ class FdeReplicateTest {
 
   @Test
   void replicateInsertsANewIdentity() {
-    fdes.replicate("ada", "Ada", "ada@x.dev", "member", "active", "2026-01-01T00:00:00Z");
+    fdes.replicate(
+        "ada", "Ada", "ada@x.dev", "member", "active", Instant.parse("2026-01-01T00:00:00Z"));
 
     var ada = fdes.byHandle("ada").orElseThrow();
     assertEquals("Ada", ada.displayName());

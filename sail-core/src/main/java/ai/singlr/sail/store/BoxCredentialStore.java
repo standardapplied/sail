@@ -42,7 +42,7 @@ public final class BoxCredentialStore {
             created_at = excluded.created_at""",
         handle.strip(),
         TokenStore.sha256(credential),
-        DateTimeUtils.now().toString());
+        DateTimeUtils.now());
     return credential;
   }
 

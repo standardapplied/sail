@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.auth;
 
+import java.time.Instant;
 import java.util.Optional;
 
 /**
@@ -16,7 +17,7 @@ import java.util.Optional;
 public interface EnrollmentTickets {
 
   /** A minted ticket: the plaintext value (shown once), the FDE it enrolls, and its expiry. */
-  record Ticket(String ticket, String fdeHandle, String expiresAt) {}
+  record Ticket(String ticket, String fdeHandle, Instant expiresAt) {}
 
   /**
    * Issues a ticket authorizing one enrollment for the FDE with {@code fdeHandle}. Throws {@link

@@ -203,8 +203,8 @@ class MessageStoreTest {
         null,
         0,
         "ada",
-        "",
-        "",
+        null,
+        null,
         "ada",
         List.of(),
         List.of());
@@ -400,7 +400,15 @@ class MessageStoreTest {
 
     messages.applyRevision(
         lateId,
-        Map.of("spec_id", "room", "author", "uday", "body", "late arrival", "created_at", "now"),
+        Map.of(
+            "spec_id",
+            "room",
+            "author",
+            "uday",
+            "body",
+            "late arrival",
+            "created_at",
+            Snapshots.millis(DateTimeUtils.now())),
         "1-abc");
 
     assertEquals(

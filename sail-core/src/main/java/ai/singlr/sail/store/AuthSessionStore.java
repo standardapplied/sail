@@ -29,19 +29,19 @@ public final class AuthSessionStore {
   }
 
   /** A newly minted session; {@code token} is shown once and never stored in the clear. */
-  public record CreatedSession(String token, String fdeId, String expiresAt) {}
+  public record CreatedSession(String token, String fdeId, Instant expiresAt) {}
 
-  public record SessionInfo(String fdeId, String createdAt, String expiresAt) {}
+  public record SessionInfo(String fdeId, Instant createdAt, Instant expiresAt) {}
 
   public CreatedSession create(String fdeId, Duration ttl) {
     var token = generateToken();
     var now = DateTimeUtils.now();
-    var expiresAt = now.plus(ttl).toString();
+    var expiresAt = now.plus(ttl);
     db.execute(
         "INSERT INTO sessions (token_hash, fde_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
         sha256(token),
         fdeId,
-        now.toString(),
+        now,
         expiresAt);
     return new CreatedSession(token, fdeId, expiresAt);
   }
@@ -52,19 +52,17 @@ public final class AuthSessionStore {
     var result =
         db.queryOne(
             "SELECT fde_id, created_at, expires_at FROM sessions WHERE token_hash = ?",
-            row -> new SessionInfo(row.text(0), row.text(1), row.text(2)),
+            row -> new SessionInfo(row.text(0), row.instant(1), row.instant(2)),
             hash);
     if (result.isEmpty()) {
       return Optional.empty();
     }
-    if (Instant.parse(result.get().expiresAt()).isBefore(DateTimeUtils.now())) {
+    if (result.get().expiresAt().isBefore(DateTimeUtils.now())) {
       db.execute("DELETE FROM sessions WHERE token_hash = ?", hash);
       return Optional.empty();
     }
     db.execute(
-        "UPDATE sessions SET last_used_at = ? WHERE token_hash = ?",
-        DateTimeUtils.now().toString(),
-        hash);
+        "UPDATE sessions SET last_used_at = ? WHERE token_hash = ?", DateTimeUtils.now(), hash);
     return result;
   }
 

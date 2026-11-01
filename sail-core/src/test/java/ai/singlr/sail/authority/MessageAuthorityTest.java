@@ -31,7 +31,9 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import ai.singlr.sail.authority.Refusal.Kind;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Decidability;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Standing;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -74,7 +76,14 @@ class MessageAuthorityTest {
 
   private static Map<String, Object> post(String room, String author) {
     return projection(
-        "room_id", room, "author", author, "body", "hi", "created_at", "2026-09-29T00:00:00Z");
+        "room_id",
+        room,
+        "author",
+        author,
+        "body",
+        "hi",
+        "created_at",
+        Snapshots.millis(Instant.parse("2026-09-29T00:00:00Z")));
   }
 
   static Stream<Case> matrix() {

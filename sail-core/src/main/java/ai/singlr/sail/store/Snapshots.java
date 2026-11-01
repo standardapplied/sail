@@ -9,6 +9,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -78,6 +79,26 @@ public final class Snapshots {
     return map.get(key) instanceof Number n ? n.longValue() : null;
   }
 
+  /**
+   * The instant a snapshot carries under {@code key}, as the integer millisecond every snapshot
+   * carries an instant as; null when absent. Anything else is refused, naming the key.
+   */
+  public static Instant instant(Map<String, Object> map, String key) {
+    var value = map == null ? null : map.get(key);
+    return switch (value) {
+      case null -> null;
+      case Number millis -> DateTimeUtils.ofMillis(millis.longValue());
+      default ->
+          throw new IllegalArgumentException(
+              key + " must be an integer millisecond, not " + value.getClass().getSimpleName());
+    };
+  }
+
+  /** {@code instant} as a snapshot carries it: its integer millisecond, or null. */
+  public static Long millis(Instant instant) {
+    return instant == null ? null : DateTimeUtils.toMillis(instant);
+  }
+
   /** Each element of a list value in string form, or an empty list when absent or not a list. */
   public static List<String> stringList(Map<String, Object> map, String key) {
     return map.get(key) instanceof List<?> list
@@ -107,9 +128,9 @@ public final class Snapshots {
    * The time {@code snapshot} names under {@code key}, or {@code now} when it names none, as a
    * restore's state does.
    */
-  public static String timeOr(Map<String, Object> snapshot, String key, String now) {
-    var time = text(snapshot, key);
-    return Strings.isBlank(time) ? now : time;
+  public static Instant timeOr(Map<String, Object> snapshot, String key, Instant now) {
+    var time = instant(snapshot, key);
+    return time == null ? now : time;
   }
 
   /**
@@ -122,7 +143,7 @@ public final class Snapshots {
       return null;
     }
     var revised = new LinkedHashMap<>(state);
-    revised.put(UPDATED_AT, DateTimeUtils.now().toString());
+    revised.put(UPDATED_AT, millis(DateTimeUtils.now()));
     return revised;
   }
 
@@ -193,7 +214,7 @@ public final class Snapshots {
    * offer named it.
    */
   public static Map<String, Object> withCreation(
-      Map<String, Object> snapshot, Creator creator, String createdAt) {
+      Map<String, Object> snapshot, Creator creator, Instant createdAt) {
     if (snapshot == null || (creator == null && createdAt == null)) {
       return snapshot;
     }
@@ -202,7 +223,7 @@ public final class Snapshots {
       committed.put(CREATOR, creator.handle());
     }
     if (createdAt != null) {
-      committed.put(CREATED_AT, createdAt);
+      committed.put(CREATED_AT, millis(createdAt));
     }
     return committed;
   }

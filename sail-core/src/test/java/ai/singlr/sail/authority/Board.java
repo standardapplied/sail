@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.authority;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.RoomStore;
@@ -51,7 +52,16 @@ final class Board implements AutoCloseable {
             new RoomStore(db)
                 .createJournaled(
                     new RoomStore.RoomRow(
-                        id, "acme", id, assignee, null, null, creator, "now", "now", null)));
+                        id,
+                        "acme",
+                        id,
+                        assignee,
+                        null,
+                        null,
+                        creator,
+                        DateTimeUtils.now(),
+                        DateTimeUtils.now(),
+                        null)));
   }
 
   /** A spec {@code id} living in {@code roomId}, assigned to {@code assignee}. */
