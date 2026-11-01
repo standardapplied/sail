@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -87,8 +88,8 @@ class ScopeChangeRoundTest {
     Acting.system(
         () -> {
           var projects = new ProjectStore(mainDb);
-          projects.upsert("acme", "name: acme\n");
-          projects.upsert("beta", "name: beta\n");
+          projects.upsert(TestDefinitions.named("acme"));
+          projects.upsert(TestDefinitions.named("beta"));
           var specs = new SpecStore(mainDb);
           specs.create(spec("a1", "acme"));
           specs.create(spec("b1", "beta"));

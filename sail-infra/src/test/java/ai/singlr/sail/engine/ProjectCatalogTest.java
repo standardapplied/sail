@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -38,8 +39,8 @@ class ProjectCatalogTest {
     var catalog = dir.resolve("sail.db");
     try (var db = Sqlite.open(catalog)) {
       new SchemaManager(db).migrate();
-      Acting.system(() -> new ProjectStore(db).upsert("gone", "name: gone\n"));
-      Acting.system(() -> new ProjectStore(db).upsert("kept", "name: kept\n"));
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("gone")));
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("kept")));
       var erasure = new Erasure(db);
       Acting.system(
           () ->

@@ -122,38 +122,6 @@ class NotificationsTest {
   }
 
   @Test
-  void retiredAgentExitedNameIsRejectedWithAnExactEdit() {
-    var refusal =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                Notifications.fromMap(
-                    Map.of("url", "https://ntfy.sh/test", "events", List.of("agent_exited")),
-                    "acme/sail.yaml"));
-
-    assertEquals(
-        "Unknown notification event `agent_exited` in acme/sail.yaml; rename `agent_exited` to"
-            + " `agent_session_stopped` in acme/sail.yaml.",
-        refusal.getMessage());
-  }
-
-  @Test
-  void retiredSessionDoneNameIsRejectedWithAnExactEdit() {
-    var refusal =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                Notifications.fromMap(
-                    Map.of("url", "https://ntfy.sh/test", "events", List.of("session_done")),
-                    "acme/sail.yaml"));
-
-    assertEquals(
-        "Unknown notification event `session_done` in acme/sail.yaml; rename `session_done` to"
-            + " `agent_session_completed` in acme/sail.yaml.",
-        refusal.getMessage());
-  }
-
-  @Test
   void newBusTypesValidateAndFilter() {
     var n =
         new Notifications("https://ntfy.sh/test", List.of("spec_dispatched", "snapshot_created"));

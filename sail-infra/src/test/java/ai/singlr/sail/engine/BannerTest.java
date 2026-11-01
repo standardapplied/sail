@@ -428,9 +428,7 @@ class BannerTest {
             null,
             null,
             null,
-            null,
-            null,
-            new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            null, null);
     var out = new ByteArrayOutputStream();
     Banner.printProjectSummary(config, new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
@@ -452,7 +450,6 @@ class BannerTest {
             "test-proj",
             null,
             new ProjectDefinition.Resources(2, "4GB", "50GB"),
-            null,
             null,
             null,
             null,
@@ -736,7 +733,7 @@ class BannerTest {
   void aTitleLongerThanItsBoxIsCutInsideTheBorder() {
     var config =
         new ProjectDefinition(
-            "p".repeat(63), null, null, null, null, null, null, null, null, null, null, null);
+            "p".repeat(63), null, null, null, null, null, null, null, null, null, null);
 
     var lines =
         printedAt(
@@ -752,7 +749,7 @@ class BannerTest {
   void aWideCharacterTakesTwoOfTheColumnsARowFits() {
     var config =
         new ProjectDefinition(
-            "acme", "界".repeat(100), null, null, null, null, null, null, null, null, null, null);
+            "acme", "界".repeat(100), null, null, null, null, null, null, null, null, null);
 
     var lines =
         printedAt(
@@ -772,7 +769,6 @@ class BannerTest {
         new ProjectDefinition(
             "acme",
             "\uD83D\uDE80".repeat(100),
-            null,
             null,
             null,
             null,
@@ -809,7 +805,6 @@ class BannerTest {
             null,
             null,
             null,
-            null,
             null);
 
     var lines =
@@ -838,7 +833,6 @@ class BannerTest {
             null,
             null,
             null,
-            null,
             null);
 
     var lines =
@@ -857,7 +851,7 @@ class BannerTest {
   void aCursorMoveInAValueIsTextTheRowFits() {
     var config =
         new ProjectDefinition(
-            "acme", "\033[99CXX", null, null, null, null, null, null, null, null, null, null);
+            "acme", "\033[99CXX", null, null, null, null, null, null, null, null, null);
 
     var lines =
         printedAt(
@@ -1294,11 +1288,9 @@ class BannerTest {
             List.of("postgresql-client-16"),
             new ProjectDefinition.Runtimes(25, "22", null),
             null,
-            null,
             services,
             null,
-            new ProjectDefinition.Agent("claude-code", true, "sail/", true, null, null, null, null),
-            new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            new ProjectDefinition.Agent("claude-code", true, "sail/", true, null, null, null, null), null);
     var state = new ContainerState.Running("10.0.0.42");
     var out = new ByteArrayOutputStream();
     Banner.printProjectConfig(config, state, new PrintStream(out), Ansi.OFF);
@@ -1333,7 +1325,6 @@ class BannerTest {
             null,
             null,
             null,
-            null,
             null);
     var state = new ContainerState.Stopped();
     var out = new ByteArrayOutputStream();
@@ -1350,7 +1341,6 @@ class BannerTest {
             "minimal",
             null,
             new ProjectDefinition.Resources(2, "4GB", "50GB"),
-            null,
             null,
             null,
             null,
@@ -1384,9 +1374,7 @@ class BannerTest {
             null,
             null,
             null,
-            null,
-            new ProjectDefinition.Agent("claude-code", false, null, true, null, null, null, null),
-            new ProjectDefinition.Ssh("dev", null));
+            new ProjectDefinition.Agent("claude-code", false, null, true, null, null, null, null), null);
     var state = new ContainerState.Running("10.0.0.1");
     var out = new ByteArrayOutputStream();
     Banner.printProjectConfig(config, state, new PrintStream(out), Ansi.OFF);
@@ -1413,9 +1401,7 @@ class BannerTest {
             null,
             null,
             null,
-            null,
-            null,
-            new ProjectDefinition.Ssh(null, List.of("ssh-ed25519 AAAA...")));
+            null, null);
     var summary = new ByteArrayOutputStream();
     var projectConfig = new ByteArrayOutputStream();
 

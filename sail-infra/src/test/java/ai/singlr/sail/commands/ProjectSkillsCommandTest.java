@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -60,7 +61,7 @@ class ProjectSkillsCommandTest {
     database = dir.resolve("sail.db");
     db = Sqlite.open(database);
     new SchemaManager(db).migrate();
-    Acting.system(() -> new ProjectStore(db).upsert("acme", ACME));
+    Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.yaml(ACME)));
   }
 
   @AfterEach

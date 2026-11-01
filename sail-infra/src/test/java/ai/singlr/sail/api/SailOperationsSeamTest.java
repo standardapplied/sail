@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -1272,7 +1273,7 @@ class SailOperationsSeamTest {
   void aNodesPurgeIsAskedOfMainAndErasesNothingHereYet() {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
-      Acting.system(() -> new ProjectStore(db).upsert("old", "name: old\n"));
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("old")));
       db.execute("UPDATE projects SET base_rev = rev WHERE name = 'old'");
       new FdeStore(db).add("node", "Node", "node@example.com", "admin");
       try (var operations =
@@ -1304,7 +1305,7 @@ class SailOperationsSeamTest {
   void aNodeThatHasNotSyncedItsRosterSaysSoInsteadOfGuessingARole() {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
-      Acting.system(() -> new ProjectStore(db).upsert("old", "name: old\n"));
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("old")));
       try (var operations =
           OperationsFactory.create(
                   db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
@@ -1332,7 +1333,7 @@ class SailOperationsSeamTest {
   void aMembersNodeIsToldAPurgeIsAdminOnlyBeforeAnythingIsAsked() {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
-      Acting.system(() -> new ProjectStore(db).upsert("old", "name: old\n"));
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("old")));
       new FdeStore(db).add("node", "Node", "node@example.com", "member");
       try (var operations =
           OperationsFactory.create(
@@ -1364,7 +1365,7 @@ class SailOperationsSeamTest {
       new SchemaManager(db).migrate();
       var projects = new ProjectStore(db);
       var definition = "name: old\n";
-      Acting.system(() -> projects.upsert("old", definition));
+      Acting.system(() -> projects.upsert(TestDefinitions.yaml(definition)));
       ProjectFileFixtures.put(operations.projectFiles("old"), "config", new byte[] {1});
       assertFalse(operations.catalog().destroy("old", false).purged());
       var renamed = operations.catalog().rename("old", "new");

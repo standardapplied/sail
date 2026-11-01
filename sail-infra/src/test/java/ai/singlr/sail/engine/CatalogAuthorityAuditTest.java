@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -128,7 +129,7 @@ class CatalogAuthorityAuditTest {
   @Test
   void aMembersRenameMovesNoSpecAndAnAdminsMovesEveryOne() {
     var member = operatorWithRole("member");
-    Acting.system(() -> new ProjectStore(db).upsert("acme", DEFINITION));
+    Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.yaml(DEFINITION)));
     Acting.as("bob", () -> new SpecStore(db).create(bobsSpec()));
 
     var refused =

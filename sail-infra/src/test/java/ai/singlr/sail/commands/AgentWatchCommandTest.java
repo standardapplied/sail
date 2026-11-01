@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -335,7 +336,7 @@ class AgentWatchCommandTest {
     var dbPath = dir.resolve("control-plane.db");
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
-      Acting.system(() -> new ProjectStore(db).upsert(project, definition));
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.yaml(definition)));
     }
     return dbPath;
   }

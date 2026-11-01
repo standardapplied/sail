@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -114,7 +115,7 @@ class UnheldProjectSyncTest {
     Acting.as(
         "node",
         () -> {
-          new ProjectStore(node.db).upsert("fresh", "name: fresh\n");
+          new ProjectStore(node.db).upsert(TestDefinitions.named("fresh"));
           node.specs.create(spec("idea", "fresh"));
         });
 

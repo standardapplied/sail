@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -58,7 +59,7 @@ class OperationsFactoryTest {
         var operations =
             OperationsFactory.create(
                 box.db, shell, bus, null, SyncScheduler.disabled(), SessionYield.NONE)) {
-      Acting.system(() -> new ProjectStore(box.db).upsert("proj", "name: proj\n"));
+      Acting.system(() -> new ProjectStore(box.db).upsert(TestDefinitions.named("proj")));
       var preview = new DispatchOperations.AdhocRequest("task", null, null, true, true);
       var plain = operations.dispatching().startAdhoc("proj", preview, "node");
       var prepared =

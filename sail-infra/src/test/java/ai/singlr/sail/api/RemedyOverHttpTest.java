@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -205,7 +206,7 @@ class RemedyOverHttpTest {
   void aCatalogDefinitionRefusedByItsReaderKeepsItsRemedy() {
     Actor.run(
         Actor.system(),
-        () -> new ProjectStore(db).upsert("beta", "name: beta\nagent_context: old\n"));
+        () -> new ProjectStore(db).upsert(TestDefinitions.yaml("name: beta\nagent_context: old\n")));
     SailApiClient.Refused refused;
     try (var client = client()) {
       refused = assertThrows(SailApiClient.Refused.class, () -> client.get("/v1/projects/beta"));

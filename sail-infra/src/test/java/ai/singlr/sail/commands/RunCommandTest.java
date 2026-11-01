@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -152,9 +153,7 @@ class RunCommandTest {
       Acting.system(
           () ->
               new ProjectStore(db)
-                  .upsert(
-                      "test-proj",
-                      """
+                  .upsert(TestDefinitions.yaml("""
                       name: test-proj
                       resources:
                         cpu: 2
@@ -162,7 +161,7 @@ class RunCommandTest {
                         disk: 50GB
                       agent:
                         type: claude-code
-                      """));
+                      """)));
     }
     var cmd = command(dbPath);
     cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
@@ -555,7 +554,7 @@ class RunCommandTest {
     var dbPath = tempDir.resolve("control-plane.db");
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
-      Acting.system(() -> new ProjectStore(db).upsert("test-proj", yaml));
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.yaml(yaml)));
     }
     return dbPath;
   }
@@ -578,7 +577,7 @@ class RunCommandTest {
       Acting.system(
           () -> {
             new ProjectStore(db)
-                .upsert("test-proj", "name: test-proj\nagent:\n  type: claude-code\n");
+                .upsert(TestDefinitions.yaml("name: test-proj\nagent:\n  type: claude-code\n"));
             new FileStore(db)
                 .put(
                     "test-proj",

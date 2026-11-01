@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -125,7 +126,7 @@ class CatalogNotificationsResolverTest {
   }
 
   private void describe(String project, String definition) {
-    Acting.system(() -> store.upsert(project, definition));
+    Acting.system(() -> store.upsert(TestDefinitions.yaml(definition)));
   }
 
   private static String captureStderr(Runnable work) {

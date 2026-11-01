@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -478,7 +479,7 @@ class AgentAttachCommandTest {
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
       HeldProjects.hold(db, "acme");
-      Acting.system(() -> new ProjectStore(db).upsert(project, definition));
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.yaml(definition)));
     }
     return dbPath;
   }

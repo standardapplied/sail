@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -318,7 +319,7 @@ class EventPublishersTest {
     box = new SyncBox(tempDir, "box");
     new FdeStore(box.db).add(config.handle(), null, null, role);
     var token = new TokenStore(box.db).create(HostToken.NAME, "admin").token();
-    Acting.system(() -> new ProjectStore(box.db).upsert("acme", YAML));
+    Acting.system(() -> new ProjectStore(box.db).upsert(TestDefinitions.yaml(YAML)));
     bus = new EventBus();
     bus.subscribe(recorder());
     serverOperations =

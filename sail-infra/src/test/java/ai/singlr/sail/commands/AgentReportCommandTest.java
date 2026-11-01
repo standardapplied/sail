@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -37,7 +38,7 @@ class AgentReportCommandTest {
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
       Acting.system(
-          () -> new ProjectStore(db).upsert("acme", "name: acme\nagent:\n  type: codex\n"));
+          () -> new ProjectStore(db).upsert(TestDefinitions.yaml("name: acme\nagent:\n  type: codex\n")));
     }
     var acme = new AgentReportCommand(operator -> OperationsFactory.open(dbPath));
     new CommandLine(acme).parseArgs("acme", "-f", "/abs/sail.yaml");

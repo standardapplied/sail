@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -121,7 +122,7 @@ class DispatchCommandWiringTest {
         () -> {
           db = Sqlite.open(tempDir.resolve("control-plane.db"));
           new SchemaManager(db).migrate();
-          new ProjectStore(db).upsert("acme", YAML);
+          new ProjectStore(db).upsert(TestDefinitions.yaml(YAML));
           var specStore = new SpecStore(db);
           Acting.as(
               "me",
@@ -299,7 +300,7 @@ class DispatchCommandWiringTest {
     new FdeStore(db).add(HANDLE, null, null, "admin");
     Acting.system(
         () -> {
-          new ProjectStore(db).upsert("acme", YAML);
+          new ProjectStore(db).upsert(TestDefinitions.yaml(YAML));
           new FileStore(db)
               .put(
                   "acme",

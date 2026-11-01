@@ -91,6 +91,6 @@ class SnapshotDecisionTest {
         new ProjectDefinition.Agent(
             "claude-code", false, null, autoSnapshot, List.of(), Map.of(), null, null);
     return new ProjectDefinition(
-        "test", null, null, null, null, null, null, List.of(), Map.of(), Map.of(), agent, null);
+        "test", null, null, null, null, null, List.of(), Map.of(), Map.of(), agent, null);
   }
 }

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
@@ -176,7 +177,7 @@ class ScopedHeadsTest {
 
   private Seeded seed(String project) {
     var id = project + "-work";
-    new ProjectStore(db).upsert(project, "name: " + project + "\n");
+    new ProjectStore(db).upsert(TestDefinitions.named(project));
     specs.create(spec(id, project));
     new RoomStore(db)
         .create(

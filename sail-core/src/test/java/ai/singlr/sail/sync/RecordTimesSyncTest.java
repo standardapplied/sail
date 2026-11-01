@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -262,7 +263,7 @@ class RecordTimesSyncTest {
     Acting.as(
         "ada",
         () -> {
-          new ProjectStore(ada.db).upsert("zenith", "name: zenith\n");
+          new ProjectStore(ada.db).upsert(TestDefinitions.named("zenith"));
           new RoomStore(ada.db)
               .create(
                   new RoomStore.RoomRow(

@@ -39,6 +39,7 @@ import java.util.Set;
 public final class ProjectStore implements ConflictResolver, SyncedStore {
 
   private static final String ENTITY = "project";
+  private static final String NAME = "name";
   private static final String BLOCKS_RESURRECTION = "_blocks_resurrection";
   private static final Map<String, Object> BLOCKING = Map.of(BLOCKS_RESURRECTION, true);
 
@@ -111,6 +112,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     var name = definition.name();
     return db.transaction(
         () -> {
+          journal.admit(name, Map.of());
           if (findByName(name).isPresent()) {
             throw new IllegalStateException("A project named '" + name + "' already exists.");
           }
@@ -500,8 +502,11 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     @Override
     public Map<String, Object> comparable(Map<String, Object> full) {
       var comparable = new LinkedHashMap<String, Object>();
+      comparable.put(NAME, full.get(NAME));
       for (var section : Section.values()) {
-        comparable.put(section.key(), full.get(section.key()));
+        if (full.get(section.key()) != null) {
+          comparable.put(section.key(), full.get(section.key()));
+        }
       }
       var creator = full.get("created_by");
       if (creator != null) {
@@ -521,9 +526,24 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
       return Boolean.TRUE.equals(snapshot.get(BLOCKS_RESURRECTION)) ? BLOCKING : Map.of();
     }
 
+    /**
+     * The project's name and each section it sets, its JSON value; an unset one is absent. The name
+     * is a work field so a live project never compares equal to its deletion, which carries none:
+     * the journal reads a missing field as null ({@link RevisionJournal}), and a project that sets
+     * no section would otherwise be the same content as its own tombstone.
+     */
     private static LinkedHashMap<String, Object> sections(String document) {
-      return new LinkedHashMap<>(
-          ProjectDefinitionJson.sections(ProjectDefinitionJson.read(document)));
+      var definition = ProjectDefinitionJson.read(document);
+      var map = new LinkedHashMap<String, Object>();
+      map.put(NAME, definition.name());
+      ProjectDefinitionJson.sections(definition)
+          .forEach(
+              (key, json) -> {
+                if (json != null) {
+                  map.put(key, json);
+                }
+              });
+      return map;
     }
   }
 

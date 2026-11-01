@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -1328,7 +1329,7 @@ class ScopedReadsTest {
     var spec = project + "-spec";
     var room = project + "-room";
     new ProjectStore(db)
-        .upsert(project, "name: " + project + "\nssh:\n  user: dev\nagent:\n  type: claude-code\n");
+        .upsert(TestDefinitions.yaml("name: " + project + "\nssh:\n  user: dev\nagent:\n  type: claude-code\n"));
     containers.add(project);
     var specs = new SpecStore(db);
     specs.create(

@@ -356,9 +356,7 @@ class ReviewPipelineConfigTest {
                     Map.of("stages", List.of(), "guardrails", Map.of("max_idle", "forever"))));
 
     assertTrue(
-        refused
-            .getMessage()
-            .startsWith("Invalid `agent.review_pipeline.guardrails.max_idle` in sail.yaml: "),
+        refused.getMessage().startsWith("Invalid `pipeline.guardrails.max_idle`: "),
         refused.getMessage());
     assertTrue(refused.getMessage().contains("4h, 90m, 30s"), refused.getMessage());
   }

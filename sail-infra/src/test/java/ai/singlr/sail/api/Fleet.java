@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static ai.singlr.sail.api.ReviewScripts.CLEAN_REVIEW;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -165,7 +166,7 @@ public final class Fleet implements AutoCloseable {
     Acting.as(
         main.handle,
         () -> {
-          main.projects.upsert(PROJECT, PROJECT_YAML);
+          main.projects.upsert(TestDefinitions.yaml(PROJECT_YAML));
           main.specs.create(spec(specId, assignee));
         });
     syncAll(nodes);
@@ -364,11 +365,11 @@ public final class Fleet implements AutoCloseable {
     }
 
     public void createProject(String name) {
-      Acting.as(handle, () -> projects.upsert(name, "name: " + name + "\n"));
+      Acting.as(handle, () -> projects.upsert(TestDefinitions.named(name)));
     }
 
     public void renameProject(String oldName, String newName) {
-      Acting.as(handle, () -> projects.rename(oldName, newName, "name: " + newName + "\n"));
+      Acting.as(handle, () -> projects.rename(oldName, newName, TestDefinitions.named(newName)));
     }
 
     public boolean hasProject(String name) {

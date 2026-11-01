@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -577,8 +578,8 @@ class FdeCommandTest {
         db -> {
           Acting.system(
               () -> {
-                new ProjectStore(db).upsert("acme", "name: acme\n");
-                new ProjectStore(db).upsert("web", "name: web\n");
+                new ProjectStore(db).upsert(TestDefinitions.named("acme"));
+                new ProjectStore(db).upsert(TestDefinitions.named("web"));
               });
           return null;
         });
@@ -639,7 +640,7 @@ class FdeCommandTest {
     handle = "uday";
     inDb(
         db -> {
-          Acting.system(() -> new ProjectStore(db).upsert("acme", "name: acme\n"));
+          Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("acme")));
           var fdes = new FdeStore(db);
           fdes.add("client", null, "client@x.com", "member");
           fdes.restrict("client");
@@ -786,15 +787,13 @@ class FdeCommandTest {
                 var projects = new ProjectStore(db);
                 for (var project : List.of("acme:dev", "web:newuser")) {
                   var nameAndUser = project.split(":");
-                  projects.upsert(
-                      nameAndUser[0],
-                      "name: "
+                  projects.upsert(TestDefinitions.yaml("name: "
                           + nameAndUser[0]
                           + "\nssh:\n  user: "
                           + nameAndUser[1]
-                          + "\n  authorized_keys:\n    - ${SSH_PUBLIC_KEY}\n");
+                          + "\n  authorized_keys:\n    - ${SSH_PUBLIC_KEY}\n"));
                 }
-                projects.upsert("docs", "name: docs\n");
+                projects.upsert(TestDefinitions.named("docs"));
               });
           return null;
         });
@@ -1831,8 +1830,8 @@ class FdeCommandTest {
         db -> {
           Acting.system(
               () -> {
-                new ProjectStore(db).upsert("alpha", "name: alpha\n");
-                new ProjectStore(db).upsert("beta", "name: beta\n");
+                new ProjectStore(db).upsert(TestDefinitions.named("alpha"));
+                new ProjectStore(db).upsert(TestDefinitions.named("beta"));
               });
           return null;
         });
@@ -1898,7 +1897,7 @@ class FdeCommandTest {
   void aGrantNamesAScopedFdeAndAProjectInTheCatalog() {
     inDb(
         db -> {
-          Acting.system(() -> new ProjectStore(db).upsert("alpha", "name: alpha\n"));
+          Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("alpha")));
           return null;
         });
     assertEquals(0, fde("add", "nia", "--scoped"));
@@ -1970,7 +1969,7 @@ class FdeCommandTest {
           Acting.system(
               () -> {
                 for (var project : projects) {
-                  new ProjectStore(db).upsert(project, "name: " + project + "\n");
+                  new ProjectStore(db).upsert(TestDefinitions.named(project));
                 }
               });
           return null;

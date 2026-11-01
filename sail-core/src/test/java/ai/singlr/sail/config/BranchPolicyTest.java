@@ -69,7 +69,7 @@ class BranchPolicyTest {
 
   private static ProjectDefinition.Agent agent(boolean autoBranch, String prefix) {
     return new ProjectDefinition.Agent(
-        "claude-code", autoBranch, prefix, false, null, null, null, null, null, null);
+        "claude-code", autoBranch, prefix, false, null, null, null, null);
   }
 
   private static ProjectDefinition configWithAgent(ProjectDefinition.Agent agent) {
@@ -77,7 +77,6 @@ class BranchPolicyTest {
         "test",
         null,
         new ProjectDefinition.Resources(2, "4GB", "50GB"),
-        null,
         null,
         null,
         null,

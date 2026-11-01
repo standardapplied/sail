@@ -133,9 +133,7 @@ class ProjectInitCommandTest {
             null,
             null,
             null,
-            null,
-            null,
-            ssh);
+            null, null);
     assertTrue(
         SailYamlGenerator.generate(config)
             .contains("ssh:\n  user: dev\n  authorized_keys:\n    - "),

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -207,8 +208,8 @@ class SailOperationsTest {
         operationsWith(
             shell().on("incus list --format json", LIST_ALL_JSON),
             store -> {
-              store.upsert("beta", "name: beta");
-              store.upsert("acme", "name: acme");
+              store.upsert(TestDefinitions.yaml("name: beta"));
+              store.upsert(TestDefinitions.yaml("name: acme"));
             },
             environment());
 
@@ -236,7 +237,7 @@ class SailOperationsTest {
     var db = Sqlite.open(tempDir.resolve("catalog-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     var projectStore = new ProjectStore(db);
-    projectStore.upsert("beta", "name: beta");
+    projectStore.upsert(TestDefinitions.yaml("name: beta"));
     var operations =
         new SailOperations(
             shell().on("incus list --format json", EMPTY_JSON),

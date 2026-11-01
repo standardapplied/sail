@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -62,7 +63,7 @@ class ProjectReaderTest {
     try (var db = Sqlite.open(dir.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
       var store = new ProjectStore(db);
-      Acting.system(() -> store.upsert("acme", ACME));
+      Acting.system(() -> store.upsert(TestDefinitions.yaml(ACME)));
       db.execute(
           "UPDATE projects SET definition = ? WHERE name = ?",
           ACME + "  build_skill: acme-build\n",
@@ -88,7 +89,7 @@ class ProjectReaderTest {
     try (var db = Sqlite.open(dir.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
       var store = new ProjectStore(db);
-      Acting.system(() -> store.upsert("acme", ACME));
+      Acting.system(() -> store.upsert(TestDefinitions.yaml(ACME)));
       db.execute(
           "UPDATE projects SET definition = ? WHERE name = ?", "agent: [unterminated", "acme");
 
@@ -111,7 +112,7 @@ class ProjectReaderTest {
     try (var db = Sqlite.open(dir.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
       var store = new ProjectStore(db);
-      Acting.system(() -> store.upsert("acme", ACME));
+      Acting.system(() -> store.upsert(TestDefinitions.yaml(ACME)));
       db.execute(
           "UPDATE projects SET definition = ? WHERE name = ?",
           ACME + "  review_pipeline:\n    stages:\n      - type: agent\n",

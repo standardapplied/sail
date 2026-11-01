@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -32,9 +33,8 @@ class AgentStatusCommandTest {
       var store = new ProjectStore(db);
       Acting.system(
           () ->
-              store.upsert(
-                  "acme", "name: acme\nrepos:\n  - url: https://x/api.git\n    path: api\n"));
-      Acting.system(() -> store.upsert("oops", "name: oops\n"));
+              store.upsert(TestDefinitions.yaml("name: acme\nrepos:\n  - url: https://x/api.git\n    path: api\n")));
+      Acting.system(() -> store.upsert(TestDefinitions.named("oops")));
       db.execute("UPDATE projects SET definition = ? WHERE name = ?", "agent: [", "oops");
       var definitions = ProjectReader.ofCatalog(store);
 

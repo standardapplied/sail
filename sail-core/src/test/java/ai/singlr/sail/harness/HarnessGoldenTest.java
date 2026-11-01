@@ -303,7 +303,7 @@ class HarnessGoldenTest {
     var ex = assertThrows(IllegalArgumentException.class, () -> Harnesses.of("unknown-agent"));
     assertEquals(
         "Unknown agent CLI: 'unknown-agent'. Known agents: claude-code, codex.\n"
-            + "  Check the 'install' list in your sail.yaml agent section.",
+            + "  Check the install list in the project's agent section.",
         ex.getMessage());
   }
 

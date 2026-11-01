@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -51,7 +52,7 @@ class ProjectRenamerTest {
   void setUp() throws Exception {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
-    new ProjectStore(db).upsert("old", DEFINITION);
+    new ProjectStore(db).upsert(TestDefinitions.yaml(DEFINITION));
     new SpecStore(db).create(spec("s1", "old"));
     ai.singlr.sail.store.ContentFixtures.put(new FileStore(db), "old", "start-dev.sh", "echo hi");
     projectsDir = tempDir.resolve("projects");
@@ -247,7 +248,7 @@ class ProjectRenamerTest {
 
   @Test
   void rejectsATargetNameAlreadyInTheCatalog() throws Exception {
-    new ProjectStore(db).upsert("taken", "name: taken\n");
+    new ProjectStore(db).upsert(TestDefinitions.named("taken"));
 
     assertThrows(IllegalStateException.class, () -> renamer(runningShell()).rename("old", "taken"));
   }

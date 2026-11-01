@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -52,8 +53,8 @@ class RoomsReadTest {
           fdes.add("uday", "Uday", null, "admin");
           fdes.add("rajesh", "Rajesh", null, "member");
           var projects = new ProjectStore(db);
-          projects.upsert("acme", "name: acme\nagent:\n  type: claude-code\n");
-          projects.upsert("nautilus", "name: nautilus\nagent:\n  type: codex\n");
+          projects.upsert(TestDefinitions.yaml("name: acme\nagent:\n  type: claude-code\n"));
+          projects.upsert(TestDefinitions.yaml("name: nautilus\nagent:\n  type: codex\n"));
         });
   }
 

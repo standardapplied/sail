@@ -31,8 +31,6 @@ class DefinitionEditsTest {
       repos:
         - url: "https://github.com/org/backend.git"
           path: backend
-      ssh:
-        user: dev
       """;
 
   private static final String MINIMAL_YAML =
@@ -94,7 +92,6 @@ class DefinitionEditsTest {
     assertEquals("my-project", updated.name());
     assertEquals(2, updated.resources().cpu());
     assertEquals(1, updated.repos().size());
-    assertEquals("dev", updated.ssh().user());
   }
 
   @Test
@@ -181,7 +178,6 @@ class DefinitionEditsTest {
 
     assertEquals("my-project", updated.name());
     assertEquals(1, updated.services().size());
-    assertEquals("dev", updated.ssh().user());
   }
 
   @Test
@@ -192,7 +188,6 @@ class DefinitionEditsTest {
     assertEquals("16GB", updated.resources().memory());
     assertEquals("50GB", updated.resources().disk());
     assertEquals("my-project", updated.name());
-    assertEquals("dev", updated.ssh().user());
     assertEquals(1, updated.services().size());
   }
 

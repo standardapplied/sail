@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -203,7 +204,7 @@ class SpecPruneTest {
   void aWholeProjectGoesWithEverythingInIt() {
     archived("old", "uday");
     run(new RunStore(db), "running", null, "old");
-    new ProjectStore(db).upsert("proj", "name: proj\n");
+    new ProjectStore(db).upsert(TestDefinitions.named("proj"));
 
     var report = Acting.by(ADMIN, () -> pruner.prune(PruneRequest.project("proj", false)));
 

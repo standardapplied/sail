@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.Guardrails;
@@ -256,7 +257,7 @@ final class ReviewLoop implements AutoCloseable {
    * does.
    */
   void describe(String yamlContent) {
-    Acting.system(() -> projects.upsert(PROJECT, yamlContent));
+    Acting.system(() -> projects.upsert(TestDefinitions.yaml(yamlContent)));
   }
 
   /** Leaves the project's row holding text that is not a definition. */

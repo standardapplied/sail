@@ -104,7 +104,7 @@ public record Guardrails(String maxDuration, String maxIdle, String action) {
     var maxDuration = duration(map, "max_duration", block);
     var maxIdle = duration(map, "max_idle", block);
     try {
-      return of(maxDuration, maxIdle, Fields.text(map, "action", block + ".action"));
+      return of(maxDuration, maxIdle, Objects.toString(map.get("action"), null));
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException("Invalid `" + block + ".action`: " + e.getMessage(), e);
     }

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.config.TestDefinitions;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -105,7 +106,7 @@ class NodeSyncOnWriteIT {
     }
     try (var converged = SyncDatabase.converge(mainDb, "mainbox")) {
       Actor.run(
-          Actor.system(), () -> new ProjectStore(converged.db()).upsert("acme", "name: acme\n"));
+          Actor.system(), () -> new ProjectStore(converged.db()).upsert(TestDefinitions.named("acme")));
       var fde = new FdeStore(converged.db()).add("mady", "Mady", "mady@example.dev", "member");
       return new AuthSessionStore(converged.db()).create(fde.id(), Duration.ofHours(1)).token();
     }

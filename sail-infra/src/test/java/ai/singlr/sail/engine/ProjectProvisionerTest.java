@@ -52,13 +52,11 @@ class ProjectProvisionerTest {
         List.of("postgresql-client-16"),
         new ProjectDefinition.Runtimes(25, "22", null),
         null,
-        null,
         Map.of(
             "postgres",
             new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
         Map.of("app", new ProjectDefinition.Process("java -jar app.jar", ".", null, Map.of())),
-        new ProjectDefinition.Agent("claude-code", true, "sail/", true, null, Map.of(), null, null),
-        new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA... alice@laptop")));
+        new ProjectDefinition.Agent("claude-code", true, "sail/", true, null, Map.of(), null, null), null);
   }
 
   private static final SshPublicKey WORKSTATION_KEY =
@@ -70,7 +68,6 @@ class ProjectProvisionerTest {
         "Simple project",
         new ProjectDefinition.Resources(2, "4GB", "50GB"),
         "ubuntu/24.04",
-        null,
         null,
         null,
         null,
@@ -92,9 +89,7 @@ class ProjectProvisionerTest {
         null,
         null,
         null,
-        null,
-        null,
-        ssh);
+        null, null);
   }
 
   private static ProjectDefinition minimalConfigWith(ProjectDefinition.Runtimes runtimes) {
@@ -106,7 +101,6 @@ class ProjectProvisionerTest {
         config.image(),
         null,
         runtimes,
-        null,
         null,
         null,
         null,
@@ -605,9 +599,7 @@ class ProjectProvisionerTest {
             null,
             null,
             null,
-            null,
-            null,
-            new ProjectDefinition.Ssh(null, List.of("ssh-ed25519 AAAA mallory@laptop")));
+            null, null);
     var pushes =
         new PushRecordingShell(
             provisionedSimpleShell()
@@ -979,9 +971,7 @@ class ProjectProvisionerTest {
             null,
             null,
             null,
-            null,
-            null,
-            new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            null, null);
 
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
@@ -1499,9 +1489,7 @@ class ProjectProvisionerTest {
             null,
             null,
             null,
-            null,
-            null,
-            new ProjectDefinition.Ssh("dev", List.of()));
+            null, null);
     var script =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -1537,9 +1525,7 @@ class ProjectProvisionerTest {
             null,
             null,
             null,
-            null,
-            null,
-            new ProjectDefinition.Ssh("dev", null));
+            null, null);
     var script =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -1934,12 +1920,10 @@ class ProjectProvisionerTest {
         "ubuntu/24.04",
         null,
         null,
-        new ProjectDefinition.Git("Acme Eng", "eng@acme.com", auth, null),
         List.of(new ProjectDefinition.Repo("https://github.com/acme/api.git", "api", null)),
         null,
         null,
-        null,
-        new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+        null, null);
   }
 
   /** Shell setup that succeeds through step 10 (Node skipped) for configs without JDK/Node. */
@@ -2184,12 +2168,10 @@ class ProjectProvisionerTest {
         "ubuntu/24.04",
         null,
         null,
-        new ProjectDefinition.Git("Acme Eng", "eng@acme.com", "ssh", keyPath),
         null,
         null,
         null,
-        null,
-        new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+        null, null);
   }
 
   private static ProjectDefinition configWithMaven(String mavenVersion) {
@@ -2203,9 +2185,7 @@ class ProjectProvisionerTest {
         null,
         null,
         null,
-        null,
-        null,
-        new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+        null, null);
   }
 
   @Test
@@ -2335,12 +2315,10 @@ class ProjectProvisionerTest {
         "ubuntu/24.04",
         null,
         null,
-        null,
         repos,
         null,
         null,
-        null,
-        new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+        null, null);
   }
 
   @Test
@@ -2794,11 +2772,9 @@ class ProjectProvisionerTest {
             null,
             null,
             null,
-            null,
             services,
             null,
-            null,
-            new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            null, null);
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -2927,14 +2903,12 @@ class ProjectProvisionerTest {
             null,
             new ProjectDefinition.Runtimes(25, "22", null),
             null,
-            null,
             Map.of(
                 "postgres",
                 new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
             null,
             new ProjectDefinition.Agent(
-                "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null),
-            new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+                "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null), null);
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -2982,14 +2956,12 @@ class ProjectProvisionerTest {
             null,
             new ProjectDefinition.Runtimes(25, "22", null),
             null,
-            null,
             Map.of(
                 "postgres",
                 new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
             null,
             new ProjectDefinition.Agent(
-                "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null),
-            new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+                "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null), null);
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -3032,7 +3004,6 @@ class ProjectProvisionerTest {
             null,
             null,
             null,
-            null,
             new ProjectDefinition.Agent(
                 "claude-code",
                 true,
@@ -3041,8 +3012,7 @@ class ProjectProvisionerTest {
                 List.of("claude-code", "codex"),
                 Map.of(),
                 null,
-                null),
-            new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+                null), null);
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -3178,14 +3148,12 @@ class ProjectProvisionerTest {
             null,
             new ProjectDefinition.Runtimes(25, null, null),
             null,
-            null,
             Map.of(
                 "postgres",
                 new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
             null,
             new ProjectDefinition.Agent(
-                "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null),
-            new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+                "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null), null);
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")

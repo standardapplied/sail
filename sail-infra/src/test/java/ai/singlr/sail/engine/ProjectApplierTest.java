@@ -737,14 +737,12 @@ class ProjectApplierTest {
             null,
             null,
             null,
-            null,
             new ProjectDefinition.Agent(
                 "claude-code",
                 true,
                 "sail/",
                 true,
                 List.of("claude-code", "codex"),
-                null,
                 null,
                 null,
                 null,
@@ -834,7 +832,6 @@ class ProjectApplierTest {
             "test",
             null,
             new ProjectDefinition.Resources(2, "4GB", "50GB"),
-            null,
             null,
             null,
             null,
@@ -1061,10 +1058,10 @@ class ProjectApplierTest {
     var applier = applier(shell);
     var agent =
         new ProjectDefinition.Agent(
-            "claude-code", true, "sail/", true, null, null, null, null, null, null);
+            "claude-code", true, "sail/", true, null, null, null, null, null);
     var config =
         new ProjectDefinition(
-            "test", null, null, null, null, null, null, null, null, null, agent, null);
+            "test", null, null, null, null, null, null, null, null, agent, null);
 
     var warnings = applier.checkUnsupportedChanges(config, null, OperatorCommand.PLAIN);
 
@@ -1485,12 +1482,11 @@ class ProjectApplierTest {
   private static ProjectDefinition minimalConfig(String agentType) {
     var agent =
         new ProjectDefinition.Agent(
-            agentType, true, "sail/", true, null, null, null, null, null, null);
+            agentType, true, "sail/", true, null, null, null, null, null);
     return new ProjectDefinition(
         "test",
         null,
         new ProjectDefinition.Resources(2, "4GB", "50GB"),
-        null,
         null,
         null,
         null,

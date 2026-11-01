@@ -15,7 +15,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -201,7 +203,8 @@ class ConvergenceSyncTest {
         Acting.as(
             as,
             () ->
-                new ProjectStore(box.db).upsert("zenith", "name: zenith\nimage: " + value + "\n"));
+                new ProjectStore(box.db)
+                    .upsert(TestDefinitions.yaml("name: zenith\nimage: " + value + "\n")));
       }
 
       @Override
@@ -218,7 +221,7 @@ class ConvergenceSyncTest {
       String value(SyncBox box) {
         return new ProjectStore(box.db)
             .findByName("zenith")
-            .map(row -> YamlUtil.parseMap(row.definition()).get("image").toString())
+            .map(row -> row.definition().image())
             .orElse(null);
       }
     };
@@ -631,7 +634,7 @@ class ConvergenceSyncTest {
 
   @Test
   void aProjectRenamedAndRenamedBackAfterASyncComesBackOnEveryBox() {
-    upsertProject(ada, "ada", "p", "name: p\n");
+    upsertProject(ada, "ada", TestDefinitions.named("p"));
     SyncBox.quiesce(main, ada, bob);
     renameProject(ada, "ada", "p", "q");
     SyncBox.quiesce(main, ada, bob);
@@ -639,29 +642,32 @@ class ConvergenceSyncTest {
 
     assertConverged();
 
-    assertEquals("name: p\n", definition(main, "p"), "p is back on main");
-    assertEquals("name: p\n", definition(bob, "p"));
+    assertEquals(TestDefinitions.named("p"), definition(main, "p"), "p is back on main");
+    assertEquals(TestDefinitions.named("p"), definition(bob, "p"));
   }
 
   @Test
   void aProjectMadeUnderARenamedAwayNameOnANodeThatHeardTheRenameSurvives() {
-    upsertProject(ada, "ada", "p", "name: p\n");
+    upsertProject(ada, "ada", TestDefinitions.named("p"));
     SyncBox.quiesce(main, ada, bob);
     renameProject(ada, "ada", "p", "q");
     SyncBox.quiesce(main, ada, bob);
-    upsertProject(bob, "bob", "p", "name: p\nnew: true\n");
+    upsertProject(bob, "bob", TestDefinitions.described("p", "new"));
 
     assertConverged();
 
-    assertEquals("name: p\nnew: true\n", definition(main, "p"), "bob's new project reaches main");
+    assertEquals(
+        TestDefinitions.described("p", "new"),
+        definition(main, "p"),
+        "bob's new project reaches main");
   }
 
   @Test
   void keepingMineAgainstARenameKeepsTheProject() {
-    upsertProject(ada, "ada", "p", "name: p\n");
+    upsertProject(ada, "ada", TestDefinitions.named("p"));
     SyncBox.quiesce(main, ada, bob);
     renameProject(ada, "ada", "p", "q");
-    upsertProject(bob, "bob", "p", "name: p\nedited: true\n");
+    upsertProject(bob, "bob", TestDefinitions.described("p", "edited"));
     SyncBox.round(main, ada);
     SyncBox.round(main, bob);
     assertTrue(bob.conflicts.pendingFor("project", "p").isPresent());
@@ -669,15 +675,16 @@ class ConvergenceSyncTest {
     SyncBox.resolve(bob, "project", "p", SyncBox.Resolve.MINE);
 
     assertConverged();
-    assertEquals("name: p\nedited: true\n", definition(main, "p"), "keeping mine keeps it");
+    assertEquals(
+        TestDefinitions.described("p", "edited"), definition(main, "p"), "keeping mine keeps it");
   }
 
   @Test
   void aRenameRecordedUnderThisBoxsMachineryIsAuthoredTheSameOnEveryBox() {
-    upsertProject(ada, "ada", "p", "name: p\n");
+    upsertProject(ada, "ada", TestDefinitions.named("p"));
     SyncBox.quiesce(main, ada, bob);
 
-    Acting.system(() -> new ProjectStore(ada.db).rename("p", "q", "name: q\n"));
+    Acting.system(() -> new ProjectStore(ada.db).rename("p", "q", TestDefinitions.named("q")));
 
     assertConverged();
   }
@@ -699,15 +706,17 @@ class ConvergenceSyncTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"name: p\n", "name: p\nback: true\n"})
-  void aReCreateAfterADeleteWhoseAnswerWasLostReachesMainWithNoConflict(String recreated)
+  @ValueSource(strings = {"", "back"})
+  void aReCreateAfterADeleteWhoseAnswerWasLostReachesMainWithNoConflict(String version)
       throws IOException {
-    upsertProject(bob, "bob", "p", "name: p\n");
+    var recreated =
+        version.isEmpty() ? TestDefinitions.named("p") : TestDefinitions.described("p", version);
+    upsertProject(bob, "bob", TestDefinitions.named("p"));
     SyncBox.quiesce(main, ada, bob);
     Acting.as("bob", () -> new ProjectStore(bob.db).delete("p"));
     SyncBox.pushLosingTheAnswer(main, bob, "project");
     assertNull(definition(main, "p"), "main took the delete");
-    upsertProject(bob, "bob", "p", recreated);
+    upsertProject(bob, "bob", recreated);
 
     SyncBox.round(main, bob);
 
@@ -719,7 +728,7 @@ class ConvergenceSyncTest {
 
   @Test
   void aNodeCannotForgeTheAuthorOfARenamesTombstoneOnMain() {
-    upsertProject(ada, "ada", "p", "name: p\n");
+    upsertProject(ada, "ada", TestDefinitions.named("p"));
     SyncBox.quiesce(main, ada, bob);
     renameProject(ada, "ada", "p", "q");
     ada.db.execute(
@@ -737,10 +746,10 @@ class ConvergenceSyncTest {
 
   @Test
   void twoBoxesMakingTheSameLaterRevisionUnderOneAuthorConvergeAndStopOffering() {
-    upsertProject(bob, "bob", "p", "name: p\n");
+    upsertProject(bob, "bob", TestDefinitions.named("p"));
     SyncBox.quiesce(main, ada, bob);
-    Acting.as("bob", () -> new ProjectStore(main.db).upsert("p", "name: p\nv: 2\n"));
-    upsertProject(bob, "bob", "p", "name: p\nv: 2\n");
+    Acting.as("bob", () -> new ProjectStore(main.db).upsert(TestDefinitions.described("p", "2")));
+    upsertProject(bob, "bob", TestDefinitions.described("p", "2"));
 
     assertConverged();
 
@@ -749,27 +758,30 @@ class ConvergenceSyncTest {
 
   @Test
   void aProjectMadeUnderANameMainRenamedAwayTwiceOnANodeThatHeardTheFirstRenameSurvives() {
-    upsertProject(ada, "ada", "p", "name: p\n");
+    upsertProject(ada, "ada", TestDefinitions.named("p"));
     SyncBox.quiesce(main, ada, bob);
     renameProject(ada, "ada", "p", "q");
     SyncBox.quiesce(main, ada, bob);
-    upsertProject(ada, "ada", "p", "name: p\nsecond: true\n");
+    upsertProject(ada, "ada", TestDefinitions.described("p", "second"));
     SyncBox.round(main, ada);
     renameProject(ada, "ada", "p", "r");
     SyncBox.round(main, ada);
-    upsertProject(bob, "bob", "p", "name: p\nbobs: true\n");
+    upsertProject(bob, "bob", TestDefinitions.described("p", "bobs"));
 
     assertConverged();
 
     assertEquals(List.of(), bob.conflicts.pending());
-    assertEquals("name: p\nbobs: true\n", definition(main, "p"), "bob's project reaches main");
+    assertEquals(
+        TestDefinitions.described("p", "bobs"),
+        definition(main, "p"),
+        "bob's project reaches main");
   }
 
   @Test
   void aProjectMadeUnderANameANodeNeverHeardDeletedLosesToTheRenamesBlock() {
-    upsertProject(ada, "ada", "p", "name: p\n");
+    upsertProject(ada, "ada", TestDefinitions.named("p"));
     SyncBox.round(main, ada);
-    upsertProject(bob, "bob", "p", "name: p\nbobs: true\n");
+    upsertProject(bob, "bob", TestDefinitions.described("p", "bobs"));
     renameProject(ada, "ada", "p", "q");
     SyncBox.round(main, ada);
 
@@ -781,13 +793,14 @@ class ConvergenceSyncTest {
 
   @Test
   void aCopyOfAReCreatedProjectStillAdoptsTheRenamesBlockAfterAnOlderHeardDeletion() {
-    upsertProject(ada, "ada", "p", "name: p\n");
+    upsertProject(ada, "ada", TestDefinitions.named("p"));
     SyncBox.quiesce(main, ada, bob);
     Acting.as("ada", () -> new ProjectStore(ada.db).delete("p"));
     SyncBox.quiesce(main, ada, bob);
-    upsertProject(ada, "ada", "p", "name: p\nsecond: true\n");
+    upsertProject(ada, "ada", TestDefinitions.described("p", "second"));
     SyncBox.quiesce(main, ada, bob);
-    assertEquals("name: p\nsecond: true\n", definition(bob, "p"), "bob holds main's copy");
+    assertEquals(
+        TestDefinitions.described("p", "second"), definition(bob, "p"), "bob holds main's copy");
     renameProject(ada, "ada", "p", "r");
     SyncBox.round(main, ada);
 
@@ -962,17 +975,17 @@ class ConvergenceSyncTest {
         room);
   }
 
-  private static void upsertProject(SyncBox box, String as, String name, String definition) {
-    Acting.as(as, () -> new ProjectStore(box.db).upsert(name, definition));
+  private static void upsertProject(SyncBox box, String as, ProjectDefinition definition) {
+    Acting.as(as, () -> new ProjectStore(box.db).upsert(definition));
   }
 
   /** Renames as {@code as}, an admin whose box then syncs as one: a rename is an admin's alone. */
   private static void renameProject(SyncBox box, String as, String from, String to) {
-    Acting.as(as, () -> new ProjectStore(box.db).rename(from, to, "name: " + to + "\n"));
+    Acting.as(as, () -> new ProjectStore(box.db).rename(from, to, TestDefinitions.named(to)));
     box.syncsAs(Actor.sync(as, Role.ADMIN));
   }
 
-  private static String definition(SyncBox box, String name) {
+  private static ProjectDefinition definition(SyncBox box, String name) {
     return new ProjectStore(box.db)
         .findByName(name)
         .map(ProjectStore.ProjectRow::definition)
