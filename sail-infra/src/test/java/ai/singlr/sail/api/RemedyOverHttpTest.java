@@ -168,8 +168,16 @@ class RemedyOverHttpTest {
     assertEquals(500, response.statusCode());
     assertEquals(
         List.of(
-            Map.of("text", "Run '"),
-            Map.of("run", "sail", "verb", "migrate", "args", List.of()),
+            Map.of("text", "Print its content with '"),
+            Map.of("run", "sail", "verb", "spec content", "args", List.of("taken")),
+            Map.of("text", "' and write it back with '"),
+            Map.of(
+                "run",
+                "sail",
+                "verb",
+                "spec content",
+                "args",
+                List.of("taken", "--body-file", "<file>")),
             Map.of("text", "'.")),
         ((Map<?, ?>) YamlUtil.parseMap(response.body()).get("error")).get("remedy"));
     SailApiClient.Refused refused;
@@ -177,13 +185,18 @@ class RemedyOverHttpTest {
       refused =
           assertThrows(SailApiClient.Refused.class, () -> client.get("/v1/specs/taken/content"));
     }
-    var reason =
-        "Spec taken has no content hash: this database's content migration never finished.";
+    var reason = "Spec taken has no content hash.";
     assertEquals(
-        List.of(reason + " Run 'sudo sail migrate'. (HTTP 500)"),
+        List.of(
+            reason
+                + " Print its content with 'sudo sail spec content taken' and write it back with"
+                + " 'sudo sail spec content taken --body-file <file>'. (HTTP 500)"),
         CliCommand.lines(refused, OperatorCommand.SUDO));
     assertEquals(
-        List.of(reason + " Run 'sail migrate'. (HTTP 500)"),
+        List.of(
+            reason
+                + " Print its content with 'sail spec content taken' and write it back with"
+                + " 'sail spec content taken --body-file <file>'. (HTTP 500)"),
         CliCommand.lines(refused, OperatorCommand.PLAIN));
   }
 
@@ -205,8 +218,16 @@ class RemedyOverHttpTest {
     assertEquals(500, response.statusCode(), response.body());
     assertEquals(
         List.of(
-            Map.of("text", "Run '"),
-            Map.of("run", "sail", "verb", "migrate", "args", List.of()),
+            Map.of("text", "Print its content with '"),
+            Map.of("run", "sail", "verb", "spec content", "args", List.of("taken")),
+            Map.of("text", "' and write it back with '"),
+            Map.of(
+                "run",
+                "sail",
+                "verb",
+                "spec content",
+                "args",
+                List.of("taken", "--body-file", "<file>")),
             Map.of("text", "'.")),
         ((Map<?, ?>) YamlUtil.parseMap(response.body()).get("error")).get("remedy"));
   }

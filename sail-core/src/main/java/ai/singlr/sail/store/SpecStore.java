@@ -1184,8 +1184,20 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         id);
   }
 
+  /**
+   * Refuses a spec row that names no content hash, naming the repair: writing its content again
+   * sets both hashes, and reading it needs neither.
+   */
   private static void requireHashed(String hash, String id) {
-    if (hash == null) throw new IllegalStateException("Spec " + id + " has no content hash.");
+    if (hash == null)
+      throw Remedied.state(
+          "Spec " + id + " has no content hash.",
+          Remedy.of(
+              "Print its content with '",
+              Remedy.sail("spec content", id),
+              "' and write it back with '",
+              Remedy.sail("spec content", id, "--body-file", "<file>"),
+              "'."));
   }
 
   public List<SpecRow> readySpecs() {

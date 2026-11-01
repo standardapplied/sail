@@ -841,7 +841,7 @@ class MainRebuiltRoundTest {
     round();
     var other =
         new SyncWire.Welcome(
-            SyncWire.PROTOCOL, "0.54.0", "main", "nia", 0, ProjectScope.all(), "another");
+            SyncWire.PROTOCOL, "0.54.0", "main", "nia", 4096, ProjectScope.all(), "another");
     answering =
         (in, out) -> {
           SyncWire.readFramed(in);
@@ -868,14 +868,14 @@ class MainRebuiltRoundTest {
     nodeDb.execute("UPDATE catalog SET main = NULL");
     write("g2");
     var before = held(nodeDb);
-    var older =
+    var uncatalogued =
         new SyncWire.Welcome(
-            SyncWire.PROTOCOL, "0.53.0", "main", "nia", 0, ProjectScope.all(), null);
+            SyncWire.PROTOCOL, "0.53.0", "main", "nia", 4096, ProjectScope.all(), null);
     answering =
         (in, out) -> {
           SyncWire.readFramed(in);
           in.close();
-          out.write((SyncWire.encode(older) + "\n").getBytes(StandardCharsets.UTF_8));
+          out.write((SyncWire.encode(uncatalogued) + "\n").getBytes(StandardCharsets.UTF_8));
           out.flush();
         };
 

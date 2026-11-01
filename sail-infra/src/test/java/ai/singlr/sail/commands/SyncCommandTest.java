@@ -81,14 +81,22 @@ class SyncCommandTest {
       }
 
       assertEquals("store", failed.kind());
-      assertEquals(List.of(Remedy.sail("migrate")), failed.remedy().commands());
-      var reason =
-          "spec: spec: Spec taken has no content hash: this database's content migration never"
-              + " finished.";
       assertEquals(
-          reason + " Run 'sudo sail migrate'.", SyncCommand.reason(failed, OperatorCommand.SUDO));
+          List.of(
+              Remedy.sail("spec content", "taken"),
+              Remedy.sail("spec content", "taken", "--body-file", "<file>")),
+          failed.remedy().commands());
+      var reason = "spec: spec: Spec taken has no content hash.";
       assertEquals(
-          reason + " Run 'sail migrate'.", SyncCommand.reason(failed, OperatorCommand.PLAIN));
+          reason
+              + " Print its content with 'sudo sail spec content taken' and write it back with"
+              + " 'sudo sail spec content taken --body-file <file>'.",
+          SyncCommand.reason(failed, OperatorCommand.SUDO));
+      assertEquals(
+          reason
+              + " Print its content with 'sail spec content taken' and write it back with"
+              + " 'sail spec content taken --body-file <file>'.",
+          SyncCommand.reason(failed, OperatorCommand.PLAIN));
     }
   }
 
