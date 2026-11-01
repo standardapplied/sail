@@ -485,7 +485,7 @@ class ProjectApplyCommandTest {
 
   @Test
   void deletedVerbsNoLongerParse() {
-    for (var deleted : List.of("create", "reconfigure", "sync")) {
+    for (var deleted : List.of("init", "reconfigure", "sync")) {
       var cmd = new CommandLine(new Sail());
       cmd.setErr(new PrintWriter(new StringWriter()));
 
