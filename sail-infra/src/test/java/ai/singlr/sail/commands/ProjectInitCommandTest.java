@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -139,5 +140,35 @@ class ProjectInitCommandTest {
         SailYamlGenerator.generate(config)
             .contains("ssh:\n  user: dev\n  authorized_keys:\n    - "),
         SailYamlGenerator.generate(config));
+  }
+
+  private Map<String, SailYaml.Process> app(
+      String answers, SailYaml.Runtimes runtimes, List<SailYaml.Repo> repos) {
+    ConsoleStub.answering(answers, true);
+    return ProjectInitCommand.promptApp(
+        new PrintStream(asked, true, StandardCharsets.UTF_8), Ansi.OFF, runtimes, repos);
+  }
+
+  @Test
+  void anAppIsAskedForOnlyWhenARuntimeImpliesOneAndRunsFromTheFirstRepo() {
+    var node = new SailYaml.Runtimes(0, "22", null);
+    var java = new SailYaml.Runtimes(25, null, "3.9.14");
+    var repo = List.of(new SailYaml.Repo("https://github.com/acme/web.git", "web", null));
+
+    assertNull(app("", null, repo));
+    assertNull(app("", new SailYaml.Runtimes(0, null, "3.9.14"), repo));
+    assertEquals("", asked.toString(StandardCharsets.UTF_8), "nothing was asked");
+    assertEquals(
+        Map.of("app", new SailYaml.Process("npm run dev", "web", 3000, Map.of())),
+        app("npm run dev\n\n", node, repo));
+    assertTrue(
+        asked
+            .toString(StandardCharsets.UTF_8)
+            .contains("  Command that starts it (blank to skip): "),
+        asked.toString(StandardCharsets.UTF_8));
+    assertEquals(
+        Map.of("app", new SailYaml.Process("mvn spring-boot:run", null, 9090, Map.of())),
+        app("mvn spring-boot:run\n9090\n", java, null));
+    assertNull(app("\n", node, repo), "a blank command skips the app");
   }
 }

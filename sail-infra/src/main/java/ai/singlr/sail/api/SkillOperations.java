@@ -7,10 +7,10 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
+import ai.singlr.sail.engine.SailSkills;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SkillFolders;
 import ai.singlr.sail.engine.StageSkill;
-import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.harness.Harness;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -141,8 +141,10 @@ public final class SkillOperations {
         .map(folder -> shared(folder, agents))
         .sorted(Comparator.comparing(Row::name))
         .forEach(rows::add);
-    var specBoard = SpecSkillGenerator.skill();
-    rows.add(new Row(specBoard.name(), Kind.SAIL, specBoard.files().size(), agents, "ok", ""));
+    SailSkills.all()
+        .forEach(
+            skill ->
+                rows.add(new Row(skill.name(), Kind.SAIL, skill.files().size(), agents, "ok", "")));
     var taken = rows.stream().map(Row::name).toList();
     var local = new LinkedHashMap<String, List<Harness>>();
     try {

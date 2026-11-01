@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.engine.SailSkills;
 import ai.singlr.sail.engine.SkillFolders;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.gen.SpecSkillGenerator;
@@ -163,8 +164,8 @@ public final class ProjectSkills {
    * whose content this box does not hold, naming the file.
    */
   public InputStream open(String project, StageSkill skill, StageSkill.File file) {
-    if (skill.name().equals(SpecSkillGenerator.NAME)) {
-      return SpecSkillGenerator.content(file);
+    if (SailSkills.named(skill.name()).isPresent()) {
+      return SailSkills.content(skill, file);
     }
     var shared = files.apply(project);
     var path = StageSkill.projectFolder(skill.name()) + file.path();
@@ -271,8 +272,9 @@ public final class ProjectSkills {
    * The {@code SKILL.md} of {@code project}'s skill {@code name}, or of sail's {@code spec-board}.
    */
   public String manifest(String project, String name) throws IOException {
-    if (name.equals(SpecSkillGenerator.NAME)) {
-      return SpecSkillGenerator.skillMd();
+    var sails = SailSkills.manifest(name);
+    if (sails.isPresent()) {
+      return sails.get();
     }
     StageSkill.requireName(name);
     var path = StageSkill.projectFolder(name) + StageSkill.MANIFEST;

@@ -14,7 +14,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
-import ai.singlr.sail.gen.SpecSkillGenerator;
+import ai.singlr.sail.engine.SailSkills;
 import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
 import java.util.List;
@@ -271,7 +271,7 @@ public final class ProjectSkillsCommand implements Runnable {
     @Override
     public Integer call() throws Exception {
       var operator = operator();
-      if (!SpecSkillGenerator.NAME.equals(name)) {
+      if (SailSkills.manifest(name).isEmpty()) {
         project = CurrentProject.require(project);
         NameValidator.requireValidProjectName(project);
       }

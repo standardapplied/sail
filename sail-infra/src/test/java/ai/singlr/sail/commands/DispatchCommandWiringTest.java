@@ -27,12 +27,12 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
+import ai.singlr.sail.engine.SailSkills;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
@@ -504,15 +504,15 @@ class DispatchCommandWiringTest {
     private final Map<String, Result> scripts = new LinkedHashMap<>();
 
     /**
-     * Every launch reconciles the in-container sail helpers and installs sail's skill; answer both
+     * Every launch reconciles the in-container sail helpers and installs sail's skills; answer both
      * as already installed, and the skills folder as holding nothing else of sail's.
      */
     StubShell() {
       on("incus config device add", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
-      on(
-          "/spec-board/" + StageSkill.STAMP,
-          ProjectSkillInstaller.fingerprint(SpecSkillGenerator.skill()));
+      for (var skill : SailSkills.all()) {
+        on("/" + skill.name() + "/" + StageSkill.STAMP, ProjectSkillInstaller.fingerprint(skill));
+      }
       on("for d in", "");
     }
 

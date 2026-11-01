@@ -15,6 +15,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -49,6 +50,8 @@ final class LocalApiRouter implements LocalApiHandler {
   private static final String RUN_SESSION = "/v1/run/session";
   private static final String PROJECTS = "/v1/projects/";
   private static final String SKILLS = "skills";
+  private static final String SERVE = "serve";
+  private static final String PORTS = "ports";
 
   private final LocalLaneOperations operations;
 
@@ -199,7 +202,7 @@ final class LocalApiRouter implements LocalApiHandler {
     }
     if (path.startsWith(PROJECTS)) {
       try {
-        return projectSkills(request, caller, path.substring(PROJECTS.length()).split("/", -1));
+        return project(request, caller, path.substring(PROJECTS.length()).split("/", -1));
       } catch (IOException | TimeoutException failed) {
         throw ApiException.of(ErrorCode.CONTAINER_ERROR, failed);
       } catch (InterruptedException interrupted) {
@@ -301,16 +304,16 @@ final class LocalApiRouter implements LocalApiHandler {
   }
 
   /**
-   * A project's skills, the one project surface of this socket: {@code GET} lists every skill an
-   * agent of the project can see and reads one's {@code SKILL.md}; {@code POST} shares a folder in
-   * the container, {@code DELETE} stops sharing one. A run reaches only its own project. Sharing
-   * and removing are a person's: a shared skill is instructions every other agent and every other
-   * box will follow, so a run's credential, whatever its lane, is refused them, and the box
-   * credential writes as the box's FDE, whose write the journal decides.
+   * A project's skills, one of this socket's two project surfaces beside its stack: {@code GET}
+   * lists every skill an agent of the project can see and reads one's {@code SKILL.md}; {@code
+   * POST} shares a folder in the container, {@code DELETE} stops sharing one. A run reaches only
+   * its own project. Sharing and removing are a person's: a shared skill is instructions every
+   * other agent and every other box will follow, so a run's credential, whatever its lane, is
+   * refused them, and the box credential writes as the box's FDE, whose write the journal decides.
    */
-  private ApiResponse projectSkills(LocalApiRequest request, Caller caller, String[] segments)
+  private ApiResponse project(LocalApiRequest request, Caller caller, String[] segments)
       throws IOException, InterruptedException, TimeoutException {
-    if (segments.length < 2 || segments.length > 3 || !SKILLS.equals(segments[1])) {
+    if (segments.length < 2) {
       return problem(404, "No route for " + request.path());
     }
     var project = segments[0];
@@ -319,6 +322,52 @@ final class LocalApiRouter implements LocalApiHandler {
         || !caller.actor().scope().admits(project)) {
       throw ProjectReader.absent(project);
     }
+    return switch (segments[1]) {
+      case SKILLS ->
+          segments.length <= 3
+              ? projectSkills(request, caller, project, segments)
+              : noRoute(request);
+      case SERVE -> segments.length == 2 ? serve(request, project) : noRoute(request);
+      case PORTS -> segments.length == 2 ? ports(request, project) : noRoute(request);
+      default -> noRoute(request);
+    };
+  }
+
+  private static ApiResponse noRoute(LocalApiRequest request) {
+    return problem(404, "No route for " + request.path());
+  }
+
+  /**
+   * {@code POST} brings the project's stack up, {@code timeout} seconds at most (default 60);
+   * {@code DELETE} stops its processes. Both are writes, refused to a read-only run.
+   */
+  private ApiResponse serve(LocalApiRequest request, String project)
+      throws IOException, InterruptedException, TimeoutException {
+    return switch (request.method()) {
+      case "POST" ->
+          ApiResponse.ok(
+              operations
+                  .stack()
+                  .serve(
+                      project,
+                      Duration.ofSeconds(
+                          ApiRouter.seconds(
+                              Objects.requireNonNullElse(request.form().get("timeout"), "60")))));
+      case "DELETE" -> ApiResponse.ok(operations.stack().stop(project));
+      default -> problem(405, "serve accepts POST or DELETE");
+    };
+  }
+
+  private ApiResponse ports(LocalApiRequest request, String project)
+      throws IOException, InterruptedException, TimeoutException {
+    return "GET".equals(request.method())
+        ? ApiResponse.ok(operations.stack().ports(project))
+        : problem(405, "ports accepts GET");
+  }
+
+  private ApiResponse projectSkills(
+      LocalApiRequest request, Caller caller, String project, String[] segments)
+      throws IOException, InterruptedException, TimeoutException {
     var skills = operations.skills();
     if (segments.length == 2) {
       return switch (request.method()) {

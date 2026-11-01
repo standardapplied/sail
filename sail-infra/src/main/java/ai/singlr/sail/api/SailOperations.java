@@ -766,6 +766,11 @@ public final class SailOperations implements HostOperations {
     return new SkillOperations(projectSkills, shell, projects);
   }
 
+  @Override
+  public StackOperations stack() {
+    return new StackOperations(shell, projects, Thread::sleep, System::nanoTime);
+  }
+
   /** The review and fix lanes the review pipeline launches through — see {@code reviewLanes}. */
   public ReviewLanes reviewLanes() {
     return dispatchOps.reviewLanes();

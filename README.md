@@ -187,6 +187,8 @@ repos:
   - { url: "https://github.com/acme/web.git", path: web }
 services:
   postgres: { image: postgres:16, ports: [5432] }
+processes:
+  web: { command: npm run dev, workdir: web, port: 3000 }   # an app the portal opens
 agent:
   type: claude-code
   guardrails:  { max_duration: 4h, max_idle: 20m, action: snapshot-and-stop }   # builds and fix runs
@@ -203,6 +205,18 @@ edit made after a failed or finished run is provisioned again from the first ste
 installing only what is missing.
 
 `sudo sail project demo` spins up a bundled zero-config demo (an Outline wiki) end to end.
+
+### The portal: run the app and open it
+
+A process declares the command that starts the project's app and the port it listens on.
+`sudo sail project serve web` brings the services and processes up, each process a
+`systemd --user` unit in the container, and says what listens where, exiting 0 only when every
+port listens; a process that exits says its last line. `--stop` stops the processes,
+`--json` prints the ports. Mast's **Portal** button does the same in one click, forwards every
+port that listens to the Mac's own `localhost` over the connection it already holds, and opens
+the browser: no `ssh -L`, nothing installed on the Mac, nothing listening once Mast quits.
+Agents get the same through sail's `sail-portal` skill (`scripts/portal up`, `ports`, `log`,
+`stop`), whatever harness they run in.
 
 ## Specs and agents
 

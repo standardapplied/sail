@@ -101,6 +101,7 @@ class SkillOperationsTest {
     assertEquals(
         List.of(
             new Row("e2e", Kind.SHARED, 1, BOTH, "ok", ""),
+            new Row("sail-portal", Kind.SAIL, 2, BOTH, "ok", ""),
             new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", ""),
             new Row(
                 "java",
@@ -120,7 +121,11 @@ class SkillOperationsTest {
 
     var rows = skills.rows("acme");
 
-    assertEquals(List.of(new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", "")), rows.rows());
+    assertEquals(
+        List.of(
+            new Row("sail-portal", Kind.SAIL, 2, BOTH, "ok", ""),
+            new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", "")),
+        rows.rows());
     assertEquals(
         Optional.of(
             "Failed to list the skills made by hand in acme: Error: Instance is not running, so"

@@ -63,6 +63,8 @@ public final class SailYamlGenerator {
 
     appendServices(sb, config.services());
 
+    appendProcesses(sb, config.processes());
+
     appendSsh(sb, config.ssh());
 
     appendAgent(sb, config.agent());
@@ -147,6 +149,41 @@ public final class SailYamlGenerator {
     sb.append("packages:\n");
     for (var pkg : config.packages()) {
       sb.append("  - ").append(quoteYaml(pkg)).append("\n");
+    }
+    sb.append("\n");
+  }
+
+  private static void appendProcesses(StringBuilder sb, Map<String, SailYaml.Process> processes) {
+    if (processes == null || processes.isEmpty()) return;
+
+    sb.append(
+        """
+        # Apps the project runs in its container. The portal brings each up and opens the
+        # first one with a port.
+        processes:
+        """);
+    for (var entry : processes.entrySet()) {
+      var process = entry.getValue();
+      sb.append("  ").append(entry.getKey()).append(":\n");
+      sb.append("    command: ").append(quoteYaml(process.command())).append("\n");
+      if (process.workdir() != null) {
+        sb.append("    workdir: ").append(quoteYaml(process.workdir())).append("\n");
+      }
+      if (process.port() != null) {
+        sb.append("    port: ").append(process.port()).append("\n");
+      }
+      if (!process.env().isEmpty()) {
+        sb.append("    env:\n");
+        process
+            .env()
+            .forEach(
+                (name, value) ->
+                    sb.append("      ")
+                        .append(name)
+                        .append(": ")
+                        .append(quoteYaml(value))
+                        .append("\n"));
+      }
     }
     sb.append("\n");
   }

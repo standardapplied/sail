@@ -40,10 +40,12 @@ services:
     image: redis:7
     ports: [6379]
 
+# Apps the project runs in its container; the portal forwards a process's port and opens it.
 processes:
   api:
     command: "npm run dev"
     workdir: "api"
+    port: 3000
 
 agent:
   type: claude-code

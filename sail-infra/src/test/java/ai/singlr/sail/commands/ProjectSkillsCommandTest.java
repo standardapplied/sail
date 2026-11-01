@@ -170,8 +170,9 @@ class ProjectSkillsCommandTest {
     assertEquals(
         """
           Skills: acme
-          SKILL       FROM  AGENTS       STATUS
-          spec-board  sail  Claude Code  ok
+          SKILL        FROM  AGENTS       STATUS
+          sail-portal  sail  Claude Code  ok
+          spec-board   sail  Claude Code  ok
         """
             + UNLISTED
             + "  Share one with 'sail project skills add <folder>'.\n",
@@ -191,11 +192,12 @@ class ProjectSkillsCommandTest {
     assertEquals(
         """
           Skills: acme
-          SKILL       FROM    AGENTS       STATUS
-          broken      shared               invalid: .sail/skills/broken/SKILL.md is missing or is not a text file.
-          e2e         shared  Claude Code  ok
-          spec-board  sail    Claude Code  ok
-          java        local   Claude Code  not synced: share it with 'skill add ~/.claude/skills/java' in the container
+          SKILL        FROM    AGENTS       STATUS
+          broken       shared               invalid: .sail/skills/broken/SKILL.md is missing or is not a text file.
+          e2e          shared  Claude Code  ok
+          sail-portal  sail    Claude Code  ok
+          spec-board   sail    Claude Code  ok
+          java         local   Claude Code  not synced: share it with 'skill add ~/.claude/skills/java' in the container
         """,
         CommandLine.Help.Ansi.OFF.string(ran.out()));
   }
@@ -212,6 +214,7 @@ class ProjectSkillsCommandTest {
     assertEquals(
         List.of(
             row("e2e", "shared", 1, "ok", null),
+            row("sail-portal", "sail", 2, "ok", null),
             row("spec-board", "sail", 2, "ok", null),
             row("java", "local", 0, "not synced", "skill add ~/.claude/skills/java")),
         parsed.get("skills"));

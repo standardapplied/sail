@@ -25,7 +25,9 @@ import ai.singlr.sail.engine.ContainerAgentProcess;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.LiveStream;
+import ai.singlr.sail.engine.PortalSkill;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
+import ai.singlr.sail.engine.SailSkills;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
@@ -269,7 +271,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                     files, stateDir.resolve("projects"), project, FileLimits.defaults()));
     for (var harness : Harnesses.all()) {
       var report = ProjectSkillInstaller.installProject(shell, CONTAINER, harness, skills);
-      assertEquals(List.of("e2e", SpecSkillGenerator.NAME), report.installed());
+      assertEquals(List.of("e2e", PortalSkill.NAME, SpecSkillGenerator.NAME), report.installed());
       assertEquals(
           "---\nname: e2e\ndescription: Runs the e2e suite.\n---\nRun the e2e suite.\n",
           exec(CONTAINER, List.of("cat", "/home/dev/" + harness.skillFolder("e2e") + "/SKILL.md"))
@@ -350,9 +352,9 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     var second = launched("review", "review_stage_started");
     watcherObservesTheExitOf(second);
     assertEquals(
-        List.of(SpecSkillGenerator.NAME),
+        SailSkills.all().stream().map(StageSkill::name).toList(),
         exec(CONTAINER, List.of("ls", "-A", "/home/dev/.agents/skills")).stdout().lines().toList(),
-        "sail's skill is installed once, and no build folder is left among them");
+        "sail's skills are installed once each, and no build folder is left among them");
     for (var contextFile : List.of("/home/dev/.claude/CLAUDE.md", "/home/dev/.codex/AGENTS.md")) {
       assertFalse(
           exec(CONTAINER, List.of("test", "-e", contextFile)).ok(),

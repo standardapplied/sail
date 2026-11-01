@@ -248,6 +248,8 @@ public final class ProjectInitCommand implements Runnable {
       services = null;
     }
 
+    var processes = promptApp(out, ansi, runtimes, repos);
+
     var ssh = promptSsh(out, ansi);
 
     out.println();
@@ -263,9 +265,38 @@ public final class ProjectInitCommand implements Runnable {
         git,
         repos,
         services,
-        null,
+        processes,
         agent,
         ssh);
+  }
+
+  /**
+   * Asks for the app the project runs, when a runtime implies one: the command that starts it and
+   * the port it listens on, which the portal forwards and opens. It runs from the first repo's
+   * folder. Null when no runtime implies an app or the command is left blank.
+   */
+  static Map<String, SailYaml.Process> promptApp(
+      PrintStream out, Ansi ansi, SailYaml.Runtimes runtimes, List<SailYaml.Repo> repos) {
+    if (runtimes == null || (runtimes.node() == null && runtimes.jdk() == 0)) {
+      return null;
+    }
+    out.println();
+    out.println(ansi.string("  @|bold App|@ @|faint (the portal brings it up and opens it)|@"));
+    var command =
+        ConsoleHelper.promptWithDefault(out, ansi, "Command that starts it (blank to skip)", "");
+    if (command.isBlank()) {
+      return null;
+    }
+    var conventional = runtimes.node() != null ? 3000 : 8080;
+    var port = promptInt(out, ansi, "Port it listens on", conventional);
+    var workdir = repos == null || repos.isEmpty() ? null : repos.getFirst().path();
+    return Map.of(
+        "app",
+        SailYaml.Process.fromMap(
+            "app",
+            workdir == null
+                ? Map.of("command", command, "port", port)
+                : Map.of("command", command, "port", port, "workdir", workdir)));
   }
 
   private static SailYaml.Service customizePresetEnv(

@@ -172,6 +172,23 @@ public final class NameValidator {
     }
   }
 
+  /**
+   * Validates a process name ({@code processes.<name>}), which names its {@code systemd --user}
+   * unit and log file in the container. Throws if invalid.
+   */
+  public static void requireValidProcessName(String process) {
+    if (process == null
+        || process.length() > MAX_LENGTH
+        || !SERVICE_NAME.matcher(process).matches()) {
+      throw new IllegalArgumentException(
+          "Invalid process name: '"
+              + process
+              + "'. Must match [a-zA-Z0-9][a-zA-Z0-9._-]*, max "
+              + MAX_LENGTH
+              + " characters.");
+    }
+  }
+
   /** Validates a POSIX username (ssh.user from sail.yaml). Throws if invalid. */
   public static void requireValidSshUser(String user) {
     if (user == null

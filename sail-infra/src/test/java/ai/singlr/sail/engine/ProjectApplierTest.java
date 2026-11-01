@@ -671,21 +671,27 @@ class ProjectApplierTest {
   }
 
   @Test
-  void applySkillsInstallsSailsSkillForTheProjectsHarnessAndWritesNoContextFile() throws Exception {
+  void applySkillsInstallsSailsSkillsForTheProjectsHarnessAndWritesNoContextFile()
+      throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var applier = applier(shell);
 
     var result = applier.applySkills(CONTAINER, minimalConfig("claude-code"), ProjectSkills.none());
 
-    assertEquals(1, result.added(), "spec-board");
+    assertEquals(2, result.added(), "sail-portal and spec-board");
     var pushes = shell.invocations().stream().filter(c -> c.contains("incus file push")).toList();
+    for (var skill : List.of("sail-portal", "spec-board")) {
+      assertTrue(
+          pushes.stream()
+              .anyMatch(
+                  c ->
+                      c.contains("/home/dev/.claude/.sail-stage-build-" + skill + ".")
+                          && c.endsWith("/SKILL.md")),
+          pushes.toString());
+    }
     assertTrue(
-        pushes.stream()
-            .anyMatch(
-                c ->
-                    c.contains("/home/dev/.claude/.sail-stage-build-spec-board.")
-                        && c.endsWith("/SKILL.md")),
-        pushes.toString());
+        pushes.stream().anyMatch(c -> c.contains("--mode 0755") && c.endsWith("/scripts/portal")),
+        "the portal's script is executable: " + pushes);
     assertTrue(
         pushes.stream().noneMatch(c -> c.contains("CLAUDE.md") || c.contains("AGENTS.md")),
         "sail writes no context file: " + pushes);
@@ -728,12 +734,14 @@ class ProjectApplierTest {
 
     var result = applier.applySkills(CONTAINER, config, ProjectSkills.none());
 
-    assertEquals(2, result.added());
+    assertEquals(4, result.added(), "both of sail's skills, for both harnesses");
     for (var dir : List.of("/home/dev/.claude/", "/home/dev/.agents/")) {
-      assertTrue(
-          shell.invocations().stream()
-              .anyMatch(c -> c.contains(dir + ".sail-stage-build-spec-board.")),
-          dir);
+      for (var skill : List.of("sail-portal", "spec-board")) {
+        assertTrue(
+            shell.invocations().stream()
+                .anyMatch(c -> c.contains(dir + ".sail-stage-build-" + skill + ".")),
+            dir + skill);
+      }
     }
   }
 
@@ -775,7 +783,7 @@ class ProjectApplierTest {
 
       var result = applier.applySkills("test", minimalConfig("codex"), skills);
 
-      assertEquals(2, result.added(), "e2e and spec-board");
+      assertEquals(3, result.added(), "e2e, sail-portal and spec-board");
       assertEquals(
           List.of(
               "skill folder 'broken' skipped: .sail/skills/broken/SKILL.md is missing or is not a"
@@ -793,7 +801,7 @@ class ProjectApplierTest {
           shell.invocations().toString());
       assertTrue(
           out.toString(StandardCharsets.UTF_8)
-              .contains("[apply] Skills \u2192 ~/.agents/skills/ (e2e, spec-board)"),
+              .contains("[apply] Skills \u2192 ~/.agents/skills/ (e2e, sail-portal, spec-board)"),
           out.toString(StandardCharsets.UTF_8));
     }
   }

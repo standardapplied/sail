@@ -56,6 +56,11 @@ class TestOperations implements Operations {
     throw new UnsupportedOperationException();
   }
 
+  @Override
+  public StackOperations stack() {
+    throw new UnsupportedOperationException();
+  }
+
   static final String RUN_CREDENTIAL = "sailrun_test";
   static final String PRINCIPAL = "claude/abc123";
   static final String OWNER = "uday";

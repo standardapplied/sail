@@ -18,10 +18,10 @@ import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
+import ai.singlr.sail.engine.SailSkills;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -1308,9 +1308,9 @@ class RoomWakeLaunchTest {
     StubShell() {
       on("incus config device add", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
-      on(
-          "/spec-board/" + StageSkill.STAMP,
-          ProjectSkillInstaller.fingerprint(SpecSkillGenerator.skill()));
+      for (var skill : SailSkills.all()) {
+        on("/" + skill.name() + "/" + StageSkill.STAMP, ProjectSkillInstaller.fingerprint(skill));
+      }
       on("for d in", "");
     }
 

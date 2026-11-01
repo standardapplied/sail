@@ -126,7 +126,7 @@ public final class ProjectSkillInstaller {
             skipped.add("skill folder '" + invalid.name() + "' skipped: " + invalid.why());
       }
     }
-    held.add(SpecSkillGenerator.skill());
+    held.addAll(SailSkills.all());
     installAll(
         shell,
         project,

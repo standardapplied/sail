@@ -24,6 +24,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,6 +49,8 @@ public final class ApiRouter implements HttpHandler {
   private static final String DISPATCH = "dispatch";
   private static final String AGENT = "agent";
   private static final String CONNECT = "connect";
+  private static final String SERVE = "serve";
+  private static final String PORTS = "ports";
   private static final String LOG = "log";
   private static final String STOP = "stop";
   private static final String REPORT = "report";
@@ -254,6 +257,8 @@ public final class ApiRouter implements HttpHandler {
       case CONNECT -> routeConnect(request, project);
       case SNAPSHOTS -> routeSnapshots(request, project);
       case "files" -> routeFiles(exchange, request, project);
+      case SERVE -> routeServe(request, project);
+      case PORTS -> routePorts(request, project);
       default -> throw notFound();
     };
   }
@@ -414,6 +419,40 @@ public final class ApiRouter implements HttpHandler {
       return ApiResponse.from(operations.project(project));
     }
     throw methodNotAllowed();
+  }
+
+  /**
+   * {@code POST} brings the project's stack up and answers when every declared port listens or its
+   * process exits, or {@code timeout} seconds (default 60) have passed; {@code DELETE} stops its
+   * processes.
+   */
+  private ApiResponse routeServe(RouteRequest request, String project) throws Exception {
+    if (request.size() != 4) {
+      throw notFound();
+    }
+    if (request.is(DELETE)) {
+      return ApiResponse.ok(operations.stack().stop(project));
+    }
+    requireMethod(request, POST);
+    var timeout = QueryParameters.from(request.uri()).values().getOrDefault("timeout", "60");
+    return ApiResponse.ok(operations.stack().serve(project, Duration.ofSeconds(seconds(timeout))));
+  }
+
+  private ApiResponse routePorts(RouteRequest request, String project) throws Exception {
+    if (request.size() != 4) {
+      throw notFound();
+    }
+    requireMethod(request, GET);
+    return ApiResponse.ok(operations.stack().ports(project));
+  }
+
+  /** {@code value} as whole seconds, refused with the field named when it is not one. */
+  static long seconds(String value) {
+    try {
+      return Long.parseLong(value.strip());
+    } catch (NumberFormatException notSeconds) {
+      throw new IllegalArgumentException("timeout must be whole seconds, got: " + value);
+    }
   }
 
   private ApiResponse routeConnect(RouteRequest request, String project) {
