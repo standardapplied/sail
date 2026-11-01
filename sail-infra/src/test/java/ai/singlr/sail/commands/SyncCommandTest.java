@@ -242,7 +242,7 @@ class SyncCommandTest {
       assertEquals("protocol", stale.get("last_error_kind"));
       assertEquals(1, stale.get("consecutive_failures"));
       assertEquals(
-          "Stale since 2026-09-14T00:00:00Z — message: page exceeded 4 MiB",
+          "Stale since 2026-09-14T00:00:00.000Z — message: page exceeded 4 MiB",
           SyncCommand.renderStatus(stale, OperatorCommand.PLAIN));
 
       health.failed(
@@ -257,7 +257,7 @@ class SyncCommandTest {
                   null)));
       var rebuilt = nonNull(capture(() -> new CommandLine(status.get()).execute("--json")));
       assertEquals(
-          "Stale since 2026-09-14T00:00:00Z — hello: ssh said: Host key verification failed. If"
+          "Stale since 2026-09-14T00:00:00.000Z — hello: ssh said: Host key verification failed. If"
               + " main was rebuilt from a copy of its database, remove the old key with 'sudo"
               + " ssh-keygen -R main', re-run 'sudo sail init --main sail@main' and compare the"
               + " fingerprint it prints with main's ('sudo ssh-keygen -lf"
@@ -266,7 +266,7 @@ class SyncCommandTest {
           SyncCommand.renderStatus(rebuilt, OperatorCommand.SUDO),
           "a node's stored failure read through sudo");
       assertEquals(
-          "Stale since 2026-09-14T00:00:00Z — hello: ssh said: Host key verification failed. If"
+          "Stale since 2026-09-14T00:00:00.000Z — hello: ssh said: Host key verification failed. If"
               + " main was rebuilt from a copy of its database, remove the old key with 'ssh-keygen"
               + " -R main', re-run 'sail init --main sail@main' and compare the fingerprint it prints"
               + " with main's ('sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on main);"

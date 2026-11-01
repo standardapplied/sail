@@ -257,21 +257,21 @@ class LiveMemberPromptGoldenTest {
                 List.of(huge, after))),
         pages);
     assertEquals(
-        List.of(48, 31_961, 31_998, 6_267),
+        List.of(52, 31_961, 31_998, 6_275),
         pages.stream().map(page -> page.text().codePointCount(0, page.text().length())).toList(),
         "a slice fills its prompt to the budget of 32,000 before its trailing blank line goes");
   }
 
   @Test
   void aSliceSharesAPromptWithWhatCameBeforeWhenItFits() {
-    var brief = message("m1", "uday", "before");
+    var brief = message("m1", "uday", "be");
     var huge = message("m2", "uday", "a".repeat(40_000));
     var written = BY + "a".repeat(40_000);
 
     assertEquals(
         List.of(
             new Rendered<>(
-                BY + "before\n\n" + written.substring(0, SLICE) + CONTINUES, List.of(brief)),
+                BY + "be\n\n" + written.substring(0, SLICE) + CONTINUES, List.of(brief)),
             new Rendered<>(CONTINUED + written.substring(SLICE), List.of(huge))),
         LiveMemberPrompt.messages(List.of(brief, huge)));
   }
@@ -282,8 +282,8 @@ class LiveMemberPromptGoldenTest {
 
     assertEquals(
         List.of(
-            new Rendered<>(BY + "😀".repeat(SLICE - 29) + CONTINUES, List.of()),
-            new Rendered<>(CONTINUED + "😀".repeat(40_000 - (SLICE - 29)), List.of(emoji))),
+            new Rendered<>(BY + "😀".repeat(SLICE - 33) + CONTINUES, List.of()),
+            new Rendered<>(CONTINUED + "😀".repeat(40_000 - (SLICE - 33)), List.of(emoji))),
         LiveMemberPrompt.messages(List.of(emoji)));
   }
 

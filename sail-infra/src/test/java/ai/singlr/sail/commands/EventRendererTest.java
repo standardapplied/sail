@@ -24,7 +24,7 @@ class EventRendererTest {
 
     var rendered = EventRenderer.human(event);
 
-    assertTrue(rendered.contains("2026-05-21T12:34:56Z"));
+    assertTrue(rendered.contains("2026-05-21T12:34:56.000Z"));
     assertTrue(rendered.contains("light-grid"));
     assertTrue(rendered.contains("spec_dispatched"));
     assertTrue(rendered.contains("sail"));
