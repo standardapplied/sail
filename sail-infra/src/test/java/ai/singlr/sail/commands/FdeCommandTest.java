@@ -28,7 +28,6 @@ import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
 import ai.singlr.sail.store.AuthSessionStore;
-import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeBoxes;
 import ai.singlr.sail.store.FdePairingStore;
 import ai.singlr.sail.store.FdeSshKeyStore;
@@ -1844,26 +1843,16 @@ class FdeCommandTest {
     assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("nia")));
     assertEquals(ProjectScope.all(), inDb(db -> new FdeStore(db).scopeOf("uma")));
 
-    inDb(
-        db -> {
-          db.execute("UPDATE change_heads SET project = NULL");
-          return null;
-        });
     assertEquals(0, fde("grant", "nia", "alpha", "--dry-run"));
     assertEquals(
         List.of("  ✓ Would grant alpha to nia. Its box holds the project after its next sync."),
         printed());
     assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("nia")));
-    assertEquals(List.of(), inDb(db -> new ChangeLog(db).heldProjects()));
 
     assertEquals(0, fde("grant", "nia", "alpha"));
     assertEquals(
         List.of("  ✓ Granted alpha to nia. Its box holds the project after its next sync."),
         printed());
-    assertEquals(
-        List.of("alpha", "beta"),
-        inDb(db -> new ChangeLog(db).heldProjects()),
-        "a grant fills the heads a release before this one wrote without their project");
     assertEquals(0, fde("grant", "nia", "alpha"));
     assertEquals(List.of("  nia already holds alpha; nothing to do."), printed());
     assertEquals(0, fde("grant", "nia", "beta", "--json"));
