@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Lane;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentUnit;
@@ -222,6 +223,47 @@ class SailOperationsTest {
         encoded.indexOf("name=acme") < encoded.indexOf("name=beta")
             && encoded.indexOf("name=beta") < encoded.indexOf("name=zeta"));
     assertTrue(encoded.contains("name=acme, container_status=running"), "live state wins");
+  }
+
+  @Test
+  void aDefinitionIsCreatedReadAndWrittenASectionAtATimeThroughTheCatalog() throws Exception {
+    var operations = operationsWith(shell(), store -> {}, environment());
+
+    var created =
+        Acting.by(
+                ADMIN, () -> operations.createProject(Map.of("name", "storefront", "image", "x/1")))
+            .orThrow();
+    var written =
+        Acting.by(
+                ADMIN,
+                () ->
+                    operations.writeProjectSection(
+                        "storefront", "image", "x/2", created.tags().get("image")))
+            .orThrow();
+
+    assertEquals("x/2", ProjectDefinitionJson.read(written.document()).image());
+    assertEquals(
+        written, Acting.by(ADMIN, () -> operations.projectDefinition("storefront")).orThrow());
+    assertError(
+        ErrorCode.PRECONDITION_FAILED,
+        Acting.by(
+            ADMIN,
+            () ->
+                operations.writeProjectSection(
+                    "storefront", "image", "x/3", created.tags().get("image"))));
+  }
+
+  @Test
+  void definitionsWithoutACatalogAreUnavailable() throws Exception {
+    var operations = operations(shell());
+
+    assertError(ErrorCode.INTERNAL, Acting.by(ADMIN, () -> operations.projectDefinition("acme")));
+    assertError(
+        ErrorCode.INTERNAL,
+        Acting.by(ADMIN, () -> operations.createProject(Map.of("name", "acme"))));
+    assertError(
+        ErrorCode.INTERNAL,
+        Acting.by(ADMIN, () -> operations.writeProjectSection("acme", "image", "x/1", "*")));
   }
 
   @Test
