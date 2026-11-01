@@ -2745,7 +2745,7 @@ class FdeCommandTest {
     var parsed = YamlUtil.parseMap(json);
     assertEquals("tkt_abc", parsed.get("ticket"));
     assertEquals("uday", parsed.get("fde"));
-    assertEquals("2026-07-07T10:15:30Z", parsed.get("expires_at"));
+    assertEquals("2026-07-07T10:15:30.000Z", parsed.get("expires_at"));
     assertEquals("https://sail.acme.dev/enroll?ticket=tkt_abc", parsed.get("enroll_url"));
   }
 
