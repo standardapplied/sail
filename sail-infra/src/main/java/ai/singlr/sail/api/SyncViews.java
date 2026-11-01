@@ -79,7 +79,7 @@ public final class SyncViews {
     if (status.lastError() != null && !status.lastError().commands().isEmpty()) {
       map.put("last_error_remedy", status.lastError().toMaps());
     }
-    map.put("stale_since", status.staleSince());
+    map.put("stale_since", DateTimeUtils.format(status.staleSince()));
     map.put("bytes_fetched", status.fetchedBytes());
     map.put("bytes_sent", status.sentBytes());
     map.put("bytes_freed", status.freedBytes());

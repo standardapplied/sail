@@ -120,7 +120,7 @@ public final class ConflictsCommand implements Callable<Integer> {
                   + "|@ — fields: "
                   + String.join(", ", c.fields())
                   + " @|faint ("
-                  + c.detectedAt()
+                  + DateTimeUtils.format(c.detectedAt())
                   + ")|@\n"));
     }
     out.append(

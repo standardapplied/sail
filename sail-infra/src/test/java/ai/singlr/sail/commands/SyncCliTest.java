@@ -214,8 +214,9 @@ class SyncCliTest {
       health.begin(peer, previous);
       health.succeeded(peer, previous, new SyncEngine.Report(0, 0, 0, 0));
       db.execute(
-          "INSERT INTO schema_version (version, applied_at) VALUES (?, datetime('now'))",
-          schema.currentVersion() + 1);
+          "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+          schema.currentVersion() + 1,
+          DateTimeUtils.now());
 
       if ("command".equals(args[0])) {
         assertEquals(1, new SyncCommand().call());

@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.store.FdeStore;
@@ -90,7 +91,7 @@ public final class ServerTokenCommand implements Runnable {
                       "    @|faint "
                           + (created.expiresAt() == null
                               ? "Never expires."
-                              : "Expires " + created.expiresAt() + ".")
+                              : "Expires " + DateTimeUtils.format(created.expiresAt()) + ".")
                           + "|@"));
               System.out.println(
                   Ansi.AUTO.string("    @|faint Save this token — it will not be shown again.|@"));
@@ -165,10 +166,12 @@ public final class ServerTokenCommand implements Runnable {
               }
               for (var token : tokens) {
                 var expiry =
-                    token.expiresAt() == null ? "never expires" : "expires " + token.expiresAt();
+                    token.expiresAt() == null
+                        ? "never expires"
+                        : "expires " + DateTimeUtils.format(token.expiresAt());
                 System.out.printf(
                     "  %-20s  %-8s  created %s  (%s)%n",
-                    token.name(), token.role(), token.createdAt(), expiry);
+                    token.name(), token.role(), DateTimeUtils.format(token.createdAt()), expiry);
               }
             }
           });

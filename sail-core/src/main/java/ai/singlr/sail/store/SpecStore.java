@@ -39,7 +39,9 @@ import java.util.function.Supplier;
  *
  * <p>Every mutation journals the spec's full post-state into the {@link ChangeLog} within the same
  * transaction, so history is complete and any revision is restorable (the DB-sync no-lost-work
- * guarantee). {@code specs.rev} tracks the current revision.
+ * guarantee). {@code specs.rev} tracks the current revision. A local write moves {@code updated_at}
+ * strictly forward, to the later of now and a millisecond past the last, so two writes in one
+ * millisecond still read as two versions (the API's {@code ETag} is that time).
  */
 public final class SpecStore implements ConflictResolver, SyncedStore {
 
@@ -342,7 +344,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         () -> {
           var ids = db.query("SELECT id FROM specs WHERE project = ?", row -> row.text(0), old);
           db.execute(
-              "UPDATE specs SET project = ?, updated_at = ?, updated_by = ? WHERE project = ?",
+              "UPDATE specs SET project = ?, updated_at = MAX(?, updated_at + 1), updated_by = ? WHERE project = ?",
               renamed,
               DateTimeUtils.now(),
               author(),
@@ -359,7 +361,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           db.execute(
               """
               UPDATE specs SET project = ?, title = ?, status = ?, assignee = ?, agent = ?,
-                  model = ?, reasoning_effort = ?, branch = ?, priority = ?, updated_at = ?,
+                  model = ?, reasoning_effort = ?, branch = ?, priority = ?, updated_at = MAX(?, updated_at + 1),
                   updated_by = ?
               WHERE id = ?""",
               spec.project(),
@@ -398,7 +400,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     db.transaction(
         () -> {
           db.execute(
-              "UPDATE specs SET status = ?, updated_at = ?, updated_by = ? WHERE id = ?",
+              "UPDATE specs SET status = ?, updated_at = MAX(?, updated_at + 1), updated_by = ? WHERE id = ?",
               status.wire(),
               DateTimeUtils.now(),
               author(),
@@ -417,7 +419,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     db.transaction(
         () -> {
           db.execute(
-              "UPDATE specs SET room_id = ?, updated_at = ?, updated_by = ? WHERE id = ? AND"
+              "UPDATE specs SET room_id = ?, updated_at = MAX(?, updated_at + 1), updated_by = ? WHERE id = ? AND"
                   + " COALESCE(room_id, id) <> id",
               id,
               DateTimeUtils.now(),
@@ -454,7 +456,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         () -> {
           db.execute(
               """
-              UPDATE specs SET status = ?, updated_at = ?, updated_by = ?
+              UPDATE specs SET status = ?, updated_at = MAX(?, updated_at + 1), updated_by = ?
               WHERE id = ? AND status = ?""",
               status.wire(),
               DateTimeUtils.now(),
@@ -483,7 +485,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         () -> {
           db.execute(
               """
-              UPDATE specs SET status = ?, branch = COALESCE(?, branch), updated_at = ?,
+              UPDATE specs SET status = ?, branch = COALESCE(?, branch), updated_at = MAX(?, updated_at + 1),
                   updated_by = ?
               WHERE id = ?""",
               status.wire(),
@@ -523,7 +525,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               now);
           setHashes(specId, body, plan);
           db.execute(
-              "UPDATE specs SET updated_at = ?, updated_by = ? WHERE id = ?",
+              "UPDATE specs SET updated_at = MAX(?, updated_at + 1), updated_by = ? WHERE id = ?",
               now,
               author(),
               specId);

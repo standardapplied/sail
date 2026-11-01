@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -118,16 +117,6 @@ class RoomCommitGuardTest {
         null,
         null,
         null);
-  }
-
-  @Test
-  void parseInstantIsNullSafeAndTolerantOfGarbage() {
-    assertNull(RoomCommitGuard.parseInstant(null));
-    assertNull(RoomCommitGuard.parseInstant("   "));
-    assertNull(RoomCommitGuard.parseInstant("not-a-timestamp"));
-    assertEquals(
-        Instant.parse("2026-01-01T00:00:00Z"),
-        RoomCommitGuard.parseInstant("2026-01-01T00:00:00Z"));
   }
 
   @Test

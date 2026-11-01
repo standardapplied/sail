@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.common.DateTimeUtils;
 import picocli.CommandLine.Help.Ansi;
 
 /** Pure formatting of an {@link Event} for human-readable terminal output. */
@@ -24,7 +25,7 @@ final class EventRenderer {
     var data = event.data().isEmpty() ? "" : "  " + event.data();
     return Ansi.AUTO.string(
         "@|faint "
-            + event.ts()
+            + DateTimeUtils.format(event.ts())
             + "|@  @|bold "
             + event.project()
             + spec

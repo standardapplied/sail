@@ -32,7 +32,7 @@ public final class SchemaManager {
    * The version this release stamps and opens. It lies beyond every version a release before v1
    * stamped, so no older database is ever read as this one.
    */
-  public static final int CURRENT_VERSION = 1000;
+  public static final int CURRENT_VERSION = 1001;
 
   private static final String SCHEMA_VERSION_TABLE =
       """

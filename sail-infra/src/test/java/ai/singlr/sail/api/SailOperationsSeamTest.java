@@ -304,8 +304,9 @@ class SailOperationsSeamTest {
       var lastSuccess = operations.syncStatus().lastSuccessAt();
       var newerVersion = new SchemaManager(node.db).currentVersion() + 1;
       node.db.execute(
-          "INSERT INTO schema_version (version, applied_at) VALUES (?, datetime('now'))",
-          newerVersion);
+          "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+          newerVersion,
+          DateTimeUtils.now());
       clock.advance(Duration.ofMinutes(1));
       var attempts = new AtomicInteger();
       try (var scheduler =

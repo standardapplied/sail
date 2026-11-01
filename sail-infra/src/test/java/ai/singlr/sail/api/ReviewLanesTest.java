@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
@@ -252,7 +253,7 @@ class ReviewLanesTest {
     assertEquals(2, watchers.size());
     assertTrue(watchers.getLast().contains("--max-duration 45m"), watchers.getLast());
     assertTrue(
-        watchers.getLast().contains("--started-at " + reviewer.startedAt()),
+        watchers.getLast().contains("--started-at " + DateTimeUtils.format(reviewer.startedAt())),
         "a re-armed watcher holds the run to what is left of its budget, from its row's start: "
             + watchers.getLast());
 
@@ -659,7 +660,8 @@ class ReviewLanesTest {
     var reviewer = loop.onlyLive();
     var unit = AgentUnit.forRun(reviewer.id());
     assertTrue(
-        loop.watcherCommandOf(reviewer.id()).contains("--started-at " + reviewer.startedAt()),
+        loop.watcherCommandOf(reviewer.id())
+            .contains("--started-at " + DateTimeUtils.format(reviewer.startedAt())),
         "the watcher is handed the run row's start: " + loop.watcherCommandOf(reviewer.id()));
     loop.container.wroteFile(
         unit.sessionPath(),

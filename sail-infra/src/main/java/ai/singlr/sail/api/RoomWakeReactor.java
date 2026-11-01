@@ -440,7 +440,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
             .filter(Objects::nonNull)
             .max(Instant::compareTo)
             .orElse(Instant.MIN);
-    return humanAt.isAfter(newestChatStart)
+    return !humanAt.isBefore(newestChatStart)
         ? new Message(newestHuman.author(), newestHuman.body())
         : null;
   }

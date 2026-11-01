@@ -65,10 +65,10 @@ class LiveMemberPromptGoldenTest {
       """
       ## Conversation in this room
 
-      uday (2026-08-11T12:00:00Z):
+      uday (2026-08-11T12:00:00.000Z):
       what is it stuck on?
 
-      claude/room-7 (2026-08-11T12:00:00Z):
+      claude/room-7 (2026-08-11T12:00:00.000Z):
       The token refresh.""";
 
   private static SpecStore.SpecRow spec() {
@@ -196,10 +196,10 @@ class LiveMemberPromptGoldenTest {
   void aLaterPromptIsTheNewMessagesAlone() {
     assertEquals(
         """
-        uday (2026-08-11T12:00:00Z):
+        uday (2026-08-11T12:00:00.000Z):
         what is it stuck on?
 
-        claude/room-7 (2026-08-11T12:00:00Z):
+        claude/room-7 (2026-08-11T12:00:00.000Z):
         The token refresh.""",
         only(LiveMemberPrompt.messages(conversation())));
     assertEquals(List.of(), LiveMemberPrompt.messages(List.of()));
@@ -303,11 +303,12 @@ class LiveMemberPromptGoldenTest {
                     + "a".repeat(20_000),
                 List.of(first)),
             new Rendered<>(
-                "claude/room-7 (2026-08-11T12:00:00Z):\n" + "b".repeat(20_000), List.of(second))),
+                "claude/room-7 (2026-08-11T12:00:00.000Z):\n" + "b".repeat(20_000),
+                List.of(second))),
         pages);
   }
 
-  private static final String BY = "uday (2026-08-11T12:00:00Z):\n";
+  private static final String BY = "uday (2026-08-11T12:00:00.000Z):\n";
   private static final String CONTINUES = "\n[continues in the next prompt]";
   private static final String CONTINUED = "[continued from the previous prompt]\n";
   private static final int SLICE = 31_930;

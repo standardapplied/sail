@@ -700,7 +700,7 @@ class NativeFleetIT {
       VALUES ('run', '%1$s', '1-d00d', 'uday', 1788220800000, 'local', 0,
           '{"id": "%1$s", "project": "demo", "spec_id": "doomed-1", "node": "uday",
             "role": "build", "agent": "claude", "status": "completed",
-            "started_at": "2026-09-01T00:00:00Z", "repos": [], "principals": []}');
+            "started_at": 1788220800000, "repos": [], "principals": []}');
       INSERT INTO change_heads (entity_type, entity_id, seq)
       VALUES ('run', '%1$s', last_insert_rowid());\
       """

@@ -98,6 +98,20 @@ class InstantsStoredAsMillisTest {
     new EventStore(db)
         .insert(
             new EventStore.EventRow(0, DateTimeUtils.now(), "t", "proj", null, null, "h", "{}"));
+    var runs = new RunStore(db);
+    var run = DateTimeUtils.newId().toString();
+    runs.create(run, "proj", "archived", "box", "build", "claude", "b", "t", null, null, "/l", "u");
+    runs.stampActivity(run, Duration.ZERO);
+    runs.complete(run, "completed", 0);
+    var reviews = new ReviewStore(db);
+    var review = reviews.createReview("archived", 1);
+    reviews.createStage(review, "tests", "test");
+    new RoomStore(db)
+        .create(
+            new RoomStore.RoomRow(
+                "lounge", "proj", "Lounge", null, null, null, "uday", null, null, "uday"));
+    new SyncHealth(db).begin("main", DateTimeUtils.now());
+    new SyncState(db).advance("main", "spec", 1L);
 
     var texts = new ArrayList<String>();
     for (var column : instantColumns()) {
@@ -110,7 +124,7 @@ class InstantsStoredAsMillisTest {
     assertEquals(List.of(), texts, "no instant is stored as text");
     var millis = PINNED.toEpochMilli();
     assertEquals(
-        List.of(millis, millis, millis),
+        List.of(millis, millis + 1, millis + 1),
         db.queryOne(
                 "SELECT created_at, updated_at, archived_at FROM specs WHERE id = 'archived'",
                 row -> List.of(row.integer(0), row.integer(1), row.integer(2)))
@@ -133,25 +147,93 @@ class InstantsStoredAsMillisTest {
   }
 
   @Test
-  void anExpiryOneMillisecondPastIsSweptAndOneMillisecondAheadIsKept() {
-    var now = DateTimeUtils.now();
+  void anExpiryOneMillisecondPastIsSweptAndOneMillisecondAheadIsKeptInEveryTable() {
+    var now = Instant.parse("2026-10-20T19:09:39.656Z");
+    DateTimeUtils.clock = Clock.fixed(now, ZoneOffset.UTC);
     var fde = new FdeStore(db);
     fde.add("ada", "Ada", "ada@x.dev", "member");
     var id = fde.byHandle("ada").orElseThrow().id();
-    for (var expiry : List.of(now.minusMillis(1), now.plusMillis(1000))) {
+    for (var sign : List.of("past", "ahead")) {
+      var expiry = sign.equals("past") ? now.minusMillis(1) : now.plusMillis(1);
       db.execute(
           "INSERT INTO sessions (token_hash, fde_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
-          "hash-" + expiry.toEpochMilli(),
+          sign,
           id,
+          now,
+          expiry);
+      db.execute(
+          "INSERT INTO webauthn_challenges (id, challenge, ceremony, fde_id, created_at,"
+              + " expires_at) VALUES (?, 'c', 'assert', ?, ?, ?)",
+          sign,
+          id,
+          now,
+          expiry);
+      db.execute(
+          "INSERT INTO enrollment_tickets (token_hash, fde_id, created_at, expires_at)"
+              + " VALUES (?, ?, ?, ?)",
+          sign,
+          id,
+          now,
+          expiry);
+      db.execute(
+          "INSERT INTO api_tokens (token_hash, name, role, created_at, expires_at)"
+              + " VALUES (?, ?, 'member', ?, ?)",
+          sign,
+          sign,
+          now,
+          expiry);
+      db.execute(
+          "INSERT INTO run_credentials (run_id, credential_hash, created_at, expires_at)"
+              + " VALUES (?, ?, ?, ?)",
+          sign,
+          sign,
           now,
           expiry);
     }
 
-    assertEquals(1, ExpiredRowSweeper.sweep(db));
+    assertEquals(5, ExpiredRowSweeper.sweep(db));
+
+    for (var table :
+        List.of(
+            "sessions",
+            "webauthn_challenges",
+            "enrollment_tickets",
+            "api_tokens",
+            "run_credentials")) {
+      assertEquals(
+          List.of(now.plusMillis(1)),
+          db.query("SELECT expires_at FROM " + table, row -> row.instant(0)),
+          table);
+    }
+  }
+
+  @Test
+  void instantsAcrossASecondBoundaryOrderAsTime() {
+    var specs = new SpecStore(db);
+    DateTimeUtils.clock = Clock.fixed(Instant.parse("2026-10-20T19:09:51.999Z"), ZoneOffset.UTC);
+    specs.create(spec("zz-first"));
+    DateTimeUtils.clock = Clock.fixed(Instant.parse("2026-10-20T19:09:52.000Z"), ZoneOffset.UTC);
+    specs.create(spec("aa-second"));
 
     assertEquals(
-        List.of(now.plusMillis(1000)),
-        db.query("SELECT expires_at FROM sessions", row -> row.instant(0)));
+        List.of("zz-first", "aa-second"),
+        db.query("SELECT id FROM specs ORDER BY created_at", row -> row.text(0)));
+  }
+
+  @Test
+  void twoLocalWritesInOneMillisecondAreTwoVersions() {
+    var at = Instant.parse("2026-10-20T19:09:51.123Z");
+    DateTimeUtils.clock = Clock.fixed(at, ZoneOffset.UTC);
+    var specs = new SpecStore(db);
+    specs.create(spec("busy"));
+
+    specs.updateStatus("busy", SpecStatus.IN_PROGRESS);
+    var first = specs.findById("busy").orElseThrow().updatedAt();
+    specs.updateStatus("busy", SpecStatus.REVIEW);
+    var second = specs.findById("busy").orElseThrow().updatedAt();
+
+    assertEquals(at.plusMillis(1), first);
+    assertEquals(at.plusMillis(2), second);
   }
 
   @Test

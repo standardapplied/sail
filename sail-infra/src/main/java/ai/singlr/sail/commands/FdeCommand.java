@@ -1119,7 +1119,7 @@ public final class FdeCommand implements Runnable {
                     + ". "
                     + (token.expiresAt() == null
                         ? "The code never expires."
-                        : "The code expires " + token.expiresAt() + ".")));
+                        : "The code expires " + DateTimeUtils.format(token.expiresAt()) + ".")));
         System.out.println(
             Ansi.AUTO.string(
                 "  @|green ✓|@ Workstation key "
@@ -1430,7 +1430,7 @@ public final class FdeCommand implements Runnable {
                       "  @|green ✓|@ Enrollment ticket for "
                           + ticket.fdeHandle()
                           + " (expires "
-                          + ticket.expiresAt()
+                          + DateTimeUtils.format(ticket.expiresAt())
                           + "):"));
               System.out.println("    " + ticket.ticket());
               System.out.println();

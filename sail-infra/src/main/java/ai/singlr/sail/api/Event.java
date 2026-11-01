@@ -479,7 +479,7 @@ public record Event(
     if (id > 0) {
       map.put("id", id);
     }
-    map.put("ts", ts.toString());
+    map.put("ts", DateTimeUtils.format(ts));
     map.put("project", project);
     if (Strings.isNotBlank(spec)) {
       map.put("spec", spec);
@@ -533,7 +533,7 @@ public record Event(
 
   private static Instant parseTs(String raw) {
     try {
-      return Instant.parse(raw);
+      return DateTimeUtils.parse(raw);
     } catch (DateTimeParseException e) {
       throw new IllegalArgumentException("invalid ts '" + raw + "': " + e.getMessage(), e);
     }
