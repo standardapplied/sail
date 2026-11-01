@@ -1,42 +1,16 @@
 name: Native binaries
 description: >
-  Fetches the released binary .github/released-tag pins and builds the native image under test,
-  each smoke-tested: the two inputs of every test that upgrades a fleet's release to this build.
+  Builds the native image under test and smoke-tests it: the input of every test that runs a fleet
+  of this build.
 
 outputs:
   candidate:
     description: The native binary built from this commit.
     value: ${{ github.workspace }}/sail-infra/target/sail
-  released:
-    description: The pinned release's Linux binary, checked against its published checksum.
-    value: ${{ runner.temp }}/released/sail-linux-amd64
 
 runs:
   using: composite
   steps:
-    # The pin is read before anything is built, so a tag with no release fails in seconds.
-    - name: Download the pinned released binary
-      shell: bash
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |
-        pin=.github/released-tag
-        tag="$(tr -d '[:space:]' < "$pin")"
-        if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "::error file=$pin::$pin holds '$tag', not a release tag. Set it to one line such as v0.46.4."
-          exit 1
-        fi
-        mkdir -p "$RUNNER_TEMP/released"
-        if ! gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/released" \
-          --pattern sail-linux-amd64 --pattern sail-linux-amd64.sha256; then
-          echo "::error file=$pin::$pin names $tag, which $GITHUB_REPOSITORY has not released with a sail-linux-amd64 binary and checksum. Set it to a published release."
-          exit 1
-        fi
-        cd "$RUNNER_TEMP/released"
-        echo "$(cat sail-linux-amd64.sha256)  sail-linux-amd64" | sha256sum -c -
-        chmod +x sail-linux-amd64
-        ./sail-linux-amd64 -V
-
     - name: Build native image
       shell: bash
       run: mvn -B package -Pnative -DskipTests

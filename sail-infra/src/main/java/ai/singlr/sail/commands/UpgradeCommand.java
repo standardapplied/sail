@@ -576,13 +576,10 @@ public final class UpgradeCommand implements Runnable {
   }
 
   /**
-   * Bootstraps the database and runs every pending migration using the NEW binary that was just
-   * installed. The token bootstrap runs in-process (the OLD binary), but every schema and data
-   * migration runs as a sub-process invocation of the freshly-installed binary's {@code sail
-   * migrate --non-interactive}. That's the only way a release's new migrations can execute during
-   * the upgrade itself — the alternative (running migrations from the OLD process's class files)
-   * has bitten us every release since 0.13.4. (The host-level steps — relocating {@code host.yaml},
-   * syncing {@code authorized_keys} — run only in the full {@code migrate}, as they need root.)
+   * Bootstraps the token and converges the box with the NEW binary that was just installed: the
+   * token bootstrap runs in-process (the OLD binary), and the rest as a sub-process invocation of
+   * the freshly-installed binary's {@code sail migrate}. That is the only way a release's own code
+   * converges the host during the upgrade itself; the OLD process's class files know nothing of it.
    */
   private void migrateDatabase(Path binaryPath, OperatorCommand operator) {
     var dbPath = SailPaths.controlPlaneDb();
@@ -592,7 +589,7 @@ public final class UpgradeCommand implements Runnable {
         System.out.println(
             "[dry-run] Would exec '"
                 + binaryPath
-                + " migrate --non-interactive' to run new-binary migrations.");
+                + " migrate' to converge the box with the new binary.");
       }
       return;
     }
@@ -601,9 +598,8 @@ public final class UpgradeCommand implements Runnable {
   }
 
   /**
-   * Creates the admin token if the DB is fresh. The token schema hasn't changed since the column
-   * was introduced, so the OLD binary is safe to do this. Everything else (new schema migrations,
-   * new data migrations) is handled by the sub-process that runs the NEW binary.
+   * Creates the admin token if the DB is fresh. Everything else is handled by the sub-process that
+   * runs the NEW binary.
    */
   private void bootstrapAdminToken(Path dbPath, OperatorCommand operator) {
     try {
@@ -633,15 +629,14 @@ public final class UpgradeCommand implements Runnable {
   }
 
   /**
-   * Spawns the just-installed binary's {@code sail migrate --non-interactive}. The sub-process runs
-   * NEW code — that's the whole point. Inherits stdio so the operator sees what migrated, and never
-   * auto-upgrades: it must migrate as the version just installed, not fetch another. Tolerates
-   * non-zero exits; the {@code sail-api} restart afterwards is a second chance.
+   * Spawns the just-installed binary's {@code sail migrate}. The sub-process runs NEW code — that's
+   * the whole point. Inherits stdio so the operator sees what converged, and never auto-upgrades:
+   * it must migrate as the version just installed, not fetch another. Tolerates non-zero exits; the
+   * {@code sail-api} restart afterwards is a second chance.
    */
   private void runNewBinaryMigrate(Path binaryPath, OperatorCommand operator) {
     try {
-      var builder =
-          new ProcessBuilder(binaryPath.toString(), "migrate", "--non-interactive").inheritIO();
+      var builder = new ProcessBuilder(binaryPath.toString(), "migrate").inheritIO();
       builder.environment().put("SAIL_AUTO_UPGRADED", "1");
       var process = builder.start();
       var finished = process.waitFor(2, TimeUnit.MINUTES);

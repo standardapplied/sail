@@ -765,8 +765,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
                 "SELECT body_hash, plan_hash, COALESCE(archived_at, cancelled_at) FROM specs"
                     + " WHERE id = ?",
                 row -> {
-                  requireMigrated(row.text(0), spec.id());
-                  requireMigrated(row.text(1), spec.id());
+                  requireHashed(row.text(0), spec.id());
+                  requireHashed(row.text(1), spec.id());
                   return Arrays.asList(row.text(0), row.text(1), row.text(2));
                 },
                 spec.id())
@@ -800,8 +800,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   private void applySnapshot(String id, Map<String, Object> snapshot) {
     var bodyHash = Snapshots.text(snapshot, "body_hash");
     var planHash = Snapshots.text(snapshot, "plan_hash");
-    requireMigrated(bodyHash, id);
-    requireMigrated(planHash, id);
+    requireHashed(bodyHash, id);
+    requireHashed(planHash, id);
     blobs.requireHeld(bodyHash);
     blobs.requireHeld(planHash);
     var body = blobs.text(bodyHash);
@@ -877,7 +877,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   /**
    * Writes when the spec entered its status as {@code since}, the transition's own time a revision
    * carries, over what the status trigger stamped from this revision's time. A revision that
-   * carries none — a restore, or one from a box that predates carrying it — leaves the trigger's.
+   * carries none, as a restore's does, leaves the trigger's.
    */
   private void applyStatusSince(String id, SpecStatus status, String since) {
     if (Strings.isBlank(since)) {
@@ -1051,25 +1051,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     return journal.dirtyIds();
   }
 
-  /** Attributes a spec solely for the retained versioned 0.14 data migration. */
-  public boolean assignMigrationProject(String id, String project) {
-    return db.transaction(
-        () -> {
-          db.execute(
-              """
-              UPDATE specs SET project = ?, updated_by = ?
-              WHERE id = ? AND (project IS NULL OR project = 'unassigned')""",
-              project,
-              author(),
-              id);
-          if (db.changes() == 0) {
-            return false;
-          }
-          recordRevision(id, "migration", false);
-          return true;
-        });
-  }
-
   /**
    * Writes an authoritative state from main at its exact revision (no minting), marking it the new
    * synced ancestor ({@code base_rev = rev}). A null snapshot adopts a deletion. Used by the sync
@@ -1188,8 +1169,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     return db.queryOne(
         "SELECT c.body, c.plan, c.updated_at, s.body_hash, s.plan_hash FROM spec_content c JOIN specs s ON s.id = c.spec_id WHERE c.spec_id = ?",
         row -> {
-          requireMigrated(row.text(3), specId);
-          requireMigrated(row.text(4), specId);
+          requireHashed(row.text(3), specId);
+          requireHashed(row.text(4), specId);
           return new SpecContent(row.text(0), row.text(1), row.text(2));
         },
         specId);
@@ -1203,11 +1184,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         id);
   }
 
-  private static void requireMigrated(String hash, String id) {
-    if (hash == null)
-      throw Remedied.state(
-          "Spec " + id + " has no content hash: this database's content migration never finished.",
-          Remedy.of("Run '", Remedy.sail("migrate"), "'."));
+  private static void requireHashed(String hash, String id) {
+    if (hash == null) throw new IllegalStateException("Spec " + id + " has no content hash.");
   }
 
   public List<SpecRow> readySpecs() {

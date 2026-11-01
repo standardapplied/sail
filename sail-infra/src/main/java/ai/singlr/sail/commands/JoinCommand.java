@@ -10,7 +10,6 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.HandleChange;
-import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.MainHostKey;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
@@ -146,9 +145,7 @@ public final class JoinCommand implements Runnable {
     var keyBefore = identity.exists();
     var updated =
         HostConfigSetCommand.applyChange(
-            HostSyncCommand.configure(host, false, target, HostInfo.hostname()),
-            "sync-handle",
-            handle);
+            HostSyncCommand.configure(host, false, target), "sync-handle", handle);
     HandleChange.write(hostConfig, db, host, updated, channels, operator);
     var publicKey = identity.ensure("sail-sync:" + handle);
     var mainHasKey = keyBefore && SyncOperations.welcomedAs(updated.sync(), channels, handle);

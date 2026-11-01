@@ -184,24 +184,6 @@ class FleetSyncTest {
     assertConverged();
   }
 
-  @Test
-  void twoBoxesScrubbingTheSameLegacyProjectConvergeWithoutAConflict() {
-    var legacy = "name: outline\ngit:\n  name: Uday\n  email: uday@example.com\n";
-    insertLegacyProject(main, "outline", legacy);
-    insertLegacyProject(node, "outline", legacy);
-
-    assertEquals(1, main.projects.canonicalizeDefinitions());
-    assertEquals(1, node.projects.canonicalizeDefinitions());
-
-    var report = SyncBox.round(main.db, node.db, "project");
-
-    assertEquals(0, report.conflicts(), "identical redacted content converges, never conflicts");
-    assertTrue(
-        node.projects.findByName("outline").orElseThrow().definition().contains("${GIT_NAME}"));
-
-    assertConverged();
-  }
-
   private static void insertLegacyProject(Box box, String name, String definition) {
     box.db.execute(
         "INSERT INTO projects (name, definition, created_at, updated_at) VALUES (?, ?, ?, ?)",

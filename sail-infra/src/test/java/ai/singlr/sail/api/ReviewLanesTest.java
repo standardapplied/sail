@@ -27,7 +27,6 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
@@ -684,42 +683,6 @@ class ReviewLanesTest {
         "ended at its limit counted from the run row's start, not decades on: " + held);
     assertFalse(loop.container.alive(reviewer.id()), "the agent's edit bought it no time");
     assertEquals(List.of("reviewer killed: time limit (45m)"), loop.details("review_errored"));
-  }
-
-  @Test
-  void aFixAgentIsLaunchedOnlyAfterAnyAgentAnOlderServerLeftForItsReviewIsKilled() {
-    loop = ReviewLoop.staged(tempDir, "codex");
-    var atUnitStart = new CopyOnWriteArrayList<String>();
-    loop.onLaunch(
-        runId ->
-            atUnitStart.add(
-                loop.runs.findById(runId).orElseThrow().role()
-                    + " after "
-                    + loop.container.commandsContaining("SAIL_RUN_ID=$1").size()
-                    + " legacy checks"));
-    loop.built("auth");
-    var reviewer = loop.onlyLive();
-
-    loop.finish(reviewer.id(), CRITICAL_FINDING);
-
-    var fix = loop.onlyLive();
-    assertEquals("fix", fix.role());
-    assertEquals(
-        List.of("review after 0 legacy checks", "fix after 1 legacy checks"),
-        atUnitStart,
-        "a reviewer shares no branch with a legacy fix agent; a fix agent's unit starts only once"
-            + " the check for one has run");
-    var check =
-        loop.container.commands().stream()
-            .filter(command -> String.join(" ", command).contains("SAIL_RUN_ID=$1"))
-            .findFirst()
-            .orElseThrow();
-    assertEquals(
-        reviewer.reviewId(),
-        check.getLast(),
-        "the check names the review, which only an older server exported as a run id");
-    assertFalse(
-        check.contains(fix.id()), "never a run of this server's: those are not its to kill");
   }
 
   @Test

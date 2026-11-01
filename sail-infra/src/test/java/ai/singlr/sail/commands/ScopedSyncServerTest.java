@@ -14,10 +14,8 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.AuthSessionStore;
-import ai.singlr.sail.store.DataMigration;
-import ai.singlr.sail.store.DataMigrations;
+import ai.singlr.sail.store.BoxDatabase;
 import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -63,7 +61,7 @@ class ScopedSyncServerTest {
   void setUp() {
     var mainPath = tempDir.resolve("main.db");
     try (var db = Sqlite.open(mainPath)) {
-      MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
+      BoxDatabase.prepare(db);
     }
     main = SyncDatabase.converge(mainPath, "main");
     mainDb = main.db();
@@ -242,7 +240,7 @@ class ScopedSyncServerTest {
         SyncSession.open(
             clientIn,
             toServer,
-            SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node-box"),
+            SyncWire.Hello.of("1.0.0", "node-box"),
             notice -> {},
             ignored -> {},
             nodeDb)) {

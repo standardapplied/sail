@@ -744,10 +744,8 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * A stage's finding counts by severity for narration, counted from its findings. A review whose
-   * findings were never synced — run on a box retired before they became content — still carries
-   * the counts its snapshot replicated, in the legacy {@code finding_counts} column, which nothing
-   * writes for a review with content. Empty when the stage has no findings.
+   * A stage's finding counts by severity for narration, counted from its findings. Empty when the
+   * stage has no findings.
    */
   public Map<String, Integer> findingCountsForStage(String stageId) {
     var counts = new LinkedHashMap<String, Integer>();
@@ -759,18 +757,6 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
             row -> Map.entry(row.text(0), (int) row.integer(1)),
             stageId)) {
       counts.put(row.getKey(), row.getValue());
-    }
-    if (!counts.isEmpty()) {
-      return counts;
-    }
-    var legacy =
-        db.queryOne(
-                "SELECT COALESCE(finding_counts, '') FROM review_stages WHERE id = ?",
-                row -> row.text(0),
-                stageId)
-            .orElse("");
-    if (!legacy.isBlank()) {
-      YamlUtil.parseMap(legacy).forEach((k, v) -> counts.put(k, ((Number) v).intValue()));
     }
     return counts;
   }
@@ -840,29 +826,10 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Folds the finding rows a box holds for review {@code id} from before findings were content into
-   * one revision carrying them, for {@link ReviewFindingsMigration}; false when the review is
-   * absent or already has content.
-   */
-  boolean foldLegacyFindings(String id) {
-    if (findReview(id).isEmpty() || findingsHashOf(id) != null) {
-      return false;
-    }
-    content.store(id, content.read(id));
-    recordRevision(id, "migration");
-    return true;
-  }
-
-  /**
    * Journals a fresh revision of the whole aggregate for a local mutation, within its transaction.
    */
   private void journal(String reviewId) {
     revisions.recordRevision(reviewId, ChangeLog.Entry.LOCAL, false);
-  }
-
-  /** Backfills a revision for a one-time data migration; delegates to the journal. */
-  String recordRevision(String id, String origin) {
-    return revisions.recordRevision(id, origin, false);
   }
 
   public Set<String> syncEntityIds() {
@@ -1006,8 +973,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
 
   /**
    * Writes an aggregate snapshot: the review row, its stages, and the projection of the findings
-   * its content names. A stage the snapshot drops goes, with its rows. The legacy {@code
-   * finding_counts} column is written only for a review that has no content yet.
+   * its content names. A stage the snapshot drops goes, with its rows.
    */
   @SuppressWarnings("unchecked")
   private void writeAggregate(String id, Map<String, Object> snapshot) {
@@ -1039,18 +1005,16 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
         Objects.requireNonNullElse(
             (List<Map<String, Object>>) snapshot.get("stages"), List.<Map<String, Object>>of());
     for (var stage : stages) {
-      var counts = hash == null ? stage.get("finding_counts") : null;
       requireStageUnclaimed(id, Snapshots.text(stage, "id"));
       db.execute(
           """
           INSERT INTO review_stages (id, review_id, name, stage_type, status, reviewer,
-              started_at, completed_at, error, finding_counts)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              started_at, completed_at, error)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET name = excluded.name,
               stage_type = excluded.stage_type, status = excluded.status,
               reviewer = excluded.reviewer, started_at = excluded.started_at,
-              completed_at = excluded.completed_at, error = excluded.error,
-              finding_counts = excluded.finding_counts""",
+              completed_at = excluded.completed_at, error = excluded.error""",
           Snapshots.text(stage, "id"),
           id,
           Snapshots.text(stage, "name"),
@@ -1059,8 +1023,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
           Snapshots.text(stage, "reviewer"),
           Snapshots.text(stage, "started_at"),
           Snapshots.text(stage, "completed_at"),
-          Snapshots.text(stage, "error"),
-          counts == null ? null : YamlUtil.dumpJson((Map<String, Object>) counts));
+          Snapshots.text(stage, "error"));
     }
     db.execute(
         """

@@ -10,9 +10,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.SailPaths;
-import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.engine.SpecCliHelper;
-import ai.singlr.sail.sync.SyncWire;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -35,9 +33,8 @@ import java.util.concurrent.TimeUnit;
  * container rather than a directory because the native binary resolves its home through the passwd
  * entry, never {@code $HOME}.
  *
- * <p>Two binaries take part: {@link #candidate()} is the build under test and {@link #released()}
- * the release the fleet upgrades from. They arrive as {@code -Dsail.it.nativeBinary} and {@code
- * -Dsail.it.releasedBinary}; without them the tests skip, except under {@code
+ * <p>Every box runs {@link #candidate()}, the build under test, which arrives as {@code
+ * -Dsail.it.nativeBinary}; without it the tests skip, except under {@code
  * -Dsail.it.requireNative=true}, where a missing binary or an unreachable Podman fails loudly.
  *
  * <p>A box's server runs only for the duration of {@link Box#serving}, and a node's only while
@@ -101,15 +98,13 @@ public final class NativeFleet implements AutoCloseable {
 
   private final String pod;
   private final Path candidate;
-  private final Path released;
   private final List<Box> boxes = new ArrayList<>();
   private Box main;
   private Daemon sshd;
 
-  private NativeFleet(String pod, Path candidate, Path released) {
+  private NativeFleet(String pod, Path candidate) {
     this.pod = pod;
     this.candidate = candidate;
-    this.released = released;
   }
 
   public record Result(int exit, String output) {}
@@ -125,15 +120,11 @@ public final class NativeFleet implements AutoCloseable {
     buildImage();
     var pod = "sail-fleet-" + UUID.randomUUID().toString().substring(0, 8);
     ok(run(COMMAND_DEADLINE, List.of("podman", "pod", "create", "--share", "net", "--name", pod)));
-    return new NativeFleet(pod, binaries.candidate(), binaries.released());
+    return new NativeFleet(pod, binaries.candidate());
   }
 
   public Path candidate() {
     return candidate;
-  }
-
-  public Path released() {
-    return released;
   }
 
   public Box main(String handle, Path binary) throws Exception {
@@ -332,10 +323,6 @@ public final class NativeFleet implements AutoCloseable {
       SELECT l.entity_type, l.entity_id, l.rev, l.kind, l.actor
       FROM change_heads h JOIN change_log l ON l.seq = h.seq %s
       ORDER BY l.entity_type, l.entity_id""";
-
-  public static boolean belowFloor(String version) {
-    return SemVer.parse(version).compareTo(SemVer.parse(SyncWire.UPGRADE_FLOOR)) < 0;
-  }
 
   public static Map<String, Object> json(String output) {
     return YamlUtil.parseMap(lastLineStarting("{", output));

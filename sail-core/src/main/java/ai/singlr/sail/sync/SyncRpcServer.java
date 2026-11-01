@@ -11,7 +11,6 @@ import ai.singlr.sail.authority.ScopeRule;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.FileLimits;
-import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
@@ -38,18 +37,18 @@ import java.util.Set;
 
 /**
  * Main's side of one sync session: a request loop over the SSH channel's stdio. Nothing is served
- * before a {@link SyncWire.Hello} has been welcomed — the protocol and the fleet floor are checked
- * there, once. It then answers {@link SyncWire.Heads} with every type's high-water, pages the
- * change log for {@link SyncWire.Pull}, reads current rows for {@link SyncWire.Need}, routes each
- * offer of a {@link SyncWire.Push} to the authoritative {@link MainReplica} for its entity type,
- * serves the node's roster pull, and returns at {@link SyncWire.Bye} or end of stream. The
- * session's {@link Actor}, on the {@link Actor.Lane#SYNC} lane, is the pusher every offer is
- * decided for, by its type's {@code WriteAuthority} — the same rule a node's journal decided the
- * write by: a {@code viewer} opens a session and pulls every type, but its offers are denied; a
- * member changes only what is theirs, names only themselves, their box's machinery or their runs as
- * its author, and creates only as themselves; and a run is only ever its executing box's. Every
- * such decision is a {@link SyncWire.Denied} for that one offer, carrying main's version, so the
- * node settles it instead of offering the same change again every round.
+ * before a {@link SyncWire.Hello} has been welcomed — the protocol is checked there, once. It then
+ * answers {@link SyncWire.Heads} with every type's high-water, pages the change log for {@link
+ * SyncWire.Pull}, reads current rows for {@link SyncWire.Need}, routes each offer of a {@link
+ * SyncWire.Push} to the authoritative {@link MainReplica} for its entity type, serves the node's
+ * roster pull, and returns at {@link SyncWire.Bye} or end of stream. The session's {@link Actor},
+ * on the {@link Actor.Lane#SYNC} lane, is the pusher every offer is decided for, by its type's
+ * {@code WriteAuthority} — the same rule a node's journal decided the write by: a {@code viewer}
+ * opens a session and pulls every type, but its offers are denied; a member changes only what is
+ * theirs, names only themselves, their box's machinery or their runs as its author, and creates
+ * only as themselves; and a run is only ever its executing box's. Every such decision is a {@link
+ * SyncWire.Denied} for that one offer, carrying main's version, so the node settles it instead of
+ * offering the same change again every round.
  *
  * <p>An offer carrying {@code erase} asks main to prune: main decides it on its own copy ({@link
  * EraseAuthority}), erases the entity and what belongs to it in one transaction, and answers the
@@ -107,7 +106,7 @@ public final class SyncRpcServer {
       Actor principal,
       FdeRoster fdeRoster,
       SyncTransitionSink transitionSink) {
-    this(replicas, principal, fdeRoster, transitionSink, ChangeHeads.NONE, SyncWire.UPGRADE_FLOOR);
+    this(replicas, principal, fdeRoster, transitionSink, ChangeHeads.NONE, "dev");
   }
 
   public SyncRpcServer(
@@ -506,19 +505,22 @@ public final class SyncRpcServer {
   }
 
   /**
-   * The one place a session's compatibility is decided. Floors compare as versions, never as
-   * strings: a node below main's floor is told to upgrade, a node whose floor is above main's is
-   * told the order — main first — and a node at the same floor is welcomed whatever its patch
-   * level. The box id names the node in main's log; who the node is stays the authenticated
-   * principal, which every commit is attributed to, and the welcome names it so the node stamps its
-   * runs with the handle main knows it by. One box syncs as each FDE: a session from another box
-   * than the FDE's is refused before anything is exchanged.
+   * The one place a session's compatibility is decided: the node speaks this main's protocol or is
+   * refused, told to upgrade itself when it speaks an older one and to upgrade main first when it
+   * speaks a newer one. The box id names the node in main's log; who the node is stays the
+   * authenticated principal, which every commit is attributed to, and the welcome names it so the
+   * node stamps its runs with the handle main knows it by. One box syncs as each FDE: a session
+   * from another box than the FDE's is refused before anything is exchanged.
    */
   private SyncWire.Response onHello(SyncWire.Hello hello) {
     if (welcomed) {
       return new SyncWire.Failed("hello already exchanged", "protocol");
     }
-    if (hello.protocol() != SyncWire.PROTOCOL) {
+    if (hello.protocol() > SyncWire.PROTOCOL) {
+      return new SyncWire.Refuse(
+          "main is " + version + ", this node is " + hello.version() + ": upgrade main first");
+    }
+    if (hello.protocol() < SyncWire.PROTOCOL) {
       return new SyncWire.Refuse(
           Remedy.of(
                   "this main speaks sync protocol "
@@ -527,19 +529,6 @@ public final class SyncRpcServer {
                       + hello.protocol()
                       + ": ")
               .then(upgradeRemedy()));
-    }
-    var nodeFloor = SemVer.tryParse(hello.floor());
-    if (nodeFloor.isEmpty()) {
-      return new SyncWire.Refuse(
-          Remedy.of("malformed floor '" + hello.floor() + "': ").then(upgradeRemedy()));
-    }
-    var order = nodeFloor.get().compareTo(SemVer.parse(SyncWire.UPGRADE_FLOOR));
-    if (order < 0) {
-      return new SyncWire.Refuse(upgradeRemedy());
-    }
-    if (order > 0) {
-      return new SyncWire.Refuse(
-          "main is " + version + ", this node is " + hello.version() + ": upgrade main first");
     }
     if (hello.box() == null || hello.box().isBlank()) {
       return new SyncWire.Refuse(Remedy.of("hello names no box id: ").then(upgradeRemedy()));

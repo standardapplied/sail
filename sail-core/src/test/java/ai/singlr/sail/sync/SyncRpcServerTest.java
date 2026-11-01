@@ -259,41 +259,31 @@ class SyncRpcServerTest {
     new SyncRpcServer(new FakeMain(), true).serve(new ByteStreams.Input(fetch + "\n"), out);
     var line = out.toString().strip();
     var refusal = assertInstanceOf(SyncWire.Refuse.class, SyncWire.decodeResponse(line));
-    assertEquals(
-        Remedy.of("upgrade to " + SyncWire.UPGRADE_FLOOR + ": ", Remedy.sail("upgrade")),
-        refusal.reason());
+    assertEquals(Remedy.of("upgrade to dev: ", Remedy.sail("upgrade")), refusal.reason());
   }
 
   @Test
-  void aFloorBelowMainsIsRefusedWithTheRemedy() throws Exception {
+  void aNodeOnAnOlderProtocolIsToldToUpgradeItself() throws Exception {
     var refusal =
         assertInstanceOf(
             SyncWire.Refuse.class,
             serve(
                     new SyncRpcServer(new FakeMain(), true),
-                    new SyncWire.Hello(4, "0.43.3", "0.34.0", "b"))
+                    new SyncWire.Hello(SyncWire.PROTOCOL - 1, "0.58.0", "b"))
                 .getFirst());
     assertEquals(
-        Remedy.of("upgrade to " + SyncWire.UPGRADE_FLOOR + ": ", Remedy.sail("upgrade")),
+        Remedy.of(
+            "this main speaks sync protocol "
+                + SyncWire.PROTOCOL
+                + ", not "
+                + (SyncWire.PROTOCOL - 1)
+                + ": upgrade to dev: ",
+            Remedy.sail("upgrade")),
         refusal.reason());
   }
 
   @Test
-  void aNodeAtTheFloorThatStillMintedPersonalRoomsIsRefusedUntilItUpgrades() throws Exception {
-    var refusal =
-        assertInstanceOf(
-            SyncWire.Refuse.class,
-            serve(
-                    new SyncRpcServer(new FakeMain(), true),
-                    new SyncWire.Hello(4, "0.46.1", "0.46.0", "b"))
-                .getFirst());
-    assertEquals(
-        Remedy.of("upgrade to " + SyncWire.UPGRADE_FLOOR + ": ", Remedy.sail("upgrade")),
-        refusal.reason());
-  }
-
-  @Test
-  void aFloorAboveMainsIsRefusedNamingTheOrder() throws Exception {
+  void aNodeOnANewerProtocolIsToldToUpgradeMainFirst() throws Exception {
     var server =
         new SyncRpcServer(
             Map.of("spec", new FakeMain()),
@@ -301,74 +291,44 @@ class SyncRpcServerTest {
             FdeRoster.EMPTY,
             SyncTransitionSink.NONE,
             SyncRpcServer.ChangeHeads.NONE,
-            "0.44.2");
+            "1.0.0");
     var refusal =
         assertInstanceOf(
             SyncWire.Refuse.class,
-            serve(server, new SyncWire.Hello(4, "0.51.0", "0.50.0", "b")).getFirst());
+            serve(server, new SyncWire.Hello(SyncWire.PROTOCOL + 1, "1.1.0", "b")).getFirst());
     assertEquals(
-        Remedy.of("main is 0.44.2, this node is 0.51.0: upgrade main first"), refusal.reason());
+        Remedy.of("main is 1.0.0, this node is 1.1.0: upgrade main first"), refusal.reason());
   }
 
   @Test
-  void aNodeAtTheFloorThatPushedRunsActingForNoOneIsRefusedUntilItUpgrades() throws Exception {
-    var refusal =
-        assertInstanceOf(
-            SyncWire.Refuse.class,
-            serve(
-                    new SyncRpcServer(new FakeMain(), true),
-                    new SyncWire.Hello(4, "0.46.2", "0.46.2", "b"))
-                .getFirst());
-    assertEquals(
-        Remedy.of("upgrade to " + SyncWire.UPGRADE_FLOOR + ": ", Remedy.sail("upgrade")),
-        refusal.reason());
-  }
-
-  @Test
-  void aNodeAtThePreviousFloorThatPushedReviewsWithoutTheirFindingsIsRefusedUntilItUpgrades()
-      throws Exception {
-    var refusal =
-        assertInstanceOf(
-            SyncWire.Refuse.class,
-            serve(
-                    new SyncRpcServer(new FakeMain(), true),
-                    new SyncWire.Hello(4, "0.46.3", "0.46.3", "b"))
-                .getFirst());
-    assertEquals(
-        Remedy.of("upgrade to " + SyncWire.UPGRADE_FLOOR + ": ", Remedy.sail("upgrade")),
-        refusal.reason());
-  }
-
-  @Test
-  void theSameFloorAtANewerPatchIsWelcomedWithMainsIdentity() throws Exception {
+  void aNodeOnThisProtocolIsWelcomedWithMainsIdentityWhateverItsBuild() throws Exception {
     var welcome =
         assertInstanceOf(
             SyncWire.Welcome.class,
             serve(
                     new SyncRpcServer(new FakeMain(), true),
-                    new SyncWire.Hello(4, "0.44.9", SyncWire.UPGRADE_FLOOR, "b"))
+                    new SyncWire.Hello(SyncWire.PROTOCOL, "1.0.9", "b"))
                 .getFirst());
     assertEquals(
-        new SyncWire.Welcome(
-            SyncWire.PROTOCOL, SyncWire.UPGRADE_FLOOR, "main", "", FileLimits.DEFAULT_MAX),
+        new SyncWire.Welcome(SyncWire.PROTOCOL, "dev", "main", "", FileLimits.DEFAULT_MAX),
         welcome,
         "a session naming no FDE is welcomed as no one");
   }
 
   @Test
-  void aWrongProtocolAMalformedFloorOrAMissingBoxIsRefused() throws Exception {
+  void aHelloNamingNoBoxIsRefused() throws Exception {
     for (var hello :
         List.of(
-            new SyncWire.Hello(3, "0.44.0", SyncWire.UPGRADE_FLOOR, "b"),
-            new SyncWire.Hello(4, "0.44.0", "latest", "b"),
-            new SyncWire.Hello(4, "0.44.0", null, "b"),
-            new SyncWire.Hello(4, "0.44.0", SyncWire.UPGRADE_FLOOR, null),
-            new SyncWire.Hello(4, "0.44.0", SyncWire.UPGRADE_FLOOR, " "))) {
+            new SyncWire.Hello(SyncWire.PROTOCOL, "1.0.0", null),
+            new SyncWire.Hello(SyncWire.PROTOCOL, "1.0.0", " "))) {
       var refusal =
           assertInstanceOf(
               SyncWire.Refuse.class,
               serve(new SyncRpcServer(new FakeMain(), true), hello).getFirst());
-      assertEquals(List.of(Remedy.sail("upgrade")), refusal.reason().commands(), hello.toString());
+      assertEquals(
+          Remedy.of("hello names no box id: upgrade to dev: ", Remedy.sail("upgrade")),
+          refusal.reason(),
+          hello.toString());
     }
   }
 

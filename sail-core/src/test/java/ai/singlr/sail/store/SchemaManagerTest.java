@@ -7,28 +7,20 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.Lane;
-import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.identity.Acting;
-import ai.singlr.sail.identity.ActingAs;
-import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-@ActingAs
 class SchemaManagerTest {
 
   @TempDir Path tempDir;
@@ -45,116 +37,119 @@ class SchemaManagerTest {
   }
 
   @Test
-  void fileVersionIndexMigratesExistingContentAndPermissionHistory() {
-    stageAtBaseline();
-    var prior = migrationIndex("CREATE INDEX idx_change_log_file_version");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    new ContentMigration().apply(db, null, DataMigration.Prompter.NON_INTERACTIVE);
-    var hash = new BlobStore(db).putText("content");
-    for (var mode : List.of(0644, 0600)) {
-      db.execute(
-          """
-          INSERT INTO change_log (entity_type, entity_id, rev, recorded_at, origin, deleted,
-              snapshot)
-          VALUES ('file', 'acme/known', ?, 'staged', 'local', 0, ?)""",
-          "1-" + mode,
-          YamlUtil.dumpJson(
-              Map.of("project", "acme", "path", "known", "content_hash", hash, "mode", mode)));
-    }
-
+  void aFreshDatabaseGetsEveryTableAndNoMigrationBookkeeping() {
     new SchemaManager(db).migrate();
 
-    var plan =
+    var tables =
         db.query(
-            """
-            EXPLAIN QUERY PLAN SELECT 1 FROM change_log WHERE entity_type = 'file' AND entity_id = ?
-                AND json_extract(snapshot, '$.content_hash') = ?
-                AND json_extract(snapshot, '$.mode') = ? LIMIT 1
-            """,
-            row -> row.text(3),
-            "acme/known",
-            hash,
-            0644);
-    assertTrue(
-        plan.stream().anyMatch(step -> step.contains("idx_change_log_file_version")),
-        plan.toString());
+            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
+            row -> row.text(0));
+    assertEquals(
+        List.of(
+            "api_tokens",
+            "blobs",
+            "box_credential",
+            "catalog",
+            "change_heads",
+            "change_log",
+            "chunks",
+            "compacted_entries",
+            "container_leases",
+            "enrollment_tickets",
+            "erase_requests",
+            "events",
+            "fde_boxes",
+            "fde_pairings",
+            "fde_ssh_keys",
+            "fdes",
+            "main_limits",
+            "materialized_files",
+            "project_files",
+            "project_grants",
+            "projects",
+            "review_findings",
+            "review_stages",
+            "reviews",
+            "room_guard",
+            "room_messages",
+            "rooms",
+            "run_credentials",
+            "run_delivered_messages",
+            "run_principals",
+            "runs",
+            "schema_version",
+            "sessions",
+            "slack_threads",
+            "spec_content",
+            "spec_dependencies",
+            "spec_repos",
+            "specs",
+            "sqlite_sequence",
+            "sync_conflicts",
+            "sync_health",
+            "sync_offers",
+            "sync_scope",
+            "sync_state",
+            "webauthn_challenges",
+            "webauthn_credentials"),
+        tables);
+    assertEquals(
+        List.of(),
+        db.query(
+            "SELECT name FROM pragma_table_info('review_stages') WHERE name = 'finding_counts'",
+            row -> row.text(0)));
   }
 
   @Test
-  void fromThePriorReleaseTheLogLearnsKindsAndArchivedSpecsTheirStatusTimes() {
-    stageAtBaseline();
-    var prior = migrationIndex("ALTER TABLE change_log ADD COLUMN kind");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    for (var entry :
-        List.of(List.of("kept", "1-a", 0), List.of("gone", "1-b", 0), List.of("gone", "2-c", 1))) {
-      db.execute(
-          """
-          INSERT INTO change_log (entity_type, entity_id, rev, recorded_at, origin, deleted,
-              snapshot)
-          VALUES ('spec', ?, ?, 'staged', 'local', ?, '{}')""",
-          entry.get(0),
-          entry.get(1),
-          entry.get(2));
-    }
-    for (var spec :
-        List.of(List.of("a", "archived"), List.of("c", "cancelled"), List.of("p", "pending"))) {
-      db.execute(
-          "INSERT INTO specs (id, title, status, created_at, updated_at) VALUES (?, ?, ?, 'then',"
-              + " '2026-06-01T00:00:00Z')",
-          spec.get(0),
-          spec.get(0),
-          spec.get(1));
-    }
-
+  void aFreshDatabaseIsMintedACatalogOfItsOwnAndNamesNoMain() {
     new SchemaManager(db).migrate();
 
-    assertEquals(
-        List.of("revision", "revision", "tombstone"),
-        db.query("SELECT kind FROM change_log ORDER BY seq", row -> row.text(0)));
-    assertEquals(
-        List.of("a|2026-06-01T00:00:00Z|", "c||2026-06-01T00:00:00Z", "p||"),
-        db.query(
-            "SELECT id || '|' || COALESCE(archived_at, '') || '|' || COALESCE(cancelled_at, '')"
-                + " FROM specs ORDER BY id",
-            row -> row.text(0)));
-    assertThrows(
-        SqliteException.class,
-        () ->
-            db.execute(
-                "INSERT INTO change_log (entity_type, entity_id, rev, recorded_at, origin,"
-                    + " snapshot, kind) VALUES ('spec', 'x', '1', 'now', 'local', '{}', 'bogus')"));
-    assertEquals(
-        0, db.queryOne("SELECT count(*) FROM erase_requests", row -> row.integer(0)).orElseThrow());
+    var catalog = db.query("SELECT id, main FROM catalog", row -> row.text(0) + "|" + row.text(1));
+
+    assertEquals(1, catalog.size());
+    assertTrue(catalog.getFirst().matches("[0-9a-f]{32}\\|null"), catalog.getFirst());
   }
 
   @Test
-  void aDeletionTheOldServerWritesDuringTheUpgradeIsStillATombstone() {
-    new SchemaManager(db).migrate();
+  void aDatabaseOfAReleaseBeforeV1IsRefusedNamingAFreshOne() {
+    stageAtVersion(244);
+    var schema = new SchemaManager(db);
 
-    db.execute(
-        """
-        INSERT INTO change_log (entity_type, entity_id, rev, recorded_at, origin, deleted, snapshot)
-        VALUES ('spec', 'gone', '2-old', 'now', 'local', 1, '{}')""");
-    db.execute(
-        """
-        INSERT INTO change_log (entity_type, entity_id, rev, recorded_at, origin, deleted, snapshot)
-        VALUES ('spec', 'kept', '1-old', 'now', 'local', 0, '{}')""");
+    var refusal = assertThrows(Remedied.State.class, schema::migrate);
 
     assertEquals(
-        List.of("gone|tombstone", "kept|revision"),
-        db.query(
-            "SELECT entity_id || '|' || kind FROM change_log ORDER BY entity_id",
-            row -> row.text(0)));
+        "Database schema v244 was made by a Sail release before v1; this release opens only v"
+            + SchemaManager.CURRENT_VERSION
+            + ".",
+        refusal.reason());
+    assertEquals(List.of(Remedy.sail("init")), refusal.remedy().commands());
+    assertEquals(
+        "Move " + tempDir.resolve("test.db") + " aside and run 'sail init' to make a fresh one.",
+        refusal.remedy().plain());
+    assertEquals(244, schema.currentVersion());
+    assertEquals(
+        List.of("schema_version"),
+        db.query("SELECT name FROM sqlite_master WHERE type = 'table'", row -> row.text(0)),
+        "nothing is created beside a refused database");
+  }
+
+  @Test
+  void migrateRefusesADatabaseNewerThanThisBinary() {
+    var newer = SchemaManager.CURRENT_VERSION + 1;
+    stageAtVersion(newer);
+    var schema = new SchemaManager(db);
+
+    var refusal = assertThrows(Remedied.State.class, schema::migrate);
+
+    assertEquals(
+        "Database schema v"
+            + newer
+            + " is newer than this Sail binary supports (v"
+            + SchemaManager.CURRENT_VERSION
+            + ").",
+        refusal.reason());
+    assertEquals("Run 'sail upgrade' before opening this database.", refusal.remedy().plain());
+    assertEquals(newer, schema.currentVersion());
   }
 
   @Test
@@ -215,512 +210,6 @@ class SchemaManagerTest {
     db.execute("UPDATE specs SET status = 'pending' WHERE id = 's'");
     assertNull(since("archived_at"));
     assertNull(since("cancelled_at"));
-  }
-
-  private String since(String column) {
-    var value =
-        db.queryOne(
-                "SELECT COALESCE(" + column + ", '') FROM specs WHERE id = 's'", row -> row.text(0))
-            .orElseThrow();
-    return value.isEmpty() ? null : value;
-  }
-
-  @Test
-  void syncHealthMigratesFromThePriorReleaseWithoutChangingTheReplica() {
-    stageAtBaseline();
-    var prior = migrationIndex("CREATE TABLE sync_health");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    db.execute(
-        "INSERT INTO specs (id, title, status, created_at, updated_at) VALUES ('keep', 'Keep', 'draft', 't0', 't0')");
-    new SchemaManager(db).migrate();
-    var health = new SyncHealth(db);
-    assertTrue(health.find("main").isEmpty());
-    assertTrue(new SpecStore(db).findById("keep").isPresent());
-    health.begin("main", java.time.Instant.EPOCH);
-    new SchemaManager(db).migrate();
-    assertEquals("syncing", health.find("main").orElseThrow().state());
-  }
-
-  @Test
-  void theBoxEachFdeSyncsFromMigratesFromThe0_46_2ReleaseKeepingItsRuns() {
-    stageAtBaseline();
-    var prior = migrationIndex("CREATE TABLE fde_boxes");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    db.execute(
-        """
-        INSERT INTO runs (id, project, node, role, agent, status, started_at, owner)
-        VALUES ('01a0ecdf-0000-7000-8000-000000000001', 'acme', 'ada', 'build', 'claude-code', 'running',
-            't0', 'ada')""");
-
-    new SchemaManager(db).migrate();
-
-    var boxes = new FdeBoxes(db);
-    assertTrue(boxes.boxOf("ada").isEmpty());
-    assertTrue(boxes.claim("ada", "ada-box").isEmpty());
-    assertEquals("ada-box", boxes.claim("ada", "laptop").orElseThrow());
-    assertTrue(new RunStore(db).findById("01a0ecdf-0000-7000-8000-000000000001").isPresent());
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-  }
-
-  @Test
-  void runsLearnTheFixLaneAndTheReviewTheyServeKeepingEveryRowAndItsRevision() {
-    stageAtBaseline();
-    var prior = migrationIndex("CREATE TABLE runs_v8");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    var review = "01a0ecdf-0000-7000-8000-0000000000a1";
-    var build = "01a0ecdf-0000-7000-8000-0000000000b1";
-    db.execute(
-        """
-        INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at, owner,
-            rev, base_rev, room_id)
-        VALUES (?, 'acme', 'auth', 'ada', 'review', 'codex', 'completed',
-            '2026-09-01T00:00:00Z', 'ada', '3-abc', '3-abc', NULL)""",
-        review);
-    db.execute(
-        """
-        INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at, owner)
-        VALUES (?, 'acme', 'auth', 'ada', 'build', 'claude-code', 'stopped', 't0', 'ada')""",
-        build);
-    assertThrows(
-        RuntimeException.class,
-        () ->
-            db.execute(
-                """
-                INSERT INTO runs (id, project, role, agent, status, started_at)
-                VALUES ('f', 'acme', 'fix', 'claude-code', 'running', 't0')"""),
-        "before the migration the runs table admits no fix lane");
-
-    new SchemaManager(db).migrate();
-
-    var runs = new RunStore(db);
-    assertEquals(
-        review,
-        runs.findById(review).orElseThrow().reviewId(),
-        "a review run recorded before runs named their review ran under its review's own id");
-    assertNull(runs.findById(build).orElseThrow().reviewId());
-    assertFalse(
-        runs.findById(build).orElseThrow().stoppedByOperator(),
-        "a run stopped before stops were marked is nobody's to escalate");
-    assertEquals(
-        "3-abc",
-        db.queryOne("SELECT rev FROM runs WHERE id = ?", row -> row.text(0), review).orElseThrow(),
-        "the rebuild journals nothing: no revision changes, so nothing is offered to main");
-    var fix = "01a0ecdf-0000-7000-8000-0000000000f1";
-    Acting.system(
-        () ->
-            ReviewRuns.reserve(
-                runs, fix, review, "acme", "auth", "ada", Lane.FIX, "claude-code", List.of()));
-    assertEquals("fix", runs.findById(fix).orElseThrow().role());
-    assertEquals(List.of(fix, review), runs.forReview(review).stream().map(r -> r.id()).toList());
-    assertEquals(
-        List.of("idx_runs_project", "idx_runs_review", "idx_runs_room", "idx_runs_spec"),
-        db.query(
-            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'runs'"
-                + " AND name LIKE 'idx_%' ORDER BY name",
-            row -> row.text(0)));
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-  }
-
-  @Test
-  void reviewsLearnTheRunTheyWaitOnKeepingEveryRowAndItsRevision() {
-    stageAtBaseline();
-    var prior = migrationIndex("ALTER TABLE reviews ADD COLUMN waiting_on");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    db.execute(
-        """
-        INSERT INTO reviews (id, spec_id, iteration, status, created_at, rev, base_rev)
-        VALUES ('r1', 'auth', 1, 'running', '2026-09-01T00:00:00Z', '2-abc', '2-abc')""");
-
-    new SchemaManager(db).migrate();
-
-    var reviews = new ReviewStore(db);
-    assertNull(
-        reviews.findReview("r1").orElseThrow().waitingOn(),
-        "a review recorded before waits were is waiting on no run");
-    assertEquals(
-        "2-abc",
-        db.queryOne("SELECT rev FROM reviews WHERE id = 'r1'", row -> row.text(0)).orElseThrow(),
-        "the column is this box's own bookkeeping: nothing is journaled or offered to main");
-    reviews.waitOn("r1", "01a0ecdf-0000-7000-8000-0000000000b1", () -> {});
-    assertEquals(
-        "01a0ecdf-0000-7000-8000-0000000000b1", reviews.findReview("r1").orElseThrow().waitingOn());
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-  }
-
-  @Test
-  void pairingsMigrateFromThe0_46_5ReleaseKeepingEveryFdeAndItsToken() {
-    stageAtBaseline();
-    var prior = migrationIndex("CREATE TABLE fde_pairings");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    var ada = new FdeStore(db).add("ada", null, "ada@x.com", "member");
-    var token = new TokenStore(db).create("mast-ada", "member", ada.id(), null).token();
-
-    new SchemaManager(db).migrate();
-
-    var pairings = new FdePairingStore(db);
-    assertTrue(pairings.find(ada.id()).isEmpty(), "an FDE from before pairings has none");
-    pairings.put(ada.id(), "ssh-ed25519 AAAA sail-mast:ada", "mast-ada");
-    assertEquals("mast-ada", pairings.find(ada.id()).orElseThrow().tokenName());
-    assertEquals("ada", new TokenStore(db).validate(token).orElseThrow().fdeHandle());
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-  }
-
-  @Test
-  void scopingMigratesFromThe0_47_0ReleaseLeavingEveryFdeUnscopedAndEveryHeadToTheBackfill() {
-    stageAtBaseline();
-    var prior = migrationIndex("ALTER TABLE fdes ADD COLUMN scope");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    db.execute(
-        "INSERT INTO fdes (id, handle, role, status, created_at)"
-            + " VALUES ('fde_1', 'ada', 'member', 'active', 't')");
-    db.execute(
-        "INSERT INTO change_log (entity_type, entity_id, rev, recorded_at, origin, deleted,"
-            + " snapshot, kind) VALUES ('spec', 's1', '1-a', 't', 'local', 0,"
-            + " '{\"project\": \"alpha\"}', 'revision')");
-    db.execute(
-        "INSERT INTO change_heads (entity_type, entity_id, seq)"
-            + " VALUES ('spec', 's1', last_insert_rowid())");
-    db.execute(
-        "INSERT INTO sync_state (peer, entity_type, checkpoint, updated_at)"
-            + " VALUES ('main', 'spec', 12, 't')");
-
-    new SchemaManager(db).migrate();
-
-    var fdes = new FdeStore(db);
-    assertEquals(ProjectScope.all(), fdes.scopeOf("ada"), "an FDE from before scoping sees all");
-    fdes.restrict("ada");
-    fdes.grant("ada", "alpha");
-    assertEquals(ProjectScope.of(List.of("alpha")), fdes.scopeOf("ada"));
-    assertThrows(
-        SqliteException.class,
-        () -> db.execute("UPDATE fdes SET scope = 'some' WHERE id = 'fde_1'"));
-    var log = new ChangeLog(db);
-    assertEquals(Optional.empty(), log.headProject("spec", "s1"), "the data migration fills it");
-    assertEquals(1, log.backfillProjects());
-    assertEquals(Optional.of("alpha"), log.headProject("spec", "s1"));
-    assertEquals(ProjectScope.all(), new SyncScope(db).held());
-    assertEquals(
-        0,
-        new SyncState(db).checkpoint("main", "spec"),
-        "walked once more by a later release, to keep what it reads there");
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-  }
-
-  @Test
-  void aStatusSinceMigratesFromThe0_52_0ReleaseToTheRevisionsTimeKeepingWhatItHeld() {
-    stageAtBaseline();
-    var prior = migrationIndex("DROP TRIGGER specs_status_since_insert");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    db.execute(
-        "INSERT INTO specs (id, project, title, status, created_at, updated_at)"
-            + " VALUES ('old', 'acme', 'Old', 'archived', 't0', '2026-01-01T00:00:00Z')");
-    var heldBefore = archivedAt("old");
-
-    new SchemaManager(db).migrate();
-    db.execute(
-        "INSERT INTO specs (id, project, title, status, created_at, updated_at)"
-            + " VALUES ('new', 'acme', 'New', 'archived', 't0', '2026-02-02T00:00:00Z')");
-    db.execute(
-        "UPDATE specs SET status = 'cancelled', updated_at = '2026-03-03T00:00:00Z'"
-            + " WHERE id = 'old'");
-
-    assertNotEquals("2026-01-01T00:00:00Z", heldBefore, "the release before stamped its clock");
-    assertEquals("2026-02-02T00:00:00Z", archivedAt("new"));
-    assertEquals(
-        Optional.of("2026-03-03T00:00:00Z"),
-        db.queryOne("SELECT cancelled_at FROM specs WHERE id = 'old'", row -> row.text(0)));
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-  }
-
-  private String archivedAt(String id) {
-    return db.queryOne("SELECT archived_at FROM specs WHERE id = ?", row -> row.text(0), id)
-        .orElseThrow();
-  }
-
-  @Test
-  void aConflictParkedBeforeConflictsKeptMainsRevisionMigratesNamingNone() {
-    stageAtBaseline();
-    var prior = migrationIndex("ALTER TABLE sync_conflicts ADD COLUMN remote_rev");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    db.execute(
-        """
-        INSERT INTO sync_conflicts (entity_type, entity_id, base_snapshot, local_snapshot,
-            remote_snapshot, fields, detected_at, status)
-        VALUES ('spec', 'auth', '{}', '{"title": "mine"}', '{"title": "theirs"}', 'title', 't0',
-            'pending')""");
-
-    new SchemaManager(db).migrate();
-
-    var parked = new SyncConflicts(db).pendingFor("spec", "auth").orElseThrow();
-    assertEquals(Map.of("title", "theirs"), parked.theirs().snapshot());
-    assertNull(parked.theirs().rev());
-    assertNull(parked.theirs().author());
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-  }
-
-  @Test
-  void aNodeUpgradedFromAReleaseThatKeptNoOffersHearsEveryHeadAgainAndKeepsNoOffer() {
-    stageAtBaseline();
-    var prior = migrationIndex("CREATE TABLE sync_offers");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    new SyncState(db).advance("main", "spec", 41);
-    new SyncState(db).advance("main", "room", 7);
-
-    new SchemaManager(db).migrate();
-
-    assertEquals(0, new SyncState(db).checkpoint("main", "spec"), "walks main's heads again");
-    assertEquals(0, new SyncState(db).checkpoint("main", "room"));
-    assertTrue(new ChangeLog(db).offer("spec", "s").isEmpty());
-    new ChangeLog(db).recordOffer("spec", "s", Map.of("title", "t"), null);
-    assertEquals(
-        Map.of("title", "t"), new ChangeLog(db).offer("spec", "s").orElseThrow().offered());
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-  }
-
-  @Test
-  void aNodeUpgradedFromAReleaseThatKeptNothingBesideItsCheckpointsWalksMainsHeadsOnce() {
-    stageAtBaseline();
-    var prior = migrationIndex("ALTER TABLE sync_state ADD COLUMN read_seq");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    var state = new SyncState(db);
-    state.advance("main", "spec", 41);
-
-    new SchemaManager(db).migrate();
-
-    assertEquals(0, state.checkpoint("main", "spec"), "walks main's heads again");
-    assertEquals(Map.of(), state.marks("main"));
-    state.read("main", "spec", 40, "s1", "2-a");
-    state.advance("main", "spec", 41);
-    db.execute(SchemaManager.CHECKPOINTS_READ_AGAIN);
-    assertEquals(
-        Map.of("spec", new SyncState.Mark(41, 40, "s1", "2-a")),
-        state.marks("main"),
-        "a checkpoint kept with what was read there is never walked again");
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-  }
-
-  @Test
-  void aMessageFromAReleaseWithNoErrorMarkKeepsWhatItWasAndTakesBackAMarkItsJournalHeld() {
-    stageAtBaseline();
-    var prior = migrationIndex("ALTER TABLE room_messages ADD COLUMN error");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    var plain = "00000000-0000-7000-8000-000000000001";
-    var asked = "00000000-0000-7000-8000-000000000002";
-    var failedUnread = "00000000-0000-7000-8000-000000000003";
-    var askedUnread = "00000000-0000-7000-8000-000000000004";
-    var claimsBoth = "00000000-0000-7000-8000-000000000005";
-    for (var row :
-        List.of(
-            List.of(plain, "Morning.", 0),
-            List.of(asked, "Which flow?", 1),
-            List.of(failedUnread, "Not logged in", 0),
-            List.of(askedUnread, "Ship it?", 0),
-            List.of(claimsBoth, "Both?", 0))) {
-      db.execute(
-          "INSERT INTO room_messages (id, room_id, author, body, reply_to, created_at, rev,"
-              + " base_rev, question) VALUES (?, 'lounge', 'claude/r1', ?, NULL,"
-              + " '2026-10-01T00:00:00Z', '1-a', '1-a', ?)",
-          row.get(0),
-          row.get(1),
-          row.get(2));
-    }
-    for (var journaled :
-        List.of(
-            List.of(failedUnread, "\"error\": true"),
-            List.of(askedUnread, "\"question\": true"),
-            List.of(claimsBoth, "\"question\": true, \"error\": true"))) {
-      db.execute(
-          "INSERT INTO change_log (entity_type, entity_id, rev, actor, recorded_at, origin,"
-              + " snapshot) VALUES ('message', ?, '1-a', 'claude/r1', '2026-10-01T00:00:00Z',"
-              + " 'remote', ?)",
-          journaled.get(0),
-          "{\"id\": \"" + journaled.get(0) + "\", " + journaled.get(1) + "}");
-    }
-
-    new SchemaManager(db).migrate();
-
-    var messages = new MessageStore(db);
-    var before =
-        Acting.system(
-            () ->
-                List.of(
-                    messages.findById(plain),
-                    messages.findById(asked),
-                    messages.findById(failedUnread),
-                    messages.findById(askedUnread),
-                    messages.findById(claimsBoth)));
-    assertEquals(
-        List.of(
-            List.of("Morning.", MessageStore.Mark.PLAIN, "1-a"),
-            List.of("Which flow?", MessageStore.Mark.QUESTION, "1-a"),
-            List.of("Not logged in", MessageStore.Mark.ERROR, "1-a"),
-            List.of("Ship it?", MessageStore.Mark.QUESTION, "1-a"),
-            List.of("Both?", MessageStore.Mark.ERROR, "1-a")),
-        before.stream()
-            .map(Optional::orElseThrow)
-            .map(row -> List.<Object>of(row.body(), row.mark(), row.rev()))
-            .toList());
-    assertEquals(
-        List.of(false, true),
-        db.queryOne(
-                "SELECT question, error FROM room_messages WHERE id = ?",
-                row -> List.of(row.integer(0) != 0, row.integer(1) != 0),
-                claimsBoth)
-            .orElseThrow(),
-        "a journal that claims both marks gives the error one alone");
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-  }
-
-  @Test
-  void aMessageJournaledUnderWhoeverWasActingIsAttributedToItsPoster() {
-    new SchemaManager(db).migrate();
-    db.execute(
-        """
-        INSERT INTO change_log (entity_type, entity_id, rev, actor, recorded_at, origin, deleted,
-            snapshot, kind)
-        VALUES ('message', 'm1', '1-a', 'uday', 't0', 'local', 0,
-                '{"room_id": "r", "author": "sail", "body": "passed"}', 'revision'),
-            ('message', 'm2', '1-b', 'mady', 't0', 'local', 0,
-                '{"room_id": "r", "author": "mady", "body": "hi"}', 'revision'),
-            ('spec', 's1', '1-c', 'uday', 't0', 'local', 0, '{"author": "sail"}', 'revision')""");
-
-    db.execute(SchemaManager.MESSAGES_AUTHORED_BY_THEIR_POSTER);
-
-    var changeLog = new ChangeLog(db);
-    assertEquals("sail", changeLog.history("message", "m1").getFirst().actor());
-    assertEquals("mady", changeLog.history("message", "m2").getFirst().actor());
-    assertEquals("uday", changeLog.history("spec", "s1").getFirst().actor(), "only messages");
-  }
-
-  @Test
-  void backfillClosesOnlyTheResidueOfADoneSpecsPassedReview() {
-    new SchemaManager(db).migrate();
-    var specs = new SpecStore(db);
-    var reviews = new ReviewStore(db);
-
-    var residue = seedFinding(specs, reviews, "done-passed", SpecStatus.DONE, "passed", false);
-    var wip = seedFinding(specs, reviews, "wip-passed", SpecStatus.IN_PROGRESS, "passed", false);
-    var failed = seedFinding(specs, reviews, "done-failed", SpecStatus.DONE, "failed", false);
-    var gone = seedFinding(specs, reviews, "done-superseded", SpecStatus.DONE, "passed", true);
-
-    db.execute(SchemaManager.BACKFILL_SHIPPED_RESIDUE);
-
-    assertEquals(
-        Finding.Resolution.SHIPPED, reviews.findFinding(residue).orElseThrow().resolution());
-    assertEquals(Finding.Resolution.OPEN, reviews.findFinding(wip).orElseThrow().resolution());
-    assertEquals(Finding.Resolution.OPEN, reviews.findFinding(failed).orElseThrow().resolution());
-    assertEquals(Finding.Resolution.OPEN, reviews.findFinding(gone).orElseThrow().resolution());
-  }
-
-  private String seedFinding(
-      SpecStore specs,
-      ReviewStore reviews,
-      String specId,
-      SpecStatus status,
-      String reviewStatus,
-      boolean superseded) {
-    specs.create(
-        new SpecStore.SpecRow(
-            specId, "proj", "T", status, null, null, null, null, null, 0, null, "", "", null,
-            List.of(), List.of()));
-    var reviewId = reviews.createReview(specId, 1);
-    var stageId = reviews.createStage(reviewId, "security", "agent");
-    var finding =
-        Finding.create(
-            Finding.Severity.HIGH,
-            Finding.Category.SECURITY,
-            "src/A.java",
-            1,
-            2,
-            "title",
-            "desc",
-            "evidence",
-            new Finding.Suggestion("a", "b", "c"),
-            0.5);
-    reviews.addFinding(stageId, finding);
-    reviews.updateReviewStatus(reviewId, reviewStatus);
-    if (superseded) {
-      reviews.supersedeForSpec(specId);
-    }
-    return finding.id();
-  }
-
-  @Test
-  void migrateCreatesAllTables() {
-    new SchemaManager(db).migrate();
-
-    var tables =
-        db.query(
-            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
-            row -> row.text(0));
-    assertTrue(tables.contains("specs"));
-    assertTrue(tables.contains("spec_dependencies"));
-    assertTrue(tables.contains("spec_repos"));
-    assertTrue(tables.contains("spec_content"));
-    assertFalse(tables.contains("spec_attachments"));
-    assertFalse(tables.contains("spec_source_findings"));
-    assertTrue(tables.contains("events"));
-    assertTrue(tables.contains("api_tokens"));
-    assertTrue(tables.contains("schema_version"));
-    assertTrue(tables.contains("runs"));
-    assertTrue(tables.contains("container_leases"));
-    assertTrue(tables.contains("main_limits"));
-    assertFalse(tables.contains("agent_sessions"));
   }
 
   @Test
@@ -789,121 +278,6 @@ class SchemaManagerTest {
   }
 
   @Test
-  void freshBaselineEqualsFloorPlusOnRamp() {
-    new SchemaManager(db).migrate();
-    try (var floor = Sqlite.open(tempDir.resolve("floor.db"))) {
-      FloorSchema.stage(floor);
-      new SchemaManager(floor).migrate();
-
-      assertEquals(canonicalSchema(db), canonicalSchema(floor));
-    }
-  }
-
-  @Test
-  void migrateOnRampsAFloorDatabaseInOneStepPreservingRows() {
-    try (var floor = Sqlite.open(tempDir.resolve("floor.db"))) {
-      FloorSchema.stage(floor);
-      floor.execute(
-          "INSERT INTO specs (id, title, status, priority, created_at, updated_at, project,"
-              + " updated_by, rev, base_rev)"
-              + " VALUES ('auth', 'OAuth', 'review', 7, 'c', 'u', 'acme', 'uday', 'r1', 'r0')");
-      floor.execute(
-          "INSERT INTO spec_content (spec_id, body, plan, updated_at)"
-              + " VALUES ('auth', 'body', 'plan', 't')");
-      var schema = new SchemaManager(floor);
-      assertEquals(SchemaManager.FLOOR_VERSION, schema.currentVersion());
-
-      schema.migrate();
-
-      assertEquals(SchemaManager.CURRENT_VERSION, schema.currentVersion());
-      var row =
-          floor
-              .queryOne(
-                  "SELECT title, status, priority, project, updated_by, rev, base_rev"
-                      + " FROM specs WHERE id = 'auth'",
-                  r ->
-                      List.of(
-                          r.text(0),
-                          r.text(1),
-                          String.valueOf(r.integer(2)),
-                          r.text(3),
-                          r.text(4),
-                          r.text(5),
-                          r.text(6)))
-              .orElseThrow();
-      assertEquals(List.of("OAuth", "review", "7", "acme", "uday", "r1", "r0"), row);
-      assertEquals(
-          "body",
-          floor
-              .queryOne("SELECT body FROM spec_content WHERE spec_id = 'auth'", r -> r.text(0))
-              .orElseThrow());
-
-      schema.migrate();
-      assertEquals(SchemaManager.CURRENT_VERSION, schema.currentVersion());
-    }
-  }
-
-  @Test
-  void aMidRampDevelopmentBoxResumesAndConvergesToTheSameSchema() {
-    try (var baseline = Sqlite.open(tempDir.resolve("baseline.db"));
-        var midRamp = Sqlite.open(tempDir.resolve("mid-ramp.db"))) {
-      new SchemaManager(baseline).migrate();
-      FloorSchema.stage(midRamp);
-      midRamp.execute("PRAGMA foreign_keys = OFF");
-      for (var i = 0; i < 3; i++) {
-        midRamp.execute(SchemaManager.ON_RAMP.get(i));
-        midRamp.execute(
-            "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-            SchemaManager.FLOOR_VERSION + i + 1);
-      }
-      midRamp.execute("PRAGMA foreign_keys = ON");
-
-      new SchemaManager(midRamp).migrate();
-
-      assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(midRamp).currentVersion());
-      assertEquals(canonicalSchema(baseline), canonicalSchema(midRamp));
-    }
-  }
-
-  @Test
-  void migrateRefusesABelowFloorDatabaseWithTheRemedy() {
-    stageAtVersion(37);
-    var schema = new SchemaManager(db);
-
-    var refusal = assertThrows(SchemaManager.PreFloorException.class, schema::migrate);
-
-    assertTrue(refusal.getMessage().contains("schema v37"));
-    assertTrue(refusal.getMessage().contains("schema v" + SchemaManager.FLOOR_VERSION));
-    assertTrue(refusal.getMessage().contains("0.14"));
-    assertTrue(refusal.getMessage().contains("let it migrate this database"));
-    assertEquals(37, schema.currentVersion());
-    assertEquals(
-        List.of("schema_version"),
-        db.query(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
-            row -> row.text(0)));
-  }
-
-  @Test
-  void migrateRefusesTheVersionJustBelowTheFloor() {
-    stageAtVersion(SchemaManager.FLOOR_VERSION - 1);
-
-    assertThrows(SchemaManager.PreFloorException.class, () -> new SchemaManager(db).migrate());
-  }
-
-  @Test
-  void migrateRefusesADatabaseNewerThanThisBinary() {
-    stageAtVersion(SchemaManager.CURRENT_VERSION + 1);
-    var schema = new SchemaManager(db);
-
-    var refusal = assertThrows(IllegalStateException.class, schema::migrate);
-
-    assertTrue(refusal.getMessage().contains("schema v" + (SchemaManager.CURRENT_VERSION + 1)));
-    assertTrue(refusal.getMessage().contains("newer than this Sail binary"));
-    assertEquals(SchemaManager.CURRENT_VERSION + 1, schema.currentVersion());
-  }
-
-  @Test
   void migrateOnFreshDatabaseCreatesIndexes() {
     new SchemaManager(db).migrate();
 
@@ -918,315 +292,6 @@ class SchemaManagerTest {
     assertTrue(indexes.contains("idx_runs_project"));
     assertTrue(indexes.contains("idx_runs_spec"));
     assertTrue(indexes.contains("idx_room_messages_page"));
-  }
-
-  @Test
-  void theMessageRekeyCarriesRowsAndTheDeliveryLedgerAcrossTheRename() {
-    var staged = SchemaManager.V1_VERSION + migrationIndex("CREATE TABLE room_messages");
-    stageAtBaseline();
-    for (var v = SchemaManager.V1_VERSION + 1; v <= staged; v++) {
-      db.execute(SchemaManager.MIGRATIONS.get(v - SchemaManager.V1_VERSION - 1));
-      db.execute("INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')", v);
-    }
-    db.execute(
-        "INSERT INTO spec_messages (id, spec_id, author, body, created_at, rev, question)"
-            + " VALUES ('0195a2f0-0000-7000-8000-00000000000a', 'auth', 'uday', 'hi', 't0',"
-            + " '1-a', 1)");
-    db.execute(
-        "INSERT INTO runs (id, project, agent, status, started_at)"
-            + " VALUES ('r-keep', 'acme', 'claude-code', 'completed', 't0')");
-    db.execute(
-        "INSERT INTO run_delivered_messages (run_id, message_id)"
-            + " VALUES ('r-keep', '0195a2f0-0000-7000-8000-00000000000a')");
-
-    new SchemaManager(db).migrate();
-
-    assertEquals(
-        "auth",
-        db.queryOne(
-                "SELECT room_id FROM room_messages"
-                    + " WHERE id = '0195a2f0-0000-7000-8000-00000000000a'",
-                r -> r.text(0))
-            .orElseThrow(),
-        "the re-key is a pure rename: rows carry over with the same room id");
-    assertEquals(
-        1,
-        db.queryOne(
-                "SELECT question FROM room_messages"
-                    + " WHERE id = '0195a2f0-0000-7000-8000-00000000000a'",
-                r -> r.integer(0))
-            .orElseThrow());
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute("DELETE FROM room_messages WHERE id = '0195a2f0-0000-7000-8000-00000000000a'");
-    assertEquals(
-        0,
-        db.query("SELECT run_id FROM run_delivered_messages", r -> r.text(0)).size(),
-        "the delivery ledger's FK followed the rename and still cascades");
-  }
-
-  @Test
-  void specsGainRoomIdBackfilledToTheirOwnIdOnUpgrade() {
-    var staged = SchemaManager.V1_VERSION + migrationIndex("ALTER TABLE specs ADD COLUMN room_id");
-    stageAtBaseline();
-    for (var v = SchemaManager.V1_VERSION + 1; v <= staged; v++) {
-      db.execute(SchemaManager.MIGRATIONS.get(v - SchemaManager.V1_VERSION - 1));
-      db.execute("INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')", v);
-    }
-    db.execute(
-        "INSERT INTO specs (id, title, status, priority, created_at, updated_at, project,"
-            + " updated_by) VALUES ('auth', 'OAuth', 'done', 0, 'c', 'u', 'acme', 'uday')");
-
-    new SchemaManager(db).migrate();
-
-    assertEquals(
-        "auth",
-        db.queryOne("SELECT room_id FROM specs WHERE id = 'auth'", r -> r.text(0)).orElseThrow(),
-        "a pre-decouple spec backfills its identity room id");
-    assertTrue(
-        db.query("PRAGMA table_info(runs)", r -> r.text(1)).contains("room_id"),
-        "chat runs can carry their room");
-  }
-
-  private void stageAtVersion(int version) {
-    db.execute(
-        "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
-    for (var v = 1; v <= version; v++) {
-      db.execute("INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')", v);
-    }
-  }
-
-  private static List<String> canonicalSchema(Sqlite database) {
-    new ContentMigration().apply(database, null, DataMigration.Prompter.NON_INTERACTIVE);
-    return database.query(
-        "SELECT type, name, tbl_name, sql FROM sqlite_master"
-            + " WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'"
-            + " ORDER BY type, name",
-        row -> row.text(0) + "|" + row.text(1) + "|" + row.text(2) + "|" + canonical(row.text(3)));
-  }
-
-  private static String canonical(String sql) {
-    return sql.replace("\"", "").replaceAll("\\s+", " ").replaceAll("\\s*([(),])\\s*", "$1").trim();
-  }
-
-  @Test
-  void postBaselineMigrationsCarryASeededV1DatabaseForward() {
-    stageAtBaseline();
-    db.execute(
-        "INSERT INTO runs (id, project, agent, status, started_at)"
-            + " VALUES ('r1', 'acme', 'claude-code', 'running', 't0')");
-
-    new SchemaManager(db).migrate();
-
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-    var row =
-        db.queryOne(
-                "SELECT project, status, principal, owner FROM runs WHERE id = 'r1'",
-                r ->
-                    List.of(
-                        r.text(0), r.text(1), String.valueOf(r.text(2)), String.valueOf(r.text(3))))
-            .orElseThrow();
-    assertEquals(List.of("acme", "running", "null", "null"), row);
-    assertTrue(
-        db.query(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'run_credentials'",
-                r -> r.text(0))
-            .contains("run_credentials"));
-    assertTrue(
-        db.query(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-                    + " AND name = 'run_delivered_messages'",
-                r -> r.text(0))
-            .contains("run_delivered_messages"));
-    assertTrue(
-        db.query(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'room_messages'",
-                r -> r.text(0))
-            .contains("room_messages"));
-    assertTrue(
-        db.query(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'rooms'",
-                r -> r.text(0))
-            .contains("rooms"));
-    assertTrue(
-        db.query(
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'box_credential'",
-                r -> r.text(0))
-            .contains("box_credential"));
-    assertEquals(
-        "acme",
-        db.queryOne("SELECT project FROM runs WHERE id = 'r1'", r -> r.text(0)).orElseThrow());
-    assertTrue(
-        db.queryOne("SELECT last_activity_at IS NULL FROM runs WHERE id = 'r1'", r -> r.integer(0))
-                .orElseThrow()
-            == 1,
-        "a pre-upgrade run derives a null activity stamp — presence readers must not guess");
-  }
-
-  @Test
-  void aMidChainPostBaselineDatabaseResumesAndConvergesToTheSameSchema() {
-    try (var fresh = Sqlite.open(tempDir.resolve("fresh.db"))) {
-      new SchemaManager(fresh).migrate();
-      stageAtBaseline();
-      db.execute(SchemaManager.MIGRATIONS.getFirst());
-      db.execute(
-          "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-          SchemaManager.V1_VERSION + 1);
-
-      new SchemaManager(db).migrate();
-
-      assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-      assertEquals(canonicalSchema(fresh), canonicalSchema(db));
-    }
-  }
-
-  private static int migrationIndex(String needle) {
-    var migrations = SchemaManager.MIGRATIONS;
-    for (var i = 0; i < migrations.size(); i++) {
-      if (migrations.get(i).contains(needle)) {
-        return i;
-      }
-    }
-    throw new AssertionError("no migration contains: " + needle);
-  }
-
-  @Test
-  void migrationsAddedAfterV0_20_0ComeAfterItsTail() {
-    assertTrue(
-        migrationIndex("CREATE TABLE run_delivered_messages")
-            < migrationIndex("CREATE TABLE run_principals"),
-        "run_delivered_messages was v0.20.0's last migration, so everything added after it —"
-            + " run_principals included — must be appended, never inserted before it. Migrations"
-            + " are addressed by list index; inserting before a shipped release's tail re-points"
-            + " every later version at different SQL and breaks that release's upgrade.");
-  }
-
-  @Test
-  void aV0_20_0ShapedDatabaseUpgradesWithoutRunningTheInsertBeforeItsCreate() {
-    stageAtBaseline();
-    var tail = migrationIndex("CREATE TABLE run_delivered_messages");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, tail + 1).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + tail + 1);
-    db.execute(
-        "INSERT INTO specs (id, title, status, created_at, updated_at)"
-            + " VALUES ('auth', 'T', 'done', 't0', 't0')");
-    db.execute(
-        "INSERT INTO runs (id, project, spec_id, agent, status, started_at, role, principal, owner)"
-            + " VALUES ('r9', 'acme', 'auth', 'codex', 'completed', 't0', 'build', 'codex/r9',"
-            + " 'uday')");
-
-    var schema = new SchemaManager(db);
-    schema.migrate();
-
-    assertEquals(
-        SchemaManager.CURRENT_VERSION,
-        schema.currentVersion(),
-        "a v0.20.0 box must ride the whole 0.21 chain — run_principals, session columns, the runs"
-            + " rebuild, and room_guard — not halt at the first entry added since it shipped");
-    assertEquals(
-        "codex/r9",
-        db.queryOne("SELECT principal FROM run_principals WHERE run_id = 'r9'", r -> r.text(0))
-            .orElseThrow(
-                () ->
-                    new AssertionError(
-                        "run_principals must exist and be back-filled from runs.principal — the"
-                            + " incident was INSERT running before CREATE on a v0.20.0 box")));
-    assertEquals(
-        "ok",
-        db.queryOne("PRAGMA integrity_check", r -> r.text(0)).orElseThrow(),
-        "the upgraded database is structurally sound");
-  }
-
-  @Test
-  void aV0_24_0ShapedDatabaseGainsTheContainerLeasesTable() {
-    stageAtBaseline();
-    var tail = migrationIndex("CREATE TABLE container_leases");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, tail).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + tail);
-
-    new SchemaManager(db).migrate();
-
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-    assertTrue(
-        db.query(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
-                    + " AND name = 'container_leases'",
-                r -> r.text(0))
-            .contains("container_leases"),
-        "a released 0.24.x box must gain the exclusive-container-lease table on upgrade");
-  }
-
-  private void stageAtBaseline() {
-    FloorSchema.stage(db);
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.ON_RAMP.forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION);
-  }
-
-  @Test
-  void theRunsRebuildCarriesRowsAndChildLedgersForwardAndAdmitsRoomRuns() {
-    stageAtBaseline();
-    var priorEntries = migrationIndex("CREATE TABLE runs_v5") + 1;
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, priorEntries).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + priorEntries);
-    db.execute(
-        "INSERT INTO specs (id, title, status, created_at, updated_at)"
-            + " VALUES ('auth', 'T', 'done', 't0', 't0')");
-    db.execute(
-        "INSERT INTO runs (id, project, spec_id, agent, status, started_at, role, principal,"
-            + " owner, session_id) VALUES ('r1', 'acme', 'auth', 'claude-code', 'completed',"
-            + " 't0', 'build', 'claude/r1', 'uday', 'sess-1')");
-    db.execute("INSERT INTO run_principals (run_id, principal) VALUES ('r1', 'claude/r1')");
-    db.execute(
-        "INSERT INTO spec_messages (id, spec_id, author, body, created_at, rev)"
-            + " VALUES ('0195a2f0-0000-7000-8000-000000000001', 'auth', 'uday', 'hi', 't0', '1-a')");
-    db.execute(
-        "INSERT INTO run_delivered_messages (run_id, message_id)"
-            + " VALUES ('r1', '0195a2f0-0000-7000-8000-000000000001')");
-
-    new SchemaManager(db).migrate();
-
-    var survived =
-        db.queryOne(
-                "SELECT project, role, principal, owner, session_id FROM runs WHERE id = 'r1'",
-                r -> List.of(r.text(0), r.text(1), r.text(2), r.text(3), r.text(4)))
-            .orElseThrow();
-    assertEquals(List.of("acme", "build", "claude/r1", "uday", "sess-1"), survived);
-    assertEquals(
-        1,
-        (int)
-            db.queryOne(
-                    "SELECT COUNT(*) FROM run_principals WHERE run_id = 'r1'",
-                    r -> (int) r.integer(0))
-                .orElseThrow(),
-        "the rebuild must never cascade the principal history away");
-    assertEquals(
-        1,
-        (int)
-            db.queryOne(
-                    "SELECT COUNT(*) FROM run_delivered_messages WHERE run_id = 'r1'",
-                    r -> (int) r.integer(0))
-                .orElseThrow(),
-        "the rebuild must never cascade the delivery ledger away");
-    db.execute(
-        "INSERT INTO runs (id, project, agent, status, started_at, role)"
-            + " VALUES ('r2', 'acme', 'claude-code', 'running', 't1', 'room')");
-    assertEquals(
-        "room", db.queryOne("SELECT role FROM runs WHERE id = 'r2'", r -> r.text(0)).orElseThrow());
   }
 
   @Test
@@ -1270,330 +335,17 @@ class SchemaManagerTest {
         "a deleted run takes its guard baseline with it");
   }
 
-  @Test
-  void theQuestionColumnArrivesDefaultedOnPreUpgradeMessages() {
-    stageAtBaseline();
-    var priorEntries = migrationIndex("ADD COLUMN question");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, priorEntries).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + priorEntries);
-    db.execute(
-        "INSERT INTO specs (id, title, status, created_at, updated_at)"
-            + " VALUES ('auth', 'T', 'pending', 't0', 't0')");
-    db.execute(
-        "INSERT INTO spec_messages (id, spec_id, author, body, created_at, rev)"
-            + " VALUES ('0195a2f0-0000-7000-8000-000000000002', 'auth', 'uday', 'hi', 't0',"
-            + " '1-a')");
-
-    new SchemaManager(db).migrate();
-
-    assertEquals(
-        0L,
-        (long)
-            db.queryOne(
-                    "SELECT question FROM room_messages"
-                        + " WHERE id = '0195a2f0-0000-7000-8000-000000000002'",
-                    r -> r.integer(0))
-                .orElseThrow(),
-        "a pre-upgrade message was never a question");
-    assertTrue(
-        new MessageStore(db)
-            .append("auth", "claude/r1", "stuck?", null, MessageStore.Mark.QUESTION)
-            .question());
-  }
-
-  @Test
-  void aV0_27_0ShapedDatabaseConvergesAndShedsTheLegacyColumns() {
-    stageAtBaseline();
-    var tail = migrationIndex("ALTER TABLE specs ADD COLUMN engagement");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, tail).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + tail);
-    db.execute(
-        "INSERT INTO specs (id, title, status, created_at, updated_at)"
-            + " VALUES ('pre', 'T', 'draft', 't0', 't0')");
-    db.execute(
-        "INSERT INTO runs (id, project, agent, status, started_at, role) VALUES"
-            + " ('r-pre', 'p', 'keep', 'completed', 't0', 'room')");
-
-    new SchemaManager(db).migrate();
-
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-    assertTrue(
-        db.query(
-                "SELECT name FROM pragma_table_info('specs') WHERE name IN ('wake', 'engagement')",
-                r -> r.text(0))
-            .isEmpty(),
-        "the conversation-side columns retire with the rebuild");
-    assertEquals(
-        "T", db.queryOne("SELECT title FROM specs WHERE id = 'pre'", r -> r.text(0)).orElseThrow());
-    assertEquals(
-        "keep",
-        db.queryOne("SELECT agent FROM runs WHERE id = 'r-pre'", r -> r.text(0)).orElseThrow(),
-        "the runs_v7 rebuild carries prior rows forward");
-    db.execute(
-        "INSERT INTO runs (id, project, agent, status, started_at, role) VALUES"
-            + " ('r-chat', 'p', 'claude-code', 'running', 't0', 'room-full')");
-    assertThrows(
-        SqliteException.class,
-        () ->
-            db.execute(
-                "INSERT INTO runs (id, project, agent, status, started_at, role) VALUES"
-                    + " ('r-bad', 'p', 'claude-code', 'running', 't0', 'shout')"));
-  }
-
-  @Test
-  void theSpecsRebuildShedsConversationColumnsAndKeepsRowsChildrenAndConstraints() {
-    var staged = SchemaManager.V1_VERSION + migrationIndex("CREATE TABLE specs_v2");
-    stageAtBaseline();
-    db.execute("PRAGMA foreign_keys = OFF");
-    for (var v = SchemaManager.V1_VERSION + 1; v <= staged; v++) {
-      db.execute(SchemaManager.MIGRATIONS.get(v - SchemaManager.V1_VERSION - 1));
-      db.execute("INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')", v);
-    }
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO specs (id, title, status, created_at, updated_at, project, wake, engagement,"
-            + " room_id) VALUES ('auth', 'OAuth', 'pending', 't0', 't1', 'acme', 'on',"
-            + " '{\"agent\":\"claude-code\"}', 'auth')");
-    db.execute(
-        "INSERT INTO specs (id, title, status, created_at, updated_at) VALUES"
-            + " ('base', 'Base', 'done', 't0', 't0')");
-    db.execute("INSERT INTO spec_dependencies (spec_id, depends_on) VALUES ('auth', 'base')");
-    db.execute("INSERT INTO spec_repos (spec_id, repo) VALUES ('auth', 'api')");
-    db.execute(
-        "INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES ('auth', 'B', 'P', 't0')");
-
-    new SchemaManager(db).migrate();
-
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-    assertTrue(
-        db.query(
-                "SELECT name FROM pragma_table_info('specs') WHERE name IN ('wake', 'engagement')",
-                r -> r.text(0))
-            .isEmpty());
-    assertEquals(
-        "OAuth",
-        db.queryOne("SELECT title FROM specs WHERE id = 'auth'", r -> r.text(0)).orElseThrow());
-    assertEquals(
-        "auth",
-        db.queryOne("SELECT room_id FROM specs WHERE id = 'auth'", r -> r.text(0)).orElseThrow());
-    assertEquals(
-        "base",
+  private String since(String column) {
+    var value =
         db.queryOne(
-                "SELECT depends_on FROM spec_dependencies WHERE spec_id = 'auth'", r -> r.text(0))
-            .orElseThrow());
-    assertEquals(
-        "B",
-        db.queryOne("SELECT body FROM spec_content WHERE spec_id = 'auth'", r -> r.text(0))
-            .orElseThrow());
-    assertTrue(
-        db.query("SELECT * FROM pragma_foreign_key_check", r -> r.text(0)).isEmpty(),
-        "the rebuild leaves no dangling child references");
-    assertTrue(
-        db.query(
-                    "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_specs_project'",
-                    r -> r.text(0))
-                .size()
-            == 1);
-    assertThrows(
-        SqliteException.class,
-        () ->
-            db.execute(
-                "INSERT INTO specs (id, title, status, created_at, updated_at) VALUES"
-                    + " ('bad', 'T', 'shouting', 't0', 't0')"));
-  }
-
-  @Test
-  void fromThe0_46_3ReleaseAFindingsFollowUpLinkBecomesItsFollowUpAndTheBoxLocalTablesGo() {
-    stageAtBaseline();
-    var prior = migrationIndex("ALTER TABLE reviews ADD COLUMN findings_hash");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    db.execute(
-        "INSERT INTO specs (id, title, status, created_at, updated_at)"
-            + " VALUES ('auth', 'T', 'done', 't0', 't0')");
-    db.execute(
-        "INSERT INTO specs (id, title, status, created_at, updated_at)"
-            + " VALUES ('auth-followup', 'F', 'pending', 't0', 't0')");
-    db.execute(
-        "INSERT INTO reviews (id, spec_id, iteration, status, created_at)"
-            + " VALUES ('r1', 'auth', 1, 'failed', 't0')");
-    db.execute(
-        "INSERT INTO review_stages (id, review_id, name, stage_type, status, finding_counts)"
-            + " VALUES ('s1', 'r1', 'security', 'agent', 'failed', '{\"HIGH\": 2}')");
-    for (var id : List.of("f1", "f2", "f3")) {
-      db.execute(
-          "INSERT INTO review_findings (id, stage_id, severity, category, title, description,"
-              + " confidence, resolution) VALUES (?, 's1', 'HIGH', 'SECURITY', 'Leak', 'D',"
-              + " 0.9, 'OPEN')",
-          id);
-    }
-    db.execute("INSERT INTO spec_source_findings (spec_id, finding_id) VALUES ('auth', 'f1')");
-    db.execute(
-        "INSERT INTO spec_source_findings (spec_id, finding_id) VALUES ('auth-followup', 'f1')");
-    db.execute(
-        "INSERT INTO spec_source_findings (spec_id, finding_id) VALUES ('auth-followup', 'f2')");
-    db.execute(
-        """
-        INSERT INTO spec_attachments (id, spec_id, filename, content_type, size_bytes,
-            storage_path, created_at) VALUES ('a1', 'auth', 'x', 'text/plain', 1, '/x', 't0')""");
-
-    new SchemaManager(db).migrate();
-
-    assertEquals(
-        List.of("auth-followup", "auth-followup", "null"),
-        db.query(
-            "SELECT COALESCE(followup, 'null') FROM review_findings ORDER BY id", r -> r.text(0)),
-        "the latest link of each finding becomes its follow-up");
-    assertEquals(
-        "",
-        db.queryOne(
-                "SELECT COALESCE(findings_hash, '') FROM reviews WHERE id = 'r1'", r -> r.text(0))
-            .orElseThrow(),
-        "the data migration folds the rows into content; the schema only makes room");
-    var tables =
-        db.query("SELECT name FROM sqlite_master WHERE type = 'table'", row -> row.text(0));
-    assertFalse(tables.contains("spec_source_findings"));
-    assertFalse(tables.contains("spec_attachments"));
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-  }
-
-  @Test
-  void fromTheUnreleased0_46_4ShapeABoxGetsATableForWhatItWroteOfEachSharedFile() {
-    stageAtBaseline();
-    var prior = migrationIndex("CREATE TABLE materialized_files");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    assertFalse(tables().contains("materialized_files"));
-
-    new SchemaManager(db).migrate();
-
-    assertTrue(tables().contains("materialized_files"));
-    var files = new FileStore(db);
-    var hash = files.blobs().putText("a");
-    files.recordMaterialized("acme/a.txt", hash, 0644);
-    assertTrue(files.copyOf("acme/a.txt", hash, 0644).ours());
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-  }
-
-  @Test
-  void aDatabaseFromTheReleaseBeforeCatalogsIsMintedOneOnUpgradeAndNamesNoMainYet() {
-    stageAtBaseline();
-    var prior = migrationIndex("CREATE TABLE catalog");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    assertFalse(tables().contains("catalog"));
-
-    new SchemaManager(db).migrate();
-
-    var catalog = new DatabaseCatalog(db);
-    assertTrue(catalog.id().matches("[0-9a-f]{32}"), catalog.id());
-    assertEquals(Optional.empty(), catalog.main());
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-  }
-
-  private List<String> tables() {
-    return db.query("SELECT name FROM sqlite_master WHERE type = 'table'", row -> row.text(0));
-  }
-
-  @Test
-  void anEventStoredBeforePublishersWereStampedSurvivesWithNone() {
-    stageAtBaseline();
-    var prior = migrationIndex("ALTER TABLE events ADD COLUMN publisher");
-    db.execute("PRAGMA foreign_keys = OFF");
-    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
-    db.execute("PRAGMA foreign_keys = ON");
-    db.execute(
-        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-        SchemaManager.V1_VERSION + prior);
-    db.execute(
-        "INSERT INTO events (timestamp, type, project, spec_id, agent, host, data)"
-            + " VALUES ('t0', 'spec_dispatched', 'acme', 'auth', 'sail', 'box', '{}')");
-
-    new SchemaManager(db).migrate();
-
-    var events = new EventStore(db);
-    var before = events.forSpec("auth").getFirst();
-    assertEquals(
-        List.of("spec_dispatched", "sail", "{}"),
-        List.of(before.type(), before.agent(), before.data()));
-    assertNull(before.publisher());
-    events.insert(
-        new EventStore.EventRow(
-            0,
-            "t1",
-            "agent_session_stopped",
-            "acme",
-            "auth",
-            "claude",
-            "box",
-            "{}",
-            "{\"handle\":\"ada\"}"));
-    assertEquals("{\"handle\":\"ada\"}", events.forSpec("auth").getLast().publisher());
-    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
-  }
-
-  @Test
-  void theFindingsRebuildCarriesRowsAndSourceLinksForwardAndAdmitsDisputed() {
-    stageAtBaseline();
-    db.execute(
-        "INSERT INTO specs (id, title, status, created_at, updated_at)"
-            + " VALUES ('auth', 'T', 'done', 't0', 't0')");
-    db.execute(
-        "INSERT INTO reviews (id, spec_id, iteration, status, created_at)"
-            + " VALUES ('r1', 'auth', 1, 'failed', 't0')");
-    db.execute(
-        "INSERT INTO review_stages (id, review_id, name, stage_type, status)"
-            + " VALUES ('s1', 'r1', 'security', 'agent', 'failed')");
-    db.execute(
-        "INSERT INTO review_findings (id, stage_id, severity, category, title, description,"
-            + " confidence, resolution) VALUES ('f1', 's1', 'HIGH', 'SECURITY', 'Leak', 'D',"
-            + " 0.9, 'OPEN')");
-    db.execute("INSERT INTO spec_source_findings (spec_id, finding_id) VALUES ('auth', 'f1')");
-
-    new SchemaManager(db).migrate();
-
-    var survived =
-        db.queryOne(
-                "SELECT title, resolution, carried_from, resolution_evidence, carry_evidence"
-                    + " FROM review_findings WHERE id = 'f1'",
-                r ->
-                    List.of(
-                        r.text(0),
-                        r.text(1),
-                        String.valueOf(r.text(2)),
-                        String.valueOf(r.text(3)),
-                        String.valueOf(r.text(4))))
+                "SELECT COALESCE(" + column + ", '') FROM specs WHERE id = 's'", row -> row.text(0))
             .orElseThrow();
-    assertEquals(List.of("Leak", "OPEN", "null", "null", "null"), survived);
-    assertEquals(
-        "auth",
-        db.queryOne("SELECT followup FROM review_findings WHERE id = 'f1'", r -> r.text(0))
-            .orElseThrow(),
-        "the rebuild must never cascade the follow-up links away");
-    db.execute("UPDATE review_findings SET resolution = 'DISPUTED' WHERE id = 'f1'");
-    assertEquals(
-        "DISPUTED",
-        db.queryOne("SELECT resolution FROM review_findings WHERE id = 'f1'", r -> r.text(0))
-            .orElseThrow());
+    return value.isEmpty() ? null : value;
+  }
+
+  private void stageAtVersion(int version) {
+    db.execute(
+        "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
+    db.execute("INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')", version);
   }
 }

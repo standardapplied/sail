@@ -172,62 +172,6 @@ class ScopedHeadsTest {
     assertEquals(Optional.of("alpha"), log.headProject("room", "alpha-work"));
   }
 
-  @Test
-  void theBackfillFillsEveryLiveHeadAndLeavesAPrunedOneUnknown() {
-    var kept = seed("alpha");
-    var gone = seed("beta");
-    specs.updateStatus("beta-work", SpecStatus.ARCHIVED);
-    var erasure = new Erasure(db);
-    erasure.erase(erasure.closure(List.of(new Erasure.Target("spec", "beta-work"))), "local");
-    specs.delete("alpha-work");
-    db.execute("UPDATE change_heads SET project = NULL");
-
-    var report = new ScopedHeadsMigration().apply(db, null, DataMigration.Prompter.NON_INTERACTIVE);
-
-    assertEquals(Optional.of("alpha"), log.headProject("spec", "alpha-work"));
-    assertEquals(Optional.of("alpha"), log.headProject("room", "alpha-work"));
-    assertEquals(Optional.of("alpha"), log.headProject("message", kept.message()));
-    assertEquals(Optional.of("alpha"), log.headProject("run", kept.run()));
-    assertEquals(Optional.of("alpha"), log.headProject("review", kept.review()));
-    assertEquals(Optional.of("alpha"), log.headProject("file", "alpha/notes.md"));
-    assertEquals(Optional.of("alpha"), log.headProject("project", "alpha"));
-    assertEquals(Optional.of("beta"), log.headProject("project", "beta"));
-    assertEquals(Optional.of("beta"), log.headProject("file", "beta/notes.md"));
-    for (var target :
-        List.of(
-            new Erasure.Target("spec", "beta-work"),
-            new Erasure.Target("room", "beta-work"),
-            new Erasure.Target("message", gone.message()),
-            new Erasure.Target("run", gone.run()),
-            new Erasure.Target("review", gone.review()))) {
-      assertEquals(
-          Optional.empty(),
-          log.headProject(target.type(), target.id()),
-          target + ": pruned before heads carried a project");
-    }
-    assertEquals(
-        DataMigration.Report.of(
-            10,
-            0,
-            6,
-            List.of(
-                "6 change head(s) name no project (pruned before this release); only unscoped"
-                    + " nodes hear of them.")),
-        report);
-    assertEquals(ScopedHeadsMigration.NAME, new ScopedHeadsMigration().name());
-    assertTrue(DataMigrations.all().stream().anyMatch(ScopedHeadsMigration.class::isInstance));
-  }
-
-  @Test
-  void aBackfillWithNothingUnknownSaysNothing() {
-    seed("alpha");
-    db.execute("UPDATE change_heads SET project = NULL");
-
-    assertEquals(
-        new DataMigration.Report(8, 0, 0, List.of()),
-        new ScopedHeadsMigration().apply(db, null, DataMigration.Prompter.NON_INTERACTIVE));
-  }
-
   private record Seeded(String message, String run, String review) {}
 
   private Seeded seed(String project) {

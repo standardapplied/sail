@@ -21,7 +21,7 @@ curl -fsSL https://raw.githubusercontent.com/standardapplied/sail/main/install.s
 `sail upgrade` replaces `/usr/local/bin/sail` and converges the database; `sail upgrade
 --binary <file>` installs a local build the same way. Linux (amd64) runs a full host. macOS
 (arm64) runs as a thin client that drives a remote host over SSH. Upgrade main first, then
-nodes: sync refuses a peer behind the fleet floor before any data moves and names the remedy.
+nodes: sync refuses a peer on another sync protocol before any data moves and names the remedy.
 
 Sail installs what it runs on and nothing else: Incus from Zabbly's stable repository, and
 zfsutils-linux for a zfs pool. It holds the incus packages, so neither `apt upgrade` nor
@@ -75,8 +75,7 @@ then re-pins main's new host key (`sudo ssh-keygen -R <main-ip>`, then `sudo sai
 has not pushed yet. Work main took after the copy is lost with it and is not rebuilt from the node:
 that sync drops what the node had pulled of it, says so once per type, and keeps each row in its
 history (`sudo sail spec history <id>`). A main restored in place from an older copy is treated the
-same way. A main set up empty is a new org: every node refuses to sync with it. A copy taken before
-0.54.0 counts as a new org too, so take a fresh one after upgrading.
+same way. A main set up empty is a new org: every node refuses to sync with it.
 
 Mast, the desktop client, is a thin client of a box: specs, rooms and reviews over its API and
 event stream, terminals and files over its pty host.

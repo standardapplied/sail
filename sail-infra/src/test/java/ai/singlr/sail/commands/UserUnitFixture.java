@@ -8,12 +8,11 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PtyHostUnit;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
-import ai.singlr.sail.store.DataMigration;
+import ai.singlr.sail.store.BoxDatabase;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -122,13 +121,7 @@ final class UserUnitFixture implements AutoCloseable {
           handle: uday
         """);
     try (var db = Sqlite.open(sail.resolve("sail.db"))) {
-      MigrateCommand.applyMigrations(
-          db,
-          "sail.db",
-          DataMigration.Prompter.NON_INTERACTIVE,
-          false,
-          true,
-          OperatorCommand.PLAIN);
+      BoxDatabase.prepare(db);
     }
   }
 

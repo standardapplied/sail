@@ -28,8 +28,7 @@ class CommandsUseTheSeamTest {
           "ServerStartCommand",
           "SyncServerCommand",
           "FdeCommand",
-          "PairingRevocation",
-          "OwnBoxPairings");
+          "PairingRevocation");
 
   @Test
   void commandsUseOperationsInsteadOfOpeningStores() throws Exception {

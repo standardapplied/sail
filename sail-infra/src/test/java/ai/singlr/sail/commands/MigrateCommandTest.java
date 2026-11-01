@@ -12,11 +12,10 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
-import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.engine.Apt;
 import ai.singlr.sail.engine.HostProvisioner;
-import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.NeedrestartPolicy;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -25,13 +24,8 @@ import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.pty.PtyEvents;
-import ai.singlr.sail.pty.PtyIdentity;
-import ai.singlr.sail.pty.PtyRooms;
-import ai.singlr.sail.pty.PtySessionHost;
-import ai.singlr.sail.store.DataMigration;
-import ai.singlr.sail.store.DataMigrator;
-import ai.singlr.sail.store.LegacyDataMigration;
+import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -42,12 +36,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import picocli.CommandLine.Help.Ansi;
 
 class MigrateCommandTest {
 
@@ -67,79 +61,6 @@ class MigrateCommandTest {
     if (db != null) {
       db.close();
     }
-  }
-
-  @Test
-  void aBoxIdIsAssignedFromTheHostnameOnlyToARoledBoxWithoutOne() {
-    var base = HostYaml.fromMap(Map.of("storage_backend", "dir"));
-    assertTrue(MigrateCommand.assignBoxId(base, "devbox").isEmpty(), "no role, no identity");
-    var node =
-        HostConfigSetCommand.applyChange(
-            HostConfigSetCommand.applyChange(base, "sync-role", "node"),
-            "sync-main",
-            "sail@maindevbox");
-    var assigned = MigrateCommand.assignBoxId(node, "devbox").orElseThrow();
-    assertEquals("devbox", assigned.sync().boxId());
-    assertEquals("sail@maindevbox", assigned.sync().main());
-    assertTrue(MigrateCommand.assignBoxId(assigned, "renamed").isEmpty(), "an id is kept");
-  }
-
-  @Test
-  void aMigrationNoteNamesItsCommandAsItsReaderTypesIt() {
-    var runs =
-        List.of(
-            new DataMigrator.Run(
-                "materialized-files",
-                false,
-                new DataMigration.Report(
-                    1,
-                    0,
-                    1,
-                    List.of(Remedy.of("restore access and rerun ", Remedy.sail("migrate"))))));
-
-    assertTrue(
-        summaryLines(runs, OperatorCommand.SUDO)
-            .contains("restore access and rerun sudo sail migrate"));
-    assertTrue(
-        summaryLines(runs, OperatorCommand.PLAIN)
-            .contains("restore access and rerun sail migrate"));
-  }
-
-  private static List<String> summaryLines(List<DataMigrator.Run> runs, OperatorCommand reader) {
-    return captureStdout(() -> MigrateCommand.printSummary("test.db", 1, 1, runs, reader))
-        .lines()
-        .toList();
-  }
-
-  @Test
-  void applyMigrationsBringsTheSchemaCurrent() {
-    MigrateCommand.applyMigrations(
-        db, "test.db", DataMigration.Prompter.NON_INTERACTIVE, false, true, OperatorCommand.PLAIN);
-
-    assertTrue(
-        new SchemaManager(db).currentVersion() > 0, "schema should have migrated from empty");
-  }
-
-  @Test
-  void migratedSchemaExposesTheCurrentSpecColumns() {
-    MigrateCommand.applyMigrations(
-        db, "test.db", DataMigration.Prompter.NON_INTERACTIVE, false, true, OperatorCommand.PLAIN);
-
-    assertDoesNotThrow(() -> new SpecStore(db).findById("none"));
-  }
-
-  @Test
-  void migrateRegistersTheV1DataFloorOnce() {
-    MigrateCommand.applyMigrations(
-        db, "test.db", DataMigration.Prompter.NON_INTERACTIVE, false, true, OperatorCommand.PLAIN);
-
-    assertEquals(
-        1L,
-        db.queryOne(
-                "SELECT COUNT(*) FROM data_migrations WHERE name = ?",
-                row -> row.integer(0),
-                LegacyDataMigration.NAME)
-            .orElseThrow());
   }
 
   @Test
@@ -197,13 +118,11 @@ class MigrateCommandTest {
         assertThrows(
             IllegalStateException.class,
             () ->
-                MigrateCommand.runMigrations(
+                MigrateCommand.converge(
                     fresh,
                     true,
-                    true,
                     new MigrateCommand.Scope.Refused("staged"),
-                    record(steps),
-                    OperatorCommand.PLAIN));
+                    (db, json) -> steps.add("host")));
 
     assertEquals("staged", refused.getMessage());
     assertFalse(Files.exists(fresh.getParent()));
@@ -211,62 +130,105 @@ class MigrateCommandTest {
   }
 
   @Test
-  void aDatabaseOnlyRunImportsIntoTheDatabaseAndLeavesTheHostAlone() {
+  void aDatabaseOnlyRunCreatesTheSchemaAndLeavesTheHostAlone() {
     var copy = tempDir.resolve("copy/sail.db");
     var steps = new ArrayList<String>();
 
     var err =
         captureStderr(
             () ->
-                MigrateCommand.runMigrations(
+                MigrateCommand.converge(
                     copy,
                     true,
-                    true,
                     new MigrateCommand.Scope.DatabaseOnly("only the copy"),
-                    record(steps),
-                    OperatorCommand.PLAIN));
+                    (db, json) -> steps.add("host")));
 
-    assertEquals(List.of("imports"), steps);
-    assertTrue(err.contains("only the copy"), err);
+    assertEquals(List.of(), steps);
+    assertEquals("only the copy\n", err);
     try (var migrated = Sqlite.open(copy)) {
-      assertTrue(new SchemaManager(migrated).currentVersion() > 0);
+      assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(migrated).currentVersion());
+      assertDoesNotThrow(() -> new SpecStore(migrated).findById("none"));
     }
   }
 
   @Test
-  void aBoxRunImportsThenConvergesTheHost() {
-    var steps = new ArrayList<String>();
+  void aMigratedDatabaseHoldsTheDemoOnceSeededByThisBoxsMachinery() {
+    var path = tempDir.resolve("demo/sail.db");
 
-    MigrateCommand.runMigrations(
-        tempDir.resolve("box/sail.db"),
-        true,
-        true,
-        new MigrateCommand.Scope.Box(),
-        record(steps),
-        OperatorCommand.PLAIN);
+    MigrateCommand.converge(
+        path, true, new MigrateCommand.Scope.DatabaseOnly(""), (db, json) -> {});
+    MigrateCommand.converge(
+        path, true, new MigrateCommand.Scope.DatabaseOnly(""), (db, json) -> {});
 
-    assertEquals(List.of("imports", "host"), steps);
+    try (var migrated = Sqlite.open(path)) {
+      assertEquals(
+          List.of("demo"),
+          new ProjectStore(migrated).list().stream().map(ProjectStore.ProjectRow::name).toList());
+      assertEquals(
+          List.of(Actor.system().handle()),
+          new ChangeLog(migrated)
+              .history("project", "demo").stream().map(ChangeLog.Entry::actor).toList());
+    }
   }
 
   @Test
-  void theImportsWriteAsThisBoxsMachinery() {
-    var importedAs = new ArrayList<Actor>();
+  void aBoxRunPreparesTheDatabaseThenConvergesTheHost() {
+    var steps = new ArrayList<String>();
+    var path = tempDir.resolve("box/sail.db");
 
-    MigrateCommand.runMigrations(
-        tempDir.resolve("box/sail.db"),
+    MigrateCommand.converge(
+        path,
         true,
-        true,
-        new MigrateCommand.Scope.DatabaseOnly("only the copy"),
-        new MigrateCommand.Convergence(
-            (db, json) -> importedAs.add(Actor.current()), (db, json) -> {}),
-        OperatorCommand.PLAIN);
+        new MigrateCommand.Scope.Box(),
+        (db, json) -> steps.add("host at v" + new SchemaManager(db).currentVersion()));
 
-    assertEquals(List.of(Actor.system()), importedAs);
+    assertEquals(List.of("host at v" + SchemaManager.CURRENT_VERSION), steps);
   }
 
-  private static MigrateCommand.Convergence record(List<String> steps) {
-    return new MigrateCommand.Convergence(
-        (db, json) -> steps.add("imports"), (db, json) -> steps.add("host"));
+  @Test
+  void aReaderIsToldWhichDatabaseWasPreparedAtWhichSchemaAndThatTheDemoWasSeeded() {
+    var path = tempDir.resolve("told/sail.db");
+
+    var out =
+        captureStdout(
+            () ->
+                MigrateCommand.converge(
+                    path, false, new MigrateCommand.Scope.Box(), (db, json) -> {}));
+
+    assertEquals(
+        Ansi.AUTO.string(
+                "  @|green ✓|@ Database: "
+                    + path
+                    + " @|faint (schema v"
+                    + SchemaManager.CURRENT_VERSION
+                    + ")|@")
+            + "\n"
+            + Ansi.AUTO.string("  @|green ✓|@ demo project seeded")
+            + "\n",
+        out);
+  }
+
+  @Test
+  void aDatabaseOfAnotherReleaseIsRefusedAndTheHostIsLeftAlone() {
+    var path = tempDir.resolve("old/sail.db");
+    try (var old = Sqlite.open(Files.createDirectories(path.getParent()).resolve("sail.db"))) {
+      old.execute(
+          "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)");
+      old.execute("INSERT INTO schema_version (version, applied_at) VALUES (244, 'staged')");
+    } catch (Exception e) {
+      throw new IllegalStateException(e);
+    }
+    var steps = new ArrayList<String>();
+
+    var refused =
+        assertThrows(
+            Remedied.State.class,
+            () ->
+                MigrateCommand.converge(
+                    path, true, new MigrateCommand.Scope.Box(), (db, json) -> steps.add("host")));
+
+    assertEquals(List.of(Remedy.sail("init")), refused.remedy().commands());
+    assertEquals(List.of(), steps);
   }
 
   private static String captureStderr(Runnable action) {
@@ -287,24 +249,12 @@ class MigrateCommandTest {
     var binary = Path.of("/usr/local/bin/sail");
 
     MigrateCommand.ensurePtyHostService(
-        false,
-        shell,
-        SystemdServiceInstaller.Mode.USER,
-        home,
-        binary,
-        home.resolve("pty.sock"),
-        true);
+        false, shell, SystemdServiceInstaller.Mode.USER, home, binary, true);
     assertTrue(shell.invocations().isEmpty(), "no systemctl where the box has no api service");
     assertFalse(Files.exists(home.resolve(".sail/services/sail-pty-host.service")));
 
     MigrateCommand.ensurePtyHostService(
-        true,
-        shell,
-        SystemdServiceInstaller.Mode.USER,
-        home,
-        binary,
-        home.resolve("pty.sock"),
-        true);
+        true, shell, SystemdServiceInstaller.Mode.USER, home, binary, true);
     assertTrue(
         Files.exists(home.resolve(".sail/services/sail-pty-host.service")),
         "a provisioned host gets the pty-host unit");
@@ -324,117 +274,6 @@ class MigrateCommandTest {
       System.setOut(original);
     }
     return out.toString(StandardCharsets.UTF_8);
-  }
-
-  private static void writeOldUnit(Path home) throws Exception {
-    var unit = home.resolve(".sail/services/sail-pty-host.service");
-    Files.createDirectories(unit.getParent());
-    Files.writeString(unit, "[Service]\nExecStart=/usr/local/bin/sail _pty-host\n");
-  }
-
-  private static PtySessionHost liveHost(Path socket, Path sessions) throws Exception {
-    return PtyHostCommand.startHost(
-        socket, sessions, token -> new PtyIdentity("uday", true), PtyRooms.NONE, PtyEvents.NONE);
-  }
-
-  @Test
-  @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
-  void theFirstUpgradePastAnOldUnitNamesTheLiveSessionsItEnds(@TempDir Path home) throws Exception {
-    var socket = home.resolve("pty.sock");
-    writeOldUnit(home);
-    try (var host = liveHost(socket, home.resolve("sessions"));
-        var client = SessionClient.connect(socket, "")) {
-      client.create("s1", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
-      client.create("s2", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
-      var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
-
-      var out =
-          captureStdout(
-              () ->
-                  MigrateCommand.ensurePtyHostService(
-                      true,
-                      shell,
-                      SystemdServiceInstaller.Mode.USER,
-                      home,
-                      Path.of("/usr/local/bin/sail"),
-                      socket,
-                      false));
-
-      assertTrue(out.contains("2 live sessions ended"), out);
-      assertTrue(out.contains("predates live handoff"), out);
-      assertTrue(
-          shell.invocations().stream()
-              .anyMatch(c -> c.contains("systemctl --user restart sail-pty-host.service")),
-          "the restart still proceeds");
-      assertTrue(
-          Files.readString(home.resolve(".sail/services/sail-pty-host.service"))
-              .contains("FileDescriptorStoreMax="),
-          "the unit now carries the store, so the next upgrade is live");
-    }
-  }
-
-  @Test
-  @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
-  void noLiveSessionsMeansNoNoticeAndANewUnitMeansNoNoticeEither(@TempDir Path home)
-      throws Exception {
-    var socket = home.resolve("pty.sock");
-    writeOldUnit(home);
-    try (var host = liveHost(socket, home.resolve("sessions"))) {
-      var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
-      var out =
-          captureStdout(
-              () ->
-                  MigrateCommand.ensurePtyHostService(
-                      true,
-                      shell,
-                      SystemdServiceInstaller.Mode.USER,
-                      home,
-                      Path.of("/usr/local/bin/sail"),
-                      socket,
-                      false));
-      assertFalse(out.contains("pty host restarted"), out);
-
-      try (var client = SessionClient.connect(socket, "")) {
-        client.create("s1", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
-      }
-      var again =
-          captureStdout(
-              () ->
-                  MigrateCommand.ensurePtyHostService(
-                      true,
-                      shell,
-                      SystemdServiceInstaller.Mode.USER,
-                      home,
-                      Path.of("/usr/local/bin/sail"),
-                      socket,
-                      false));
-      assertFalse(again.contains("pty host restarted"), "the unit now has the store: " + again);
-    }
-  }
-
-  @Test
-  void anUnreachableHostIsSaidToBeUnaskableAndTheRestartProceeds(@TempDir Path home)
-      throws Exception {
-    writeOldUnit(home);
-    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
-
-    var out =
-        captureStdout(
-            () ->
-                MigrateCommand.ensurePtyHostService(
-                    true,
-                    shell,
-                    SystemdServiceInstaller.Mode.USER,
-                    home,
-                    Path.of("/usr/local/bin/sail"),
-                    home.resolve("nobody.sock"),
-                    false));
-
-    assertTrue(out.contains("could not be asked"), out);
-    assertTrue(out.contains("predates live handoff"), out);
-    assertTrue(
-        shell.invocations().stream()
-            .anyMatch(c -> c.contains("systemctl --user restart sail-pty-host.service")));
   }
 
   @Test
@@ -568,23 +407,5 @@ class MigrateCommandTest {
     assertEquals(byInit.subList(0, 5), byMigrate.subList(0, 5), "the same script and bytes");
     assertEquals(
         dir.resolve(NeedrestartPolicy.DROP_IN.path().substring(1)).toString(), byMigrate.get(5));
-  }
-
-  @Test
-  void migrationConvergesOnlyTheContainersSailProvisioned() {
-    var probe =
-        new ScriptedShellExecutor()
-            .onOk("incus config device get app sail-api-sock source", "/var/lib/sail/api");
-    var devices = new IncusDeviceManager(probe);
-
-    assertEquals(
-        List.of("app"),
-        MigrateCommand.sailManagedContainers(List.of("app", "stranger", "Not_A_Project"), devices),
-        "an upgrade converges Sail's containers; a foreign instance on the same host must never"
-            + " be handed the API socket, the box credential, or the provenance marker apply --all"
-            + " trusts");
-    assertTrue(
-        probe.invocations().stream().noneMatch(cmd -> cmd.contains("Not_A_Project")),
-        "an invalid name never reaches incus");
   }
 }

@@ -170,7 +170,7 @@ class RoomStoreTest {
     snapshot.put("wake", "on");
     snapshot.put("roster", null);
     snapshot.put("created_by", "uday");
-    snapshot.put("created_at", "2026-08-01T00:00:00Z");
+    snapshot.put(Snapshots.CREATED_AT, "2026-08-01T00:00:00Z");
     snapshot.put(Snapshots.ACTOR, "sam");
 
     Actor.run(Actor.main(), () -> rooms.applyRevision("synced", snapshot, "3-abc"));

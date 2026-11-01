@@ -17,13 +17,11 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.BoxDatabase;
 import ai.singlr.sail.store.ChangeLog;
-import ai.singlr.sail.store.DataMigration;
-import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.HeldProjects;
-import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -76,7 +74,7 @@ class SyncServerCommandTest {
   void setUp() {
     var mainPath = tempDir.resolve("main.db");
     try (var db = Sqlite.open(mainPath)) {
-      MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
+      BoxDatabase.prepare(db);
     }
     mainReplicaDb = SyncDatabase.converge(mainPath, "main");
     mainDb = mainReplicaDb.db();
@@ -163,7 +161,7 @@ class SyncServerCommandTest {
         SyncSession.open(
             clientIn,
             toServer,
-            SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node-box"),
+            SyncWire.Hello.of("1.0.0", "node-box"),
             n -> {},
             ignored -> {},
             nodeDb)) {
@@ -249,7 +247,7 @@ class SyncServerCommandTest {
                   SyncSession.open(
                       clientIn,
                       toServer,
-                      SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node-box"),
+                      SyncWire.Hello.of("1.0.0", "node-box"),
                       n -> {},
                       ignored -> {},
                       nodeDb));

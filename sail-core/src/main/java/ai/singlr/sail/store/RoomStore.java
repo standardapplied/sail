@@ -195,8 +195,8 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * The room for {@code id}, created on demand from the identity fields when absent — the seam that
-   * keeps membership writes safe for a spec whose room predates or postdates the backfill.
+   * The room for {@code id}, created on demand from the identity fields when absent, so a
+   * membership write never needs the room to exist first.
    */
   public RoomRow ensureFor(String id, String project, String title, String assignee, String wake) {
     return db.transaction(
@@ -546,21 +546,14 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
     /**
      * Writes every synced field of {@code snapshot}, at the revision's times ({@link
      * Snapshots#timed}), the creation time it carries verbatim on every lane, so rooms made apart
-     * and merged settle on the one main holds; a revision from a box that predates the times names
-     * its creation time as a field, taken for a room this box does not hold yet and by a node
-     * adopting main's revision, never over a row main holds. The creator is written once: an update
-     * keeps the row's, except that a node adopting main's revision takes main's.
+     * and merged settle on the one main holds. The creator is written once: an update keeps the
+     * row's, except that a node adopting main's revision takes main's.
      */
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
       var now = DateTimeUtils.now().toString();
       var adopting = Actor.current().lane() == Actor.Lane.MAIN;
-      var legacy = adopting || findById(id).isEmpty();
-      var createdAt =
-          Snapshots.timeOr(
-              snapshot,
-              Snapshots.CREATED_AT,
-              legacy ? Snapshots.text(snapshot, "created_at") : null);
+      var createdAt = Snapshots.text(snapshot, Snapshots.CREATED_AT);
       db.execute(
           """
           INSERT INTO rooms (id, project, title, assignee, wake, roster, created_by,

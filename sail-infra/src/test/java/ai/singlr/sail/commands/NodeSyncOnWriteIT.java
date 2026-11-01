@@ -15,10 +15,8 @@ import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.AuthSessionStore;
-import ai.singlr.sail.store.DataMigration;
-import ai.singlr.sail.store.DataMigrations;
+import ai.singlr.sail.store.BoxDatabase;
 import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -103,7 +101,7 @@ class NodeSyncOnWriteIT {
    */
   private static String seedMainWithMemberSession(Path mainDb) {
     try (var db = Sqlite.open(mainDb)) {
-      MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
+      BoxDatabase.prepare(db);
     }
     try (var converged = SyncDatabase.converge(mainDb, "mainbox")) {
       Actor.run(

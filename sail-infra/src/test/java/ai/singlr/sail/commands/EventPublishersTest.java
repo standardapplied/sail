@@ -48,7 +48,6 @@ import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncTransitionSink;
-import ai.singlr.sail.sync.SyncWire;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
@@ -222,7 +221,7 @@ class EventPublishersTest {
                           Actor.sync(ME, Role.MEMBER),
                           () -> SyncServerCommand.roster(main.db, Actor.main()),
                           SyncTransitionSink.NONE,
-                          SyncWire.UPGRADE_FLOOR)),
+                          "1.0.0")),
               SyncOperations.PLAIN_NOTICES);
 
       Acting.by(new Actor(ME, Role.MEMBER, Actor.Lane.CLI), () -> sync.sync(new SyncRequest(null)));

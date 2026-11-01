@@ -9,17 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
-import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ContentFixtures;
-import ai.singlr.sail.store.DataMigration;
-import ai.singlr.sail.store.DataMigrator;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FileStore;
-import ai.singlr.sail.store.MaterializedFilesMigration;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncBox;
@@ -180,38 +175,6 @@ class FilesAuditTest {
   }
 
   @Test
-  void migratesImportDoesNotRepublishMainsStaleCopyOverANodesNewerVersion() throws Exception {
-    ContentFixtures.put(main, "acme", "app.conf", "v1");
-    materialize();
-    SyncBox.round(mainDb, nodeDb, "file");
-    nodePushes("v2");
-
-    var imported = new FileImporter(projectsDir, main, ProjectScope.all()).importAll();
-
-    assertEquals(0, imported.imported(), "the import took main's own stale copy as an edit");
-    assertEquals("v2", ContentFixtures.text(main, "acme", "app.conf"));
-    SyncBox.round(mainDb, nodeDb, "file");
-    assertEquals("v2", ContentFixtures.text(node, "acme", "app.conf"));
-    converged();
-  }
-
-  @Test
-  void migratesImportDoesNotResurrectAFileANodeDeleted() throws Exception {
-    ContentFixtures.put(main, "acme", "app.conf", "v1");
-    materialize();
-    SyncBox.round(mainDb, nodeDb, "file");
-    Acting.system(() -> node.delete("acme", "app.conf"));
-    SyncBox.round(mainDb, nodeDb, "file");
-    assertTrue(main.find("acme", "app.conf").isEmpty());
-
-    new FileImporter(projectsDir, main, ProjectScope.all()).importAll();
-
-    assertTrue(main.find("acme", "app.conf").isEmpty(), "the import resurrected the deleted file");
-    assertEquals(1, materialize().deleted(), "left for the materializer to remove");
-    converged();
-  }
-
-  @Test
   void theRecordGoesWithMainsEraseANodesAdoptionAndANodesPrune() throws Exception {
     var nodeProjects = tempDir.resolve("node-projects");
     ContentFixtures.put(main, "acme", "app.conf", "v1");
@@ -233,44 +196,6 @@ class FilesAuditTest {
 
     assertEquals("v1", Files.readString(copy), "an erased file's copy stays with the project");
     assertEquals("only here", Files.readString(nodeProjects.resolve("acme/files/draft.conf")));
-    converged();
-  }
-
-  @Test
-  void theUpgradeOfAMainThatCompactedPublishesNeitherItsStaleCopyNorADeletedFilesCopy()
-      throws Exception {
-    ContentFixtures.put(main, "acme", "app.conf", "v0");
-    ContentFixtures.put(main, "acme", "gone.conf", "v0");
-    new FileMaterializer(main, projectsDir).materialize("acme");
-    SyncBox.round(mainDb, nodeDb, "file");
-    var last = nodePushesMoreThanHistoryKeeps();
-    SyncBox.pushPastHistory(mainDb, nodeDb, "acme", "gone.conf");
-    Acting.system(() -> node.delete("acme", "gone.conf"));
-    SyncBox.round(mainDb, nodeDb, "file");
-    mainCompacts();
-    mainDb.execute("DELETE FROM materialized_files");
-
-    var seed =
-        new DataMigrator(mainDb, List.of(new MaterializedFilesMigration(projectsDir)))
-            .run(
-                ProjectRegistry.loadFromDisk(tempDir.resolve("no-projects")),
-                DataMigration.Prompter.NON_INTERACTIVE)
-            .getFirst();
-    var imported = new FileImporter(projectsDir, main, ProjectScope.all()).importAll();
-    var report = materialize();
-
-    assertEquals(2, seed.report().ambiguous(), "neither copy matches what compaction left");
-    assertEquals(0, imported.imported(), "the import republished a copy the seed could not tell");
-    assertEquals(last, ContentFixtures.text(main, "acme", "app.conf"));
-    assertTrue(main.find("acme", "gone.conf").isEmpty(), "the import resurrected a deleted file");
-    assertEquals(
-        new FileMaterializer.Report(0, 0, List.of(), List.of("app.conf", "gone.conf")),
-        report,
-        "both copies are kept and reported apart until the person publishes or discards them");
-    assertEquals("v0", Files.readString(copy));
-    Files.delete(copy);
-    assertEquals(new FileMaterializer.Report(1, 0, List.of(), List.of("gone.conf")), materialize());
-    assertEquals(last, Files.readString(copy), "a discarded copy is refreshed");
     converged();
   }
 

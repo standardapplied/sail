@@ -16,9 +16,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /**
- * The sync lane on the binaries engineers install: the released build upgrading to the build under
- * test, across real sshd and the gateway's forced command. See {@link NativeFleet} for how the
- * binaries arrive and why a box is a container.
+ * The sync lane on the binary engineers install, a fleet of the build under test, across real sshd
+ * and the gateway's forced command. See {@link NativeFleet} for how the binaries arrive and why a
+ * box is a container.
  */
 @Timeout(value = 15, unit = TimeUnit.MINUTES)
 class NativeFleetIT {
@@ -30,10 +30,10 @@ class NativeFleetIT {
   private static final int CUT_AFTER_BYTES = 3_000_000;
 
   @Test
-  void aFleetUpgradedMainFirstKeepsEveryWriteAndSurfacesTheConflict() throws Exception {
+  void aFleetKeepsEveryWriteOfAnOfflineNodeAndSurfacesTheConflict() throws Exception {
     try (var fleet = NativeFleet.openOrSkip()) {
-      var main = fleet.main("uday", fleet.released());
-      var mady = fleet.node("mady", fleet.released());
+      var main = fleet.main("uday", fleet.candidate());
+      var mady = fleet.node("mady", fleet.candidate());
       main.serving(
           () -> {
             main.createSpecs("seed", 5, BODY_BYTES);
@@ -63,10 +63,6 @@ class NativeFleetIT {
             mady.retitle("seed-1", "edited on the node");
           });
 
-      main.install(fleet.candidate());
-      aNodeNotYetUpgradedSyncsOrIsToldToUpgrade(mady);
-
-      mady.install(fleet.candidate());
       mady.sailOk("sync");
       assertEquals(List.of("seed-1"), pendingConflicts(mady));
       assertEquals("edited on main", main.title("seed-1"));
@@ -374,41 +370,10 @@ class NativeFleetIT {
   }
 
   @Test
-  void aNodeUpgradedAheadOfMainRecoversOnceMainFollows() throws Exception {
+  void aPruneOnMainLeavesTheNodeNoRowHistoryOrBlobOfItAfterOneRound() throws Exception {
     try (var fleet = NativeFleet.openOrSkip()) {
-      var main = fleet.main("uday", fleet.released());
-      main.serving(() -> main.createSpecs("seed", 3, BODY_BYTES));
+      var main = fleet.main("uday", fleet.candidate());
       var mady = fleet.node("mady", fleet.candidate());
-
-      var ahead = mady.sail("sync");
-
-      var refused = ahead.exit() != 0;
-      if (refused) {
-        assertTrue(ahead.output().contains("upgrade main"), ahead::output);
-      } else {
-        fleet.offline(mady, () -> mady.createSpecs("node-ahead", 1, BODY_BYTES));
-      }
-      main.serving(() -> main.createSpecs("before-upgrade", 1, BODY_BYTES));
-
-      main.install(fleet.candidate());
-      main.serving(() -> main.createSpecs("after-upgrade", 1, BODY_BYTES));
-      mady.sailOk("sync");
-      if (refused) {
-        fleet.offline(mady, () -> mady.createSpecs("node-ahead", 1, BODY_BYTES));
-        mady.sailOk("sync");
-      }
-
-      assertEquals("6", main.query("SELECT count(*) FROM specs WHERE project = 'demo'").strip());
-      fleet.assertConverged(mady);
-      fleet.assertHeadsAgree(mady);
-    }
-  }
-
-  @Test
-  void aPruneOnAnUpgradedMainLeavesTheNodeNoRowHistoryOrBlobOfItAfterOneRound() throws Exception {
-    try (var fleet = NativeFleet.openOrSkip()) {
-      var main = fleet.main("uday", fleet.released());
-      var mady = fleet.node("mady", fleet.released());
       main.serving(
           () -> {
             main.createSpecs("doomed", 1, BODY_BYTES);
@@ -434,10 +399,6 @@ class NativeFleetIT {
         assertEquals(
             "1", mady.query("SELECT count(*) FROM blobs WHERE hash = '" + hash + "'").strip());
       }
-
-      main.install(fleet.candidate());
-      aNodeNotYetUpgradedSyncsOrIsToldToUpgrade(mady);
-      mady.install(fleet.candidate());
 
       main.serving(
           () -> {
@@ -495,7 +456,7 @@ class NativeFleetIT {
       main.catalog("alpha", "beta");
       var nia = fleet.node("nia", fleet.candidate(), "--scoped");
       var uma = fleet.node("uma", fleet.candidate());
-      var released = fleet.node("ole", fleet.released(), "--scoped");
+      var ole = fleet.node("ole", fleet.candidate(), "--scoped");
       main.sailOk("fde", "grant", "nia", "alpha");
       main.sailOk("fde", "grant", "ole", "alpha");
       main.serving(
@@ -512,15 +473,14 @@ class NativeFleetIT {
 
       nia.sailOk("sync");
       uma.sailOk("sync");
-      released.sailOk("sync");
+      ole.sailOk("sync");
 
       assertEquals(
           "a-1\na-2",
-          released.query("SELECT id FROM specs ORDER BY id").strip(),
-          "main scopes a node of the last release all the same");
+          ole.query("SELECT id FROM specs ORDER BY id").strip(),
+          "main scopes a second scoped node to its own grant");
       assertEquals(
-          "0",
-          released.query("SELECT count(*) FROM blobs WHERE hash = '" + betaFile + "'").strip());
+          "0", ole.query("SELECT count(*) FROM blobs WHERE hash = '" + betaFile + "'").strip());
       fleet.assertScopedTo(nia, "alpha");
       assertEquals("2", nia.query("SELECT count(*) FROM specs").strip());
       assertEquals(
@@ -599,16 +559,16 @@ class NativeFleetIT {
       assertEquals(0, NativeFleet.json(nia.sailOk("sync", "--json")).get("pulled"));
 
       main.sailOk("fde", "revoke", "ole", "alpha");
-      var releasedRevoked = released.sail("sync");
+      var oleRevoked = ole.sail("sync");
 
-      assertEquals(0, releasedRevoked.exit(), releasedRevoked::output);
+      assertEquals(0, oleRevoked.exit(), oleRevoked::output);
       assertTrue(
-          releasedRevoked.output().contains("project alpha: dropped from this box with the"),
-          releasedRevoked::output);
+          oleRevoked.output().contains("project alpha: dropped from this box with the"),
+          oleRevoked::output);
       assertEquals(
           "",
-          released.query("SELECT id FROM specs ORDER BY id").strip(),
-          "a node of the last release drops the project main revoked, as one of this build does");
+          ole.query("SELECT id FROM specs ORDER BY id").strip(),
+          "a scoped node drops the project main revoked from it");
     }
   }
 
@@ -745,26 +705,6 @@ class NativeFleetIT {
       VALUES ('run', '%1$s', last_insert_rowid());\
       """
           .formatted(DOOMED_RUN);
-
-  /**
-   * The node's round after main takes the candidate. Below the sync floor it is refused, changes
-   * nothing and names the upgrade; at or above it, it is an ordinary round.
-   */
-  private static void aNodeNotYetUpgradedSyncsOrIsToldToUpgrade(NativeFleet.Box node)
-      throws Exception {
-    var version = node.version();
-    var before = node.replicated();
-    var stale = node.sail("sync");
-    if (NativeFleet.belowFloor(version)) {
-      System.out.println("node at " + version + " is below the sync floor: its round is refused");
-      assertNotEquals(0, stale.exit(), stale::output);
-      assertTrue(stale.output().contains("sail upgrade"), stale::output);
-      assertEquals(before, node.replicated(), "a refused round changed the node");
-    } else {
-      System.out.println("node at " + version + " meets the sync floor: its round goes through");
-      assertEquals(0, stale.exit(), stale::output);
-    }
-  }
 
   private static List<String> pendingConflicts(NativeFleet.Box box) throws Exception {
     return NativeFleet.jsonList(box.sailOk("conflicts", "--json")).stream()

@@ -27,7 +27,6 @@ import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.store.AuthSessionStore;
-import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.EnrollmentTicketStore;
 import ai.singlr.sail.store.FdeBoxes;
 import ai.singlr.sail.store.FdePairingStore;
@@ -666,9 +665,6 @@ public final class FdeCommand implements Runnable {
       if (!before.unrestricted() && before.projects().containsAll(grants)) {
         return;
       }
-      if (!grants.isEmpty()) {
-        new ChangeLog(db).backfillProjects();
-      }
       fdes.restrict(handle);
       grants.forEach(project -> fdes.grant(handle, project));
     }
@@ -851,7 +847,6 @@ public final class FdeCommand implements Runnable {
     var changed = fdes.grantsOf(handle).admits(project) != grant;
     if (changed && !dryRun) {
       if (grant) {
-        new ChangeLog(db).backfillProjects();
         fdes.grant(handle, project);
       } else {
         fdes.revoke(handle, project);

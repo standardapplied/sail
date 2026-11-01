@@ -20,10 +20,8 @@ import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.AuthSessionStore;
-import ai.singlr.sail.store.DataMigration;
-import ai.singlr.sail.store.DataMigrations;
+import ai.singlr.sail.store.BoxDatabase;
 import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncDatabase;
@@ -76,7 +74,7 @@ class ScopeTeardownIT extends AbstractIncusIT {
   private void roundScopedTo(String project) throws Exception {
     var mainPath = tempDir.resolve("main.db");
     try (var db = Sqlite.open(mainPath)) {
-      MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
+      BoxDatabase.prepare(db);
     }
     try (var main = SyncDatabase.converge(mainPath, "main");
         var nodeDb = Sqlite.open(tempDir.resolve("node.db"))) {

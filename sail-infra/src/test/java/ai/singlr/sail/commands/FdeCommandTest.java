@@ -28,8 +28,6 @@ import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
 import ai.singlr.sail.store.AuthSessionStore;
-import ai.singlr.sail.store.ChangeLog;
-import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.FdeBoxes;
 import ai.singlr.sail.store.FdePairingStore;
 import ai.singlr.sail.store.FdeSshKeyStore;
@@ -1553,203 +1551,6 @@ class FdeCommandTest {
     return new String[] {client, (String) decoded(printedCode()).get("token")};
   }
 
-  @Test
-  void anUpgradeRevokesEveryPairingButTheBoxsOwnOnceAndSaysWhichThroughTheSameSeam()
-      throws Exception {
-    var tokens = pairedClientThenUday();
-    var uday = loginsOf("uday");
-    var workstation = Files.readString(workstationKey());
-    out.reset();
-
-    inDb(
-        db -> {
-          MigrateCommand.revokeOtherFdesPairings(db, this::box, false, OperatorCommand.PLAIN);
-          return null;
-        });
-
-    assertEquals(
-        List.of(
-            "  ✓ Revoked client's connect code: a code logs in as root and is minted only for this"
-                + " box's own FDE."),
-        printed());
-    assertEquals(List.of(), loginsOf("client"));
-    assertNull(handleOf(tokens[0]));
-    assertEquals(List.of("uday"), inDb(db -> new FdePairingStore(db).handles()));
-    assertEquals(uday, loginsOf("uday"));
-    assertEquals("uday", handleOf(tokens[1]));
-    assertEquals(workstation, Files.readString(workstationKey()), "it is uday's key");
-
-    out.reset();
-    handle = "nobody";
-    inDb(
-        db -> {
-          MigrateCommand.revokeOtherFdesPairings(db, this::box, false, OperatorCommand.PLAIN);
-          return null;
-        });
-
-    assertEquals(List.of(), printed(), "it runs once");
-    assertEquals("uday", handleOf(tokens[1]));
-  }
-
-  @Test
-  void anUpgradeOfABoxThatNamesNoFdeRevokesEveryPairingAndSaysHowItsOperatorPairsAgain()
-      throws Exception {
-    handle = "uday";
-    assertEquals(0, fde("pair", "uday", "--host", "m", "--email", "uday@x.com"));
-    var token = (String) decoded(printedCode()).get("token");
-    handle = null;
-    out.reset();
-
-    inDb(
-        db -> {
-          MigrateCommand.revokeOtherFdesPairings(db, this::box, false, OperatorCommand.PLAIN);
-          return null;
-        });
-
-    assertEquals(
-        List.of(
-            "  ✓ Revoked uday's connect code: a code logs in as root and is minted only for this"
-                + " box's own FDE. This box names none: if it is uday, name it with 'sail"
-                + " host config set sync-handle uday' and pair again."),
-        printed());
-    assertEquals(List.of(), loginsOf("uday"));
-    assertNull(handleOf(token));
-  }
-
-  @Test
-  void aRehearsalOnACopyRevokesNoPairingAndTheBoxsOwnMigrateDoes() throws Exception {
-    var tokens = pairedClientThenUday();
-    var convergence =
-        new MigrateCommand.Convergence(
-            (db, json) -> {},
-            (db, json) ->
-                MigrateCommand.revokeOtherFdesPairings(db, this::box, json, OperatorCommand.PLAIN));
-    assertFalse(
-        DataMigrations.all().stream()
-            .anyMatch(migration -> migration.name().equals(OwnBoxPairings.NAME)),
-        "every lane runs the registry; only the box's own convergence revokes");
-
-    MigrateCommand.runMigrations(
-        tempDir.resolve("sail.db"),
-        true,
-        true,
-        new MigrateCommand.Scope.DatabaseOnly("only the copy"),
-        convergence,
-        OperatorCommand.PLAIN);
-
-    assertEquals("client", handleOf(tokens[0]));
-    assertEquals(1, loginsOf("client").size());
-
-    MigrateCommand.runMigrations(
-        tempDir.resolve("sail.db"),
-        true,
-        true,
-        new MigrateCommand.Scope.Box(),
-        convergence,
-        OperatorCommand.PLAIN);
-
-    assertNull(handleOf(tokens[0]));
-    assertEquals(List.of(), loginsOf("client"));
-  }
-
-  @Test
-  void anUpgradeThatCannotRevokeSaysSoAndTheNextMigrateFinishesIt() throws Exception {
-    var tokens = pairedClientThenUday();
-    var ssh = home().resolve(".ssh");
-    Files.setPosixFilePermissions(ssh, PosixFilePermissions.fromString("r-x------"));
-    err.reset();
-    inDb(
-        db -> {
-          MigrateCommand.revokeOtherFdesPairings(db, this::box, false, OperatorCommand.PLAIN);
-          return null;
-        });
-    Files.setPosixFilePermissions(ssh, PosixFilePermissions.fromString("rwx------"));
-
-    assertEquals(
-        "  ⚠ Connect codes of FDEs other than this box's own are not all revoked: Could not remove"
-            + " client's key line from root's authorized_keys (AccessDeniedException), so nothing"
-            + " of client was removed and its pairing still works. Check that "
-            + ssh
-            + " is writable by root, then run the command again. Run 'sail migrate' again.\n",
-        err.toString(StandardCharsets.UTF_8));
-    assertEquals("client", handleOf(tokens[0]));
-
-    inDb(
-        db -> {
-          MigrateCommand.revokeOtherFdesPairings(db, this::box, true, OperatorCommand.PLAIN);
-          return null;
-        });
-
-    assertNull(handleOf(tokens[0]));
-  }
-
-  @Test
-  void anUpgradeThatCannotTakeThePairingLockRevokesNothingAndSaysSo() throws Exception {
-    var tokens = pairedClientThenUday();
-    var lock = tempDir.resolve("sail.db.pairings.lock");
-    Files.delete(lock);
-    Files.createDirectory(lock);
-    err.reset();
-
-    inDb(
-        db -> {
-          MigrateCommand.revokeOtherFdesPairings(db, this::box, false, OperatorCommand.PLAIN);
-          return null;
-        });
-
-    assertEquals(
-        "  ⚠ Connect codes of FDEs other than this box's own are not all revoked: Could not take"
-            + " the pairing lock ("
-            + lock
-            + ": Is a directory). Run 'sail migrate' again.\n",
-        err.toString(StandardCharsets.UTF_8));
-    assertEquals("client", handleOf(tokens[0]));
-  }
-
-  @Test
-  void anUpgradeThatRevokesOnePairingAndFailsOnTheNextSaysTheOneItRevoked() throws Exception {
-    var tokens = pairedClientThenUday();
-    handle = "ada";
-    assertEquals(
-        0, fde("pair", "ada", "--host", "m", "--email", "ada@x.com", "--as-workstation-key"));
-    var ada = (String) decoded(printedCode()).get("token");
-    handle = "uday";
-    var client =
-        inDb(
-            db ->
-                new FdePairingStore(db)
-                    .find(new FdeStore(db).byHandle("client").orElseThrow().id())
-                    .orElseThrow()
-                    .publicKey());
-    keygen.incus.container("acme", "Running", PASSWD, accounts("dev:x:1000:1000"));
-    keygen.incus.files.put("acme/home/dev" + AUTHORIZED, client + "\n");
-    keygen.incus.failures.put("file push", new ShellExec.Result(1, "", "Error: I/O error\n"));
-    out.reset();
-    err.reset();
-
-    inDb(
-        db -> {
-          MigrateCommand.revokeOtherFdesPairings(db, this::box, false, OperatorCommand.PLAIN);
-          return null;
-        });
-
-    assertEquals(
-        List.of(
-            "  ✓ Revoked ada's connect code: a code logs in as root and is minted only for this"
-                + " box's own FDE."),
-        printed());
-    assertEquals(
-        "  ⚠ Connect codes of FDEs other than this box's own are not all revoked: Could not remove"
-            + " client's key from this box's containers (Failed to push file to"
-            + " /home/dev/.ssh/authorized_keys: Error: I/O error\n). Its login is revoked, and its"
-            + " token and record are kept until the key is gone: check that 'incus list' answers,"
-            + " then run the command again. Run 'sail migrate' again.\n",
-        err.toString(StandardCharsets.UTF_8));
-    assertNull(handleOf(ada));
-    assertEquals("client", handleOf(tokens[0]));
-    assertEquals(List.of("client", "uday"), inDb(db -> new FdePairingStore(db).handles()));
-  }
-
   @ParameterizedTest
   @CsvSource({"me@mac, ' (me@mac)'", ",''"})
   void pairingWhereTheWorkstationKeyIsAnothersIsRefusedNamingItAndWritesNothing(
@@ -2042,26 +1843,16 @@ class FdeCommandTest {
     assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("nia")));
     assertEquals(ProjectScope.all(), inDb(db -> new FdeStore(db).scopeOf("uma")));
 
-    inDb(
-        db -> {
-          db.execute("UPDATE change_heads SET project = NULL");
-          return null;
-        });
     assertEquals(0, fde("grant", "nia", "alpha", "--dry-run"));
     assertEquals(
         List.of("  ✓ Would grant alpha to nia. Its box holds the project after its next sync."),
         printed());
     assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("nia")));
-    assertEquals(List.of(), inDb(db -> new ChangeLog(db).heldProjects()));
 
     assertEquals(0, fde("grant", "nia", "alpha"));
     assertEquals(
         List.of("  ✓ Granted alpha to nia. Its box holds the project after its next sync."),
         printed());
-    assertEquals(
-        List.of("alpha", "beta"),
-        inDb(db -> new ChangeLog(db).heldProjects()),
-        "a grant fills the heads a release before this one wrote without their project");
     assertEquals(0, fde("grant", "nia", "alpha"));
     assertEquals(List.of("  nia already holds alpha; nothing to do."), printed());
     assertEquals(0, fde("grant", "nia", "beta", "--json"));

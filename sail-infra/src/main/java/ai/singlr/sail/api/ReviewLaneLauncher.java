@@ -7,15 +7,12 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
-import ai.singlr.sail.engine.LegacyFixAgent;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StreamJsonResult;
 import ai.singlr.sail.store.RunStore;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -88,9 +85,6 @@ final class ReviewLaneLauncher implements ReviewLanes {
     var role = invocation.lane().wire();
     try {
       claimed.run();
-      if (invocation.lane() == Lane.FIX) {
-        stopLegacyFixAgent(project, invocation.reviewId());
-      }
       if (!invocation.shown().isEmpty()) {
         runStore.markDelivered(runId, invocation.shown());
       }
@@ -121,23 +115,6 @@ final class ReviewLaneLauncher implements ReviewLanes {
     } catch (RuntimeException e) {
       runReservation.releaseIfAbsent(runId, project, unit);
       throw e;
-    }
-  }
-
-  /**
-   * Ends whatever fix agent an older server left running for {@code reviewId} ({@link
-   * LegacyFixAgent}), so the fix run about to start is the only one on the spec's branch. A
-   * container that cannot say whether one is alive fails the launch: starting beside it is the one
-   * thing this must never do.
-   */
-  private void stopLegacyFixAgent(String project, String reviewId) {
-    try {
-      LegacyFixAgent.stop(shell, project, reviewId);
-    } catch (IOException unanswered) {
-      throw new ApiException(
-          ErrorCode.AGENT_LAUNCH_FAILED,
-          "Could not rule out a fix agent an older server left running.",
-          unanswered);
     }
   }
 

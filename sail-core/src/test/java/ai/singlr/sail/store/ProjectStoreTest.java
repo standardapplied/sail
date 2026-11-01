@@ -174,23 +174,4 @@ class ProjectStoreTest {
     assertTrue(snapshot.get("definition").toString().contains("${GIT_NAME}"));
     assertFalse(snapshot.get("definition").toString().contains("uday@example.com"));
   }
-
-  @Test
-  void canonicalizeScrubsAPreBrickRowAndCountsIt() {
-    db.execute(
-        "INSERT INTO projects (name, definition, created_at, updated_at)"
-            + " VALUES ('legacy', 'git:\n  name: Uday\n  email: uday@example.com\n', 'now', 'now')");
-
-    assertEquals(1, store.canonicalizeDefinitions());
-
-    var definition = store.findByName("legacy").orElseThrow().definition();
-    assertTrue(definition.contains("${GIT_NAME}"));
-    assertFalse(definition.contains("uday@example.com"));
-  }
-
-  @Test
-  void canonicalizeIsANoOpForAlreadyRedactedRows() {
-    store.upsert("acme", "git:\n  name: Uday\n  email: uday@example.com\n");
-    assertEquals(0, store.canonicalizeDefinitions(), "upsert already redacted it");
-  }
 }

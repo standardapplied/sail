@@ -18,12 +18,7 @@ import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyWire;
-import ai.singlr.sail.store.DataMigrations;
-import ai.singlr.sail.store.MaterializedFilesMigration;
-import ai.singlr.sail.store.OrphanErasure;
-import ai.singlr.sail.store.PersonalRoomErasure;
 import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.Sqlite;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -39,24 +34,14 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /**
- * {@code sail upgrade} as the fleet runs it. The box is an incus system container — systemd, root,
- * sshd — provisioned by the released binary the real way, then upgraded to the candidate with
- * {@code sail upgrade --binary}: the install, the new binary's migrations, the {@code sail-api}
- * restart and the pty host's live handoff, end to end. Root's control plane under {@code
+ * {@code sail upgrade} as a box takes it. The box is an incus system container — systemd, root,
+ * sshd — provisioned by the build under test the real way, then upgraded with {@code sail upgrade
+ * --binary} to a second build of the same release (the candidate with one byte appended, so its
+ * bytes differ and the install is real): the install, the new binary's migrate, the {@code
+ * sail-api} restart and the pty host's live handoff, end to end. Root's control plane under {@code
  * /var/lib/sail} is main; the user {@code mady} is a node syncing through the {@code sail} user's
- * forced command, so the gateway lane crosses the upgrade too. The candidate runs from a staged
+ * forced command, so the gateway lane crosses the upgrade too. The second build runs from a staged
  * path of its own, so host state that names the binary it ran from shows.
- *
- * <p>The shared script stands for a box the content migration converted: its row carries the mode
- * the old rule gave a script (0755), its history records none, and the copy an older materializer
- * wrote on disk is 0644 — on main and on the node alike. Main's records of the orphan and the
- * personal-room erasures, and both boxes' records of what they wrote of each shared file ({@code
- * materialized_files} and the seed that fills it), are dropped before the hop, so the candidate's
- * migrate has data migrations to run and record whichever release it hops from: a released box that
- * already seeds its own copies would otherwise remember writing the script at 0755, and the sync
- * after the hop would publish the 0644 on disk as a person's chmod. The node runs the installed
- * binary too, so it is the released one until the hop. Main holds uday's personal room in the demo
- * project as an older sail minted it, and the hop erases it.
  */
 @Timeout(value = 8, unit = TimeUnit.MINUTES)
 class UpgradeE2EIT extends AbstractIncusIT {
@@ -70,9 +55,6 @@ class UpgradeE2EIT extends AbstractIncusIT {
   private static final String NODE = "mady";
   private static final String NODE_DB = "/home/mady/.sail/sail.db";
   private static final String SERVER = "http://127.0.0.1:7070";
-  private static final String SCRIPT_ID = "demo/deploy.sh";
-  private static final String SCRIPT_ON_MAIN = "/root/.sail/projects/demo/files/deploy.sh";
-  private static final String SCRIPT_ON_NODE = "/home/mady/.sail/projects/demo/files/deploy.sh";
   private static final String SESSION = "e2e";
   private static final Pattern PID = Pattern.compile("pid=(\\d+)\\r?\\n");
   private static final Duration COMMAND_DEADLINE = Duration.ofMinutes(5);
@@ -85,38 +67,8 @@ class UpgradeE2EIT extends AbstractIncusIT {
           "/var/lib/sail/host.yaml",
           SshIdentityProvisioner.DROP_IN,
           SshdKeepalive.DROP_IN.path());
-  private static final String PERSONAL_ROOM = "fde-uday-demo-b67a43c29afbe133";
-  private static final String MINT_PERSONAL_ROOM =
-      """
-      INSERT INTO rooms (id, project, title, assignee, created_by, created_at, updated_at,
-          updated_by)
-      VALUES ('%s', 'demo', 'uday', 'uday', 'uday', 't0', 't0', 'uday')"""
-          .formatted(PERSONAL_ROOM);
-  private static final String PERSONAL_ROOM_ERASED =
-      "SELECT count(*) FROM rooms WHERE id = '"
-          + PERSONAL_ROOM
-          + "' UNION ALL SELECT count(*) FROM change_log WHERE entity_id = '"
-          + PERSONAL_ROOM
-          + "' AND kind = 'erasure'";
   private static final String SPECS =
       "SELECT id, title, status, body_hash FROM specs WHERE id LIKE 'seed-%' ORDER BY id";
-  private static final String SCRIPT_REVISIONS =
-      "SELECT count(*) FROM change_log WHERE entity_type = 'file' AND entity_id = '"
-          + SCRIPT_ID
-          + "'";
-  private static final String LEGACY_HISTORY =
-      "UPDATE change_log SET snapshot = json_remove(snapshot, '$.mode')"
-          + " WHERE entity_type = 'file' AND entity_id = '"
-          + SCRIPT_ID
-          + "'";
-  private static final String MODES_RECORDED =
-      "SELECT count(*) FROM change_log WHERE entity_type = 'file' AND entity_id = '"
-          + SCRIPT_ID
-          + "' AND json_extract(snapshot, '$.mode') IS NOT NULL";
-  private static final String SCRIPT_MODE =
-      "SELECT mode FROM project_files WHERE id = '" + SCRIPT_ID + "'";
-  private static final String ORPHANS_ERASED =
-      "SELECT count(*) FROM data_migrations WHERE name = '" + OrphanErasure.NAME + "'";
 
   private static final String PROVISION_MAIN =
       """
@@ -129,7 +81,7 @@ class UpgradeE2EIT extends AbstractIncusIT {
       sail host service install
       sail host ssh-identity
       sail fde add uday --role admin --email uday@example.dev
-      sail migrate --non-interactive
+      sail migrate
       """;
   private static final String PROVISION_NODE =
       """
@@ -148,38 +100,24 @@ class UpgradeE2EIT extends AbstractIncusIT {
         sail spec create --server %s --id seed-$n --title "Seed $n" -p demo \\
           --body-file /tmp/seed-$n.md
       done
-      printf '#!/bin/sh\\necho deploy\\n' > /tmp/deploy.sh
-      chmod 755 /tmp/deploy.sh
-      sail project files add -p demo /tmp/deploy.sh --as deploy.sh
       """
           .formatted(SERVER);
 
   @Test
-  void theReleasedBoxUpgradesToTheCandidateKeepingItsDataServicesAndSessions() throws Exception {
-    var binaries = NativeBinaries.requireOrSkip("the upgrade end to end");
+  void aBoxUpgradesToAnotherBuildKeepingItsDataServicesAndSessions() throws Exception {
+    var candidate = NativeBinaries.requireOrSkip("the upgrade end to end").candidate();
     ensureIncusOrSkip();
     try {
       launchPrepared(BOX);
       UserUnitFixture.await(this::booted, "the box's systemd to finish booting");
-      push(binaries.released(), INSTALLED);
-      push(binaries.candidate(), STAGED);
+      push(candidate, INSTALLED);
+      push(candidate, STAGED);
+      rootOk("printf '\\n' >> " + STAGED);
       rootOk(PROVISION_MAIN);
       provisionNode();
       seed();
       var socket = ptyProxy();
       var pid = openSession(socket);
-      query(
-          "DELETE FROM data_migrations WHERE name IN ('"
-              + OrphanErasure.NAME
-              + "', '"
-              + PersonalRoomErasure.NAME
-              + "', '"
-              + MaterializedFilesMigration.NAME
-              + "')");
-      query("DELETE FROM materialized_files");
-      nodeQuery(
-          "DELETE FROM data_migrations WHERE name = '" + MaterializedFilesMigration.NAME + "'");
-      nodeQuery("DELETE FROM materialized_files");
       rootOk(
           "install -d -m 700 "
               + REHEARSAL
@@ -188,15 +126,12 @@ class UpgradeE2EIT extends AbstractIncusIT {
               + " '.backup "
               + REHEARSAL
               + "/sail.db'");
-      var driver = driver();
-
-      aFileThatIsNotSailIsRefusedBeforeAnythingChanges(driver, socket, pid);
+      aFileThatIsNotSailIsRefusedBeforeAnythingChanges(socket, pid);
       theStagedCandidateMayNotMigrateTheBoxItIsNotInstalledOn(socket, pid);
 
       var specs = query(SPECS);
-      var revisions = List.of(query(SCRIPT_REVISIONS), nodeQuery(SCRIPT_REVISIONS));
       var before = serviceStates();
-      var upgraded = root(driver + " upgrade --binary " + STAGED);
+      var upgraded = root(INSTALLED + " upgrade --binary " + STAGED);
       System.out.println(upgraded.stdout() + upgraded.stderr());
       assertEquals(0, upgraded.exitCode(), () -> upgraded.stdout() + upgraded.stderr() + journal());
 
@@ -205,23 +140,12 @@ class UpgradeE2EIT extends AbstractIncusIT {
       theSessionLivesOnInTheSameProcessAndStillTakesInput(socket, pid);
       theDatabaseStaysSharedWithTheGateway();
       hostStateNamesTheInstalledBinary();
-      theLegacyScriptSyncsWithoutAConflict(revisions);
+      theNodeTakesItsOwnUpgradeAndSyncsThroughTheGateway();
       upgradingAgainRestartsNothing();
       aRehearsalConvergesTheCopyAndTouchesNothingElse();
     } finally {
       deleteContainerQuietly(BOX);
     }
-  }
-
-  /** The released sail drives the hop when it knows {@code --binary}, as the fleet's would. */
-  private String driver() throws Exception {
-    if (rootOk(INSTALLED + " upgrade --help").contains("--binary")) {
-      System.out.println("sail upgrade --binary driven by the released binary: the fleet's hop");
-      return INSTALLED;
-    }
-    System.out.println(
-        "sail upgrade --binary driven by the candidate: the released sail upgrade has no --binary");
-    return STAGED;
   }
 
   private void provisionNode() throws Exception {
@@ -241,23 +165,12 @@ class UpgradeE2EIT extends AbstractIncusIT {
             (String) joined.get("public_key")));
   }
 
-  /**
-   * Specs through the API, the shared script synced to the node, and then both boxes put in the
-   * state the content migration leaves a legacy box in.
-   */
+  /** Specs through the API, synced to the node. */
   private void seed() throws Exception {
     awaitListening("sail-api");
     rootOk(SEED);
     nodeOk("sail sync");
-    query(LEGACY_HISTORY);
-    query(MINT_PERSONAL_ROOM);
-    rootOk("chmod 644 " + SCRIPT_ON_MAIN);
-    nodeQuery(LEGACY_HISTORY);
-    ok(List.of("runuser", "-u", NODE, "--", "chmod", "644", SCRIPT_ON_NODE));
-    assertEquals(List.of("493", "493"), List.of(query(SCRIPT_MODE), nodeQuery(SCRIPT_MODE)));
-    assertEquals(List.of("0", "0"), List.of(query(MODES_RECORDED), nodeQuery(MODES_RECORDED)));
-    assertEquals("644", ok(List.of("stat", "-c", "%a", SCRIPT_ON_MAIN)).strip());
-    assertEquals("644", ok(List.of("stat", "-c", "%a", SCRIPT_ON_NODE)).strip());
+    assertEquals(query(SPECS), nodeQuery(SPECS));
   }
 
   /** Opens the session whose child prints its pid and blocks on {@code read}; returns the pid. */
@@ -277,23 +190,23 @@ class UpgradeE2EIT extends AbstractIncusIT {
     }
   }
 
-  private void aFileThatIsNotSailIsRefusedBeforeAnythingChanges(
-      String driver, Path socket, String pid) throws Exception {
+  private void aFileThatIsNotSailIsRefusedBeforeAnythingChanges(Path socket, String pid)
+      throws Exception {
     rootOk("printf 'not a binary\\n' > " + NOT_SAIL + " && chmod 755 " + NOT_SAIL);
     var installed = sha(INSTALLED);
     var services = serviceStates();
 
-    var refused = root(driver + " upgrade --binary " + NOT_SAIL);
+    var refused = root(INSTALLED + " upgrade --binary " + NOT_SAIL);
 
     assertNotEquals(0, refused.exitCode(), refused::stdout);
     assertTrue(refused.stderr().contains(NOT_SAIL), refused::stderr);
-    assertEquals(installed, sha(INSTALLED), "the released binary stays in place");
+    assertEquals(installed, sha(INSTALLED), "the installed binary stays in place");
     assertEquals(services, serviceStates(), "nothing restarted");
     assertSessionAlive(socket, pid);
   }
 
   /**
-   * The candidate's own migrate, run from where it was staged, is refused before it opens the
+   * The staged build's own migrate, run from where it was staged, is refused before it opens the
    * database: migrated by it, the database would lock the installed sail out, and host state must
    * keep naming the installed binary. The refusal says how to install it instead.
    */
@@ -301,14 +214,18 @@ class UpgradeE2EIT extends AbstractIncusIT {
       throws Exception {
     var hostState = hostState();
     var services = serviceStates();
+    var stamped = query("SELECT applied_at FROM schema_version");
 
-    var refused = root(STAGED + " migrate --non-interactive");
+    var refused = root(STAGED + " migrate");
 
     assertNotEquals(0, refused.exitCode(), refused::stdout);
     assertTrue(
         refused.stderr().contains("sudo " + INSTALLED + " upgrade --binary " + STAGED),
         refused::stderr);
-    assertEquals("0", query(ORPHANS_ERASED), "the staged candidate migrated the database");
+    assertEquals(
+        stamped,
+        query("SELECT applied_at FROM schema_version"),
+        "the staged build opened the database");
     assertEquals(hostState, hostState(), "the staged candidate rewrote host state");
     assertEquals(services, serviceStates(), "the staged candidate restarted a service");
     assertSessionAlive(socket, pid);
@@ -318,13 +235,8 @@ class UpgradeE2EIT extends AbstractIncusIT {
     assertEquals(ok(List.of(STAGED, "-V")), ok(List.of("sail", "-V")));
     assertEquals(sha(STAGED), sha(INSTALLED));
     assertEquals(
-        Integer.toString(candidateSchema()), query("SELECT max(version) FROM schema_version"));
-    var recorded = query("SELECT name FROM data_migrations").lines().toList();
-    for (var migration : DataMigrations.all()) {
-      assertTrue(recorded.contains(migration.name()), migration.name() + " not in " + recorded);
-    }
-    assertEquals("1", query(ORPHANS_ERASED), "the candidate ran its data migrations");
-    assertEquals("0\n1", query(PERSONAL_ROOM_ERASED), "the personal room is erased on main");
+        Integer.toString(SchemaManager.CURRENT_VERSION),
+        query("SELECT max(version) FROM schema_version"));
     assertEquals(specs, query(SPECS), "the seeded specs are intact");
   }
 
@@ -356,9 +268,10 @@ class UpgradeE2EIT extends AbstractIncusIT {
     }
   }
 
+  /** Every database file, its lock files included, is the sail group's to read and write. */
   private void theDatabaseStaysSharedWithTheGateway() throws Exception {
-    for (var line : rootOk("stat -c '%n %U:%G %a' " + DB + "*").lines().toList()) {
-      assertTrue(line.endsWith(" root:sail 660"), line);
+    for (var line : rootOk("stat -c '%n %G %a' " + DB + "*").lines().toList()) {
+      assertTrue(line.endsWith(" sail 660"), line);
     }
     assertEquals("root:sail 640", rootOk("stat -c '%U:%G %a' /var/lib/sail/host.yaml").strip());
   }
@@ -381,26 +294,22 @@ class UpgradeE2EIT extends AbstractIncusIT {
   }
 
   /**
-   * The node takes its own upgrade — its binary is already the candidate, so that is the new
-   * binary's migrate — then writes through the gateway. No revision of the script is recorded on
-   * either box, nothing conflicts, and both copies end up with the script's mode.
+   * The node takes its own upgrade — its binary is already the installed one, so that is its own
+   * migrate — then writes through the gateway, and nothing conflicts on either box.
    */
-  private void theLegacyScriptSyncsWithoutAConflict(List<String> revisions) throws Exception {
-    nodeOk("sail migrate --non-interactive");
+  private void theNodeTakesItsOwnUpgradeAndSyncsThroughTheGateway() throws Exception {
+    nodeOk("sail migrate");
     nodeOk(
         """
         printf 'from the node\\n' > ~/node.txt
         sail project files add -p demo ~/node.txt --as node.txt
         sail sync
         """);
-    rootOk("sail project files pull -p demo");
 
-    assertEquals(revisions, List.of(query(SCRIPT_REVISIONS), nodeQuery(SCRIPT_REVISIONS)));
     assertEquals(List.of(), NativeFleet.jsonList(nodeOk("sail conflicts --json")));
     assertEquals(List.of(), NativeFleet.jsonList(rootOk("sail conflicts --json")));
     assertEquals("1", query("SELECT count(*) FROM project_files WHERE id = 'demo/node.txt'"));
-    assertEquals("755", ok(List.of("stat", "-c", "%a", SCRIPT_ON_MAIN)).strip());
-    assertEquals("755", ok(List.of("stat", "-c", "%a", SCRIPT_ON_NODE)).strip());
+    assertEquals(query(SPECS), nodeQuery(SPECS));
   }
 
   private void upgradingAgainRestartsNothing() throws Exception {
@@ -418,17 +327,15 @@ class UpgradeE2EIT extends AbstractIncusIT {
     var hostState = hostState();
     var services = serviceStates();
     var copy = REHEARSAL + "/sail.db";
-    assertEquals("0", ok(List.of("sqlite3", copy, ORPHANS_ERASED)).strip());
 
-    var rehearsed = rootOk("SAIL_DATA_DIR=" + REHEARSAL + " sail migrate --non-interactive");
+    var rehearsed = rootOk("SAIL_DATA_DIR=" + REHEARSAL + " sail migrate");
 
     assertEquals(hostState, hostState(), "a rehearsal rewrote host state");
     assertEquals(services, serviceStates(), "a rehearsal restarted a service");
     assertTrue(rehearsed.contains("Rehearsal: migrated " + copy + " only"), rehearsed);
     assertEquals(
-        Integer.toString(candidateSchema()),
+        Integer.toString(SchemaManager.CURRENT_VERSION),
         ok(List.of("sqlite3", copy, "SELECT max(version) FROM schema_version")).strip());
-    assertEquals("1", ok(List.of("sqlite3", copy, ORPHANS_ERASED)).strip());
   }
 
   private void assertSessionAlive(Path socket, String pid) throws Exception {
@@ -452,14 +359,6 @@ class UpgradeE2EIT extends AbstractIncusIT {
     var matcher = PID.matcher(seen);
     matcher.find();
     return matcher.group(1);
-  }
-
-  private static int candidateSchema() {
-    try (var db = Sqlite.openMemory()) {
-      var schema = new SchemaManager(db);
-      schema.migrate();
-      return schema.currentVersion();
-    }
   }
 
   /**

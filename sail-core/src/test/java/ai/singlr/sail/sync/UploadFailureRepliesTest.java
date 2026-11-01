@@ -155,7 +155,7 @@ class UploadFailureRepliesTest {
           SyncWire.encode(
               new SyncWire.Welcome(
                   SyncWire.PROTOCOL,
-                  SyncWire.UPGRADE_FLOOR,
+                  "1.0.0",
                   "main",
                   "node",
                   limits.fileMax(),

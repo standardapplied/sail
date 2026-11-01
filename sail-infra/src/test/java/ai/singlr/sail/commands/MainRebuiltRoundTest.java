@@ -26,14 +26,12 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.BoxDatabase;
 import ai.singlr.sail.store.ChangeLog;
-import ai.singlr.sail.store.DataMigration;
-import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.DatabaseCatalog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
-import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -126,7 +124,7 @@ class MainRebuiltRoundTest {
   private Main main(String file, String id, String project) {
     var path = tempDir.resolve(file);
     try (var db = Sqlite.open(path)) {
-      MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
+      BoxDatabase.prepare(db);
     }
     var database = SyncDatabase.converge(path, id);
     mains.add(database);
@@ -471,33 +469,6 @@ class MainRebuiltRoundTest {
         List.of(1),
         round.types().stream().filter(t -> "spec".equals(t.type())).map(t -> t.entries()).toList(),
         "the erasure alone is paged, not every head");
-  }
-
-  @Test
-  void aProjectMigrateImportsIntoAMainRestoredInPlaceReachesTheNode() throws Exception {
-    round();
-    var copy = copyOf(serving, "copy.db", serving.id());
-    Acting.as("nia", () -> new ProjectStore(serving.db()).upsert("delta", "name: delta\n"));
-    round();
-    serving = copy;
-    var projects = tempDir.resolve("main-projects");
-    Files.createDirectories(projects.resolve("delta"));
-    Files.writeString(
-        projects.resolve("delta").resolve(SailPaths.PROJECT_DESCRIPTOR), "name: delta\n");
-    Acting.system(
-        () ->
-            new ProjectImporter(projects, new ProjectStore(serving.db()), ProjectScope.all())
-                .importAll());
-
-    round();
-
-    assertEquals(projectRows(serving.db()), projectRows(nodeDb));
-    assertNotEquals(
-        "nia",
-        nodeDb
-            .queryOne("SELECT created_by FROM projects WHERE name = 'delta'", r -> r.text(0))
-            .orElseThrow(),
-        "the node holds main's delta, not the one main lost");
   }
 
   private static List<String> projectRows(Sqlite db) {
@@ -873,7 +844,7 @@ class MainRebuiltRoundTest {
     round();
     var other =
         new SyncWire.Welcome(
-            SyncWire.PROTOCOL, "0.54.0", "main", "nia", 0, ProjectScope.all(), "another");
+            SyncWire.PROTOCOL, "0.54.0", "main", "nia", 4096, ProjectScope.all(), "another");
     answering =
         (in, out) -> {
           SyncWire.readFramed(in);
@@ -900,14 +871,14 @@ class MainRebuiltRoundTest {
     nodeDb.execute("UPDATE catalog SET main = NULL");
     write("g2");
     var before = held(nodeDb);
-    var older =
+    var uncatalogued =
         new SyncWire.Welcome(
-            SyncWire.PROTOCOL, "0.53.0", "main", "nia", 0, ProjectScope.all(), null);
+            SyncWire.PROTOCOL, "0.53.0", "main", "nia", 4096, ProjectScope.all(), null);
     answering =
         (in, out) -> {
           SyncWire.readFramed(in);
           in.close();
-          out.write((SyncWire.encode(older) + "\n").getBytes(StandardCharsets.UTF_8));
+          out.write((SyncWire.encode(uncatalogued) + "\n").getBytes(StandardCharsets.UTF_8));
           out.flush();
         };
 
@@ -968,5 +939,32 @@ class MainRebuiltRoundTest {
     public boolean isDryRun() {
       return false;
     }
+  }
+
+  @Test
+  void aProjectMigrateImportsIntoAMainRestoredInPlaceReachesTheNode() throws Exception {
+    round();
+    var copy = copyOf(serving, "copy.db", serving.id());
+    Acting.as("nia", () -> new ProjectStore(serving.db()).upsert("delta", "name: delta\n"));
+    round();
+    serving = copy;
+    var projects = tempDir.resolve("main-projects");
+    Files.createDirectories(projects.resolve("delta"));
+    Files.writeString(
+        projects.resolve("delta").resolve(SailPaths.PROJECT_DESCRIPTOR), "name: delta\n");
+    Acting.system(
+        () ->
+            new ProjectImporter(projects, new ProjectStore(serving.db()), ProjectScope.all())
+                .importAll());
+
+    round();
+
+    assertEquals(projectRows(serving.db()), projectRows(nodeDb));
+    assertNotEquals(
+        "nia",
+        nodeDb
+            .queryOne("SELECT created_by FROM projects WHERE name = 'delta'", r -> r.text(0))
+            .orElseThrow(),
+        "the node holds main's delta, not the one main lost");
   }
 }

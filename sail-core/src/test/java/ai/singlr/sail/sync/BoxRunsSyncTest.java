@@ -220,27 +220,6 @@ class BoxRunsSyncTest {
   }
 
   @Test
-  void aRunMainAlreadyHoldsActingForNoOneIsStampedAndFinishesOnEveryBox() {
-    var legacy = reserve(ada, "ada", null, "adhoc");
-    SyncBox.quiesce(main, ada);
-    for (var box : List.of(main, ada)) {
-      box.db.execute("UPDATE runs SET owner = NULL WHERE id = ?", legacy);
-      box.db.execute(
-          """
-          UPDATE change_log SET snapshot = json_set(snapshot, '$.owner', NULL)
-          WHERE entity_type = 'run' AND entity_id = ?""",
-          legacy);
-    }
-    finish(ada, legacy);
-
-    SyncBox.quiesce(main, ada);
-
-    assertEquals("completed", runs(main).findById(legacy).orElseThrow().status());
-    assertEquals("ada", runs(main).findById(legacy).orElseThrow().owner());
-    SyncBox.assertEqualToMain(main, ada);
-  }
-
-  @Test
   void mainDeniesARunThatActsForNoOne() throws IOException {
     ownSpec(main, "ada", "mine");
     SyncBox.quiesce(main, ada);

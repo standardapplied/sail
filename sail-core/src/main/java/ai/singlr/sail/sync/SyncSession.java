@@ -190,22 +190,18 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
    */
   TypeReport reconcile(String type, LocalReplica local);
 
-  /**
-   * The handle main authenticated this session as, blank for a session that names no FDE; empty
-   * against a main that predates saying so.
-   */
-  Optional<String> handle();
+  /** The handle main authenticated this session as, blank for a session that names no FDE. */
+  String handle();
 
   /**
-   * Main's {@code limits.file_max} as its welcome named it, 0 from a main that predates saying so:
-   * the ceiling the node enforces together with its own before a file ever reaches a sync.
+   * Main's {@code limits.file_max} as its welcome named it: the ceiling the node enforces together
+   * with its own before a file ever reaches a sync.
    */
   long mainFileMax();
 
   /**
-   * The projects main's welcome scoped this node to: every project unless main scoped its FDE, and
-   * from a main that predates scoping, which names none. Main alone decides it; the node holds what
-   * main sends and drops what main stops sending.
+   * The projects main's welcome scoped this node to: every project unless main scoped its FDE. Main
+   * alone decides it; the node holds what main sends and drops what main stops sending.
    */
   ProjectScope scope();
 
@@ -216,7 +212,7 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
    */
   void keep(Set<String> projects);
 
-  /** The catalog of main's database as its welcome named it; empty from a main that never says. */
+  /** The catalog of main's database as its welcome named it; empty when main names none. */
   Optional<String> catalog();
 
   /** The box id main welcomed this session as: the peer this node's checkpoints are kept for. */
@@ -265,9 +261,7 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
    * Opens a session with {@code hello}. A {@link SyncWire.Welcome} yields the paged session, with
    * one line of {@code notice} when this node runs ahead of main's version, and each offer main
    * denies handed to {@code denied} as it settles, for the caller to word; a refusal or anything
-   * else fails naming it. An answer that is a message but names no {@code op} is what every
-   * protocol before 4 put on the wire, so it fails naming the remedy — upgrade main. Anything that
-   * is not a message at all is reported as what it is, never blamed on main's version.
+   * else fails naming it, and an answer that is not a message at all is reported as what it is.
    */
   static SyncSession open(
       InputStream in,
@@ -287,13 +281,6 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
       Consumer<Denial> denied) {
     var context = SyncWire.context(hello);
     var line = Rpc.exchange(in, out, SyncWire.encode(hello), context);
-    if (SyncWire.predatesOps(line)) {
-      throw new SyncTransportException(
-          "refused",
-          context + ": main is on a sync protocol this node cannot speak:",
-          Remedy.of("upgrade main ('", Remedy.sail("upgrade"), "' on main), then sync again"),
-          null);
-    }
     SyncWire.Response response;
     try {
       response = SyncWire.decodeResponse(line);

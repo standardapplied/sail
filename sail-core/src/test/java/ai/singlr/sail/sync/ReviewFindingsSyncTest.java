@@ -11,20 +11,15 @@ import static ai.singlr.sail.sync.SyncFixtures.findingKeptInChangeLog;
 import static ai.singlr.sail.sync.SyncFixtures.findings;
 import static ai.singlr.sail.sync.SyncFixtures.ownSpec;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
-import ai.singlr.sail.store.DataMigration;
-import ai.singlr.sail.store.DataMigrator;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.Finding;
-import ai.singlr.sail.store.ReviewFindingsMigration;
 import ai.singlr.sail.store.ReviewStore;
 import java.nio.file.Path;
 import java.util.List;
@@ -397,65 +392,6 @@ class ReviewFindingsSyncTest {
         () ->
             erasure.erase(
                 erasure.closure(List.of(new Erasure.Target(Erasure.SPEC, specId))), "local"));
-  }
-
-  private void foldLegacyFindings(SyncBox box) {
-    new DataMigrator(box.db, List.of(new ReviewFindingsMigration()))
-        .run(
-            ProjectRegistry.loadFromDisk(dir.resolve("no-projects")),
-            DataMigration.Prompter.NON_INTERACTIVE);
-  }
-
-  /** A review main took from ada before findings were content, with box-local finding rows. */
-  private String legacyReview(String specId, String findingId) {
-    var review = failedReview(specId);
-    round(ada);
-    var stage = reviews.stagesForReview(review).getFirst().id();
-    ada.db.execute(
-        """
-        INSERT INTO review_findings (id, stage_id, severity, category, file, line_start, line_end,
-            title, description, confidence, resolution)
-        VALUES (?, ?, 'HIGH', 'SECURITY', 'A.java', 1, 2, 'legacy', 'd', 0.9, 'OPEN')""",
-        findingId,
-        stage);
-    return review;
-  }
-
-  @Test
-  void aNodesLegacyFindingsFoldIntoOneRevisionThatTheNextRoundPushesToMainAndOnToBob() {
-    ownSpec(main, "ada", "s", "ada");
-    round(ada);
-    round(bob);
-    var review = legacyReview("s", "legacy-finding");
-    var before = new ChangeLog(ada.db).history("review", review).size();
-
-    foldLegacyFindings(ada);
-    foldLegacyFindings(ada);
-
-    var history = new ChangeLog(ada.db).history("review", review);
-    assertEquals(before + 1, history.size(), "one revision, folded once");
-    assertEquals(Actor.system().handle(), history.getLast().actor());
-    SyncBox.assertConvergedWithin(2, main, ada, bob);
-    for (var box : List.of(main, bob)) {
-      assertEquals(List.of("legacy-finding"), ids(findings(box, review)), box.id);
-    }
-  }
-
-  @Test
-  void aNodesLegacyFindingsOfASpecNoLongerItsAreDeniedAndKeptInItsChangeLog() {
-    ownSpec(main, "ada", "s", "ada");
-    round(ada);
-    var review = legacyReview("s", "legacy-finding");
-    assign(main, "root", "s", "bob");
-
-    foldLegacyFindings(ada);
-    var denied = round(ada);
-
-    assertEquals(List.of(review), deniedReviews(denied), "the denial is announced");
-    assertEquals(List.of(), findings(ada, review), "ada holds main's version exactly");
-    assertTrue(findingKeptInChangeLog(ada, review, "legacy-finding"));
-    assertFalse(findingKeptInChangeLog(main, review, "legacy-finding"));
-    SyncBox.assertConvergedWithin(2, main, ada, bob);
   }
 
   private static List<String> ids(List<Finding> findings) {

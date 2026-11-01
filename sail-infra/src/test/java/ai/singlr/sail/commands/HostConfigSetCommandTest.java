@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
@@ -276,10 +277,22 @@ class HostConfigSetCommandTest {
   }
 
   @Test
+  void aRoleSetByHandMintsTheBoxIdOnceSoTheBoxNeverSyncsAsItsHostname() {
+    assertNull(BASE.sync().boxId());
+
+    var roled = HostConfigSetCommand.applyChange(BASE, "sync-role", "node");
+    var again = HostConfigSetCommand.applyChange(roled, "sync-role", "main");
+
+    assertNotNull(roled.sync().boxId());
+    assertEquals(roled.sync().boxId(), again.sync().boxId(), "an id, once held, is kept");
+    assertEquals(roled.sync().boxId(), HostSyncCommand.withBoxId(again).sync().boxId());
+  }
+
+  @Test
   void syncRoleAndMainComposeAndPreserveOtherFields() {
     var asNode = HostConfigSetCommand.applyChange(BASE, "sync-role", "node");
     var pointed = HostConfigSetCommand.applyChange(asNode, "sync-main", "sail@maindevbox");
-    var minted = HostSyncCommand.withBoxId(pointed, "devbox");
+    var minted = HostSyncCommand.withBoxId(pointed);
     var identified = HostConfigSetCommand.applyChange(minted, "sync-handle", "mady");
     assertEquals(minted.sync().boxId(), identified.sync().boxId());
 
@@ -293,7 +306,7 @@ class HostConfigSetCommandTest {
       @TempDir Path dir) throws Exception {
     var hostYaml = dir.resolve("host.yaml");
     var dbPath = dir.resolve("sail.db");
-    var standalone = HostSyncCommand.withBoxId(BASE, "devbox");
+    var standalone = HostSyncCommand.withBoxId(BASE);
     YamlUtil.dumpToFile(standalone.toMap(), hostYaml);
     String run;
     try (var db = Sqlite.open(dbPath)) {

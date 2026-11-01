@@ -54,7 +54,7 @@ public final class NodeIdentity {
 
   /**
    * Whether {@code host.yaml}, read whole, declares this box main or standalone: the reading on
-   * which a box forgets the scope main last named it ({@code MigrationRunner}). Unlike {@link
+   * which a box forgets the scope main last named it ({@code BoxDatabase}). Unlike {@link
    * #authoritative()}, a file absent, empty or unreadable answers no — one being moved into the
    * shared data directory or truncated by a writer would otherwise pass for a standalone box's, and
    * a node would lose its grant until its next round.

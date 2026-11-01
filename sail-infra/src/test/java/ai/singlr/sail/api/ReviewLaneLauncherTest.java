@@ -169,23 +169,6 @@ class ReviewLaneLauncherTest {
   }
 
   @Test
-  void aFixLaunchWhoseLegacyCheckTheContainerWillNotRunFailsAndLeavesNoRunRunning() {
-    var invocation = invocation(Lane.FIX, List.of());
-    loop.container.failing("SAIL_RUN_ID=$1", "Error: websocket: close 1006");
-
-    var failure = assertThrows(ApiException.class, () -> launch(invocation));
-
-    assertEquals(ErrorCode.AGENT_LAUNCH_FAILED, failure.failure().errorCode());
-    assertTrue(failure.getCause().getMessage().contains("older server"), failure.toString());
-    assertTrue(
-        loop.container.launched().isEmpty(),
-        "no fix agent starts while nothing says whether an older one still works the branch");
-    assertEquals(
-        List.of("failed"),
-        loop.runs.forReview(invocation.reviewId()).stream().map(RunStore.RunRow::status).toList());
-  }
-
-  @Test
   void aRunsOutputIsItsOwnLogsFinalAnswerAndBlankWhenItWroteNone() throws Exception {
     var runId = launch(invocation(Lane.REVIEW, List.of()));
     var run = loop.runs.findById(runId).orElseThrow();

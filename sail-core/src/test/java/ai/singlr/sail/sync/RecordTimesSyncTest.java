@@ -330,23 +330,6 @@ class RecordTimesSyncTest {
   }
 
   @Test
-  void aRoomABoxBeforeTheTimesMakesKeepsItsCreatorsTime() {
-    var rooms = new RoomStore(main.db);
-    var offer = new LinkedHashMap<String, Object>();
-    offer.put("project", "acme");
-    offer.put("title", "Parlour");
-    offer.put("created_at", "2020-01-01T00:00:00Z");
-
-    var taken =
-        Actor.call(
-            Actor.sync("ada", Role.MEMBER),
-            () -> rooms.commitRevision("parlour", offer, null, rooms.authority()));
-
-    assertInstanceOf(PushOutcome.Accepted.class, taken);
-    assertEquals("2020-01-01T00:00:00Z", rooms.findById("parlour").orElseThrow().createdAt());
-  }
-
-  @Test
   void aRestoredRoomIsStampedWhenItIsRestored() {
     var rooms = new RoomStore(main.db);
     Acting.as("main", () -> rooms.create(room("lounge")));

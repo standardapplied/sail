@@ -58,7 +58,7 @@ class HostSyncCommandTest {
 
   @Test
   void asMainSetsTheMainRole() {
-    var updated = HostSyncCommand.configure(BASE, true, null, "devbox");
+    var updated = HostSyncCommand.configure(BASE, true, null);
 
     assertTrue(updated.sync().isMain());
     assertEquals("10.0.0.1", updated.serverIp(), "other host config is preserved");
@@ -66,9 +66,9 @@ class HostSyncCommandTest {
 
   @Test
   void aNodeTakingTheMainRoleDropsTheMainItPointedAt() {
-    var node = HostSyncCommand.configure(BASE, false, "sail@maindevbox", "devbox");
+    var node = HostSyncCommand.configure(BASE, false, "sail@maindevbox");
 
-    var promoted = HostSyncCommand.configure(node, true, null, "devbox");
+    var promoted = HostSyncCommand.configure(node, true, null);
 
     assertTrue(promoted.sync().isMain());
     assertNull(promoted.sync().main());
@@ -77,7 +77,7 @@ class HostSyncCommandTest {
 
   @Test
   void mainTargetMakesItANodePointedAtMainInOneStep() {
-    var updated = HostSyncCommand.configure(BASE, false, "sail@maindevbox", "devbox");
+    var updated = HostSyncCommand.configure(BASE, false, "sail@maindevbox");
 
     assertEquals("node", updated.sync().role());
     assertEquals("sail@maindevbox", updated.sync().main());
@@ -85,22 +85,12 @@ class HostSyncCommandTest {
 
   @Test
   void takingARoleMintsABoxIdOnceAndKeepsAnExistingOne() {
-    var asMain = HostSyncCommand.configure(BASE, true, null, "devbox");
+    var asMain = HostSyncCommand.configure(BASE, true, null);
     assertNotNull(asMain.sync().boxId());
-    var asNode = HostSyncCommand.configure(asMain, false, "sail@maindevbox", "devbox");
+    var asNode = HostSyncCommand.configure(asMain, false, "sail@maindevbox");
     assertEquals(asMain.sync().boxId(), asNode.sync().boxId(), "a box keeps its identity");
-    var another = HostSyncCommand.configure(BASE, false, "sail@maindevbox", "devbox");
+    var another = HostSyncCommand.configure(BASE, false, "sail@maindevbox");
     assertNotEquals(asMain.sync().boxId(), another.sync().boxId());
-  }
-
-  @Test
-  void aBoxThatTookItsRoleBeforeIdsExistedAdoptsItsHostnameInsteadOfMintingOne() {
-    var roledBeforeIds = HostConfigSetCommand.applyChange(BASE, "sync-role", "main");
-    assertNull(roledBeforeIds.sync().boxId());
-    var redeclared = HostSyncCommand.configure(roledBeforeIds, true, null, "devbox");
-    assertEquals("devbox", redeclared.sync().boxId(), "peers checkpoint against the hostname");
-    var asNode = HostSyncCommand.configure(redeclared, false, "sail@maindevbox", "elsewhere");
-    assertEquals("devbox", asNode.sync().boxId(), "an id, once held, is kept");
   }
 
   @Test
@@ -133,7 +123,7 @@ class HostSyncCommandTest {
 
     var taken =
         HostSyncCommand.takeRole(
-            hostYaml, dbPath, named, true, null, null, "devbox", NO_ONE, OperatorCommand.PLAIN);
+            hostYaml, dbPath, named, true, null, null, NO_ONE, OperatorCommand.PLAIN);
 
     assertTrue(taken.sync().isMain());
     assertTrue(taken.enrolled().isEmpty());
@@ -156,15 +146,7 @@ class HostSyncCommandTest {
     var own =
         handle == null ? null : new HostSyncCommand.OwnFde(handle, "Ada L", "ada@example.com");
     return HostSyncCommand.takeRole(
-        hostYaml,
-        dir.resolve("sail.db"),
-        host,
-        true,
-        null,
-        own,
-        "devbox",
-        NO_ONE,
-        OperatorCommand.PLAIN);
+        hostYaml, dir.resolve("sail.db"), host, true, null, own, NO_ONE, OperatorCommand.PLAIN);
   }
 
   private static List<FdeStore.Fde> roster(Path dir) {
@@ -263,7 +245,7 @@ class HostSyncCommandTest {
   void aMainActingAsAnotherFdeIsRefusedNamingBothAndLeftAsItIs(@TempDir Path dir) throws Exception {
     var grace =
         HostConfigSetCommand.applyChange(
-            HostSyncCommand.configure(BASE, true, null, "devbox"), "sync-handle", "grace");
+            HostSyncCommand.configure(BASE, true, null), "sync-handle", "grace");
     YamlUtil.dumpToFile(grace.toMap(), dir.resolve("host.yaml"));
     var config = Files.readString(dir.resolve("host.yaml"));
 
@@ -280,7 +262,7 @@ class HostSyncCommandTest {
   void takingTheMainRoleWithNoHandleKeepsTheOneTheBoxHas(@TempDir Path dir) throws Exception {
     var grace =
         HostConfigSetCommand.applyChange(
-            HostSyncCommand.configure(BASE, true, null, "devbox"), "sync-handle", "grace");
+            HostSyncCommand.configure(BASE, true, null), "sync-handle", "grace");
     YamlUtil.dumpToFile(grace.toMap(), dir.resolve("host.yaml"));
 
     assertEquals("grace", asMainOperatedBy(dir, null).sync().handle());
@@ -331,6 +313,6 @@ class HostSyncCommandTest {
   void aMalformedMainTargetIsRejected() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> HostSyncCommand.configure(BASE, false, "not a target!", "devbox"));
+        () -> HostSyncCommand.configure(BASE, false, "not a target!"));
   }
 }

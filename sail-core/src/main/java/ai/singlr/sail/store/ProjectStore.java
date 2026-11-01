@@ -221,25 +221,6 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Rewrites every catalogued definition to its {@linkplain PersonalFields#redact redacted} form,
-   * so a catalog written before this brick — carrying one box's git identity and SSH keys — is
-   * scrubbed and the placeholder form propagates on the next sync. A no-op for definitions already
-   * redacted; returns how many it changed. Because redaction is deterministic, a node that runs
-   * this against its main-derived rows reaches the same content main does and the two converge
-   * without conflict.
-   */
-  public int canonicalizeDefinitions() {
-    var changed = 0;
-    for (var row : list()) {
-      if (!PersonalFields.redact(row.definition()).equals(row.definition())) {
-        upsert(row.name(), row.definition());
-        changed++;
-      }
-    }
-    return changed;
-  }
-
-  /**
    * Adopts main's authoritative state at its exact rev (no minting), as the new synced ancestor.
    */
   @Override

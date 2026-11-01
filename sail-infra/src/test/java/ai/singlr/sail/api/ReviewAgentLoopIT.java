@@ -636,38 +636,6 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
   }
 
-  @Test
-  void aFixAgentAnOlderServerLeftRunningForTheReviewIsKilledBeforeTheFixRunStarts()
-      throws Exception {
-    hold();
-    bus.publish(buildStop("auth"));
-    var reviewer = launched("auth", "review", "review_stage_started");
-    eventually(() -> logOf(reviewer).contains("review started"), "the reviewer is running");
-    var legacy = processWithRunId(reviewer.reviewId());
-    var otherRun = processWithRunId(reviewer.id());
-    assertTrue(alive(legacy) && alive(otherRun), "both stand-in processes are running");
-
-    release();
-    var exit = exitOf(reviewer);
-    hold();
-    publishStop(exit);
-
-    var fix = launched("auth", "fix", "review_iteration_started");
-    assertEquals(reviewer.reviewId(), fix.reviewId());
-    eventually(
-        () -> new AgentSession(shell).unitActive(CONTAINER, AgentUnit.forRun(fix.id())),
-        "the fix agent's unit is running");
-    assertFalse(
-        alive(legacy),
-        "the process an older server started for this review, exporting the review id as its run"
-            + " id, was killed before the fix run's unit started");
-    assertTrue(alive(otherRun), "a process of a run this server started is not its to kill");
-
-    release();
-    watcherObservesTheExitOf(fix);
-    awaitEvent("review_stage_started");
-  }
-
   /** Starts a long-lived process as the dev user whose environment holds SAIL_RUN_ID=runId. */
   private String processWithRunId(String runId) throws Exception {
     var started =
