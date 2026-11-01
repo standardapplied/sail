@@ -113,12 +113,13 @@ class RecordTimesSyncTest {
     SyncBox.quiesce(main, ada, bob);
 
     var clock = DateTimeUtils.clock;
+    var later = DateTimeUtils.now().plusSeconds(60);
     Instant archived;
     try {
-      DateTimeUtils.clock = Clock.fixed(Instant.parse("2026-10-20T19:09:39.656Z"), ZoneOffset.UTC);
+      DateTimeUtils.clock = Clock.fixed(later, ZoneOffset.UTC);
       Acting.as("ada", () -> ada.specs.updateStatus("e-acme", SpecStatus.ARCHIVED));
       archived = archivedAt(ada, "e-acme");
-      DateTimeUtils.clock = Clock.fixed(Instant.parse("2026-10-20T19:09:39.657Z"), ZoneOffset.UTC);
+      DateTimeUtils.clock = Clock.fixed(later.plusMillis(1), ZoneOffset.UTC);
       Acting.as("ada", () -> ada.specs.setContent("e-acme", "Kept for the record.", ""));
     } finally {
       DateTimeUtils.clock = clock;
@@ -136,10 +137,11 @@ class RecordTimesSyncTest {
     SyncBox.quiesce(main, ada, bob);
 
     var clock = DateTimeUtils.clock;
+    var later = DateTimeUtils.now().plusSeconds(60);
     try {
-      DateTimeUtils.clock = Clock.fixed(Instant.parse("2026-10-20T19:09:39.656Z"), ZoneOffset.UTC);
+      DateTimeUtils.clock = Clock.fixed(later, ZoneOffset.UTC);
       Acting.as("main", () -> main.specs.updateStatus("m-acme", SpecStatus.ARCHIVED));
-      DateTimeUtils.clock = Clock.fixed(Instant.parse("2026-10-20T19:09:39.657Z"), ZoneOffset.UTC);
+      DateTimeUtils.clock = Clock.fixed(later.plusMillis(1), ZoneOffset.UTC);
       Acting.as("ada", () -> ada.specs.updateStatus("m-acme", SpecStatus.ARCHIVED));
     } finally {
       DateTimeUtils.clock = clock;
