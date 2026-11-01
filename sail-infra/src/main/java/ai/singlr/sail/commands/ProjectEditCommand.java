@@ -6,16 +6,16 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.common.Remedied;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinition.Section;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
-import ai.singlr.sail.engine.ProjectDefinitions;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -23,25 +23,22 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
 /**
- * Edits a project's definition in the catalog — the source of truth — and re-materializes the
- * on-disk {@code sail.yaml}. With the database authoritative, hand-editing the descriptor file is a
- * no-op; this is the supported way to change a project, and the edit replicates to every other box
- * on the next {@code sail sync}. Opens {@code $EDITOR} by default, or reads the new definition from
- * {@code --file} for non-interactive use.
+ * Edits a project's definition in the catalog in {@code $EDITOR}: the whole JSON document, or one
+ * section of it. The edit is checked whole and only the sections it changed are written, in one
+ * revision, refused if another write changed any of them while the editor was open; it replicates
+ * to every other box on the next {@code sail sync}.
  */
 @Command(
     name = "edit",
-    description = "Edit a project's definition (saves to the catalog; syncs to other boxes).",
+    description = "Edit a project's definition in $EDITOR (saves to the catalog; syncs to boxes).",
     mixinStandardHelpOptions = true)
 public final class ProjectEditCommand implements Runnable {
 
   @Parameters(index = "0", description = "Project name.")
   private String name;
 
-  @Option(
-      names = {"-f", "--file"},
-      description = "Read the new definition from this file instead of opening $EDITOR.")
-  private String file;
+  @Option(names = "--section", description = "Edit this section alone.")
+  private String section;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -64,73 +61,73 @@ public final class ProjectEditCommand implements Runnable {
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
+    var only = section == null ? null : Section.of(section);
     var actor = CliOperator.current();
     ProjectCatalog.requireRecordable(name, actor);
-    var current =
-        ProjectDefinitions.definition(name, null)
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "No project '"
-                            + name
-                            + "' to edit. Create it with '"
-                            + operator.sail("project apply")
-                            + "', or sync it from main with '"
-                            + operator.sail("sync")
-                            + "'."));
-
-    var edited = file != null ? Files.readString(Path.of(file)) : edit(editor, name, current);
-    if (edited.equals(current)) {
-      if (!json) {
-        System.out.println(Ansi.AUTO.string("  @|faint No changes.|@"));
-      }
-      return;
-    }
-
-    validate(name, edited);
-    ProjectDefinitions.persist(name, null, edited, actor);
+    var current = ProjectMutations.current(name, operator);
+    var seed = seed(current, only);
+    var text = edit(editor, name, seed);
+    var edited = text.equals(seed) ? current : edited(name, current, only, text);
+    var changed = ProjectCatalog.writeChanged(current, edited, actor);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
-      map.put("status", "updated");
+      map.put("status", changed.isEmpty() ? "unchanged" : "updated");
+      map.put("sections", changed.stream().map(Section::key).toList());
       System.out.println(YamlUtil.dumpJson(map));
+      return;
+    }
+    if (changed.isEmpty()) {
+      System.out.println(Ansi.AUTO.string("  @|faint No changes.|@"));
       return;
     }
     System.out.println(
         Ansi.AUTO.string(
-            "  @|green ✓|@ Updated '"
+            "  @|green ✓|@ Updated "
+                + String.join(", ", changed.stream().map(Section::key).toList())
+                + " of '"
                 + name
                 + "'. It replicates to other boxes on the next sync."));
   }
 
+  /** What the editor opens on: the whole definition, or {@code only}'s value, as JSON. */
+  static String seed(ProjectDefinition current, Section only) {
+    var document = YamlUtil.parseMap(ProjectDefinitionJson.write(current));
+    var value = only == null ? document : document.get(only.key());
+    return YamlUtil.dumpJsonPretty(value) + "\n";
+  }
+
   /**
-   * Parses {@code edited} and rejects it unless it is a valid descriptor whose {@code name} still
-   * matches the project — renaming a project through {@code edit} is not allowed, since the name is
-   * its identity in the catalog. Pure, so the validation is unit-tested without a database.
+   * The definition {@code text} leaves project {@code name} as: the whole document, whose name must
+   * stay {@code name}, or {@code only}'s new value; refused, with the reason, when it is not one.
    */
-  static void validate(String name, String edited) {
-    SailYaml config;
+  static ProjectDefinition edited(
+      String name, ProjectDefinition current, Section only, String text) {
+    ProjectDefinition edited;
     try {
-      config = SailYaml.fromMap(YamlUtil.parseMap(edited));
+      edited =
+          only == null
+              ? ProjectDefinitionJson.read(text)
+              : ProjectDefinitionJson.withSection(current, only, text.strip());
     } catch (RuntimeException e) {
       throw Remedied.argument(
-          Remedied.joined("Edited descriptor is not valid:", Remedied.reasonOf(e)),
+          Remedied.joined("The edited definition is not valid:", Remedied.reasonOf(e)),
           Remedied.remedyOf(e));
     }
-    if (config.name() == null || !config.name().equals(name)) {
+    if (!name.equals(edited.name())) {
       throw new IllegalArgumentException(
           "The 'name' field must stay '"
               + name
-              + "'. Renaming a project through edit is not"
-              + " supported.");
+              + "'. Renaming a project through edit is not supported.");
     }
+    return edited;
   }
 
   /** {@code seed} as the engineer left it in {@code editor}; the scratch file never outlives it. */
   static String edit(Editor editor, String name, String seed)
       throws IOException, InterruptedException {
-    var tmp = Files.createTempFile("sail-project-" + name + "-", ".yaml");
+    var tmp = Files.createTempFile("sail-project-" + name + "-", ".json");
     try {
       Files.writeString(tmp, seed);
       var exit = editor.edit(tmp);

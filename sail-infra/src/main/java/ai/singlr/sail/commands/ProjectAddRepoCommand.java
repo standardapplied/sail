@@ -6,8 +6,9 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.SailYamlUpdater;
+import ai.singlr.sail.config.DefinitionEdits;
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
@@ -16,7 +17,6 @@ import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectApplier;
-import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.io.PrintStream;
 import java.util.LinkedHashMap;
@@ -35,12 +35,6 @@ public final class ProjectAddRepoCommand implements Runnable {
 
   @Parameters(index = "0", description = "Project name.")
   private String name;
-
-  @Option(
-      names = {"-f", "--file"},
-      description = "Path to sail.yaml project descriptor.",
-      defaultValue = "sail.yaml")
-  private String file;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -74,22 +68,19 @@ public final class ProjectAddRepoCommand implements Runnable {
     var ansi = Ansi.AUTO;
     var out = System.out;
 
-    var explicit = ProjectDefinitions.explicitFile(file);
-    var actor = ProjectMutations.catalogOperator(name, explicit, dryRun);
-    var config =
-        SailYaml.fromMap(
-            YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit, operator)));
+    var actor = ProjectMutations.catalogOperator(name, dryRun);
+    var config = ProjectMutations.current(name, operator);
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
 
     ContainerStateGuard.requireRunning(state, name);
 
-    SailYaml.Repo repo;
+    ProjectDefinition.Repo repo;
 
     if (url != null) {
       var path = repoPath != null ? repoPath : guessRepoPath(url);
-      repo = new SailYaml.Repo(url, path, branch);
+      repo = new ProjectDefinition.Repo(url, path, branch);
     } else {
       if (!json) {
         Banner.printBranding(out, ansi);
@@ -100,18 +91,16 @@ public final class ProjectAddRepoCommand implements Runnable {
       repo = collectRepoInteractively(out, ansi);
     }
 
-    var sshUser = config.sshUser();
+    var edited = ProjectMutations.checked(DefinitionEdits.addRepo(config, repo));
     var token = Strings.isNotBlank(gitToken) ? gitToken : null;
     var applier = new ProjectApplier(shell, out);
     var result =
         applier.applyRepos(
-            name, List.of(repo), sshUser, GitCredentials.singleTokenMap(token), config.git());
-
-    var updatedText = YamlUtil.dumpToString((SailYamlUpdater.addRepo(config, repo)).toMap());
-    ProjectMutations.persist(
-        name,
-        explicit,
-        updatedText,
+            name, List.of(repo), ProjectDefinition.USER, GitCredentials.singleTokenMap(token));
+    ProjectMutations.write(
+        Section.REPOS,
+        config,
+        edited,
         dryRun,
         out,
         "record repo '" + repo.path() + "' in the catalog",
@@ -135,15 +124,15 @@ public final class ProjectAddRepoCommand implements Runnable {
                 + repo.path()
                 + "' added to "
                 + name
-                + " and sail.yaml updated"));
+                + " and its definition"));
   }
 
-  private SailYaml.Repo collectRepoInteractively(PrintStream out, Ansi ansi) {
+  private ProjectDefinition.Repo collectRepoInteractively(PrintStream out, Ansi ansi) {
     var repoUrl = promptRequired(out, ansi, "Repo URL");
     var pathDefault = guessRepoPath(repoUrl);
     var path = promptWithDefault(out, ansi, "Local path", pathDefault);
     var branchInput = promptWithDefault(out, ansi, "Branch (blank for default)", "");
-    return new SailYaml.Repo(repoUrl, path, branchInput.isEmpty() ? null : branchInput);
+    return new ProjectDefinition.Repo(repoUrl, path, branchInput.isEmpty() ? null : branchInput);
   }
 
   private static String guessRepoPath(String url) {

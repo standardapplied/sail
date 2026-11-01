@@ -5,20 +5,21 @@
 
 package ai.singlr.sail.gen;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
  * Curated catalog of common infrastructure services for interactive project initialization. Each
- * preset maps to a ready-to-use {@link SailYaml.Service} definition with sensible defaults.
+ * preset maps to a ready-to-use {@link ProjectDefinition.Service} definition with sensible
+ * defaults.
  */
 public final class ServicePresets {
 
   private ServicePresets() {}
 
-  public record Preset(String key, String displayName, SailYaml.Service service) {
+  public record Preset(String key, String displayName, ProjectDefinition.Service service) {
 
     /** Extracts the default version tag from the image (e.g. "postgres:16" → "16"). */
     public String defaultVersion() {
@@ -28,11 +29,11 @@ public final class ServicePresets {
     }
 
     /** Returns a new Service with the image tag replaced by the given version. */
-    public SailYaml.Service withVersion(String version) {
+    public ProjectDefinition.Service withVersion(String version) {
       var img = service.image();
       var colon = img.lastIndexOf(':');
       var base = colon >= 0 ? img.substring(0, colon) : img;
-      return new SailYaml.Service(
+      return new ProjectDefinition.Service(
           base + ":" + version,
           service.ports(),
           service.environment(),
@@ -46,7 +47,7 @@ public final class ServicePresets {
           new Preset(
               "postgres",
               "Postgres 16",
-              new SailYaml.Service(
+              new ProjectDefinition.Service(
                   "postgres:16",
                   List.of(5432),
                   orderedEnv(
@@ -54,11 +55,13 @@ public final class ServicePresets {
                   null,
                   List.of("pgdata:/var/lib/postgresql/data"))),
           new Preset(
-              "redis", "Redis 7", new SailYaml.Service("redis:7", List.of(6379), null, null, null)),
+              "redis",
+              "Redis 7",
+              new ProjectDefinition.Service("redis:7", List.of(6379), null, null, null)),
           new Preset(
               "meilisearch",
               "Meilisearch",
-              new SailYaml.Service(
+              new ProjectDefinition.Service(
                   "getmeili/meilisearch:latest",
                   List.of(7700),
                   orderedEnv(
@@ -73,7 +76,7 @@ public final class ServicePresets {
           new Preset(
               "redpanda",
               "Redpanda",
-              new SailYaml.Service(
+              new ProjectDefinition.Service(
                   "redpandadata/redpanda:latest",
                   List.of(9092, 8081, 8082),
                   null,

@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.store.SyncConflicts;
+import java.util.Map;
 
 /**
  * The full control-plane surface served over the web API by {@link ApiRouter}. Extends {@link
@@ -44,6 +45,19 @@ public interface Operations extends LocalLaneOperations {
   Result<AgentsResponse> agents();
 
   Result<ProjectResponse> project(String project);
+
+  /** Project {@code project}'s definition and the tag of each of its sections. */
+  Result<ProjectDefinitionResponse> projectDefinition(String project);
+
+  /** Creates the project the definition {@code document} names, refused when one exists. */
+  Result<ProjectDefinitionResponse> createProject(Map<String, Object> document);
+
+  /**
+   * Writes {@code value} as section {@code section} of project {@code project}'s definition, only
+   * over the section {@code ifMatch}, its tag, names when given; {@code null} unsets it.
+   */
+  Result<ProjectDefinitionResponse> writeProjectSection(
+      String project, String section, Object value, String ifMatch);
 
   /** Returns the two-hop SSH target (server jump + container) for a running project. */
   Result<ConnectResponse> connect(String project);

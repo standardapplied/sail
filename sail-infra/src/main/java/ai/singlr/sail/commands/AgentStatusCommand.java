@@ -9,7 +9,7 @@ import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentSession;
@@ -32,7 +32,6 @@ import java.util.Map;
 import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -49,8 +48,6 @@ public final class AgentStatusCommand implements Runnable {
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
-
-  @Mixin private IgnoredFileOption file;
 
   private final Function<OperatorCommand, HostOperations> operations;
 
@@ -188,7 +185,7 @@ public final class AgentStatusCommand implements Runnable {
     ContainerStateGuard.requireRunning(state, name);
 
     AgentSession.SessionInfo info;
-    SailYaml config;
+    ProjectDefinition config;
     try (var operations = this.operations.apply(operator)) {
       info = operations.dispatching().projectSession(name, NodeIdentity.handle());
       config = operations.catalog().definitions().read(name).orElse(null);
@@ -263,7 +260,10 @@ public final class AgentStatusCommand implements Runnable {
 
   static List<String> repoPathsOrDefault(ProjectReader definitions, String projectName) {
     try {
-      return definitions.read(projectName).map(SailYaml::repoPaths).orElse(DEFAULT_REPO_PATHS);
+      return definitions
+          .read(projectName)
+          .map(ProjectDefinition::repoPaths)
+          .orElse(DEFAULT_REPO_PATHS);
     } catch (Exception ignored) {
       return DEFAULT_REPO_PATHS;
     }

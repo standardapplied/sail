@@ -67,16 +67,16 @@ class BranchPolicyTest {
     assertEquals("feat/oauth-flow", BranchPolicy.branchName(config, spec("oauth-flow", "   ")));
   }
 
-  private static SailYaml.Agent agent(boolean autoBranch, String prefix) {
-    return new SailYaml.Agent(
+  private static ProjectDefinition.Agent agent(boolean autoBranch, String prefix) {
+    return new ProjectDefinition.Agent(
         "claude-code", autoBranch, prefix, false, null, null, null, null, null, null);
   }
 
-  private static SailYaml configWithAgent(SailYaml.Agent agent) {
-    return new SailYaml(
+  private static ProjectDefinition configWithAgent(ProjectDefinition.Agent agent) {
+    return new ProjectDefinition(
         "test",
         null,
-        new SailYaml.Resources(2, "4GB", "50GB"),
+        new ProjectDefinition.Resources(2, "4GB", "50GB"),
         null,
         null,
         null,

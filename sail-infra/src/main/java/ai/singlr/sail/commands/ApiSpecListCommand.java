@@ -28,7 +28,7 @@ public final class ApiSpecListCommand implements Runnable {
       names = {"-p", "--project"},
       description =
           "Filter by client project ('*' = all projects). Defaults to the current project,"
-              + " inferred from cwd's sail.yaml or set by project switch.")
+              + " set by project switch.")
   private String project;
 
   @Option(names = "--all-projects", description = "List specs across all projects.")

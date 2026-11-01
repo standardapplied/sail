@@ -12,8 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Engagement;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Roster;
-import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerSailSetup;
@@ -124,8 +124,8 @@ class HomeRoomTest {
         .useLaunchExecutor(Runnable::run);
   }
 
-  private static SailYaml definition(String text) {
-    return SailYaml.fromMap(YamlUtil.parseMap(text));
+  private static ProjectDefinition definition(String text) {
+    return ProjectDefinition.fromMap(YamlUtil.parseMap(text));
   }
 
   private static Actor fde(String handle) {

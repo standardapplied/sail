@@ -112,11 +112,11 @@ public final class YamlUtil {
   }
 
   /**
-   * Dumps in block style: these files ({@code host.yaml}, {@code config.yaml}, {@code sail.yaml})
-   * are declarative configuration the operator edits by hand, and the default flow style emits a
-   * single-line {@code {...}} map that is hostile to both editing and diffing. A list's items sit
-   * indented under their key, and a long value — a verify command — stays on its one line rather
-   * than fold at a column, as a person would write them.
+   * Dumps in block style: these files ({@code host.yaml}, {@code config.yaml}) are declarative
+   * configuration the operator edits by hand, and the default flow style emits a single-line {@code
+   * {...}} map that is hostile to both editing and diffing. A list's items sit indented under their
+   * key, and a long value — a verify command — stays on its one line rather than fold at a column,
+   * as a person would write them.
    */
   public static String dumpToString(Map<String, Object> map) {
     var dump =
@@ -133,6 +133,48 @@ public final class YamlUtil {
   /** Write a Map as YAML to a file. */
   public static void dumpToFile(Map<String, Object> map, Path path) throws IOException {
     Files.writeString(path, dumpToString(map));
+  }
+
+  /** Dump any value a parsed document holds (a map, a list, text, a number, a flag or null). */
+  public static String dumpJsonValue(Object value) {
+    var sb = new StringBuilder();
+    appendJson(sb, value);
+    return sb.toString();
+  }
+
+  /** {@code value} as JSON a person edits: each key and element on a line, indented by two. */
+  public static String dumpJsonPretty(Object value) {
+    var sb = new StringBuilder();
+    appendPretty(sb, value, "");
+    return sb.toString();
+  }
+
+  @SuppressWarnings("unchecked")
+  private static void appendPretty(StringBuilder sb, Object value, String indent) {
+    var inner = indent + "  ";
+    switch (value) {
+      case Map<?, ?> m when !m.isEmpty() -> {
+        sb.append("{\n");
+        var first = true;
+        for (var entry : ((Map<String, Object>) m).entrySet()) {
+          if (!first) sb.append(",\n");
+          sb.append(inner).append('"').append(escapeJson(entry.getKey())).append("\": ");
+          appendPretty(sb, entry.getValue(), inner);
+          first = false;
+        }
+        sb.append('\n').append(indent).append('}');
+      }
+      case List<?> l when !l.isEmpty() -> {
+        sb.append("[\n");
+        for (var i = 0; i < l.size(); i++) {
+          if (i > 0) sb.append(",\n");
+          sb.append(inner);
+          appendPretty(sb, l.get(i), inner);
+        }
+        sb.append('\n').append(indent).append(']');
+      }
+      case null, default -> appendJson(sb, value);
+    }
   }
 
   /** Dump a list to a valid JSON string. */

@@ -8,7 +8,7 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.List;
@@ -86,11 +86,11 @@ class SnapshotDecisionTest {
     assertFalse(SnapshotDecision.shouldSnapshot(null, null, false));
   }
 
-  private static SailYaml configWithAutoSnapshot(boolean autoSnapshot) {
+  private static ProjectDefinition configWithAutoSnapshot(boolean autoSnapshot) {
     var agent =
-        new SailYaml.Agent(
+        new ProjectDefinition.Agent(
             "claude-code", false, null, autoSnapshot, List.of(), Map.of(), null, null);
-    return new SailYaml(
+    return new ProjectDefinition(
         "test", null, null, null, null, null, null, List.of(), Map.of(), Map.of(), agent, null);
   }
 }

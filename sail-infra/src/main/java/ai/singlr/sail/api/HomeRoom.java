@@ -6,7 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.webauthn.Hashes;
@@ -66,7 +66,7 @@ public final class HomeRoom {
    * member, through the same door the API's room creation takes, so every admission check runs as
    * it does there. Runs as the bound actor, the box's FDE.
    */
-  public static Outcome ensure(Operations operations, SailYaml definition, String handle) {
+  public static Outcome ensure(Operations operations, ProjectDefinition definition, String handle) {
     if (Strings.isBlank(handle)) {
       return Outcome.skipped("this box names no FDE, so it has no home room");
     }

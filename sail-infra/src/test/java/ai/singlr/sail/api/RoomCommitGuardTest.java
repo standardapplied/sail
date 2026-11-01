@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.RunStore;
@@ -55,8 +55,8 @@ class RoomCommitGuardTest {
     if (db != null) db.close();
   }
 
-  private static final SailYaml CONFIG =
-      SailYaml.fromMap(
+  private static final ProjectDefinition CONFIG =
+      ProjectDefinition.fromMap(
           Map.of(
               "name",
               "acme",

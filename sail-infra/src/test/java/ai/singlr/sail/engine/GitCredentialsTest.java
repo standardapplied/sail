@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -43,9 +43,9 @@ class GitCredentialsTest {
   void buildCredentialStoreIncludesAllHttpsHosts() {
     var repos =
         List.of(
-            new SailYaml.Repo("https://gitlab.com/org/repo.git", "repo", null),
-            new SailYaml.Repo("https://bitbucket.org/team/app.git", "app", null),
-            new SailYaml.Repo("git@github.com:user/other.git", "other", null));
+            new ProjectDefinition.Repo("https://gitlab.com/org/repo.git", "repo", null),
+            new ProjectDefinition.Repo("https://bitbucket.org/team/app.git", "app", null),
+            new ProjectDefinition.Repo("git@github.com:user/other.git", "other", null));
     var creds = GitCredentials.buildCredentialStore(Map.of("*", "tok123"), repos);
     assertTrue(creds.contains("https://oauth2:tok123@gitlab.com\n"));
     assertTrue(creds.contains("https://oauth2:tok123@bitbucket.org\n"));
@@ -56,8 +56,8 @@ class GitCredentialsTest {
   void buildCredentialStoreUsesPerHostTokens() {
     var repos =
         List.of(
-            new SailYaml.Repo("https://github.com/org/app.git", "app", null),
-            new SailYaml.Repo("https://gitlab.com/org/repo.git", "repo", null));
+            new ProjectDefinition.Repo("https://github.com/org/app.git", "app", null),
+            new ProjectDefinition.Repo("https://gitlab.com/org/repo.git", "repo", null));
     var tokens = Map.of("github.com", "ghp_xxx", "gitlab.com", "glpat_yyy");
     var creds = GitCredentials.buildCredentialStore(tokens, repos);
     assertTrue(creds.contains("https://oauth2:ghp_xxx@github.com\n"));
@@ -68,8 +68,8 @@ class GitCredentialsTest {
   void buildCredentialStoreDeduplicatesHosts() {
     var repos =
         List.of(
-            new SailYaml.Repo("https://gitlab.com/org/a.git", "a", null),
-            new SailYaml.Repo("https://gitlab.com/org/b.git", "b", null));
+            new ProjectDefinition.Repo("https://gitlab.com/org/a.git", "a", null),
+            new ProjectDefinition.Repo("https://gitlab.com/org/b.git", "b", null));
     var creds = GitCredentials.buildCredentialStore(Map.of("*", "tok123"), repos);
     var lines = creds.strip().split("\n");
     assertEquals(1, lines.length, "One gitlab.com entry (deduplicated)");
@@ -99,8 +99,8 @@ class GitCredentialsTest {
   void buildCredentialStoreSkipsHostsWithNoToken() {
     var repos =
         List.of(
-            new SailYaml.Repo("https://gitlab.com/org/repo.git", "repo", null),
-            new SailYaml.Repo("https://github.com/org/app.git", "app", null));
+            new ProjectDefinition.Repo("https://gitlab.com/org/repo.git", "repo", null),
+            new ProjectDefinition.Repo("https://github.com/org/app.git", "app", null));
     var creds = GitCredentials.buildCredentialStore(null, repos);
     for (var line : creds.lines().toList()) {
       assertFalse(line.contains("null"), "Should not include null token entries");
@@ -109,7 +109,7 @@ class GitCredentialsTest {
 
   @Test
   void buildCredentialStoreWorksWithEmptyMap() {
-    var repos = List.of(new SailYaml.Repo("https://github.com/org/app.git", "app", null));
+    var repos = List.of(new ProjectDefinition.Repo("https://github.com/org/app.git", "app", null));
     var creds = GitCredentials.buildCredentialStore(Map.of(), repos);
     assertNotNull(creds);
   }
@@ -130,9 +130,9 @@ class GitCredentialsTest {
   void extractHttpsHostsFromMixedRepos() {
     var repos =
         List.of(
-            new SailYaml.Repo("https://github.com/org/app.git", "app", null),
-            new SailYaml.Repo("https://gitlab.com/org/repo.git", "repo", null),
-            new SailYaml.Repo("git@bitbucket.org:team/lib.git", "lib", null));
+            new ProjectDefinition.Repo("https://github.com/org/app.git", "app", null),
+            new ProjectDefinition.Repo("https://gitlab.com/org/repo.git", "repo", null),
+            new ProjectDefinition.Repo("git@bitbucket.org:team/lib.git", "lib", null));
     var hosts = GitCredentials.extractHttpsHosts(repos);
     assertEquals(List.of("github.com", "gitlab.com"), hosts);
   }
@@ -148,8 +148,8 @@ class GitCredentialsTest {
   void extractSshHostsFromMixedUrls() {
     var repos =
         List.of(
-            new SailYaml.Repo("git@bitbucket.org:team/app.git", "app", null),
-            new SailYaml.Repo("https://gitlab.example.com/org/repo.git", "repo", null));
+            new ProjectDefinition.Repo("git@bitbucket.org:team/app.git", "app", null),
+            new ProjectDefinition.Repo("https://gitlab.example.com/org/repo.git", "repo", null));
     var hosts = GitCredentials.extractSshHosts(repos);
     assertTrue(hosts.contains("github.com"), "Default github.com");
     assertTrue(hosts.contains("gitlab.com"), "Default gitlab.com");
@@ -159,14 +159,16 @@ class GitCredentialsTest {
 
   @Test
   void extractSshHostsRejectsUnsafeHost() {
-    var repos = List.of(new SailYaml.Repo("https://github.com;touch/tmp/pwned", "app", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com;touch/tmp/pwned", "app", null));
 
     assertThrows(IllegalArgumentException.class, () -> GitCredentials.extractSshHosts(repos));
   }
 
   @Test
   void extractHttpsHostsRejectsUnsafeHost() {
-    var repos = List.of(new SailYaml.Repo("https://github.com;touch/tmp/pwned", "app", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com;touch/tmp/pwned", "app", null));
 
     assertThrows(IllegalArgumentException.class, () -> GitCredentials.extractHttpsHosts(repos));
   }
@@ -176,11 +178,12 @@ class GitCredentialsTest {
     var hosts =
         GitCredentials.githubHosts(
             List.of(
-                new SailYaml.Repo("https://github.com/org/a.git", "a", null),
-                new SailYaml.Repo("https://github.com/org/b.git", "b", null),
-                new SailYaml.Repo("https://git.example.com/org/c.git", "c", null, "github"),
-                new SailYaml.Repo("https://gitlab.com/org/d.git", "d", null),
-                new SailYaml.Repo("git@github.com:org/e.git", "e", null)));
+                new ProjectDefinition.Repo("https://github.com/org/a.git", "a", null),
+                new ProjectDefinition.Repo("https://github.com/org/b.git", "b", null),
+                new ProjectDefinition.Repo(
+                    "https://git.example.com/org/c.git", "c", null, "github"),
+                new ProjectDefinition.Repo("https://gitlab.com/org/d.git", "d", null),
+                new ProjectDefinition.Repo("git@github.com:org/e.git", "e", null)));
 
     assertEquals(List.of("github.com", "git.example.com"), hosts);
     assertEquals(List.of(), GitCredentials.githubHosts(null));

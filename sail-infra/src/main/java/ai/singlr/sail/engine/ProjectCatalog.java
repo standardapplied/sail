@@ -8,6 +8,9 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinition.Section;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
@@ -17,15 +20,19 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncScope;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
- * Records a project's definition into the control-plane catalog (the {@code projects} table), the
- * shared, replicated source of truth that everything running a project reads. A definition that
- * does not reach the catalog is not recorded anywhere: the write fails loud, before the on-disk
- * copy is written. Only a node that cannot name its operator refuses, and its commands resolve the
- * operator before they change anything.
+ * Reads and records a project's definition in the control-plane catalog (the {@code projects}
+ * table), the shared, replicated source of truth that everything running a project reads, and the
+ * only place a definition lives. Only a node that cannot name its operator refuses, and its
+ * commands resolve the operator before they change anything.
  */
 public final class ProjectCatalog {
 
@@ -55,8 +62,8 @@ public final class ProjectCatalog {
       throw new IllegalStateException(
           "Project '"
               + name
-              + "' was pruned, and a pruned name is never used again. Choose a new name for the"
-              + " project in its sail.yaml.");
+              + "' was pruned, and a pruned name is never used again. Give the project a new"
+              + " name.");
     }
   }
 
@@ -116,20 +123,93 @@ public final class ProjectCatalog {
     }
   }
 
-  /**
-   * Records the definition as {@code operator}, this box's operator ({@link CliOperator}), which
-   * the caller resolves before it writes anything, so a node that cannot name it refuses the edit
-   * rather than losing it. Throws when the definition was not recorded, naming the cause; a write
-   * the project rule refuses is thrown as the refusal it is, with its fix.
-   */
-  public static void record(String name, String definition, Actor operator) {
-    record(SailPaths.controlPlaneDb(), name, definition, operator);
+  /** The definition project {@code name} holds in this box's catalog, or empty when none. */
+  public static Optional<ProjectDefinition> read(String name) {
+    return read(SailPaths.controlPlaneDb(), name);
   }
 
-  static void record(Path catalog, String name, String definition, Actor operator) {
+  static Optional<ProjectDefinition> read(Path catalog, String name) {
+    if (!Files.isRegularFile(catalog)) {
+      return Optional.empty();
+    }
     try (var db = Sqlite.open(catalog)) {
       new SchemaManager(db).migrate();
-      Actor.run(operator, () -> new ProjectStore(db).upsert(name, definition));
+      return new ProjectStore(db).findByName(name).map(ProjectStore.ProjectRow::definition);
+    }
+  }
+
+  /**
+   * Records {@code definition}, created or replaced, as {@code operator}, this box's operator
+   * ({@link CliOperator}), which the caller resolves before it writes anything, so a node that
+   * cannot name it refuses the edit rather than losing it. Throws when the definition was not
+   * recorded, naming the cause; a write the project rule refuses is thrown as the refusal it is,
+   * with its fix.
+   */
+  public static void record(ProjectDefinition definition, Actor operator) {
+    write(
+        SailPaths.controlPlaneDb(), definition.name(), operator, store -> store.upsert(definition));
+  }
+
+  /** Creates the project {@code definition} names as {@code operator}; refused when it exists. */
+  public static void create(ProjectDefinition definition, Actor operator) {
+    write(
+        SailPaths.controlPlaneDb(), definition.name(), operator, store -> store.create(definition));
+  }
+
+  /**
+   * Writes {@code section} of project {@code name} to what {@code edited} holds there, as {@code
+   * operator}, only while the catalog holds the section as {@code read} did: an edit made from a
+   * definition read before another write of that section is refused, never laid over it.
+   */
+  public static void writeSection(
+      String name,
+      Section section,
+      ProjectDefinition read,
+      ProjectDefinition edited,
+      Actor operator) {
+    write(
+        SailPaths.controlPlaneDb(),
+        name,
+        operator,
+        store ->
+            store.writeSection(
+                name,
+                section,
+                ProjectDefinitionJson.section(edited, section),
+                ProjectStore.tagOf(ProjectDefinitionJson.section(read, section))));
+  }
+
+  /**
+   * Writes the sections {@code edited} changes from {@code read}, as {@code operator}, in one
+   * revision, only while the catalog holds each of them as {@code read} did; returns the sections
+   * it wrote, none when the edit changed nothing.
+   */
+  public static List<Section> writeChanged(
+      ProjectDefinition read, ProjectDefinition edited, Actor operator) {
+    var before = ProjectDefinitionJson.sections(read);
+    var after = ProjectDefinitionJson.sections(edited);
+    var values = new LinkedHashMap<Section, String>();
+    var tags = new LinkedHashMap<Section, String>();
+    for (var section : Section.values()) {
+      if (!Objects.equals(before.get(section.key()), after.get(section.key()))) {
+        values.put(section, after.get(section.key()));
+        tags.put(section, ProjectStore.tagOf(before.get(section.key())));
+      }
+    }
+    if (!values.isEmpty()) {
+      write(
+          SailPaths.controlPlaneDb(),
+          read.name(),
+          operator,
+          store -> store.writeSections(read.name(), values, tags));
+    }
+    return List.copyOf(values.keySet());
+  }
+
+  static void write(Path catalog, String name, Actor operator, Consumer<ProjectStore> change) {
+    try (var db = Sqlite.open(catalog)) {
+      new SchemaManager(db).migrate();
+      Actor.run(operator, () -> change.accept(new ProjectStore(db)));
     } catch (WriteRefused refused) {
       throw refused;
     } catch (Exception e) {

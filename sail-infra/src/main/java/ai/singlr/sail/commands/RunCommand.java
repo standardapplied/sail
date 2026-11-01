@@ -17,7 +17,7 @@ import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.WorkBranch;
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
@@ -27,10 +27,8 @@ import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailWatcher;
-import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
-import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
@@ -52,7 +50,6 @@ import java.util.function.Function;
 import java.util.regex.Pattern;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -102,11 +99,8 @@ public final class RunCommand implements Runnable {
               + " passed, prompts interactively (defaults to no); skips silently in --json mode.")
   private Boolean snapshot;
 
-  @Mixin private IgnoredFileOption file;
-
   private final Function<OperatorCommand, HostOperations> operations;
   private final BiFunction<ShellExec, OperationHooks, HostOperations> launches;
-  private final Function<OperatorCommand, LocalIdentity> identity;
   private final Function<Boolean, ShellExec> shells;
   private final DispatchOperations.AgentLauncher terminal;
   private SailEventPublisher eventPublisher;
@@ -115,7 +109,6 @@ public final class RunCommand implements Runnable {
     this(
         operator -> OperationsFactory.open(operator::warn),
         (shell, hooks) -> OperationsFactory.open(shell, hooks, new PtyHostYield()),
-        LocalIdentity::detect,
         ShellExecutor::new,
         DispatchOperations.terminalLauncher());
   }
@@ -129,12 +122,10 @@ public final class RunCommand implements Runnable {
   RunCommand(
       Function<OperatorCommand, HostOperations> operations,
       BiFunction<ShellExec, OperationHooks, HostOperations> launches,
-      Function<OperatorCommand, LocalIdentity> identity,
       Function<Boolean, ShellExec> shells,
       DispatchOperations.AgentLauncher terminal) {
     this.operations = operations;
     this.launches = launches;
-    this.identity = identity;
     this.shells = shells;
     this.terminal = terminal;
   }
@@ -153,11 +144,9 @@ public final class RunCommand implements Runnable {
       Banner.printBranding(System.out, Ansi.AUTO);
     }
 
-    SailYaml config;
+    ProjectDefinition config;
     try (var operations = this.operations.apply(operator)) {
-      config =
-          ProjectDefinitions.definitionWithBoxIdentity(
-              operations.catalog(), name, identity.apply(operator), operator);
+      config = operations.catalog().definitions().require(name);
     }
 
     var shell = shells.apply(dryRun);
@@ -174,7 +163,7 @@ public final class RunCommand implements Runnable {
     launchAgent(shell, config, operator);
   }
 
-  private void launchAgent(ShellExec shell, SailYaml config, OperatorCommand operator)
+  private void launchAgent(ShellExec shell, ProjectDefinition config, OperatorCommand operator)
       throws Exception {
     if (task == null && config.agent() != null) {
       try (var operations = this.operations.apply(operator)) {
@@ -201,7 +190,7 @@ public final class RunCommand implements Runnable {
           "--background requires --task or a pending spec in the Sail database.");
     }
 
-    var sshUser = config.sshUser();
+    var sshUser = ProjectDefinition.USER;
     var workDir = "/home/" + sshUser + "/workspace";
     if (!path.isBlank()) {
       workDir = workDir + "/" + path;
@@ -262,7 +251,7 @@ public final class RunCommand implements Runnable {
     }
   }
 
-  private String branchName(SailYaml config, String label) {
+  private String branchName(ProjectDefinition config, String label) {
     if (config.agent() == null || !config.agent().autoBranch()) {
       return null;
     }

@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -89,7 +89,7 @@ class RepoOriginTest {
                 dryRun,
                 "acme",
                 "/home/dev/workspace/web",
-                new SailYaml.Repo("https://github.com/org/web.git", "web", null)));
+                new ProjectDefinition.Repo("https://github.com/org/web.git", "web", null)));
   }
 
   /** Runs the git a container would, on this machine, so git finds repositories as it does. */
@@ -137,7 +137,10 @@ class RepoOriginTest {
             IllegalStateException.class,
             () ->
                 RepoOrigin.require(
-                    new LocalGit(), "acme", dir.toString(), new SailYaml.Repo(URL, "web", null)))
+                    new LocalGit(),
+                    "acme",
+                    dir.toString(),
+                    new ProjectDefinition.Repo(URL, "web", null)))
         .getMessage();
   }
 
@@ -156,7 +159,10 @@ class RepoOriginTest {
     assertDoesNotThrow(
         () ->
             RepoOrigin.require(
-                new LocalGit(), "acme", dir.toString(), new SailYaml.Repo(URL, "web", null)));
+                new LocalGit(),
+                "acme",
+                dir.toString(),
+                new ProjectDefinition.Repo(URL, "web", null)));
   }
 
   @Test
@@ -196,7 +202,8 @@ class RepoOriginTest {
   void aTokenInTheDefinitionsUrlIsNeverEchoed() throws Exception {
     var dir = checkout("https://github.com/org/old.git");
     var withToken =
-        new SailYaml.Repo("https://x-access-token:secret@github.com/org/new.git", "web", null);
+        new ProjectDefinition.Repo(
+            "https://x-access-token:secret@github.com/org/new.git", "web", null);
 
     var refusal =
         assertThrows(

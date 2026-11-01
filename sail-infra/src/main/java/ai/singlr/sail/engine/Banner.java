@@ -10,7 +10,7 @@ import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.ProjectScope;
@@ -287,7 +287,7 @@ public final class Banner {
   }
 
   /** Prints a bordered project summary box showing key configuration values. */
-  public static void printProjectSummary(SailYaml config, PrintStream out, Ansi ansi) {
+  public static void printProjectSummary(ProjectDefinition config, PrintStream out, Ansi ansi) {
     var pkgCount = config.packages() != null ? config.packages().size() : 0;
 
     var w = W;
@@ -299,12 +299,6 @@ public final class Banner {
       w = Math.max(w, rowWidth("Disk:", config.resources().disk()));
     }
     w = Math.max(w, rowWidth("Packages:", pkgCount + " user + 5 baseline"));
-    if (config.ssh() != null) {
-      w = Math.max(w, rowWidth("SSH user:", config.sshUser()));
-    }
-    if (config.git() != null) {
-      w = Math.max(w, rowWidth("Git:", config.git().name() + " <" + config.git().email() + ">"));
-    }
     if (config.repos() != null && !config.repos().isEmpty()) {
       w = Math.max(w, rowWidth("Repos:", config.repos().size() + " repositories"));
     }
@@ -323,19 +317,6 @@ public final class Banner {
       labelRow(out, ansi, w, "Disk:", config.resources().disk(), null, null);
     }
     labelRow(out, ansi, w, "Packages:", pkgCount + " user + 5 baseline", null, null);
-    if (config.ssh() != null) {
-      labelRow(out, ansi, w, "SSH user:", config.sshUser(), null, null);
-    }
-    if (config.git() != null) {
-      labelRow(
-          out,
-          ansi,
-          w,
-          "Git:",
-          config.git().name() + " <" + config.git().email() + ">",
-          null,
-          null);
-    }
     if (config.repos() != null && !config.repos().isEmpty()) {
       labelRow(out, ansi, w, "Repos:", config.repos().size() + " repositories", null, null);
     }
@@ -347,7 +328,7 @@ public final class Banner {
 
   /** Prints a detailed project configuration view with live container status. */
   public static void printProjectConfig(
-      SailYaml config, ContainerState state, PrintStream out, Ansi ansi) {
+      ProjectDefinition config, ContainerState state, PrintStream out, Ansi ansi) {
     var statusText =
         switch (state) {
           case ContainerState.Running r ->
@@ -380,10 +361,6 @@ public final class Banner {
         w = Math.max(w, rowWidth("Maven:", config.runtimes().maven()));
       }
     }
-    if (config.git() != null) {
-      w = Math.max(w, rowWidth("Git:", config.git().name() + " <" + config.git().email() + ">"));
-      w = Math.max(w, rowWidth("Git auth:", config.git().auth()));
-    }
     if (config.repos() != null) {
       for (var repo : config.repos()) {
         var detail = repo.path();
@@ -400,9 +377,6 @@ public final class Banner {
       w = Math.max(w, rowWidth("Agent:", Objects.requireNonNullElse(config.agent().type(), "-")));
       w = Math.max(w, rowWidth("Auto-snap:", String.valueOf(config.agent().autoSnapshot())));
       w = Math.max(w, rowWidth("Auto-branch:", String.valueOf(config.agent().autoBranch())));
-    }
-    if (config.ssh() != null) {
-      w = Math.max(w, rowWidth("SSH user:", config.sshUser()));
     }
     w = boxWidth(w);
 
@@ -444,19 +418,6 @@ public final class Banner {
       emptyRow(out, ansi, w);
     }
 
-    if (config.git() != null) {
-      labelRow(
-          out,
-          ansi,
-          w,
-          "Git:",
-          config.git().name() + " <" + config.git().email() + ">",
-          null,
-          null);
-      labelRow(out, ansi, w, "Git auth:", config.git().auth(), null, null);
-      emptyRow(out, ansi, w);
-    }
-
     if (config.repos() != null && !config.repos().isEmpty()) {
       for (var repo : config.repos()) {
         var detail = repo.path();
@@ -488,11 +449,6 @@ public final class Banner {
           out, ansi, w, "Auto-snap:", String.valueOf(config.agent().autoSnapshot()), null, null);
       labelRow(
           out, ansi, w, "Auto-branch:", String.valueOf(config.agent().autoBranch()), null, null);
-      emptyRow(out, ansi, w);
-    }
-
-    if (config.ssh() != null) {
-      labelRow(out, ansi, w, "SSH user:", config.sshUser(), null, null);
       emptyRow(out, ansi, w);
     }
 
@@ -1393,7 +1349,7 @@ public final class Banner {
     return 2 + label.length() + gap + Strings.columns(value);
   }
 
-  private static String serviceValue(Map.Entry<String, SailYaml.Service> entry) {
+  private static String serviceValue(Map.Entry<String, ProjectDefinition.Service> entry) {
     var ports =
         entry.getValue().ports() != null && !entry.getValue().ports().isEmpty()
             ? " ("

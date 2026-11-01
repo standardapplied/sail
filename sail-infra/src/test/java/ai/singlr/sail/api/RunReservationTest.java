@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -50,8 +50,8 @@ class RunReservationTest {
   private static final String RUN_ID = DateTimeUtils.newId().toString();
   private SessionYield sessionYield = SessionYield.NONE;
 
-  private static final SailYaml CONFIG =
-      SailYaml.fromMap(
+  private static final ProjectDefinition CONFIG =
+      ProjectDefinition.fromMap(
           Map.of(
               "name",
               "acme",

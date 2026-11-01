@@ -2574,7 +2574,7 @@ class SailOperationsTest {
 
     var error = operations.project("acme");
 
-    assertError(ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND, error);
+    assertError(ErrorCode.PROJECT_NOT_IN_CATALOG, error);
   }
 
   @Test

@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import java.util.LinkedHashMap;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -22,7 +22,7 @@ class PodmanCommandsTest {
     env.put("POSTGRES_DB", "acme");
     env.put("POSTGRES_USER", "dev");
     var service =
-        new SailYaml.Service(
+        new ProjectDefinition.Service(
             "postgres:16", List.of(5432), env, null, List.of("pgdata:/var/lib/postgresql/data"));
 
     var cmd = PodmanCommands.buildRunCommand("postgres", service);
@@ -49,7 +49,7 @@ class PodmanCommandsTest {
 
   @Test
   void minimalServiceImageOnly() {
-    var service = new SailYaml.Service("redis:7", null, null, null, null);
+    var service = new ProjectDefinition.Service("redis:7", null, null, null, null);
 
     var cmd = PodmanCommands.buildRunCommand("redis", service);
 
@@ -60,7 +60,8 @@ class PodmanCommandsTest {
   @Test
   void multiplePorts() {
     var service =
-        new SailYaml.Service("redpanda:latest", List.of(9092, 8082, 9644), null, null, null);
+        new ProjectDefinition.Service(
+            "redpanda:latest", List.of(9092, 8082, 9644), null, null, null);
 
     var cmd = PodmanCommands.buildRunCommand("redpanda", service);
 
@@ -72,7 +73,7 @@ class PodmanCommandsTest {
   @Test
   void customCommandIsSplitOnWhitespace() {
     var service =
-        new SailYaml.Service(
+        new ProjectDefinition.Service(
             "redpanda:latest", null, null, "redpanda start --smp 1 --memory 512M", null);
 
     var cmd = PodmanCommands.buildRunCommand("redpanda", service);
@@ -89,7 +90,7 @@ class PodmanCommandsTest {
 
   @Test
   void emptyCommandIsIgnored() {
-    var service = new SailYaml.Service("postgres:16", null, null, "", null);
+    var service = new ProjectDefinition.Service("postgres:16", null, null, "", null);
 
     var cmd = PodmanCommands.buildRunCommand("postgres", service);
 
@@ -98,7 +99,7 @@ class PodmanCommandsTest {
 
   @Test
   void blankCommandIsIgnored() {
-    var service = new SailYaml.Service("postgres:16", null, null, "   ", null);
+    var service = new ProjectDefinition.Service("postgres:16", null, null, "   ", null);
 
     var cmd = PodmanCommands.buildRunCommand("postgres", service);
 
@@ -108,7 +109,7 @@ class PodmanCommandsTest {
   @Test
   void multipleVolumes() {
     var service =
-        new SailYaml.Service(
+        new ProjectDefinition.Service(
             "meilisearch:latest",
             null,
             null,
@@ -125,7 +126,7 @@ class PodmanCommandsTest {
 
   @Test
   void returnedListIsImmutable() {
-    var service = new SailYaml.Service("redis:7", null, null, null, null);
+    var service = new ProjectDefinition.Service("redis:7", null, null, null, null);
 
     var cmd = PodmanCommands.buildRunCommand("redis", service);
 
@@ -138,7 +139,7 @@ class PodmanCommandsTest {
     env.put("A", "1");
     env.put("B", "2");
     env.put("C", "3");
-    var service = new SailYaml.Service("img:latest", null, env, null, null);
+    var service = new ProjectDefinition.Service("img:latest", null, env, null, null);
 
     var cmd = PodmanCommands.buildRunCommand("svc", service);
 

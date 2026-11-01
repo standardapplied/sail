@@ -9,7 +9,7 @@ import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
-import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -102,8 +102,6 @@ public final class ProjectRenamer {
     var hasContainer =
         oldState instanceof ContainerState.Running || oldState instanceof ContainerState.Stopped;
     var wasRunning = oldState instanceof ContainerState.Running;
-    var newDefinition = withName(existing.definition(), renamed);
-
     var undo = new ArrayDeque<Compensation>();
     try {
       if (wasRunning) {
@@ -118,7 +116,6 @@ public final class ProjectRenamer {
       undo.push(() -> operations.catalog().undoRename(catalogRename));
       moveProjectDir(old, renamed);
       undo.push(() -> moveProjectDir(renamed, old));
-      materialize(renamed, newDefinition);
     } catch (Exception e) {
       rollback(undo);
       throw e;
@@ -156,15 +153,20 @@ public final class ProjectRenamer {
     Files.move(src, dst);
   }
 
-  private void materialize(String name, String definition) throws IOException {
-    ProjectDefinitions.write(
-        projectsDir.resolve(name).resolve(SailPaths.PROJECT_DESCRIPTOR), definition);
-  }
-
-  static String withName(String definition, String name) {
-    var map = YamlUtil.parseMap(definition);
-    map.put("name", name);
-    return YamlUtil.dumpToString(map);
+  /** {@code definition} under the name {@code name}. */
+  static ProjectDefinition withName(ProjectDefinition definition, String name) {
+    return new ProjectDefinition(
+        name,
+        definition.description(),
+        definition.resources(),
+        definition.image(),
+        definition.packages(),
+        definition.runtimes(),
+        definition.repos(),
+        definition.services(),
+        definition.processes(),
+        definition.agent(),
+        definition.pipeline());
   }
 
   private static void attempt(Compensation step, List<String> warnings, String what) {

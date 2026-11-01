@@ -5,8 +5,9 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.SailYamlUpdater;
+import ai.singlr.sail.config.DefinitionEdits;
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
@@ -15,11 +16,9 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
-import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.io.PrintStream;
-import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Objects;
@@ -41,12 +40,6 @@ public final class ProjectResourcesSetCommand implements Runnable {
 
   @Parameters(index = "0", description = "Project name.")
   private String name;
-
-  @Option(
-      names = {"-f", "--file"},
-      description = "Path to sail.yaml project descriptor.",
-      defaultValue = "sail.yaml")
-  private String file;
 
   @Option(names = "--cpu", description = "CPU core limit.")
   private Integer cpu;
@@ -94,22 +87,14 @@ public final class ProjectResourcesSetCommand implements Runnable {
       throw RootRequired.refusal(spec);
     }
 
-    var explicit = ProjectDefinitions.explicitFile(file);
-    var actor = ProjectMutations.catalogOperator(name, explicit, dryRun);
-    var descriptorPath = explicit != null ? explicit : ProjectDefinitions.canonicalPath(name);
-    var config =
-        SailYaml.fromMap(
-            YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit, operator)));
+    var actor = ProjectMutations.catalogOperator(name, dryRun);
+    var config = ProjectMutations.current(name, operator);
     if (config.resources() == null) {
       throw new IllegalStateException(
-          "sail.yaml must have a resources section with cpu, memory, and disk.");
-    }
-    if (!name.equals(config.name())) {
-      throw new IllegalStateException(
-          "Project name mismatch: expected '" + name + "', found '" + config.name() + "'.");
+          "Project '" + name + "' sets no resources: set cpu, memory and disk in its definition.");
     }
 
-    var desiredResources = SailYamlUpdater.mergeResources(config.resources(), cpu, memory, disk);
+    var desiredResources = DefinitionEdits.mergeResources(config.resources(), cpu, memory, disk);
     var descriptorChanged = !config.resources().equals(desiredResources);
 
     var queryManager = new ContainerManager(queryShell());
@@ -130,18 +115,15 @@ public final class ProjectResourcesSetCommand implements Runnable {
     }
 
     if (!descriptorChanged && !liveLimitsChanged && !diskChanged) {
-      printAlreadyCurrent(descriptorPath, desiredResources);
+      printAlreadyCurrent(desiredResources);
       return;
     }
 
     if (descriptorChanged) {
-      var updatedText =
-          YamlUtil.dumpToString(
-              (SailYamlUpdater.updateResources(config, cpu, memory, disk)).toMap());
-      ProjectMutations.persist(
-          name,
-          explicit,
-          updatedText,
+      ProjectMutations.write(
+          Section.RESOURCES,
+          config,
+          ProjectMutations.checked(DefinitionEdits.updateResources(config, cpu, memory, disk)),
           dryRun,
           out,
           "record resources for '" + name + "' in the catalog",
@@ -163,7 +145,6 @@ public final class ProjectResourcesSetCommand implements Runnable {
     }
 
     printResult(
-        descriptorPath,
         config.resources(),
         desiredResources,
         descriptorChanged,
@@ -185,7 +166,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
     return shellOverride != null ? shellOverride : new ShellExecutor(dryRun);
   }
 
-  private static boolean limitsDiffer(ResourceLimits limits, SailYaml.Resources desired) {
+  private static boolean limitsDiffer(ResourceLimits limits, ProjectDefinition.Resources desired) {
     if (limits == null) {
       return true;
     }
@@ -197,12 +178,11 @@ public final class ProjectResourcesSetCommand implements Runnable {
     return value == null ? "" : value.strip().replaceAll("\\s+", "").toUpperCase(Locale.ROOT);
   }
 
-  private void printAlreadyCurrent(Path sailYamlPath, SailYaml.Resources desiredResources) {
+  private void printAlreadyCurrent(ProjectDefinition.Resources desiredResources) {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
       map.put("status", "unchanged");
-      map.put("descriptor", sailYamlPath.toAbsolutePath().toString());
       map.put("resources", resourceMap(desiredResources));
       out.println(YamlUtil.dumpJson(map));
       return;
@@ -212,18 +192,16 @@ public final class ProjectResourcesSetCommand implements Runnable {
   }
 
   private void printResult(
-      Path sailYamlPath,
-      SailYaml.Resources previous,
-      SailYaml.Resources desired,
+      ProjectDefinition.Resources previous,
+      ProjectDefinition.Resources desired,
       boolean descriptorChanged,
       boolean liveChanged,
       boolean restarted) {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
-      map.put("descriptor", sailYamlPath.toAbsolutePath().toString());
       map.put("dry_run", dryRun);
-      map.put("updated_descriptor", descriptorChanged);
+      map.put("updated_definition", descriptorChanged);
       map.put("applied_live", liveChanged);
       map.put("restarted", restarted);
       map.put("previous_resources", resourceMap(previous));
@@ -233,11 +211,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
     }
 
     if (descriptorChanged) {
-      out.println(
-          Ansi.AUTO.string(
-              "  @|green \u2713|@ Updated sail.yaml @|faint "
-                  + sailYamlPath.toAbsolutePath()
-                  + "|@"));
+      out.println(Ansi.AUTO.string("  @|green \u2713|@ Updated the project's definition"));
     }
     if (liveChanged) {
       out.println(
@@ -259,7 +233,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
     out.println(Ansi.AUTO.string("  @|bold,green \u2713 Resource update complete.|@"));
   }
 
-  private static LinkedHashMap<String, Object> resourceMap(SailYaml.Resources resources) {
+  private static LinkedHashMap<String, Object> resourceMap(ProjectDefinition.Resources resources) {
     var map = new LinkedHashMap<String, Object>();
     map.put("cpu", resources.cpu());
     map.put("memory", resources.memory());

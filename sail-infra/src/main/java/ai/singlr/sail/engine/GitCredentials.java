@@ -6,8 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.SailYaml;
-import java.nio.file.Path;
+import ai.singlr.sail.config.ProjectDefinition;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -32,7 +31,8 @@ public final class GitCredentials {
    * provider-specific environment variables ({@code GITHUB_TOKEN}, {@code GITLAB_TOKEN}, {@code
    * BITBUCKET_TOKEN}).
    */
-  public static String buildCredentialStore(Map<String, String> tokens, List<SailYaml.Repo> repos) {
+  public static String buildCredentialStore(
+      Map<String, String> tokens, List<ProjectDefinition.Repo> repos) {
     var hosts = extractHttpsHosts(repos);
     var sb = new StringBuilder();
     for (var host : hosts) {
@@ -48,25 +48,25 @@ public final class GitCredentials {
    * The unique HTTPS hosts of {@code repos} that are GitHub: {@code github.com}, or a host whose
    * repo is marked {@code forge: github}.
    */
-  public static List<String> githubHosts(List<SailYaml.Repo> repos) {
+  public static List<String> githubHosts(List<ProjectDefinition.Repo> repos) {
     if (repos == null) {
       return List.of();
     }
     return repos.stream()
-        .filter(repo -> SailYaml.Repo.GITHUB.equals(repo.forge()) || isGithubCom(repo))
+        .filter(repo -> ProjectDefinition.Repo.GITHUB.equals(repo.forge()) || isGithubCom(repo))
         .flatMap(repo -> extractHttpsHosts(List.of(repo)).stream())
         .distinct()
         .toList();
   }
 
-  private static boolean isGithubCom(SailYaml.Repo repo) {
+  private static boolean isGithubCom(ProjectDefinition.Repo repo) {
     return extractHttpsHosts(List.of(repo)).contains("github.com");
   }
 
   /**
    * Extracts unique HTTPS hostnames from repo URLs. Only includes hosts from repos that use HTTPS.
    */
-  public static List<String> extractHttpsHosts(List<SailYaml.Repo> repos) {
+  public static List<String> extractHttpsHosts(List<ProjectDefinition.Repo> repos) {
     var hosts = new LinkedHashSet<String>();
     if (repos != null) {
       for (var repo : repos) {
@@ -120,35 +120,6 @@ public final class GitCredentials {
     return Map.of("*", token);
   }
 
-  /**
-   * Extracts unique SSH hostnames from repo URLs. Handles both SSH-style ({@code git@host:path})
-   * and HTTPS-style URLs. Always includes {@code github.com} and {@code gitlab.com} as common
-   * defaults for {@code ssh-keyscan}.
-   */
-  public static List<String> extractSshHosts(List<SailYaml.Repo> repos) {
-    var hosts = new LinkedHashSet<String>();
-    hosts.add("github.com");
-    hosts.add("gitlab.com");
-    if (repos != null) {
-      for (var repo : repos) {
-        var url = repo.url();
-        if (url.startsWith("git@")) {
-          var colonIdx = url.indexOf(':');
-          if (colonIdx > 4) {
-            hosts.add(url.substring(4, colonIdx));
-          }
-        } else if (url.startsWith("https://")) {
-          var afterScheme = url.substring(8);
-          var slashIdx = afterScheme.indexOf('/');
-          if (slashIdx > 0) {
-            hosts.add(afterScheme.substring(0, slashIdx));
-          }
-        }
-      }
-    }
-    return hosts.stream().map(GitCredentials::requireSafeHost).toList();
-  }
-
   private static String requireSafeHost(String host) {
     if (host == null
         || host.length() > 253
@@ -172,15 +143,5 @@ public final class GitCredentials {
     } catch (NumberFormatException e) {
       return true;
     }
-  }
-
-  /**
-   * Resolves a host-side file path, expanding {@code ~} to the invoking user's home ({@link
-   * SailPaths#invokingHome()}), the {@code sudo} caller's rather than root's.
-   */
-  public static Path resolveHostPath(String path) {
-    return path.startsWith("~/")
-        ? SailPaths.invokingHome().resolve(path.substring(2))
-        : Path.of(path);
   }
 }

@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ShellExec;
 import java.io.ByteArrayOutputStream;
@@ -175,8 +175,8 @@ class ProjectResourcesSetCommandTest {
     return yamlPath;
   }
 
-  private SailYaml loadProjectYaml(Path yamlPath) throws Exception {
-    return SailYaml.fromMap(YamlUtil.parseFile(yamlPath));
+  private ProjectDefinition loadProjectYaml(Path yamlPath) throws Exception {
+    return ProjectDefinition.fromMap(YamlUtil.parseFile(yamlPath));
   }
 
   private static final class TestShell implements ShellExec {

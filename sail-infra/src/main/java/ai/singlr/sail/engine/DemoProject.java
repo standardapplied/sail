@@ -5,17 +5,16 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import java.util.Map;
 
 /**
  * The bundled demo project — an Outline wiki (Postgres + Redis) — shipped inside the binary so
  * {@code sail project demo} needs no network and no external repository. The definition is seeded
  * into the control-plane catalog on install/upgrade (see {@link DemoSeeder}); its workspace files
- * are materialised at provision time. This keeps a single concept: every project, the demo
- * included, lives in the database, never in GitHub.
- *
- * <p>The descriptor keeps the per-engineer placeholders ({@code ${GIT_NAME}}, {@code ${GIT_EMAIL}},
- * {@code ${SSH_PUBLIC_KEY}}) that {@code project demo} resolves against the local environment.
+ * are shared through the catalog's file store when the demo is made. This keeps a single concept:
+ * every project, the demo included, lives in the database.
  */
 public final class DemoProject {
 
@@ -24,55 +23,33 @@ public final class DemoProject {
   /** Catalog name of the demo project. */
   public static final String NAME = "demo";
 
-  /** The demo's {@code sail.yaml}, stored verbatim as the project definition. */
-  public static final String DEFINITION =
-      """
-      name: demo
-      description: "Outline wiki — open-source knowledge base with Postgres and Redis"
-
-      resources:
-        cpu: 2
-        memory: 4GB
-        disk: 20GB
-
-      image: ubuntu/24.04
-
-      runtimes:
-        node: "22"
-
-      git:
-        name: ${GIT_NAME}
-        email: ${GIT_EMAIL}
-        auth: token
-
-      repos:
-        - url: https://github.com/outline/outline.git
-          path: outline
-
-      services:
-        postgres:
-          image: postgres:16
-          ports: [5432]
-          environment:
-            POSTGRES_DB: outline
-            POSTGRES_USER: dev
-            POSTGRES_PASSWORD: dev
-          volumes:
-            - "pgdata:/var/lib/postgresql/data"
-        redis:
-          image: redis:7
-          ports: [6379]
-
-      ssh:
-        user: dev
-        authorized_keys:
-          - ${SSH_PUBLIC_KEY}
-
-      agent:
-        type: claude-code
-        auto_snapshot: true
-        auto_branch: true
-      """;
+  /** The demo's definition, as the catalog holds it. */
+  public static final ProjectDefinition DEFINITION =
+      ProjectDefinitionJson.read(
+          """
+          {
+            "name": "demo",
+            "description": "Outline wiki — open-source knowledge base with Postgres and Redis",
+            "resources": {"cpu": 2, "memory": "4GB", "disk": "20GB"},
+            "image": "ubuntu/24.04",
+            "runtimes": {"node": "22"},
+            "repos": [{"url": "https://github.com/outline/outline.git", "path": "outline"}],
+            "services": {
+              "postgres": {
+                "image": "postgres:16",
+                "ports": [5432],
+                "environment": {
+                  "POSTGRES_DB": "outline",
+                  "POSTGRES_USER": "dev",
+                  "POSTGRES_PASSWORD": "dev"
+                },
+                "volumes": ["pgdata:/var/lib/postgresql/data"]
+              },
+              "redis": {"image": "redis:7", "ports": [6379]}
+            },
+            "agent": {"type": "claude-code", "auto_snapshot": true, "auto_branch": true}
+          }
+          """);
 
   private static final String OUTLINE_SETUP_SH =
       """
@@ -94,7 +71,7 @@ public final class DemoProject {
       SECRET_KEY=$(openssl rand -hex 32)
       UTILS_SECRET=$(openssl rand -hex 32)
 
-      # Defaults — match sail.yaml Postgres config (superuser=dev, db=outline)
+      # Defaults — match the definition's Postgres config (superuser=dev, db=outline)
       PG_ADMIN="dev"
       DB_USER="dev"
       DB_PASS="dev"

@@ -7,38 +7,35 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
-import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.store.ProjectStore;
 import java.util.Optional;
 
 /**
- * Where everything that runs a project reads its definition: the catalog row, parsed as stored,
- * personal-field placeholders included. The on-disk {@code sail.yaml} is a copy nothing running
- * reads, so a revision that reaches the catalog, by sync or by a command, is what the next read
- * sees.
+ * Where everything that runs a project reads its definition: the catalog row, read as stored, so a
+ * revision that reaches the catalog, by sync or by a command, is what the next read sees.
  */
 @FunctionalInterface
 public interface ProjectReader {
 
   /** The project's definition, or empty when this box holds no definition of it. */
-  Optional<SailYaml> read(String project);
+  Optional<ProjectDefinition> read(String project);
 
   /** The project's definition, or a not-found error saying how to get one. */
-  default SailYaml require(String project) {
+  default ProjectDefinition require(String project) {
     return read(project).orElseThrow(() -> absent(project));
   }
 
   /** The not-found error for a project this box holds no definition of. */
   static ApiException absent(String project) {
     return new ApiException(
-        ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND,
+        ErrorCode.PROJECT_NOT_IN_CATALOG,
         "Project '" + project + "' is not in the catalog.",
         Remedy.of(
-            "If its descriptor is on this box, import it with '",
-            Remedy.sail("migrate"),
-            "'. To create the project, run '",
-            Remedy.sail("project apply", "-f", "<file>"),
+            "Create it with '",
+            Remedy.sail("project create", project),
+            "', or sync it from main with '",
+            Remedy.sail("sync"),
             "'."));
   }
 
@@ -51,12 +48,12 @@ public interface ProjectReader {
     if (store == null) {
       return project -> Optional.empty();
     }
-    return project -> store.findByName(project).map(row -> parse(project, row.definition()));
+    return project -> store.findByName(project).map(row -> parse(project, row));
   }
 
-  private static SailYaml parse(String project, String definition) {
+  private static ProjectDefinition parse(String project, ProjectStore.ProjectRow row) {
     try {
-      return SailYaml.fromMap(YamlUtil.parseMap(definition));
+      return row.definition();
     } catch (RuntimeException e) {
       throw new Unreadable(project, e);
     }

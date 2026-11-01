@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.RunStore;
@@ -433,11 +433,11 @@ class AgentReporterTest {
     assertFalse(map.containsKey("last_commit_minutes_ago"));
   }
 
-  private static SailYaml buildConfig() {
-    return new SailYaml(
+  private static ProjectDefinition buildConfig() {
+    return new ProjectDefinition(
         CONTAINER,
         null,
-        new SailYaml.Resources(4, "12GB", "150GB"),
+        new ProjectDefinition.Resources(4, "12GB", "150GB"),
         null,
         null,
         null,
@@ -445,7 +445,7 @@ class AgentReporterTest {
         null,
         null,
         null,
-        new SailYaml.Agent("claude-code", true, "sail/", true, null, null, null, null),
-        new SailYaml.Ssh("dev", null));
+        new ProjectDefinition.Agent("claude-code", true, "sail/", true, null, null, null, null),
+        new ProjectDefinition.Ssh("dev", null));
   }
 }

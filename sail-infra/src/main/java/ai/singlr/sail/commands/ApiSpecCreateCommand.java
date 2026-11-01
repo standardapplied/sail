@@ -42,7 +42,7 @@ public final class ApiSpecCreateCommand implements Runnable {
       names = {"-p", "--project"},
       description =
           "Client project this spec belongs to. Defaults to the current project, inferred from"
-              + " cwd's sail.yaml or set by project switch.")
+              + " the one set by project switch.")
   private String project;
 
   @Option(names = "--status", description = "Initial status.", defaultValue = "draft")

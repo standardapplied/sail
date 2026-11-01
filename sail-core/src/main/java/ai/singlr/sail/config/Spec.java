@@ -194,9 +194,9 @@ public record Spec(
   }
 
   /**
-   * The definition-shaped projection — the sail.yaml face of a spec. Deliberately narrower than the
-   * record: priority, attribution, and the room link are store-owned state, not definition, so they
-   * never appear here.
+   * The definition-shaped projection — the definition face of a spec. Deliberately narrower than
+   * the record: priority, attribution, and the room link are store-owned state, not definition, so
+   * they never appear here.
    */
   public Map<String, Object> toMap() {
     var map = new LinkedHashMap<String, Object>();

@@ -10,7 +10,7 @@ import java.util.List;
 /** The harnesses sail knows, and the one it assumes when a project names none. */
 public final class Harnesses {
 
-  /** The harness a project gets when its {@code sail.yaml} names none. */
+  /** The harness a project gets when its definition names none. */
   public static final Harness DEFAULT = new ClaudeCode();
 
   private static final List<Harness> ALL = List.of(DEFAULT, new Codex());
@@ -22,7 +22,7 @@ public final class Harnesses {
     return ALL;
   }
 
-  /** The {@code sail.yaml} names of every known harness, in the same order. */
+  /** The names a definition gives every known harness, in the same order. */
   public static List<String> names() {
     return ALL.stream().map(Harness::yamlName).toList();
   }
@@ -40,7 +40,7 @@ public final class Harnesses {
   }
 
   /**
-   * The harness named {@code yamlName} in {@code sail.yaml}.
+   * The harness a definition names {@code yamlName}.
    *
    * @throws IllegalArgumentException if no harness has that name
    */
@@ -55,6 +55,6 @@ public final class Harnesses {
                         + yamlName
                         + "'. Known agents: "
                         + String.join(", ", names())
-                        + ".\n  Check the 'install' list in your sail.yaml agent section."));
+                        + ".\n  Check the install list in the project's agent section."));
   }
 }

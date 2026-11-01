@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Lane;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.AgentSession;
@@ -157,7 +158,7 @@ final class HostLanes {
     }
 
     @Override
-    public String demoDefinition() {
+    public ProjectDefinition demoDefinition() {
       schema.initialize();
       DemoSeeder.seedIfAbsent(db);
       return projectStore

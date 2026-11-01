@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ProjectServer.Kind;
 import ai.singlr.sail.engine.ProjectServer.Port;
@@ -165,8 +165,8 @@ class ProjectServerTest {
         () -> now);
   }
 
-  private static SailYaml acme() {
-    return SailYaml.fromMap(YamlUtil.parseMap(ACME));
+  private static ProjectDefinition acme() {
+    return ProjectDefinition.fromMap(YamlUtil.parseMap(ACME));
   }
 
   @Test
@@ -230,7 +230,7 @@ class ProjectServerTest {
   @Test
   void aValueThatIsNotOneShellWordIsQuotedAndAWorkdirOfTheWorkspaceIsTheWorkspace() {
     var config =
-        SailYaml.fromMap(
+        ProjectDefinition.fromMap(
             YamlUtil.parseMap(
                 "name: acme\nprocesses:\n  web:\n    command: x\n    workdir: .\n    env:\n      GREETING: \"it's $HOME\"\n"));
 
@@ -241,7 +241,8 @@ class ProjectServerTest {
             + "x\n",
         ProjectServer.script(config, config.processes().get("web")));
     var noRepo =
-        SailYaml.fromMap(YamlUtil.parseMap("name: acme\nprocesses:\n  web:\n    command: x\n"));
+        ProjectDefinition.fromMap(
+            YamlUtil.parseMap("name: acme\nprocesses:\n  web:\n    command: x\n"));
     assertEquals(
         "/home/dev/workspace", ProjectServer.workdirOf(noRepo, noRepo.processes().get("web")));
   }
@@ -268,7 +269,8 @@ class ProjectServerTest {
     var changed =
         server.serve(
             "acme",
-            SailYaml.fromMap(YamlUtil.parseMap(ACME.replace("npm run dev", "npm run start"))),
+            ProjectDefinition.fromMap(
+                YamlUtil.parseMap(ACME.replace("npm run dev", "npm run start"))),
             Duration.ofSeconds(60));
 
     assertEquals(
@@ -391,7 +393,7 @@ class ProjectServerTest {
 
     server.serve(
         "acme",
-        SailYaml.fromMap(YamlUtil.parseMap(ACME.substring(0, ACME.indexOf("  worker:")))),
+        ProjectDefinition.fromMap(YamlUtil.parseMap(ACME.substring(0, ACME.indexOf("  worker:")))),
         Duration.ofSeconds(60));
 
     assertEquals(
@@ -459,7 +461,7 @@ class ProjectServerTest {
   void aDefinitionWithoutProcessesServesItsServicesAsBefore() throws Exception {
     var container = new Container().looking(look("LISTEN 0 4096 *:5432 *:*\n"));
     var config =
-        SailYaml.fromMap(
+        ProjectDefinition.fromMap(
             YamlUtil.parseMap(
                 "name: acme\nservices:\n  postgres:\n    image: postgres:16\n    ports: [5432]\n"));
 

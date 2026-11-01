@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.HostYaml;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
@@ -43,31 +43,32 @@ class ProjectProvisionerTest {
 
   @TempDir Path tempDir;
 
-  private static SailYaml fullConfig() {
-    return new SailYaml(
+  private static ProjectDefinition fullConfig() {
+    return new ProjectDefinition(
         "acme-health",
         "Acme Health Platform",
-        new SailYaml.Resources(4, "12GB", "150GB"),
+        new ProjectDefinition.Resources(4, "12GB", "150GB"),
         "ubuntu/24.04",
         List.of("postgresql-client-16"),
-        new SailYaml.Runtimes(25, "22", null),
+        new ProjectDefinition.Runtimes(25, "22", null),
         null,
         null,
         Map.of(
-            "postgres", new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null)),
-        Map.of("app", new SailYaml.Process("java -jar app.jar", ".", null, Map.of())),
-        new SailYaml.Agent("claude-code", true, "sail/", true, null, Map.of(), null, null),
-        new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA... alice@laptop")));
+            "postgres",
+            new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
+        Map.of("app", new ProjectDefinition.Process("java -jar app.jar", ".", null, Map.of())),
+        new ProjectDefinition.Agent("claude-code", true, "sail/", true, null, Map.of(), null, null),
+        new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA... alice@laptop")));
   }
 
   private static final SshPublicKey WORKSTATION_KEY =
       SshPublicKey.parse(TestSshKeys.ed25519("workstation", "uday@laptop"));
 
-  private static SailYaml minimalConfig() {
-    return new SailYaml(
+  private static ProjectDefinition minimalConfig() {
+    return new ProjectDefinition(
         "simple",
         "Simple project",
-        new SailYaml.Resources(2, "4GB", "50GB"),
+        new ProjectDefinition.Resources(2, "4GB", "50GB"),
         "ubuntu/24.04",
         null,
         null,
@@ -79,9 +80,9 @@ class ProjectProvisionerTest {
         null);
   }
 
-  private static SailYaml minimalConfigWith(SailYaml.Ssh ssh) {
+  private static ProjectDefinition minimalConfigWith(ProjectDefinition.Ssh ssh) {
     var config = minimalConfig();
-    return new SailYaml(
+    return new ProjectDefinition(
         config.name(),
         config.description(),
         config.resources(),
@@ -96,9 +97,9 @@ class ProjectProvisionerTest {
         ssh);
   }
 
-  private static SailYaml minimalConfigWith(SailYaml.Runtimes runtimes) {
+  private static ProjectDefinition minimalConfigWith(ProjectDefinition.Runtimes runtimes) {
     var config = minimalConfig();
-    return new SailYaml(
+    return new ProjectDefinition(
         config.name(),
         config.description(),
         config.resources(),
@@ -498,7 +499,7 @@ class ProjectProvisionerTest {
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     setupTracker.load(ProjectProvisioner.inputs(minimalConfig(), Optional.empty()));
     setupTracker.advance(ProjectPhase.SSH_CONFIGURED);
-    var edited = minimalConfigWith(new SailYaml.Ssh("dev", null));
+    var edited = minimalConfigWith(new ProjectDefinition.Ssh("dev", null));
 
     var shell = minimalSuccessShell();
     var steps = new ArrayList<String>();
@@ -548,7 +549,7 @@ class ProjectProvisionerTest {
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     setupTracker.load(ProjectProvisioner.inputs(minimalConfig(), Optional.empty()));
     setupTracker.advance(ProjectPhase.MAVEN_INSTALLED);
-    var withJdk = minimalConfigWith(new SailYaml.Runtimes(25, null, null));
+    var withJdk = minimalConfigWith(new ProjectDefinition.Runtimes(25, null, null));
 
     var shell = provisionedSimpleShell().onFail("dpkg -s temurin-25-jdk", "not installed");
     var steps = new ArrayList<String>();
@@ -568,7 +569,7 @@ class ProjectProvisionerTest {
   void aRuntimeAddedToAFinishedContainersDescriptorIsInstalledAndTheRestIsAlreadyThere()
       throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
-    var withNode = minimalConfigWith(new SailYaml.Runtimes(0, "22", null));
+    var withNode = minimalConfigWith(new ProjectDefinition.Runtimes(0, "22", null));
 
     var shell = provisionedSimpleShell().onFail("node --version", "not found");
     var steps = new ArrayList<String>();
@@ -594,19 +595,19 @@ class ProjectProvisionerTest {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var finished = minimalConfig();
     var edited =
-        new SailYaml(
+        new ProjectDefinition(
             finished.name(),
             finished.description(),
             finished.resources(),
             finished.image(),
             null,
-            new SailYaml.Runtimes(0, "22", null),
+            new ProjectDefinition.Runtimes(0, "22", null),
             null,
             null,
             null,
             null,
             null,
-            new SailYaml.Ssh(null, List.of("ssh-ed25519 AAAA mallory@laptop")));
+            new ProjectDefinition.Ssh(null, List.of("ssh-ed25519 AAAA mallory@laptop")));
     var pushes =
         new PushRecordingShell(
             provisionedSimpleShell()
@@ -796,7 +797,7 @@ class ProjectProvisionerTest {
     var incus = new SharedIncus(held, () -> {}, "simple");
     var apply =
         new FutureTask<>(
-            provision(incus, minimalConfigWith(new SailYaml.Runtimes(25, null, null))));
+            provision(incus, minimalConfigWith(new ProjectDefinition.Runtimes(25, null, null))));
     new Thread(apply).start();
     assertTrue(held.reached.await(10, TimeUnit.SECONDS), "the apply never reached its JDK step");
 
@@ -808,7 +809,7 @@ class ProjectProvisionerTest {
     assertDoesNotThrow(() -> apply.get());
   }
 
-  private Callable<Void> provision(ShellExec shell, SailYaml config) {
+  private Callable<Void> provision(ShellExec shell, ProjectDefinition config) {
     var tracker = tracker();
     return () -> {
       new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN)
@@ -968,10 +969,10 @@ class ProjectProvisionerTest {
   void projectImageOverridesHostImage() throws Exception {
     var shell = allSuccessShell();
     var customConfig =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/22.04",
             List.of("postgresql-client-16"),
             null,
@@ -980,7 +981,7 @@ class ProjectProvisionerTest {
             null,
             null,
             null,
-            new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
 
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
@@ -1233,7 +1234,7 @@ class ProjectProvisionerTest {
     var alice = TestSshKeys.ed25519("alice", "alice@laptop");
     var config =
         minimalConfigWith(
-            new SailYaml.Ssh(
+            new ProjectDefinition.Ssh(
                 null,
                 List.of(
                     alice,
@@ -1302,7 +1303,7 @@ class ProjectProvisionerTest {
   private void provisionedWith(
       ShellExec shell,
       Path stateFile,
-      SailYaml config,
+      ProjectDefinition config,
       Optional<SshPublicKey> workstationKey,
       List<String> steps)
       throws Exception {
@@ -1319,7 +1320,7 @@ class ProjectProvisionerTest {
   void aPaddedDefinitionKeyIsWrittenStripped() throws Exception {
     var shell = new PushRecordingShell(minimalSuccessShell());
     var alice = TestSshKeys.ed25519("alice", "alice@laptop");
-    var config = minimalConfigWith(new SailYaml.Ssh(null, List.of("  " + alice + "  ")));
+    var config = minimalConfigWith(new ProjectDefinition.Ssh(null, List.of("  " + alice + "  ")));
 
     new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN)
         .provision(config, hostYaml(), null, null);
@@ -1351,7 +1352,7 @@ class ProjectProvisionerTest {
             + WORKSTATION_KEY.blob()
             + " laptop";
     var bob = "restrict " + TestSshKeys.ed25519("bob", "bob@laptop");
-    var config = minimalConfigWith(new SailYaml.Ssh(null, List.of(restricted, bob, bob)));
+    var config = minimalConfigWith(new ProjectDefinition.Ssh(null, List.of(restricted, bob, bob)));
 
     new ProjectProvisioner(
             shell, tracker(), null, Optional.of(WORKSTATION_KEY), OperatorCommand.PLAIN)
@@ -1375,7 +1376,8 @@ class ProjectProvisionerTest {
             OperatorCommand.PLAIN);
 
     provisioner.provision(
-        minimalConfigWith(new SailYaml.Ssh(null, List.of("ssh-ed25519 AAAA alice@laptop"))),
+        minimalConfigWith(
+            new ProjectDefinition.Ssh(null, List.of("ssh-ed25519 AAAA alice@laptop"))),
         hostYaml(),
         null,
         null);
@@ -1445,7 +1447,8 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(minimalConfigWith(new SailYaml.Ssh("dev", null)), hostYaml(), null, null);
+    provisioner.provision(
+        minimalConfigWith(new ProjectDefinition.Ssh("dev", null)), hostYaml(), null, null);
 
     assertEquals("", shell.pushed.get("simple/home/dev/.ssh/authorized_keys"));
     assertFalse(shell.script.invocations().stream().anyMatch(c -> c.contains("useradd")));
@@ -1486,10 +1489,10 @@ class ProjectProvisionerTest {
   @Test
   void aNewUserWithAnEmptyKeyListGetsAnEmptyAuthorizedKeys() throws Exception {
     var configWithEmptyKeys =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
             List.of("postgresql-client-16"),
             null,
@@ -1498,7 +1501,7 @@ class ProjectProvisionerTest {
             null,
             null,
             null,
-            new SailYaml.Ssh("dev", List.of()));
+            new ProjectDefinition.Ssh("dev", List.of()));
     var script =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -1524,10 +1527,10 @@ class ProjectProvisionerTest {
   @Test
   void aNewUserWithNoKeyListGetsAnEmptyAuthorizedKeys() throws Exception {
     var configWithNullKeys =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
             null,
             null,
@@ -1536,7 +1539,7 @@ class ProjectProvisionerTest {
             null,
             null,
             null,
-            new SailYaml.Ssh("dev", null));
+            new ProjectDefinition.Ssh("dev", null));
     var script =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -1923,20 +1926,20 @@ class ProjectProvisionerTest {
     assertEquals("NODE_INSTALLED", tracker.currentState().error().failedPhase());
   }
 
-  private static SailYaml configWithGit(String auth) {
-    return new SailYaml(
+  private static ProjectDefinition configWithGit(String auth) {
+    return new ProjectDefinition(
         "acme-health",
         "Acme Health Platform",
-        new SailYaml.Resources(4, "12GB", "150GB"),
+        new ProjectDefinition.Resources(4, "12GB", "150GB"),
         "ubuntu/24.04",
         null,
         null,
-        new SailYaml.Git("Acme Eng", "eng@acme.com", auth, null),
-        List.of(new SailYaml.Repo("https://github.com/acme/api.git", "api", null)),
+        new ProjectDefinition.Git("Acme Eng", "eng@acme.com", auth, null),
+        List.of(new ProjectDefinition.Repo("https://github.com/acme/api.git", "api", null)),
         null,
         null,
         null,
-        new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+        new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
   }
 
   /** Shell setup that succeeds through step 10 (Node skipped) for configs without JDK/Node. */
@@ -2173,36 +2176,36 @@ class ProjectProvisionerTest {
     assertTrue(ex.getMessage().contains("git.ssh_key"));
   }
 
-  private static SailYaml configWithGitSshKey(String keyPath) {
-    return new SailYaml(
+  private static ProjectDefinition configWithGitSshKey(String keyPath) {
+    return new ProjectDefinition(
         "acme-health",
         "Acme Health Platform",
-        new SailYaml.Resources(4, "12GB", "150GB"),
+        new ProjectDefinition.Resources(4, "12GB", "150GB"),
         "ubuntu/24.04",
         null,
         null,
-        new SailYaml.Git("Acme Eng", "eng@acme.com", "ssh", keyPath),
+        new ProjectDefinition.Git("Acme Eng", "eng@acme.com", "ssh", keyPath),
         null,
         null,
         null,
         null,
-        new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+        new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
   }
 
-  private static SailYaml configWithMaven(String mavenVersion) {
-    return new SailYaml(
+  private static ProjectDefinition configWithMaven(String mavenVersion) {
+    return new ProjectDefinition(
         "acme-health",
         "Acme Health Platform",
-        new SailYaml.Resources(4, "12GB", "150GB"),
+        new ProjectDefinition.Resources(4, "12GB", "150GB"),
         "ubuntu/24.04",
         null,
-        new SailYaml.Runtimes(0, null, mavenVersion),
+        new ProjectDefinition.Runtimes(0, null, mavenVersion),
         null,
         null,
         null,
         null,
         null,
-        new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+        new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
   }
 
   @Test
@@ -2324,11 +2327,11 @@ class ProjectProvisionerTest {
     assertEquals("MAVEN_INSTALLED", tracker.currentState().error().failedPhase());
   }
 
-  private static SailYaml configWithRepos(List<SailYaml.Repo> repos) {
-    return new SailYaml(
+  private static ProjectDefinition configWithRepos(List<ProjectDefinition.Repo> repos) {
+    return new ProjectDefinition(
         "acme-health",
         "Acme Health Platform",
-        new SailYaml.Resources(4, "12GB", "150GB"),
+        new ProjectDefinition.Resources(4, "12GB", "150GB"),
         "ubuntu/24.04",
         null,
         null,
@@ -2337,15 +2340,15 @@ class ProjectProvisionerTest {
         null,
         null,
         null,
-        new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+        new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
   }
 
   @Test
   void reposClonedAsDevUser() throws Exception {
     var repos =
         List.of(
-            new SailYaml.Repo("https://github.com/acme/app.git", "acme", null),
-            new SailYaml.Repo("https://github.com/acme/lib.git", "lib", null));
+            new ProjectDefinition.Repo("https://github.com/acme/app.git", "acme", null),
+            new ProjectDefinition.Repo("https://github.com/acme/lib.git", "lib", null));
     var shell =
         shellThroughStep10()
             .onFail("test -d /home/dev/workspace/acme", "")
@@ -2404,7 +2407,8 @@ class ProjectProvisionerTest {
 
   @Test
   void repoAlreadyExistsIsSkipped() throws Exception {
-    var repos = List.of(new SailYaml.Repo("https://github.com/acme/app.git", "acme", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/acme/app.git", "acme", null));
     var shell =
         shellThroughStep10()
             .onOk("test -d /home/dev/workspace/acme", "")
@@ -2433,7 +2437,8 @@ class ProjectProvisionerTest {
 
   @Test
   void repoWithBranchUsesBranchFlag() throws Exception {
-    var repos = List.of(new SailYaml.Repo("https://github.com/acme/app.git", "acme", "develop"));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/acme/app.git", "acme", "develop"));
     var shell = shellThroughStep10().onFail("test -d /home/dev/workspace/acme", "");
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
@@ -2449,7 +2454,8 @@ class ProjectProvisionerTest {
 
   @Test
   void aCheckoutOfAnotherRepositoryStopsTheStepBeforeItIsRecorded() {
-    var repos = List.of(new SailYaml.Repo("https://github.com/acme/app.git", "acme", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/acme/app.git", "acme", null));
     var shell =
         shellThroughStep10()
             .onOk("test -d /home/dev/workspace/acme", "")
@@ -2476,7 +2482,8 @@ class ProjectProvisionerTest {
 
   @Test
   void repoCloneFailureThrows() {
-    var repos = List.of(new SailYaml.Repo("https://github.com/acme/app.git", "acme", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/acme/app.git", "acme", null));
     var shell =
         shellThroughStep10()
             .onFail("test -d /home/dev/workspace/acme", "")
@@ -2770,17 +2777,19 @@ class ProjectProvisionerTest {
 
   @Test
   void multipleServicesProvisionedInOrder() throws Exception {
-    var services = new LinkedHashMap<String, SailYaml.Service>();
+    var services = new LinkedHashMap<String, ProjectDefinition.Service>();
     services.put(
-        "postgres", new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null));
+        "postgres",
+        new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null));
     services.put(
         "meilisearch",
-        new SailYaml.Service("getmeili/meilisearch:latest", List.of(7700), Map.of(), null, null));
+        new ProjectDefinition.Service(
+            "getmeili/meilisearch:latest", List.of(7700), Map.of(), null, null));
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Multi-service",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
             null,
             null,
@@ -2789,7 +2798,7 @@ class ProjectProvisionerTest {
             services,
             null,
             null,
-            new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -2910,22 +2919,22 @@ class ProjectProvisionerTest {
   @Test
   void agentToolsAlreadyInstalledSkipsInstall() throws Exception {
     var configWithInstall =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
             null,
-            new SailYaml.Runtimes(25, "22", null),
+            new ProjectDefinition.Runtimes(25, "22", null),
             null,
             null,
             Map.of(
                 "postgres",
-                new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null)),
+                new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
             null,
-            new SailYaml.Agent(
+            new ProjectDefinition.Agent(
                 "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null),
-            new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -2965,22 +2974,22 @@ class ProjectProvisionerTest {
   @Test
   void agentToolsInstallFailureRecordsError() {
     var configWithInstall =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
             null,
-            new SailYaml.Runtimes(25, "22", null),
+            new ProjectDefinition.Runtimes(25, "22", null),
             null,
             null,
             Map.of(
                 "postgres",
-                new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null)),
+                new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
             null,
-            new SailYaml.Agent(
+            new ProjectDefinition.Agent(
                 "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null),
-            new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -3013,18 +3022,18 @@ class ProjectProvisionerTest {
   @Test
   void multipleAgentToolsInstalled() throws Exception {
     var configWithMultiple =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
             null,
-            new SailYaml.Runtimes(0, "22", null),
+            new ProjectDefinition.Runtimes(0, "22", null),
             null,
             null,
             null,
             null,
-            new SailYaml.Agent(
+            new ProjectDefinition.Agent(
                 "claude-code",
                 true,
                 "sail/",
@@ -3033,7 +3042,7 @@ class ProjectProvisionerTest {
                 Map.of(),
                 null,
                 null),
-            new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -3161,22 +3170,22 @@ class ProjectProvisionerTest {
   @Test
   void provisioningInstallsSailsSkillAndWritesNoContextFile() throws Exception {
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
             null,
-            new SailYaml.Runtimes(25, null, null),
+            new ProjectDefinition.Runtimes(25, null, null),
             null,
             null,
             Map.of(
                 "postgres",
-                new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null)),
+                new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
             null,
-            new SailYaml.Agent(
+            new ProjectDefinition.Agent(
                 "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null),
-            new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")

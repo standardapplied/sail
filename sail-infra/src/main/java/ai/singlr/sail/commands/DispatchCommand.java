@@ -54,7 +54,7 @@ public final class DispatchCommand implements Runnable {
       names = {"-p", "--project"},
       description =
           "Project whose container runs the agent (default: the current project, inferred from"
-              + " cwd's sail.yaml or set by project switch).")
+              + " the one set by project switch).")
   private String project;
 
   private String name;
@@ -101,8 +101,6 @@ public final class DispatchCommand implements Runnable {
               + " spec whose status is not 'pending' is reset to pending, recording a 'restarted'"
               + " lifecycle event, before dispatching.")
   private boolean restart;
-
-  @Mixin private IgnoredFileOption file;
 
   @Mixin private SyncOptions syncOptions;
 

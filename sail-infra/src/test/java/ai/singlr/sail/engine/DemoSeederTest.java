@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.SyncRequest;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -182,7 +182,7 @@ class DemoSeederTest {
     DemoSeeder.seedIfAbsent(db, true);
     var definition = store.findByName(DemoProject.NAME).orElseThrow().definition();
 
-    var config = SailYaml.fromMap(YamlUtil.parseMap(definition));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(definition));
     assertEquals("demo", config.name());
   }
 

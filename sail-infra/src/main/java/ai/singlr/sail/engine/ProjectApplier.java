@@ -6,7 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.api.ProjectSkills;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerManager.ResourceLimits;
 import ai.singlr.sail.harness.Harnesses;
@@ -27,7 +27,7 @@ import java.util.stream.Stream;
  * Applies incremental changes to an already-provisioned project container. Detects what is already
  * present in the container and only applies the delta — adding missing services, repos, agent
  * tools, etc. Also supports declarative reconciliation: removing services that are running in the
- * container but no longer declared in sail.yaml.
+ * container but no longer declared in its definition.
  *
  * <p>Unlike {@link ProjectProvisioner} (which runs the full provisioning pipeline from scratch),
  * this engine is safe to run on a live container at any time.
@@ -63,7 +63,7 @@ public final class ProjectApplier {
   }
 
   /**
-   * Installs missing apt packages — the sail baseline plus any declared in sail.yaml. Packages
+   * Installs missing apt packages — the sail baseline plus any its definition declares. Packages
    * already installed are skipped, so a converge on a current container never touches apt. This is
    * how containers provisioned before a baseline addition pick up the new tools.
    */
@@ -106,7 +106,7 @@ public final class ProjectApplier {
   /**
    * Applies new services from the config. Services already running in the container are skipped.
    */
-  public ApplyResult applyServices(String name, Map<String, SailYaml.Service> services)
+  public ApplyResult applyServices(String name, Map<String, ProjectDefinition.Service> services)
       throws IOException, InterruptedException, TimeoutException {
     if (services == null || services.isEmpty()) {
       return ApplyResult.empty();
@@ -141,17 +141,15 @@ public final class ProjectApplier {
    */
   public ApplyResult applyRepos(
       String name,
-      List<SailYaml.Repo> repos,
+      List<ProjectDefinition.Repo> repos,
       String sshUser,
-      Map<String, String> gitTokens,
-      SailYaml.Git git)
+      Map<String, String> gitTokens)
       throws IOException, InterruptedException, TimeoutException {
     if (repos == null || repos.isEmpty()) {
       return ApplyResult.empty();
     }
 
     ensureCredentialStore(name, sshUser, gitTokens, repos);
-    ensureSshKey(name, sshUser, git);
 
     var added = 0;
     var skipped = 0;
@@ -213,12 +211,9 @@ public final class ProjectApplier {
     return new ApplyResult(added, 0, skipped, List.of());
   }
 
-  /** Sets {@code dev}'s git identity to the definition's, unless both values already match. */
-  public ApplyResult applyGitConfig(String name, SailYaml.Git git, String sshUser)
+  /** Sets {@code dev}'s git identity to this box's {@code git}, unless both already match. */
+  public ApplyResult applyGitConfig(String name, LocalIdentity.GitIdentity git)
       throws IOException, InterruptedException, TimeoutException {
-    if (git == null) {
-      return ApplyResult.empty();
-    }
     if (current(name, "user.name", git.name()) && current(name, "user.email", git.email())) {
       out.println("  [skip] Git config already current");
       return new ApplyResult(0, 0, 1, List.of());
@@ -256,7 +251,7 @@ public final class ProjectApplier {
    * skill is left as it is, a changed one is replaced whole, one the project no longer holds is
    * removed, and one that is no skill is skipped with a warning saying why.
    */
-  public ApplyResult applySkills(String name, SailYaml config, ProjectSkills skills)
+  public ApplyResult applySkills(String name, ProjectDefinition config, ProjectSkills skills)
       throws Exception {
     var harnesses = ProjectProvisioner.installedHarnesses(config);
     if (harnesses.isEmpty()) {
@@ -316,10 +311,10 @@ public final class ProjectApplier {
    * are running in the Incus container but are not declared in the services map.
    *
    * @param name the Incus container name
-   * @param services the desired services from sail.yaml (may be null)
+   * @param services the services the definition declares (may be null)
    * @return result with removed count for orphaned services
    */
-  public ApplyResult reconcileServices(String name, Map<String, SailYaml.Service> services)
+  public ApplyResult reconcileServices(String name, Map<String, ProjectDefinition.Service> services)
       throws IOException, InterruptedException, TimeoutException {
     var running = queryRunningServiceNames(name);
     if (running.isEmpty()) {
@@ -332,7 +327,7 @@ public final class ProjectApplier {
     }
     var removed = 0;
     for (var orphan : orphans) {
-      out.println("  [remove] Orphaned service '" + orphan + "' not in sail.yaml");
+      out.println("  [remove] Orphaned service '" + orphan + "' not in the definition");
       shell.exec(ContainerExec.asDevUser(name, List.of("podman", "stop", orphan)));
       shell.exec(ContainerExec.asDevUser(name, List.of("podman", "rm", "-f", orphan)));
       removed++;
@@ -363,13 +358,12 @@ public final class ProjectApplier {
   }
 
   /**
-   * Pushes workspace files from the local {@code files/} directory into the container at {@code
-   * ~/workspace/}. Pushes each file individually to preserve correct path structure.
+   * Pushes the project's shared files, as the catalog's file store wrote them to {@code filesDir},
+   * into the container at {@code ~/workspace/}, each file on its own so its path is kept.
    */
-  public ApplyResult applyWorkspaceFiles(String name, Path sailYamlPath, String sshUser)
+  public ApplyResult applyWorkspaceFiles(String name, Path filesDir, String sshUser)
       throws IOException, InterruptedException, TimeoutException {
-    var filesDir = WorkspaceFiles.resolveFilesDir(sailYamlPath);
-    if (filesDir == null) {
+    if (filesDir == null || !Files.isDirectory(filesDir)) {
       return ApplyResult.empty();
     }
     var entries = WorkspaceFiles.listFiles(filesDir);
@@ -446,7 +440,7 @@ public final class ProjectApplier {
 
   /** Checks for config sections that cannot be changed post-creation and returns warnings. */
   public List<String> checkUnsupportedChanges(
-      SailYaml config, ResourceLimits liveLimits, OperatorCommand operator) {
+      ProjectDefinition config, ResourceLimits liveLimits, OperatorCommand operator) {
     var warnings = new ArrayList<String>();
     if (config.resources() != null
         && liveLimits != null
@@ -474,7 +468,10 @@ public final class ProjectApplier {
    * each GitHub host among them with the same token.
    */
   private void ensureCredentialStore(
-      String name, String sshUser, Map<String, String> gitTokens, List<SailYaml.Repo> repos)
+      String name,
+      String sshUser,
+      Map<String, String> gitTokens,
+      List<ProjectDefinition.Repo> repos)
       throws IOException, InterruptedException, TimeoutException {
     var credContent = GitCredentials.buildCredentialStore(gitTokens, repos);
     if (credContent.isEmpty()) {
@@ -490,37 +487,6 @@ public final class ProjectApplier {
       throw new IOException("Failed to configure git credential helper: " + helperResult.stderr());
     }
     ForgeCliLogin.loginGitHub(shell, name, sshUser, gitTokens, repos);
-  }
-
-  /**
-   * Pushes the SSH private key (and optional public key) into the container so that {@code git
-   * clone} can authenticate via SSH. Only acts when {@code git.auth} is {@code "ssh"} and a key
-   * path is configured.
-   */
-  private void ensureSshKey(String name, String sshUser, SailYaml.Git git)
-      throws IOException, InterruptedException, TimeoutException {
-    if (git == null || !"ssh".equals(git.auth()) || git.sshKey() == null) {
-      return;
-    }
-    var sshKeyHostPath = GitCredentials.resolveHostPath(git.sshKey());
-    if (!Files.exists(sshKeyHostPath)) {
-      throw new IOException(
-          "SSH key not found: "
-              + sshKeyHostPath
-              + "\n  Check the 'git.ssh_key' path in sail.yaml points to an existing private key.");
-    }
-    var sshDir = "/home/" + sshUser + "/.ssh";
-    shell.exec(ContainerExec.asDevUser(name, List.of("mkdir", "-p", sshDir)));
-    shell.exec(ContainerExec.asDevUser(name, List.of("chmod", "700", sshDir)));
-
-    var keyContent = Files.readString(sshKeyHostPath);
-    pushFile(name, sshDir + "/id_ed25519", keyContent, "0600");
-
-    var pubKeyPath = Path.of(sshKeyHostPath + ".pub");
-    if (Files.exists(pubKeyPath)) {
-      var pubContent = Files.readString(pubKeyPath);
-      pushFile(name, sshDir + "/id_ed25519.pub", pubContent);
-    }
   }
 
   /** Pushes content to a file inside the container via temp file + incus file push + chown. */

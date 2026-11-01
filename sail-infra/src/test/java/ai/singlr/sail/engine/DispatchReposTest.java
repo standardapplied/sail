@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import java.util.Arrays;
@@ -38,7 +38,7 @@ class DispatchReposTest {
                 "feat/ui"),
             List.of());
 
-    assertEquals(List.of("web"), targets.stream().map(SailYaml.Repo::path).toList());
+    assertEquals(List.of("web"), targets.stream().map(ProjectDefinition.Repo::path).toList());
   }
 
   @Test
@@ -60,7 +60,7 @@ class DispatchReposTest {
                 "feat/ui"),
             List.of("web"));
 
-    assertEquals(List.of("web"), targets.stream().map(SailYaml.Repo::path).toList());
+    assertEquals(List.of("web"), targets.stream().map(ProjectDefinition.Repo::path).toList());
   }
 
   @Test
@@ -82,7 +82,7 @@ class DispatchReposTest {
                 "feat/ui"),
             List.of());
 
-    assertEquals(List.of("api"), targets.stream().map(SailYaml.Repo::path).toList());
+    assertEquals(List.of("api"), targets.stream().map(ProjectDefinition.Repo::path).toList());
   }
 
   @Test
@@ -129,8 +129,8 @@ class DispatchReposTest {
                 List.of()));
   }
 
-  private static SailYaml config(String... paths) {
-    return SailYaml.fromMap(
+  private static ProjectDefinition config(String... paths) {
+    return ProjectDefinition.fromMap(
         Map.of(
             "name",
             "workspace",

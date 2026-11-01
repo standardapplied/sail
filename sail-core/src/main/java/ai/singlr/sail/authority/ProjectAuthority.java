@@ -12,7 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Who may write a project's descriptor: any role that can write ({@link WriterAuthority}), since
+ * Who may write a project's definition: any role that can write ({@link WriterAuthority}), since
  * there is no project membership to mirror. A rename — the deletion of the old name that blocks its
  * resurrection ({@link ProjectStore#renames}) — is an admin's alone: it moves every spec and file
  * of the project, whoever's they are, so it is refused before any of them is written.

@@ -9,8 +9,8 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Guardrails;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Roster;
-import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.AgentSession;
@@ -409,7 +409,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     var config = projects.loadRunning(seat.project()).config();
     if (config.agent() == null) {
       throw new ApiException(
-          ErrorCode.AGENT_NOT_CONFIGURED, "No agent configured in sail.yaml's agent block.");
+          ErrorCode.AGENT_NOT_CONFIGURED, "The project's definition sets no agent.");
     }
     if (!Ownership.owns(localHandle, seat.owner())) {
       throw RoomWakeLauncher.notThisBoxs(
@@ -434,16 +434,16 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
                 new Harness.LiveLaunch(
                     full, member.model(), resumed.map(RunStore.RunRow::sessionId).orElse(null)))
             .orElseThrow();
-    var repos = full ? reposOf(seat, config) : List.<SailYaml.Repo>of();
-    var repoPaths = repos.stream().map(SailYaml.Repo::path).toList();
+    var repos = full ? reposOf(seat, config) : List.<ProjectDefinition.Repo>of();
+    var repoPaths = repos.stream().map(ProjectDefinition.Repo::path).toList();
     var branch =
         full && seat.spec() != null && Strings.isNotBlank(seat.spec().branch())
             ? seat.spec().branch()
             : null;
     var workDir =
         full
-            ? AgentSession.launchWorkDir(config.sshUser(), repos)
-            : "/home/" + config.sshUser() + "/workspace";
+            ? AgentSession.launchWorkDir(ProjectDefinition.USER, repos)
+            : "/home/" + ProjectDefinition.USER + "/workspace";
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.live(runId);
     var credential =
@@ -576,7 +576,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   }
 
   /** A spec's repos for its room, the project's whole set for a room with no spec to narrow it. */
-  private static List<SailYaml.Repo> reposOf(Seat seat, SailYaml config) {
+  private static List<ProjectDefinition.Repo> reposOf(Seat seat, ProjectDefinition config) {
     return seat.spec() != null
         ? DispatchRepos.resolve(config, seat.spec().toSpec(), List.of())
         : config.repos();
@@ -746,7 +746,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   private final class Member {
 
     private final Seat seat;
-    private final SailYaml config;
+    private final ProjectDefinition config;
     private final RunStore.RunRow run;
     private final String runId;
     private final AgentUnit unit;
@@ -775,7 +775,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
 
     private Member(
         Seat seat,
-        SailYaml config,
+        ProjectDefinition config,
         RunStore.RunRow run,
         AgentUnit unit,
         AgentProcess.Handle handle,
@@ -787,7 +787,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       this.unit = unit;
       this.handle = handle;
       this.full = full;
-      this.limits = config.agent().guardrailsFor(run.lane().orElseThrow());
+      this.limits = config.guardrailsFor(run.lane().orElseThrow());
       this.startedAt = timing.clock().get();
       this.lastLine = startedAt;
       this.guarded = !full;

@@ -8,7 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -38,7 +38,7 @@ class LocalApiStackTest {
                         shell,
                         project ->
                             Optional.of(
-                                SailYaml.fromMap(
+                                ProjectDefinition.fromMap(
                                     YamlUtil.parseMap(
                                         StackOperationsTest.ACME.replace("acme", project))))),
                     duration -> {},

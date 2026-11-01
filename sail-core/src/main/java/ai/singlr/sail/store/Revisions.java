@@ -43,7 +43,7 @@ public final class Revisions {
     }
   }
 
-  private static String shortHash(String content) {
+  static String shortHash(String content) {
     try {
       var digest = MessageDigest.getInstance("SHA-256");
       var hex = HexFormat.of().formatHex(digest.digest(content.getBytes(StandardCharsets.UTF_8)));

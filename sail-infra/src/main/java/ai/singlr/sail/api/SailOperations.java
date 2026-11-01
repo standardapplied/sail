@@ -14,6 +14,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.EngagementMode;
 import ai.singlr.sail.config.FileLimits;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
@@ -1212,6 +1213,29 @@ public final class SailOperations implements HostOperations {
   }
 
   @Override
+  public Result<ProjectDefinitionResponse> projectDefinition(String project) {
+    return safe(() -> definitions().definition(project));
+  }
+
+  @Override
+  public Result<ProjectDefinitionResponse> createProject(Map<String, Object> document) {
+    return safe(() -> definitions().create(document));
+  }
+
+  @Override
+  public Result<ProjectDefinitionResponse> writeProjectSection(
+      String project, String section, Object value, String ifMatch) {
+    return safe(() -> definitions().writeSection(project, section, value, ifMatch));
+  }
+
+  private ProjectDefinitionOperations definitions() {
+    if (projectStore == null) {
+      throw storeUnavailable("project catalog");
+    }
+    return new ProjectDefinitionOperations(projectStore);
+  }
+
+  @Override
   public Result<ConnectResponse> connect(String project) {
     return safe(() -> connectValue(readable(project)));
   }
@@ -1521,7 +1545,7 @@ public final class SailOperations implements HostOperations {
         environment.serverIp(),
         environment.serverUser(),
         containerIp,
-        loaded.config().sshUser(),
+        ProjectDefinition.USER,
         environment.workstationKeySet());
   }
 
@@ -1833,9 +1857,9 @@ public final class SailOperations implements HostOperations {
    * Maps an operation's outcome onto the wire contract the routers already speak: an {@link
    * ApiException} is a structured refusal, a {@link WriteRefused} is the journal's, answered with
    * its kind's code, an {@link IllegalArgumentException} is a caller error — a validation
-   * precondition like "repo not configured in sail.yaml" — surfaced as {@code invalid_request}
-   * (400) with its message, the same convention {@code ApiRouter} and {@code LocalApiRouter} apply
-   * to exceptions escaping their own routing. Only a truly unexpected exception becomes a generic
+   * precondition like "the definition has no such repo" — surfaced as {@code invalid_request} (400)
+   * with its message, the same convention {@code ApiRouter} and {@code LocalApiRouter} apply to
+   * exceptions escaping their own routing. Only a truly unexpected exception becomes a generic
    * {@code internal} 500, and its stack trace goes to the journal first.
    */
   private static <T> Result<T> safe(Supplier<T> supplier) {

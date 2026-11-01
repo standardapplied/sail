@@ -8,7 +8,6 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.Main;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
-import ai.singlr.sail.config.PlaceholderResolver;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.NameValidator;
@@ -118,7 +117,7 @@ public final class InitCommand implements Runnable {
           System.getenv("SUDO_USER"),
           SailPaths.hostConfigPath(),
           SailPaths::accountHome,
-          LocalIdentity.detect(operator),
+          LocalIdentity.detect(),
           InitCommand::ask,
           operator,
           InitCommand::runCommand);
@@ -149,8 +148,8 @@ public final class InitCommand implements Runnable {
     requireNoUserService(box.sudoUser(), box.homeOf());
     var provisioned = Files.exists(box.hostConfig());
     var fde = operatorHandle(intent, box, provisioned);
-    var name = gitChoice(box, PlaceholderResolver.GIT_NAME, fullName, "Your full name", "--name");
-    var mail = gitChoice(box, PlaceholderResolver.GIT_EMAIL, email, "Your email", "--email");
+    var name = gitChoice(box, LocalIdentity.GitField.NAME, fullName, "Your full name", "--name");
+    var mail = gitChoice(box, LocalIdentity.GitField.EMAIL, email, "Your email", "--email");
     var roster = roster(intent, box.identity(), name, mail);
 
     System.out.println(Ansi.AUTO.string("  @|bold Setting up this box...|@"));
@@ -197,26 +196,26 @@ public final class InitCommand implements Runnable {
   }
 
   /**
-   * The operator's {@code placeholder} value: {@code flag}, or else asked for when this box's git
-   * identity holds none. Asked before the first step, so a long setup waits on no question, and
-   * adopted after the last, once the box is provisioned. A box left with no value is refused before
-   * any step: every project applied here by name would be refused for it.
+   * The operator's {@code field}: {@code flag}, or else asked for when this box's git identity
+   * holds none. Asked before the first step, so a long setup waits on no question, and adopted
+   * after the last, once the box is provisioned. A box left with no value is refused before any
+   * step: every project applied here by name would be refused for it.
    */
   private static GitChoice gitChoice(
-      Box box, String placeholder, String flag, String label, String option) {
-    if (box.identity().gitValue(placeholder).isPresent()) {
-      return new GitChoice(placeholder, flag, false);
+      Box box, LocalIdentity.GitField field, String flag, String label, String option) {
+    if (box.identity().gitValue(field).isPresent()) {
+      return new GitChoice(field, flag, false);
     }
     var chosen = Strings.isNotBlank(flag) ? flag : box.prompt().ask(label);
     if (Strings.isBlank(chosen)) {
       throw new IllegalStateException(
           "This box has no git "
-              + LocalIdentity.gitKey(placeholder)
+              + field.key()
               + " set, so a project here can't take on your identity. Re-run with "
               + option
               + " \"...\".");
     }
-    return new GitChoice(placeholder, chosen.strip(), true);
+    return new GitChoice(field, chosen.strip(), true);
   }
 
   /**
@@ -224,18 +223,16 @@ public final class InitCommand implements Runnable {
    * unset} says the box's git identity has none, so init gives it this one; an identity the box
    * already holds is never overwritten.
    */
-  private record GitChoice(String placeholder, String value, boolean unset) {
+  private record GitChoice(LocalIdentity.GitField field, String value, boolean unset) {
     void adopt(LocalIdentity identity) throws Exception {
       if (unset) {
-        identity.adoptGit(placeholder, value);
+        identity.adoptGit(field, value);
       }
     }
 
     /** {@code value}, stripped, or what {@code identity} holds when none was given. */
     String orHeld(LocalIdentity identity) {
-      return Strings.isNotBlank(value)
-          ? value.strip()
-          : identity.gitValue(placeholder).orElse(null);
+      return Strings.isNotBlank(value) ? value.strip() : identity.gitValue(field).orElse(null);
     }
   }
 

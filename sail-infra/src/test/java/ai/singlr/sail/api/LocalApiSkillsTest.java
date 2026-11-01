@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.FileLimits;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.SharedProjectFiles;
@@ -63,8 +63,8 @@ class LocalApiSkillsTest {
     new SchemaManager(db).migrate();
     files = new FileStore(db);
     shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
-    var acme = SailYaml.fromMap(YamlUtil.parseMap(ACME));
-    var zeta = SailYaml.fromMap(YamlUtil.parseMap(ACME.replace("acme", "zeta")));
+    var acme = ProjectDefinition.fromMap(YamlUtil.parseMap(ACME));
+    var zeta = ProjectDefinition.fromMap(YamlUtil.parseMap(ACME.replace("acme", "zeta")));
     var skills =
         new SkillOperations(
             new ProjectSkills(
@@ -346,7 +346,7 @@ class LocalApiSkillsTest {
             new ProjectLoader(
                 new ScriptedShellExecutor()
                     .onOk("incus list", "[{\"name\": \"acme\", \"status\": \"Running\"}]"),
-                project -> Optional.of(SailYaml.fromMap(YamlUtil.parseMap(ACME)))));
+                project -> Optional.of(ProjectDefinition.fromMap(YamlUtil.parseMap(ACME)))));
     var interrupted =
         new LocalApiRouter(
             new TestOperations() {

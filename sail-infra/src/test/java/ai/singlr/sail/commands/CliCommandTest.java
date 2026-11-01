@@ -173,8 +173,7 @@ class CliCommandTest {
             CliCommand.run(
                 () -> {
                   throw new ApiException(
-                      ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND,
-                      "Project 'acme' is not in the catalog.");
+                      ErrorCode.PROJECT_NOT_IN_CATALOG, "Project 'acme' is not in the catalog.");
                 }));
 
     assertEquals(
@@ -320,7 +319,7 @@ class CliCommandTest {
         "Project 'acme' is not in the catalog.",
         CliCommand.describe(
             new ApiException(
-                ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND, "Project 'acme' is not in the catalog.")),
+                ErrorCode.PROJECT_NOT_IN_CATALOG, "Project 'acme' is not in the catalog.")),
         "a refusal that names no fix is its message alone");
     assertEquals("boom", CliCommand.describe(new IllegalStateException("boom")));
     assertEquals("IllegalStateException", CliCommand.describe(new IllegalStateException()));

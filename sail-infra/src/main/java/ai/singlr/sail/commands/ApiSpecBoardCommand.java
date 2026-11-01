@@ -20,7 +20,7 @@ public final class ApiSpecBoardCommand implements Runnable {
       names = {"-p", "--project"},
       description =
           "Scope the board to one client project ('*' = all projects). Defaults to the current"
-              + " project, inferred from cwd's sail.yaml or set by project switch.")
+              + " project, set by project switch.")
   private String project;
 
   @Option(names = "--all-projects", description = "Show the board across all projects.")

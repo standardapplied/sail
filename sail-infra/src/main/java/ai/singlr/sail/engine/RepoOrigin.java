@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
@@ -29,7 +29,7 @@ final class RepoOrigin {
    * Refuses {@code dir} unless it is the root of a checkout whose {@code origin} is {@code repo}'s
    * URL. A dry run observes no checkout, so it has nothing to refuse.
    */
-  static void require(ShellExec probes, String container, String dir, SailYaml.Repo repo)
+  static void require(ShellExec probes, String container, String dir, ProjectDefinition.Repo repo)
       throws IOException, InterruptedException, TimeoutException {
     if (probes.isDryRun()) {
       return;
@@ -54,7 +54,7 @@ final class RepoOrigin {
    * unless it is the root of its own work tree.
    */
   private static Optional<String> mismatch(
-      ShellExec probes, String container, String dir, SailYaml.Repo repo)
+      ShellExec probes, String container, String dir, ProjectDefinition.Repo repo)
       throws IOException, InterruptedException, TimeoutException {
     var checkout =
         probes.exec(

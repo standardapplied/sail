@@ -7,7 +7,7 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harness.Launch;
@@ -488,7 +488,7 @@ public final class AgentSession {
     };
   }
 
-  public static String launchWorkDir(String sshUser, List<SailYaml.Repo> targetRepos) {
+  public static String launchWorkDir(String sshUser, List<ProjectDefinition.Repo> targetRepos) {
     var workspace = "/home/" + sshUser + "/workspace";
     if (targetRepos.size() == 1) {
       return workspace + "/" + targetRepos.getFirst().path();

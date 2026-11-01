@@ -7,8 +7,8 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Roster;
-import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.DispatchRepos;
@@ -80,7 +80,7 @@ public final class RoomWakeLauncher {
     var config = loaded.config();
     if (config.agent() == null) {
       throw new ApiException(
-          ErrorCode.AGENT_NOT_CONFIGURED, "No agent configured in sail.yaml's agent block.");
+          ErrorCode.AGENT_NOT_CONFIGURED, "The project's definition sets no agent.");
     }
     if (runStore == null) {
       throw new ApiException(
@@ -128,8 +128,10 @@ public final class RoomWakeLauncher {
     var unit = AgentUnit.forRun(runId);
     var role = full ? DispatchGate.ROOM_FULL_ROLE : DispatchGate.ROOM_ROLE;
     var targetRepos =
-        full ? DispatchRepos.resolve(config, spec.toSpec(), List.of()) : List.<SailYaml.Repo>of();
-    var repoPaths = targetRepos.stream().map(SailYaml.Repo::path).toList();
+        full
+            ? DispatchRepos.resolve(config, spec.toSpec(), List.of())
+            : List.<ProjectDefinition.Repo>of();
+    var repoPaths = targetRepos.stream().map(ProjectDefinition.Repo::path).toList();
     var branch = full ? Objects.toString(spec.branch(), "") : "";
     var credential =
         runReservation.reserve(
@@ -153,8 +155,8 @@ public final class RoomWakeLauncher {
           engagement != null && engagement.model() != null ? engagement.model() : spec.model();
       var workDir =
           full
-              ? AgentSession.launchWorkDir(config.sshUser(), targetRepos)
-              : "/home/" + config.sshUser() + "/workspace";
+              ? AgentSession.launchWorkDir(ProjectDefinition.USER, targetRepos)
+              : "/home/" + ProjectDefinition.USER + "/workspace";
       var launch =
           runLauncher.launchSession(
               new RunLauncher.LaunchSpec(
@@ -205,7 +207,8 @@ public final class RoomWakeLauncher {
    * reserves with a null spec and the room id as its serialization scope, and full mode claims the
    * project's whole repo set — a conversation has no work-item to narrow it.
    */
-  private String wakeSpecless(String project, String roomId, SailYaml config, String localHandle) {
+  private String wakeSpecless(
+      String project, String roomId, ProjectDefinition config, String localHandle) {
     var rooms = roomStore.get();
     var room = rooms == null ? null : rooms.findById(roomId).orElse(null);
     if (room == null) {
@@ -240,8 +243,8 @@ public final class RoomWakeLauncher {
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
     var role = full ? DispatchGate.ROOM_FULL_ROLE : DispatchGate.ROOM_ROLE;
-    var targetRepos = full ? config.repos() : List.<SailYaml.Repo>of();
-    var repoPaths = targetRepos.stream().map(SailYaml.Repo::path).toList();
+    var targetRepos = full ? config.repos() : List.<ProjectDefinition.Repo>of();
+    var repoPaths = targetRepos.stream().map(ProjectDefinition.Repo::path).toList();
     var credential =
         runReservation.reserve(
             runId,
@@ -263,8 +266,8 @@ public final class RoomWakeLauncher {
       }
       var workDir =
           full
-              ? AgentSession.launchWorkDir(config.sshUser(), targetRepos)
-              : "/home/" + config.sshUser() + "/workspace";
+              ? AgentSession.launchWorkDir(ProjectDefinition.USER, targetRepos)
+              : "/home/" + ProjectDefinition.USER + "/workspace";
       var launch =
           runLauncher.launchSession(
               new RunLauncher.LaunchSpec(

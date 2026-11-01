@@ -10,8 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ReviewPipelineConfig;
-import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -27,13 +27,13 @@ import org.junit.jupiter.api.io.TempDir;
 
 class ReviewWiringTest {
 
-  private static SailYaml yaml(Map<String, Object> agent) {
+  private static ProjectDefinition yaml(Map<String, Object> agent) {
     var map = new HashMap<String, Object>();
     map.put("name", "acme");
     if (agent != null) {
       map.put("agent", agent);
     }
-    return SailYaml.fromMap(map);
+    return ProjectDefinition.fromMap(map);
   }
 
   @Test
@@ -156,7 +156,7 @@ class ReviewWiringTest {
   @Test
   void aBlockThatNamesNoStagesGetsTheDefaultReview() {
     var sail =
-        SailYaml.fromMap(
+        ProjectDefinition.fromMap(
             Map.of(
                 "name",
                 "acme",

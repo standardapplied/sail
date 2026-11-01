@@ -6,8 +6,9 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.SailYamlUpdater;
+import ai.singlr.sail.config.DefinitionEdits;
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
@@ -15,7 +16,6 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectApplier;
-import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.gen.ServicePresets;
 import java.io.PrintStream;
@@ -37,12 +37,6 @@ public final class ProjectAddServiceCommand implements Runnable {
 
   @Parameters(index = "0", description = "Project name.")
   private String name;
-
-  @Option(
-      names = {"-f", "--file"},
-      description = "Path to sail.yaml project descriptor.",
-      defaultValue = "sail.yaml")
-  private String file;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -76,11 +70,8 @@ public final class ProjectAddServiceCommand implements Runnable {
     var ansi = Ansi.AUTO;
     var out = System.out;
 
-    var explicit = ProjectDefinitions.explicitFile(file);
-    var actor = ProjectMutations.catalogOperator(name, explicit, dryRun);
-    var config =
-        SailYaml.fromMap(
-            YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit, operator)));
+    var actor = ProjectMutations.catalogOperator(name, dryRun);
+    var config = ProjectMutations.current(name, operator);
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
@@ -88,7 +79,7 @@ public final class ProjectAddServiceCommand implements Runnable {
     ContainerStateGuard.requireRunning(state, name);
 
     String svcName;
-    SailYaml.Service service;
+    ProjectDefinition.Service service;
 
     if (serviceName != null && image != null) {
       svcName = serviceName;
@@ -105,15 +96,13 @@ public final class ProjectAddServiceCommand implements Runnable {
       service = selection.service();
     }
 
+    var edited = ProjectMutations.checked(DefinitionEdits.addService(config, svcName, service));
     var applier = new ProjectApplier(shell, out);
     var result = applier.applyServices(name, Map.of(svcName, service));
-
-    var updatedText =
-        YamlUtil.dumpToString((SailYamlUpdater.addService(config, svcName, service)).toMap());
-    ProjectMutations.persist(
-        name,
-        explicit,
-        updatedText,
+    ProjectMutations.write(
+        Section.SERVICES,
+        config,
+        edited,
         dryRun,
         out,
         "record service '" + svcName + "' in the catalog",
@@ -137,10 +126,10 @@ public final class ProjectAddServiceCommand implements Runnable {
                 + svcName
                 + "' added to "
                 + name
-                + " and sail.yaml updated"));
+                + " and its definition"));
   }
 
-  private SailYaml.Service buildServiceFromFlags() {
+  private ProjectDefinition.Service buildServiceFromFlags() {
     Map<String, String> env = null;
     if (envPairs != null && !envPairs.isEmpty()) {
       env = new LinkedHashMap<>();
@@ -151,10 +140,10 @@ public final class ProjectAddServiceCommand implements Runnable {
         }
       }
     }
-    return new SailYaml.Service(image, ports, env, null, volumes);
+    return new ProjectDefinition.Service(image, ports, env, null, volumes);
   }
 
-  private record ServiceSelection(String name, SailYaml.Service service) {}
+  private record ServiceSelection(String name, ProjectDefinition.Service service) {}
 
   private ServiceSelection collectServiceInteractively(PrintStream out, Ansi ansi) {
     var presets = ServicePresets.all();
@@ -204,8 +193,8 @@ public final class ProjectAddServiceCommand implements Runnable {
     throw new IllegalArgumentException("Invalid selection: " + input);
   }
 
-  private SailYaml.Service customizePresetEnv(
-      SailYaml.Service service, PrintStream out, Ansi ansi) {
+  private ProjectDefinition.Service customizePresetEnv(
+      ProjectDefinition.Service service, PrintStream out, Ansi ansi) {
     var defaultEnv = service.environment();
     var env = new LinkedHashMap<String, String>();
     if (defaultEnv != null && !defaultEnv.isEmpty()) {
@@ -225,7 +214,7 @@ public final class ProjectAddServiceCommand implements Runnable {
         }
       } while (ConsoleHelper.confirmNo("Add another env var?"));
     }
-    return new SailYaml.Service(
+    return new ProjectDefinition.Service(
         service.image(),
         service.ports(),
         env.isEmpty() ? null : env,
@@ -274,7 +263,7 @@ public final class ProjectAddServiceCommand implements Runnable {
       } while (ConsoleHelper.confirmNo("Add another volume?"));
     }
     return new ServiceSelection(
-        svcName, new SailYaml.Service(img, customPorts, env, null, customVolumes));
+        svcName, new ProjectDefinition.Service(img, customPorts, env, null, customVolumes));
   }
 
   private static String promptWithDefault(PrintStream out, Ansi ansi, String label, String def) {

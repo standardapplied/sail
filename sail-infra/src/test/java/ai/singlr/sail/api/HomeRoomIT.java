@@ -10,8 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Engagement;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Roster;
-import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.ContainerFilePush;
@@ -91,7 +91,7 @@ class HomeRoomIT extends AbstractIncusIT {
             .formatted(CONTAINER);
     var yaml = stateDir.resolve("sail.yaml");
     Files.writeString(yaml, text);
-    var definition = SailYaml.fromMap(YamlUtil.parseMap(text));
+    var definition = ProjectDefinition.fromMap(YamlUtil.parseMap(text));
     try (var db = Sqlite.open(stateDir.resolve("it.db"))) {
       new SchemaManager(db).migrate();
       HeldProjects.hold(db, CONTAINER);

@@ -8,7 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.RunRetention;
@@ -105,7 +105,7 @@ public final class RunReservation {
       String branch,
       String task,
       AgentUnit unit,
-      SailYaml config) {
+      ProjectDefinition config) {
     return reserve(
         runId, project, specId, null, boxHandle, role, repos, agentType, branch, task, unit, config,
         () -> {});
@@ -124,7 +124,7 @@ public final class RunReservation {
       String branch,
       String task,
       AgentUnit unit,
-      SailYaml config) {
+      ProjectDefinition config) {
     return reserve(
         runId, project, specId, roomId, boxHandle, role, repos, agentType, branch, task, unit,
         config, () -> {});
@@ -132,8 +132,8 @@ public final class RunReservation {
 
   /**
    * As {@link #reserve(String, String, String, String, String, String, List, String, String,
-   * String, AgentUnit, SailYaml)}, committing {@code alongside} with the reservation: a dispatch's
-   * claim of its spec lands with its run or not at all.
+   * String, AgentUnit, ProjectDefinition)}, committing {@code alongside} with the reservation: a
+   * dispatch's claim of its spec lands with its run or not at all.
    */
   public String reserve(
       String runId,
@@ -147,7 +147,7 @@ public final class RunReservation {
       String branch,
       String task,
       AgentUnit unit,
-      SailYaml config,
+      ProjectDefinition config,
       Runnable alongside) {
     return switch (claim(
         runId,
@@ -205,7 +205,7 @@ public final class RunReservation {
       String branch,
       String task,
       AgentUnit unit,
-      SailYaml config) {
+      ProjectDefinition config) {
     return claim(
         runId,
         project,
@@ -366,12 +366,11 @@ public final class RunReservation {
 
   /**
    * The run's configured hard lifetime, bounding its credential ({@link
-   * SailYaml.Agent#lifetimeFor}), or null when none bounds it — an unbounded run's credential is
+   * ProjectDefinition#lifetimeFor}), or null when none bounds it — an unbounded run's credential is
    * revoked by its verified finishers.
    */
-  private static Duration configuredMaxDuration(SailYaml config, String role) {
-    var agent = config.agent();
-    return agent == null ? null : agent.lifetimeFor(Lane.of(role).orElse(null));
+  private static Duration configuredMaxDuration(ProjectDefinition config, String role) {
+    return config.agent() == null ? null : config.lifetimeFor(Lane.of(role).orElse(null));
   }
 
   private void pruneRuns(String project) {

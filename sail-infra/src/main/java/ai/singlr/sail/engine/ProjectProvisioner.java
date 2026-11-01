@@ -8,8 +8,8 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
-import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.ssh.SshPublicKey;
@@ -54,9 +54,6 @@ public final class ProjectProvisioner {
    * An {@code authorized_keys} options field before a key, as {@link ContainerAuthorizedKeys} reads
    * it.
    */
-  private static final Pattern AUTHORIZED_KEYS_OPTIONS =
-      Pattern.compile("^" + ContainerAuthorizedKeys.OPTIONS + "\\s+");
-
   private static final String RESTART_PENDING_KEY = "user.sail.restart_pending";
 
   static final List<String> BASELINE_PACKAGES =
@@ -106,13 +103,17 @@ public final class ProjectProvisioner {
   /**
    * Runs all provisioning steps with resume support. On failure, the current phase is recorded in
    * the tracker and the exception is re-thrown. A tracker its owner already loaded for this
-   * descriptor is used as it stands, so a reset the owner made in a dry run is not read back from
+   * definition is used as it stands, so a reset the owner made in a dry run is not read back from
    * the file it left in place. Once the container exists its record of the last finished run is
    * cleared, and on success it records the inputs it was provisioned from and the progress file is
    * removed.
    */
   public void provision(
-      SailYaml config, HostYaml host, Map<String, String> gitTokens, Path sailYamlPath)
+      ProjectDefinition config,
+      HostYaml host,
+      Map<String, String> gitTokens,
+      LocalIdentity.GitIdentity git,
+      Path filesDir)
       throws Exception {
     var inputs = inputs(config, workstationKey);
     if (!inputs.equals(tracker.currentState().inputs())) {
@@ -133,15 +134,14 @@ public final class ProjectProvisioner {
       configureTestcontainers(config);
       installJdk(config);
       installNode(config);
-      configureGit(config, gitTokens);
+      configureGit(config, gitTokens, git);
       installMaven(config);
       cloneRepos(config, gitTokens);
-      pushWorkspaceFiles(config, sailYamlPath);
+      pushWorkspaceFiles(config, filesDir);
       provisionServices(config);
       configurePruneCron(config);
       installAgentTools(config);
       installSkills(config);
-      recordSpecsPhase();
       writeProjectState(config);
       tracker.cleanup();
     } catch (Exception e) {
@@ -154,14 +154,14 @@ public final class ProjectProvisioner {
   }
 
   /**
-   * The digest of what a run provisions from, the resolved descriptor and the box's workstation
-   * key: the {@link ProvisionTracker} keeps progress only for the inputs it was recorded for, so an
-   * edited descriptor, or a workstation key registered, replaced or revoked, is provisioned again.
-   * With no key the digest is the descriptor's alone, as it was before the key was an input.
+   * The digest of what a run provisions from, the definition and the box's workstation key: the
+   * {@link ProvisionTracker} keeps progress only for the inputs it was recorded for, so an edited
+   * definition, or a workstation key registered, replaced or revoked, is provisioned again. With no
+   * key the digest is the definition's alone, as it was before the key was an input.
    */
-  public static String inputs(SailYaml config, Optional<SshPublicKey> workstationKey) {
+  public static String inputs(ProjectDefinition config, Optional<SshPublicKey> workstationKey) {
     var provisioned =
-        YamlUtil.dumpToString(config.toMap())
+        ProjectDefinitionJson.write(config)
             + workstationKey.map(key -> "workstation_key: " + key.fingerprint() + "\n").orElse("");
     return HexFormat.of().formatHex(Hashes.sha256(provisioned.getBytes(StandardCharsets.UTF_8)));
   }
@@ -172,7 +172,7 @@ public final class ProjectProvisioner {
    * provisions from: when it is, the container needs no run.
    */
   public static boolean provisionedFrom(
-      Optional<String> recorded, SailYaml config, Optional<SshPublicKey> workstationKey) {
+      Optional<String> recorded, ProjectDefinition config, Optional<SshPublicKey> workstationKey) {
     return recorded.equals(Optional.of(inputs(config, workstationKey)));
   }
 
@@ -193,17 +193,17 @@ public final class ProjectProvisioner {
 
   /**
    * Voids the container's record of a finished run before this run changes it, so a run that fails
-   * part way leaves no record and the next apply provisions again, whatever descriptor it brings.
+   * part way leaves no record and the next apply provisions again, whatever definition it brings.
    */
   private void clearProvisionedInputs(String name) throws Exception {
     var cleared = containerConfig.set(name, List.of(INPUTS_KEY + "="));
     if (!cleared.ok()) {
       throw new IOException(
-          "Failed to clear the record of the last provisioned descriptor: " + cleared.stderr());
+          "Failed to clear the record of the last provisioned definition: " + cleared.stderr());
     }
   }
 
-  private void launchContainer(SailYaml config, HostYaml host) throws Exception {
+  private void launchContainer(ProjectDefinition config, HostYaml host) throws Exception {
     currentPhase = ProjectPhase.CONTAINER_LAUNCHED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(1, "container already running");
@@ -239,7 +239,7 @@ public final class ProjectProvisioner {
    * so provisioning and recovery install identically. Failure is non-fatal: it is logged with the
    * one command that fixes it, and the agent hooks fall back to file-only audit until then.
    */
-  private void installSailMachinery(SailYaml config) {
+  private void installSailMachinery(ProjectDefinition config) {
     try {
       ContainerSailSetup.ensureInstalled(shell, config.name());
     } catch (Exception e) {
@@ -254,7 +254,7 @@ public final class ProjectProvisioner {
     }
   }
 
-  private void setDiskQuota(SailYaml config, HostYaml host) throws Exception {
+  private void setDiskQuota(ProjectDefinition config, HostYaml host) throws Exception {
     currentPhase = ProjectPhase.DISK_QUOTA_SET;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(2, "disk quota already set");
@@ -272,7 +272,7 @@ public final class ProjectProvisioner {
     }
   }
 
-  private void setResourceLimits(SailYaml config) throws Exception {
+  private void setResourceLimits(ProjectDefinition config) throws Exception {
     currentPhase = ProjectPhase.RESOURCE_LIMITS_SET;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(3, "resource limits already set");
@@ -325,7 +325,7 @@ public final class ProjectProvisioner {
 
   /**
    * Whether the container already holds every one of {@code settings}, so that a container
-   * provisioned again for an edited descriptor is not restarted under the agents running in it.
+   * provisioned again for an edited definition is not restarted under the agents running in it.
    */
   private boolean isConfigured(String name, Map<String, String> settings)
       throws IOException, InterruptedException, TimeoutException {
@@ -338,7 +338,7 @@ public final class ProjectProvisioner {
     return true;
   }
 
-  private void waitForNetwork(SailYaml config) throws Exception {
+  private void waitForNetwork(ProjectDefinition config) throws Exception {
     currentPhase = ProjectPhase.NETWORK_READY;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(4, "network already ready");
@@ -365,7 +365,7 @@ public final class ProjectProvisioner {
     stepDone(4, "Network connected" + (ipDetail.isEmpty() ? "" : " (" + ipDetail + ")"));
   }
 
-  private void installPackages(SailYaml config) throws Exception {
+  private void installPackages(ProjectDefinition config) throws Exception {
     currentPhase = ProjectPhase.PACKAGES_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(5, "packages already installed");
@@ -394,7 +394,7 @@ public final class ProjectProvisioner {
     stepDone(5, "Installed " + packages.size() + " packages");
   }
 
-  private void configureSsh(SailYaml config, HostYaml host) throws Exception {
+  private void configureSsh(ProjectDefinition config, HostYaml host) throws Exception {
     currentPhase = ProjectPhase.SSH_CONFIGURED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(6, "SSH already configured");
@@ -403,7 +403,7 @@ public final class ProjectProvisioner {
     step(6, "Configuring SSH access...");
 
     var name = config.name();
-    var user = config.sshUser();
+    var user = ProjectDefinition.USER;
 
     var userCheck = execInContainer(name, List.of("id", user));
     if (!userCheck.ok()) {
@@ -425,7 +425,7 @@ public final class ProjectProvisioner {
     }
     pushFileToContainer(name, "/etc/sudoers.d/" + user, user + " ALL=(ALL) NOPASSWD:ALL\n", "0440");
 
-    writeAuthorizedKeys(name, user, trustedKeys(workstationKey, config));
+    writeAuthorizedKeys(name, user, trustedKeys(workstationKey));
 
     var sshResult = execInContainer(name, List.of("systemctl", "enable", "--now", "ssh"));
     if (!sshResult.ok()) {
@@ -439,45 +439,18 @@ public final class ProjectProvisioner {
     stepDone(6, "Created user " + user + " (uid 1000)");
   }
 
-  /**
-   * The keys a container trusts: the box's workstation key, whatever the definition says, then the
-   * definition's own, each key once.
-   */
-  private static List<String> trustedKeys(Optional<SshPublicKey> workstationKey, SailYaml config) {
-    var trusted = new LinkedHashMap<String, String>();
-    workstationKey.ifPresent(key -> trusted.put(key.fingerprint(), key.line()));
-    var declared =
-        config.ssh() != null && config.ssh().authorizedKeys() != null
-            ? config.ssh().authorizedKeys()
-            : List.<String>of();
-    for (var line : declared) {
-      var key = line.strip();
-      trusted.putIfAbsent(identityOf(key), key);
-    }
-    return List.copyOf(trusted.values());
+  /** The keys a container trusts: the box's workstation key, its owner's laptop, alone. */
+  private static List<String> trustedKeys(Optional<SshPublicKey> workstationKey) {
+    return workstationKey.map(key -> List.of(key.line())).orElse(List.of());
   }
 
   /**
    * What tells one {@code authorized_keys} line from another: its key's fingerprint, whatever its
    * comment or options, or the line itself when it holds no key sail can read.
    */
-  private static String identityOf(String line) {
-    return fingerprintOf(line)
-        .or(() -> fingerprintOf(AUTHORIZED_KEYS_OPTIONS.matcher(line).replaceFirst("")))
-        .orElse(line);
-  }
-
-  private static Optional<String> fingerprintOf(String line) {
-    try {
-      return Optional.of(SshPublicKey.parse(line).fingerprint());
-    } catch (IllegalArgumentException unparsed) {
-      return Optional.empty();
-    }
-  }
-
   /**
-   * Writes exactly the keys the container trusts, so a key removed from the descriptor, or a
-   * workstation key revoked, loses its access on the next provisioning run.
+   * Writes exactly the keys the container trusts, so a key no longer registered, or a workstation
+   * key revoked, loses its access on the next provisioning run.
    */
   private void writeAuthorizedKeys(String name, String user, List<String> keys)
       throws IOException, InterruptedException, TimeoutException {
@@ -530,11 +503,11 @@ public final class ProjectProvisioner {
     }
   }
 
-  private static String image(SailYaml config, HostYaml host) {
+  private static String image(ProjectDefinition config, HostYaml host) {
     return Objects.requireNonNullElse(config.image(), host.image());
   }
 
-  private void installPodman(SailYaml config) throws Exception {
+  private void installPodman(ProjectDefinition config) throws Exception {
     currentPhase = ProjectPhase.PODMAN_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(7, "Podman already installed");
@@ -559,7 +532,7 @@ public final class ProjectProvisioner {
         "/etc/containers/registries.conf.d/01-unqualified.conf",
         "unqualified-search-registries = [\"docker.io\"]\n");
 
-    var sshUser = config.sshUser();
+    var sshUser = ProjectDefinition.USER;
     var lingerResult = execInContainer(name, List.of("loginctl", "enable-linger", sshUser));
     if (!lingerResult.ok()) {
       throw new IOException(
@@ -600,7 +573,7 @@ public final class ProjectProvisioner {
    * leaks anyway. The hourly→15-minute {@code cleanup-containers.sh} cron (a plain {@code podman rm
    * -f}, no client-side timeout to lose) is the reliable sweep instead.
    */
-  private void configureTestcontainers(SailYaml config) throws Exception {
+  private void configureTestcontainers(ProjectDefinition config) throws Exception {
     currentPhase = ProjectPhase.TESTCONTAINERS_CONFIGURED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(8, "Testcontainers already configured");
@@ -631,7 +604,7 @@ public final class ProjectProvisioner {
     stepDone(8, "Testcontainers configured");
   }
 
-  private void installJdk(SailYaml config) throws Exception {
+  private void installJdk(ProjectDefinition config) throws Exception {
     currentPhase = ProjectPhase.JDK_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(9, "JDK already installed");
@@ -724,7 +697,7 @@ public final class ProjectProvisioner {
     stepDone(9, "JDK " + version + " (Temurin)");
   }
 
-  private void installNode(SailYaml config) throws Exception {
+  private void installNode(ProjectDefinition config) throws Exception {
     currentPhase = ProjectPhase.NODE_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(10, "Node already installed");
@@ -801,52 +774,32 @@ public final class ProjectProvisioner {
     stepDone(10, "Node.js " + version);
   }
 
-  private void configureGit(SailYaml config, Map<String, String> gitTokens) throws Exception {
+  private void configureGit(
+      ProjectDefinition config, Map<String, String> gitTokens, LocalIdentity.GitIdentity git)
+      throws Exception {
     currentPhase = ProjectPhase.GIT_CONFIGURED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(11, "git already configured");
       return;
     }
 
-    if (config.git() == null) {
-      tracker.advance(currentPhase);
-      stepSkipped(11, "no git config");
-      return;
-    }
-
     step(11, "Configuring git identity...");
 
     var name = config.name();
-    var user = config.sshUser();
+    var user = ProjectDefinition.USER;
 
     var nameResult =
-        execAsDevUser(name, List.of("git", "config", "--global", "user.name", config.git().name()));
+        execAsDevUser(name, List.of("git", "config", "--global", "user.name", git.name()));
     if (!nameResult.ok()) {
       throw new IOException("Failed to set git user.name: " + nameResult.stderr());
     }
     var emailResult =
-        execAsDevUser(
-            name, List.of("git", "config", "--global", "user.email", config.git().email()));
+        execAsDevUser(name, List.of("git", "config", "--global", "user.email", git.email()));
     if (!emailResult.ok()) {
       throw new IOException("Failed to set git user.email: " + emailResult.stderr());
     }
 
-    var knownHostsPath = "/etc/ssh/ssh_known_hosts";
-    var sshHosts = GitCredentials.extractSshHosts(config.repos());
-    if (!sshHosts.isEmpty()) {
-      var command =
-          new ArrayList<>(
-              List.of(
-                  "bash",
-                  "-c",
-                  "out=$1; shift; ssh-keyscan -H \"$@\" >> \"$out\" 2>/dev/null",
-                  "ssh-keyscan",
-                  knownHostsPath));
-      command.addAll(sshHosts);
-      execInContainer(name, command, INSTALL_TIMEOUT);
-    }
-
-    if ("token".equals(config.git().auth()) && gitTokens != null && !gitTokens.isEmpty()) {
+    if (gitTokens != null && !gitTokens.isEmpty()) {
       var credContent = GitCredentials.buildCredentialStore(gitTokens, config.repos());
       var credPath = "/home/" + user + "/.git-credentials";
       pushFileToContainer(name, credPath, credContent, "0600");
@@ -862,35 +815,11 @@ public final class ProjectProvisioner {
       ForgeCliLogin.loginGitHub(shell, name, user, gitTokens, config.repos());
     }
 
-    if ("ssh".equals(config.git().auth()) && config.git().sshKey() != null) {
-      var sshKeyHostPath = GitCredentials.resolveHostPath(config.git().sshKey());
-      if (!Files.exists(sshKeyHostPath)) {
-        throw new IOException(
-            "SSH key not found: "
-                + sshKeyHostPath
-                + "\n  Check the 'git.ssh_key' path in sail.yaml points to an existing private key.");
-      }
-      var sshDir = "/home/" + user + "/.ssh";
-      execInContainer(name, List.of("mkdir", "-p", sshDir));
-      execInContainer(name, List.of("chmod", "700", sshDir));
-
-      var keyContent = Files.readString(sshKeyHostPath);
-      pushFileToContainer(name, sshDir + "/id_ed25519", keyContent, "0600");
-
-      var pubKeyPath = Path.of(sshKeyHostPath + ".pub");
-      if (Files.exists(pubKeyPath)) {
-        var pubContent = Files.readString(pubKeyPath);
-        pushFileToContainer(name, sshDir + "/id_ed25519.pub", pubContent, "0644");
-      }
-
-      execInContainer(name, List.of("chown", "-R", user + ":" + user, sshDir));
-    }
-
     tracker.advance(currentPhase);
     stepDone(11, "Git identity configured");
   }
 
-  private void installMaven(SailYaml config) throws Exception {
+  private void installMaven(ProjectDefinition config) throws Exception {
     currentPhase = ProjectPhase.MAVEN_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(12, "Maven already installed");
@@ -972,7 +901,8 @@ public final class ProjectProvisioner {
     return baseUrl + version + "/binaries/apache-maven-" + version + "-bin.tar.gz";
   }
 
-  private void cloneRepos(SailYaml config, Map<String, String> gitTokens) throws Exception {
+  private void cloneRepos(ProjectDefinition config, Map<String, String> gitTokens)
+      throws Exception {
     currentPhase = ProjectPhase.REPOS_CLONED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(13, "repos already cloned");
@@ -988,14 +918,10 @@ public final class ProjectProvisioner {
     step(13, "Cloning " + config.repos().size() + " repositories...");
 
     var name = config.name();
-    var user = config.sshUser();
+    var user = ProjectDefinition.USER;
     var cloned = 0;
 
     refreshCredentialStore(config, gitTokens, name, user);
-
-    if ("ssh".equals(config.git() != null ? config.git().auth() : null)) {
-      verifySshConnectivity(name, config.repos());
-    }
 
     execAsDevUser(name, List.of("mkdir", "-p", "/home/" + user + "/workspace"));
 
@@ -1027,11 +953,8 @@ public final class ProjectProvisioner {
   }
 
   private void refreshCredentialStore(
-      SailYaml config, Map<String, String> gitTokens, String containerName, String user)
+      ProjectDefinition config, Map<String, String> gitTokens, String containerName, String user)
       throws Exception {
-    if (config.git() == null || !"token".equals(config.git().auth())) {
-      return;
-    }
     var credContent = GitCredentials.buildCredentialStore(gitTokens, config.repos());
     if (credContent.isEmpty()) {
       return;
@@ -1051,30 +974,29 @@ public final class ProjectProvisioner {
     ForgeCliLogin.loginGitHub(shell, containerName, user, gitTokens, config.repos());
   }
 
-  private void pushWorkspaceFiles(SailYaml config, Path sailYamlPath) throws Exception {
+  private void pushWorkspaceFiles(ProjectDefinition config, Path filesDir) throws Exception {
     currentPhase = ProjectPhase.WORKSPACE_FILES_PUSHED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(14, "workspace files already pushed");
       return;
     }
 
-    var filesDir = WorkspaceFiles.resolveFilesDir(sailYamlPath);
-    if (filesDir == null) {
+    if (filesDir == null || !Files.isDirectory(filesDir)) {
       tracker.advance(currentPhase);
-      stepSkipped(14, "no files/ directory");
+      stepSkipped(14, "no shared files");
       return;
     }
 
     var entries = WorkspaceFiles.listFiles(filesDir);
     if (entries.isEmpty()) {
       tracker.advance(currentPhase);
-      stepSkipped(14, "files/ directory is empty");
+      stepSkipped(14, "no shared files");
       return;
     }
 
     step(14, "Pushing " + entries.size() + " workspace file(s)...");
 
-    var user = config.sshUser();
+    var user = ProjectDefinition.USER;
     var workspace = "/home/" + user + "/workspace/";
     for (var entry : entries) {
       var cmd =
@@ -1093,7 +1015,7 @@ public final class ProjectProvisioner {
     stepDone(14, "Pushed " + entries.size() + " workspace file(s)");
   }
 
-  private void provisionServices(SailYaml config) throws Exception {
+  private void provisionServices(ProjectDefinition config) throws Exception {
     currentPhase = ProjectPhase.SERVICES_PROVISIONED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(15, "services already provisioned");
@@ -1135,7 +1057,7 @@ public final class ProjectProvisioner {
         "Started " + started + "/" + config.services().size() + " services (" + serviceNames + ")");
   }
 
-  private void configurePruneCron(SailYaml config) throws Exception {
+  private void configurePruneCron(ProjectDefinition config) throws Exception {
     currentPhase = ProjectPhase.PRUNE_CRON_CONFIGURED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(16, "cleanup cron already configured");
@@ -1144,7 +1066,7 @@ public final class ProjectProvisioner {
     step(16, "Configuring stale container cleanup...");
 
     var name = config.name();
-    var user = config.sshUser();
+    var user = ProjectDefinition.USER;
 
     var check = execAsDevUser(name, List.of("crontab", "-l"));
     if (check.ok() && check.stdout().contains(CleanupScripts.CONTAINER_CLEANUP_PATH)) {
@@ -1175,7 +1097,7 @@ public final class ProjectProvisioner {
     stepDone(16, "Container cleanup scheduled (hourly) + agent cleanup helper installed");
   }
 
-  private void installAgentTools(SailYaml config) throws Exception {
+  private void installAgentTools(ProjectDefinition config) throws Exception {
     currentPhase = ProjectPhase.AGENT_TOOLS_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(17, "agent tools already installed");
@@ -1229,14 +1151,14 @@ public final class ProjectProvisioner {
    * harness the project installs. Sail writes no context file: how the codebase is built is the
    * repository's own {@code AGENTS.md} to say, and the loop's rules are in the prompts.
    */
-  private void installSkills(SailYaml config) throws Exception {
+  private void installSkills(ProjectDefinition config) throws Exception {
     currentPhase = ProjectPhase.SKILLS_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(18, "skills already installed");
       return;
     }
 
-    var user = config.sshUser();
+    var user = ProjectDefinition.USER;
     var workspace = "/home/" + user + "/workspace";
     execInContainer(config.name(), List.of("mkdir", "-p", workspace));
     execInContainer(config.name(), List.of("chown", user + ":" + user, workspace));
@@ -1262,30 +1184,20 @@ public final class ProjectProvisioner {
   }
 
   /** The harnesses the project installs: {@code agent.install}, else {@code agent.type}. */
-  public static List<Harness> installedHarnesses(SailYaml config) {
+  public static List<Harness> installedHarnesses(ProjectDefinition config) {
     if (config.agent() == null) {
       return List.of();
     }
     return config.agent().installs().stream().map(Harnesses::of).toList();
   }
 
-  private void recordSpecsPhase() throws Exception {
-    currentPhase = ProjectPhase.SPECS_SCAFFOLD_CREATED;
-    if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(19, "specs are database-backed (no scaffold)");
-      return;
-    }
-    tracker.advance(currentPhase);
-    stepSkipped(19, "specs are database-backed (no scaffold)");
-  }
-
-  private void writeProjectState(SailYaml config) throws Exception {
+  private void writeProjectState(ProjectDefinition config) throws Exception {
     currentPhase = ProjectPhase.COMPLETE;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(20, "project state already written");
+      stepSkipped(19, "project state already written");
       return;
     }
-    step(20, "Writing project state...");
+    step(19, "Writing project state...");
 
     var name = config.name();
     execInContainer(name, List.of("mkdir", "-p", "/etc/sail"));
@@ -1300,11 +1212,11 @@ public final class ProjectProvisioner {
     var recorded =
         containerConfig.set(name, List.of(INPUTS_KEY + "=" + inputs(config, workstationKey)));
     if (!recorded.ok()) {
-      throw new IOException("Failed to record the provisioned descriptor: " + recorded.stderr());
+      throw new IOException("Failed to record the provisioned definition: " + recorded.stderr());
     }
 
     tracker.advance(currentPhase);
-    stepDone(20, "Project config saved");
+    stepDone(19, "Project config saved");
   }
 
   /**
@@ -1352,40 +1264,6 @@ public final class ProjectProvisioner {
           "Failed to enable podman-restart service: "
               + enableResult.stderr()
               + "\n  Podman containers with --restart=always will not auto-start after reboot.");
-    }
-  }
-
-  /**
-   * Tests SSH connectivity to each unique git host before attempting clones. Extracts hostnames
-   * from SSH-style repo URLs ({@code git@host:path}) and runs {@code ssh -T git@host} inside the
-   * container. Fails with a clear diagnostic message if any host rejects the key.
-   */
-  private void verifySshConnectivity(String name, List<SailYaml.Repo> repos)
-      throws IOException, InterruptedException, TimeoutException {
-    var hosts =
-        repos.stream()
-            .map(SailYaml.Repo::url)
-            .filter(u -> u.startsWith("git@"))
-            .map(u -> u.substring(4, u.indexOf(':')))
-            .distinct()
-            .toList();
-
-    for (var host : hosts) {
-      var result = execAsDevUser(name, List.of("ssh", "-T", "-o", "BatchMode=yes", "git@" + host));
-      if (!result.ok() && !result.stderr().contains("successfully authenticated")) {
-        throw new IOException(
-            "SSH authentication to "
-                + host
-                + " failed."
-                + "\n  Possible causes:"
-                + "\n    - The SSH key has a passphrase (not supported in non-interactive mode)"
-                + "\n    - The key is not registered in "
-                + host
-                + "\n    - Wrong key path in sail.yaml (git.ssh_key)"
-                + "\n  Debug: ssh into the container and run 'ssh -vT git@"
-                + host
-                + "'");
-      }
     }
   }
 

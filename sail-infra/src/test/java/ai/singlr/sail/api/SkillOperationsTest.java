@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import ai.singlr.sail.api.SkillOperations.Kind;
 import ai.singlr.sail.api.SkillOperations.Row;
 import ai.singlr.sail.config.FileLimits;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.SharedProjectFiles;
@@ -56,7 +56,7 @@ class SkillOperationsTest {
     new SchemaManager(db).migrate();
     files = new FileStore(db);
     shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
-    var definition = SailYaml.fromMap(YamlUtil.parseMap(ACME));
+    var definition = ProjectDefinition.fromMap(YamlUtil.parseMap(ACME));
     skills =
         new SkillOperations(
             new ProjectSkills(
@@ -243,7 +243,7 @@ class SkillOperationsTest {
                         files, dir.resolve("projects"), project, FileLimits.defaults())),
             interrupting,
             new ProjectLoader(
-                shell, project -> Optional.of(SailYaml.fromMap(YamlUtil.parseMap(ACME)))));
+                shell, project -> Optional.of(ProjectDefinition.fromMap(YamlUtil.parseMap(ACME)))));
 
     var shared =
         Acting.as(

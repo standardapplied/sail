@@ -34,7 +34,7 @@ public final class BranchPolicy {
    * The result is purely derived from configuration and the spec record; no git or container I/O
    * happens here.
    */
-  public static String branchName(SailYaml config, Spec spec) {
+  public static String branchName(ProjectDefinition config, Spec spec) {
     if (config == null || config.agent() == null || !config.agent().autoBranch()) {
       return null;
     }

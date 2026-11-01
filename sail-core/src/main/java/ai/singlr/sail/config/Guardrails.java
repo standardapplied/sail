@@ -16,13 +16,13 @@ import java.util.regex.Pattern;
 /**
  * The limits one agent run is held to: a hard wall-clock ceiling ({@code max_duration}) and an
  * idle/stall window ({@code max_idle}), with what to do when either is crossed. The one limits type
- * every lane reads: {@code agent.guardrails} in sail.yaml bounds a build, an ad-hoc run and a chat
- * turn, {@code agent.review_pipeline.guardrails} a reviewer and a fix agent, and both blocks parse
- * here. The stall window measures time since the agent's last <em>progress event</em> (a tool call
- * or log chunk) — not git activity. The earlier git-based idle timeout was removed because an agent
- * working without committing looked idle; the agent event stream does not have that blind spot, so
- * it distinguishes a long build from a hung agent. Quality assessment still happens post-task via
- * {@code agent review}.
+ * every lane reads: {@code agent.guardrails} in the definition bounds a build, an ad-hoc run and a
+ * chat turn, {@code agent.review_pipeline.guardrails} a reviewer and a fix agent, and both blocks
+ * parse here. The stall window measures time since the agent's last <em>progress event</em> (a tool
+ * call or log chunk) — not git activity. The earlier git-based idle timeout was removed because an
+ * agent working without committing looked idle; the agent event stream does not have that blind
+ * spot, so it distinguishes a long build from a hung agent. Quality assessment still happens
+ * post-task via {@code agent review}.
  *
  * @param maxDuration hard wall-clock stop (e.g. "4h", "90m"); null for none
  * @param maxIdle stall window — act when no progress event arrives for this long (e.g. "15m"); null
@@ -35,16 +35,16 @@ public record Guardrails(String maxDuration, String maxIdle, String action) {
   private static final Pattern DURATION_PATTERN = Pattern.compile("^(\\d+)([hms])$");
 
   /**
-   * The supervision every dispatched agent gets when {@code sail.yaml} configures no {@code
-   * guardrails} block: a 4h wall-clock ceiling and a 20m no-progress stall window, stopping the
-   * agent on either. All three are overridable per project; this is only the default-on baseline.
+   * The supervision every dispatched agent gets when the definition sets no {@code guardrails}
+   * block: a 4h wall-clock ceiling and a 20m no-progress stall window, stopping the agent on
+   * either. All three are overridable per project; this is only the default-on baseline.
    */
   public static Guardrails defaults() {
     return new Guardrails("4h", "20m", "stop");
   }
 
   /**
-   * The supervision a reviewer and a fix agent get when {@code sail.yaml} configures no {@code
+   * The supervision a reviewer and a fix agent get when the definition sets no {@code
    * review_pipeline.guardrails} block: 45 minutes of wall clock, enough for a fix that runs the
    * project's full verification, and the build lane's 20m stall window, stopping the agent on
    * either.
@@ -90,85 +90,62 @@ public record Guardrails(String maxDuration, String maxIdle, String action) {
   /** The build lane's block, {@code agent.guardrails}, as error messages name it. */
   static final String BUILD_BLOCK = "agent.guardrails";
 
-  /** The review lanes' block, {@code agent.review_pipeline.guardrails}. */
-  static final String REVIEW_BLOCK = "agent.review_pipeline.guardrails";
+  /** The review lanes' block, {@code pipeline.guardrails}. */
+  static final String REVIEW_BLOCK = "pipeline.guardrails";
 
-  /** Parses an {@code agent.guardrails} block of {@code sail.yaml}. */
+  /** Parses an {@code agent.guardrails} block. */
   public static Guardrails fromMap(Map<String, Object> map) {
-    return fromMap(map, BUILD_BLOCK, "sail.yaml");
+    return fromMap(map, BUILD_BLOCK);
   }
 
-  /**
-   * Parses the guardrails block {@code block} of {@code descriptor}, so a refused value names the
-   * key to fix and the file it is in.
-   */
-  static Guardrails fromMap(Map<String, Object> map, String block, String descriptor) {
-    rejectRetiredKey(map, "idle_timeout", "max_idle", descriptor);
-    rejectRetiredKey(map, "commit_burst", "max_idle", descriptor);
-    var maxDuration = duration(map, "max_duration", block, descriptor);
-    var maxIdle = duration(map, "max_idle", block, descriptor);
+  /** Parses the guardrails block {@code block}, so a refused value names the key to fix. */
+  static Guardrails fromMap(Map<String, Object> map, String block) {
+    Fields.only(map, block, List.of("max_duration", "max_idle", "action"));
+    var maxDuration = duration(map, "max_duration", block);
+    var maxIdle = duration(map, "max_idle", block);
     try {
-      return of(maxDuration, maxIdle, Objects.toString(map.get("action"), null));
+      return of(maxDuration, maxIdle, Fields.text(map, "action", block + ".action"));
     } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException(
-          "Invalid `" + block + ".action` in " + descriptor + ": " + e.getMessage(), e);
+      throw new IllegalArgumentException("Invalid `" + block + ".action`: " + e.getMessage(), e);
     }
   }
 
   /**
-   * The guardrails block {@code raw} holds under {@code block}: empty when the descriptor names
+   * The guardrails block {@code raw} holds under {@code block}: empty when the definition names
    * none, parsed when it is a block, and refused when it is anything else — a scalar or a list
    * there is a mistake, and must not run an agent under limits nobody wrote.
    */
   @SuppressWarnings("unchecked")
-  static Optional<Guardrails> fromBlock(Object raw, String block, String descriptor) {
+  static Optional<Guardrails> fromBlock(Object raw, String block) {
     return switch (raw) {
       case null -> Optional.empty();
-      case Map<?, ?> limits ->
-          Optional.of(fromMap((Map<String, Object>) limits, block, descriptor));
+      case Map<?, ?> limits -> Optional.of(fromMap(Fields.asMap(limits, block), block));
       default ->
           throw new IllegalArgumentException(
               "Invalid `"
                   + block
-                  + "` in "
-                  + descriptor
-                  + ": expected a block with max_duration, max_idle and action, e.g."
-                  + " `guardrails: {max_duration: 45m, max_idle: 20m, action: stop}`.");
+                  + "`: expected a block with max_duration, max_idle and action, e.g."
+                  + " `{\"max_duration\": \"45m\", \"max_idle\": \"20m\", \"action\": \"stop\"}`.");
     };
   }
 
-  private static String duration(
-      Map<String, Object> map, String key, String block, String descriptor) {
+  private static String duration(Map<String, Object> map, String key, String block) {
     var raw = map.get(key);
     if (raw == null) {
       return null;
     }
-    var value = raw.toString().strip();
+    if (!(raw instanceof String text)) {
+      throw new IllegalArgumentException(
+          "Invalid `" + block + "." + key + "`: write it as text such as 45m, 4h or 90s.");
+    }
+    var value = text.strip();
     try {
       requireLimit(value);
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException(
-          "Invalid `" + block + "." + key + "` in " + descriptor + ": " + e.getMessage(), e);
+          "Invalid `" + block + "." + key + "`: " + e.getMessage(), e);
     }
     return value;
-  }
-
-  private static void rejectRetiredKey(
-      Map<String, Object> map, String key, String replacement, String descriptor) {
-    if (map.containsKey(key)) {
-      throw new IllegalArgumentException(
-          "Unknown guardrail key `"
-              + key
-              + "` in "
-              + descriptor
-              + "; rename `"
-              + key
-              + "` to `"
-              + replacement
-              + "` in "
-              + descriptor
-              + ".");
-    }
   }
 
   public Map<String, Object> toMap() {

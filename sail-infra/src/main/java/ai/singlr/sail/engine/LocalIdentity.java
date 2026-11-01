@@ -5,10 +5,7 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.PlaceholderResolver;
-import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -17,103 +14,88 @@ import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Answers a project definition's personal-field placeholders from <em>this</em> box: the git
- * identity from {@code git config --global}, and {@code ${SSH_PUBLIC_KEY}} from the box owner's
- * workstation key ({@link SailPaths#workstationPublicKeyPath()}) — the human key an engineer SSHes
- * into containers with, distinct from the machine sync key. Resolution happens once, when a project
- * is provisioned, so the synced definition stays identity-free and each box's containers trust
- * their owner's laptop key. A missing value fails loud with the one command that fixes it, rather
- * than silently provisioning a container no laptop can reach.
+ * This box's git identity, from {@code git config --global} of the account that owns it: the name
+ * and email every container provisioned here commits as. A project's definition carries none, so
+ * each engineer's containers commit as them; a box with none set fails loud with the command that
+ * sets it, rather than provisioning a container that commits as nobody.
  */
 public final class LocalIdentity {
 
+  /** A git identity field and the {@code git config} key that holds it. */
+  public enum GitField {
+    NAME("user.name"),
+    EMAIL("user.email");
+
+    private final String key;
+
+    GitField(String key) {
+      this.key = key;
+    }
+
+    /** The {@code git config} key. */
+    public String key() {
+      return key;
+    }
+  }
+
+  /** The name and email a container commits as. */
+  public record GitIdentity(String name, String email) {}
+
   private final ShellExec shell;
-  private final Path sshPublicKeyPath;
   private final Path home;
   private final boolean sudo;
-  private final OperatorCommand operator;
 
-  /**
-   * This process's git identity and the workstation key at {@code sshPublicKeyPath}, its failures
-   * worded for {@code operator}.
-   */
-  public LocalIdentity(ShellExec shell, Path sshPublicKeyPath, OperatorCommand operator) {
-    this(shell, sshPublicKeyPath, null, false, operator);
+  /** This process's own git identity. */
+  public LocalIdentity(ShellExec shell) {
+    this(shell, null, false);
   }
 
   /**
-   * The identity of the account whose home is {@code home}: its git config and its key. {@code
-   * sudo} when that account is root acting for a {@code sudo} caller, who sets root's git config
-   * with {@code sudo}.
+   * The identity of the account whose home is {@code home}: its git config. {@code sudo} when that
+   * account is root acting for a {@code sudo} caller, who sets root's git config with {@code sudo}.
    */
-  LocalIdentity(
-      ShellExec shell, Path sshPublicKeyPath, Path home, boolean sudo, OperatorCommand operator) {
+  LocalIdentity(ShellExec shell, Path home, boolean sudo) {
     this.shell = shell;
-    this.sshPublicKeyPath = sshPublicKeyPath;
     this.home = home;
     this.sudo = sudo;
-    this.operator = operator;
   }
 
   /**
-   * This box's identity: the git config and workstation public key of the account that owns it
-   * ({@link SailPaths#identityHome()}).
+   * This box's identity: the git config of the account that owns it ({@link
+   * SailPaths#identityHome()}).
    */
-  public static LocalIdentity detect(OperatorCommand operator) {
+  public static LocalIdentity detect() {
     return detect(
         new ShellExecutor(false),
         SailPaths.isRoot(),
         SailPaths.identityHome(),
-        SailPaths.invokingHome(),
-        operator);
-  }
-
-  /** The workstation key file this identity's {@code ${SSH_PUBLIC_KEY}} resolves from. */
-  public Path sshPublicKeyPath() {
-    return sshPublicKeyPath;
+        SailPaths.invokingHome());
   }
 
   /**
    * The identity at {@code home}, read for the person whose home is {@code invokingHome}: root's
    * own, when root reads it for a {@code sudo} caller, is set with {@code sudo}.
    */
-  static LocalIdentity detect(
-      ShellExec shell, boolean root, Path home, Path invokingHome, OperatorCommand operator) {
-    return new LocalIdentity(
-        shell,
-        SailPaths.workstationPublicKeyPath(home),
-        home,
-        root && !home.equals(invokingHome),
-        operator);
+  static LocalIdentity detect(ShellExec shell, boolean root, Path home, Path invokingHome) {
+    return new LocalIdentity(shell, home, root && !home.equals(invokingHome));
   }
 
-  /**
-   * This box's git value for a {@code ${GIT_NAME}}/{@code ${GIT_EMAIL}} placeholder, or empty when
-   * unset. Never throws — used to offer a default the engineer can accept or override at a prompt,
-   * where {@link #valueFor} would hard-fail instead.
-   */
-  public Optional<String> gitValue(String placeholder) {
-    var key = gitKey(placeholder);
-    if (key == null) {
-      return Optional.empty();
-    }
-    var value = run(gitConfigCommand(key));
+  /** This box's git identity, failing loud with the command that sets whichever is unset. */
+  public GitIdentity git() {
+    return new GitIdentity(required(GitField.NAME), required(GitField.EMAIL));
+  }
+
+  /** This box's value of {@code field}, or empty when unset. Never throws. */
+  public Optional<String> gitValue(GitField field) {
+    var value = run(gitConfigCommand(field.key()));
     return Strings.isBlank(value) ? Optional.empty() : Optional.of(value);
   }
 
-  /**
-   * Writes {@code value} as this identity's git value for a {@code ${GIT_NAME}}/{@code
-   * ${GIT_EMAIL}} placeholder, into the account's global git config, so a later apply resolves it.
-   */
-  public void adoptGit(String placeholder, String value)
-      throws InterruptedException, TimeoutException {
-    var key = gitKey(placeholder);
-    if (key == null) {
-      throw new IllegalArgumentException("${" + placeholder + "} is not a git identity field");
-    }
+  /** Writes {@code value} as this box's {@code field}, into the account's global git config. */
+  public void adoptGit(GitField field, String value) throws InterruptedException, TimeoutException {
     String failure;
     try {
-      var result = shell.exec(withHome(List.of("git", "config", "--global", key, value)));
+      var result = shell.exec(withHome(List.of("git", "config", "--global", field.key(), value)));
       if (result.ok()) {
         return;
       }
@@ -123,31 +105,11 @@ public final class LocalIdentity {
     }
     throw new IllegalStateException(
         "Couldn't set this box's git "
-            + key
+            + field.key()
             + ": "
             + failure
             + "\n  Set it yourself and re-run: "
-            + gitFix(key));
-  }
-
-  /** The git config key a {@code ${GIT_NAME}}/{@code ${GIT_EMAIL}} placeholder reads. */
-  public static String gitKey(String placeholder) {
-    return switch (placeholder) {
-      case PlaceholderResolver.GIT_NAME -> "user.name";
-      case PlaceholderResolver.GIT_EMAIL -> "user.email";
-      default -> null;
-    };
-  }
-
-  /** Resolves one known placeholder name to this box's value, failing loud if it is not set. */
-  public String valueFor(String placeholder) {
-    return switch (placeholder) {
-      case PlaceholderResolver.GIT_NAME -> gitConfig("user.name");
-      case PlaceholderResolver.GIT_EMAIL -> gitConfig("user.email");
-      case PlaceholderResolver.SSH_PUBLIC_KEY -> sshPublicKey();
-      default ->
-          throw new IllegalArgumentException("No box-local source for ${" + placeholder + "}");
-    };
+            + gitFix(field.key()));
   }
 
   /**
@@ -166,37 +128,21 @@ public final class LocalIdentity {
     return List.copyOf(withHome);
   }
 
-  private String gitConfig(String key) {
-    var value = run(gitConfigCommand(key));
-    if (Strings.isBlank(value)) {
-      throw new IllegalStateException(
-          "This box has no git "
-              + key
-              + " set, so a project here can't take on your identity.\n"
-              + "  Set it once and re-run: "
-              + gitFix(key));
-    }
-    return value;
+  private String required(GitField field) {
+    return gitValue(field)
+        .orElseThrow(
+            () ->
+                new IllegalStateException(
+                    "This box has no git "
+                        + field.key()
+                        + " set, so a project here can't take on your identity.\n"
+                        + "  Set it once and re-run: "
+                        + gitFix(field.key())));
   }
 
   /** The command that sets {@code key} for the account whose git config this identity reads. */
   private String gitFix(String key) {
     return (sudo ? "sudo " : "") + "git config --global " + key + " \"...\"";
-  }
-
-  private String sshPublicKey() {
-    return WorkstationIdentity.registeredAt(sshPublicKeyPath)
-        .map(SshPublicKey::line)
-        .orElseThrow(() -> new IllegalStateException(missingKeyMessage()));
-  }
-
-  private String missingKeyMessage() {
-    return """
-        This box has no valid workstation SSH key set (%s), so a container here can't authorize \
-        you to connect from your laptop.
-          Register it (auto-detected from this box's authorized_keys, or pass the key):
-            %s"""
-        .formatted(sshPublicKeyPath, operator.render(Remedy.of(WorkstationIdentity.SET_KEY)));
   }
 
   private String run(List<String> command) {

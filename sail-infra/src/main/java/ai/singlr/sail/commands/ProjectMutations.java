@@ -5,40 +5,38 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinition.Section;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
-import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.identity.Actor;
-import java.io.IOException;
 import java.io.PrintStream;
-import java.nio.file.Path;
 
 /**
- * Shared read/write seam for the commands that mutate one field of a project definition (add a repo
- * or service, remove a service, change resources). They all read the current definition
- * catalog-first and persist the result back to the catalog, so an edit can never read a stale
- * on-disk copy or be silently dropped on the next sync. Centralizing it keeps every mutation on the
- * same database-authoritative path as {@code project edit}.
+ * Shared read/write seam for the commands that change one section of a project's definition (add a
+ * repo or service, remove a service, change resources). Each reads the definition from the catalog,
+ * checks its edit whole before it touches the container, and writes the one section it changed,
+ * refused if another write changed that section since it was read.
  */
 final class ProjectMutations {
 
   private ProjectMutations() {}
 
-  /** The current definition text, catalog-first; throws with guidance if the project is unknown. */
-  static String currentDefinition(String name, Path explicitFile, OperatorCommand operator) {
-    return ProjectDefinitions.definition(name, explicitFile)
-        .orElseThrow(() -> notFound(name, operator));
+  /** The definition project {@code name} holds, or a refusal naming how to make one. */
+  static ProjectDefinition current(String name, OperatorCommand operator) {
+    return ProjectCatalog.read(name).orElseThrow(() -> notFound(name, operator));
   }
 
   /**
    * This box's operator, resolved before a command changes anything, for the catalog write of
    * project {@code name} that ends it: a node that cannot name its operator, or whose operator the
    * journal will refuse that write, refuses up front, never after cloning, starting or editing.
-   * Null for a dry run or an explicit {@code -f} file, neither of which touches the catalog.
+   * Null for a dry run, which touches no catalog.
    */
-  static Actor catalogOperator(String name, Path explicitFile, boolean dryRun) {
-    if (dryRun || explicitFile != null) {
+  static Actor catalogOperator(String name, boolean dryRun) {
+    if (dryRun) {
       return null;
     }
     var operator = CliOperator.current();
@@ -46,25 +44,28 @@ final class ProjectMutations {
     return operator;
   }
 
+  /** {@code edited} checked whole, before any side effect it would follow. */
+  static ProjectDefinition checked(ProjectDefinition edited) {
+    return ProjectDefinitionJson.validated(edited);
+  }
+
   /**
-   * Persists an edited definition through the catalog seam as {@code operator} (see {@link
-   * #catalogOperator}), or prints the intent under {@code --dry-run}. {@code dryRunLabel} describes
-   * the change for the dry-run line.
+   * Writes {@code section} of {@code read}'s project as {@code edited} holds it, as {@code
+   * operator} (see {@link #catalogOperator}), or prints the intent under {@code --dry-run}.
    */
-  static void persist(
-      String name,
-      Path explicitFile,
-      String definition,
+  static void write(
+      Section section,
+      ProjectDefinition read,
+      ProjectDefinition edited,
       boolean dryRun,
       PrintStream out,
       String dryRunLabel,
-      Actor operator)
-      throws IOException {
+      Actor operator) {
     if (dryRun) {
       out.println("[dry-run] " + dryRunLabel);
       return;
     }
-    ProjectDefinitions.persist(name, explicitFile, definition, operator);
+    ProjectCatalog.writeSection(read.name(), section, read, edited, operator);
   }
 
   static IllegalStateException notFound(String name, OperatorCommand operator) {
@@ -72,7 +73,7 @@ final class ProjectMutations {
         "No project '"
             + name
             + "' in the catalog. Create it with '"
-            + operator.sail("project apply")
+            + operator.sail("project create " + name)
             + "', or sync it from main with '"
             + operator.sail("sync")
             + "'.");

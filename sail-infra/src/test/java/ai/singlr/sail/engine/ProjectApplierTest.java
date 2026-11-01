@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.config.FileLimits;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -143,7 +143,9 @@ class ProjectApplierTest {
     var applier = applier(shell);
 
     var services =
-        Map.of("postgres", new SailYaml.Service("postgres:16", List.of(5432), null, null, null));
+        Map.of(
+            "postgres",
+            new ProjectDefinition.Service("postgres:16", List.of(5432), null, null, null));
     var result = applier.applyServices(CONTAINER, services);
 
     assertEquals(1, result.added());
@@ -162,7 +164,9 @@ class ProjectApplierTest {
     var applier = new ProjectApplier(probes, mutator, new PrintStream(new ByteArrayOutputStream()));
 
     var services =
-        Map.of("postgres", new SailYaml.Service("postgres:16", List.of(5432), null, null, null));
+        Map.of(
+            "postgres",
+            new ProjectDefinition.Service("postgres:16", List.of(5432), null, null, null));
     applier.applyServices(CONTAINER, services);
     applier.applyAgentTools(CONTAINER, List.of("claude-code"));
     applier.applyPackages(CONTAINER, null);
@@ -200,7 +204,9 @@ class ProjectApplierTest {
     var applier = applier(shell);
 
     var services =
-        Map.of("postgres", new SailYaml.Service("postgres:16", List.of(5432), null, null, null));
+        Map.of(
+            "postgres",
+            new ProjectDefinition.Service("postgres:16", List.of(5432), null, null, null));
     var result = applier.applyServices(CONTAINER, services);
 
     assertEquals(0, result.added());
@@ -217,9 +223,11 @@ class ProjectApplierTest {
             .onOk("podman run");
     var applier = applier(shell);
 
-    var services = new LinkedHashMap<String, SailYaml.Service>();
-    services.put("postgres", new SailYaml.Service("postgres:16", List.of(5432), null, null, null));
-    services.put("redis", new SailYaml.Service("redis:7", List.of(6379), null, null, null));
+    var services = new LinkedHashMap<String, ProjectDefinition.Service>();
+    services.put(
+        "postgres", new ProjectDefinition.Service("postgres:16", List.of(5432), null, null, null));
+    services.put(
+        "redis", new ProjectDefinition.Service("redis:7", List.of(6379), null, null, null));
     var result = applier.applyServices(CONTAINER, services);
 
     assertEquals(1, result.added());
@@ -245,7 +253,8 @@ class ProjectApplierTest {
             .onOk("git clone");
     var applier = applier(shell);
 
-    var repos = List.of(new SailYaml.Repo("https://github.com/org/backend.git", "backend", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
     var result = applier.applyRepos(CONTAINER, repos, "dev", null, null);
 
     assertEquals(1, result.added());
@@ -263,7 +272,8 @@ class ProjectApplierTest {
                 "https://github.com/org/backend.git\n");
     var applier = applier(shell);
 
-    var repos = List.of(new SailYaml.Repo("https://github.com/org/backend.git", "backend", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
     var result = applier.applyRepos(CONTAINER, repos, "dev", null, null);
 
     assertEquals(0, result.added());
@@ -280,7 +290,8 @@ class ProjectApplierTest {
   @Test
   void aCheckoutOfAnotherRepositoryIsRefusedAndLeftAsItIs() {
     var shell = checkout(new ShellExec.Result(0, "https://github.com/org/old.git\n", ""));
-    var repos = List.of(new SailYaml.Repo("https://github.com/org/backend.git", "backend", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
 
     var refused =
         assertThrows(
@@ -302,7 +313,8 @@ class ProjectApplierTest {
   void aDirectoryThatIsNoCheckoutIsRefused() {
     var shell =
         checkout(new ShellExec.Result(128, "", "fatal: not a git repository (or any parent)"));
-    var repos = List.of(new SailYaml.Repo("https://github.com/org/backend.git", "backend", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
 
     var refused =
         assertThrows(
@@ -318,7 +330,8 @@ class ProjectApplierTest {
   @Test
   void aCheckoutWithNoOriginIsRefused() {
     var shell = checkout(new ShellExec.Result(2, "", "error: No such remote 'origin'"));
-    var repos = List.of(new SailYaml.Repo("https://github.com/org/backend.git", "backend", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
 
     var refused =
         assertThrows(
@@ -336,7 +349,8 @@ class ProjectApplierTest {
     var shell =
         checkout(
             new ShellExec.Result(0, "https://x-access-token:ghp_s3cret@github.com/org/old\n", ""));
-    var repos = List.of(new SailYaml.Repo("https://github.com/org/backend.git", "backend", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
 
     var refused =
         assertThrows(
@@ -352,7 +366,8 @@ class ProjectApplierTest {
   @Test
   void aCheckoutSwitchedBetweenSshAndHttpsStillConverges() throws Exception {
     var shell = checkout(new ShellExec.Result(0, "ssh://git@GitHub.com/org/backend/\n", ""));
-    var repos = List.of(new SailYaml.Repo("git@github.com:org/backend.git", "backend", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("git@github.com:org/backend.git", "backend", null));
 
     var result = applier(shell).applyRepos(CONTAINER, repos, "dev", null, null);
 
@@ -372,7 +387,8 @@ class ProjectApplierTest {
             .onOk("git clone");
     var applier = applier(shell);
 
-    var repos = List.of(new SailYaml.Repo("https://github.com/org/private.git", "private", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/org/private.git", "private", null));
     applier.applyRepos(CONTAINER, repos, "dev", Map.of("*", "ghp_secret123"), null);
 
     var cloneCmd = shell.invocations().stream().filter(c -> c.contains("git clone")).findFirst();
@@ -427,8 +443,9 @@ class ProjectApplierTest {
     applier.applyRepos(
         CONTAINER,
         List.of(
-            new SailYaml.Repo("https://git.example.com/org/api.git", "api", null, "github"),
-            new SailYaml.Repo("https://gitlab.com/org/web.git", "web", null)),
+            new ProjectDefinition.Repo(
+                "https://git.example.com/org/api.git", "api", null, "github"),
+            new ProjectDefinition.Repo("https://gitlab.com/org/web.git", "web", null)),
         "dev",
         Map.of("*", "tok_wild"),
         null);
@@ -448,7 +465,7 @@ class ProjectApplierTest {
 
     applier.applyRepos(
         CONTAINER,
-        List.of(new SailYaml.Repo("https://gitlab.com/org/web.git", "web", null)),
+        List.of(new ProjectDefinition.Repo("https://gitlab.com/org/web.git", "web", null)),
         "dev",
         Map.of("gitlab.com", "glpat_x"),
         null);
@@ -470,7 +487,8 @@ class ProjectApplierTest {
             () ->
                 applier.applyRepos(
                     CONTAINER,
-                    List.of(new SailYaml.Repo("https://github.com/org/api.git", "api", null)),
+                    List.of(
+                        new ProjectDefinition.Repo("https://github.com/org/api.git", "api", null)),
                     "dev",
                     Map.of("*", "ghp_bad"),
                     null));
@@ -485,7 +503,8 @@ class ProjectApplierTest {
     var shell = new ScriptedShellExecutor().onFail("test -d", "not found").onOk("git clone");
     var applier = applier(shell);
 
-    var repos = List.of(new SailYaml.Repo("https://github.com/org/repo.git", "repo", "develop"));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/org/repo.git", "repo", "develop"));
     applier.applyRepos(CONTAINER, repos, "dev", null, null);
 
     var cloneCmd = shell.invocations().stream().filter(c -> c.contains("git clone")).findFirst();
@@ -574,7 +593,7 @@ class ProjectApplierTest {
 
     var result =
         applier.applyGitConfig(
-            CONTAINER, new SailYaml.Git("John", "john@acme.com", "token", null), "dev");
+            CONTAINER, new ProjectDefinition.Git("John", "john@acme.com", "token", null), "dev");
 
     assertEquals(1, result.added());
     assertTrue(
@@ -595,7 +614,7 @@ class ProjectApplierTest {
 
     var result =
         applier.applyGitConfig(
-            CONTAINER, new SailYaml.Git("John", "john@acme.com", "token", null), "dev");
+            CONTAINER, new ProjectDefinition.Git("John", "john@acme.com", "token", null), "dev");
 
     assertEquals(new ProjectApplier.ApplyResult(0, 0, 1, List.of()), result);
     assertEquals("  [skip] Git config already current\n", out.toString());
@@ -615,7 +634,7 @@ class ProjectApplierTest {
 
     var result =
         applier.applyGitConfig(
-            CONTAINER, new SailYaml.Git("John", "john@acme.com", "token", null), "dev");
+            CONTAINER, new ProjectDefinition.Git("John", "john@acme.com", "token", null), "dev");
 
     assertEquals(new ProjectApplier.ApplyResult(1, 0, 0, List.of()), result);
     assertEquals("  [apply] Git config (name=John, email=john@acme.com)\n", out.toString());
@@ -632,7 +651,7 @@ class ProjectApplierTest {
 
     var result =
         applier.applyGitConfig(
-            CONTAINER, new SailYaml.Git("John ", "john@acme.com", "token", null), "dev");
+            CONTAINER, new ProjectDefinition.Git("John ", "john@acme.com", "token", null), "dev");
 
     assertEquals(new ProjectApplier.ApplyResult(1, 0, 0, List.of()), result);
     assertEquals("  [apply] Git config (name=John , email=john@acme.com)\n", out.toString());
@@ -649,7 +668,7 @@ class ProjectApplierTest {
 
     var result =
         applier.applyGitConfig(
-            CONTAINER, new SailYaml.Git("John", "john@acme.com", "token", null), "dev");
+            CONTAINER, new ProjectDefinition.Git("John", "john@acme.com", "token", null), "dev");
 
     assertEquals(new ProjectApplier.ApplyResult(1, 0, 0, List.of()), result);
     assertEquals("  [apply] Git config (name=John, email=john@acme.com)\n", out.toString());
@@ -708,10 +727,10 @@ class ProjectApplierTest {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var applier = applier(shell);
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "test",
             null,
-            new SailYaml.Resources(2, "4GB", "50GB"),
+            new ProjectDefinition.Resources(2, "4GB", "50GB"),
             null,
             null,
             null,
@@ -719,7 +738,7 @@ class ProjectApplierTest {
             null,
             null,
             null,
-            new SailYaml.Agent(
+            new ProjectDefinition.Agent(
                 "claude-code",
                 true,
                 "sail/",
@@ -811,10 +830,10 @@ class ProjectApplierTest {
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "test",
             null,
-            new SailYaml.Resources(2, "4GB", "50GB"),
+            new ProjectDefinition.Resources(2, "4GB", "50GB"),
             null,
             null,
             null,
@@ -840,7 +859,9 @@ class ProjectApplierTest {
     var applier = applier(shell);
 
     var services =
-        Map.of("postgres", new SailYaml.Service("postgres:16", List.of(5432), null, null, null));
+        Map.of(
+            "postgres",
+            new ProjectDefinition.Service("postgres:16", List.of(5432), null, null, null));
     var ex = assertThrows(Exception.class, () -> applier.applyServices(CONTAINER, services));
 
     assertTrue(ex.getMessage().contains("Failed to start service"));
@@ -865,7 +886,8 @@ class ProjectApplierTest {
             .onFail("git clone", "authentication failed");
     var applier = applier(shell);
 
-    var repos = List.of(new SailYaml.Repo("https://github.com/org/backend.git", "backend", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/org/backend.git", "backend", null));
     var ex =
         assertThrows(
             Exception.class, () -> applier.applyRepos(CONTAINER, repos, "dev", null, null));
@@ -894,7 +916,8 @@ class ProjectApplierTest {
             .onOk("git clone");
     var applier = applier(shell);
 
-    var repos = List.of(new SailYaml.Repo("https://gitlab.com/org/repo.git", "repo", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://gitlab.com/org/repo.git", "repo", null));
     applier.applyRepos(CONTAINER, repos, "dev", Map.of("*", "ghp_token"), null);
 
     var cloneCmd = shell.invocations().stream().filter(c -> c.contains("git clone")).findFirst();
@@ -920,8 +943,8 @@ class ProjectApplierTest {
             .onOk("git clone");
     var applier = applier(shell);
 
-    var repos = List.of(new SailYaml.Repo("git@github.com:org/repo.git", "repo", null));
-    var git = new SailYaml.Git("Dev", "dev@test.com", "ssh", keyFile.toString());
+    var repos = List.of(new ProjectDefinition.Repo("git@github.com:org/repo.git", "repo", null));
+    var git = new ProjectDefinition.Git("Dev", "dev@test.com", "ssh", keyFile.toString());
     applier.applyRepos(CONTAINER, repos, "dev", null, git);
 
     var cmds = shell.invocations();
@@ -938,8 +961,8 @@ class ProjectApplierTest {
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
 
-    var repos = List.of(new SailYaml.Repo("git@github.com:org/repo.git", "repo", null));
-    var git = new SailYaml.Git("Dev", "dev@test.com", "ssh", "/nonexistent/key");
+    var repos = List.of(new ProjectDefinition.Repo("git@github.com:org/repo.git", "repo", null));
+    var git = new ProjectDefinition.Git("Dev", "dev@test.com", "ssh", "/nonexistent/key");
     var ex =
         assertThrows(Exception.class, () -> applier.applyRepos(CONTAINER, repos, "dev", null, git));
     assertTrue(ex.getMessage().contains("SSH key not found"));
@@ -950,8 +973,9 @@ class ProjectApplierTest {
     var shell = new ScriptedShellExecutor().onFail("test -d", "not found").onOk("git clone");
     var applier = applier(shell);
 
-    var repos = List.of(new SailYaml.Repo("https://github.com/org/repo.git", "repo", null));
-    var git = new SailYaml.Git("Dev", "dev@test.com", "token", null);
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/org/repo.git", "repo", null));
+    var git = new ProjectDefinition.Git("Dev", "dev@test.com", "token", null);
     applier.applyRepos(CONTAINER, repos, "dev", null, git);
 
     var cmds = shell.invocations();
@@ -1036,9 +1060,11 @@ class ProjectApplierTest {
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
     var agent =
-        new SailYaml.Agent("claude-code", true, "sail/", true, null, null, null, null, null, null);
+        new ProjectDefinition.Agent(
+            "claude-code", true, "sail/", true, null, null, null, null, null, null);
     var config =
-        new SailYaml("test", null, null, null, null, null, null, null, null, null, agent, null);
+        new ProjectDefinition(
+            "test", null, null, null, null, null, null, null, null, null, agent, null);
 
     var warnings = applier.checkUnsupportedChanges(config, null, OperatorCommand.PLAIN);
 
@@ -1108,7 +1134,9 @@ class ProjectApplierTest {
     var applier = applier(shell);
 
     var services =
-        Map.of("postgres", new SailYaml.Service("postgres:16", List.of(5432), null, null, null));
+        Map.of(
+            "postgres",
+            new ProjectDefinition.Service("postgres:16", List.of(5432), null, null, null));
     var result = applier.reconcileServices(CONTAINER, services);
 
     assertEquals(1, result.removed());
@@ -1127,7 +1155,9 @@ class ProjectApplierTest {
     var applier = applier(shell);
 
     var services =
-        Map.of("postgres", new SailYaml.Service("postgres:16", List.of(5432), null, null, null));
+        Map.of(
+            "postgres",
+            new ProjectDefinition.Service("postgres:16", List.of(5432), null, null, null));
     var result = applier.reconcileServices(CONTAINER, services);
 
     assertEquals(0, result.removed());
@@ -1139,7 +1169,9 @@ class ProjectApplierTest {
     var applier = applier(shell);
 
     var services =
-        Map.of("postgres", new SailYaml.Service("postgres:16", List.of(5432), null, null, null));
+        Map.of(
+            "postgres",
+            new ProjectDefinition.Service("postgres:16", List.of(5432), null, null, null));
     var result = applier.reconcileServices(CONTAINER, services);
 
     assertEquals(0, result.removed());
@@ -1450,13 +1482,14 @@ class ProjectApplierTest {
     return new ProjectApplier(shell, new PrintStream(new ByteArrayOutputStream()));
   }
 
-  private static SailYaml minimalConfig(String agentType) {
+  private static ProjectDefinition minimalConfig(String agentType) {
     var agent =
-        new SailYaml.Agent(agentType, true, "sail/", true, null, null, null, null, null, null);
-    return new SailYaml(
+        new ProjectDefinition.Agent(
+            agentType, true, "sail/", true, null, null, null, null, null, null);
+    return new ProjectDefinition(
         "test",
         null,
-        new SailYaml.Resources(2, "4GB", "50GB"),
+        new ProjectDefinition.Resources(2, "4GB", "50GB"),
         null,
         null,
         null,

@@ -60,7 +60,7 @@ public final class DemoSeeder {
     if (!seeds || store.latestRev(DemoProject.NAME) != null) {
       return false;
     }
-    Actor.run(Actor.system(), () -> store.upsert(DemoProject.NAME, DemoProject.DEFINITION));
+    Actor.run(Actor.system(), () -> store.upsert(DemoProject.DEFINITION));
     return true;
   }
 

@@ -11,7 +11,9 @@ import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.PersonalFields;
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinition.Section;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.identity.Actor;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -21,18 +23,18 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Project-definition catalog on SQLite. Each project's full descriptor (the canonical {@code
- * sail.yaml}) is stored verbatim as the {@code definition} blob, keyed by name, alongside the
- * attribution columns the board lists on. The catalog never looks inside a definition — it loads it
- * whole and hands it to the provisioner.
+ * Project-definition catalog on SQLite. Each project's {@link ProjectDefinition} is stored as its
+ * JSON document ({@link ProjectDefinitionJson}), keyed by name, alongside the attribution columns
+ * the board lists on. Every definition is checked whole before it is held, and each of its sections
+ * is a field of its own in the comparison, so two boxes editing different sections never conflict.
  *
  * <p>Every mutation journals the project's full post-state into the shared {@link ChangeLog} under
  * entity type {@code project} within one transaction, through the {@link RevisionJournal} every
  * mutable synced store shares — the same revision/CAS/conflict machinery {@link SpecStore} and
  * {@link FileStore} use — so a project created on main replicates to every box, with history and
- * bidirectional conflict resolution. Only the {@code definition} is comparable; attribution and
- * timestamps never cause a false conflict. Containers and run state are local and live elsewhere;
- * this table is only the definition every box agrees on.
+ * bidirectional conflict resolution. Only the sections are comparable; attribution and timestamps
+ * never cause a false conflict. Containers and run state are local and live elsewhere; this table
+ * is only the definition every box agrees on.
  */
 public final class ProjectStore implements ConflictResolver, SyncedStore {
 
@@ -48,32 +50,132 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     this.journal = new RevisionJournal(db, new ChangeLog(db), new ProjectSchema(), this::authority);
   }
 
+  /**
+   * A catalogued project: its definition's JSON {@code document} and who made and last changed it.
+   */
   public record ProjectRow(
       String name,
-      String definition,
+      String document,
       String createdBy,
       Instant createdAt,
       String updatedBy,
-      Instant updatedAt) {}
+      Instant updatedAt) {
+
+    /** The definition the row holds, read whole; a row that holds none readable is refused. */
+    public ProjectDefinition definition() {
+      return ProjectDefinitionJson.read(document);
+    }
+  }
+
+  /** A section write refused because the section is no longer the one its writer last read. */
+  public static final class StaleSection extends RuntimeException {
+    private final transient ProjectRow current;
+
+    StaleSection(String name, Section section, ProjectRow current) {
+      super(
+          "The "
+              + section.key()
+              + " section of project '"
+              + name
+              + "' changed since it was read. Read it again, then write it.");
+      this.current = current;
+    }
+
+    /** The project as it is now. */
+    public ProjectRow current() {
+      return current;
+    }
+  }
 
   /**
    * Inserts the project or replaces its definition as the bound {@link Actor}, preserving the
    * original {@code created_by}/{@code created_at}, and journals it as a local edit the next sync
-   * pushes. Idempotent in effect; re-applying the same definition still records a revision that
-   * converges.
-   *
-   * <p>The definition is {@linkplain PersonalFields#redact redacted} first, so the catalogued,
-   * synced state never carries this box's git identity or SSH keys — each box resolves those
-   * locally at provision time. This is the one seam where a definition a human authored enters the
-   * catalog; revisions arriving over sync are already redacted at their origin.
+   * pushes. The definition is checked whole first. Re-applying the same definition still records a
+   * revision that converges.
    */
-  public void upsert(String name, String definition) {
-    var canonical = PersonalFields.redact(definition);
+  public void upsert(ProjectDefinition definition) {
+    var document = ProjectDefinitionJson.write(ProjectDefinitionJson.validated(definition));
     db.transaction(
         () -> {
-          writeRow(name, canonical, author(), null, null, DateTimeUtils.now());
-          journal.recordRevision(name, ChangeLog.Entry.LOCAL, false);
+          writeRow(definition.name(), document, author(), null, null, DateTimeUtils.now());
+          journal.recordRevision(definition.name(), ChangeLog.Entry.LOCAL, false);
         });
+  }
+
+  /**
+   * Creates the project {@code definition} names as the bound {@link Actor}; refused when one by
+   * that name is already catalogued.
+   */
+  public ProjectRow create(ProjectDefinition definition) {
+    var document = ProjectDefinitionJson.write(ProjectDefinitionJson.validated(definition));
+    var name = definition.name();
+    return db.transaction(
+        () -> {
+          if (findByName(name).isPresent()) {
+            throw new IllegalStateException("A project named '" + name + "' already exists.");
+          }
+          writeRow(name, document, author(), null, null, DateTimeUtils.now());
+          journal.recordRevision(name, ChangeLog.Entry.LOCAL, false);
+          return findByName(name).orElseThrow();
+        });
+  }
+
+  /**
+   * Writes {@code json}, the JSON value of {@code section} ({@code null} unsets it), into project
+   * {@code name}'s definition as the bound {@link Actor}: checked whole, one revision. When {@code
+   * expected} names the section's tag ({@link #tagOf}) its writer last read, a section changed
+   * since is refused as {@link StaleSection}, the project left as it is; null writes whatever it
+   * holds.
+   */
+  public ProjectRow writeSection(String name, Section section, String json, String expected) {
+    var values = new LinkedHashMap<Section, String>();
+    values.put(section, json);
+    var tags = new LinkedHashMap<Section, String>();
+    if (expected != null) {
+      tags.put(section, expected);
+    }
+    return writeSections(name, values, tags);
+  }
+
+  /**
+   * Writes each section {@code values} names, as {@link #writeSection} writes one, all in one
+   * revision or none: a section whose tag {@code expected} names and the project no longer holds
+   * refuses the whole write.
+   */
+  public ProjectRow writeSections(
+      String name, Map<Section, String> values, Map<Section, String> expected) {
+    return db.transaction(
+        () -> {
+          var held =
+              findByName(name)
+                  .orElseThrow(
+                      () ->
+                          new IllegalArgumentException(
+                              "Project '" + name + "' is not in the catalog."));
+          var definition = held.definition();
+          for (var tag : expected.entrySet()) {
+            if (!tag.getValue()
+                .equals(tagOf(ProjectDefinitionJson.section(definition, tag.getKey())))) {
+              throw new StaleSection(name, tag.getKey(), held);
+            }
+          }
+          var next = definition;
+          for (var value : values.entrySet()) {
+            next = ProjectDefinitionJson.withSection(next, value.getKey(), value.getValue());
+          }
+          writeRow(
+              name, ProjectDefinitionJson.write(next), author(), null, null, DateTimeUtils.now());
+          journal.recordRevision(name, ChangeLog.Entry.LOCAL, false);
+          return findByName(name).orElseThrow();
+        });
+  }
+
+  /**
+   * The tag of a section's JSON value as a project holds it: what a writer names to write only over
+   * the section it read. Equal values have equal tags; an unset section has one too.
+   */
+  public static String tagOf(String sectionJson) {
+    return Revisions.shortHash(sectionJson == null ? "null" : sectionJson);
   }
 
   /** Tombstones a project so the deletion propagates; a no-op if it is already absent. */
@@ -98,8 +200,8 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
    * not); a creation over a deletion a box heard is that box's own and is offered. Idempotent — a
    * no-op once {@code old} is gone; rejects a rename onto a name that is still live here.
    */
-  public void rename(String old, String renamed, String newDefinition) {
-    var canonical = PersonalFields.redact(newDefinition);
+  public void rename(String old, String renamed, ProjectDefinition newDefinition) {
+    var canonical = ProjectDefinitionJson.write(ProjectDefinitionJson.validated(newDefinition));
     db.transaction(
         () -> {
           if (findByName(old).isEmpty()) {
@@ -329,12 +431,13 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
         createdAt);
   }
 
-  private static String definitionOf(Map<String, Object> snapshot) {
-    if (snapshot == null) {
-      return null;
+  /** The definition document of project {@code name} whose sections {@code snapshot} carries. */
+  private static String documentOf(String name, Map<String, Object> snapshot) {
+    var sections = new LinkedHashMap<String, String>();
+    for (var section : Section.values()) {
+      sections.put(section.key(), Snapshots.text(snapshot, section.key()));
     }
-    var definition = snapshot.get("definition");
-    return definition == null ? null : definition.toString();
+    return ProjectDefinitionJson.write(ProjectDefinitionJson.fromSections(name, sections));
   }
 
   /** The project's store-specific half of the shared {@link RevisionJournal} sync protocol. */
@@ -361,15 +464,15 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     }
 
     /**
-     * The definition, the one work field, who created the project and when, and when it was last
-     * revised; the author rides as the journal head's.
+     * The definition's sections, each a work field, who created the project and when, and when it
+     * was last revised; the author rides as the journal head's.
      */
     @Override
     public Map<String, Object> snapshotMap(String id) {
       return findByName(id)
           .map(
               row -> {
-                var map = comparable(row.definition());
+                var map = sections(row.document());
                 map.put("created_by", row.createdBy());
                 map.put("created_at", Snapshots.millis(row.createdAt()));
                 map.put("updated_at", Snapshots.millis(row.updatedAt()));
@@ -387,7 +490,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
       var held = findByName(id).map(ProjectRow::createdBy).orElse(null);
       writeRow(
           id,
-          definitionOf(snapshot),
+          documentOf(id, snapshot),
           Snapshots.actor(snapshot),
           Snapshots.adoptedCreator(snapshot, held),
           Snapshots.instant(snapshot, Snapshots.CREATED_AT),
@@ -396,7 +499,10 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
 
     @Override
     public Map<String, Object> comparable(Map<String, Object> full) {
-      var comparable = comparable(definitionOf(full));
+      var comparable = new LinkedHashMap<String, Object>();
+      for (var section : Section.values()) {
+        comparable.put(section.key(), full.get(section.key()));
+      }
       var creator = full.get("created_by");
       if (creator != null) {
         comparable.put(Snapshots.CREATOR, creator);
@@ -415,10 +521,9 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
       return Boolean.TRUE.equals(snapshot.get(BLOCKS_RESURRECTION)) ? BLOCKING : Map.of();
     }
 
-    private static LinkedHashMap<String, Object> comparable(String definition) {
-      var map = new LinkedHashMap<String, Object>();
-      map.put("definition", definition);
-      return map;
+    private static LinkedHashMap<String, Object> sections(String document) {
+      return new LinkedHashMap<>(
+          ProjectDefinitionJson.sections(ProjectDefinitionJson.read(document)));
     }
   }
 

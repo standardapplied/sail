@@ -15,8 +15,8 @@ import java.util.stream.Stream;
 
 /**
  * Resolves and lists workspace files from the {@code files/} directory convention. A {@code files/}
- * directory next to {@code sail.yaml} is pushed path-preserving into {@code ~/workspace/} inside
- * the container during provisioning.
+ * directory the file store writes for a project is pushed path-preserving into {@code ~/workspace/}
+ * inside the container during provisioning.
  */
 public final class WorkspaceFiles {
 
@@ -31,26 +31,6 @@ public final class WorkspaceFiles {
 
   public static void mode(Path file, int mode) throws IOException {
     Files.setAttribute(file, "unix:mode", mode, LinkOption.NOFOLLOW_LINKS);
-  }
-
-  /**
-   * Resolves the {@code files/} directory next to the given {@code sail.yaml} path.
-   *
-   * @return the files directory path, or {@code null} if it does not exist or is not a directory
-   */
-  public static Path resolveFilesDir(Path sailYamlPath) {
-    if (sailYamlPath == null) {
-      return null;
-    }
-    var parent = sailYamlPath.toAbsolutePath().getParent();
-    if (parent == null) {
-      return null;
-    }
-    var filesDir = parent.resolve("files");
-    if (Files.isDirectory(filesDir)) {
-      return filesDir;
-    }
-    return null;
   }
 
   /**

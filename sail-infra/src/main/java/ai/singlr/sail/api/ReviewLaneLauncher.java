@@ -7,7 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ShellExec;
@@ -78,7 +78,7 @@ final class ReviewLaneLauncher implements ReviewLanes {
       Invocation invocation,
       String runId,
       AgentUnit unit,
-      SailYaml config,
+      ProjectDefinition config,
       String credential,
       Runnable claimed) {
     var project = invocation.project();

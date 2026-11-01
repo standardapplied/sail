@@ -17,7 +17,7 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.HomeRoom;
 import ai.singlr.sail.api.SailOperations;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerSailSetup;
@@ -204,8 +204,9 @@ class ProjectApplyCommandTest {
         "This box keeps no room aggregate, so rooms cannot be served.", refused.getMessage());
   }
 
-  private static SailYaml claudeProject() {
-    return SailYaml.fromMap(YamlUtil.parseMap("name: acme\nagent:\n  type: claude-code\n"));
+  private static ProjectDefinition claudeProject() {
+    return ProjectDefinition.fromMap(
+        YamlUtil.parseMap("name: acme\nagent:\n  type: claude-code\n"));
   }
 
   @Test

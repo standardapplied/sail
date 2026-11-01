@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
@@ -26,7 +27,7 @@ public interface HostCatalog {
 
   boolean roomKnown(String room);
 
-  String demoDefinition();
+  ProjectDefinition demoDefinition();
 
   List<String> projectsWithFiles();
 

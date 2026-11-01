@@ -5,41 +5,109 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
-import ai.singlr.sail.engine.ProjectDefinitions;
-import ai.singlr.sail.engine.SailPaths;
-import ai.singlr.sail.gen.SailYamlGenerator;
 import ai.singlr.sail.gen.ServicePresets;
 import ai.singlr.sail.harness.Harnesses;
+import java.io.InputStream;
 import java.io.PrintStream;
-import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
+import picocli.CommandLine.Parameters;
 
 @Command(
-    name = "init",
-    description = "Interactively generate a sail.yaml project descriptor.",
+    name = "create",
+    description =
+        "Create a project in the catalog: from flags, from a definition on stdin, or by"
+            + " answering questions on a terminal.",
     mixinStandardHelpOptions = true)
-public final class ProjectInitCommand implements Runnable {
+public final class ProjectCreateCommand implements Runnable {
 
-  @Option(names = "--json", description = "Output generated config as JSON instead of writing.")
-  private boolean json;
+  private static final String DEFAULT_IMAGE = "ubuntu/24.04";
+
+  @Parameters(
+      index = "0",
+      arity = "0..1",
+      description = "Project name. Asked for on a terminal; read from --definition when given.")
+  private String name;
 
   @Option(
-      names = {"-o", "--output"},
-      description = "Output file path (default: ~/.sail/projects/<name>/sail.yaml).")
-  private String output;
+      names = "--definition",
+      description = "Read the whole definition, a JSON document, from stdin (-).")
+  private String definition;
+
+  @Option(names = "--description", description = "What the project is.")
+  private String description;
+
+  @Option(names = "--image", description = "The container image (default ubuntu/24.04).")
+  private String image;
+
+  @Option(names = "--cpu", description = "CPU cores (default 2).")
+  private Integer cpu;
+
+  @Option(names = "--memory", description = "Memory (default 8GB).")
+  private String memory;
+
+  @Option(names = "--disk", description = "Disk (default 50GB).")
+  private String disk;
+
+  @Option(names = "--jdk", description = "JDK major version.")
+  private Integer jdk;
+
+  @Option(names = "--node", description = "Node.js version.")
+  private String node;
+
+  @Option(names = "--maven", description = "Maven version.")
+  private String maven;
+
+  @Option(
+      names = "--repo",
+      description = "An https repository to clone, its folder named after it. Repeatable.")
+  private List<String> repos;
+
+  @Option(
+      names = "--service",
+      description = "A service preset, optionally at a version (postgres, redis:7). Repeatable.")
+  private List<String> services;
+
+  @Option(
+      names = "--agent",
+      description =
+          "The harness the project's agent runs (default claude-code; none for no agent).")
+  private String agent;
+
+  @Option(names = "--dry-run", description = "Print the definition instead of creating it.")
+  private boolean dryRun;
+
+  @Option(names = "--json", description = "Output in JSON format.")
+  private boolean json;
+
+  private final Supplier<InputStream> stdin;
+  private final BooleanSupplier console;
+
+  public ProjectCreateCommand() {
+    this(() -> System.in, ConsoleHelper::hasConsole);
+  }
+
+  ProjectCreateCommand(Supplier<InputStream> stdin, BooleanSupplier console) {
+    this.stdin = stdin;
+    this.console = console;
+  }
 
   @Override
   public void run() {
@@ -50,52 +118,155 @@ public final class ProjectInitCommand implements Runnable {
     var operator = OperatorCommand.here();
     var ansi = Ansi.AUTO;
     var out = System.out;
-
-    if (!json) {
-      Banner.printBranding(out, ansi);
-      out.println();
-      out.println(ansi.string("  @|bold Initializing sail.yaml|@"));
-      out.println(ansi.string("  @|faint Press Enter to accept defaults shown in [brackets].|@"));
-      out.println();
-    }
-
-    var config = collectInputs(out, ansi);
-    ProjectCatalog.requireInScope(config.name());
-
-    if (json) {
-      out.println(buildJsonOutput(config));
+    var created = ProjectDefinitionJson.validated(definition(out, ansi));
+    ProjectCatalog.requireInScope(created.name());
+    ProjectCatalog.requireUnpruned(created.name());
+    if (dryRun) {
+      out.println(ProjectDefinitionJson.write(created));
       return;
     }
-
-    var outputPath = output != null ? Path.of(output) : defaultOutputPath(config.name());
-
-    confirmOverwrite(outputPath);
-
-    var yamlContent = SailYamlGenerator.generate(config);
-    ProjectDefinitions.write(outputPath, yamlContent);
-
+    var actor = CliOperator.current();
+    ProjectCatalog.requireRecordable(created.name(), actor);
+    ProjectCatalog.create(created, actor);
+    if (json) {
+      out.println(ProjectDefinitionJson.write(created));
+      return;
+    }
     out.println();
-    out.println(ansi.string("  @|bold,green \u2713 Created|@ " + outputPath));
+    out.println(
+        ansi.string("  @|bold,green \u2713|@ Created " + created.name() + " in the catalog."));
     out.println(
         ansi.string(
-            "    @|faint Next:|@ review the file, then run @|bold "
-                + nextApplyCommand(config.name(), outputPath, operator)
+            "    @|faint Next:|@ make its container with @|bold "
+                + operator.sail("project apply " + created.name())
                 + "|@"));
   }
 
-  /** Returns when nothing is at {@code outputPath}, or overwriting it was confirmed. */
-  static void confirmOverwrite(Path outputPath) {
-    if (Files.exists(outputPath)) {
-      ConsoleHelper.proceed(
-          outputPath + " already exists. Overwrite?", "Not written", "--output <another path>");
+  /** The definition this create was given, by stdin, by its questions, or by its flags. */
+  private ProjectDefinition definition(PrintStream out, Ansi ansi) throws Exception {
+    if (definition != null) {
+      return fromStdin();
     }
+    if (!flagsGiven() && !json && console.getAsBoolean()) {
+      Banner.printBranding(out, ansi);
+      out.println();
+      out.println(ansi.string("  @|bold Creating a project|@"));
+      out.println(ansi.string("  @|faint Press Enter to accept defaults shown in [brackets].|@"));
+      out.println();
+      return collectInputs(out, ansi);
+    }
+    return fromFlags();
+  }
+
+  private ProjectDefinition fromStdin() throws Exception {
+    if (!"-".equals(definition)) {
+      throw new IllegalArgumentException(
+          "--definition reads the definition from stdin: pass --definition -.");
+    }
+    if (flagsGiven()) {
+      throw new IllegalArgumentException(
+          "--definition carries the whole definition: drop the section flags, or the definition.");
+    }
+    var read =
+        ProjectDefinitionJson.read(new String(stdin.get().readAllBytes(), StandardCharsets.UTF_8));
+    if (Strings.isNotBlank(name) && !name.equals(read.name())) {
+      throw new IllegalArgumentException(
+          "The definition names project '"
+              + read.name()
+              + "', not '"
+              + name
+              + "'. Name the one it names, or none.");
+    }
+    return read;
+  }
+
+  private boolean flagsGiven() {
+    return description != null
+        || image != null
+        || cpu != null
+        || memory != null
+        || disk != null
+        || jdk != null
+        || node != null
+        || maven != null
+        || repos != null
+        || services != null
+        || agent != null;
+  }
+
+  private ProjectDefinition fromFlags() {
+    if (Strings.isBlank(name)) {
+      throw new IllegalArgumentException(
+          "Name the project to create, or pass its definition with --definition -.");
+    }
+    NameValidator.requireValidProjectName(name);
+    var runtimes =
+        jdk != null || node != null || maven != null
+            ? new ProjectDefinition.Runtimes(jdk == null ? 0 : jdk, node, maven)
+            : null;
+    return new ProjectDefinition(
+        name,
+        description,
+        new ProjectDefinition.Resources(
+            cpu == null ? 2 : cpu,
+            memory == null ? "8GB" : normalizeSize(memory),
+            disk == null ? "50GB" : normalizeSize(disk)),
+        image == null ? DEFAULT_IMAGE : image,
+        null,
+        runtimes,
+        repos == null
+            ? null
+            : repos.stream()
+                .map(url -> new ProjectDefinition.Repo(url, guessRepoPath(url), null))
+                .toList(),
+        services == null ? null : presets(services),
+        null,
+        agentNamed(agent == null ? Harnesses.DEFAULT.yamlName() : agent),
+        null);
+  }
+
+  /** The services {@code named} presets give, each at its version when one is named. */
+  static Map<String, ProjectDefinition.Service> presets(List<String> named) {
+    var chosen = new LinkedHashMap<String, ProjectDefinition.Service>();
+    for (var entry : named) {
+      var colon = entry.indexOf(':');
+      var key = colon < 0 ? entry : entry.substring(0, colon);
+      var preset =
+          ServicePresets.all().stream()
+              .filter(candidate -> candidate.key().equals(key))
+              .findFirst()
+              .orElseThrow(
+                  () ->
+                      new IllegalArgumentException(
+                          "'"
+                              + key
+                              + "' is not a service preset. The presets are: "
+                              + String.join(
+                                  ", ",
+                                  ServicePresets.all().stream()
+                                      .map(ServicePresets.Preset::key)
+                                      .toList())
+                              + "."));
+      chosen.put(
+          preset.key(),
+          colon < 0 ? preset.service() : preset.withVersion(entry.substring(colon + 1)));
+    }
+    return chosen;
+  }
+
+  /** The agent a project gets for the harness {@code type}; null for {@code none}. */
+  static ProjectDefinition.Agent agentNamed(String type) {
+    if ("none".equalsIgnoreCase(type)) {
+      return null;
+    }
+    return new ProjectDefinition.Agent(type, true, "agent/", true, null, null, null, null);
   }
 
   /**
    * Asks which harness the project's agent runs, offering the default, and which others to install
    * beside it. Answers {@code null} for a project that wants no agent.
    */
-  static SailYaml.Agent promptAgent(PrintStream out, Ansi ansi) {
+  static ProjectDefinition.Agent promptAgent(PrintStream out, Ansi ansi) {
     var agentType =
         ConsoleHelper.promptWithDefault(out, ansi, agentTypePrompt(), Harnesses.DEFAULT.yamlName());
     if ("none".equalsIgnoreCase(agentType)) {
@@ -112,26 +283,7 @@ public final class ProjectInitCommand implements Runnable {
         }
       } while (ConsoleHelper.confirmNo("Add another?"));
     }
-    return new SailYaml.Agent(
-        agentType, true, "agent/", true, install, null, null, null, null, null);
-  }
-
-  /**
-   * Asks for the keys that may SSH into the container. The user is not asked: sail runs every
-   * agent, shell and hook as {@code dev}, so that is the only user a container can have.
-   */
-  static SailYaml.Ssh promptSsh(PrintStream out, Ansi ansi) {
-    out.println();
-    out.println(ansi.string("  @|bold SSH access|@"));
-    List<String> authorizedKeys = null;
-    if (ConsoleHelper.confirmNo("Add public key for remote login (SSH into container)?")) {
-      authorizedKeys = new ArrayList<>();
-      do {
-        var key = ConsoleHelper.promptRequired(out, ansi, "Public key (e.g. ssh-ed25519 AAAA...)");
-        authorizedKeys.add(key);
-      } while (ConsoleHelper.confirmNo("Add another key?"));
-    }
-    return new SailYaml.Ssh("dev", authorizedKeys);
+    return new ProjectDefinition.Agent(agentType, true, "agent/", true, install, null, null, null);
   }
 
   static String agentTypePrompt() {
@@ -142,23 +294,15 @@ public final class ProjectInitCommand implements Runnable {
     return "Agent CLI name (" + String.join("/", Harnesses.names()) + ")";
   }
 
-  static Path defaultOutputPath(String name) {
-    return SailPaths.projectDir(name).resolve(SailPaths.PROJECT_DESCRIPTOR);
-  }
-
-  static String nextApplyCommand(String name, Path outputPath, OperatorCommand operator) {
-    if (outputPath
-        .toAbsolutePath()
-        .normalize()
-        .equals(defaultOutputPath(name).toAbsolutePath().normalize())) {
-      return operator.sail("project apply " + name);
-    }
-    return operator.sail("project apply " + name + " -f " + outputPath);
-  }
-
-  private SailYaml collectInputs(PrintStream out, Ansi ansi) {
-    var dirName = sanitizeProjectName(Path.of("").toAbsolutePath().getFileName().toString());
-    var name = ConsoleHelper.promptWithDefault(out, ansi, "Project name", dirName);
+  private ProjectDefinition collectInputs(PrintStream out, Ansi ansi) {
+    var name =
+        Strings.isNotBlank(this.name)
+            ? this.name
+            : ConsoleHelper.promptWithDefault(
+                out,
+                ansi,
+                "Project name",
+                sanitizeProjectName(Path.of("").toAbsolutePath().getFileName().toString()));
     NameValidator.requireValidProjectName(name);
 
     var description = ConsoleHelper.promptWithDefault(out, ansi, "Description", "");
@@ -169,7 +313,7 @@ public final class ProjectInitCommand implements Runnable {
     var cpu = promptInt(out, ansi, "CPU cores", 2);
     var memory = normalizeSize(ConsoleHelper.promptWithDefault(out, ansi, "Memory", "8GB"));
     var disk = normalizeSize(ConsoleHelper.promptWithDefault(out, ansi, "Disk", "50GB"));
-    var resources = new SailYaml.Resources(cpu, memory, disk);
+    var resources = new ProjectDefinition.Resources(cpu, memory, disk);
 
     out.println();
     out.println(ansi.string("  @|bold Runtimes|@"));
@@ -184,35 +328,14 @@ public final class ProjectInitCommand implements Runnable {
     var nodeStr = ConsoleHelper.promptWithDefault(out, ansi, "Node.js version (blank to skip)", "");
     var maven =
         ConsoleHelper.promptWithDefault(out, ansi, "Maven version (blank to skip)", "3.9.14");
-    SailYaml.Runtimes runtimes = null;
+    ProjectDefinition.Runtimes runtimes = null;
     var nodeVersion = nodeStr.isEmpty() ? null : nodeStr;
     if (jdk > 0 || nodeVersion != null || !maven.isEmpty()) {
-      runtimes = new SailYaml.Runtimes(jdk, nodeVersion, maven.isEmpty() ? null : maven);
+      runtimes = new ProjectDefinition.Runtimes(jdk, nodeVersion, maven.isEmpty() ? null : maven);
     }
 
     out.println();
-    SailYaml.Git git = null;
-    if (ConsoleHelper.confirm("Configure git identity?")) {
-      var gitName = ConsoleHelper.promptRequired(out, ansi, "Git full name (for commits)");
-      var gitEmail = ConsoleHelper.promptRequired(out, ansi, "Git email");
-      var authInput =
-          ConsoleHelper.promptWithDefault(
-              out, ansi, "Auth method for cloning repos (token/ssh)", "token");
-      var auth = "ssh".equalsIgnoreCase(authInput) ? "ssh" : "token";
-      String sshKey = null;
-      if ("ssh".equals(auth)) {
-        sshKey =
-            ConsoleHelper.promptWithDefault(
-                out,
-                ansi,
-                "Path to SSH private key for git (copied into container)",
-                "~/.ssh/id_ed25519");
-      }
-      git = new SailYaml.Git(gitName, gitEmail, auth, sshKey);
-    }
-
-    out.println();
-    List<SailYaml.Repo> repos = null;
+    List<ProjectDefinition.Repo> repos = null;
     if (ConsoleHelper.confirmNo("Add repositories to clone?")) {
       repos = new ArrayList<>();
       do {
@@ -220,13 +343,13 @@ public final class ProjectInitCommand implements Runnable {
         var pathDefault = guessRepoPath(url);
         var path = ConsoleHelper.promptWithDefault(out, ansi, "Local path", pathDefault);
         var branch = ConsoleHelper.promptWithDefault(out, ansi, "Branch (blank for default)", "");
-        repos.add(new SailYaml.Repo(url, path, branch.isEmpty() ? null : branch));
+        repos.add(new ProjectDefinition.Repo(url, path, branch.isEmpty() ? null : branch));
       } while (ConsoleHelper.confirmNo("Add another repository?"));
     }
 
     out.println();
     out.println(ansi.string("  @|bold Infrastructure services (Podman containers)|@"));
-    Map<String, SailYaml.Service> services = new LinkedHashMap<>();
+    Map<String, ProjectDefinition.Service> services = new LinkedHashMap<>();
     for (var preset : ServicePresets.all()) {
       var ports =
           preset.service().ports().stream()
@@ -250,24 +373,21 @@ public final class ProjectInitCommand implements Runnable {
 
     var processes = promptApp(out, ansi, runtimes, repos);
 
-    var ssh = promptSsh(out, ansi);
-
     out.println();
     var agent = promptAgent(out, ansi);
 
-    return new SailYaml(
+    return new ProjectDefinition(
         name,
         description,
         resources,
-        "ubuntu/24.04",
+        DEFAULT_IMAGE,
         null,
         runtimes,
-        git,
         repos,
         services,
         processes,
         agent,
-        ssh);
+        null);
   }
 
   /**
@@ -275,8 +395,11 @@ public final class ProjectInitCommand implements Runnable {
    * the port it listens on, which the portal forwards and opens. It runs from the first repo's
    * folder. Null when no runtime implies an app or the command is left blank.
    */
-  static Map<String, SailYaml.Process> promptApp(
-      PrintStream out, Ansi ansi, SailYaml.Runtimes runtimes, List<SailYaml.Repo> repos) {
+  static Map<String, ProjectDefinition.Process> promptApp(
+      PrintStream out,
+      Ansi ansi,
+      ProjectDefinition.Runtimes runtimes,
+      List<ProjectDefinition.Repo> repos) {
     if (runtimes == null || (runtimes.node() == null && runtimes.jdk() == 0)) {
       return null;
     }
@@ -290,17 +413,11 @@ public final class ProjectInitCommand implements Runnable {
     var conventional = runtimes.node() != null ? 3000 : 8080;
     var port = promptInt(out, ansi, "Port it listens on", conventional);
     var workdir = repos == null || repos.isEmpty() ? null : repos.getFirst().path();
-    return Map.of(
-        "app",
-        SailYaml.Process.fromMap(
-            "app",
-            workdir == null
-                ? Map.of("command", command, "port", port)
-                : Map.of("command", command, "port", port, "workdir", workdir)));
+    return Map.of("app", new ProjectDefinition.Process(command, workdir, port, Map.of()));
   }
 
-  private static SailYaml.Service customizePresetEnv(
-      SailYaml.Service service, PrintStream out, Ansi ansi) {
+  private static ProjectDefinition.Service customizePresetEnv(
+      ProjectDefinition.Service service, PrintStream out, Ansi ansi) {
     var defaultEnv = service.environment();
     var env = new LinkedHashMap<String, String>();
     if (defaultEnv != null && !defaultEnv.isEmpty()) {
@@ -321,7 +438,7 @@ public final class ProjectInitCommand implements Runnable {
         }
       } while (ConsoleHelper.confirmNo("Add another env var?"));
     }
-    return new SailYaml.Service(
+    return new ProjectDefinition.Service(
         service.image(),
         service.ports(),
         env.isEmpty() ? null : env,
@@ -373,7 +490,7 @@ public final class ProjectInitCommand implements Runnable {
    * services map.
    */
   private static void collectCustomServices(
-      PrintStream out, Ansi ansi, Map<String, SailYaml.Service> services) {
+      PrintStream out, Ansi ansi, Map<String, ProjectDefinition.Service> services) {
     do {
       out.println();
       out.println(ansi.string("  @|bold Custom Podman service|@"));
@@ -418,86 +535,7 @@ public final class ProjectInitCommand implements Runnable {
           volumes.add(vol);
         } while (ConsoleHelper.confirmNo("Add another volume?"));
       }
-      services.put(svcName, new SailYaml.Service(image, ports, env, null, volumes));
+      services.put(svcName, new ProjectDefinition.Service(image, ports, env, null, volumes));
     } while (ConsoleHelper.confirmNo("Add another custom service?"));
-  }
-
-  private static String buildJsonOutput(SailYaml config) {
-    var map = new LinkedHashMap<String, Object>();
-    map.put("name", config.name());
-    if (config.description() != null) map.put("description", config.description());
-
-    var res = new LinkedHashMap<String, Object>();
-    res.put("cpu", config.resources().cpu());
-    res.put("memory", config.resources().memory());
-    res.put("disk", config.resources().disk());
-    map.put("resources", res);
-
-    map.put("image", config.image());
-
-    if (config.runtimes() != null) {
-      var rt = new LinkedHashMap<String, Object>();
-      if (config.runtimes().jdk() > 0) rt.put("jdk", config.runtimes().jdk());
-      if (config.runtimes().node() != null) rt.put("node", config.runtimes().node());
-      if (config.runtimes().maven() != null) rt.put("maven", config.runtimes().maven());
-      if (!rt.isEmpty()) map.put("runtimes", rt);
-    }
-
-    if (config.git() != null) {
-      var g = new LinkedHashMap<String, Object>();
-      g.put("name", config.git().name());
-      g.put("email", config.git().email());
-      g.put("auth", config.git().auth());
-      if (config.git().sshKey() != null) g.put("ssh_key", config.git().sshKey());
-      map.put("git", g);
-    }
-
-    if (config.repos() != null && !config.repos().isEmpty()) {
-      var reposList = new ArrayList<Map<String, Object>>();
-      for (var repo : config.repos()) {
-        var r = new LinkedHashMap<String, Object>();
-        r.put("url", repo.url());
-        r.put("path", repo.path());
-        if (repo.branch() != null) r.put("branch", repo.branch());
-        reposList.add(r);
-      }
-      map.put("repos", reposList);
-    }
-
-    if (config.services() != null && !config.services().isEmpty()) {
-      var svcs = new LinkedHashMap<String, Object>();
-      for (var entry : config.services().entrySet()) {
-        var svc = new LinkedHashMap<String, Object>();
-        svc.put("image", entry.getValue().image());
-        if (entry.getValue().ports() != null) svc.put("ports", entry.getValue().ports());
-        if (entry.getValue().environment() != null)
-          svc.put("environment", entry.getValue().environment());
-        if (entry.getValue().volumes() != null) svc.put("volumes", entry.getValue().volumes());
-        if (entry.getValue().command() != null) svc.put("command", entry.getValue().command());
-        svcs.put(entry.getKey(), svc);
-      }
-      map.put("services", svcs);
-    }
-
-    if (config.ssh() != null) {
-      var s = new LinkedHashMap<String, Object>();
-      s.put("user", config.ssh().user());
-      if (config.ssh().authorizedKeys() != null)
-        s.put("authorized_keys", config.ssh().authorizedKeys());
-      map.put("ssh", s);
-    }
-
-    if (config.agent() != null) {
-      var a = new LinkedHashMap<String, Object>();
-      a.put("type", config.agent().type());
-      a.put("auto_snapshot", config.agent().autoSnapshot());
-      a.put("auto_branch", config.agent().autoBranch());
-      if (config.agent().branchPrefix() != null)
-        a.put("branch_prefix", config.agent().branchPrefix());
-      if (config.agent().install() != null) a.put("install", config.agent().install());
-      map.put("agent", a);
-    }
-
-    return YamlUtil.dumpJson(map);
   }
 }

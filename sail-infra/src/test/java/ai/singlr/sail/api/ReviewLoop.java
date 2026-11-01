@@ -9,8 +9,8 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.Notifications;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ReviewPipelineConfig;
-import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SlackNotifications;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentSession;
@@ -141,7 +141,7 @@ final class ReviewLoop implements AutoCloseable {
     projects = new ProjectStore(db);
     reader = ProjectReader.ofCatalog(projects);
     describe(yamlContent);
-    Function<String, SailYaml> loader = project -> load();
+    Function<String, ProjectDefinition> loader = project -> load();
     this.config = config != null ? config : ReviewWiring.configResolver(loader);
     this.reviewer = reviewer != null ? reviewer : ReviewWiring.reviewerResolver(loader);
     specs = new SpecStore(db);
@@ -265,7 +265,7 @@ final class ReviewLoop implements AutoCloseable {
         "UPDATE projects SET definition = ? WHERE name = ?", "agent: [unterminated", PROJECT);
   }
 
-  private SailYaml load() {
+  private ProjectDefinition load() {
     return reader.read(PROJECT).orElse(null);
   }
 

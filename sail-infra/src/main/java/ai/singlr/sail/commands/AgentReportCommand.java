@@ -7,7 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentReporter;
@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -42,8 +41,6 @@ public final class AgentReportCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Mixin private IgnoredFileOption file;
-
   private final Function<OperatorCommand, HostOperations> operations;
 
   public AgentReportCommand() {
@@ -60,7 +57,7 @@ public final class AgentReportCommand implements Runnable {
   }
 
   /** The project's definition from the catalog, which a report needs. */
-  SailYaml definition(OperatorCommand operator) {
+  ProjectDefinition definition(OperatorCommand operator) {
     try (var operations = this.operations.apply(operator)) {
       return operations.catalog().definitions().require(name);
     }

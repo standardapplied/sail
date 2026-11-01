@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.common.Remedy;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
 
 class ProjectLoaderTest {
 
-  private static final SailYaml ACME = SailYaml.fromMap(Map.of("name", "acme"));
+  private static final ProjectDefinition ACME = ProjectDefinition.fromMap(Map.of("name", "acme"));
 
   @Test
   void aProjectIsItsDefinitionAndItsContainerState() {
@@ -41,7 +41,7 @@ class ProjectLoaderTest {
 
     var refused = assertThrows(ApiException.class, () -> loader.load("acme"));
 
-    assertEquals(ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND, refused.failure().errorCode());
+    assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, refused.failure().errorCode());
     assertEquals("Project 'acme' is not in the catalog.", refused.getMessage());
   }
 

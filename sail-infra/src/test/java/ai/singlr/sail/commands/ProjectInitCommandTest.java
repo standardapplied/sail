@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.gen.SailYamlGenerator;
 import ai.singlr.sail.harness.Harnesses;
 import java.io.ByteArrayOutputStream;
@@ -45,7 +45,7 @@ class ProjectInitCommandTest {
     System.setOut(originalOut);
   }
 
-  private SailYaml.Agent answering(String answers) {
+  private ProjectDefinition.Agent answering(String answers) {
     ConsoleStub.answering(answers, true);
     return ProjectInitCommand.promptAgent(
         new PrintStream(asked, true, StandardCharsets.UTF_8), Ansi.OFF);
@@ -120,13 +120,13 @@ class ProjectInitCommandTest {
         ProjectInitCommand.promptSsh(
             new PrintStream(asked, true, StandardCharsets.UTF_8), Ansi.OFF);
 
-    assertEquals(new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA alice@laptop")), ssh);
+    assertEquals(new ProjectDefinition.Ssh("dev", List.of("ssh-ed25519 AAAA alice@laptop")), ssh);
     assertFalse(asked.toString(StandardCharsets.UTF_8).contains("SSH user"));
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "acme",
             null,
-            new SailYaml.Resources(2, "4GB", "50GB"),
+            new ProjectDefinition.Resources(2, "4GB", "50GB"),
             "ubuntu/24.04",
             null,
             null,
@@ -142,8 +142,8 @@ class ProjectInitCommandTest {
         SailYamlGenerator.generate(config));
   }
 
-  private Map<String, SailYaml.Process> app(
-      String answers, SailYaml.Runtimes runtimes, List<SailYaml.Repo> repos) {
+  private Map<String, ProjectDefinition.Process> app(
+      String answers, ProjectDefinition.Runtimes runtimes, List<ProjectDefinition.Repo> repos) {
     ConsoleStub.answering(answers, true);
     return ProjectInitCommand.promptApp(
         new PrintStream(asked, true, StandardCharsets.UTF_8), Ansi.OFF, runtimes, repos);
@@ -151,15 +151,15 @@ class ProjectInitCommandTest {
 
   @Test
   void anAppIsAskedForOnlyWhenARuntimeImpliesOneAndRunsFromTheFirstRepo() {
-    var node = new SailYaml.Runtimes(0, "22", null);
-    var java = new SailYaml.Runtimes(25, null, "3.9.14");
-    var repo = List.of(new SailYaml.Repo("https://github.com/acme/web.git", "web", null));
+    var node = new ProjectDefinition.Runtimes(0, "22", null);
+    var java = new ProjectDefinition.Runtimes(25, null, "3.9.14");
+    var repo = List.of(new ProjectDefinition.Repo("https://github.com/acme/web.git", "web", null));
 
     assertNull(app("", null, repo));
-    assertNull(app("", new SailYaml.Runtimes(0, null, "3.9.14"), repo));
+    assertNull(app("", new ProjectDefinition.Runtimes(0, null, "3.9.14"), repo));
     assertEquals("", asked.toString(StandardCharsets.UTF_8), "nothing was asked");
     assertEquals(
-        Map.of("app", new SailYaml.Process("npm run dev", "web", 3000, Map.of())),
+        Map.of("app", new ProjectDefinition.Process("npm run dev", "web", 3000, Map.of())),
         app("npm run dev\n\n", node, repo));
     assertTrue(
         asked
@@ -167,7 +167,7 @@ class ProjectInitCommandTest {
             .contains("  Command that starts it (blank to skip): "),
         asked.toString(StandardCharsets.UTF_8));
     assertEquals(
-        Map.of("app", new SailYaml.Process("mvn spring-boot:run", null, 9090, Map.of())),
+        Map.of("app", new ProjectDefinition.Process("mvn spring-boot:run", null, 9090, Map.of())),
         app("mvn spring-boot:run\n9090\n", java, null));
     assertNull(app("\n", node, repo), "a blank command skips the app");
   }

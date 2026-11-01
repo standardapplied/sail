@@ -18,7 +18,7 @@ import java.util.function.Function;
 
 /**
  * Centralized path constants for CLI state files. All state lives under {@code ~/.sail/}: project
- * descriptors, provisioning state, host config, and client config. Every command works from any
+ * shared files, provisioning state, host config, and client config. Every command works from any
  * directory by project name alone.
  */
 public final class SailPaths {
@@ -27,7 +27,6 @@ public final class SailPaths {
 
   private static final Path SAIL_DIR = Path.of(System.getProperty("user.home"), ".sail");
   private static final Path PROJECTS_DIR = SAIL_DIR.resolve("projects");
-  public static final String PROJECT_DESCRIPTOR = "sail.yaml";
 
   /** Returns the base sail directory: {@code ~/.sail}. */
   public static Path sailDir() {
@@ -105,6 +104,15 @@ public final class SailPaths {
   /** Returns the project-specific directory: {@code ~/.sail/projects/<name>}. */
   public static Path projectDir(String name) {
     return PROJECTS_DIR.resolve(name);
+  }
+
+  /**
+   * The folder a project's shared files are written to from the catalog's file store ({@code
+   * ~/.sail/projects/<name>/files}), which {@code project apply} pushes into its container's
+   * workspace.
+   */
+  public static Path projectFilesDir(String name) {
+    return projectDir(name).resolve("files");
   }
 
   /** Returns the provision state file: {@code ~/.sail/projects/<name>/provision-state.yaml}. */
@@ -240,28 +248,6 @@ public final class SailPaths {
 
   private static boolean isAbsolute(String path) {
     return !path.isEmpty() && Path.of(path).isAbsolute();
-  }
-
-  /**
-   * Walks up from {@code start} (defaulting to the current working directory) looking for a {@code
-   * sail.yaml}. Returns the directory containing it, or empty if none is found before reaching the
-   * filesystem root or the user's home directory (whichever comes first). Pure I/O-free helper for
-   * callers that pull additional metadata out of the descriptor.
-   */
-  public static Optional<Path> findSailYamlUpward(Path start) {
-    var home = Path.of(System.getProperty("user.home"));
-    var dir = start.toAbsolutePath().normalize();
-    while (dir != null) {
-      var candidate = dir.resolve(PROJECT_DESCRIPTOR);
-      if (Files.isRegularFile(candidate)) {
-        return Optional.of(candidate);
-      }
-      if (dir.equals(home)) {
-        return Optional.empty();
-      }
-      dir = dir.getParent();
-    }
-    return Optional.empty();
   }
 
   /**

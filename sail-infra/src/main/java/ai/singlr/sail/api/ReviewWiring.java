@@ -6,8 +6,8 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.AgentRoster;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ReviewPipelineConfig;
-import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -16,11 +16,11 @@ import java.util.function.Supplier;
 
 /**
  * Builds the per-project resolvers the {@link ReviewPipelineController} needs from a loader that
- * maps a project to its {@link SailYaml}. Encodes two product decisions so the controller stays
- * mechanism-only: review is on by default — a project that configures no {@code review_pipeline}
- * still gets {@link ReviewPipelineConfig#mandatoryDefault()} — and a stage that names no agent is
- * reviewed by the project's roster reviewer ({@link AgentRoster#reviewer}, i.e. the other installed
- * agent when there is one, else the coder itself in a fresh session).
+ * maps a project to its {@link ProjectDefinition}. Encodes two product decisions so the controller
+ * stays mechanism-only: review is on by default — a project that configures no {@code
+ * review_pipeline} still gets {@link ReviewPipelineConfig#mandatoryDefault()} — and a stage that
+ * names no agent is reviewed by the project's roster reviewer ({@link AgentRoster#reviewer}, i.e.
+ * the other installed agent when there is one, else the coder itself in a fresh session).
  */
 public final class ReviewWiring {
 
@@ -36,7 +36,7 @@ public final class ReviewWiring {
       ReviewStore reviewStore,
       RunStore runStore,
       EventBus eventBus,
-      Function<String, SailYaml> projectLoader,
+      Function<String, ProjectDefinition> projectLoader,
       ReviewLanes lanes,
       Runnable syncTrigger,
       Supplier<String> localHandle) {
@@ -57,7 +57,7 @@ public final class ReviewWiring {
    * {@link ProjectReader.Unreadable} for one whose row cannot be read, which is never taken for a
    * project with no pipeline.
    */
-  public static Function<String, SailYaml> definitions(ProjectReader reader) {
+  public static Function<String, ProjectDefinition> definitions(ProjectReader reader) {
     return project -> reader.read(project).orElse(null);
   }
 
@@ -66,16 +66,15 @@ public final class ReviewWiring {
    * the block its definition holds.
    */
   public static Function<String, ReviewPipelineConfig> configResolver(
-      Function<String, SailYaml> loader) {
+      Function<String, ProjectDefinition> loader) {
     return project -> {
       var config = loader.apply(project);
-      return ReviewPipelineConfig.resolved(
-          config != null && config.agent() != null ? config.agent().reviewPipeline() : null);
+      return ReviewPipelineConfig.resolved(config != null ? config.pipeline() : null);
     };
   }
 
   /** Resolves a project's default reviewer agent from its installed-agent roster. */
-  static Function<String, String> reviewerResolver(Function<String, SailYaml> loader) {
+  static Function<String, String> reviewerResolver(Function<String, ProjectDefinition> loader) {
     return project -> {
       var config = loader.apply(project);
       var agent = config != null ? config.agent() : null;

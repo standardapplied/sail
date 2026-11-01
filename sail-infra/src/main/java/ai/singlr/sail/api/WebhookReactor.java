@@ -101,7 +101,7 @@ public final class WebhookReactor implements EventSubscriber {
 
   /**
    * A sync-derived event replays a transition another box already executed — and, with this same
-   * webhook configuration in its synced project descriptor, already notified. Sending it again from
+   * webhook configuration in its synced project definition, already notified. Sending it again from
    * main would double every webhook, so narration input stays Slack-only.
    */
   private static boolean isSyncDerived(Event event) {

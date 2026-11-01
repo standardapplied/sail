@@ -27,7 +27,6 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -68,8 +67,6 @@ public final class AgentSweepCommand implements Runnable {
       arity = "0..1",
       description = "Project name (default: the current project).")
   private String name;
-
-  @Mixin private IgnoredFileOption file;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;

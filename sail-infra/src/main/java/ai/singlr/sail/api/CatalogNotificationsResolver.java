@@ -6,7 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.Notifications;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import java.util.Objects;
 
 /**
@@ -28,8 +28,8 @@ public final class CatalogNotificationsResolver implements ProjectNotificationsR
     try {
       return definitions
           .read(project)
-          .map(SailYaml::agent)
-          .map(SailYaml.Agent::notifications)
+          .map(ProjectDefinition::agent)
+          .map(ProjectDefinition.Agent::notifications)
           .orElse(null);
     } catch (Exception e) {
       System.err.println("  [webhook] Warning: could not load notifications: " + e.getMessage());

@@ -7,7 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ShellExec;
 import java.nio.file.Path;
@@ -37,8 +37,8 @@ public final class WorkBranch {
    * project when there is no path. Paths compare as the filesystem resolves them, so {@code
    * web/../api} and {@code ./api/src} branch in {@code api}, where the agent starts.
    */
-  public static List<SailYaml.Repo> repos(SailYaml config, String path) {
-    var repos = Objects.requireNonNullElse(config.repos(), List.<SailYaml.Repo>of());
+  public static List<ProjectDefinition.Repo> repos(ProjectDefinition config, String path) {
+    var repos = Objects.requireNonNullElse(config.repos(), List.<ProjectDefinition.Repo>of());
     var requested = Path.of(workspacePath(path));
     if (requested.toString().isEmpty()) {
       return repos;
@@ -47,7 +47,7 @@ public final class WorkBranch {
         repos.stream()
             .filter(repo -> requested.startsWith(Path.of(repo.path()).normalize()))
             .max(Comparator.comparingInt(repo -> Path.of(repo.path()).normalize().getNameCount()))
-            .orElse(new SailYaml.Repo(null, requested.toString(), null)));
+            .orElse(new ProjectDefinition.Repo(null, requested.toString(), null)));
   }
 
   /**
@@ -76,8 +76,8 @@ public final class WorkBranch {
    */
   public boolean checkout(
       String project,
-      SailYaml config,
-      List<SailYaml.Repo> targetRepos,
+      ProjectDefinition config,
+      List<ProjectDefinition.Repo> targetRepos,
       String branch,
       Optional<Remedy.Command> redispatch,
       boolean restart) {
@@ -86,7 +86,7 @@ public final class WorkBranch {
     }
     var created = false;
     for (var repo : targetRepos) {
-      var repoDir = "/home/" + config.sshUser() + "/workspace/" + repo.path();
+      var repoDir = "/home/" + ProjectDefinition.USER + "/workspace/" + repo.path();
       if (!insideWorkTree(project, repoDir)) {
         continue;
       }
@@ -148,12 +148,12 @@ public final class WorkBranch {
 
   /**
    * The mainline a fresh work branch forks from: the repo's configured branch when {@code
-   * sail.yaml} pins one, else origin's default branch (the clone's {@code origin/HEAD}), else
+   * definition} pins one, else origin's default branch (the clone's {@code origin/HEAD}), else
    * blank. Deriving it from the repo config or the remote default — never the current {@code HEAD}
    * — keeps a new branch off the mainline even when a prior dispatch left the checkout on an
    * earlier work branch.
    */
-  private String baseBranch(String project, String repoDir, SailYaml.Repo repo) {
+  private String baseBranch(String project, String repoDir, ProjectDefinition.Repo repo) {
     if (Strings.isNotBlank(repo.branch())) {
       return repo.branch();
     }

