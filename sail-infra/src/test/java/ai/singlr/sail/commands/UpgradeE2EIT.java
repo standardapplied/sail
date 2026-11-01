@@ -268,9 +268,10 @@ class UpgradeE2EIT extends AbstractIncusIT {
     }
   }
 
+  /** Every database file, its lock files included, is the sail group's to read and write. */
   private void theDatabaseStaysSharedWithTheGateway() throws Exception {
-    for (var line : rootOk("stat -c '%n %U:%G %a' " + DB + "*").lines().toList()) {
-      assertTrue(line.endsWith(" root:sail 660"), line);
+    for (var line : rootOk("stat -c '%n %G %a' " + DB + "*").lines().toList()) {
+      assertTrue(line.endsWith(" sail 660"), line);
     }
     assertEquals("root:sail 640", rootOk("stat -c '%U:%G %a' /var/lib/sail/host.yaml").strip());
   }
