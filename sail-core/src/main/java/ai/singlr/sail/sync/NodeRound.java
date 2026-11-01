@@ -26,7 +26,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -47,8 +46,7 @@ public final class NodeRound {
    * target} serves the database this node, whose database is {@code db}, synced with: main set up
    * empty at the same address welcomes the node as readily as the main it replaced. The first
    * welcome that names a catalog is recorded as main's ({@link DatabaseCatalog#recordMain}). A main
-   * that names none predates catalogs, and could be any database at all, so it is refused too:
-   * asked to upgrade before this node has recorded a catalog, told it is another database after.
+   * that names none could be any database at all, so it is refused too.
    */
   public static void admit(SyncSession session, Sqlite db, String target) {
     var catalog = new DatabaseCatalog(db);
@@ -84,11 +82,9 @@ public final class NodeRound {
   /**
    * Begins a round over {@code session} for the node whose database is {@code db} and whose
    * configured sync handle is {@code handle}. It fails, before anything is offered or adopted,
-   * unless main authenticated the session as that handle; a main that predates saying which handle
-   * it authenticated is not asked. Then every run main has never acknowledged is settled ({@link
-   * #acknowledgeHeld}), every one main does not hold is stamped as this box's ({@link
-   * #stampUnheld}), and so is every run of this box's that acts for no one, which an older release
-   * reserved and main would never take. Main's file ceiling is recorded, and every offer whose
+   * unless main authenticated the session as that handle. Then every run main has never
+   * acknowledged is settled ({@link #acknowledgeHeld}) and every one main does not hold is stamped
+   * as this box's ({@link #stampUnheld}). Main's file ceiling is recorded, and every offer whose
    * dependency can never arrive is settled ({@link Settlement}). Before any of that the box is
    * brought in line with the scope main named ({@link #rescope}). Returns what was settled and what
    * was dropped, for the round's notices.
@@ -97,8 +93,6 @@ public final class NodeRound {
     requireAgreed(session.handle(), handle);
     var settled = new ArrayList<>(rescope(session, db, handle));
     stampUnheld(db, handle, acknowledgeHeld(session, db));
-    var runs = new RunStore(db);
-    runs.stamp(handle, runs.ownerless(handle));
     var limits = new SyncLimits(db);
     limits.recordMainFileMax(session.mainFileMax());
     acknowledgeOversized(session, db, limits.mainFileMax());
@@ -266,14 +260,12 @@ public final class NodeRound {
 
   /**
    * Fails naming both handles and the fix unless {@code configured} is the handle main
-   * authenticated the session as, when main said.
+   * authenticated the session as.
    */
-  static void requireAgreed(Optional<String> authenticated, String configured) {
-    if (authenticated.isEmpty()
-        || (Strings.isNotBlank(configured) && configured.equals(authenticated.get()))) {
+  static void requireAgreed(String main, String configured) {
+    if (Strings.isNotBlank(configured) && configured.equals(main)) {
       return;
     }
-    var main = authenticated.get();
     var mine =
         Strings.isBlank(configured)
             ? "this box has no sync handle"

@@ -72,23 +72,6 @@ class PtyHostUnitTest {
   }
 
   @Test
-  void aUnitWithoutTheStorePredatesLiveHandoff(@TempDir Path home) throws Exception {
-    var unit =
-        new PtyHostUnit(
-            new ScriptedShellExecutor(), SystemdServiceInstaller.Mode.USER, home, BINARY);
-    assertFalse(
-        PtyHostUnit.predatesLiveHandoff(unit.serviceFilePath()), "no unit: nothing to predate");
-
-    Files.createDirectories(unit.serviceFilePath().getParent());
-    Files.writeString(
-        unit.serviceFilePath(), "[Service]\nExecStart=/usr/local/bin/sail _pty-host\n");
-    assertTrue(PtyHostUnit.predatesLiveHandoff(unit.serviceFilePath()));
-
-    Files.writeString(unit.serviceFilePath(), unit.renderUnit());
-    assertFalse(PtyHostUnit.predatesLiveHandoff(unit.serviceFilePath()));
-  }
-
-  @Test
   void installWritesUnitSymlinkAndEnablesUnderUserSystemd(@TempDir Path home) throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var unit = new PtyHostUnit(shell, SystemdServiceInstaller.Mode.USER, home, BINARY);

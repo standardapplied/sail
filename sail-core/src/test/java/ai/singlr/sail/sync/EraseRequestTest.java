@@ -29,7 +29,7 @@ class EraseRequestTest {
 
   private static final Actor MADY = Actor.sync("mady", Role.MEMBER);
   private static final Actor ADMIN = Actor.sync("uday", Role.ADMIN);
-  private static final SyncWire.Hello HELLO = SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node");
+  private static final SyncWire.Hello HELLO = SyncWire.Hello.of("1.0.0", "node");
 
   private SyncBox main;
 

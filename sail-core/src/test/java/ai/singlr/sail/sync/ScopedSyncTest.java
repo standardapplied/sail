@@ -62,7 +62,7 @@ class ScopedSyncTest {
   private static final String A = "alpha";
   private static final String B = "beta";
   private static final ProjectScope ONLY_A = ProjectScope.of(List.of(A));
-  private static final SyncWire.Hello HELLO = SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "nia");
+  private static final SyncWire.Hello HELLO = SyncWire.Hello.of("1.0.0", "nia");
 
   @TempDir Path dir;
   private SyncBox main;
@@ -1220,7 +1220,7 @@ class ScopedSyncTest {
               SyncWire.Page.class,
               serve(
                       main.server(Actor.sync(null, Role.VIEWER).withScope(ProjectScope.none())),
-                      SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "anon"),
+                      SyncWire.Hello.of("1.0.0", "anon"),
                       new SyncWire.Pull(entity.type(), 0, 100))
                   .getLast());
       assertEquals(List.of(), page.entries(), entity.type());
@@ -1374,7 +1374,7 @@ class ScopedSyncTest {
             FdeRoster.EMPTY,
             SyncTransitionSink.NONE,
             new ChangeLog(main.db)::headsAfter,
-            SyncWire.UPGRADE_FLOOR)
+            "1.0.0")
         .content(main.db, FileLimits.defaults());
   }
 

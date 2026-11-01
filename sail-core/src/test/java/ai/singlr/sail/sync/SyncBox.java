@@ -463,8 +463,7 @@ public final class SyncBox implements AutoCloseable {
 
   /** This box serving every registered type as main, to sessions authenticated as {@code as}. */
   public SyncRpcServer server(Actor as) {
-    return SyncRpcServer.over(
-            db, id, null, as, FdeRoster.EMPTY, transitions, SyncWire.UPGRADE_FLOOR)
+    return SyncRpcServer.over(db, id, null, as, FdeRoster.EMPTY, transitions, "1.0.0")
         .content(db, limits);
   }
 
@@ -512,12 +511,7 @@ public final class SyncBox implements AutoCloseable {
                 }));
     var changes = new ChangeLog(db);
     return new SyncRpcServer(
-            replicas,
-            as,
-            FdeRoster.EMPTY,
-            SyncTransitionSink.NONE,
-            changes::headsAfter,
-            SyncWire.UPGRADE_FLOOR)
+            replicas, as, FdeRoster.EMPTY, SyncTransitionSink.NONE, changes::headsAfter, "1.0.0")
         .content(db, limits)
         .boxes(new SyncRpcServer.MainBox(null, this.id));
   }
@@ -778,7 +772,7 @@ public final class SyncBox implements AutoCloseable {
         SyncSession.open(
             clientInput.apply(clientIn),
             nodeOut.apply(tee),
-            SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, box),
+            SyncWire.Hello.of("1.0.0", box),
             notice -> notices.add(notice.plain()),
             denial -> notices.add(denial.describe().plain()),
             db);
@@ -818,7 +812,7 @@ public final class SyncBox implements AutoCloseable {
             Actor.sync(handle, Role.MEMBER),
             FdeRoster.EMPTY,
             SyncTransitionSink.NONE,
-            SyncWire.UPGRADE_FLOOR);
+            "1.0.0");
     try (var link = connect(server, node, handle, SyncWire.MAX_FRAME, out -> out)) {
       return link.reconcile(type, SyncedEntities.replicas(node, handle, handle).get(type)).report();
     } catch (IOException e) {

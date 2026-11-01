@@ -7,9 +7,6 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
-import ai.singlr.sail.store.DataMigration;
-import ai.singlr.sail.store.DataMigrations;
-import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
@@ -31,14 +28,9 @@ public final class SyncDatabase implements AutoCloseable {
   }
 
   /**
-   * Opens the database at {@code dbPath}, converges its schema, and guarantees the v1 data floor
-   * before returning. A failure closes the handle before any sync data is touched.
-   *
-   * <p>{@link SchemaManager#migrate} refuses a below-floor database with the install-0.14.x remedy
-   * — that refusal passes through untouched. A database that converges cleanly but has no floor
-   * marker was necessarily born at or above the floor (the schema floor forbids any other
-   * crossing), so the data migrations run here only to finish or stamp the floor repair — keeping a
-   * fresh or auxiliary-created box's first sync frictionless.
+   * Opens the database at {@code dbPath} and creates its schema when it is fresh, before returning.
+   * A failure closes the handle before any sync data is touched; a database {@link SchemaManager}
+   * refuses passes through with its own remedy.
    */
   public static SyncDatabase converge(Path dbPath, String box) {
     var db = Sqlite.open(dbPath);
@@ -51,16 +43,12 @@ public final class SyncDatabase implements AutoCloseable {
     }
   }
 
-  /** Converges {@code db}'s schema and data. */
+  /** Creates {@code db}'s schema when it is fresh, or refuses a database of another release. */
   public static void prepare(Sqlite db, String box) {
     try {
       new SchemaManager(db).migrate();
-      var migrations = DataMigrations.databaseOnly();
-      if (DataMigrations.anyPending(db, migrations)) {
-        MigrationRunner.applyAll(db, migrations, DataMigration.Prompter.NON_INTERACTIVE);
-      }
-    } catch (SchemaManager.PreFloorException e) {
-      throw e;
+    } catch (Remedied.State refused) {
+      throw refused;
     } catch (RuntimeException e) {
       throw Remedied.state(
           "Sync aborted before touching data: could not converge the database schema on '"

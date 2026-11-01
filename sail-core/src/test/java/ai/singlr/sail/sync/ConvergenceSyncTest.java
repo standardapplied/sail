@@ -30,8 +30,6 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.Revisions;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import java.io.ByteArrayInputStream;
@@ -227,7 +225,6 @@ class ConvergenceSyncTest {
 
     final String type;
     final String id;
-    final String legacyTable;
     final String first;
     final String second;
     final String third;
@@ -235,7 +232,6 @@ class ConvergenceSyncTest {
     Kind(String type, String id, String first, String second, String third) {
       this.type = type;
       this.id = id;
-      this.legacyTable = type.equals("file") ? "project_files" : type + "s";
       this.first = first;
       this.second = second;
       this.third = third;
@@ -633,73 +629,6 @@ class ConvergenceSyncTest {
     assertConverged();
   }
 
-  /**
-   * The state 0.46.2 left: its {@code --theirs} minted a revision of the node's own for main's
-   * side, under main's author. The upgrade's checkpoint reset ({@link
-   * SchemaManager#NODES_HEAR_EVERY_HEAD_AGAIN}, proven wired by {@code SchemaManagerTest}) is run
-   * by hand here.
-   */
-  @ParameterizedTest
-  @EnumSource(Kind.class)
-  void aResolveTakingMainsSideUnderAnEarlierReleaseConvergesOnceTheUpgradeResetsItsCheckpoint(
-      Kind kind) {
-    kind.make(main, "bob", kind.first);
-    SyncBox.quiesce(main, ada, bob);
-    kind.change(main, "root", kind.second);
-    kind.change(bob, "bob", kind.third);
-    SyncBox.round(main, bob);
-    SyncBox.resolve(bob, kind.type, kind.id, SyncBox.Resolve.THEIRS);
-    var head = new ChangeLog(bob.db).head(kind.type, kind.id).orElseThrow();
-    var minted = Revisions.next(head.rev(), "minted by the node");
-    bob.db.execute("UPDATE change_log SET rev = ? WHERE seq = ?", minted, head.seq());
-    bob.db.execute(
-        "UPDATE %s SET rev = ?, base_rev = ? WHERE rev = ?".formatted(kind.legacyTable),
-        minted,
-        minted,
-        head.rev());
-    SyncBox.round(main, bob);
-    assertEquals(minted, new ChangeLog(bob.db).head(kind.type, kind.id).orElseThrow().rev());
-
-    bob.db.execute(SchemaManager.NODES_HEAR_EVERY_HEAD_AGAIN);
-
-    assertConverged();
-  }
-
-  @Test
-  void aRevisionMainRecordedWithNoAuthorAdoptedAsMainUnderAnEarlierReleaseConverges() {
-    Acting.as(null, () -> main.specs.create(spec("m", "bob")));
-    SyncBox.quiesce(main, ada, bob);
-    bob.db.execute(
-        "UPDATE change_log SET actor = 'main' WHERE entity_type = 'spec' AND entity_id = 'm'");
-    SyncBox.round(main, bob);
-    assertEquals("main", new ChangeLog(bob.db).head("spec", "m").orElseThrow().actor());
-
-    bob.db.execute(SchemaManager.NODES_HEAR_EVERY_HEAD_AGAIN);
-
-    assertConverged();
-    assertNull(new ChangeLog(bob.db).head("spec", "m").orElseThrow().actor());
-  }
-
-  @Test
-  void aRenameAdoptedWithoutItsBlockUnderAnEarlierReleaseConverges() {
-    upsertProject(ada, "ada", "p", "name: p\n");
-    SyncBox.quiesce(main, ada, bob);
-    renameProject(ada, "ada", "p", "q");
-    SyncBox.quiesce(main, ada, bob);
-    bob.db.execute(
-        """
-        UPDATE change_log SET snapshot = json_remove(snapshot, '$._blocks_resurrection'),
-            actor = 'main'
-        WHERE entity_type = 'project' AND entity_id = 'p'""");
-    SyncBox.round(main, bob);
-    assertFalse(Snapshots.isDeletionMark(new ProjectStore(bob.db).currentForSync("p")));
-
-    bob.db.execute(SchemaManager.NODES_HEAR_EVERY_HEAD_AGAIN);
-
-    assertConverged();
-    assertTrue(Snapshots.isDeletionMark(new ProjectStore(bob.db).currentForSync("p")));
-  }
-
   @Test
   void aProjectRenamedAndRenamedBackAfterASyncComesBackOnEveryBox() {
     upsertProject(ada, "ada", "p", "name: p\n");
@@ -866,23 +795,6 @@ class ConvergenceSyncTest {
 
     assertNull(definition(main, "p"), "bob's copy adopted the block");
     assertNull(definition(bob, "p"));
-  }
-
-  @Test
-  void aRenamesTombstoneAdoptedUnderAnotherAuthorUnderAnEarlierReleaseConverges() {
-    upsertProject(ada, "ada", "p", "name: p\n");
-    SyncBox.quiesce(main, ada, bob);
-    renameProject(ada, "ada", "p", "q");
-    SyncBox.quiesce(main, ada, bob);
-    bob.db.execute(
-        """
-        UPDATE change_log SET actor = 'main'
-        WHERE entity_type = 'project' AND entity_id = 'p' AND kind = 'tombstone'""");
-
-    bob.db.execute(SchemaManager.NODES_HEAR_EVERY_HEAD_AGAIN);
-
-    assertConverged();
-    assertEquals("ada", new ChangeLog(bob.db).head("project", "p").orElseThrow().actor());
   }
 
   @Test

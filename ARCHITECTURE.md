@@ -156,38 +156,19 @@ revision ids), `ConflictDetector` (a pure three-way merge), `ConflictResolver` (
 by the three synced stores), `SyncConflicts` (parked conflicts), `SyncState` (per-peer
 checkpoints), `ExpiredRowSweeper` (hourly housekeeping), and `PushOutcome` (the CAS result).
 
-Migrations are two-layer and idempotent. `SchemaManager` owns the schema layer: the v1
-baseline creates the current schema directly on a fresh database, a database at or past
-the published 0.14 floor (schema v118, the version every released 0.14.x binary reaches)
-rides the on-ramp — the post-floor migrations that never shipped in a 0.14.x release —
-to the baseline, and a database below the floor is refused with the remedy — install
-sail 0.14.x, run `sail upgrade`, retry — never a silent replay of deleted steps. A
-separate `DataMigration` framework runs one-shot content fix-ups exactly once, tracked by
-name. `MigrationRunner.applyAll` runs schema migrations then data migrations.
-`MigrateCommand` additionally imports on-disk descriptors and shared files, scrubs
-per-developer identity to placeholders, and, on main or a standalone box, seeds the bundled demo. Schema and registered
-data migrations run on `sail migrate`, on `sail upgrade` (which spawns the new binary's
-`migrate` so a release's new migrations actually execute), and on every daemon start, so a
-failed upgrade-time migration self-heals on the next service start. Imports run only from
-the explicit migrate lane. Host state (the `sail` user's forced commands and the systemd
-units) names the installed binary, `/usr/local/bin/sail`, so only that binary's migrate
-converges the host. Under a `SAIL_DATA_DIR` override, migrate is a rehearsal that migrates
-and imports into the copy alone. Any other binary is refused before it opens the database:
-it would migrate the database past what the installed binary can open.
-
-**Migration policy.** Schema migrations are append-only within a major version: entries
-are added after the baseline, never reordered, edited, or removed, and each one ships in
-the PR that needs it together with a test that migrates a seeded database and asserts the
-data survived. Collapsing the chain into a new baseline is allowed only at a major
-version with a published floor: the floor's final schema and the new baseline must be
-structurally equivalent (the `FloorSchema` fixture replays the released chain verbatim,
-and the schema-diff test in `SchemaManagerTest` pins floor-plus-on-ramp against a fresh
-baseline), the floor must be a version a released binary can actually reach, and
-everything below the floor is refused with an actionable error naming the release that
-can still carry it. Sync peers enforce the same floor in the wire handshake before any rows are
-exchanged. There is no downgrade path: pre-1.0 explicitly has none, and post-1.0 policy
-is forward-only with the documented floor mechanism. The pre-1.0 chain is recoverable
-from git history only.
+The schema is one baseline. `SchemaManager` creates it on a fresh database in one
+transaction and stamps it `CURRENT_VERSION`; a database stamped with that version opens as it
+is, and any other is refused with a remedy: one made by a release before v1 is replaced (move
+it aside, `sail init`), a newer one needs a newer binary. There is no version to walk and no
+data fix-up framework. `BoxDatabase.prepare` opens the schema on every daemon start and every
+`sail migrate`, then lets a box that is not a node forget the scope main last named it.
+`sail migrate` is how a release converges its box: it prepares the database, writes the host's
+drop-ins, holds Incus and reinstalls the pty session host, and `sail upgrade` runs the new
+binary's `migrate` once it is installed, so new-release code does that as root. Host state
+(the `sail` user's forced commands and the systemd units) names the installed binary,
+`/usr/local/bin/sail`, so only that binary's migrate converges the host. Under a
+`SAIL_DATA_DIR` override, migrate prepares the copy alone. Any other binary is refused before
+it opens the database.
 
 ## The sync layer: one main, many nodes
 
@@ -1998,19 +1979,11 @@ command the installer sends against a real shell under a temporary directory;
   `agent.review_pipeline.fix_skill`, `stages[].skill`, `stages[].categories`,
   `agent.methodology` and `agent_context` fail `SailYaml.fromMap` with one sentence each
   saying where the text now goes, so a row that arrives by sync with one is
-  `ProjectReader.Unreadable` with that sentence. `StagePromptsMigration`
-  (`stages-are-prompts-v1`, in `DataMigrations.all`, needing nothing of the box's files)
-  rewrites every definition the catalog holds without those keys through
-  `ProjectStore.upsert`, a journalled revision that syncs, listing per project what it
-  dropped and where it belongs; a second run changes nothing. The refusal is for what comes
-  back afterwards.
+  `ProjectReader.Unreadable` with that sentence.
   *`SailYamlTest.aDeletedKeyIsRefusedInOneSentenceNamingWhereItsTextGoes`,
   `ProjectReaderTest.aRowThatSetsADeletedKeyIsUnreadableNamingTheProjectAndWhereTheTextGoes`,
   `ProjectApplyCommandTest.planTargetRefusesADeletedKeyNamingWhereItsTextGoes`,
-  `ProjectEditCommandTest.rejectsADeletedKeyNamingWhereItsTextGoes`,
-  `StagePromptsMigrationTest.everyDefinitionWithADeletedKeyIsRewrittenWithoutItAsANewRevisionThatSyncs`,
-  `StagePromptsMigrationTest.theReportListsPerProjectWhatItDroppedAndWhereItBelongs`,
-  `StagePromptsMigrationTest.aSecondRunChangesNothing`.*
+  `ProjectEditCommandTest.rejectsADeletedKeyNamingWhereItsTextGoes`.*
 - **P9. The forge CLI the prompt relies on is authenticated by sail.** Where provisioning
   or `project apply` writes a token into `~/.git-credentials` for a GitHub host
   (`github.com`, or a repo marked `repos[].forge: github`), `ForgeCliLogin` logs `gh` in for
@@ -2668,8 +2641,8 @@ no pairing is removed through the gateway as before, and no key file is touched.
   journal head's author. Every store mutator stamps `updated_by` (and `created_by` on a create) from the same
   actor, so the row and its history always agree. Deliberately unjournaled, and so naming no
   one: `RunStore.stampActivity` (a latest-wins heartbeat), `Erasure.discard`,
-  `ChangeLog.purge` and `ChangeLog.compact` (history rewritten under erasure and retention),
-  and the `ContentMigration`/`SchemaManager` rewrites. There is no default actor, in
+  and `ChangeLog.purge` and `ChangeLog.compact` (history rewritten under erasure and
+  retention). There is no default actor, in
   production or in tests: a test binds only the writes it makes itself (`@ActingAs`,
   `Acting`), and a binding an entry point makes is proven by a test that drives that entry
   unbound wherever a test can drive it (the interactive files picker needs a console).
@@ -2732,9 +2705,9 @@ when its own work does:
 |---|---|---|
 | `Unit tests and quality gates` | the wildcard-import check, then `mvn clean verify`: every unit test, the JaCoCo gates, spotless | nothing else; it is the unit verdict |
 | `Dependency scan` | OWASP dependency-check, offline against a cached NVD database refreshed best-effort | the NVD cache |
-| `Native fleet sync tests` | `NativeFleetIT`: sync end to end on native binaries in Podman boxes | the candidate and the released binary |
+| `Native fleet sync tests` | `NativeFleetIT`: sync end to end on native binaries in Podman boxes | the candidate binary |
 | `Multi-node control-plane integration tests` | every `*IT` that runs without incus | the runner's systemd user manager |
-| `Incus-backed integration tests` | every `*IT` but `NativeFleetIT`, on a real incus | incus, the candidate and the released binary |
+| `Incus-backed integration tests` | every `*IT` but `NativeFleetIT`, on a real incus | incus and the candidate binary |
 
 - **Surefire runs in one job.** Every failsafe job passes `-Dtest=NoUnitTests
   -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true`: the unit suite and the coverage
@@ -2745,14 +2718,8 @@ when its own work does:
   fork of its own, not to a slower suite.
 - **The native image is built only where a test needs it.** The `native-binaries` action is
   used by the native fleet job and the incus job, and by no other.
-- **The released binary is pinned.** The two fleet suites upgrade from a published release to the
-  candidate. Which release is the one line of `.github/released-tag`, read by the
-  `native-binaries` action before it builds anything, so a pin that names no release fails in
-  seconds naming the file, and publishing a release changes no branch's checks. The pin follows
-  the previous release, the hop a current fleet makes, and moves in a commit of its own after
-  each release (see the README). It is not the schema floor: `SchemaManager.FLOOR_VERSION`
-  stays the oldest schema an upgrade starts from, and the suites' legacy fixtures reset the
-  state they depend on before the hop, so what they prove does not depend on how old the pin is.
+- **Every fleet runs one build.** The fleet suites run boxes of the candidate only: a box of
+  another release is refused at the sync hello, so there is no hop to rehearse.
 - **A job leaves its evidence.** Each job that runs tests tees its maven log and ends with the
   `test-evidence` action. The job summary holds how many test classes finished, the `Tests run:`
   totals of each module and every `<<< FAILURE!` and `<<< ERROR!` line, also for a maven that was

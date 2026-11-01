@@ -7,7 +7,6 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.pty.PtySessionHost;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -100,16 +99,6 @@ public final class PtyHostUnit {
         """
         .formatted(
             userClause, sailBinary.get(), PtySessionHost.Limits.DEFAULTS.sessions(), wantedBy);
-  }
-
-  /** Whether the unit file at {@code path} carries the descriptor store — an older one does not. */
-  public static boolean predatesLiveHandoff(Path path) {
-    try {
-      return Files.isRegularFile(path)
-          && !Files.readString(path).contains("FileDescriptorStoreMax=");
-    } catch (IOException unreadable) {
-      return false;
-    }
   }
 
   /**

@@ -943,8 +943,8 @@ public final class PagedSyncSession implements SyncSession {
   }
 
   @Override
-  public Optional<String> handle() {
-    return Optional.ofNullable(handle);
+  public String handle() {
+    return handle;
   }
 
   @Override

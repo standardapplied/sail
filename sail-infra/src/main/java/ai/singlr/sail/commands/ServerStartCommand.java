@@ -53,14 +53,12 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxCredentialStore;
-import ai.singlr.sail.store.DataMigration;
-import ai.singlr.sail.store.DataMigrations;
+import ai.singlr.sail.store.BoxDatabase;
 import ai.singlr.sail.store.EnrollmentTicketStore;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.ExpiredRowSweeper;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
-import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.PendingChallengeStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -148,35 +146,7 @@ public final class ServerStartCommand implements Runnable {
     var db = Sqlite.open(dbPath);
     var shutdown = new GracefulShutdown().register(db);
     Runtime.getRuntime().addShutdownHook(new Thread(shutdown::shutdown, "sail-shutdown"));
-    var migrationResult =
-        MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
-    if (migrationResult.schemaAfter() > migrationResult.schemaBefore()) {
-      System.out.println(
-          Ansi.AUTO.string(
-              "  @|green ✓|@ Schema migrated: "
-                  + migrationResult.schemaBefore()
-                  + " → "
-                  + migrationResult.schemaAfter()));
-    }
-    for (var run : migrationResult.dataRuns()) {
-      if (!run.alreadyApplied()
-          && (run.report().applied() > 0
-              || run.report().ambiguous() > 0
-              || run.report().skipped() > 0)) {
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|green ✓|@ "
-                    + run.name()
-                    + ": "
-                    + run.report().applied()
-                    + " applied, "
-                    + run.report().ambiguous()
-                    + " ambiguous, "
-                    + run.report().skipped()
-                    + " skipped"));
-        run.report().notes().forEach(note -> System.out.println("    " + note.plain()));
-      }
-    }
+    BoxDatabase.prepare(db);
 
     var tokenStore = new TokenStore(db);
     var configPath = SailPaths.clientConfigPath();

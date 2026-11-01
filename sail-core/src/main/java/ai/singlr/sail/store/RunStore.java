@@ -928,20 +928,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         boxHandle, madeHere("SELECT id FROM runs WHERE node IS NULL OR node = '' ORDER BY rowid"));
   }
 
-  /**
-   * Every run this box executes, by its {@code node} {@code boxHandle}, that acts for no one: an
-   * older release reserved some with no owner, and main takes a run only acting for its box's FDE.
-   */
-  public List<String> ownerless(String boxHandle) {
-    if (Strings.isBlank(boxHandle)) {
-      return List.of();
-    }
-    return db.query(
-        "SELECT id FROM runs WHERE node = ? AND (owner IS NULL OR owner = '') ORDER BY rowid",
-        row -> row.text(0),
-        boxHandle);
-  }
-
   private List<String> madeHere(String selectIds) {
     return db.query(selectIds, row -> row.text(0)).stream()
         .filter(id -> changeLog.begunHere(ENTITY, id))

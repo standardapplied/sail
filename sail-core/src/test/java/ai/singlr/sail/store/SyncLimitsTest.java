@@ -45,8 +45,5 @@ class SyncLimitsTest {
 
     limits.recordMainFileMax(8);
     assertEquals(8, limits.mainFileMax());
-
-    limits.recordMainFileMax(0);
-    assertEquals(8, limits.mainFileMax(), "an older main that names none leaves the last known");
   }
 }

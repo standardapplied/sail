@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.Event;
-import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
@@ -29,18 +28,12 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
-import ai.singlr.sail.store.ContentMigration;
-import ai.singlr.sail.store.DataMigration;
-import ai.singlr.sail.store.DataMigrations;
+import ai.singlr.sail.store.BoxDatabase;
 import ai.singlr.sail.store.DatabaseCatalog;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.HeldProjects;
-import ai.singlr.sail.store.MaterializedFilesMigration;
-import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.ReviewFindingsMigration;
 import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.ScopedHeadsMigration;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncHealth;
@@ -79,12 +72,6 @@ class SyncCliTest {
   @ValueSource(ints = {1, 4, 5})
   void cliFreshnessHonorsPersistedBackoffAndExplicitSyncStillProbes(int failures) throws Exception {
     runIsolated(Integer.toString(failures));
-  }
-
-  @ParameterizedTest
-  @ValueSource(strings = {"upgrade-freshen", "upgrade-agent-stop"})
-  void cliFreshnessMigratesThePreHealthSchemaAndContinuesLocally(String scenario) throws Exception {
-    runIsolated(scenario);
   }
 
   @Test
@@ -201,10 +188,6 @@ class SyncCliTest {
         var operations = OperationsFactory.open()) {
       var schema = new SchemaManager(db);
       schema.migrate();
-      if (args[0].startsWith("upgrade-")) {
-        verifyPreHealthUpgrade(args[0], db, operations);
-        return;
-      }
       if ("scope-mid-write".equals(args[0])) {
         verifyScopeDuringIdentityWrite(db);
         return;
@@ -298,9 +281,9 @@ class SyncCliTest {
     }
 
     if (scenario.startsWith("scope-migrate-")) {
-      MigrateCommand.runMigrations(true, true, OperatorCommand.PLAIN);
+      assertEquals(0, new CommandLine(new Sail()).execute("migrate", "--json"));
     } else {
-      MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
+      BoxDatabase.prepare(db);
     }
 
     var projects = new ProjectStore(db);
@@ -351,7 +334,7 @@ class SyncCliTest {
                     }));
     Thread.ofPlatform().start(rewrite);
     assertTrue(truncated.await(10, TimeUnit.SECONDS), "the rewrite never truncated host.yaml");
-    MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
+    BoxDatabase.prepare(db);
     assertEquals(granted, new SyncScope(db).held(), "the empty file decided nothing");
     resume.countDown();
     rewrite.get();
@@ -394,106 +377,5 @@ class SyncCliTest {
         "  Single devbox — nothing to sync. Set up sync with: sudo sail init --as-main --handle"
             + " <you>, or sudo sail init --main <main>.\n",
         output.toString(StandardCharsets.UTF_8));
-  }
-
-  private static void verifyPreHealthUpgrade(String scenario, Sqlite db, HostOperations operations)
-      throws Exception {
-    db.execute("ALTER TABLE room_messages DROP COLUMN error");
-    db.execute("DROP TABLE compacted_entries");
-    db.execute("ALTER TABLE sync_state DROP COLUMN read_rev");
-    db.execute("ALTER TABLE sync_state DROP COLUMN read_id");
-    db.execute("ALTER TABLE sync_state DROP COLUMN read_seq");
-    db.execute("DROP TABLE catalog");
-    db.execute("DROP TABLE sync_scope");
-    db.execute("ALTER TABLE change_heads DROP COLUMN project");
-    db.execute("DROP TABLE project_grants");
-    db.execute("ALTER TABLE fdes DROP COLUMN scope");
-    db.execute("DELETE FROM data_migrations WHERE name = ?", ScopedHeadsMigration.NAME);
-    db.execute("DROP TABLE fde_pairings");
-    db.execute("ALTER TABLE reviews DROP COLUMN waiting_on");
-    db.execute("ALTER TABLE events DROP COLUMN publisher");
-    db.execute("DROP TABLE materialized_files");
-    db.execute("DELETE FROM data_migrations WHERE name = ?", MaterializedFilesMigration.NAME);
-    db.execute("ALTER TABLE reviews DROP COLUMN findings_hash");
-    db.execute("ALTER TABLE review_findings DROP COLUMN followup");
-    db.execute(
-        "CREATE TABLE spec_source_findings (spec_id TEXT NOT NULL, finding_id TEXT NOT NULL,"
-            + " PRIMARY KEY (spec_id, finding_id))");
-    db.execute(
-        "CREATE TABLE spec_attachments (id TEXT PRIMARY KEY, spec_id TEXT NOT NULL,"
-            + " filename TEXT NOT NULL, content_type TEXT NOT NULL, size_bytes INTEGER NOT NULL,"
-            + " storage_path TEXT NOT NULL, created_at TEXT NOT NULL)");
-    db.execute("DELETE FROM data_migrations WHERE name = ?", ReviewFindingsMigration.NAME);
-    db.execute("DROP TRIGGER change_log_kind_from_deleted");
-    for (var index :
-        List.of(
-            "idx_change_log_tombstones",
-            "idx_room_messages_reply",
-            "idx_runs_room",
-            "idx_rooms_project",
-            "idx_specs_room",
-            "idx_run_delivered_message")) db.execute("DROP INDEX " + index);
-    db.execute("DROP TABLE erase_requests");
-    db.execute("DROP TABLE fde_boxes");
-    db.execute("DROP TABLE sync_offers");
-    for (var column : List.of("remote_rev", "remote_author"))
-      db.execute("ALTER TABLE sync_conflicts DROP COLUMN " + column);
-    db.execute("DROP TRIGGER specs_status_since_insert");
-    db.execute("DROP TRIGGER specs_status_since_update");
-    for (var column : List.of("archived_at", "cancelled_at"))
-      db.execute("ALTER TABLE specs DROP COLUMN " + column);
-    db.execute("ALTER TABLE change_log DROP COLUMN kind");
-    db.execute("DROP INDEX idx_change_log_file_version");
-    for (var table : List.of("blobs", "chunks")) db.execute("DROP TABLE " + table);
-    for (var column : List.of("body_hash", "plan_hash"))
-      db.execute("ALTER TABLE specs DROP COLUMN " + column);
-    for (var column : List.of("content_hash", "size", "mode", "kind"))
-      db.execute("ALTER TABLE project_files DROP COLUMN " + column);
-    db.execute("ALTER TABLE project_files ADD COLUMN content TEXT NOT NULL DEFAULT ''");
-    db.execute("DELETE FROM data_migrations WHERE name = ?", ContentMigration.NAME);
-    db.execute("DROP TABLE sync_health");
-    db.execute("DROP TABLE change_heads");
-    db.execute("DROP TABLE sync_state");
-    db.execute("DROP TABLE main_limits");
-    db.execute(
-        "CREATE TABLE sync_state (peer TEXT PRIMARY KEY, checkpoint INTEGER NOT NULL DEFAULT 0,"
-            + " updated_at TEXT NOT NULL)");
-    db.execute("UPDATE schema_version SET version = ?", SchemaManager.SYNC_HEALTH_VERSION - 1);
-    assertEquals(SchemaManager.SYNC_HEALTH_VERSION - 1, operations.schema().version());
-    assertNull(
-        operations.syncStatus().state(),
-        "a database from before health reports nothing attempted, not a missing table");
-
-    if ("upgrade-agent-stop".equals(scenario)) {
-      db.execute(
-          "INSERT INTO projects (name, definition, created_by, created_at, updated_by, updated_at)"
-              + " VALUES ('acme', 'name: acme', 'it', 'now', 'it', 'now')");
-      var output = new ByteArrayOutputStream();
-      var original = System.out;
-      try (var capture = new PrintStream(output, true, StandardCharsets.UTF_8)) {
-        System.setOut(capture);
-        assertEquals(0, new CommandLine(new Sail()).execute("agent", "stop", "acme", "--dry-run"));
-      } finally {
-        System.setOut(original);
-      }
-      assertTrue(output.toString(StandardCharsets.UTF_8).contains("No running agent session"));
-    } else {
-      try (var scheduler = NodeSync.scheduler(false, OperatorCommand.PLAIN)) {
-        scheduler.freshenRead();
-      }
-    }
-
-    assertTrue(operations.schema().version() > SchemaManager.SYNC_HEALTH_VERSION);
-    var status = operations.syncStatus();
-    assertEquals("stale", status.state());
-    assertEquals(1, status.consecutiveFailures());
-    assertEquals("unreachable", status.lastErrorKind());
-    assertEquals(
-        List.of(Event.WellKnownTypes.SYNC_DEGRADED),
-        new EventStore(db).recent(10).stream().map(EventStore.EventRow::type).toList());
-    try (var scheduler = NodeSync.scheduler(false, OperatorCommand.PLAIN)) {
-      scheduler.freshenRead();
-    }
-    assertEquals(status, operations.syncStatus());
   }
 }

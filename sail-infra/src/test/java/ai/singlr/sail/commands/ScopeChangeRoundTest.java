@@ -14,7 +14,6 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.PipedSyncChannel;
-import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -22,10 +21,8 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.AuthSessionStore;
-import ai.singlr.sail.store.DataMigration;
-import ai.singlr.sail.store.DataMigrations;
+import ai.singlr.sail.store.BoxDatabase;
 import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -77,7 +74,7 @@ class ScopeChangeRoundTest {
   void setUp() {
     var mainPath = tempDir.resolve("main.db");
     try (var db = Sqlite.open(mainPath)) {
-      MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
+      BoxDatabase.prepare(db);
     }
     main = SyncDatabase.converge(mainPath, "main");
     mainDb = main.db();
@@ -401,28 +398,6 @@ class ScopeChangeRoundTest {
 
     assertEquals(List.of(), incus.invocations);
     assertEquals(List.of("acme", "beta", "gamma"), incus.names());
-  }
-
-  @Test
-  void aLeftoverDescriptorIsNeverImportedAndTheNextRoundTakesItWithNoDrop() throws Exception {
-    narrowTo("beta");
-    round();
-    Files.createDirectories(projectsDir.resolve("acme"));
-    Files.writeString(projectsDir.resolve("acme").resolve("sail.yaml"), "name: acme\n");
-
-    for (var migrate = 0; migrate < 2; migrate++) {
-      var report =
-          Actor.call(
-              Actor.system(),
-              () ->
-                  new ProjectImporter(
-                          projectsDir, new ProjectStore(nodeDb), new SyncScope(nodeDb).held())
-                      .importAll());
-      assertEquals(new ProjectImporter.Report(0, 2, List.of()), report);
-    }
-
-    assertEquals(List.of(), round());
-    assertEquals(List.of("beta"), childrenOf(projectsDir));
   }
 
   private static List<String> childrenOf(Path dir) throws IOException {

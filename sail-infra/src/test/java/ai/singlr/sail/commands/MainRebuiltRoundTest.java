@@ -17,8 +17,6 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PipedSyncChannel;
-import ai.singlr.sail.engine.ProjectImporter;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -26,14 +24,12 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.BoxDatabase;
 import ai.singlr.sail.store.ChangeLog;
-import ai.singlr.sail.store.DataMigration;
-import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.DatabaseCatalog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
-import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -48,7 +44,6 @@ import ai.singlr.sail.sync.SyncWire;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -126,7 +121,7 @@ class MainRebuiltRoundTest {
   private Main main(String file, String id, String project) {
     var path = tempDir.resolve(file);
     try (var db = Sqlite.open(path)) {
-      MigrationRunner.applyAll(db, DataMigrations.all(), DataMigration.Prompter.NON_INTERACTIVE);
+      BoxDatabase.prepare(db);
     }
     var database = SyncDatabase.converge(path, id);
     mains.add(database);
@@ -471,33 +466,6 @@ class MainRebuiltRoundTest {
         List.of(1),
         round.types().stream().filter(t -> "spec".equals(t.type())).map(t -> t.entries()).toList(),
         "the erasure alone is paged, not every head");
-  }
-
-  @Test
-  void aProjectMigrateImportsIntoAMainRestoredInPlaceReachesTheNode() throws Exception {
-    round();
-    var copy = copyOf(serving, "copy.db", serving.id());
-    Acting.as("nia", () -> new ProjectStore(serving.db()).upsert("delta", "name: delta\n"));
-    round();
-    serving = copy;
-    var projects = tempDir.resolve("main-projects");
-    Files.createDirectories(projects.resolve("delta"));
-    Files.writeString(
-        projects.resolve("delta").resolve(SailPaths.PROJECT_DESCRIPTOR), "name: delta\n");
-    Acting.system(
-        () ->
-            new ProjectImporter(projects, new ProjectStore(serving.db()), ProjectScope.all())
-                .importAll());
-
-    round();
-
-    assertEquals(projectRows(serving.db()), projectRows(nodeDb));
-    assertNotEquals(
-        "nia",
-        nodeDb
-            .queryOne("SELECT created_by FROM projects WHERE name = 'delta'", r -> r.text(0))
-            .orElseThrow(),
-        "the node holds main's delta, not the one main lost");
   }
 
   private static List<String> projectRows(Sqlite db) {

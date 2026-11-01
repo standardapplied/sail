@@ -836,7 +836,7 @@ class SyncTransportTest {
             Actor.sync("A", Role.MEMBER),
             () -> roster,
             SyncTransitionSink.NONE,
-            SyncWire.UPGRADE_FLOOR);
+            "1.0.0");
     try (var link = SyncBox.connect(server, nodeA)) {
       assertEquals(1, link.reconcile("spec", nodeA.replica).report().pushed());
       assertEquals(1, link.reconcile("file", nodeFileReplica).report().pushed());

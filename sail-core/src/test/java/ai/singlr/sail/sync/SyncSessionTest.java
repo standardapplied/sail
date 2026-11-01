@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.FileLimits;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
@@ -26,7 +27,10 @@ class SyncSessionTest {
 
   private static final SyncWire.Hello HELLO = SyncWire.Hello.of("0.44.0", "node-box");
   private static final String WELCOME =
-      SyncWire.encode(new SyncWire.Welcome(SyncWire.PROTOCOL, "0.44.0", "main-box")) + "\n";
+      SyncWire.encode(
+              new SyncWire.Welcome(
+                  SyncWire.PROTOCOL, "0.44.0", "main-box", "", FileLimits.DEFAULT_MAX))
+          + "\n";
 
   private static SyncSession open(
       String serverLines, ai.singlr.sail.sync.ByteStreams.Output out, List<String> notices) {
@@ -55,19 +59,13 @@ class SyncSessionTest {
         "{\"rev\": \"3-abc\", \"maxSeq\": 9}",
         "  {}"
       })
-  void anAnswerThatNamesNoOpIsAnOlderMainAndFailsNamingTheRemedy(String olderProtocol) {
-    var v3 = olderProtocol + "\n";
+  void anAnswerThatIsNoMessageOfThisProtocolFailsAsAProtocolFailure(String notAWelcome) {
     var notices = new ArrayList<String>();
     var failure =
         assertThrows(
             SyncTransportException.class,
-            () -> open(v3, new ai.singlr.sail.sync.ByteStreams.Output(), notices));
-    assertEquals("refused", failure.kind());
-    assertTrue(
-        failure
-            .getMessage()
-            .contains("main is on a sync protocol this node cannot speak: upgrade main"),
-        failure.getMessage());
+            () -> open(notAWelcome + "\n", new ai.singlr.sail.sync.ByteStreams.Output(), notices));
+    assertEquals("protocol", failure.kind());
     assertTrue(notices.isEmpty());
   }
 
@@ -136,13 +134,20 @@ class SyncSessionTest {
 
   @Test
   void aWelcomeFromAnotherProtocolOrWithoutAMainIdIsRefused() {
-    var other = SyncWire.encode(new SyncWire.Welcome(5, "0.50.0", "main")) + "\n";
+    var other =
+        SyncWire.encode(
+                new SyncWire.Welcome(
+                    SyncWire.PROTOCOL + 1, "0.50.0", "main", "", FileLimits.DEFAULT_MAX))
+            + "\n";
     var failure =
         assertThrows(
             SyncTransportException.class,
             () -> open(other, new ai.singlr.sail.sync.ByteStreams.Output(), new ArrayList<>()));
     assertTrue(failure.getMessage().contains("upgrade main first"), failure.getMessage());
-    var anonymous = SyncWire.encode(new SyncWire.Welcome(SyncWire.PROTOCOL, "0.44.0", "")) + "\n";
+    var anonymous =
+        SyncWire.encode(
+                new SyncWire.Welcome(SyncWire.PROTOCOL, "0.44.0", "", "", FileLimits.DEFAULT_MAX))
+            + "\n";
     assertThrows(
         SyncTransportException.class,
         () -> open(anonymous, new ai.singlr.sail.sync.ByteStreams.Output(), new ArrayList<>()));
@@ -150,7 +155,11 @@ class SyncSessionTest {
 
   @Test
   void aNodeAheadOfMainIsToldTheUpgradeOrderOncePerSession() {
-    var older = SyncWire.encode(new SyncWire.Welcome(SyncWire.PROTOCOL, "0.44.0", "main")) + "\n";
+    var older =
+        SyncWire.encode(
+                new SyncWire.Welcome(
+                    SyncWire.PROTOCOL, "0.44.0", "main", "", FileLimits.DEFAULT_MAX))
+            + "\n";
     var notices = new ArrayList<String>();
     try (var session =
         SyncSession.open(
@@ -169,7 +178,10 @@ class SyncSessionTest {
 
   @Test
   void aDevBuildOnEitherSideNeverProducesAVersionNotice() {
-    var dev = SyncWire.encode(new SyncWire.Welcome(SyncWire.PROTOCOL, "dev", "main")) + "\n";
+    var dev =
+        SyncWire.encode(
+                new SyncWire.Welcome(SyncWire.PROTOCOL, "dev", "main", "", FileLimits.DEFAULT_MAX))
+            + "\n";
     var notices = new ArrayList<String>();
     try (var session =
         SyncSession.open(

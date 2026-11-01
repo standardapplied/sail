@@ -182,7 +182,7 @@ class ScopedHeadsTest {
     specs.delete("alpha-work");
     db.execute("UPDATE change_heads SET project = NULL");
 
-    var report = new ScopedHeadsMigration().apply(db, null, DataMigration.Prompter.NON_INTERACTIVE);
+    var filed = log.backfillProjects();
 
     assertEquals(Optional.of("alpha"), log.headProject("spec", "alpha-work"));
     assertEquals(Optional.of("alpha"), log.headProject("room", "alpha-work"));
@@ -203,29 +203,18 @@ class ScopedHeadsTest {
       assertEquals(
           Optional.empty(),
           log.headProject(target.type(), target.id()),
-          target + ": pruned before heads carried a project");
+          target + ": pruned before its head was filed");
     }
-    assertEquals(
-        DataMigration.Report.of(
-            10,
-            0,
-            6,
-            List.of(
-                "6 change head(s) name no project (pruned before this release); only unscoped"
-                    + " nodes hear of them.")),
-        report);
-    assertEquals(ScopedHeadsMigration.NAME, new ScopedHeadsMigration().name());
-    assertTrue(DataMigrations.all().stream().anyMatch(ScopedHeadsMigration.class::isInstance));
+    assertEquals(10L, filed);
   }
 
   @Test
-  void aBackfillWithNothingUnknownSaysNothing() {
+  void theBackfillCountsEveryHeadThatCarriesAProject() {
     seed("alpha");
     db.execute("UPDATE change_heads SET project = NULL");
 
-    assertEquals(
-        new DataMigration.Report(8, 0, 0, List.of()),
-        new ScopedHeadsMigration().apply(db, null, DataMigration.Prompter.NON_INTERACTIVE));
+    assertEquals(8L, log.backfillProjects());
+    assertEquals(8L, log.backfillProjects());
   }
 
   private record Seeded(String message, String run, String review) {}

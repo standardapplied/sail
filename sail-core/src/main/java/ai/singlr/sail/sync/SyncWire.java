@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.BiFunction;
 
 /**
  * The line protocol of one sync session over a Door-2 SSH channel, protocol 4: the node and main
@@ -50,16 +51,11 @@ import java.util.TreeMap;
  */
 public final class SyncWire {
 
-  /** The protocol this build speaks; a peer announcing another is refused. */
-  public static final int PROTOCOL = 4;
-
   /**
-   * The fleet floor both sides must advertise before exchanging rows: the release that carries a
-   * review's findings as its content, so an older node can never push a review back without them.
-   * Bump again only when a change makes older peers unsafe, never for a routine release; patch
-   * releases above the floor are wire-compatible with each other.
+   * The protocol this build speaks; a peer announcing another is refused at the hello, so nothing
+   * here reads a message another protocol wrote. Bump it with any change to what a message carries.
    */
-  public static final String UPGRADE_FLOOR = "0.46.4";
+  public static final int PROTOCOL = 5;
 
   /** The byte ceiling for a JSON announcing line, including a whole blob manifest. */
   public static final int MAX_FRAME = 16 * 1024 * 1024;
@@ -98,7 +94,6 @@ public final class SyncWire {
   private static final String DENIED = "denied";
   private static final String PROTOCOL_KEY = "protocol";
   private static final String VERSION = "version";
-  private static final String FLOOR = "floor";
   private static final String BOX = "box";
   private static final String MAIN_ID = "mainId";
   private static final String HANDLE = "handle";
@@ -215,11 +210,11 @@ public final class SyncWire {
 
   public sealed interface Request permits Hello, Heads, Pull, Need, Push, FetchFdes, Bye, Content {}
 
-  /** Opens the session: the node's protocol, build, fleet floor and box identity. */
-  public record Hello(int protocol, String version, String floor, String box) implements Request {
+  /** Opens the session: the node's protocol, build and box identity. */
+  public record Hello(int protocol, String version, String box) implements Request {
     /** This build's hello for {@code box}. */
     public static Hello of(String version, String box) {
-      return new Hello(PROTOCOL, version, UPGRADE_FLOOR, box);
+      return new Hello(PROTOCOL, version, box);
     }
   }
 
@@ -233,7 +228,7 @@ public final class SyncWire {
       marks = Map.copyOf(marks);
     }
 
-    /** Heads naming nothing read, as a node that predates marks asks. */
+    /** Heads naming nothing read: a node with no checkpoint yet. */
     public Heads() {
       this(Map.of());
     }
@@ -380,12 +375,11 @@ public final class SyncWire {
   }
 
   /**
-   * Main accepted the hello: its protocol, build, the box id the node checkpoints against, and the
-   * {@code handle} it authenticated the session as — blank for a session that names no FDE, and
-   * null from an older main, which never says — and the {@code scope} of projects that FDE may see:
-   * every project unless main scoped it, which is also what an older main, naming none, means. The
-   * {@code catalog} names main's database ({@code DatabaseCatalog}), null from a main that never
-   * says.
+   * Main accepted the hello: its protocol, build, the box id the node checkpoints against, the
+   * {@code handle} it authenticated the session as — blank for a session that names no FDE — its
+   * file ceiling, the {@code scope} of projects that FDE may see, every project unless main scoped
+   * it, and the {@code catalog} naming main's database ({@code DatabaseCatalog}), which a node
+   * refuses a main to name none of ({@code NodeRound#admit}).
    */
   public record Welcome(
       int protocol,
@@ -397,9 +391,14 @@ public final class SyncWire {
       String catalog)
       implements Response {
     public Welcome {
+      Objects.requireNonNull(handle, "handle");
       Objects.requireNonNull(scope, "scope");
+      if (fileMax <= 0) {
+        throw new IllegalArgumentException("A welcome names main's file ceiling, not " + fileMax);
+      }
     }
 
+    /** A welcome from a main with no catalog to name. */
     public Welcome(
         int protocol,
         String version,
@@ -410,24 +409,13 @@ public final class SyncWire {
       this(protocol, version, mainId, handle, fileMax, scope, null);
     }
 
+    /** A welcome of an unscoped FDE from a main with no catalog to name. */
     public Welcome(int protocol, String version, String mainId, String handle, long fileMax) {
       this(protocol, version, mainId, handle, fileMax, ProjectScope.all());
     }
-
-    /** A welcome that names no handle, as a main that predates saying so sends it. */
-    public Welcome(int protocol, String version, String mainId) {
-      this(protocol, version, mainId, null, 0);
-    }
-
-    public Welcome(int protocol, String version, String mainId, String handle) {
-      this(protocol, version, mainId, handle, 0);
-    }
   }
 
-  /**
-   * Main refused the session before serving anything, naming the remedy as data. On the wire its
-   * plain reading rides beside it, the reason a node that predates remedies reads.
-   */
+  /** Main refused the session before serving anything, naming the remedy as data. */
   public record Refuse(Remedy reason) implements Response {
     public Refuse(String reason) {
       this(Remedy.of(reason));
@@ -444,7 +432,7 @@ public final class SyncWire {
       rewound = Set.copyOf(rewound);
     }
 
-    /** Tips naming no type rewound, as a main that predates marks answers. */
+    /** Tips naming no type rewound. */
     public Tips(Map<String, Long> tips) {
       this(tips, Set.of());
     }
@@ -726,7 +714,6 @@ public final class SyncWire {
         map.put(OP, OP_HELLO);
         map.put(PROTOCOL_KEY, hello.protocol());
         map.put(VERSION, hello.version());
-        map.put(FLOOR, hello.floor());
         map.put(BOX, hello.box());
       }
       case Heads heads -> {
@@ -775,12 +762,8 @@ public final class SyncWire {
         map.put(PROTOCOL_KEY, welcome.protocol());
         map.put(VERSION, welcome.version());
         map.put(MAIN_ID, welcome.mainId());
-        if (welcome.handle() != null) {
-          map.put(HANDLE, welcome.handle());
-        }
-        if (welcome.fileMax() > 0) {
-          map.put(FILE_MAX, welcome.fileMax());
-        }
+        map.put(HANDLE, welcome.handle());
+        map.put(FILE_MAX, welcome.fileMax());
         if (!welcome.scope().unrestricted()) {
           map.put(SCOPE, List.copyOf(welcome.scope().projects()));
         }
@@ -834,11 +817,7 @@ public final class SyncWire {
     var op = string(map, OP);
     return switch (op) {
       case OP_HELLO ->
-          new Hello(
-              intValue(map, PROTOCOL_KEY),
-              string(map, VERSION),
-              string(map, FLOOR),
-              string(map, BOX));
+          new Hello(intValue(map, PROTOCOL_KEY), string(map, VERSION), string(map, BOX));
       case OP_HEADS -> new Heads(marks(map));
       case OP_PULL -> new Pull(string(map, TYPE), longValue(map, SINCE), intValue(map, LIMIT));
       case OP_NEED ->
@@ -853,23 +832,6 @@ public final class SyncWire {
     };
   }
 
-  /**
-   * Whether {@code line} is a JSON object that names no {@code op}. Every protocol-4 message names
-   * one and no earlier protocol did, so at a hello this is how an older main reads. The brace is
-   * checked first because the parser also accepts YAML, where a stray {@code Warning: …} line on
-   * the channel is a map too — and that is noise, not an older main.
-   */
-  static boolean predatesOps(String line) {
-    if (!line.stripLeading().startsWith("{")) {
-      return false;
-    }
-    try {
-      return !YamlUtil.parseJsonLine(line, MAX_FRAME).containsKey(OP);
-    } catch (RuntimeException notAMessage) {
-      return false;
-    }
-  }
-
   public static Response decodeResponse(String line) {
     var map = YamlUtil.parseJsonLine(line, MAX_FRAME);
     var op = string(map, OP);
@@ -879,8 +841,8 @@ public final class SyncWire {
               intValue(map, PROTOCOL_KEY),
               string(map, VERSION),
               string(map, MAIN_ID),
-              string(map, HANDLE),
-              longValue(map, FILE_MAX),
+              required(map, HANDLE, SyncWire::string),
+              required(map, FILE_MAX, SyncWire::longValue),
               map.containsKey(SCOPE) ? ProjectScope.of(strings(map, SCOPE)) : ProjectScope.all(),
               string(map, CATALOG));
       case OP_REFUSE -> new Refuse(remedy(map, REASON));
@@ -1097,6 +1059,15 @@ public final class SyncWire {
     return map.get(key) instanceof List<?> list
         ? list.stream().map(String::valueOf).toList()
         : List.of();
+  }
+
+  /** {@code key} as {@code read} reads it, refusing a message that leaves it out. */
+  private static <T> T required(
+      Map<String, Object> map, String key, BiFunction<Map<String, Object>, String, T> read) {
+    if (map.get(key) == null) {
+      throw new IllegalArgumentException(map.get(OP) + " names no " + key);
+    }
+    return read.apply(map, key);
   }
 
   private static String string(Map<String, Object> map, String key) {

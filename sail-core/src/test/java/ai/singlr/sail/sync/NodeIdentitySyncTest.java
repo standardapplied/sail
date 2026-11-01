@@ -19,13 +19,8 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeBoxes;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
-import java.io.FilterOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.Optional;
-import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -91,25 +86,10 @@ class NodeIdentitySyncTest {
     return id;
   }
 
-  private static UnaryOperator<OutputStream> welcomingAsAnOlderMain() {
-    return out ->
-        new FilterOutputStream(out) {
-          @Override
-          public void write(byte[] buffer, int offset, int length) throws IOException {
-            var line = new String(buffer, offset, length, StandardCharsets.UTF_8);
-            var older =
-                line.contains("\"op\": \"welcome\"")
-                    ? line.replaceAll(", \"handle\": \"[^\"]*\"", "")
-                    : line;
-            out.write(older.getBytes(StandardCharsets.UTF_8));
-          }
-        };
-  }
-
   @Test
   void theWelcomeNamesTheHandleMainAuthenticatedTheSessionAs() throws IOException {
     try (var link = SyncBox.connect(main.server(UDAY), ada)) {
-      assertEquals("uday", link.session().handle().orElseThrow());
+      assertEquals("uday", link.session().handle());
     }
     SyncBox.assertConverged(main, ada);
   }
@@ -171,23 +151,6 @@ class NodeIdentitySyncTest {
   }
 
   @Test
-  void againstAMainThatOmitsTheHandleTheRoundRunsAsBefore() throws IOException {
-    ownSpec(main, "ada", "mine");
-    var unstamped = finishedRun(ada, null, "mine");
-    try (var link =
-        SyncBox.connect(main.server(ADA), ada, SyncWire.MAX_FRAME, welcomingAsAnOlderMain())) {
-      assertTrue(link.session().handle().isEmpty());
-      Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), ada.db, "ada"));
-      var report = link.reconcile("run", ada.replicas().get("run"));
-
-      assertEquals(1, report.report().pushed(), report.toString());
-    }
-    assertEquals("ada", new RunStore(main.db).findById(unstamped).orElseThrow().owner());
-    NodeRound.requireAgreed(Optional.empty(), "anyone");
-    SyncBox.assertConverged(main, ada.syncsAs(ADA));
-  }
-
-  @Test
   void aSecondBoxSyncingAsAnFdeTiedToABoxIsRefusedUntilItIsReleased() throws IOException {
     ownSpec(main, "ada", "mine");
     SyncBox.round(main, ada);
@@ -212,13 +175,7 @@ class NodeIdentitySyncTest {
   void mainsOwnFdeSyncsFromNoBoxButMain() throws IOException {
     var server =
         SyncRpcServer.over(
-            main.db,
-            "main",
-            "ada",
-            ADA,
-            FdeRoster.EMPTY,
-            SyncTransitionSink.NONE,
-            SyncWire.UPGRADE_FLOOR);
+            main.db, "main", "ada", ADA, FdeRoster.EMPTY, SyncTransitionSink.NONE, "1.0.0");
 
     var refused =
         assertThrows(SyncTransportException.class, () -> SyncBox.connect(server, ada).close());
@@ -233,7 +190,7 @@ class NodeIdentitySyncTest {
   @Test
   void aSessionNamingNoFdeClaimsNoBox() throws IOException {
     try (var link = SyncBox.connect(main.server(Actor.sync(null, Role.VIEWER)), ada)) {
-      assertEquals("", link.session().handle().orElseThrow());
+      assertEquals("", link.session().handle());
     }
     try (var other = new SyncBox("other");
         var link = SyncBox.connect(main.server(Actor.sync(null, Role.VIEWER)), other)) {

@@ -50,7 +50,6 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
@@ -257,10 +256,7 @@ public final class SailOperations implements HostOperations {
   @Override
   public SyncStatus syncStatus() {
     var config = syncOperations.configuration();
-    var health =
-        new SchemaManager(controlPlane).currentVersion() < SchemaManager.SYNC_HEALTH_VERSION
-            ? null
-            : new SyncHealth(controlPlane).find(config.main()).orElse(null);
+    var health = new SyncHealth(controlPlane).find(config.main()).orElse(null);
     return health == null
         ? SyncStatus.unattempted(config.role(), config.main())
         : new SyncStatus(

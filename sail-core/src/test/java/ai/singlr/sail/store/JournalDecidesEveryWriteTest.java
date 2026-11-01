@@ -128,13 +128,7 @@ class JournalDecidesEveryWriteTest {
 
     private void seed() {
       projects.upsert("acme", "name: acme\n");
-      db.execute(
-          "INSERT INTO projects (name, definition, created_at, updated_at)"
-              + " VALUES ('unscrubbed', 'git:\n  name: Bob\n  email: bob@example.com\n', 'now',"
-              + " 'now')");
       specs.create(spec("theirs", SpecStatus.IN_PROGRESS));
-      specs.create(spec("legacy", SpecStatus.PENDING));
-      db.execute("UPDATE specs SET project = 'unassigned' WHERE id = 'legacy'");
       specs.create(spec("shipped", SpecStatus.REVIEW));
       specs.create(spec("fix", SpecStatus.DONE));
       specs.create(spec("gone", SpecStatus.PENDING));
@@ -231,9 +225,6 @@ class JournalDecidesEveryWriteTest {
         owned("SpecStore.setContent", f -> f.specs.setContent("theirs", "body", "plan")),
         owned("SpecStore.restore", f -> f.specs.restore("gone", f.goneRev)),
         owned("SpecStore.reproject", f -> f.specs.reproject("acme", "acme3")),
-        owned(
-            "SpecStore.assignMigrationProject",
-            f -> f.specs.assignMigrationProject("legacy", "acme")),
         write("RoomStore.create", null, f -> f.rooms.create(room("lounge"))),
         write(
             "RoomStore.createJournaled",
@@ -351,10 +342,6 @@ class JournalDecidesEveryWriteTest {
         write("FileStore.delete", null, f -> f.files.delete("acme", "notes.md")),
         write("FileStore.reproject", null, f -> f.files.reproject("acme", "acme2")),
         write("ProjectStore.upsert", null, f -> f.projects.upsert("acme", "name: acme\nx: 1\n")),
-        write(
-            "ProjectStore.canonicalizeDefinitions",
-            null,
-            f -> f.projects.canonicalizeDefinitions()),
         write("ProjectStore.delete", null, f -> f.projects.delete("acme")),
         write(
             "ProjectStore.rename",

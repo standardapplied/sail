@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BlobStore;
@@ -66,9 +67,9 @@ class SyncWireTest {
 
   private static final List<SyncWire.Response> RESPONSES =
       List.of(
-          new SyncWire.Welcome(4, "0.44.0", "main-box"),
-          new SyncWire.Welcome(4, "0.46.3", "main-box", "ada"),
-          new SyncWire.Welcome(4, "0.46.3", "main-box", ""),
+          new SyncWire.Welcome(4, "0.44.0", "main-box", "", FileLimits.DEFAULT_MAX),
+          new SyncWire.Welcome(4, "0.46.3", "main-box", "ada", FileLimits.DEFAULT_MAX),
+          new SyncWire.Welcome(4, "0.46.3", "main-box", "", FileLimits.DEFAULT_MAX),
           new SyncWire.Refuse("hello required"),
           new SyncWire.Tips(Map.of("spec", 7L, "file", 0L)),
           new SyncWire.Tips(Map.of("spec", 7L, "room", 3L), Set.of("spec", "room")),
@@ -150,51 +151,56 @@ class SyncWireTest {
   }
 
   @Test
-  void aWelcomeNamesTheHandleOnlyWhenMainSaysOne() {
-    assertFalse(
-        SyncWire.encode(new SyncWire.Welcome(4, "0.44.0", "main-box")).contains("handle"),
-        "an older main's welcome carries no handle");
+  void aWelcomeAlwaysNamesTheHandleBlankForNoFdeAndOneNamingNoneIsRefused() {
+    assertEquals(
+        "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.44.0\", \"mainId\":"
+            + " \"main-box\", \"handle\": \"\", \"file_max\": 4096}",
+        SyncWire.encode(new SyncWire.Welcome(4, "0.44.0", "main-box", "", 4096)));
     assertEquals(
         "ada",
         ((SyncWire.Welcome)
                 SyncWire.decodeResponse(
-                    SyncWire.encode(new SyncWire.Welcome(4, "0.46.3", "main-box", "ada"))))
+                    SyncWire.encode(new SyncWire.Welcome(4, "1.0.0", "main-box", "ada", 4096))))
             .handle());
-    assertNull(
-        ((SyncWire.Welcome)
+    var nameless =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
                 SyncWire.decodeResponse(
-                    "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.46.2\","
-                        + " \"mainId\": \"m\"}"))
-            .handle());
+                    "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"1.0.0\","
+                        + " \"mainId\": \"m\", \"file_max\": 4096}"));
+    assertEquals("welcome names no handle", nameless.getMessage());
   }
 
   @Test
   void aWelcomeNamesMainsCatalogOnlyWhenMainHasOne() {
     var catalogued =
-        new SyncWire.Welcome(4, "0.53.0", "main-box", "ada", 0, ProjectScope.all(), "c0ffee");
-    var older = new SyncWire.Welcome(4, "0.52.0", "main-box", "ada", 0);
+        new SyncWire.Welcome(4, "0.53.0", "main-box", "ada", 4096, ProjectScope.all(), "c0ffee");
+    var uncatalogued = new SyncWire.Welcome(4, "0.53.0", "main-box", "ada", 4096);
 
     assertEquals(
         "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.53.0\", \"mainId\":"
-            + " \"main-box\", \"handle\": \"ada\", \"catalog\": \"c0ffee\"}",
+            + " \"main-box\", \"handle\": \"ada\", \"file_max\": 4096, \"catalog\": \"c0ffee\"}",
         SyncWire.encode(catalogued));
     assertEquals(catalogued, SyncWire.decodeResponse(SyncWire.encode(catalogued)));
-    assertFalse(SyncWire.encode(older).contains("catalog"));
-    assertNull(((SyncWire.Welcome) SyncWire.decodeResponse(SyncWire.encode(older))).catalog());
+    assertFalse(SyncWire.encode(uncatalogued).contains("catalog"));
+    assertNull(
+        ((SyncWire.Welcome) SyncWire.decodeResponse(SyncWire.encode(uncatalogued))).catalog());
   }
 
   @Test
   void aWelcomeNamesAScopeOnlyForAScopedFdeAndAMissingKeyIsNeverAnEmptyGrant() {
-    var unscoped = new SyncWire.Welcome(4, "0.48.0", "main-box", "ada", 0);
+    var unscoped = new SyncWire.Welcome(4, "0.48.0", "main-box", "ada", 4096);
     var scoped =
         new SyncWire.Welcome(
-            4, "0.48.0", "main-box", "nia", 0, ProjectScope.of(List.of("beta", "alpha")));
-    var ungranted = new SyncWire.Welcome(4, "0.48.0", "main-box", "bob", 0, ProjectScope.none());
+            4, "0.48.0", "main-box", "nia", 4096, ProjectScope.of(List.of("beta", "alpha")));
+    var ungranted = new SyncWire.Welcome(4, "0.48.0", "main-box", "bob", 4096, ProjectScope.none());
 
     assertFalse(SyncWire.encode(unscoped).contains("scope"));
     assertEquals(
         "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.48.0\", \"mainId\":"
-            + " \"main-box\", \"handle\": \"nia\", \"scope\": [\"alpha\", \"beta\"]}",
+            + " \"main-box\", \"handle\": \"nia\", \"file_max\": 4096, \"scope\": [\"alpha\","
+            + " \"beta\"]}",
         SyncWire.encode(scoped));
     assertEquals(unscoped, SyncWire.decodeResponse(SyncWire.encode(unscoped)));
     assertEquals(scoped, SyncWire.decodeResponse(SyncWire.encode(scoped)));
@@ -205,7 +211,8 @@ class SyncWireTest {
         ((SyncWire.Welcome)
                 SyncWire.decodeResponse(
                     "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.48.0\","
-                        + " \"mainId\": \"m\", \"scope\": null}"))
+                        + " \"mainId\": \"m\", \"handle\": \"\", \"file_max\": 1,"
+                        + " \"scope\": null}"))
             .scope(),
         "a scope key that names nothing readable grants nothing");
     assertEquals(
@@ -213,30 +220,34 @@ class SyncWireTest {
         ((SyncWire.Welcome)
                 SyncWire.decodeResponse(
                     "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.47.0\","
-                        + " \"mainId\": \"m\", \"a_key_from_the_future\": [1]}"))
+                        + " \"mainId\": \"m\", \"handle\": \"\", \"file_max\": 1,"
+                        + " \"a_key_from_the_future\": [1]}"))
             .scope(),
-        "an older main names no scope, and a key this build does not know is ignored");
+        "an unscoped FDE's welcome names no scope, and a key this build does not know is ignored");
   }
 
   @Test
-  void aWelcomeCarriesMainsFileCeilingOnlyWhenItHasOne() {
-    assertFalse(
-        SyncWire.encode(new SyncWire.Welcome(4, "0.46.3", "main-box", "ada")).contains("file_max"),
-        "an older main's welcome names no ceiling");
-    assertEquals(
-        0,
-        ((SyncWire.Welcome)
-                SyncWire.decodeResponse(
-                    "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.46.2\","
-                        + " \"mainId\": \"m\"}"))
-            .fileMax(),
-        "a node reads no ceiling as none");
+  void aWelcomeAlwaysCarriesMainsFileCeilingAndOneWithoutIsRefused() {
     assertEquals(
         4096L,
         ((SyncWire.Welcome)
                 SyncWire.decodeResponse(
-                    SyncWire.encode(new SyncWire.Welcome(4, "0.46.3", "main-box", "ada", 4096))))
+                    SyncWire.encode(new SyncWire.Welcome(4, "1.0.0", "main-box", "ada", 4096))))
             .fileMax());
+    var ceilingless =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                SyncWire.decodeResponse(
+                    "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"1.0.0\","
+                        + " \"mainId\": \"m\", \"handle\": \"\"}"));
+    assertEquals("welcome names no file_max", ceilingless.getMessage());
+    assertEquals(
+        "A welcome names main's file ceiling, not 0",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new SyncWire.Welcome(4, "1.0.0", "main-box", "ada", 0))
+            .getMessage());
   }
 
   @Test
@@ -350,11 +361,9 @@ class SyncWireTest {
   }
 
   @Test
-  void aHelloOfThisBuildCarriesTheProtocolAndTheFloor() {
+  void aHelloOfThisBuildCarriesTheProtocolTheBuildAndTheBox() {
     var hello = SyncWire.Hello.of("0.44.3", "box");
-    assertEquals(SyncWire.PROTOCOL, hello.protocol());
-    assertEquals(SyncWire.UPGRADE_FLOOR, hello.floor());
-    assertEquals("0.44.3", hello.version());
+    assertEquals(new SyncWire.Hello(SyncWire.PROTOCOL, "0.44.3", "box"), hello);
   }
 
   @Test

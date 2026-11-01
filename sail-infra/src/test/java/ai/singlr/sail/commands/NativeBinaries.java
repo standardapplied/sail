@@ -9,20 +9,20 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 
 /**
- * The two native binaries the upgrade lanes run: {@link #candidate()}, the build under test, and
- * {@link #released()}, the release the fleet upgrades from. They arrive as {@code
- * -Dsail.it.nativeBinary} and {@code -Dsail.it.releasedBinary}; without them a test skips, except
- * under {@code -Dsail.it.requireNative=true}, where a missing binary fails loudly.
+ * The native binary the fleet lanes run: {@link #candidate()}, the build under test. It arrives as
+ * {@code -Dsail.it.nativeBinary}; without it a test skips, except under {@code
+ * -Dsail.it.requireNative=true}, where a missing binary fails loudly.
  */
-record NativeBinaries(Path candidate, Path released) {
+record NativeBinaries(Path candidate) {
 
   static NativeBinaries requireOrSkip(String lane) {
     requireOrSkip(lane, unavailable());
-    return new NativeBinaries(binary("sail.it.nativeBinary"), binary("sail.it.releasedBinary"));
+    return new NativeBinaries(binary(NATIVE_BINARY));
   }
+
+  private static final String NATIVE_BINARY = "sail.it.nativeBinary";
 
   /** Fails or skips {@code lane} for {@code reason}; a {@code null} reason lets it run. */
   static void requireOrSkip(String lane, String reason) {
@@ -39,16 +39,14 @@ record NativeBinaries(Path candidate, Path released) {
     assumeTrue(false, lane + " skipped (" + reason + ")");
   }
 
-  /** Why the binaries cannot be used, or {@code null} when both are executable files. */
+  /** Why the binary cannot be used, or {@code null} when it is an executable file. */
   static String unavailable() {
-    for (var property : List.of("sail.it.nativeBinary", "sail.it.releasedBinary")) {
-      var value = System.getProperty(property, "");
-      if (value.isBlank()) {
-        return "-D" + property + " is not set";
-      }
-      if (!Files.isExecutable(Path.of(value))) {
-        return "-D" + property + "=" + value + " is not an executable file";
-      }
+    var value = System.getProperty(NATIVE_BINARY, "");
+    if (value.isBlank()) {
+      return "-D" + NATIVE_BINARY + " is not set";
+    }
+    if (!Files.isExecutable(Path.of(value))) {
+      return "-D" + NATIVE_BINARY + "=" + value + " is not an executable file";
     }
     return null;
   }

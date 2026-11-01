@@ -9,8 +9,6 @@ import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.authority.WriterAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.common.Remedied;
-import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.FileLimits;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -90,13 +88,7 @@ public final class FileStore implements ConflictResolver, SyncedStore {
 
     public FileRow {
       if (contentHash == null)
-        throw Remedied.state(
-            "File "
-                + project
-                + "/"
-                + path
-                + " has no content hash: this database's content migration never finished.",
-            Remedy.of("Run '", Remedy.sail("migrate"), "'."));
+        throw new IllegalStateException("File " + project + "/" + path + " has no content hash.");
       BlobStore.requireHash(contentHash);
       if (size < 0
           || mode < 0

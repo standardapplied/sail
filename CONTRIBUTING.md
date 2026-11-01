@@ -38,20 +38,11 @@ Gates are ratchets: each protects the current baseline and only moves up.
 
 ## Database migration policy
 
-The SQLite schema is versioned by `SchemaManager` in `sail-core`.
-
-- **Append-only within a major version.** New migrations go after the current baseline and
-  are never reordered, edited or removed once released. A wrong migration is fixed by
-  appending another.
-- **Every migration ships with a seeded-data test** that stages a database at the prior
-  version, seeds representative rows, migrates and asserts the rows survived.
-- **Baselining happens only at a major version with a published floor.** The floor's final
-  schema and the new baseline must be structurally identical, proven by the `FloorSchema`
-  fixture and the schema-diff test; anything below the floor is refused with an error naming
-  the release that can still carry it forward. The current floor is schema v118 (sail 0.14.x).
-- **No downgrade path.** Schema changes are forward-only.
-- **One-shot data fix-ups are `DataMigration`s**, run exactly once and tracked by name in
-  `data_migrations`, never schema migrations.
+The SQLite schema is one baseline, `SchemaManager.BASELINE` in `sail-core`, stamped
+`SchemaManager.CURRENT_VERSION`. A fresh database gets it in one transaction; a database
+stamped with any other version is refused naming what to do, never migrated. A change to the
+schema edits the baseline and its test (`SchemaManagerTest` lists every table), and until the
+first post-v1 migration exists, a box carries no database across it: it is reinstalled.
 
 ## Cutting a release
 
@@ -60,10 +51,5 @@ The SQLite schema is versioned by `SchemaManager` in `sail-core`.
    in one commit, `chore: bump version to X.Y.Z`, and tag it `vX.Y.Z`.
 3. Push main and the tag. The tag triggers `release.yml`: the test suite on Linux and macOS,
    native images for both, and a GitHub Release with checksums and keyless cosign bundles.
-4. Once the release is published, move `.github/released-tag` to `vX.Y.Z` in a pull request
-   of its own (`ci: the fleet upgrades from vX.Y.Z`). That file is the release the upgrade
-   rehearsals (`NativeFleetIT`, `UpgradeE2EIT`) start from, so publishing never changes an
-   open branch's checks.
-
-Upgrade main first, then nodes. Sync refuses a peer below the fleet floor before any data moves
+Upgrade main first, then nodes. Sync refuses a peer on another protocol before any data moves
 and names the remedy.

@@ -57,7 +57,6 @@ import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncTransitionSink;
 import ai.singlr.sail.sync.SyncTransportException;
-import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -1005,7 +1004,7 @@ class SailOperationsSeamTest {
                     session,
                     FdeRoster.EMPTY,
                     SyncTransitionSink.NONE,
-                    SyncWire.UPGRADE_FLOOR)),
+                    "1.0.0")),
         SyncOperations.PLAIN_NOTICES);
   }
 
@@ -1089,7 +1088,7 @@ class SailOperationsSeamTest {
                               List.of(
                                   Map.of("handle", "node", "role", "viewer", "status", "active")),
                           SyncTransitionSink.NONE,
-                          SyncWire.UPGRADE_FLOOR)),
+                          "1.0.0")),
               SyncOperations.PLAIN_NOTICES));
       operations.schema().prepareSync();
 
@@ -1128,7 +1127,7 @@ class SailOperationsSeamTest {
                               List::of,
                               SyncTransitionSink.NONE,
                               new ChangeLog(main.db)::headsAfter,
-                              SyncWire.UPGRADE_FLOOR)
+                              "1.0.0")
                           .content(main.db, FileLimits.defaults())),
               events::add,
               SyncOperations.PLAIN_NOTICES));
@@ -1179,7 +1178,7 @@ class SailOperationsSeamTest {
                               List::of,
                               SyncTransitionSink.NONE,
                               new ChangeLog(main.db)::headsAfter,
-                              SyncWire.UPGRADE_FLOOR)
+                              "1.0.0")
                           .content(main.db, FileLimits.defaults())),
               SyncOperations.PLAIN_NOTICES));
       operations.schema().prepareSync();
@@ -1539,7 +1538,7 @@ class SailOperationsSeamTest {
             Actor.sync(handle, Role.MEMBER),
             () -> rosterOf(main),
             SyncTransitionSink.NONE,
-            SyncWire.UPGRADE_FLOOR));
+            "1.0.0"));
   }
 
   /** Main's roster as its sync server serves it to a node. */

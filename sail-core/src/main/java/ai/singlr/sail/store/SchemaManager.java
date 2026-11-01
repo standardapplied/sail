@@ -5,251 +5,39 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import java.util.List;
 
 /**
- * Manages SQLite schema versioning against the v1 baseline. A fresh database gets the current
- * schema in one shot; a database at or above the published 0.14 floor (schema v{@value
- * #FLOOR_VERSION}, the version every released 0.14.x binary reaches) rides the on-ramp — the
- * post-floor migrations that never shipped in a 0.14.x release — to the baseline; anything below
- * the floor is refused with the remedy, never silently replayed. The pre-1.0 migration chain lives
- * in git history only.
+ * Creates the one schema this release opens. A fresh database gets it in one shot, stamped {@value
+ * #CURRENT_VERSION}; a database with that stamp opens as it is; any other is refused with what to
+ * do. There is no version to walk: a box made by a release before v1 is reinstalled, not migrated,
+ * and an older binary never opens a newer schema.
  *
- * <p>Policy: migrations are append-only within a major version, and baselining like this happens
- * only at a major version with a published floor. The floor must be a version a released binary can
- * actually reach — a floor no release can produce strands the fleet behind an impossible remedy.
- * See ARCHITECTURE.md. Its rewrites change the shape of rows, never what they say, so they journal
- * nothing and name no actor.
+ * <p>The local-only tables never join a sync snapshot: {@code run_credentials} (per-run credential
+ * hashes), {@code run_delivered_messages} (delivery bookkeeping), {@code room_guard} (the room
+ * commit guard's launch baseline, kept host-side so the guarded agent can never reach it), {@code
+ * container_leases} (a box's own exclusive-container-operation claims), {@code fde_boxes} (main's
+ * record of the one box each FDE syncs from), {@code materialized_files} (the versions of each
+ * shared file this box wrote to disk or published), {@code fde_pairings} (the key and token this
+ * box made for each FDE's Mast), {@code project_grants} (the projects main granted each scoped
+ * FDE), {@code sync_scope} (the scope main last named for this node) and {@code catalog} (which
+ * database this is, and which of main's a node syncs with).
  */
 public final class SchemaManager {
 
-  /** The schema version a fully-migrated released sail 0.14.x database carries: the v1 floor. */
-  static final int FLOOR_VERSION = 118;
-
   /**
-   * The migrations between the floor and the baseline: appended after 0.14.1 shipped, never
-   * released, so a floor database must replay them here. Verbatim from the deleted chain; a
-   * database mid-ramp (a development box) resumes at its recorded version.
+   * The version this release stamps and opens. It lies beyond every version a release before v1
+   * stamped, so no older database is ever read as this one.
    */
-  static final List<String> ON_RAMP =
-      List.of(
-          """
-          CREATE TABLE runs_v4 (
-              id TEXT PRIMARY KEY,
-              project TEXT NOT NULL,
-              spec_id TEXT,
-              agent TEXT NOT NULL,
-              branch TEXT,
-              task TEXT,
-              pid INTEGER,
-              status TEXT NOT NULL DEFAULT 'running'
-                  CHECK (status IN ('running', 'stopping', 'completed', 'stopped', 'failed')),
-              started_at TEXT NOT NULL,
-              completed_at TEXT,
-              exit_code INTEGER,
-              watcher_pid INTEGER,
-              node TEXT,
-              role TEXT NOT NULL DEFAULT 'build'
-                  CHECK (role IN ('build', 'adhoc', 'review')),
-              log_path TEXT,
-              rev TEXT,
-              base_rev TEXT,
-              unit TEXT,
-              repos TEXT
-          )""",
-          """
-          INSERT INTO runs_v4 (id, project, spec_id, agent, branch, task, pid, status,
-                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
-                  rev, base_rev, unit, repos)
-              SELECT id, project, spec_id, agent, branch, task, pid, status,
-                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
-                  rev, base_rev, unit, repos FROM runs""",
-          "DROP TABLE runs",
-          "ALTER TABLE runs_v4 RENAME TO runs",
-          "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
-          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
-          "ALTER TABLE runs ADD COLUMN pid_ticks INTEGER");
+  public static final int CURRENT_VERSION = 1000;
 
-  /** The v1 baseline version: the floor plus the on-ramp it is structurally equivalent to. */
-  static final int V1_VERSION = FLOOR_VERSION + ON_RAMP.size() + 1;
-
-  /**
-   * The post-baseline migration chain: append-only within the 1.x major, one statement per version,
-   * versions continuing from {@value #V1_VERSION}. A migration's version is its <em>list index</em>
-   * ({@link #postBaselineFrom} applies {@code MIGRATIONS.get(version - V1_VERSION - 1)}), so an
-   * entry's position is its identity across releases: inserting one in the middle re-points every
-   * later version at different SQL, and a box stamped by an earlier release then runs a statement
-   * against the wrong schema — the {@code run_principals} incident, where a v0.20.0 box ran {@code
-   * INSERT INTO run_principals} at the index its {@code CREATE} used to hold. <b>Only ever append;
-   * never reorder, edit, or remove an entry.</b> Each addition ships with a test that seeds a
-   * database in a prior release's shape and migrates it forward — a fresh-database test cannot
-   * catch a mid-list insertion, because it never replays the earlier version→SQL mapping. The
-   * {@code run_credentials} table is local-only secret material (per-run credential hashes), and
-   * {@code run_delivered_messages} (delivery bookkeeping), {@code room_guard} (the room commit
-   * guard's launch baseline, kept host-side so the guarded agent can never reach it), {@code
-   * container_leases} (a box's own exclusive-container-operation claims), {@code fde_boxes} (main's
-   * record of the one box each FDE syncs from), {@code materialized_files} (the versions of each
-   * shared file this box wrote to disk or published), {@code fde_pairings} (the key and token this
-   * box made for each FDE's Mast), {@code project_grants} (the projects main granted each scoped
-   * FDE), {@code sync_scope} (the scope main last named for this node) and {@code catalog} (which
-   * database this is, and which of main's a node syncs with) are local-only as well — none of the
-   * ten ever joins a sync snapshot.
-   */
-  /**
-   * One-time sweep of the review-loop convergence gap: findings a spec shipped below the gate were
-   * left {@code OPEN} forever (nothing resolved a passed review's own residue). Closes every such
-   * finding — {@code OPEN} on the non-superseded passed review of a {@code done} spec — as {@code
-   * SHIPPED}, the same terminal state {@code ReviewStore.resolveShippedFindings} now writes on the
-   * {@code → done} transition going forward. Named so the migration test runs this exact statement.
-   */
-  static final String BACKFILL_SHIPPED_RESIDUE =
+  private static final String SCHEMA_VERSION_TABLE =
       """
-      UPDATE review_findings SET resolution = 'SHIPPED',
-              resolution_evidence = 'shipped below the review gate'
-          WHERE resolution = 'OPEN'
-          AND stage_id IN (
-              SELECT s.id FROM review_stages s
-              JOIN reviews r ON r.id = s.review_id
-              JOIN specs sp ON sp.id = r.spec_id
-              WHERE r.status = 'passed'
-              AND r.superseded_at IS NULL
-              AND sp.status = 'done')""";
-
-  /**
-   * Every box records a message revision under the author the message names ({@code
-   * ChangeLog.appendAuthored}); a box that posted a message before that recorded whoever was acting
-   * instead, so main and the nodes named different authors for the same revision. Named so the
-   * migration test runs this exact statement.
-   */
-  static final String MESSAGES_AUTHORED_BY_THEIR_POSTER =
-      """
-      UPDATE change_log SET actor = json_extract(snapshot, '$.author')
-          WHERE entity_type = 'message' AND kind = 'revision'
-          AND actor IS NOT json_extract(snapshot, '$.author')""";
-
-  /**
-   * A node that resolved a conflict taking main's side under an earlier release sits on a revision
-   * it minted itself, and one that adopted a revision main recorded with no author, or a rename's
-   * tombstone without its block, holds main's revision under other content; none is dirty, and
-   * main's head sits behind the node's checkpoint, so no round would look at it again. Every node
-   * walks main's heads once more, and takes main's version wherever its own differs.
-   */
-  public static final String NODES_HEAR_EVERY_HEAD_AGAIN = "UPDATE sync_state SET checkpoint = 0";
-
-  /**
-   * Main's shared-file ceiling as its welcome named it, so the node enforces the lower at ingest.
-   */
-  static final String MAIN_FILE_LIMIT = "CREATE TABLE main_limits (file_max INTEGER NOT NULL)";
-
-  /**
-   * A finding names the follow-up spec drafted from it in its review's synced content, where the
-   * box-local {@code spec_source_findings} link used to be the only record and vanished with the
-   * follow-up's row. The latest link becomes the finding's one {@code followup} before the table is
-   * dropped, and the data migration folds it into the review's content with the finding.
-   */
-  static final String FOLLOWUPS_FROM_LINKS =
-      """
-      UPDATE review_findings SET followup = (
-          SELECT l.spec_id FROM spec_source_findings l WHERE l.finding_id = review_findings.id
-          ORDER BY l.rowid DESC LIMIT 1)""";
-
-  /**
-   * When a spec entered {@code archived} or {@code cancelled} on this box: the timestamp retention
-   * ages on. Kept by the database on every path that writes a status — create, edit, a lifecycle
-   * transition, a sync adoption, a restore — so no writer can forget it; leaving the status clears
-   * it. A box-local fact, never part of a snapshot: main's sweeper ages on when main saw it.
-   */
-  static final String STATUS_SINCE_ON_INSERT =
-      """
-      CREATE TRIGGER specs_status_since_insert AFTER INSERT ON specs
-      WHEN NEW.status IN ('archived', 'cancelled')
-      BEGIN
-          UPDATE specs SET
-              archived_at = CASE WHEN NEW.status = 'archived'
-                  THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') END,
-              cancelled_at = CASE WHEN NEW.status = 'cancelled'
-                  THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') END
-          WHERE id = NEW.id;
-      END""";
-
-  static final String STATUS_SINCE_ON_UPDATE =
-      """
-      CREATE TRIGGER specs_status_since_update AFTER UPDATE OF status ON specs
-      WHEN NEW.status IS NOT OLD.status
-      BEGIN
-          UPDATE specs SET
-              archived_at = CASE WHEN NEW.status = 'archived'
-                  THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') END,
-              cancelled_at = CASE WHEN NEW.status = 'cancelled'
-                  THEN strftime('%Y-%m-%dT%H:%M:%fZ', 'now') END
-          WHERE id = NEW.id;
-      END""";
-
-  /**
-   * When a spec entered {@code archived} or {@code cancelled}: the time of the revision that made
-   * the transition ({@code updated_at}), which the revision carries on ({@link
-   * Snapshots#STATUS_SINCE}) and a box adopting it writes verbatim, so every box holds the same
-   * instant and retention ages on the author's. Supersedes {@link #STATUS_SINCE_ON_INSERT}, which
-   * stamped each box's own clock.
-   */
-  static final String STATUS_SINCE_REVISION_ON_INSERT =
-      """
-      CREATE TRIGGER specs_status_since_insert AFTER INSERT ON specs
-      WHEN NEW.status IN ('archived', 'cancelled')
-      BEGIN
-          UPDATE specs SET
-              archived_at = CASE WHEN NEW.status = 'archived'
-                  THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END,
-              cancelled_at = CASE WHEN NEW.status = 'cancelled'
-                  THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END
-          WHERE id = NEW.id;
-      END""";
-
-  /** As {@link #STATUS_SINCE_REVISION_ON_INSERT}, superseding {@link #STATUS_SINCE_ON_UPDATE}. */
-  static final String STATUS_SINCE_REVISION_ON_UPDATE =
-      """
-      CREATE TRIGGER specs_status_since_update AFTER UPDATE OF status ON specs
-      WHEN NEW.status IS NOT OLD.status
-      BEGIN
-          UPDATE specs SET
-              archived_at = CASE WHEN NEW.status = 'archived'
-                  THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END,
-              cancelled_at = CASE WHEN NEW.status = 'cancelled'
-                  THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END
-          WHERE id = NEW.id;
-      END""";
-
-  /**
-   * A deletion a release before {@code change_log.kind} writes — the old server keeps running while
-   * the upgrade migrates, and the column's default reads it as a revision — is recorded as the
-   * tombstone it is, so it still reaches main.
-   */
-  static final String KIND_FROM_DELETED =
-      """
-      CREATE TRIGGER change_log_kind_from_deleted AFTER INSERT ON change_log
-      WHEN NEW.deleted = 1 AND NEW.kind = 'revision'
-      BEGIN
-          UPDATE change_log SET kind = 'tombstone' WHERE seq = NEW.seq;
-      END""";
-
-  /**
-   * Whether main scoped an FDE to the projects it is granted ({@code granted}) or it sees every
-   * project ({@code all}, every FDE before this). Main's alone: the roster a node mirrors never
-   * says, so a node scopes no one.
-   */
-  static final String FDE_SCOPE =
-      """
-      ALTER TABLE fdes ADD COLUMN scope TEXT NOT NULL DEFAULT 'all'
-          CHECK (scope IN ('all', 'granted'))""";
-
-  /** The projects main granted each scoped FDE: box-local on main, like {@code fde_ssh_keys}. */
-  static final String PROJECT_GRANTS =
-      """
-      CREATE TABLE project_grants (
-          fde_id TEXT NOT NULL REFERENCES fdes(id) ON DELETE CASCADE,
-          project TEXT NOT NULL,
-          granted_at TEXT NOT NULL,
-          PRIMARY KEY (fde_id, project)
+      CREATE TABLE IF NOT EXISTS schema_version (
+          version INTEGER PRIMARY KEY,
+          applied_at TEXT NOT NULL
       )""";
 
   /**
@@ -260,622 +48,6 @@ public final class SchemaManager {
   static final String CATALOG =
       "CREATE TABLE catalog AS SELECT lower(hex(randomblob(16))) AS id, NULL AS main";
 
-  /**
-   * A box that ran a release with no column for a message's mark took a marked message in unmarked,
-   * and sync never reads a revision it holds again; the journal kept the snapshot whole, so the
-   * mark comes back from it. A message is a question or an error, never both.
-   */
-  static final String MESSAGE_MARKS_FROM_THE_JOURNAL =
-      """
-      UPDATE room_messages SET
-          error = CASE WHEN id IN (SELECT entity_id FROM change_log WHERE entity_type = 'message'
-              AND json_extract(snapshot, '$.error') = 1) THEN 1 ELSE error END,
-          question = CASE WHEN id IN (SELECT entity_id FROM change_log WHERE entity_type = 'message'
-              AND json_extract(snapshot, '$.question') = 1
-              AND json_extract(snapshot, '$.error') IS NOT 1) THEN 1 ELSE question END
-      WHERE error = 0 AND question = 0""";
-
-  /**
-   * A checkpoint a node kept before it kept what it read there ({@link SyncState.Mark}) cannot be
-   * told from the same seq in a main restored in place and grown past it, so each node walks main's
-   * heads once more and keeps, from then on, what it read beside every checkpoint.
-   */
-  static final String CHECKPOINTS_READ_AGAIN =
-      "UPDATE sync_state SET checkpoint = 0 WHERE read_seq IS NULL";
-
-  /**
-   * What each entry {@link ChangeLog#compact} dropped was, by seq: the evidence that a seq a node
-   * read is empty under retention, never because main was restored from an older copy and grew
-   * other entries there.
-   */
-  static final String COMPACTED_ENTRIES =
-      """
-      CREATE TABLE compacted_entries (
-          seq INTEGER PRIMARY KEY,
-          entity_type TEXT NOT NULL,
-          entity_id TEXT NOT NULL,
-          rev TEXT NOT NULL
-      )""";
-
-  /**
-   * The project each change head belongs to, null when unknown, so a page is scoped from the head
-   * alone: a pruned row has no row left to join, yet its erasure must still reach the nodes that
-   * held it and no other. Filled for existing heads by the {@code scoped-heads-v1} data migration.
-   */
-  static final String HEAD_PROJECT = "ALTER TABLE change_heads ADD COLUMN project TEXT";
-
-  /**
-   * The scope main's last welcome named for this node: one {@code all} row, or one {@code granted}
-   * row per project (a lone one naming none for a scope of no project). Empty until a welcome says.
-   */
-  static final String NODE_SCOPE =
-      """
-      CREATE TABLE sync_scope (
-          kind TEXT NOT NULL CHECK (kind IN ('all', 'granted')),
-          project TEXT
-      )""";
-
-  static final List<String> MIGRATIONS =
-      List.of(
-          "ALTER TABLE runs ADD COLUMN principal TEXT",
-          "ALTER TABLE runs ADD COLUMN owner TEXT",
-          """
-          CREATE TABLE run_credentials (
-              run_id TEXT PRIMARY KEY,
-              credential_hash TEXT NOT NULL UNIQUE,
-              created_at TEXT NOT NULL,
-              expires_at TEXT
-          )""",
-          """
-          CREATE TABLE spec_messages (
-              id TEXT PRIMARY KEY,
-              spec_id TEXT NOT NULL,
-              author TEXT NOT NULL,
-              body TEXT NOT NULL,
-              reply_to TEXT REFERENCES spec_messages(id),
-              created_at TEXT NOT NULL,
-              rev TEXT NOT NULL,
-              base_rev TEXT
-          )""",
-          "CREATE INDEX idx_spec_messages_page ON spec_messages(spec_id, id DESC)",
-          """
-          CREATE TABLE box_credential (
-              id INTEGER PRIMARY KEY CHECK (id = 1),
-              handle TEXT NOT NULL,
-              credential_hash TEXT NOT NULL UNIQUE,
-              created_at TEXT NOT NULL
-          )""",
-          """
-          CREATE TABLE review_findings_v2 (
-              id TEXT PRIMARY KEY,
-              stage_id TEXT NOT NULL REFERENCES review_stages(id) ON DELETE CASCADE,
-              severity TEXT NOT NULL,
-              category TEXT NOT NULL,
-              file TEXT,
-              line_start INTEGER,
-              line_end INTEGER,
-              title TEXT NOT NULL,
-              description TEXT NOT NULL,
-              evidence TEXT,
-              suggestion_before TEXT,
-              suggestion_after TEXT,
-              suggestion_rationale TEXT,
-              confidence REAL NOT NULL DEFAULT 0.0,
-              resolution TEXT NOT NULL DEFAULT 'OPEN'
-                  CHECK (resolution IN ('OPEN', 'FIXED', 'DISMISSED', 'DISPUTED')),
-              resolution_evidence TEXT,
-              carried_from TEXT
-          )""",
-          """
-          INSERT INTO review_findings_v2 (id, stage_id, severity, category, file,
-                  line_start, line_end, title, description, evidence, suggestion_before,
-                  suggestion_after, suggestion_rationale, confidence, resolution)
-              SELECT id, stage_id, severity, category, file,
-                  line_start, line_end, title, description, evidence, suggestion_before,
-                  suggestion_after, suggestion_rationale, confidence, resolution
-              FROM review_findings""",
-          "DROP TABLE review_findings",
-          "ALTER TABLE review_findings_v2 RENAME TO review_findings",
-          "CREATE INDEX idx_review_findings_stage ON review_findings(stage_id)",
-          "CREATE INDEX idx_review_findings_severity ON review_findings(severity)",
-          """
-          CREATE TABLE run_delivered_messages (
-              run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-              message_id TEXT NOT NULL REFERENCES spec_messages(id) ON DELETE CASCADE,
-              PRIMARY KEY (run_id, message_id)
-          )""",
-          """
-          CREATE TABLE run_principals (
-              run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-              principal TEXT NOT NULL,
-              PRIMARY KEY (run_id, principal)
-          )""",
-          "INSERT INTO run_principals SELECT id, principal FROM runs WHERE principal IS NOT NULL",
-          "ALTER TABLE review_findings ADD COLUMN carry_evidence TEXT",
-          "ALTER TABLE runs ADD COLUMN session_id TEXT",
-          "ALTER TABLE runs ADD COLUMN session_source TEXT",
-          "ALTER TABLE runs ADD COLUMN transcript_path TEXT",
-          """
-          CREATE TABLE runs_v5 (
-              id TEXT PRIMARY KEY,
-              project TEXT NOT NULL,
-              spec_id TEXT,
-              agent TEXT NOT NULL,
-              branch TEXT,
-              task TEXT,
-              pid INTEGER,
-              status TEXT NOT NULL DEFAULT 'running'
-                  CHECK (status IN ('running', 'stopping', 'completed', 'stopped', 'failed')),
-              started_at TEXT NOT NULL,
-              completed_at TEXT,
-              exit_code INTEGER,
-              watcher_pid INTEGER,
-              node TEXT,
-              role TEXT NOT NULL DEFAULT 'build'
-                  CHECK (role IN ('build', 'adhoc', 'review', 'room')),
-              log_path TEXT,
-              rev TEXT,
-              base_rev TEXT,
-              unit TEXT,
-              repos TEXT,
-              pid_ticks INTEGER,
-              principal TEXT,
-              owner TEXT,
-              session_id TEXT,
-              session_source TEXT,
-              transcript_path TEXT
-          )""",
-          """
-          INSERT INTO runs_v5 (id, project, spec_id, agent, branch, task, pid, status,
-                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
-                  rev, base_rev, unit, repos, pid_ticks, principal, owner, session_id,
-                  session_source, transcript_path)
-              SELECT id, project, spec_id, agent, branch, task, pid, status,
-                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
-                  rev, base_rev, unit, repos, pid_ticks, principal, owner, session_id,
-                  session_source, transcript_path FROM runs""",
-          "DROP TABLE runs",
-          "ALTER TABLE runs_v5 RENAME TO runs",
-          "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
-          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
-          "ALTER TABLE specs ADD COLUMN wake TEXT"
-              + " CHECK (wake IS NULL OR wake IN ('on', 'mention', 'off'))",
-          """
-          CREATE TABLE room_guard (
-              run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
-              baseline TEXT NOT NULL
-          )""",
-          "ALTER TABLE runs ADD COLUMN last_activity_at TEXT",
-          "ALTER TABLE spec_messages ADD COLUMN question INTEGER NOT NULL DEFAULT 0",
-          """
-          CREATE TABLE runs_v6 (
-              id TEXT PRIMARY KEY,
-              project TEXT NOT NULL,
-              spec_id TEXT,
-              agent TEXT NOT NULL,
-              branch TEXT,
-              task TEXT,
-              pid INTEGER,
-              status TEXT NOT NULL DEFAULT 'running'
-                  CHECK (status IN ('running', 'stopping', 'completed', 'stopped', 'failed')),
-              started_at TEXT NOT NULL,
-              completed_at TEXT,
-              exit_code INTEGER,
-              watcher_pid INTEGER,
-              node TEXT,
-              role TEXT NOT NULL DEFAULT 'build'
-                  CHECK (role IN ('build', 'adhoc', 'review', 'room', 'invite', 'invite-full')),
-              log_path TEXT,
-              rev TEXT,
-              base_rev TEXT,
-              unit TEXT,
-              repos TEXT,
-              pid_ticks INTEGER,
-              principal TEXT,
-              owner TEXT,
-              session_id TEXT,
-              session_source TEXT,
-              transcript_path TEXT,
-              last_activity_at TEXT
-          )""",
-          """
-          INSERT INTO runs_v6 (id, project, spec_id, agent, branch, task, pid, status,
-                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
-                  rev, base_rev, unit, repos, pid_ticks, principal, owner, session_id,
-                  session_source, transcript_path, last_activity_at)
-              SELECT id, project, spec_id, agent, branch, task, pid, status,
-                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
-                  rev, base_rev, unit, repos, pid_ticks, principal, owner, session_id,
-                  session_source, transcript_path, last_activity_at FROM runs""",
-          "DROP TABLE runs",
-          "ALTER TABLE runs_v6 RENAME TO runs",
-          "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
-          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
-          """
-          CREATE TABLE container_leases (
-              project TEXT NOT NULL,
-              node TEXT NOT NULL DEFAULT '',
-              action TEXT NOT NULL,
-              created_at TEXT NOT NULL,
-              PRIMARY KEY (project, node)
-          )""",
-          "ALTER TABLE specs ADD COLUMN engagement TEXT",
-          """
-          CREATE TABLE runs_v7 (
-              id TEXT PRIMARY KEY,
-              project TEXT NOT NULL,
-              spec_id TEXT,
-              agent TEXT NOT NULL,
-              branch TEXT,
-              task TEXT,
-              pid INTEGER,
-              status TEXT NOT NULL DEFAULT 'running'
-                  CHECK (status IN ('running', 'stopping', 'completed', 'stopped', 'failed')),
-              started_at TEXT NOT NULL,
-              completed_at TEXT,
-              exit_code INTEGER,
-              watcher_pid INTEGER,
-              node TEXT,
-              role TEXT NOT NULL DEFAULT 'build'
-                  CHECK (role IN ('build', 'adhoc', 'review', 'room', 'room-full', 'invite',
-                      'invite-full')),
-              log_path TEXT,
-              rev TEXT,
-              base_rev TEXT,
-              unit TEXT,
-              repos TEXT,
-              pid_ticks INTEGER,
-              principal TEXT,
-              owner TEXT,
-              session_id TEXT,
-              session_source TEXT,
-              transcript_path TEXT,
-              last_activity_at TEXT
-          )""",
-          """
-          INSERT INTO runs_v7 (id, project, spec_id, agent, branch, task, pid, status,
-                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
-                  rev, base_rev, unit, repos, pid_ticks, principal, owner, session_id,
-                  session_source, transcript_path, last_activity_at)
-              SELECT id, project, spec_id, agent, branch, task, pid, status,
-                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
-                  rev, base_rev, unit, repos, pid_ticks, principal, owner, session_id,
-                  session_source, transcript_path, last_activity_at FROM runs""",
-          "DROP TABLE runs",
-          "ALTER TABLE runs_v7 RENAME TO runs",
-          "CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project)",
-          "CREATE INDEX IF NOT EXISTS idx_runs_spec ON runs(spec_id)",
-          """
-          CREATE TABLE review_findings_v3 (
-              id TEXT PRIMARY KEY,
-              stage_id TEXT NOT NULL REFERENCES review_stages(id) ON DELETE CASCADE,
-              severity TEXT NOT NULL,
-              category TEXT NOT NULL,
-              file TEXT,
-              line_start INTEGER,
-              line_end INTEGER,
-              title TEXT NOT NULL,
-              description TEXT NOT NULL,
-              evidence TEXT,
-              suggestion_before TEXT,
-              suggestion_after TEXT,
-              suggestion_rationale TEXT,
-              confidence REAL NOT NULL DEFAULT 0.0,
-              resolution TEXT NOT NULL DEFAULT 'OPEN'
-                  CHECK (resolution IN ('OPEN', 'FIXED', 'DISMISSED', 'DISPUTED', 'SHIPPED')),
-              resolution_evidence TEXT,
-              carried_from TEXT,
-              carry_evidence TEXT
-          )""",
-          """
-          INSERT INTO review_findings_v3 (id, stage_id, severity, category, file,
-                  line_start, line_end, title, description, evidence, suggestion_before,
-                  suggestion_after, suggestion_rationale, confidence, resolution,
-                  resolution_evidence, carried_from, carry_evidence)
-              SELECT id, stage_id, severity, category, file,
-                  line_start, line_end, title, description, evidence, suggestion_before,
-                  suggestion_after, suggestion_rationale, confidence, resolution,
-                  resolution_evidence, carried_from, carry_evidence
-              FROM review_findings""",
-          "DROP TABLE review_findings",
-          "ALTER TABLE review_findings_v3 RENAME TO review_findings",
-          "CREATE INDEX idx_review_findings_stage ON review_findings(stage_id)",
-          "CREATE INDEX idx_review_findings_severity ON review_findings(severity)",
-          BACKFILL_SHIPPED_RESIDUE,
-          """
-          CREATE TABLE rooms (
-              id TEXT PRIMARY KEY,
-              project TEXT,
-              title TEXT NOT NULL,
-              assignee TEXT,
-              wake TEXT CHECK (wake IN ('on', 'mention', 'off')),
-              roster TEXT,
-              created_by TEXT,
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
-              updated_by TEXT,
-              rev TEXT,
-              base_rev TEXT
-          )""",
-          """
-          CREATE TABLE room_messages (
-              id TEXT PRIMARY KEY,
-              room_id TEXT NOT NULL,
-              author TEXT NOT NULL,
-              body TEXT NOT NULL,
-              reply_to TEXT REFERENCES room_messages(id),
-              created_at TEXT NOT NULL,
-              rev TEXT NOT NULL,
-              base_rev TEXT,
-              question INTEGER NOT NULL DEFAULT 0
-          )""",
-          """
-          INSERT INTO room_messages (id, room_id, author, body, reply_to, created_at, rev,
-                  base_rev, question)
-              SELECT id, spec_id, author, body, reply_to, created_at, rev, base_rev, question
-              FROM spec_messages""",
-          """
-          CREATE TABLE run_delivered_messages_v2 (
-              run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-              message_id TEXT NOT NULL REFERENCES room_messages(id) ON DELETE CASCADE,
-              PRIMARY KEY (run_id, message_id)
-          )""",
-          "INSERT INTO run_delivered_messages_v2 SELECT run_id, message_id"
-              + " FROM run_delivered_messages",
-          "DROP TABLE run_delivered_messages",
-          "ALTER TABLE run_delivered_messages_v2 RENAME TO run_delivered_messages",
-          "DROP TABLE spec_messages",
-          "CREATE INDEX idx_room_messages_page ON room_messages(room_id, id DESC)",
-          "ALTER TABLE specs ADD COLUMN room_id TEXT",
-          "UPDATE specs SET room_id = id WHERE room_id IS NULL",
-          "ALTER TABLE runs ADD COLUMN room_id TEXT",
-          """
-          CREATE TABLE specs_v2 (
-              id TEXT PRIMARY KEY,
-              title TEXT NOT NULL,
-              status TEXT NOT NULL DEFAULT 'draft'
-                  CHECK (status IN ('draft', 'pending', 'in_progress', 'review', 'awaiting_merge',
-                      'done', 'cancelled', 'archived')),
-              assignee TEXT,
-              agent TEXT,
-              model TEXT,
-              reasoning_effort TEXT
-                  CHECK (reasoning_effort IS NULL OR reasoning_effort IN
-                      ('none', 'low', 'medium', 'high', 'xhigh')),
-              branch TEXT,
-              priority INTEGER NOT NULL DEFAULT 0,
-              created_by TEXT,
-              created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL,
-              project TEXT NOT NULL DEFAULT 'unassigned',
-              updated_by TEXT,
-              rev TEXT,
-              base_rev TEXT,
-              room_id TEXT
-          )""",
-          "INSERT INTO specs_v2 (id, title, status, assignee, agent, model, reasoning_effort,"
-              + " branch, priority, created_by, created_at, updated_at, project, updated_by, rev,"
-              + " base_rev, room_id) SELECT id, title, status, assignee, agent, model,"
-              + " reasoning_effort, branch, priority, created_by, created_at, updated_at, project,"
-              + " updated_by, rev, base_rev, room_id FROM specs",
-          "DROP TABLE specs",
-          "ALTER TABLE specs_v2 RENAME TO specs",
-          "CREATE INDEX idx_specs_project ON specs(project)",
-          """
-          CREATE TABLE sync_health (
-              peer TEXT PRIMARY KEY,
-              last_attempt_at TEXT,
-              last_success_at TEXT,
-              consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
-              last_error_kind TEXT CHECK (last_error_kind IN ('unreachable', 'refused', 'protocol', 'store')),
-              last_error TEXT,
-              last_report TEXT,
-              state TEXT NOT NULL CHECK (state IN ('in_sync', 'syncing', 'stale')),
-              stale_since TEXT
-          )""",
-          """
-          CREATE TABLE change_heads (
-              entity_type TEXT NOT NULL,
-              entity_id TEXT NOT NULL,
-              seq INTEGER NOT NULL,
-              PRIMARY KEY (entity_type, entity_id)
-          )""",
-          "CREATE INDEX idx_change_heads_seq ON change_heads(entity_type, seq)",
-          """
-          INSERT INTO change_heads (entity_type, entity_id, seq)
-          SELECT entity_type, entity_id, MAX(seq) FROM change_log
-          GROUP BY entity_type, entity_id""",
-          """
-          CREATE TABLE sync_state_v2 (
-              peer TEXT NOT NULL,
-              entity_type TEXT NOT NULL,
-              checkpoint INTEGER NOT NULL DEFAULT 0,
-              updated_at TEXT NOT NULL,
-              PRIMARY KEY (peer, entity_type)
-          )""",
-          "DROP TABLE sync_state",
-          "ALTER TABLE sync_state_v2 RENAME TO sync_state",
-          """
-          CREATE TABLE chunks (
-              hash TEXT PRIMARY KEY,
-              size INTEGER NOT NULL,
-              bytes BLOB NOT NULL
-          )""",
-          """
-          CREATE TABLE blobs (
-              hash TEXT PRIMARY KEY,
-              size INTEGER NOT NULL,
-              chunks TEXT NOT NULL,
-              created_at TEXT NOT NULL
-          )""",
-          "ALTER TABLE specs ADD COLUMN body_hash TEXT",
-          "ALTER TABLE specs ADD COLUMN plan_hash TEXT",
-          "ALTER TABLE project_files ADD COLUMN content_hash TEXT",
-          "ALTER TABLE project_files ADD COLUMN size INTEGER",
-          "ALTER TABLE project_files ADD COLUMN mode INTEGER NOT NULL DEFAULT 420",
-          "ALTER TABLE project_files ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'",
-          """
-          CREATE INDEX idx_change_log_file_version ON change_log (
-              entity_id, json_extract(snapshot, '$.content_hash'), json_extract(snapshot, '$.mode')
-          ) WHERE entity_type = 'file'
-          """,
-          """
-          ALTER TABLE change_log ADD COLUMN kind TEXT NOT NULL DEFAULT 'revision'
-              CHECK (kind IN ('revision', 'tombstone', 'erasure'))""",
-          KIND_FROM_DELETED,
-          "UPDATE change_log SET kind = 'tombstone' WHERE deleted = 1",
-          "ALTER TABLE specs ADD COLUMN archived_at TEXT",
-          "ALTER TABLE specs ADD COLUMN cancelled_at TEXT",
-          "UPDATE specs SET archived_at = updated_at WHERE status = 'archived'",
-          "UPDATE specs SET cancelled_at = updated_at WHERE status = 'cancelled'",
-          STATUS_SINCE_ON_INSERT,
-          STATUS_SINCE_ON_UPDATE,
-          """
-          CREATE TABLE erase_requests (
-              entity_type TEXT NOT NULL,
-              entity_id TEXT NOT NULL,
-              actor TEXT,
-              requested_at TEXT NOT NULL,
-              PRIMARY KEY (entity_type, entity_id)
-          )""",
-          "CREATE INDEX idx_change_log_tombstones ON change_log(entity_type) WHERE kind = 'tombstone'",
-          "CREATE INDEX idx_room_messages_reply ON room_messages(reply_to)",
-          "CREATE INDEX idx_runs_room ON runs(room_id)",
-          "CREATE INDEX idx_rooms_project ON rooms(project)",
-          "CREATE INDEX idx_specs_room ON specs(room_id)",
-          "CREATE INDEX idx_run_delivered_message ON run_delivered_messages(message_id)",
-          """
-          CREATE TABLE fde_boxes (
-              handle TEXT PRIMARY KEY,
-              box_id TEXT NOT NULL,
-              claimed_at TEXT NOT NULL
-          )""",
-          "ALTER TABLE sync_conflicts ADD COLUMN remote_rev TEXT",
-          "ALTER TABLE sync_conflicts ADD COLUMN remote_author TEXT",
-          MESSAGES_AUTHORED_BY_THEIR_POSTER,
-          """
-          CREATE TABLE sync_offers (
-              entity_type TEXT NOT NULL,
-              entity_id TEXT NOT NULL,
-              offered TEXT,
-              offered_from TEXT,
-              PRIMARY KEY (entity_type, entity_id)
-          )""",
-          NODES_HEAR_EVERY_HEAD_AGAIN,
-          MAIN_FILE_LIMIT,
-          "ALTER TABLE reviews ADD COLUMN findings_hash TEXT",
-          "ALTER TABLE review_findings ADD COLUMN followup TEXT",
-          FOLLOWUPS_FROM_LINKS,
-          "DROP TABLE spec_source_findings",
-          "DROP TABLE spec_attachments",
-          """
-          CREATE TABLE materialized_files (
-              id TEXT NOT NULL,
-              content_hash TEXT NOT NULL,
-              mode INTEGER NOT NULL,
-              undecided INTEGER NOT NULL DEFAULT 0,
-              PRIMARY KEY (id, content_hash, mode)
-          )""",
-          "ALTER TABLE events ADD COLUMN publisher TEXT",
-          """
-          CREATE TABLE runs_v8 (
-              id TEXT PRIMARY KEY,
-              project TEXT NOT NULL,
-              spec_id TEXT,
-              agent TEXT NOT NULL,
-              branch TEXT,
-              task TEXT,
-              pid INTEGER,
-              status TEXT NOT NULL DEFAULT 'running'
-                  CHECK (status IN ('running', 'stopping', 'completed', 'stopped', 'failed')),
-              started_at TEXT NOT NULL,
-              completed_at TEXT,
-              exit_code INTEGER,
-              watcher_pid INTEGER,
-              node TEXT,
-              role TEXT NOT NULL DEFAULT 'build'
-                  CHECK (role IN ('build', 'adhoc', 'review', 'fix', 'room', 'room-full',
-                      'invite', 'invite-full')),
-              log_path TEXT,
-              rev TEXT,
-              base_rev TEXT,
-              unit TEXT,
-              repos TEXT,
-              pid_ticks INTEGER,
-              principal TEXT,
-              owner TEXT,
-              session_id TEXT,
-              session_source TEXT,
-              transcript_path TEXT,
-              last_activity_at TEXT,
-              room_id TEXT,
-              review_id TEXT,
-              stop_source TEXT
-          )""",
-          """
-          INSERT INTO runs_v8 (id, project, spec_id, agent, branch, task, pid, status,
-                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
-                  rev, base_rev, unit, repos, pid_ticks, principal, owner, session_id,
-                  session_source, transcript_path, last_activity_at, room_id, review_id)
-              SELECT id, project, spec_id, agent, branch, task, pid, status,
-                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
-                  rev, base_rev, unit, repos, pid_ticks, principal, owner, session_id,
-                  session_source, transcript_path, last_activity_at, room_id,
-                  CASE WHEN role = 'review' THEN id END FROM runs""",
-          "DROP TABLE runs",
-          "ALTER TABLE runs_v8 RENAME TO runs",
-          "CREATE INDEX idx_runs_project ON runs(project)",
-          "CREATE INDEX idx_runs_spec ON runs(spec_id)",
-          "CREATE INDEX idx_runs_room ON runs(room_id)",
-          "CREATE INDEX idx_runs_review ON runs(review_id)",
-          "ALTER TABLE reviews ADD COLUMN waiting_on TEXT",
-          """
-          CREATE TABLE fde_pairings (
-              fde_id TEXT PRIMARY KEY REFERENCES fdes(id) ON DELETE CASCADE,
-              public_key TEXT NOT NULL,
-              token_name TEXT NOT NULL,
-              created_at TEXT NOT NULL
-          )""",
-          FDE_SCOPE,
-          PROJECT_GRANTS,
-          HEAD_PROJECT,
-          NODE_SCOPE,
-          "DROP TRIGGER specs_status_since_insert",
-          STATUS_SINCE_REVISION_ON_INSERT,
-          "DROP TRIGGER specs_status_since_update",
-          STATUS_SINCE_REVISION_ON_UPDATE,
-          CATALOG,
-          "ALTER TABLE sync_state ADD COLUMN read_seq INTEGER",
-          "ALTER TABLE sync_state ADD COLUMN read_id TEXT",
-          "ALTER TABLE sync_state ADD COLUMN read_rev TEXT",
-          CHECKPOINTS_READ_AGAIN,
-          COMPACTED_ENTRIES,
-          "CREATE INDEX idx_compacted_entries_entity ON compacted_entries(entity_type, entity_id)",
-          "ALTER TABLE room_messages ADD COLUMN error INTEGER NOT NULL DEFAULT 0",
-          MESSAGE_MARKS_FROM_THE_JOURNAL);
-
-  /** The schema version this binary converges every database to. */
-  static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();
-
-  /** The version that introduced {@code sync_health}; a database below it has no health to read. */
-  public static final int SYNC_HEALTH_VERSION = versionIntroducing("CREATE TABLE sync_health");
-
-  private static int versionIntroducing(String statementPrefix) {
-    for (var i = 0; i < MIGRATIONS.size(); i++) {
-      if (MIGRATIONS.get(i).strip().startsWith(statementPrefix)) {
-        return V1_VERSION + i + 1;
-      }
-    }
-    throw new IllegalStateException("No migration introduces " + statementPrefix);
-  }
-
-  private static final String SCHEMA_VERSION_TABLE =
-      """
-      CREATE TABLE IF NOT EXISTS schema_version (
-          version INTEGER PRIMARY KEY,
-          applied_at TEXT NOT NULL
-      )""";
-
   private static final List<String> BASELINE =
       List.of(
           """
@@ -883,14 +55,12 @@ public final class SchemaManager {
               id TEXT PRIMARY KEY,
               title TEXT NOT NULL,
               status TEXT NOT NULL DEFAULT 'draft'
-                  CHECK (status IN ('draft', 'pending', 'in_progress', 'review', 'awaiting_merge',
-                      'done', 'cancelled', 'archived')),
+                  CHECK (status IN ('draft', 'pending', 'in_progress', 'review', 'awaiting_merge', 'done', 'cancelled', 'archived')),
               assignee TEXT,
               agent TEXT,
               model TEXT,
               reasoning_effort TEXT
-                  CHECK (reasoning_effort IS NULL OR reasoning_effort IN
-                      ('none', 'low', 'medium', 'high', 'xhigh')),
+                  CHECK (reasoning_effort IS NULL OR reasoning_effort IN ('none', 'low', 'medium', 'high', 'xhigh')),
               branch TEXT,
               priority INTEGER NOT NULL DEFAULT 0,
               created_by TEXT,
@@ -899,9 +69,37 @@ public final class SchemaManager {
               project TEXT NOT NULL DEFAULT 'unassigned',
               updated_by TEXT,
               rev TEXT,
-              base_rev TEXT
+              base_rev TEXT,
+              room_id TEXT,
+              body_hash TEXT,
+              plan_hash TEXT,
+              archived_at TEXT,
+              cancelled_at TEXT
           )""",
           "CREATE INDEX idx_specs_project ON specs(project)",
+          "CREATE INDEX idx_specs_room ON specs(room_id)",
+          """
+          CREATE TRIGGER specs_status_since_insert AFTER INSERT ON specs
+          WHEN NEW.status IN ('archived', 'cancelled')
+          BEGIN
+              UPDATE specs SET
+                  archived_at = CASE WHEN NEW.status = 'archived'
+                      THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END,
+                  cancelled_at = CASE WHEN NEW.status = 'cancelled'
+                      THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END
+              WHERE id = NEW.id;
+          END""",
+          """
+          CREATE TRIGGER specs_status_since_update AFTER UPDATE OF status ON specs
+          WHEN NEW.status IS NOT OLD.status
+          BEGIN
+              UPDATE specs SET
+                  archived_at = CASE WHEN NEW.status = 'archived'
+                      THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END,
+                  cancelled_at = CASE WHEN NEW.status = 'cancelled'
+                      THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END
+              WHERE id = NEW.id;
+          END""",
           """
           CREATE TABLE spec_dependencies (
               spec_id TEXT NOT NULL REFERENCES specs(id) ON DELETE CASCADE,
@@ -922,16 +120,6 @@ public final class SchemaManager {
               updated_at TEXT NOT NULL
           )""",
           """
-          CREATE TABLE spec_attachments (
-              id TEXT PRIMARY KEY,
-              spec_id TEXT NOT NULL REFERENCES specs(id) ON DELETE CASCADE,
-              filename TEXT NOT NULL,
-              content_type TEXT NOT NULL,
-              size_bytes INTEGER NOT NULL,
-              storage_path TEXT NOT NULL,
-              created_at TEXT NOT NULL
-          )""",
-          """
           CREATE TABLE events (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               timestamp TEXT NOT NULL,
@@ -940,7 +128,8 @@ public final class SchemaManager {
               spec_id TEXT,
               agent TEXT,
               host TEXT NOT NULL,
-              data TEXT NOT NULL DEFAULT '{}'
+              data TEXT NOT NULL DEFAULT '{}',
+              publisher TEXT
           )""",
           "CREATE INDEX idx_events_type ON events(type)",
           "CREATE INDEX idx_events_project ON events(project)",
@@ -952,17 +141,16 @@ public final class SchemaManager {
               handle TEXT NOT NULL UNIQUE,
               display_name TEXT,
               email TEXT,
-              status TEXT NOT NULL DEFAULT 'active'
-                  CHECK (status IN ('active', 'disabled')),
+              status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
               created_at TEXT NOT NULL,
-              role TEXT NOT NULL DEFAULT 'member'
+              role TEXT NOT NULL DEFAULT 'member',
+              scope TEXT NOT NULL DEFAULT 'all' CHECK (scope IN ('all', 'granted'))
           )""",
           """
           CREATE TABLE api_tokens (
               token_hash TEXT PRIMARY KEY,
               name TEXT NOT NULL UNIQUE,
-              role TEXT NOT NULL DEFAULT 'member'
-                  CHECK (role IN ('admin', 'member', 'viewer')),
+              role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('admin', 'member', 'viewer')),
               fde_id TEXT REFERENCES fdes(id) ON DELETE CASCADE,
               created_at TEXT NOT NULL,
               last_used_at TEXT,
@@ -1029,7 +217,9 @@ public final class SchemaManager {
               superseded_at TEXT,
               error TEXT,
               rev TEXT,
-              base_rev TEXT
+              base_rev TEXT,
+              findings_hash TEXT,
+              waiting_on TEXT
           )""",
           "CREATE INDEX idx_reviews_spec ON reviews(spec_id)",
           """
@@ -1043,36 +233,99 @@ public final class SchemaManager {
               reviewer TEXT,
               started_at TEXT,
               completed_at TEXT,
-              error TEXT,
-              finding_counts TEXT
+              error TEXT
           )""",
           "CREATE INDEX idx_review_stages_review ON review_stages(review_id)",
           """
-          CREATE TABLE review_findings (
-              id TEXT PRIMARY KEY,
-              stage_id TEXT NOT NULL REFERENCES review_stages(id) ON DELETE CASCADE,
-              severity TEXT NOT NULL,
-              category TEXT NOT NULL,
-              file TEXT,
-              line_start INTEGER,
-              line_end INTEGER,
-              title TEXT NOT NULL,
-              description TEXT NOT NULL,
-              evidence TEXT,
-              suggestion_before TEXT,
-              suggestion_after TEXT,
-              suggestion_rationale TEXT,
-              confidence REAL NOT NULL DEFAULT 0.0,
-              resolution TEXT NOT NULL DEFAULT 'OPEN'
-                  CHECK (resolution IN ('OPEN', 'FIXED', 'DISMISSED'))
+          CREATE TABLE projects (
+              name TEXT PRIMARY KEY,
+              definition TEXT NOT NULL,
+              created_by TEXT,
+              created_at TEXT NOT NULL,
+              updated_by TEXT,
+              updated_at TEXT NOT NULL,
+              rev TEXT,
+              base_rev TEXT
           )""",
-          "CREATE INDEX idx_review_findings_stage ON review_findings(stage_id)",
-          "CREATE INDEX idx_review_findings_severity ON review_findings(severity)",
           """
-          CREATE TABLE spec_source_findings (
-              spec_id TEXT NOT NULL REFERENCES specs(id) ON DELETE CASCADE,
-              finding_id TEXT NOT NULL REFERENCES review_findings(id) ON DELETE CASCADE,
-              PRIMARY KEY (spec_id, finding_id)
+          CREATE TABLE project_files (
+              id TEXT PRIMARY KEY,
+              project TEXT NOT NULL,
+              path TEXT NOT NULL,
+              rev TEXT,
+              base_rev TEXT,
+              updated_at TEXT NOT NULL,
+              content_hash TEXT,
+              size INTEGER,
+              mode INTEGER NOT NULL DEFAULT 420,
+              kind TEXT NOT NULL DEFAULT 'text',
+              UNIQUE (project, path)
+          )""",
+          """
+          CREATE TABLE change_log (
+              seq INTEGER PRIMARY KEY AUTOINCREMENT,
+              entity_type TEXT NOT NULL,
+              entity_id TEXT NOT NULL,
+              rev TEXT NOT NULL,
+              actor TEXT,
+              recorded_at TEXT NOT NULL,
+              origin TEXT NOT NULL,
+              deleted INTEGER NOT NULL DEFAULT 0,
+              snapshot TEXT NOT NULL,
+              peer TEXT,
+              kind TEXT NOT NULL DEFAULT 'revision'
+                  CHECK (kind IN ('revision', 'tombstone', 'erasure'))
+          )""",
+          "CREATE INDEX idx_change_log_entity ON change_log(entity_type, entity_id, seq)",
+          "CREATE INDEX idx_change_log_file_version"
+              + " ON change_log ( entity_id, json_extract(snapshot, '$.content_hash'), json_extract(snapshot, '$.mode') ) WHERE entity_type = 'file'",
+          "CREATE INDEX idx_change_log_tombstones"
+              + " ON change_log(entity_type) WHERE kind = 'tombstone'",
+          """
+          CREATE TRIGGER change_log_kind_from_deleted AFTER INSERT ON change_log
+          WHEN NEW.deleted = 1 AND NEW.kind = 'revision'
+          BEGIN
+              UPDATE change_log SET kind = 'tombstone' WHERE seq = NEW.seq;
+          END""",
+          """
+          CREATE TABLE sync_conflicts (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              entity_type TEXT NOT NULL,
+              entity_id TEXT NOT NULL,
+              base_snapshot TEXT,
+              local_snapshot TEXT,
+              remote_snapshot TEXT,
+              fields TEXT NOT NULL,
+              detected_at TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'pending',
+              resolved_rev TEXT,
+              remote_rev TEXT,
+              remote_author TEXT
+          )""",
+          "CREATE INDEX idx_sync_conflicts_pending"
+              + " ON sync_conflicts(status, entity_type, entity_id)",
+          """
+          CREATE TABLE slack_threads (
+              project TEXT NOT NULL,
+              spec_id TEXT NOT NULL,
+              channel TEXT NOT NULL,
+              thread_ts TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              PRIMARY KEY (project, spec_id)
+          )""",
+          """
+          CREATE TABLE run_credentials (
+              run_id TEXT PRIMARY KEY,
+              credential_hash TEXT NOT NULL UNIQUE,
+              created_at TEXT NOT NULL,
+              expires_at TEXT
+          )""",
+          """
+          CREATE TABLE box_credential (
+              id INTEGER PRIMARY KEY CHECK (id = 1),
+              handle TEXT NOT NULL,
+              credential_hash TEXT NOT NULL UNIQUE,
+              created_at TEXT NOT NULL
           )""",
           """
           CREATE TABLE runs (
@@ -1091,87 +344,217 @@ public final class SchemaManager {
               watcher_pid INTEGER,
               node TEXT,
               role TEXT NOT NULL DEFAULT 'build'
-                  CHECK (role IN ('build', 'adhoc', 'review')),
+                  CHECK (role IN ('build', 'adhoc', 'review', 'fix', 'room', 'room-full', 'invite', 'invite-full')),
               log_path TEXT,
               rev TEXT,
               base_rev TEXT,
               unit TEXT,
               repos TEXT,
-              pid_ticks INTEGER
+              pid_ticks INTEGER,
+              principal TEXT,
+              owner TEXT,
+              session_id TEXT,
+              session_source TEXT,
+              transcript_path TEXT,
+              last_activity_at TEXT,
+              room_id TEXT,
+              review_id TEXT,
+              stop_source TEXT
           )""",
           "CREATE INDEX idx_runs_project ON runs(project)",
           "CREATE INDEX idx_runs_spec ON runs(spec_id)",
+          "CREATE INDEX idx_runs_room ON runs(room_id)",
+          "CREATE INDEX idx_runs_review ON runs(review_id)",
           """
-          CREATE TABLE projects (
-              name TEXT PRIMARY KEY,
-              definition TEXT NOT NULL,
+          CREATE TABLE run_principals (
+              run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+              principal TEXT NOT NULL,
+              PRIMARY KEY (run_id, principal)
+          )""",
+          """
+          CREATE TABLE room_guard (
+              run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+              baseline TEXT NOT NULL
+          )""",
+          """
+          CREATE TABLE container_leases (
+              project TEXT NOT NULL,
+              node TEXT NOT NULL DEFAULT '',
+              action TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              PRIMARY KEY (project, node)
+          )""",
+          """
+          CREATE TABLE review_findings (
+              id TEXT PRIMARY KEY,
+              stage_id TEXT NOT NULL REFERENCES review_stages(id) ON DELETE CASCADE,
+              severity TEXT NOT NULL,
+              category TEXT NOT NULL,
+              file TEXT,
+              line_start INTEGER,
+              line_end INTEGER,
+              title TEXT NOT NULL,
+              description TEXT NOT NULL,
+              evidence TEXT,
+              suggestion_before TEXT,
+              suggestion_after TEXT,
+              suggestion_rationale TEXT,
+              confidence REAL NOT NULL DEFAULT 0.0,
+              resolution TEXT NOT NULL DEFAULT 'OPEN'
+                  CHECK (resolution IN ('OPEN', 'FIXED', 'DISMISSED', 'DISPUTED', 'SHIPPED')),
+              resolution_evidence TEXT,
+              carried_from TEXT,
+              carry_evidence TEXT,
+              followup TEXT
+          )""",
+          "CREATE INDEX idx_review_findings_stage ON review_findings(stage_id)",
+          "CREATE INDEX idx_review_findings_severity ON review_findings(severity)",
+          """
+          CREATE TABLE rooms (
+              id TEXT PRIMARY KEY,
+              project TEXT,
+              title TEXT NOT NULL,
+              assignee TEXT,
+              wake TEXT CHECK (wake IN ('on', 'mention', 'off')),
+              roster TEXT,
               created_by TEXT,
               created_at TEXT NOT NULL,
-              updated_by TEXT,
               updated_at TEXT NOT NULL,
+              updated_by TEXT,
               rev TEXT,
               base_rev TEXT
           )""",
+          "CREATE INDEX idx_rooms_project ON rooms(project)",
           """
-          CREATE TABLE project_files (
+          CREATE TABLE room_messages (
               id TEXT PRIMARY KEY,
-              project TEXT NOT NULL,
-              path TEXT NOT NULL,
-              content TEXT NOT NULL,
-              rev TEXT,
-              base_rev TEXT,
-              updated_at TEXT NOT NULL,
-              UNIQUE (project, path)
-          )""",
-          """
-          CREATE TABLE change_log (
-              seq INTEGER PRIMARY KEY AUTOINCREMENT,
-              entity_type TEXT NOT NULL,
-              entity_id TEXT NOT NULL,
+              room_id TEXT NOT NULL,
+              author TEXT NOT NULL,
+              body TEXT NOT NULL,
+              reply_to TEXT REFERENCES room_messages(id),
+              created_at TEXT NOT NULL,
               rev TEXT NOT NULL,
-              actor TEXT,
-              recorded_at TEXT NOT NULL,
-              origin TEXT NOT NULL,
-              deleted INTEGER NOT NULL DEFAULT 0,
-              snapshot TEXT NOT NULL,
-              peer TEXT
+              base_rev TEXT,
+              question INTEGER NOT NULL DEFAULT 0,
+              error INTEGER NOT NULL DEFAULT 0
           )""",
-          "CREATE INDEX idx_change_log_entity ON change_log(entity_type, entity_id, seq)",
+          "CREATE INDEX idx_room_messages_page ON room_messages(room_id, id DESC)",
+          "CREATE INDEX idx_room_messages_reply ON room_messages(reply_to)",
           """
-          CREATE TABLE sync_conflicts (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
+          CREATE TABLE run_delivered_messages (
+              run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+              message_id TEXT NOT NULL REFERENCES room_messages(id) ON DELETE CASCADE,
+              PRIMARY KEY (run_id, message_id)
+          )""",
+          "CREATE INDEX idx_run_delivered_message ON run_delivered_messages(message_id)",
+          """
+          CREATE TABLE sync_health (
+              peer TEXT PRIMARY KEY,
+              last_attempt_at TEXT,
+              last_success_at TEXT,
+              consecutive_failures INTEGER NOT NULL DEFAULT 0 CHECK (consecutive_failures >= 0),
+              last_error_kind TEXT
+                  CHECK (last_error_kind IN ('unreachable', 'refused', 'protocol', 'store')),
+              last_error TEXT,
+              last_report TEXT,
+              state TEXT NOT NULL CHECK (state IN ('in_sync', 'syncing', 'stale')),
+              stale_since TEXT
+          )""",
+          """
+          CREATE TABLE change_heads (
               entity_type TEXT NOT NULL,
               entity_id TEXT NOT NULL,
-              base_snapshot TEXT,
-              local_snapshot TEXT,
-              remote_snapshot TEXT,
-              fields TEXT NOT NULL,
-              detected_at TEXT NOT NULL,
-              status TEXT NOT NULL DEFAULT 'pending',
-              resolved_rev TEXT
+              seq INTEGER NOT NULL,
+              project TEXT,
+              PRIMARY KEY (entity_type, entity_id)
           )""",
-          "CREATE INDEX idx_sync_conflicts_pending"
-              + " ON sync_conflicts(status, entity_type, entity_id)",
+          "CREATE INDEX idx_change_heads_seq ON change_heads(entity_type, seq)",
           """
           CREATE TABLE sync_state (
-              peer TEXT PRIMARY KEY,
+              peer TEXT NOT NULL,
+              entity_type TEXT NOT NULL,
               checkpoint INTEGER NOT NULL DEFAULT 0,
-              updated_at TEXT NOT NULL
+              updated_at TEXT NOT NULL,
+              read_seq INTEGER,
+              read_id TEXT,
+              read_rev TEXT,
+              PRIMARY KEY (peer, entity_type)
           )""",
           """
-          CREATE TABLE slack_threads (
+          CREATE TABLE chunks (
+              hash TEXT PRIMARY KEY,
+              size INTEGER NOT NULL,
+              bytes BLOB NOT NULL
+          )""",
+          """
+          CREATE TABLE blobs (
+              hash TEXT PRIMARY KEY,
+              size INTEGER NOT NULL,
+              chunks TEXT NOT NULL,
+              created_at TEXT NOT NULL
+          )""",
+          """
+          CREATE TABLE erase_requests (
+              entity_type TEXT NOT NULL,
+              entity_id TEXT NOT NULL,
+              actor TEXT,
+              requested_at TEXT NOT NULL,
+              PRIMARY KEY (entity_type, entity_id)
+          )""",
+          """
+          CREATE TABLE fde_boxes (
+              handle TEXT PRIMARY KEY,
+              box_id TEXT NOT NULL,
+              claimed_at TEXT NOT NULL
+          )""",
+          """
+          CREATE TABLE sync_offers (
+              entity_type TEXT NOT NULL,
+              entity_id TEXT NOT NULL,
+              offered TEXT,
+              offered_from TEXT,
+              PRIMARY KEY (entity_type, entity_id)
+          )""",
+          """
+          CREATE TABLE main_limits (
+              file_max INTEGER NOT NULL
+          )""",
+          """
+          CREATE TABLE materialized_files (
+              id TEXT NOT NULL,
+              content_hash TEXT NOT NULL,
+              mode INTEGER NOT NULL,
+              undecided INTEGER NOT NULL DEFAULT 0,
+              PRIMARY KEY (id, content_hash, mode)
+          )""",
+          """
+          CREATE TABLE fde_pairings (
+              fde_id TEXT PRIMARY KEY REFERENCES fdes(id) ON DELETE CASCADE,
+              public_key TEXT NOT NULL,
+              token_name TEXT NOT NULL,
+              created_at TEXT NOT NULL
+          )""",
+          """
+          CREATE TABLE project_grants (
+              fde_id TEXT NOT NULL REFERENCES fdes(id) ON DELETE CASCADE,
               project TEXT NOT NULL,
-              spec_id TEXT NOT NULL,
-              channel TEXT NOT NULL,
-              thread_ts TEXT NOT NULL,
-              created_at TEXT NOT NULL,
-              PRIMARY KEY (project, spec_id)
+              granted_at TEXT NOT NULL,
+              PRIMARY KEY (fde_id, project)
           )""",
           """
-          CREATE TABLE data_migrations (
-              name TEXT PRIMARY KEY,
-              applied_at TEXT NOT NULL
-          )""");
+          CREATE TABLE sync_scope (
+              kind TEXT NOT NULL CHECK (kind IN ('all', 'granted')),
+              project TEXT
+          )""",
+          CATALOG,
+          """
+          CREATE TABLE compacted_entries (
+              seq INTEGER PRIMARY KEY,
+              entity_type TEXT NOT NULL,
+              entity_id TEXT NOT NULL,
+              rev TEXT NOT NULL
+          )""",
+          "CREATE INDEX idx_compacted_entries_entity ON compacted_entries(entity_type, entity_id)");
 
   private final Sqlite db;
 
@@ -1180,132 +563,50 @@ public final class SchemaManager {
   }
 
   /**
-   * Converges the schema to this binary's current version. A fresh database gets the v1 baseline
-   * plus the post-baseline chain directly; a database at or past the 0.14 floor rides the on-ramp
-   * remainder to the baseline (a released 0.14.x database replays the never-released post-floor
-   * migrations; a development box mid-ramp resumes where its version left off) and then the
-   * post-baseline chain, applied incrementally from its recorded version; a database below the
-   * floor raises {@link PreFloorException} with the remedy, because this release no longer carries
-   * the pre-1.0 migration chain; a database newer than this binary raises {@link
-   * IllegalStateException}, because an older binary must not operate on a schema it does not
-   * understand. Idempotent: re-running on a current database is a no-op.
+   * Creates the schema on a fresh database and stamps it, atomically; does nothing on a database
+   * this release made. Any other database is refused naming what to do: an older one was made by a
+   * release before v1 and is replaced, a newer one needs a newer binary.
    */
   public void migrate() {
     db.execute(SCHEMA_VERSION_TABLE);
-    var current = currentVersion();
-    if (current > CURRENT_VERSION) {
-      throw new IllegalStateException(
+    if (currentVersion() == CURRENT_VERSION) {
+      return;
+    }
+    db.transaction(
+        () -> {
+          var current = currentVersion();
+          if (current == CURRENT_VERSION) return;
+          if (current != 0) throw refused(current);
+          BASELINE.forEach(db::execute);
+          stamp(CURRENT_VERSION);
+        });
+  }
+
+  private IllegalStateException refused(int version) {
+    if (version > CURRENT_VERSION) {
+      return Remedied.state(
           "Database schema v"
-              + current
+              + version
               + " is newer than this Sail binary supports (v"
               + CURRENT_VERSION
-              + "). Upgrade Sail before opening this database.");
+              + ").",
+          Remedy.of("Run '", Remedy.sail("upgrade"), "' before opening this database."));
     }
-    if (current == CURRENT_VERSION) {
-      return;
-    }
-    if (current == 0) {
-      db.transaction(
-          () -> {
-            if (currentVersion() != 0) return;
-            BASELINE.forEach(db::execute);
-            MIGRATIONS.forEach(db::execute);
-            db.execute("ALTER TABLE project_files DROP COLUMN content");
-            stamp(CURRENT_VERSION);
-          });
-      return;
-    }
-    if (current < FLOOR_VERSION) {
-      throw new PreFloorException(
-          "This database is schema v"
-              + current
-              + ", below the v1 schema floor (schema v"
-              + FLOOR_VERSION
-              + "), and this release does not carry pre-floor migrations."
-              + " Install sail 0.14.x, let it migrate this database, then upgrade to this release"
-              + " and retry.");
-    }
-    if (current < V1_VERSION) {
-      onRampFrom(current);
-    }
-    postBaselineFrom(currentVersion());
-  }
-
-  /**
-   * Applies the post-baseline remainder incrementally: each migration commits with its own version
-   * stamp, so an interruption resumes exactly where it left off and a database written by an older
-   * 1.x binary replays only the entries it has not seen. Foreign-key enforcement is suspended for
-   * the window, exactly as on the on-ramp: the chain contains a table rebuild whose {@code DROP
-   * TABLE} would otherwise fire an implicit delete and cascade child rows away. Integrity is
-   * verified before enforcement is restored.
-   */
-  private void postBaselineFrom(int current) {
-    if (current >= CURRENT_VERSION) {
-      return;
-    }
-    db.execute("PRAGMA foreign_keys = OFF");
-    try {
-      for (var next = current + 1; next <= CURRENT_VERSION; next++) {
-        var version = next;
-        var statement = MIGRATIONS.get(version - V1_VERSION - 1);
-        db.transaction(
-            () -> {
-              if (currentVersion() >= version) return;
-              db.execute(statement);
-              stamp(version);
-            });
-      }
-      requireForeignKeysIntact();
-    } finally {
-      db.execute("PRAGMA foreign_keys = ON");
-    }
-  }
-
-  /**
-   * Applies the on-ramp remainder from {@code current} and stamps the baseline version, atomically.
-   * Foreign-key enforcement is suspended for the window because the on-ramp contains a table
-   * rebuild that must drop-and-recreate a parent without firing child cascades; integrity is
-   * verified before enforcement is restored, so a violated rebuild fails loud rather than shipping
-   * a corrupted database.
-   */
-  private void onRampFrom(int current) {
-    db.execute("PRAGMA foreign_keys = OFF");
-    try {
-      db.transaction(
-          () -> {
-            var lockedVersion = currentVersion();
-            if (lockedVersion >= V1_VERSION) return;
-            ON_RAMP.subList(lockedVersion - FLOOR_VERSION, ON_RAMP.size()).forEach(db::execute);
-            stamp(V1_VERSION);
-          });
-      requireForeignKeysIntact();
-    } finally {
-      db.execute("PRAGMA foreign_keys = ON");
-    }
-  }
-
-  private void requireForeignKeysIntact() {
-    var violations =
-        db.query("PRAGMA foreign_key_check", row -> row.text(0) + " row " + row.integer(1));
-    if (!violations.isEmpty()) {
-      throw new SqliteException(
-          "Migration broke referential integrity: " + String.join(", ", violations), 0);
-    }
+    return Remedied.state(
+        "Database schema v"
+            + version
+            + " was made by a Sail release before v1; this release opens only v"
+            + CURRENT_VERSION
+            + ".",
+        Remedy.of(
+            "Move " + db.path() + " aside and run '",
+            Remedy.sail("init"),
+            "' to make a fresh one."));
   }
 
   private void stamp(int version) {
     db.execute(
         "INSERT INTO schema_version (version, applied_at) VALUES (?, datetime('now'))", version);
-  }
-
-  /**
-   * A database below the v1 schema floor: only a sail 0.14.x binary can carry it forward. Kept
-   * distinct so callers can surface the message without re-wrapping.
-   */
-  public static final class PreFloorException extends IllegalStateException {
-    PreFloorException(String message) {
-      super(message);
-    }
   }
 
   public int currentVersion() {

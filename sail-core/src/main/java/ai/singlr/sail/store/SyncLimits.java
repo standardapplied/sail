@@ -19,11 +19,8 @@ public final class SyncLimits {
     this.db = db;
   }
 
-  /** Records main's {@code file_max}; a 0 (an older main that names none) leaves the last known. */
+  /** Records main's {@code file_max}, as its welcome named it. */
   public void recordMainFileMax(long fileMax) {
-    if (fileMax <= 0) {
-      return;
-    }
     db.transaction(
         () -> {
           db.execute("DELETE FROM main_limits");

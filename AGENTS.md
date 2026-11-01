@@ -105,11 +105,11 @@ tests bite, and the deletion count in the body.
   `sail-infra/src/main/resources/META-INF/native-image/ai.singlr/sail-cli/reflect-config.json`
   and stringified in `PtySelfTestCommand.jsonProbe()`; the release smoke test is the only
   place an unregistered record fails.
-- Schema migrations are append-only: never reorder, edit or remove an entry; ship each with
-  a test that seeds the prior shape and migrates. One-shot fix-ups are `DataMigration`s,
-  tracked by name.
+- The schema is one baseline (`SchemaManager.BASELINE`): a database of another version is
+  refused, never walked. A schema change edits the baseline and is a fleet reinstall until
+  the first post-v1 migration exists.
 - `sail upgrade` runs the old binary; a fix to the upgrade path only takes effect one
-  release later unless it rides `migrate`.
+  release later unless it rides `migrate`, which the new binary runs.
 - Hook scripts drain stdin before anything else, or the hook writer gets `EPIPE`.
 - `gh run view --log` truncates a job's log at about 5,000 lines. The whole log is
   `gh api repos/standardapplied/sail/actions/jobs/<jobId>/logs`.

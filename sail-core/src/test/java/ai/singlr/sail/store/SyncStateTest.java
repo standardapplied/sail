@@ -8,7 +8,6 @@ package ai.singlr.sail.store;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ai.singlr.sail.sync.SyncedEntities;
 import java.nio.file.Path;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -111,41 +110,5 @@ class SyncStateTest {
     assertThrows(IllegalArgumentException.class, () -> new SyncState.Mark(4, -1, "s", "1-a"));
     assertThrows(IllegalArgumentException.class, () -> new SyncState.Mark(4, 0, "s", "1-a"));
     assertThrows(IllegalArgumentException.class, () -> new SyncState.Mark(4, 3, "", ""));
-  }
-
-  @Test
-  void theMigrationStartsEveryTypeFromZeroSoAnOverAdvancedProtocol3CheckpointHidesNothing() {
-    try (var staged = Sqlite.open(tempDir.resolve("staged.db"))) {
-      FloorSchema.stage(staged);
-      staged.execute("PRAGMA foreign_keys = OFF");
-      SchemaManager.ON_RAMP.forEach(staged::execute);
-      var rewrite = migrationIndex("CREATE TABLE sync_state_v2");
-      SchemaManager.MIGRATIONS.subList(0, rewrite).forEach(staged::execute);
-      staged.execute("PRAGMA foreign_keys = ON");
-      staged.execute(
-          "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
-          SchemaManager.V1_VERSION + rewrite);
-      staged.execute(
-          "INSERT INTO sync_state (peer, checkpoint, updated_at) VALUES ('maindevbox', 314, 't0')");
-
-      new SchemaManager(staged).migrate();
-
-      var migrated = new SyncState(staged);
-      for (var entity : SyncedEntities.all()) {
-        assertEquals(0L, migrated.checkpoint("maindevbox", entity.type()), entity.type());
-      }
-      migrated.advance("maindevbox", "spec", 7);
-      assertEquals(7L, migrated.checkpoint("maindevbox", "spec"));
-      assertEquals(0L, migrated.checkpoint("maindevbox", "run"));
-    }
-  }
-
-  private static int migrationIndex(String needle) {
-    for (var i = 0; i < SchemaManager.MIGRATIONS.size(); i++) {
-      if (SchemaManager.MIGRATIONS.get(i).contains(needle)) {
-        return i;
-      }
-    }
-    throw new AssertionError("no migration contains: " + needle);
   }
 }

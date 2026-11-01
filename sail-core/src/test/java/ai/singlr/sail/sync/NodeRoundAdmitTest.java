@@ -38,7 +38,7 @@ class NodeRoundAdmitTest {
   private static SyncSession welcomedBy(String catalog) {
     var welcome =
         new SyncWire.Welcome(
-            SyncWire.PROTOCOL, "0.53.0", "main", "nia", 0, ProjectScope.all(), catalog);
+            SyncWire.PROTOCOL, "0.53.0", "main", "nia", 4096, ProjectScope.all(), catalog);
     return SyncSession.open(
         new ByteStreams.Input(SyncWire.encode(welcome) + "\n"),
         new ByteStreams.Output(),

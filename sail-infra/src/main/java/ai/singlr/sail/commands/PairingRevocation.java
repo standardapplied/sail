@@ -25,8 +25,8 @@ import java.util.concurrent.TimeoutException;
 /**
  * Takes back everything a pairing made this box trust: the key lines in the operator's login, the
  * key in this box's containers and, when it is the workstation key, that file, then the token and
- * the record. {@code fde unpair}, {@code fde rm}, a re-pair and {@link OwnBoxPairings} all revoke
- * through here, each holding {@link PairingTrust}.
+ * the record. {@code fde unpair}, {@code fde rm} and a re-pair all revoke through here, each
+ * holding {@link PairingTrust}.
  */
 final class PairingRevocation {
 

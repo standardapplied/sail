@@ -201,7 +201,7 @@ class SyncBlobTest {
                 Actor.sync("viewer", Role.VIEWER),
                 FdeRoster.EMPTY,
                 SyncTransitionSink.NONE,
-                SyncWire.UPGRADE_FLOOR)
+                "1.0.0")
             .serve(input, OutputStream.nullOutputStream());
       }
     }
@@ -455,7 +455,7 @@ class SyncBlobTest {
                   FdeRoster.EMPTY,
                   SyncTransitionSink.NONE,
                   new ChangeLog(main.db)::headsAfter,
-                  SyncWire.UPGRADE_FLOOR)
+                  "1.0.0")
               .content(main.db, FileLimits.defaults());
       var replicas = SyncedEntities.replicas(node.db, "node", "node");
       try (var link = SyncBox.connect(server, node)) {

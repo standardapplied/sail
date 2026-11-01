@@ -278,7 +278,7 @@ public final class SyncOperations {
         var session =
             SyncSession.open(
                 channel.reader(), channel.writer(), hello(config), unsaid -> {}, unsaid -> {})) {
-      return session.handle().filter(handle::equals).isPresent();
+      return handle.equals(session.handle());
     } catch (Exception notWelcomed) {
       return false;
     }

@@ -37,7 +37,6 @@ import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncSession;
 import ai.singlr.sail.sync.SyncTransitionSink;
-import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.io.IOException;
 import java.net.URI;
@@ -284,7 +283,7 @@ class OneDecisionTest {
             Actor.sync("ada", Role.MEMBER),
             FdeRoster.EMPTY,
             SyncTransitionSink.NONE,
-            SyncWire.UPGRADE_FLOOR);
+            "1.0.0");
     try (var link = SyncBox.connect(server, node)) {
       return link.reconcile(type, SyncedEntities.replicas(node.db, node.id, node.id).get(type));
     }

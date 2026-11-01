@@ -164,10 +164,9 @@ public final class Snapshots {
   /**
    * The creator a row that holds {@code held} records when written from {@code snapshot}. A creator
    * is written once: main keeps the one it holds whatever a later offer names, and a node adopting
-   * main's revision takes the creator main holds, none included. A snapshot without the {@link
-   * #CREATOR} key, from a main that predates it, keeps {@code held}. One exception fills a gap an
-   * older main left: a creator main never recorded is taken from a push by that creator, naming
-   * itself — a push never names anyone else as a creator.
+   * main's revision takes the creator main holds, none included; a snapshot without the {@link
+   * #CREATOR} key keeps {@code held}. A creator main never recorded is taken from a push by that
+   * creator, naming itself — a push never names anyone else as a creator.
    */
   public static String adoptedCreator(Map<String, Object> snapshot, String held) {
     var actor = Actor.current();
