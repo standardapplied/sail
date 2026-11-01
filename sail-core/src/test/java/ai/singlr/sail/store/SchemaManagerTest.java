@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import org.junit.jupiter.api.AfterEach;
@@ -193,17 +194,19 @@ class SchemaManagerTest {
     new SchemaManager(db).migrate();
     db.execute(
         "INSERT INTO specs (id, title, status, created_at, updated_at) VALUES ('s', 's',"
-            + " 'archived', 't0', 1767225600000)");
-    assertEquals("2026-01-01T00:00:00Z", since("archived_at"));
+            + " 'archived', 1767225600000, 1767225600000)");
+    assertEquals(Instant.parse("2026-01-01T00:00:00Z"), since("archived_at"));
 
     db.execute("UPDATE specs SET title = 'renamed', updated_at = 1767312000000 WHERE id = 's'");
     assertEquals(
-        "2026-01-01T00:00:00Z", since("archived_at"), "an edit that keeps the status keeps it");
+        Instant.parse("2026-01-01T00:00:00Z"),
+        since("archived_at"),
+        "an edit that keeps the status keeps it");
 
     db.execute(
         "UPDATE specs SET status = 'cancelled', updated_at = 1767398400000" + " WHERE id = 's'");
     assertNull(since("archived_at"));
-    assertEquals("2026-01-03T00:00:00Z", since("cancelled_at"));
+    assertEquals(Instant.parse("2026-01-03T00:00:00Z"), since("cancelled_at"));
 
     db.execute("UPDATE specs SET status = 'pending' WHERE id = 's'");
     assertNull(since("archived_at"));
@@ -333,12 +336,9 @@ class SchemaManagerTest {
         "a deleted run takes its guard baseline with it");
   }
 
-  private String since(String column) {
-    var value =
-        db.queryOne(
-                "SELECT COALESCE(" + column + ", '') FROM specs WHERE id = 's'", row -> row.text(0))
-            .orElseThrow();
-    return value.isEmpty() ? null : value;
+  private Instant since(String column) {
+    return db.queryOne("SELECT " + column + " FROM specs WHERE id = 's'", row -> row.instant(0))
+        .orElseThrow();
   }
 
   private void stageAtVersion(int version) {
