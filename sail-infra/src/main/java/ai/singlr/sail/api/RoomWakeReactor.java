@@ -430,9 +430,6 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       return null;
     }
     var humanAt = newestHuman.createdAt();
-    if (humanAt == null) {
-      return null;
-    }
     var newestChatStart =
         target.runs().stream()
             .filter(RunStore.RunRow::chatRole)
