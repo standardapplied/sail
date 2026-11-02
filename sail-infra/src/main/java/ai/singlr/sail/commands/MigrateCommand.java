@@ -53,6 +53,12 @@ public final class MigrateCommand implements Runnable {
   @Option(names = "--json", description = "Output JSON instead of human-readable text.")
   private boolean json;
 
+  @Option(
+      names = "--non-interactive",
+      hidden = true,
+      description = "Accepted from Sail 0.58's upgrade, which passes it; changes nothing.")
+  private boolean nonInteractive;
+
   @Override
   public void run() {
     CliCommand.run(this::execute);
@@ -128,8 +134,9 @@ public final class MigrateCommand implements Runnable {
   }
 
   /**
-   * Prepares the database at {@code dbPath}, then, when {@code scope} is the whole box, converges
-   * the host around it with {@code host}.
+   * Converts the database at {@code dbPath} when Sail 0.58 made it ({@link LegacyHostConversion}),
+   * prepares it, then, when {@code scope} is the whole box, converges the host around it with
+   * {@code host}.
    */
   static void converge(
       Path dbPath, boolean jsonOutput, Scope scope, BiConsumer<Sqlite, Boolean> host) {
@@ -141,6 +148,7 @@ public final class MigrateCommand implements Runnable {
     } catch (Exception e) {
       throw new IllegalStateException("Could not prepare " + dbPath.getParent(), e);
     }
+    LegacyHostConversion.convertIfLegacy(dbPath, scope instanceof Scope.Box, jsonOutput);
     try (var db = Sqlite.open(dbPath)) {
       BoxDatabase.prepare(db);
       if (!jsonOutput) {
