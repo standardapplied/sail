@@ -39,6 +39,7 @@ class NativeFleetIT {
             main.createSpecs("open", 2, BODY_BYTES);
             main.createSpecs("closed", 1, BODY_BYTES);
             main.apiOk("spec", "update", "closed-1", "--status", "archived");
+            main.apiOk("spec", "update", "open-1", "--assignee", "mady");
             main.apiOk("spec", "comment", "open-1", "--body", "kept with its spec");
             main.apiOk("spec", "comment", "closed-1", "--body", "dropped with its spec");
             main.shOk("printf 'echo up\\n' > /tmp/setup.sh && chmod 755 /tmp/setup.sh");
