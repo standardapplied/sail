@@ -18,6 +18,7 @@ import java.io.UncheckedIOException;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
@@ -300,32 +301,59 @@ public final class LegacyConversion {
     } catch (IOException e) {
       failure.addSuppressed(e);
     }
+    try {
+      clearStaging();
+    } catch (IOException e) {
+      failure.addSuppressed(e);
+    }
   }
 
   /**
    * Copies the database as it is converted to {@link #backup()}, readable by its owner alone: it
-   * holds every credential hash the box holds. The file is made first, empty, so the copy lands in
-   * it with those permissions, and the copy is on disk before the database changes. A failure after
-   * the file is made takes it away again.
+   * holds every credential hash the box holds. The copy is made inside a directory only its owner
+   * may enter, narrowed to its owner and written to disk there, then moved into place, so no other
+   * user can open it at any moment and it is on disk before the database changes. A directory left
+   * by a conversion that died is cleared first: only the holder of the write lock gets here. A
+   * failure takes the copy away again.
    */
   private void backUp() {
+    var copy = staging().resolve(backup().getFileName());
     try {
-      Files.createFile(
-          backup(),
-          PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
-    } catch (IOException e) {
-      throw new UncheckedIOException("Could not create the backup " + backup(), e);
-    }
-    try {
-      try (var copy = Sqlite.open(path)) {
-        copy.execute("VACUUM INTO ?", backup().toString());
+      clearStaging();
+      Files.createDirectory(
+          staging(),
+          PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+      try (var source = Sqlite.open(path)) {
+        source.execute("VACUUM INTO ?", copy.toString());
       }
-      flush(backup(), StandardOpenOption.WRITE);
+      Files.setPosixFilePermissions(copy, PosixFilePermissions.fromString("rw-------"));
+      flush(copy, StandardOpenOption.WRITE);
+      Files.move(copy, backup(), StandardCopyOption.ATOMIC_MOVE);
+      Files.delete(staging());
       flush(backup().toAbsolutePath().getParent(), StandardOpenOption.READ);
-    } catch (RuntimeException e) {
-      forgetBackup(e);
-      throw e;
+    } catch (IOException | RuntimeException e) {
+      var failure =
+          Remedied.state(
+              "Could not back up " + path + " to " + backup() + " (" + e + ").",
+              Remedy.of(
+                  "Make room, or move ",
+                  staging().toString(),
+                  " aside if it is there, then run '",
+                  Remedy.sail("migrate"),
+                  "' again."),
+              e);
+      forgetBackup(failure);
+      throw failure;
     }
+  }
+
+  private Path staging() {
+    return backup().resolveSibling(backup().getFileName() + ".partial");
+  }
+
+  private void clearStaging() throws IOException {
+    Files.deleteIfExists(staging().resolve(backup().getFileName()));
+    Files.deleteIfExists(staging());
   }
 
   private static void flush(Path file, StandardOpenOption mode) {

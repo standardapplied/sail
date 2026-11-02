@@ -18,6 +18,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -662,6 +663,113 @@ class LegacyConversionTest {
   }
 
   @Test
+  void aHalfMadeBackupADeadConversionLeftIsClearedAndMadeAgain() throws IOException {
+    legacyFleet();
+    var staging = Files.createDirectory(file.resolveSibling("sail.db.0.58.bak.partial"));
+    Files.writeString(staging.resolve("sail.db.0.58.bak"), "half a copy");
+
+    var report = converted();
+
+    assertEquals(LegacyConversion.VERSION, versionOf(report.backup()));
+    assertFalse(Files.exists(staging));
+  }
+
+  @Test
+  void aStagingDirectoryHoldingSomethingElseFailsTheConversionAndChangesNothing()
+      throws IOException {
+    legacyFleet();
+    var staging = Files.createDirectory(file.resolveSibling("sail.db.0.58.bak.partial"));
+    Files.writeString(staging.resolve("notes"), "not ours");
+
+    var refused = assertThrows(IllegalStateException.class, () -> conversion().convert());
+
+    assertTrue(
+        Remedied.reasonOf(refused)
+            .startsWith(
+                "Could not back up "
+                    + file
+                    + " to "
+                    + file.resolveSibling("sail.db.0.58.bak")
+                    + " (java.nio.file.DirectoryNotEmptyException: "
+                    + staging),
+        refused.getMessage());
+    assertTrue(
+        refused.getMessage().contains("move " + staging + " aside if it is there"),
+        refused.getMessage());
+    assertEquals("not ours", Files.readString(staging.resolve("notes")));
+    assertEquals(LegacyConversion.VERSION, versionOf(file));
+    assertFalse(Files.exists(file.resolveSibling("sail.db.0.58.bak")));
+  }
+
+  @Test
+  void aBackupThatFailsHalfwayTakesItsCopyAwayAndChangesNothing() throws IOException {
+    try (var legacy = LegacyDatabase.create(file, CATALOG)) {
+      fleet(legacy);
+      legacy.run("run-3", "sail", "open-a", "running", null);
+      legacy.db.execute("UPDATE runs SET unit = 'sail-agent-run-3' WHERE id = 'run-3'");
+    }
+    var backup = file.resolveSibling("sail.db.0.58.bak");
+    var host =
+        new LegacyConversion.Host() {
+          @Override
+          public boolean running(String project, String unit) {
+            try {
+              Files.writeString(Files.createDirectories(backup).resolve("in the way"), "x");
+            } catch (IOException e) {
+              throw new UncheckedIOException(e);
+            }
+            return false;
+          }
+
+          @Override
+          public void requireNoOtherHolder() {}
+        };
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> LegacyConversion.at(file, hostYaml, host).orElseThrow().convert());
+
+    assertTrue(
+        Remedied.reasonOf(refused).startsWith("Could not back up " + file + " to " + backup),
+        refused.getMessage());
+    assertEquals(1, refused.getSuppressed().length);
+    assertFalse(Files.exists(file.resolveSibling("sail.db.0.58.bak.partial")));
+    assertEquals(LegacyConversion.VERSION, versionOf(file));
+  }
+
+  @Test
+  void aCopySqliteCannotMakeFailsWithTheRemedyAndChangesNothing() throws IOException {
+    var deep = dir;
+    while (482 - deep.toString().length() > 150) {
+      deep = deep.resolve("d".repeat(100));
+    }
+    deep = deep.resolve("d".repeat(482 - deep.toString().length() - 1));
+    var deepFile = Files.createDirectories(deep).resolve("sail.db");
+    assertEquals(490, deepFile.toString().length());
+    try (var legacy = LegacyDatabase.create(deepFile, CATALOG)) {
+      fleet(legacy);
+    }
+    var staging = deepFile.resolveSibling("sail.db.0.58.bak.partial");
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                LegacyConversion.at(deepFile, hostYaml, LegacyDatabase.QUIET)
+                    .orElseThrow()
+                    .convert());
+
+    assertTrue(refused.getCause() instanceof SqliteException, refused.getMessage());
+    assertTrue(
+        refused.getMessage().contains("move " + staging + " aside if it is there"),
+        refused.getMessage());
+    assertFalse(Files.exists(staging));
+    assertFalse(Files.exists(deepFile.resolveSibling("sail.db.0.58.bak")));
+    assertEquals(LegacyConversion.VERSION, versionOf(deepFile));
+  }
+
+  @Test
   void aHostYamlThatCannotBeReadRefusesBeforeAnythingIsDecided() throws IOException {
     legacyFleet();
 
@@ -718,6 +826,7 @@ class LegacyConversionTest {
     assertEquals(
         PosixFilePermissions.fromString("rw-------"),
         Files.getPosixFilePermissions(report.backup()));
+    assertFalse(Files.exists(file.resolveSibling("sail.db.0.58.bak.partial")));
     try (var backup = Sqlite.open(report.backup())) {
       assertEquals(
           5L, backup.queryOne("SELECT COUNT(*) FROM specs", row -> row.integer(0)).orElseThrow());
@@ -818,6 +927,7 @@ class LegacyConversionTest {
   private void assertUnchanged() {
     assertEquals(LegacyConversion.VERSION, versionOf(file));
     assertFalse(Files.exists(file.resolveSibling("sail.db.0.58.bak")));
+    assertFalse(Files.exists(file.resolveSibling("sail.db.0.58.bak.partial")));
     try (var db = Sqlite.open(file)) {
       assertNotNull(db.queryOne("SELECT COUNT(*) FROM runs", row -> row.integer(0)).orElseThrow());
       assertEquals(
