@@ -8,7 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.Lane;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.RunStore;
@@ -140,7 +140,7 @@ public final class AdhocRunner {
       String branch,
       String task,
       AgentUnit unit,
-      SailYaml config) {
+      ProjectDefinition config) {
     if (runStore == null) {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED,
@@ -160,13 +160,13 @@ public final class AdhocRunner {
         config);
   }
 
-  private static String adhocWorkDir(SailYaml config, String path) {
-    var workDir = "/home/" + config.sshUser() + "/workspace";
+  private static String adhocWorkDir(ProjectDefinition config, String path) {
+    var workDir = "/home/" + ProjectDefinition.USER + "/workspace";
     var relative = WorkBranch.workspacePath(path);
     return relative.isEmpty() ? workDir : workDir + "/" + relative;
   }
 
-  private static boolean adhocFullPermissions(SailYaml config) {
+  private static boolean adhocFullPermissions(ProjectDefinition config) {
     return config.agent() != null
         && config.agent().config() != null
         && "full".equals(config.agent().config().get("permissions"));
@@ -178,7 +178,7 @@ public final class AdhocRunner {
    */
   private boolean prepare(
       String project,
-      SailYaml config,
+      ProjectDefinition config,
       DispatchOperations.AdhocRequest request,
       DispatchOperations.AdhocPreparer preparer) {
     try {

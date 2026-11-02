@@ -28,17 +28,17 @@ public enum ProjectPhase {
   PODMAN_INSTALLED,
   /** Testcontainers environment variables configured for the dev user. */
   TESTCONTAINERS_CONFIGURED,
-  /** JDK installed at the version specified in sail.yaml runtimes. */
+  /** JDK installed at the version the definition's runtimes name. */
   JDK_INSTALLED,
-  /** Node.js installed at the version specified in sail.yaml runtimes. */
+  /** Node.js installed at the version the definition's runtimes name. */
   NODE_INSTALLED,
-  /** Git configured with user name, email, known hosts, and optional credentials. */
+  /** Git configured with this box's identity and the forge credentials. */
   GIT_CONFIGURED,
-  /** Maven installed at the version specified in sail.yaml runtimes. */
+  /** Maven installed at the version the definition's runtimes name. */
   MAVEN_INSTALLED,
   /** Source repositories cloned into ~/workspace/. */
   REPOS_CLONED,
-  /** Workspace files from the local {@code files/} directory pushed into ~/workspace/. */
+  /** The project's shared files, from the catalog's file store, pushed into ~/workspace/. */
   WORKSPACE_FILES_PUSHED,
   /** Infrastructure services provisioned as rootless Podman containers. */
   SERVICES_PROVISIONED,
@@ -50,8 +50,6 @@ public enum ProjectPhase {
    * The project's skills and sail's spec-board installed for every harness the project installs.
    */
   SKILLS_INSTALLED,
-  /** Specs scaffold directory created inside workspace. */
-  SPECS_SCAFFOLD_CREATED,
   /** Project state written inside container. Provisioning complete. */
   COMPLETE,
 }

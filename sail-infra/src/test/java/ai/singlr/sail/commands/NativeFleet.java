@@ -518,20 +518,11 @@ public final class NativeFleet implements AutoCloseable {
                   prefix));
     }
 
-    /**
-     * Catalogs {@code projects} on this box from descriptors it holds, as {@code sail migrate}
-     * imports a project that was never provisioned.
-     */
+    /** Catalogs {@code projects} on this box, as an engineer creates one never provisioned. */
     public void catalog(String... projects) throws Exception {
       for (var project : projects) {
-        shOk(
-            """
-            install -d "$HOME/.sail/projects/%1$s"
-            printf 'name: %1$s\\nimage: ubuntu/24.04\\n' > "$HOME/.sail/projects/%1$s/sail.yaml"
-            """
-                .formatted(project));
+        sailOk("project", "create", project, "--image", "ubuntu/24.04");
       }
-      sailOk("migrate");
     }
 
     /** Runs {@code sail} against this box's control-plane server; only inside {@link #serving}. */

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -64,7 +65,7 @@ class ScopeRuleTest {
     specs = new SpecStore(db);
     rule = new ScopeRule(new ChangeLog(db), "spec");
     for (var project : List.of("alpha", "beta")) {
-      new ProjectStore(db).upsert(project, "name: " + project + "\n");
+      new ProjectStore(db).upsert(TestDefinitions.named(project));
       specs.create(spec(project + "-work", project, "uma"));
       new RoomStore(db)
           .create(
@@ -283,7 +284,8 @@ class ScopeRuleTest {
     var catalogued =
         assertThrows(
             WriteRefused.class,
-            () -> Acting.by(NIA, () -> new ProjectStore(db).upsert("gamma", "name: gamma\n")));
+            () ->
+                Acting.by(NIA, () -> new ProjectStore(db).upsert(TestDefinitions.named("gamma"))));
     assertEquals("Project 'gamma' was not found.", catalogued.getMessage());
 
     Acting.by(NIA, () -> specs.create(spec("mine", "alpha", "nia")));

@@ -13,7 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.HostYaml;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
@@ -43,33 +44,35 @@ class ProjectProvisionerTest {
 
   @TempDir Path tempDir;
 
-  private static SailYaml fullConfig() {
-    return new SailYaml(
+  private static ProjectDefinition fullConfig() {
+    return new ProjectDefinition(
         "acme-health",
         "Acme Health Platform",
-        new SailYaml.Resources(4, "12GB", "150GB"),
+        new ProjectDefinition.Resources(4, "12GB", "150GB"),
         "ubuntu/24.04",
         List.of("postgresql-client-16"),
-        new SailYaml.Runtimes(25, "22", null),
-        null,
+        new ProjectDefinition.Runtimes(25, "22", null),
         null,
         Map.of(
-            "postgres", new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null)),
-        Map.of("app", new SailYaml.Process("java -jar app.jar", ".", null, Map.of())),
-        new SailYaml.Agent("claude-code", true, "sail/", true, null, Map.of(), null, null),
-        new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA... alice@laptop")));
+            "postgres",
+            new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
+        Map.of("app", new ProjectDefinition.Process("java -jar app.jar", ".", null, Map.of())),
+        new ProjectDefinition.Agent("claude-code", true, "sail/", true, null, Map.of(), null, null),
+        null);
   }
+
+  private static final LocalIdentity.GitIdentity GIT =
+      new LocalIdentity.GitIdentity("Acme Eng", "eng@acme.com");
 
   private static final SshPublicKey WORKSTATION_KEY =
       SshPublicKey.parse(TestSshKeys.ed25519("workstation", "uday@laptop"));
 
-  private static SailYaml minimalConfig() {
-    return new SailYaml(
+  private static ProjectDefinition minimalConfig() {
+    return new ProjectDefinition(
         "simple",
         "Simple project",
-        new SailYaml.Resources(2, "4GB", "50GB"),
+        new ProjectDefinition.Resources(2, "4GB", "50GB"),
         "ubuntu/24.04",
-        null,
         null,
         null,
         null,
@@ -79,33 +82,15 @@ class ProjectProvisionerTest {
         null);
   }
 
-  private static SailYaml minimalConfigWith(SailYaml.Ssh ssh) {
+  private static ProjectDefinition minimalConfigWith(ProjectDefinition.Runtimes runtimes) {
     var config = minimalConfig();
-    return new SailYaml(
-        config.name(),
-        config.description(),
-        config.resources(),
-        config.image(),
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        null,
-        ssh);
-  }
-
-  private static SailYaml minimalConfigWith(SailYaml.Runtimes runtimes) {
-    var config = minimalConfig();
-    return new SailYaml(
+    return new ProjectDefinition(
         config.name(),
         config.description(),
         config.resources(),
         config.image(),
         null,
         runtimes,
-        null,
         null,
         null,
         null,
@@ -272,11 +257,11 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     assertEquals(35, steps.size());
     assertTrue(steps.stream().anyMatch(s -> s.contains("done:1/")));
-    assertTrue(steps.stream().anyMatch(s -> s.contains("done:20/")));
+    assertTrue(steps.stream().anyMatch(s -> s.contains("done:19/")));
   }
 
   @Test
@@ -291,10 +276,10 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(minimalConfig(), hostYaml(), null, null);
+    provisioner.provision(minimalConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(tracker.isComplete());
-    assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"));
+    assertTrue(steps.contains("done:6/19:Created user dev (uid 1000)"));
     assertFalse(Files.exists(tempDir.resolve("provision-state.yaml")));
   }
 
@@ -304,7 +289,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    assertDoesNotThrow(() -> provisioner.provision(fullConfig(), hostYaml(), null, null));
+    assertDoesNotThrow(() -> provisioner.provision(fullConfig(), hostYaml(), null, GIT, null));
   }
 
   @Test
@@ -315,7 +300,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(
         shell
@@ -342,10 +327,11 @@ class ProjectProvisionerTest {
 
     var thrown =
         assertThrows(
-            IOException.class, () -> provisioner.provision(fullConfig(), hostYaml(), null, null));
+            IOException.class,
+            () -> provisioner.provision(fullConfig(), hostYaml(), null, GIT, null));
 
-    assertEquals("Failed to record the provisioned descriptor: denied", thrown.getMessage());
-    assertEquals("SPECS_SCAFFOLD_CREATED", YamlUtil.parseFile(stateFile).get("completed_phase"));
+    assertEquals("Failed to record the provisioned definition: denied", thrown.getMessage());
+    assertEquals("SKILLS_INSTALLED", YamlUtil.parseFile(stateFile).get("completed_phase"));
   }
 
   @Test
@@ -379,10 +365,10 @@ class ProjectProvisionerTest {
             new RecordingListener(steps),
             Optional.empty(),
             OperatorCommand.PLAIN)
-        .provision(minimalConfig(), hostYaml(), null, null);
+        .provision(minimalConfig(), hostYaml(), null, GIT, null);
 
-    assertEquals("step:1/20:Launching container simple...", steps.getFirst());
-    assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"), steps.toString());
+    assertEquals("step:1/19:Launching container simple...", steps.getFirst());
+    assertTrue(steps.contains("done:6/19:Created user dev (uid 1000)"), steps.toString());
     assertEquals(before, Files.readString(stateFile));
   }
 
@@ -400,7 +386,7 @@ class ProjectProvisionerTest {
         new ProjectProvisioner(
             shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     assertEquals(32, steps.size());
     assertTrue(steps.get(0).contains("skipped:1/"));
@@ -434,7 +420,7 @@ class ProjectProvisionerTest {
         new ProjectProvisioner(
             shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     assertEquals(30, steps.size());
     assertTrue(steps.get(0).contains("skipped:1/"));
@@ -464,7 +450,7 @@ class ProjectProvisionerTest {
         new ProjectProvisioner(
             shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     assertEquals(29, steps.size());
     assertTrue(steps.get(0).contains("skipped:1/"));
@@ -486,28 +472,28 @@ class ProjectProvisionerTest {
         new ProjectProvisioner(
             shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
-    assertEquals(20, steps.size());
+    assertEquals(19, steps.size());
     assertTrue(steps.stream().allMatch(s -> s.startsWith("skipped:")));
   }
 
   @Test
-  void anInterruptedRunForAnotherDescriptorRestartsFromStepOne() throws Exception {
+  void anInterruptedRunForAnotherDefinitionRestartsFromStepOne() throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     setupTracker.load(ProjectProvisioner.inputs(minimalConfig(), Optional.empty()));
     setupTracker.advance(ProjectPhase.SSH_CONFIGURED);
-    var edited = minimalConfigWith(new SailYaml.Ssh("dev", null));
+    var edited = minimalConfigWith(new ProjectDefinition.Runtimes(25, null, null));
 
     var shell = minimalSuccessShell();
     var steps = new ArrayList<String>();
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     new ProjectProvisioner(
             shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN)
-        .provision(edited, hostYaml(), null, null);
+        .provision(edited, hostYaml(), null, GIT, null);
 
-    assertEquals("step:1/20:Launching container simple...", steps.getFirst());
+    assertEquals("step:1/19:Launching container simple...", steps.getFirst());
     assertTrue(shell.invocations().contains("incus exec simple -- id dev"));
     assertTrue(shell.invocations().contains("incus exec simple -- useradd -m -s /bin/bash dev"));
     assertTrue(
@@ -535,52 +521,52 @@ class ProjectProvisionerTest {
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     new ProjectProvisioner(
             shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN)
-        .provision(minimalConfig(), hostYaml(), null, null);
+        .provision(minimalConfig(), hostYaml(), null, GIT, null);
 
-    assertEquals("step:1/20:Launching container simple...", steps.getFirst());
+    assertEquals("step:1/19:Launching container simple...", steps.getFirst());
     assertTrue(shell.invocations().contains("incus exec simple -- useradd -m -s /bin/bash dev"));
   }
 
   @Test
-  void aRuntimeAddedToAnInterruptedRunsDescriptorIsInstalledAndTheRestIsAlreadyThere()
+  void aRuntimeAddedToAnInterruptedRunsDefinitionIsInstalledAndTheRestIsAlreadyThere()
       throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     setupTracker.load(ProjectProvisioner.inputs(minimalConfig(), Optional.empty()));
     setupTracker.advance(ProjectPhase.MAVEN_INSTALLED);
-    var withJdk = minimalConfigWith(new SailYaml.Runtimes(25, null, null));
+    var withJdk = minimalConfigWith(new ProjectDefinition.Runtimes(25, null, null));
 
     var shell = provisionedSimpleShell().onFail("dpkg -s temurin-25-jdk", "not installed");
     var steps = new ArrayList<String>();
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     new ProjectProvisioner(
             shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN)
-        .provision(withJdk, hostYaml(), null, null);
+        .provision(withJdk, hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(cmds.contains("incus exec simple -- dpkg -s temurin-25-jdk"));
     assertTrue(cmds.stream().anyMatch(c -> c.endsWith("apt-get install -y -qq temurin-25-jdk")));
     assertAlreadyProvisioned(steps, cmds);
-    assertTrue(steps.contains("done:9/20:JDK 25 (Temurin)"), steps.toString());
+    assertTrue(steps.contains("done:9/19:JDK 25 (Temurin)"), steps.toString());
   }
 
   @Test
-  void aRuntimeAddedToAFinishedContainersDescriptorIsInstalledAndTheRestIsAlreadyThere()
+  void aRuntimeAddedToAFinishedContainersDefinitionIsInstalledAndTheRestIsAlreadyThere()
       throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
-    var withNode = minimalConfigWith(new SailYaml.Runtimes(0, "22", null));
+    var withNode = minimalConfigWith(new ProjectDefinition.Runtimes(0, "22", null));
 
     var shell = provisionedSimpleShell().onFail("node --version", "not found");
     var steps = new ArrayList<String>();
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     new ProjectProvisioner(
             shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN)
-        .provision(withNode, hostYaml(), null, null);
+        .provision(withNode, hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(cmds.stream().anyMatch(c -> c.endsWith("apt-get install -y -qq nodejs")));
     assertAlreadyProvisioned(steps, cmds);
-    assertTrue(steps.contains("done:10/20:Node.js 22"), steps.toString());
+    assertTrue(steps.contains("done:10/19:Node.js 22"), steps.toString());
     assertTrue(
         cmds.contains(
             "incus config set simple user.sail.inputs="
@@ -589,24 +575,23 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void anInterruptedRunVoidsTheFinishedRecordSoTheFinishedDescriptorIsProvisionedAgain()
+  void anInterruptedRunVoidsTheFinishedRecordSoTheFinishedDefinitionIsProvisionedAgain()
       throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var finished = minimalConfig();
     var edited =
-        new SailYaml(
+        new ProjectDefinition(
             finished.name(),
             finished.description(),
             finished.resources(),
             finished.image(),
             null,
-            new SailYaml.Runtimes(0, "22", null),
+            new ProjectDefinition.Runtimes(0, "22", null),
             null,
             null,
             null,
             null,
-            null,
-            new SailYaml.Ssh(null, List.of("ssh-ed25519 AAAA mallory@laptop")));
+            null);
     var pushes =
         new PushRecordingShell(
             provisionedSimpleShell()
@@ -625,11 +610,9 @@ class ProjectProvisionerTest {
                     null,
                     Optional.empty(),
                     OperatorCommand.PLAIN)
-                .provision(edited, hostYaml(), null, null));
+                .provision(edited, hostYaml(), null, GIT, null));
 
-    assertEquals(
-        "ssh-ed25519 AAAA mallory@laptop\n",
-        pushes.pushed.get("simple/home/dev/.ssh/authorized_keys"));
+    assertEquals("", pushes.pushed.get("simple/home/dev/.ssh/authorized_keys"));
     assertEquals(Optional.empty(), ProjectProvisioner.provisionedInputs(shell, "simple"));
 
     var steps = new ArrayList<String>();
@@ -639,9 +622,9 @@ class ProjectProvisionerTest {
             new RecordingListener(steps),
             Optional.empty(),
             OperatorCommand.PLAIN)
-        .provision(finished, hostYaml(), null, null);
+        .provision(finished, hostYaml(), null, GIT, null);
 
-    assertEquals("step:1/20:Launching container simple...", steps.getFirst());
+    assertEquals("step:1/19:Launching container simple...", steps.getFirst());
     assertEquals("", pushes.pushed.get("simple/home/dev/.ssh/authorized_keys"));
     assertEquals(
         Optional.of(ProjectProvisioner.inputs(finished, Optional.empty())),
@@ -661,10 +644,10 @@ class ProjectProvisionerTest {
             () ->
                 new ProjectProvisioner(
                         shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN)
-                    .provision(minimalConfig(), hostYaml(), null, null));
+                    .provision(minimalConfig(), hostYaml(), null, GIT, null));
 
     assertEquals(
-        "Failed to clear the record of the last provisioned descriptor: denied",
+        "Failed to clear the record of the last provisioned definition: denied",
         failure.getMessage());
     assertEquals("incus config set simple user.sail.inputs=", shell.invocations().getLast());
     assertEquals("CONTAINER_LAUNCHED", YamlUtil.parseFile(stateFile).get("completed_phase"));
@@ -688,12 +671,12 @@ class ProjectProvisionerTest {
                         new RecordingListener(failedRun),
                         Optional.empty(),
                         OperatorCommand.PLAIN)
-                    .provision(minimalConfig(), hostYaml(), null, null));
+                    .provision(minimalConfig(), hostYaml(), null, GIT, null));
 
     assertEquals(
         "Failed to restart container after config: shutdown timed out", failure.getMessage());
     assertEquals(
-        List.of("step:3/20:Setting resource limits...", "failed"),
+        List.of("step:3/19:Setting resource limits...", "failed"),
         failedRun.subList(failedRun.size() - 2, failedRun.size()));
     assertEquals("DISK_QUOTA_SET", YamlUtil.parseFile(stateFile).get("completed_phase"));
     assertEquals("2", shell.config.get("simple limits.cpu"));
@@ -706,9 +689,9 @@ class ProjectProvisionerTest {
             new RecordingListener(steps),
             Optional.empty(),
             OperatorCommand.PLAIN)
-        .provision(minimalConfig(), hostYaml(), null, null);
+        .provision(minimalConfig(), hostYaml(), null, GIT, null);
 
-    assertTrue(steps.contains("done:3/20:Resources 2 CPU, 4GB RAM"), steps.toString());
+    assertTrue(steps.contains("done:3/19:Resources 2 CPU, 4GB RAM"), steps.toString());
     assertEquals(
         2, script.invocations().stream().filter(c -> c.equals("incus restart simple")).count());
     assertFalse(shell.config.containsKey("simple user.sail.restart_pending"));
@@ -733,7 +716,7 @@ class ProjectProvisionerTest {
                         null,
                         Optional.empty(),
                         OperatorCommand.PLAIN)
-                    .provision(minimalConfig(), hostYaml(), null, null));
+                    .provision(minimalConfig(), hostYaml(), null, GIT, null));
 
     assertEquals("Failed to clear the pending restart: denied", failure.getMessage());
     assertEquals("DISK_QUOTA_SET", YamlUtil.parseFile(stateFile).get("completed_phase"));
@@ -796,7 +779,7 @@ class ProjectProvisionerTest {
     var incus = new SharedIncus(held, () -> {}, "simple");
     var apply =
         new FutureTask<>(
-            provision(incus, minimalConfigWith(new SailYaml.Runtimes(25, null, null))));
+            provision(incus, minimalConfigWith(new ProjectDefinition.Runtimes(25, null, null))));
     new Thread(apply).start();
     assertTrue(held.reached.await(10, TimeUnit.SECONDS), "the apply never reached its JDK step");
 
@@ -808,11 +791,11 @@ class ProjectProvisionerTest {
     assertDoesNotThrow(() -> apply.get());
   }
 
-  private Callable<Void> provision(ShellExec shell, SailYaml config) {
+  private Callable<Void> provision(ShellExec shell, ProjectDefinition config) {
     var tracker = tracker();
     return () -> {
       new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN)
-          .provision(config, hostYaml(), null, null);
+          .provision(config, hostYaml(), null, GIT, null);
       return null;
     };
   }
@@ -870,10 +853,10 @@ class ProjectProvisionerTest {
   }
 
   private static void assertAlreadyProvisioned(List<String> steps, List<String> cmds) {
-    assertTrue(steps.contains("done:1/20:Container simple (already exists)"), steps.toString());
+    assertTrue(steps.contains("done:1/19:Container simple (already exists)"), steps.toString());
     assertTrue(
-        steps.contains("done:3/20:Resources 2 CPU, 4GB RAM (already set)"), steps.toString());
-    assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"), steps.toString());
+        steps.contains("done:3/19:Resources 2 CPU, 4GB RAM (already set)"), steps.toString());
+    assertTrue(steps.contains("done:6/19:Created user dev (uid 1000)"), steps.toString());
     assertFalse(cmds.stream().anyMatch(c -> c.startsWith("incus launch")));
     assertFalse(cmds.stream().anyMatch(c -> c.startsWith("incus restart")));
     assertFalse(
@@ -896,7 +879,8 @@ class ProjectProvisionerTest {
 
     var ex =
         assertThrows(
-            IOException.class, () -> provisioner.provision(fullConfig(), hostYaml(), null, null));
+            IOException.class,
+            () -> provisioner.provision(fullConfig(), hostYaml(), null, GIT, null));
     assertTrue(ex.getMessage().contains("Failed to launch container"));
 
     var state = tracker.currentState();
@@ -912,7 +896,7 @@ class ProjectProvisionerTest {
         new ProjectProvisioner(
             shell, tracker(), ProvisionListener.NOOP, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     var userCreated = firstIndexMatching(cmds, c -> c.contains("useradd"));
@@ -957,7 +941,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(steps.stream().anyMatch(s -> s.contains("done:1/") && s.contains("already exists")));
     var cmds = shell.invocations();
@@ -968,10 +952,10 @@ class ProjectProvisionerTest {
   void projectImageOverridesHostImage() throws Exception {
     var shell = allSuccessShell();
     var customConfig =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/22.04",
             List.of("postgresql-client-16"),
             null,
@@ -979,12 +963,11 @@ class ProjectProvisionerTest {
             null,
             null,
             null,
-            null,
-            new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            null);
 
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
-    provisioner.provision(customConfig, hostYaml(), null, null);
+    provisioner.provision(customConfig, hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -998,7 +981,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(minimalConfig(), hostYaml(), null, null);
+    provisioner.provision(minimalConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -1012,7 +995,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -1025,7 +1008,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -1047,7 +1030,8 @@ class ProjectProvisionerTest {
 
     var ex =
         assertThrows(
-            IOException.class, () -> provisioner.provision(fullConfig(), hostYaml(), null, null));
+            IOException.class,
+            () -> provisioner.provision(fullConfig(), hostYaml(), null, GIT, null));
     assertTrue(ex.getMessage().contains("Failed to set disk quota"));
     assertEquals("DISK_QUOTA_SET", tracker.currentState().error().failedPhase());
   }
@@ -1067,7 +1051,8 @@ class ProjectProvisionerTest {
 
     var ex =
         assertThrows(
-            IOException.class, () -> provisioner.provision(fullConfig(), hostYaml(), null, null));
+            IOException.class,
+            () -> provisioner.provision(fullConfig(), hostYaml(), null, GIT, null));
     assertTrue(ex.getMessage().contains("Failed to set resource limits"));
     assertEquals("RESOURCE_LIMITS_SET", tracker.currentState().error().failedPhase());
   }
@@ -1086,7 +1071,8 @@ class ProjectProvisionerTest {
 
     var ex =
         assertThrows(
-            IOException.class, () -> provisioner.provision(fullConfig(), hostYaml(), null, null));
+            IOException.class,
+            () -> provisioner.provision(fullConfig(), hostYaml(), null, GIT, null));
     assertTrue(ex.getMessage().contains("network did not come up"));
     assertEquals("NETWORK_READY", tracker.currentState().error().failedPhase());
   }
@@ -1107,7 +1093,8 @@ class ProjectProvisionerTest {
 
     var ex =
         assertThrows(
-            IOException.class, () -> provisioner.provision(fullConfig(), hostYaml(), null, null));
+            IOException.class,
+            () -> provisioner.provision(fullConfig(), hostYaml(), null, GIT, null));
     assertTrue(ex.getMessage().contains("Failed to install packages"));
     assertEquals("PACKAGES_INSTALLED", tracker.currentState().error().failedPhase());
   }
@@ -1118,7 +1105,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     var installCmd =
@@ -1139,7 +1126,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(cmds.stream().anyMatch(c -> c.contains("useradd") && c.contains("dev")));
@@ -1185,13 +1172,14 @@ class ProjectProvisionerTest {
 
     var ex =
         assertThrows(
-            IOException.class, () -> provisioner.provision(fullConfig(), hostYaml(), null, null));
+            IOException.class,
+            () -> provisioner.provision(fullConfig(), hostYaml(), null, GIT, null));
     assertTrue(ex.getMessage().contains("Failed to create user"));
     assertEquals("SSH_CONFIGURED", tracker.currentState().error().failedPhase());
   }
 
   @Test
-  void aDescriptorWithoutAnSshBlockProvisionsDev() throws Exception {
+  void everyContainerIsProvisionedForDev() throws Exception {
     var shell = new PushRecordingShell(minimalSuccessShell());
     var steps = new ArrayList<String>();
     var provisioner =
@@ -1202,9 +1190,9 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(minimalConfig(), hostYaml(), null, null);
+    provisioner.provision(minimalConfig(), hostYaml(), null, GIT, null);
 
-    assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"), steps.toString());
+    assertTrue(steps.contains("done:6/19:Created user dev (uid 1000)"), steps.toString());
     var cmds = shell.script.invocations();
     assertTrue(cmds.contains("incus exec simple -- useradd -m -s /bin/bash dev"), cmds.toString());
     assertTrue(cmds.contains("incus exec simple -- usermod -aG sudo dev"));
@@ -1216,36 +1204,15 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void aDescriptorWithoutAnSshBlockTrustsTheBoxsWorkstationKey() throws Exception {
+  void aContainerTrustsTheBoxsWorkstationKeyAlone() throws Exception {
     var shell = new PushRecordingShell(minimalSuccessShell());
 
     new ProjectProvisioner(
             shell, tracker(), null, Optional.of(WORKSTATION_KEY), OperatorCommand.PLAIN)
-        .provision(minimalConfig(), hostYaml(), null, null);
+        .provision(minimalConfig(), hostYaml(), null, GIT, null);
 
     assertEquals(
         WORKSTATION_KEY.line() + "\n", shell.pushed.get("simple/home/dev/.ssh/authorized_keys"));
-  }
-
-  @Test
-  void theWorkstationKeyComesFirstAndOnceBesideTheDefinitionsKeys() throws Exception {
-    var shell = new PushRecordingShell(minimalSuccessShell());
-    var alice = TestSshKeys.ed25519("alice", "alice@laptop");
-    var config =
-        minimalConfigWith(
-            new SailYaml.Ssh(
-                null,
-                List.of(
-                    alice,
-                    WORKSTATION_KEY.type() + " " + WORKSTATION_KEY.blob() + " resolved@box")));
-
-    new ProjectProvisioner(
-            shell, tracker(), null, Optional.of(WORKSTATION_KEY), OperatorCommand.PLAIN)
-        .provision(config, hostYaml(), null, null);
-
-    assertEquals(
-        WORKSTATION_KEY.line() + "\n" + alice + "\n",
-        shell.pushed.get("simple/home/dev/.ssh/authorized_keys"));
   }
 
   @Test
@@ -1261,7 +1228,7 @@ class ProjectProvisionerTest {
         HexFormat.of()
             .formatHex(
                 Hashes.sha256(
-                    YamlUtil.dumpToString(config.toMap()).getBytes(StandardCharsets.UTF_8))),
+                    ProjectDefinitionJson.write(config).getBytes(StandardCharsets.UTF_8))),
         none,
         "a box with no key keeps the digest its containers recorded");
     assertEquals(3, Set.of(none, registered, replaced).size());
@@ -1287,7 +1254,7 @@ class ProjectProvisionerTest {
 
     provisionedWith(shell, stateFile, config, Optional.of(WORKSTATION_KEY), steps);
 
-    assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"), steps.toString());
+    assertTrue(steps.contains("done:6/19:Created user dev (uid 1000)"), steps.toString());
     assertEquals(
         WORKSTATION_KEY.line() + "\n", pushes.pushed.get("simple/home/dev/.ssh/authorized_keys"));
     var recorded = ProjectProvisioner.provisionedInputs(shell, "simple");
@@ -1302,7 +1269,7 @@ class ProjectProvisionerTest {
   private void provisionedWith(
       ShellExec shell,
       Path stateFile,
-      SailYaml config,
+      ProjectDefinition config,
       Optional<SshPublicKey> workstationKey,
       List<String> steps)
       throws Exception {
@@ -1312,19 +1279,7 @@ class ProjectProvisionerTest {
             new RecordingListener(steps),
             workstationKey,
             OperatorCommand.PLAIN)
-        .provision(config, hostYaml(), null, null);
-  }
-
-  @Test
-  void aPaddedDefinitionKeyIsWrittenStripped() throws Exception {
-    var shell = new PushRecordingShell(minimalSuccessShell());
-    var alice = TestSshKeys.ed25519("alice", "alice@laptop");
-    var config = minimalConfigWith(new SailYaml.Ssh(null, List.of("  " + alice + "  ")));
-
-    new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN)
-        .provision(config, hostYaml(), null, null);
-
-    assertEquals(alice + "\n", shell.pushed.get("simple/home/dev/.ssh/authorized_keys"));
+        .provision(config, hostYaml(), null, GIT, null);
   }
 
   @Test
@@ -1342,53 +1297,6 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void aDefinitionKeyWithOptionsIsTheSameKeyOnceAndAnotherKeyKeepsItsOptions() throws Exception {
-    var shell = new PushRecordingShell(minimalSuccessShell());
-    var restricted =
-        "from=\"10.0.0.0/8\",no-pty "
-            + WORKSTATION_KEY.type()
-            + " "
-            + WORKSTATION_KEY.blob()
-            + " laptop";
-    var bob = "restrict " + TestSshKeys.ed25519("bob", "bob@laptop");
-    var config = minimalConfigWith(new SailYaml.Ssh(null, List.of(restricted, bob, bob)));
-
-    new ProjectProvisioner(
-            shell, tracker(), null, Optional.of(WORKSTATION_KEY), OperatorCommand.PLAIN)
-        .provision(config, hostYaml(), null, null);
-
-    assertEquals(
-        WORKSTATION_KEY.line() + "\n" + bob + "\n",
-        shell.pushed.get("simple/home/dev/.ssh/authorized_keys"));
-  }
-
-  @Test
-  void anSshBlockWithKeysAndNoUserProvisionsDevWithThoseKeys() throws Exception {
-    var shell = new PushRecordingShell(minimalSuccessShell());
-    var steps = new ArrayList<String>();
-    var provisioner =
-        new ProjectProvisioner(
-            shell,
-            tracker(),
-            new RecordingListener(steps),
-            Optional.empty(),
-            OperatorCommand.PLAIN);
-
-    provisioner.provision(
-        minimalConfigWith(new SailYaml.Ssh(null, List.of("ssh-ed25519 AAAA alice@laptop"))),
-        hostYaml(),
-        null,
-        null);
-
-    assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"), steps.toString());
-    assertTrue(
-        shell.script.invocations().contains("incus exec simple -- useradd -m -s /bin/bash dev"));
-    assertEquals(
-        "ssh-ed25519 AAAA alice@laptop\n",
-        shell.pushed.get("simple/home/dev/.ssh/authorized_keys"));
-  }
-
-  @Test
   void aDevAtAnotherUidFailsStepSixAndKeepsTheWatermarkBeforeIt() throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var shell =
@@ -1403,7 +1311,7 @@ class ProjectProvisionerTest {
     var failure =
         assertThrows(
             IOException.class,
-            () -> provisioner.provision(minimalConfig(), hostYaml(), null, null));
+            () -> provisioner.provision(minimalConfig(), hostYaml(), null, GIT, null));
 
     var expected =
         "User 'dev' in simple has uid 1001, but sail runs every agent, shell and hook as uid 1000."
@@ -1431,21 +1339,21 @@ class ProjectProvisionerTest {
     var failure =
         assertThrows(
             IOException.class,
-            () -> provisioner.provision(minimalConfig(), hostYaml(), null, null));
+            () -> provisioner.provision(minimalConfig(), hostYaml(), null, GIT, null));
 
     assertEquals(
         "Failed to look up user 'dev' in simple: id: 'dev': no such user", failure.getMessage());
   }
 
   @Test
-  void anExistingDevGetsExactlyTheDescriptorsKeysWhichMayBeNone() throws Exception {
+  void anExistingDevGetsExactlyTheWorkstationKeyWhichMayBeNone() throws Exception {
     var shell =
         new PushRecordingShell(
             minimalSuccessShell().onOk("id dev", "uid=1000(dev)").onOk("id -u dev", "1000"));
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(minimalConfigWith(new SailYaml.Ssh("dev", null)), hostYaml(), null, null);
+    provisioner.provision(minimalConfig(), hostYaml(), null, GIT, null);
 
     assertEquals("", shell.pushed.get("simple/home/dev/.ssh/authorized_keys"));
     assertFalse(shell.script.invocations().stream().anyMatch(c -> c.contains("useradd")));
@@ -1476,20 +1384,20 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertFalse(cmds.stream().anyMatch(c -> c.contains("useradd")));
-    assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"), steps.toString());
+    assertTrue(steps.contains("done:6/19:Created user dev (uid 1000)"), steps.toString());
   }
 
   @Test
   void aNewUserWithAnEmptyKeyListGetsAnEmptyAuthorizedKeys() throws Exception {
     var configWithEmptyKeys =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
             List.of("postgresql-client-16"),
             null,
@@ -1497,8 +1405,7 @@ class ProjectProvisionerTest {
             null,
             null,
             null,
-            null,
-            new SailYaml.Ssh("dev", List.of()));
+            null);
     var script =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -1514,7 +1421,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(configWithEmptyKeys, hostYaml(), null, null);
+    provisioner.provision(configWithEmptyKeys, hostYaml(), null, GIT, null);
 
     var cmds = script.invocations();
     assertTrue(cmds.stream().anyMatch(c -> c.contains("useradd")));
@@ -1524,10 +1431,10 @@ class ProjectProvisionerTest {
   @Test
   void aNewUserWithNoKeyListGetsAnEmptyAuthorizedKeys() throws Exception {
     var configWithNullKeys =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
             null,
             null,
@@ -1535,8 +1442,7 @@ class ProjectProvisionerTest {
             null,
             null,
             null,
-            null,
-            new SailYaml.Ssh("dev", null));
+            null);
     var script =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -1552,7 +1458,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(configWithNullKeys, hostYaml(), null, null);
+    provisioner.provision(configWithNullKeys, hostYaml(), null, GIT, null);
 
     assertEquals("", shell.pushed.get("acme-health/home/dev/.ssh/authorized_keys"));
   }
@@ -1563,7 +1469,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -1610,7 +1516,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -1642,7 +1548,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertFalse(
@@ -1673,7 +1579,8 @@ class ProjectProvisionerTest {
 
     var ex =
         assertThrows(
-            IOException.class, () -> provisioner.provision(fullConfig(), hostYaml(), null, null));
+            IOException.class,
+            () -> provisioner.provision(fullConfig(), hostYaml(), null, GIT, null));
     assertTrue(ex.getMessage().contains("Failed to install Podman"));
     assertEquals("PODMAN_INSTALLED", tracker.currentState().error().failedPhase());
   }
@@ -1684,7 +1591,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -1723,7 +1630,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("done:8/") && s.contains("already configured")));
@@ -1735,7 +1642,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -1764,7 +1671,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(minimalConfig(), hostYaml(), null, null);
+    provisioner.provision(minimalConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(steps.stream().anyMatch(s -> s.contains("skipped:9/") && s.contains("no JDK")));
     var cmds = shell.invocations();
@@ -1796,7 +1703,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("done:9/") && s.contains("already installed")));
@@ -1824,7 +1731,8 @@ class ProjectProvisionerTest {
 
     var ex =
         assertThrows(
-            IOException.class, () -> provisioner.provision(fullConfig(), hostYaml(), null, null));
+            IOException.class,
+            () -> provisioner.provision(fullConfig(), hostYaml(), null, GIT, null));
     assertTrue(ex.getMessage().contains("Failed to install temurin-25-jdk"));
     assertEquals("JDK_INSTALLED", tracker.currentState().error().failedPhase());
   }
@@ -1835,7 +1743,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -1858,7 +1766,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(minimalConfig(), hostYaml(), null, null);
+    provisioner.provision(minimalConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(steps.stream().anyMatch(s -> s.contains("skipped:10/") && s.contains("no Node")));
   }
@@ -1889,7 +1797,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("done:10/") && s.contains("already installed")));
@@ -1918,25 +1826,59 @@ class ProjectProvisionerTest {
 
     var ex =
         assertThrows(
-            IOException.class, () -> provisioner.provision(fullConfig(), hostYaml(), null, null));
+            IOException.class,
+            () -> provisioner.provision(fullConfig(), hostYaml(), null, GIT, null));
     assertTrue(ex.getMessage().contains("Failed to install Node.js"));
     assertEquals("NODE_INSTALLED", tracker.currentState().error().failedPhase());
   }
 
-  private static SailYaml configWithGit(String auth) {
-    return new SailYaml(
+  private static ProjectDefinition configWithRepo() {
+    return new ProjectDefinition(
         "acme-health",
         "Acme Health Platform",
-        new SailYaml.Resources(4, "12GB", "150GB"),
+        new ProjectDefinition.Resources(4, "12GB", "150GB"),
         "ubuntu/24.04",
         null,
         null,
-        new SailYaml.Git("Acme Eng", "eng@acme.com", auth, null),
-        List.of(new SailYaml.Repo("https://github.com/acme/api.git", "api", null)),
+        List.of(new ProjectDefinition.Repo("https://github.com/acme/api.git", "api", null)),
         null,
         null,
         null,
-        new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+        null);
+  }
+
+  @Test
+  void gitTakesTheBoxsIdentityAndTheTokenSetsCredentialsWithNoSshKeyScan() throws Exception {
+    var shell = shellThroughStep10();
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
+
+    provisioner.provision(configWithRepo(), hostYaml(), Map.of("*", "ghp_test123"), GIT, null);
+
+    var cmds = shell.invocations();
+    assertTrue(
+        cmds.stream()
+            .anyMatch(c -> c.contains("git config --global user.name") && c.contains("Acme Eng")),
+        "Should set git user.name to the box's");
+    assertTrue(
+        cmds.stream()
+            .anyMatch(
+                c -> c.contains("git config --global user.email") && c.contains("eng@acme.com")),
+        "Should set git user.email to the box's");
+    assertFalse(
+        cmds.stream().anyMatch(c -> c.contains("ssh-keyscan")), "a container clones over https");
+    assertTrue(
+        cmds.stream()
+            .anyMatch(
+                c ->
+                    c.contains("incus file push")
+                        && c.contains("--mode 0600")
+                        && c.contains(".git-credentials")),
+        "Should write .git-credentials via file push with mode 0600");
+    assertTrue(
+        cmds.stream().anyMatch(c -> c.contains("git config --global credential.helper store")),
+        "Should configure credential helper store");
+    ProjectApplierTest.assertGhLoggedIn(shell, "github.com", "ghp_test123");
   }
 
   /** Shell setup that succeeds through step 10 (Node skipped) for configs without JDK/Node. */
@@ -1958,52 +1900,6 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void gitConfiguredWithTokenSetsCredentials() throws Exception {
-    var shell = shellThroughStep10();
-    var provisioner =
-        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
-
-    provisioner.provision(configWithGit("token"), hostYaml(), Map.of("*", "ghp_test123"), null);
-
-    var cmds = shell.invocations();
-    assertTrue(
-        cmds.stream()
-            .anyMatch(c -> c.contains("git config --global user.name") && c.contains("Acme Eng")),
-        "Should set git user.name");
-    assertTrue(
-        cmds.stream()
-            .anyMatch(
-                c -> c.contains("git config --global user.email") && c.contains("eng@acme.com")),
-        "Should set git user.email");
-    assertTrue(
-        cmds.stream().anyMatch(c -> c.contains("ssh-keyscan")),
-        "Should add known hosts for github/gitlab");
-    assertTrue(
-        cmds.stream()
-            .anyMatch(
-                c ->
-                    c.contains("incus file push")
-                        && c.contains("--mode 0600")
-                        && c.contains(".git-credentials")),
-        "Should write .git-credentials via file push with mode 0600");
-    assertTrue(
-        cmds.stream().anyMatch(c -> c.contains("git config --global credential.helper store")),
-        "Should configure credential helper store");
-    ProjectApplierTest.assertGhLoggedIn(shell, "github.com", "ghp_test123");
-  }
-
-  @Test
-  void gitConfiguredWithSshNeverLogsGhIn() throws Exception {
-    var shell = shellThroughStep10();
-    var provisioner =
-        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
-
-    provisioner.provision(configWithGit("ssh"), hostYaml(), Map.of("*", "ghp_test123"), null);
-
-    assertTrue(shell.invocations().stream().noneMatch(c -> c.contains("gh auth login")));
-  }
-
-  @Test
   void aFailedGhLoginFailsTheGitStepNamingTheHost() throws Exception {
     var shell = shellThroughStep10().onFail("gh auth login", "The token in GH_TOKEN is invalid.");
     var provisioner =
@@ -2014,7 +1910,7 @@ class ProjectProvisionerTest {
             IOException.class,
             () ->
                 provisioner.provision(
-                    configWithGit("token"), hostYaml(), Map.of("*", "ghp_bad"), null));
+                    configWithRepo(), hostYaml(), Map.of("*", "ghp_bad"), GIT, null));
 
     assertEquals(
         "Failed to log gh in for github.com in acme-health: The token in GH_TOKEN is invalid.",
@@ -2022,38 +1918,13 @@ class ProjectProvisionerTest {
     assertEquals(
         ProjectPhase.GIT_CONFIGURED,
         tracker()
-            .load(ProjectProvisioner.inputs(configWithGit("token"), Optional.empty()))
+            .load(ProjectProvisioner.inputs(configWithRepo(), Optional.empty()))
             .resumePoint()
             .orElseThrow());
   }
 
   @Test
-  void gitConfiguredWithSshSkipsCredentialStore() throws Exception {
-    var shell = shellThroughStep10();
-    var provisioner =
-        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
-
-    provisioner.provision(configWithGit("ssh"), hostYaml(), null, null);
-
-    var cmds = shell.invocations();
-    assertTrue(
-        cmds.stream().anyMatch(c -> c.contains("git config --global user.name")),
-        "Should still set git identity");
-    assertFalse(
-        cmds.stream()
-            .anyMatch(
-                c ->
-                    c.contains("incus file push")
-                        && c.contains("--mode 0600")
-                        && c.contains(".git-credentials")),
-        "Should NOT write .git-credentials for ssh auth");
-    assertFalse(
-        cmds.stream().anyMatch(c -> c.contains("credential.helper")),
-        "Should NOT configure credential.helper for ssh auth");
-  }
-
-  @Test
-  void gitSkippedWhenNoGitBlock() throws Exception {
+  void theGitStepGivesEveryContainerTheBoxsIdentity() throws Exception {
     var shell = minimalSuccessShell();
     var steps = new ArrayList<String>();
     var provisioner =
@@ -2064,31 +1935,16 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(minimalConfig(), hostYaml(), null, null);
+    provisioner.provision(minimalConfig(), hostYaml(), null, GIT, null);
 
-    assertTrue(
-        steps.stream().anyMatch(s -> s.contains("skipped:11/") && s.contains("no git")),
-        "Step 11 should be skipped when git config is null");
-    var cmds = shell.invocations();
-    assertFalse(cmds.stream().anyMatch(c -> c.contains("git config --global")));
-  }
-
-  @Test
-  void gitKnownHostsScansDefaultHosts() throws Exception {
-    var shell = shellThroughStep10();
-    var provisioner =
-        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
-
-    provisioner.provision(configWithGit("token"), hostYaml(), null, null);
-
+    assertTrue(steps.contains("done:11/19:Git identity configured"), steps.toString());
     var cmds = shell.invocations();
     assertTrue(
-        cmds.stream()
-            .anyMatch(c -> c.contains("ssh-keyscan") && c.contains("github.com gitlab.com")),
-        "Should scan default hosts (github.com, gitlab.com) via ssh-keyscan");
-    assertFalse(
-        cmds.stream().anyMatch(c -> c.contains("ssh-keyscan -H github.com gitlab.com")),
-        "ssh-keyscan hosts must be passed as positional arguments, not interpolated into shell");
+        cmds.stream().anyMatch(c -> c.endsWith("git config --global user.name Acme Eng")),
+        cmds.toString());
+    assertTrue(
+        cmds.stream().anyMatch(c -> c.endsWith("git config --global user.email eng@acme.com")),
+        cmds.toString());
   }
 
   @Test
@@ -2103,7 +1959,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(configWithGit("token"), hostYaml(), null, null);
+    provisioner.provision(configWithRepo(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -2122,87 +1978,19 @@ class ProjectProvisionerTest {
         "Step 11 should complete successfully");
   }
 
-  @Test
-  void gitSshKeyPushedIntoContainer() throws Exception {
-    var keyFile = tempDir.resolve("id_ed25519");
-    Files.writeString(
-        keyFile, "-----BEGIN OPENSSH PRIVATE KEY-----\nfake\n-----END OPENSSH PRIVATE KEY-----\n");
-    var pubFile = tempDir.resolve("id_ed25519.pub");
-    Files.writeString(pubFile, "ssh-ed25519 AAAA... test@host");
-
-    var shell = shellThroughStep10();
-    var provisioner =
-        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
-
-    var config = configWithGitSshKey(keyFile.toString());
-    provisioner.provision(config, hostYaml(), null, null);
-
-    var cmds = shell.invocations();
-    assertTrue(
-        cmds.stream()
-            .anyMatch(
-                c ->
-                    c.contains("incus file push")
-                        && c.contains("--mode 0600")
-                        && c.contains("id_ed25519")),
-        "Should push private key with mode 0600");
-    assertTrue(
-        cmds.stream().anyMatch(c -> c.contains("id_ed25519.pub")),
-        "Should push public key when .pub file exists alongside private key");
-    assertFalse(
-        cmds.stream()
-            .anyMatch(
-                c ->
-                    c.contains("incus file push")
-                        && c.contains("--mode 0600")
-                        && c.contains(".git-credentials")),
-        "Should NOT write .git-credentials for ssh auth");
-  }
-
-  @Test
-  void gitSshKeyMissingThrowsClearError() {
-    var shell = shellThroughStep10();
-    var provisioner =
-        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
-
-    var config = configWithGitSshKey("/nonexistent/path/id_ed25519");
-    var ex =
-        assertThrows(
-            IOException.class, () -> provisioner.provision(config, hostYaml(), null, null));
-    assertTrue(ex.getMessage().contains("SSH key not found"));
-    assertTrue(ex.getMessage().contains("git.ssh_key"));
-  }
-
-  private static SailYaml configWithGitSshKey(String keyPath) {
-    return new SailYaml(
+  private static ProjectDefinition configWithMaven(String mavenVersion) {
+    return new ProjectDefinition(
         "acme-health",
         "Acme Health Platform",
-        new SailYaml.Resources(4, "12GB", "150GB"),
+        new ProjectDefinition.Resources(4, "12GB", "150GB"),
         "ubuntu/24.04",
         null,
-        null,
-        new SailYaml.Git("Acme Eng", "eng@acme.com", "ssh", keyPath),
-        null,
-        null,
-        null,
-        null,
-        new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
-  }
-
-  private static SailYaml configWithMaven(String mavenVersion) {
-    return new SailYaml(
-        "acme-health",
-        "Acme Health Platform",
-        new SailYaml.Resources(4, "12GB", "150GB"),
-        "ubuntu/24.04",
-        null,
-        new SailYaml.Runtimes(0, null, mavenVersion),
+        new ProjectDefinition.Runtimes(0, null, mavenVersion),
         null,
         null,
         null,
         null,
-        null,
-        new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+        null);
   }
 
   @Test
@@ -2211,7 +1999,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(configWithMaven("3.9.9"), hostYaml(), null, null);
+    provisioner.provision(configWithMaven("3.9.9"), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -2238,7 +2026,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(configWithMaven("3.9.12"), hostYaml(), null, null);
+    provisioner.provision(configWithMaven("3.9.12"), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -2272,7 +2060,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(minimalConfig(), hostYaml(), null, null);
+    provisioner.provision(minimalConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("skipped:12/") && s.contains("no Maven")),
@@ -2292,7 +2080,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(configWithMaven("3.9.9"), hostYaml(), null, null);
+    provisioner.provision(configWithMaven("3.9.9"), hostYaml(), null, GIT, null);
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("done:12/") && s.contains("already installed")),
@@ -2317,35 +2105,34 @@ class ProjectProvisionerTest {
     var ex =
         assertThrows(
             IOException.class,
-            () -> provisioner.provision(configWithMaven("99.0.0"), hostYaml(), null, null));
+            () -> provisioner.provision(configWithMaven("99.0.0"), hostYaml(), null, GIT, null));
     assertTrue(ex.getMessage().contains("Failed to install Maven"));
     assertTrue(ex.getMessage().contains("dlcdn.apache.org"));
     assertTrue(ex.getMessage().contains("archive.apache.org"));
     assertEquals("MAVEN_INSTALLED", tracker.currentState().error().failedPhase());
   }
 
-  private static SailYaml configWithRepos(List<SailYaml.Repo> repos) {
-    return new SailYaml(
+  private static ProjectDefinition configWithRepos(List<ProjectDefinition.Repo> repos) {
+    return new ProjectDefinition(
         "acme-health",
         "Acme Health Platform",
-        new SailYaml.Resources(4, "12GB", "150GB"),
+        new ProjectDefinition.Resources(4, "12GB", "150GB"),
         "ubuntu/24.04",
-        null,
         null,
         null,
         repos,
         null,
         null,
         null,
-        new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+        null);
   }
 
   @Test
   void reposClonedAsDevUser() throws Exception {
     var repos =
         List.of(
-            new SailYaml.Repo("https://github.com/acme/app.git", "acme", null),
-            new SailYaml.Repo("https://github.com/acme/lib.git", "lib", null));
+            new ProjectDefinition.Repo("https://github.com/acme/app.git", "acme", null),
+            new ProjectDefinition.Repo("https://github.com/acme/lib.git", "lib", null));
     var shell =
         shellThroughStep10()
             .onFail("test -d /home/dev/workspace/acme", "")
@@ -2359,7 +2146,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(configWithRepos(repos), hostYaml(), null, null);
+    provisioner.provision(configWithRepos(repos), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -2395,7 +2182,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(minimalConfig(), hostYaml(), null, null);
+    provisioner.provision(minimalConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("skipped:13/") && s.contains("no repos")),
@@ -2404,7 +2191,8 @@ class ProjectProvisionerTest {
 
   @Test
   void repoAlreadyExistsIsSkipped() throws Exception {
-    var repos = List.of(new SailYaml.Repo("https://github.com/acme/app.git", "acme", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/acme/app.git", "acme", null));
     var shell =
         shellThroughStep10()
             .onOk("test -d /home/dev/workspace/acme", "")
@@ -2420,7 +2208,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(configWithRepos(repos), hostYaml(), null, null);
+    provisioner.provision(configWithRepos(repos), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertFalse(
@@ -2433,12 +2221,13 @@ class ProjectProvisionerTest {
 
   @Test
   void repoWithBranchUsesBranchFlag() throws Exception {
-    var repos = List.of(new SailYaml.Repo("https://github.com/acme/app.git", "acme", "develop"));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/acme/app.git", "acme", "develop"));
     var shell = shellThroughStep10().onFail("test -d /home/dev/workspace/acme", "");
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(configWithRepos(repos), hostYaml(), null, null);
+    provisioner.provision(configWithRepos(repos), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -2449,7 +2238,8 @@ class ProjectProvisionerTest {
 
   @Test
   void aCheckoutOfAnotherRepositoryStopsTheStepBeforeItIsRecorded() {
-    var repos = List.of(new SailYaml.Repo("https://github.com/acme/app.git", "acme", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/acme/app.git", "acme", null));
     var shell =
         shellThroughStep10()
             .onOk("test -d /home/dev/workspace/acme", "")
@@ -2463,7 +2253,7 @@ class ProjectProvisionerTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> provisioner.provision(configWithRepos(repos), hostYaml(), null, null));
+            () -> provisioner.provision(configWithRepos(repos), hostYaml(), null, GIT, null));
 
     assertEquals(
         "Repo 'acme' is a clone of https://github.com/acme/legacy.git, but the definition says"
@@ -2476,7 +2266,8 @@ class ProjectProvisionerTest {
 
   @Test
   void repoCloneFailureThrows() {
-    var repos = List.of(new SailYaml.Repo("https://github.com/acme/app.git", "acme", null));
+    var repos =
+        List.of(new ProjectDefinition.Repo("https://github.com/acme/app.git", "acme", null));
     var shell =
         shellThroughStep10()
             .onFail("test -d /home/dev/workspace/acme", "")
@@ -2488,13 +2279,13 @@ class ProjectProvisionerTest {
     var ex =
         assertThrows(
             IOException.class,
-            () -> provisioner.provision(configWithRepos(repos), hostYaml(), null, null));
+            () -> provisioner.provision(configWithRepos(repos), hostYaml(), null, GIT, null));
     assertTrue(ex.getMessage().contains("Failed to clone"));
     assertEquals("REPOS_CLONED", tracker.currentState().error().failedPhase());
   }
 
   @Test
-  void workspaceFilesSkippedWhenSailYamlPathNull() throws Exception {
+  void workspaceFilesSkippedWhenNoFilesDirIsGiven() throws Exception {
     var shell = allSuccessShell();
     var steps = new ArrayList<String>();
     var provisioner =
@@ -2505,11 +2296,10 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(
-        steps.stream()
-            .anyMatch(s -> s.contains("skipped:14/") && s.contains("no files/ directory")));
+        steps.stream().anyMatch(s -> s.contains("skipped:14/") && s.contains("no shared files")));
   }
 
   @Test
@@ -2527,11 +2317,11 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, sailYaml);
+    provisioner.provision(
+        fullConfig(), hostYaml(), null, GIT, sailYaml.getParent().resolve("files"));
 
     assertTrue(
-        steps.stream()
-            .anyMatch(s -> s.contains("skipped:14/") && s.contains("no files/ directory")));
+        steps.stream().anyMatch(s -> s.contains("skipped:14/") && s.contains("no shared files")));
   }
 
   @Test
@@ -2554,7 +2344,8 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, sailYaml);
+    provisioner.provision(
+        fullConfig(), hostYaml(), null, GIT, sailYaml.getParent().resolve("files"));
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("done:14/") && s.contains("2 workspace file(s)")));
@@ -2603,7 +2394,8 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, sailYaml);
+    provisioner.provision(
+        fullConfig(), hostYaml(), null, GIT, sailYaml.getParent().resolve("files"));
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("done:14/") && s.contains("1 workspace file(s)")),
@@ -2635,11 +2427,11 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, sailYaml);
+    provisioner.provision(
+        fullConfig(), hostYaml(), null, GIT, sailYaml.getParent().resolve("files"));
 
     assertTrue(
-        steps.stream()
-            .anyMatch(s -> s.contains("skipped:14/") && s.contains("files/ directory is empty")),
+        steps.stream().anyMatch(s -> s.contains("skipped:14/") && s.contains("no shared files")),
         steps.toString());
     assertTrue(shell.invocations().stream().noneMatch(c -> c.contains(".sail/skills")));
   }
@@ -2660,11 +2452,11 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, sailYaml);
+    provisioner.provision(
+        fullConfig(), hostYaml(), null, GIT, sailYaml.getParent().resolve("files"));
 
     assertTrue(
-        steps.stream()
-            .anyMatch(s -> s.contains("skipped:14/") && s.contains("files/ directory is empty")));
+        steps.stream().anyMatch(s -> s.contains("skipped:14/") && s.contains("no shared files")));
   }
 
   @Test
@@ -2673,7 +2465,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -2698,7 +2490,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(minimalConfig(), hostYaml(), null, null);
+    provisioner.provision(minimalConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("skipped:15/") && s.contains("no services")));
@@ -2730,7 +2522,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(steps.stream().anyMatch(s -> s.contains("done:15/") && s.contains("0/1")));
     var cmds = shell.invocations();
@@ -2763,33 +2555,35 @@ class ProjectProvisionerTest {
 
     var ex =
         assertThrows(
-            IOException.class, () -> provisioner.provision(fullConfig(), hostYaml(), null, null));
+            IOException.class,
+            () -> provisioner.provision(fullConfig(), hostYaml(), null, GIT, null));
     assertTrue(ex.getMessage().contains("Failed to start service 'postgres'"));
     assertEquals("SERVICES_PROVISIONED", tracker.currentState().error().failedPhase());
   }
 
   @Test
   void multipleServicesProvisionedInOrder() throws Exception {
-    var services = new LinkedHashMap<String, SailYaml.Service>();
+    var services = new LinkedHashMap<String, ProjectDefinition.Service>();
     services.put(
-        "postgres", new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null));
+        "postgres",
+        new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null));
     services.put(
         "meilisearch",
-        new SailYaml.Service("getmeili/meilisearch:latest", List.of(7700), Map.of(), null, null));
+        new ProjectDefinition.Service(
+            "getmeili/meilisearch:latest", List.of(7700), Map.of(), null, null));
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Multi-service",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
-            null,
             null,
             null,
             null,
             services,
             null,
             null,
-            new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            null);
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -2811,7 +2605,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(config, hostYaml(), null, null);
+    provisioner.provision(config, hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     var pgIdx = indexOfContaining(cmds, "--name postgres");
@@ -2826,7 +2620,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -2863,7 +2657,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("done:16/") && s.contains("already configured")));
@@ -2881,7 +2675,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("done:17/") && s.contains("claude-code")),
@@ -2900,7 +2694,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(minimalConfig(), hostYaml(), null, null);
+    provisioner.provision(minimalConfig(), hostYaml(), null, GIT, null);
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("skipped:17/") && s.contains("no agent")),
@@ -2910,22 +2704,21 @@ class ProjectProvisionerTest {
   @Test
   void agentToolsAlreadyInstalledSkipsInstall() throws Exception {
     var configWithInstall =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
             null,
-            new SailYaml.Runtimes(25, "22", null),
-            null,
+            new ProjectDefinition.Runtimes(25, "22", null),
             null,
             Map.of(
                 "postgres",
-                new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null)),
+                new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
             null,
-            new SailYaml.Agent(
+            new ProjectDefinition.Agent(
                 "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null),
-            new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            null);
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -2951,7 +2744,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(configWithInstall, hostYaml(), null, null);
+    provisioner.provision(configWithInstall, hostYaml(), null, GIT, null);
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("done:17/") && s.contains("0/1")),
@@ -2965,22 +2758,21 @@ class ProjectProvisionerTest {
   @Test
   void agentToolsInstallFailureRecordsError() {
     var configWithInstall =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
             null,
-            new SailYaml.Runtimes(25, "22", null),
-            null,
+            new ProjectDefinition.Runtimes(25, "22", null),
             null,
             Map.of(
                 "postgres",
-                new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null)),
+                new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
             null,
-            new SailYaml.Agent(
+            new ProjectDefinition.Agent(
                 "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null),
-            new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            null);
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -3005,7 +2797,7 @@ class ProjectProvisionerTest {
     var ex =
         assertThrows(
             IOException.class,
-            () -> provisioner.provision(configWithInstall, hostYaml(), null, null));
+            () -> provisioner.provision(configWithInstall, hostYaml(), null, GIT, null));
     assertTrue(ex.getMessage().contains("Failed to install agent CLI"));
     assertEquals("AGENT_TOOLS_INSTALLED", tracker.currentState().error().failedPhase());
   }
@@ -3013,18 +2805,17 @@ class ProjectProvisionerTest {
   @Test
   void multipleAgentToolsInstalled() throws Exception {
     var configWithMultiple =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
             null,
-            new SailYaml.Runtimes(0, "22", null),
+            new ProjectDefinition.Runtimes(0, "22", null),
             null,
             null,
             null,
-            null,
-            new SailYaml.Agent(
+            new ProjectDefinition.Agent(
                 "claude-code",
                 true,
                 "sail/",
@@ -3033,7 +2824,7 @@ class ProjectProvisionerTest {
                 Map.of(),
                 null,
                 null),
-            new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            null);
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -3058,7 +2849,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(configWithMultiple, hostYaml(), null, null);
+    provisioner.provision(configWithMultiple, hostYaml(), null, GIT, null);
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("done:17/") && s.contains("2/2")),
@@ -3077,7 +2868,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(
@@ -3094,7 +2885,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     var socketCmd =
@@ -3114,7 +2905,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     var aptCmd = cmds.stream().filter(c -> c.contains("apt-get update")).findFirst().orElseThrow();
@@ -3128,7 +2919,7 @@ class ProjectProvisionerTest {
     var provisioner =
         new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
-    provisioner.provision(fullConfig(), hostYaml(), null, null);
+    provisioner.provision(fullConfig(), hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     var launch = indexOfContaining(cmds, "incus launch");
@@ -3161,22 +2952,21 @@ class ProjectProvisionerTest {
   @Test
   void provisioningInstallsSailsSkillAndWritesNoContextFile() throws Exception {
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
             null,
-            new SailYaml.Runtimes(25, null, null),
-            null,
+            new ProjectDefinition.Runtimes(25, null, null),
             null,
             Map.of(
                 "postgres",
-                new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null)),
+                new ProjectDefinition.Service("postgres:16", List.of(5432), Map.of(), null, null)),
             null,
-            new SailYaml.Agent(
+            new ProjectDefinition.Agent(
                 "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null),
-            new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            null);
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
@@ -3201,7 +2991,7 @@ class ProjectProvisionerTest {
             Optional.empty(),
             OperatorCommand.PLAIN);
 
-    provisioner.provision(config, hostYaml(), null, null);
+    provisioner.provision(config, hostYaml(), null, GIT, null);
 
     var cmds = shell.invocations();
     assertTrue(

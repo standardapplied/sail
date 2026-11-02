@@ -49,6 +49,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
@@ -217,6 +218,7 @@ public final class SyncOperations {
     var types = new ArrayList<SyncSession.TypeReport>();
     var failures = new ArrayList<SyncTransportException>();
     var knownMessages = messages.syncEntityIds();
+    var knownProjects = names(projects);
     for (var entity : SyncedEntities.all()) {
       try {
         types.add(session.reconcile(entity.type(), replicas.get(entity.type())));
@@ -236,7 +238,7 @@ public final class SyncOperations {
       failures.add(transportFailure("fde", e));
     }
     materialize(files);
-    materializeProjects(projects);
+    announceNewProjects(projects, knownProjects);
     reconcileLiveResources(projects, reportFor(types, "project"));
     tearDownOutOfScope(dropped(settled));
     var summed =
@@ -605,45 +607,33 @@ public final class SyncOperations {
     }
   }
 
+  private static Set<String> names(ProjectStore projects) {
+    return projects.list().stream()
+        .map(ProjectStore.ProjectRow::name)
+        .collect(Collectors.toCollection(TreeSet::new));
+  }
+
   /**
-   * Writes a freshly-synced project's descriptor to its canonical {@code
-   * ~/.sail/projects/<name>/sail.yaml}, next to the {@code files/} bundle the file sync
-   * materialized, so the provisioner sees the whole project together. Only writes when the
-   * descriptor is absent — it never clobbers a local copy; the database stays the source of truth,
-   * and a project that already exists on this box keeps its file. Reports the names it newly
-   * materialized so the caller can point the engineer at provisioning.
+   * Names the projects this round brought to the catalog that it did not hold before, each with the
+   * command that makes its container here.
    */
-  private List<String> materializeProjects(ProjectStore projects) {
-    var created = new ArrayList<String>();
-    for (var project : projects.list()) {
-      var descriptor = projectsDir.resolve(project.name()).resolve(SailPaths.PROJECT_DESCRIPTOR);
-      if (Files.exists(descriptor)) {
-        continue;
-      }
-      try {
-        ProjectDefinitions.write(descriptor, project.definition());
-        created.add(project.name());
-      } catch (IOException e) {
-        System.err.println(
-            Banner.errorLine(
-                "Could not write descriptor for '" + project.name() + "': " + e.getMessage(),
-                Ansi.AUTO));
-      }
+  private void announceNewProjects(ProjectStore projects, Set<String> known) {
+    var created = names(projects);
+    created.removeAll(known);
+    if (created.isEmpty()) {
+      return;
     }
-    if (!created.isEmpty()) {
-      var applies =
-          created.stream()
-              .map(name -> Remedy.of("\n    ", Remedy.sail("project apply", name)))
-              .toArray();
-      notice.accept(
-          Remedy.of(
-                  created.size()
-                      + " new project(s) synced from main: "
-                      + String.join(", ", created)
-                      + ". Provision each with:")
-              .then(applies));
-    }
-    return created;
+    var applies =
+        created.stream()
+            .map(name -> Remedy.of("\n    ", Remedy.sail("project apply", name)))
+            .toArray();
+    notice.accept(
+        Remedy.of(
+                created.size()
+                    + " new project(s) synced from main: "
+                    + String.join(", ", created)
+                    + ". Provision each with:")
+            .then(applies));
   }
 
   /** Projects the synced files onto disk, warning about any local edits it deliberately left. */

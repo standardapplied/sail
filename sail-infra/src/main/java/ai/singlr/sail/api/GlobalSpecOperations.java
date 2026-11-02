@@ -145,7 +145,7 @@ final class GlobalSpecOperations {
       throw new ApiException(
           ErrorCode.INVALID_REQUEST,
           "spec project is required.",
-          "Pass --project <name> or run from a directory containing sail.yaml.");
+          "Pass --project <name>, or set a current project with project switch.");
     }
     var row =
         new SpecStore.SpecRow(

@@ -9,7 +9,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.BranchPolicy;
 import ai.singlr.sail.config.Lane;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.SpecStatus;
@@ -125,7 +125,7 @@ public final class BuildDispatch {
     admission.requireTrustedRoster(localHandle);
     if (loaded.config().agent() == null) {
       throw new ApiException(
-          ErrorCode.AGENT_NOT_CONFIGURED, "No agent configured in sail.yaml's agent block.");
+          ErrorCode.AGENT_NOT_CONFIGURED, "The project's definition sets no agent.");
     }
 
     var specs = specStore.projectSpecs(project);
@@ -360,8 +360,8 @@ public final class BuildDispatch {
    */
   private PreparedClaim prepare(
       String project,
-      SailYaml config,
-      List<SailYaml.Repo> targetRepos,
+      ProjectDefinition config,
+      List<ProjectDefinition.Repo> targetRepos,
       SpecResolution resolution,
       Spec taskSpec,
       String branch,
@@ -444,7 +444,7 @@ public final class BuildDispatch {
       String branch,
       String task,
       AgentUnit unit,
-      SailYaml config,
+      ProjectDefinition config,
       Runnable claim) {
     if (runStore == null) {
       commit(claim);

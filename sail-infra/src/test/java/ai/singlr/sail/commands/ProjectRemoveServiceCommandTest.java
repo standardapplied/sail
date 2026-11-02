@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -20,7 +21,7 @@ class ProjectRemoveServiceCommandTest {
 
     assertTrue(usage.contains("--json"));
     assertTrue(usage.contains("--dry-run"));
-    assertTrue(usage.contains("--file"));
+    assertFalse(usage.contains("--file"));
     assertTrue(usage.contains("Remove an infrastructure service"));
   }
 

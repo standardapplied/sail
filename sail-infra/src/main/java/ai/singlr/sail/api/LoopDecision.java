@@ -37,7 +37,7 @@ final class LoopDecision {
   static final int MAX_ERRORED_RETRIES = 3;
 
   private static final String NO_REVIEWER =
-      "no reviewer agent resolved; set stages[].agent or agent.install in sail.yaml";
+      "no reviewer agent resolved; set pipeline.stages[].agent or agent.install in the definition";
 
   private static final String NOT_COMMITTED = "fix agent's work could not be committed: ";
 

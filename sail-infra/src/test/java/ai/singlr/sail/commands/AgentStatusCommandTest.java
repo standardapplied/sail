@@ -6,10 +6,12 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.ProjectReader;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ProjectStore;
@@ -33,8 +35,9 @@ class AgentStatusCommandTest {
       Acting.system(
           () ->
               store.upsert(
-                  "acme", "name: acme\nrepos:\n  - url: https://x/api.git\n    path: api\n"));
-      Acting.system(() -> store.upsert("oops", "name: oops\n"));
+                  TestDefinitions.yaml(
+                      "name: acme\nrepos:\n  - url: https://x/api.git\n    path: api\n")));
+      Acting.system(() -> store.upsert(TestDefinitions.named("oops")));
       db.execute("UPDATE projects SET definition = ? WHERE name = ?", "agent: [", "oops");
       var definitions = ProjectReader.ofCatalog(store);
 
@@ -57,7 +60,7 @@ class AgentStatusCommandTest {
 
     assertTrue(usage.contains("status"));
     assertTrue(usage.contains("--json"));
-    assertTrue(usage.contains("--file"));
+    assertFalse(usage.contains("--file"));
   }
 
   @Test

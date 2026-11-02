@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -58,7 +59,7 @@ class OperationsFactoryTest {
         var operations =
             OperationsFactory.create(
                 box.db, shell, bus, null, SyncScheduler.disabled(), SessionYield.NONE)) {
-      Acting.system(() -> new ProjectStore(box.db).upsert("proj", "name: proj\n"));
+      Acting.system(() -> new ProjectStore(box.db).upsert(TestDefinitions.named("proj")));
       var preview = new DispatchOperations.AdhocRequest("task", null, null, true, true);
       var plain = operations.dispatching().startAdhoc("proj", preview, "node");
       var prepared =

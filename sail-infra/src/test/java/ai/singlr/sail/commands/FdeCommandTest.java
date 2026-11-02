@@ -14,11 +14,11 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.ContainerAuthorizedKeys;
 import ai.singlr.sail.engine.FileMutexTest;
-import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.SailPaths;
@@ -577,8 +577,8 @@ class FdeCommandTest {
         db -> {
           Acting.system(
               () -> {
-                new ProjectStore(db).upsert("acme", "name: acme\n");
-                new ProjectStore(db).upsert("web", "name: web\n");
+                new ProjectStore(db).upsert(TestDefinitions.named("acme"));
+                new ProjectStore(db).upsert(TestDefinitions.named("web"));
               });
           return null;
         });
@@ -639,7 +639,7 @@ class FdeCommandTest {
     handle = "uday";
     inDb(
         db -> {
-          Acting.system(() -> new ProjectStore(db).upsert("acme", "name: acme\n"));
+          Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("acme")));
           var fdes = new FdeStore(db);
           fdes.add("client", null, "client@x.com", "member");
           fdes.restrict("client");
@@ -784,17 +784,9 @@ class FdeCommandTest {
           Acting.system(
               () -> {
                 var projects = new ProjectStore(db);
-                for (var project : List.of("acme:dev", "web:newuser")) {
-                  var nameAndUser = project.split(":");
-                  projects.upsert(
-                      nameAndUser[0],
-                      "name: "
-                          + nameAndUser[0]
-                          + "\nssh:\n  user: "
-                          + nameAndUser[1]
-                          + "\n  authorized_keys:\n    - ${SSH_PUBLIC_KEY}\n");
+                for (var project : List.of("acme", "web", "docs")) {
+                  projects.upsert(TestDefinitions.named(project));
                 }
-                projects.upsert("docs", "name: docs\n");
               });
           return null;
         });
@@ -1831,8 +1823,8 @@ class FdeCommandTest {
         db -> {
           Acting.system(
               () -> {
-                new ProjectStore(db).upsert("alpha", "name: alpha\n");
-                new ProjectStore(db).upsert("beta", "name: beta\n");
+                new ProjectStore(db).upsert(TestDefinitions.named("alpha"));
+                new ProjectStore(db).upsert(TestDefinitions.named("beta"));
               });
           return null;
         });
@@ -1898,7 +1890,7 @@ class FdeCommandTest {
   void aGrantNamesAScopedFdeAndAProjectInTheCatalog() {
     inDb(
         db -> {
-          Acting.system(() -> new ProjectStore(db).upsert("alpha", "name: alpha\n"));
+          Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("alpha")));
           return null;
         });
     assertEquals(0, fde("add", "nia", "--scoped"));
@@ -1970,7 +1962,7 @@ class FdeCommandTest {
           Acting.system(
               () -> {
                 for (var project : projects) {
-                  new ProjectStore(db).upsert(project, "name: " + project + "\n");
+                  new ProjectStore(db).upsert(TestDefinitions.named(project));
                 }
               });
           return null;
@@ -2507,10 +2499,6 @@ class FdeCommandTest {
     assertEquals(Path.of(System.getProperty("user.home")), box.home());
     assertEquals(Path.of("/etc/ssh/ssh_host_ed25519_key.pub"), box.hostKey());
     assertEquals(SailPaths.workstationPublicKeyPath(), box.workstationKey());
-    assertEquals(
-        LocalIdentity.detect(OperatorCommand.PLAIN).sshPublicKeyPath(),
-        box.workstationKey(),
-        "a pairing writes the key ${SSH_PUBLIC_KEY} resolves from");
     assertEquals(SailPaths.controlPlaneDb(), box.database());
     assertFalse(box.shell().isDryRun());
     assertEquals(HostSync.isNode(HostSync.config()), box.node());

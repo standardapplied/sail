@@ -19,6 +19,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ProjectFileFixtures;
@@ -1272,7 +1273,7 @@ class SailOperationsSeamTest {
   void aNodesPurgeIsAskedOfMainAndErasesNothingHereYet() {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
-      Acting.system(() -> new ProjectStore(db).upsert("old", "name: old\n"));
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("old")));
       db.execute("UPDATE projects SET base_rev = rev WHERE name = 'old'");
       new FdeStore(db).add("node", "Node", "node@example.com", "admin");
       try (var operations =
@@ -1304,7 +1305,7 @@ class SailOperationsSeamTest {
   void aNodeThatHasNotSyncedItsRosterSaysSoInsteadOfGuessingARole() {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
-      Acting.system(() -> new ProjectStore(db).upsert("old", "name: old\n"));
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("old")));
       try (var operations =
           OperationsFactory.create(
                   db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
@@ -1332,7 +1333,7 @@ class SailOperationsSeamTest {
   void aMembersNodeIsToldAPurgeIsAdminOnlyBeforeAnythingIsAsked() {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
-      Acting.system(() -> new ProjectStore(db).upsert("old", "name: old\n"));
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("old")));
       new FdeStore(db).add("node", "Node", "node@example.com", "member");
       try (var operations =
           OperationsFactory.create(
@@ -1364,7 +1365,7 @@ class SailOperationsSeamTest {
       new SchemaManager(db).migrate();
       var projects = new ProjectStore(db);
       var definition = "name: old\n";
-      Acting.system(() -> projects.upsert("old", definition));
+      Acting.system(() -> projects.upsert(TestDefinitions.yaml(definition)));
       ProjectFileFixtures.put(operations.projectFiles("old"), "config", new byte[] {1});
       assertFalse(operations.catalog().destroy("old", false).purged());
       var renamed = operations.catalog().rename("old", "new");
@@ -1372,7 +1373,9 @@ class SailOperationsSeamTest {
       assertTrue(operations.catalog().project("new").isPresent());
       assertEquals("config", operations.projectFiles("new").list().getFirst().path());
       operations.catalog().undoRename(renamed);
-      assertEquals(definition, operations.catalog().project("old").orElseThrow().definition());
+      assertEquals(
+          TestDefinitions.yaml(definition),
+          operations.catalog().project("old").orElseThrow().definition());
       assertEquals(1, operations.catalog().projects().size());
       assertEquals(
           "0 specs, 0 rooms, 0 messages, 0 runs, 0 reviews, 1 files, 1 projects, 0 events and 0"
@@ -1448,7 +1451,7 @@ class SailOperationsSeamTest {
                   "{}"));
       assertEquals(
           1L, box.db.queryOne("SELECT count(*) FROM events", row -> row.integer(0)).orElseThrow());
-      assertTrue(operations.catalog().demoDefinition().contains("demo"));
+      assertEquals("demo", operations.catalog().demoDefinition().name());
       assertEquals("demo", operations.catalog().definitions().require("demo").name());
       assertTrue(operations.catalog().destroy("demo", true).purged());
       assertTrue(operations.catalog().definitions().read("demo").isEmpty());

@@ -6,7 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.RunStore;
@@ -119,10 +119,10 @@ public final class AgentReporter {
    * best-effort: failures produce degraded output rather than errors.
    *
    * @param containerName the Incus container name
-   * @param config the project's SailYaml config
+   * @param config the project's ProjectDefinition config
    */
   public Report generate(
-      String containerName, SailYaml config, List<Spec> specs, RunStore.RunRow session)
+      String containerName, ProjectDefinition config, List<Spec> specs, RunStore.RunRow session)
       throws IOException, InterruptedException, TimeoutException {
     return generate(containerName, config, specs, session, SailPaths.projectDir(containerName));
   }
@@ -159,7 +159,7 @@ public final class AgentReporter {
    */
   Report generate(
       String containerName,
-      SailYaml config,
+      ProjectDefinition config,
       List<Spec> specs,
       RunStore.RunRow session,
       Path stateDir)

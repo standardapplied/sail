@@ -13,7 +13,9 @@ import ai.singlr.sail.authority.Refusal.Kind;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
+import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -127,7 +129,7 @@ class JournalDecidesEveryWriteTest {
     }
 
     private void seed() {
-      projects.upsert("acme", "name: acme\n");
+      projects.upsert(TestDefinitions.named("acme"));
       specs.create(spec("theirs", SpecStatus.IN_PROGRESS));
       specs.create(spec("shipped", SpecStatus.REVIEW));
       specs.create(spec("fix", SpecStatus.DONE));
@@ -350,12 +352,27 @@ class JournalDecidesEveryWriteTest {
             }),
         write("FileStore.delete", null, f -> f.files.delete("acme", "notes.md")),
         write("FileStore.reproject", null, f -> f.files.reproject("acme", "acme2")),
-        write("ProjectStore.upsert", null, f -> f.projects.upsert("acme", "name: acme\nx: 1\n")),
+        write(
+            "ProjectStore.upsert",
+            null,
+            f -> f.projects.upsert(TestDefinitions.described("acme", "1"))),
         write("ProjectStore.delete", null, f -> f.projects.delete("acme")),
+        write(
+            "ProjectStore.create",
+            null,
+            f -> f.projects.create(TestDefinitions.described("acme4", "1"))),
+        write(
+            "ProjectStore.writeSection",
+            null,
+            f -> f.projects.writeSection("acme", Section.IMAGE, "\"ubuntu/24.04\"", null)),
+        write(
+            "ProjectStore.writeSections",
+            null,
+            f -> f.projects.writeSections("acme", Map.of(Section.DESCRIPTION, "\"2\""), Map.of())),
         write(
             "ProjectStore.rename",
             Kind.ADMIN_ONLY,
-            f -> f.projects.rename("acme", "acme2", "name: acme2\n")),
+            f -> f.projects.rename("acme", "acme2", TestDefinitions.named("acme2"))),
         owned(
             "MessageStore.append",
             f -> f.messages.append("theirs", Actor.current().handle(), "hi", null)));

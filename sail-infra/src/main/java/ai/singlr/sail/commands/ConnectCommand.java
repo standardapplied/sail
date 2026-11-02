@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
@@ -15,7 +16,6 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
-import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkstationIdentity;
@@ -87,7 +87,7 @@ public final class ConnectCommand implements Runnable {
 
     var resolvedServerUser =
         Objects.requireNonNullElse(serverUser, System.getProperty("user.name"));
-    var containerUser = resolveContainerUser(name, operator);
+    var containerUser = ProjectDefinition.USER;
 
     var registered = WorkstationIdentity.registered();
     var identityFile = WorkstationIdentity.identityFileFor(registered);
@@ -118,19 +118,6 @@ public final class ConnectCommand implements Runnable {
             containerIp,
             containerUser,
             identityFile));
-  }
-
-  /**
-   * The container login user from the project definition (catalog-first), defaulting to {@code dev}
-   * when the descriptor can't be read — a running container is reason enough to print a snippet, so
-   * a missing descriptor degrades to the default rather than failing.
-   */
-  private static String resolveContainerUser(String name, OperatorCommand operator) {
-    try {
-      return ProjectDefinitions.load(name, null, operator).sshUser();
-    } catch (RuntimeException e) {
-      return "dev";
-    }
   }
 
   /**

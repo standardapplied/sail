@@ -24,6 +24,7 @@ import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
@@ -86,8 +87,6 @@ class DispatchCommandWiringTest {
   private static final String YAML =
       """
       name: acme
-      ssh:
-        user: dev
       repos:
         - url: https://github.com/acme/app.git
           path: app
@@ -121,7 +120,7 @@ class DispatchCommandWiringTest {
         () -> {
           db = Sqlite.open(tempDir.resolve("control-plane.db"));
           new SchemaManager(db).migrate();
-          new ProjectStore(db).upsert("acme", YAML);
+          new ProjectStore(db).upsert(TestDefinitions.yaml(YAML));
           var specStore = new SpecStore(db);
           Acting.as(
               "me",
@@ -299,7 +298,7 @@ class DispatchCommandWiringTest {
     new FdeStore(db).add(HANDLE, null, null, "admin");
     Acting.system(
         () -> {
-          new ProjectStore(db).upsert("acme", YAML);
+          new ProjectStore(db).upsert(TestDefinitions.yaml(YAML));
           new FileStore(db)
               .put(
                   "acme",

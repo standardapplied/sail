@@ -7,8 +7,6 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -22,48 +20,6 @@ import org.junit.jupiter.api.io.TempDir;
 class WorkspaceFilesTest {
 
   @TempDir Path tempDir;
-
-  @Test
-  void resolveFilesDirFindsAdjacentDirectory() throws IOException {
-    var filesDir = tempDir.resolve("files");
-    Files.createDirectories(filesDir);
-    var sailYaml = tempDir.resolve("sail.yaml");
-    Files.writeString(sailYaml, "name: test");
-
-    var result = WorkspaceFiles.resolveFilesDir(sailYaml);
-
-    assertNotNull(result);
-    assertEquals(filesDir.toAbsolutePath(), result.toAbsolutePath());
-  }
-
-  @Test
-  void resolveFilesDirReturnsNullWhenNoFilesDir() throws IOException {
-    var sailYaml = tempDir.resolve("sail.yaml");
-    Files.writeString(sailYaml, "name: test");
-
-    var result = WorkspaceFiles.resolveFilesDir(sailYaml);
-
-    assertNull(result);
-  }
-
-  @Test
-  void resolveFilesDirReturnsNullWhenFilesIsFile() throws IOException {
-    var filesFile = tempDir.resolve("files");
-    Files.writeString(filesFile, "not a directory");
-    var sailYaml = tempDir.resolve("sail.yaml");
-    Files.writeString(sailYaml, "name: test");
-
-    var result = WorkspaceFiles.resolveFilesDir(sailYaml);
-
-    assertNull(result);
-  }
-
-  @Test
-  void resolveFilesDirReturnsNullWhenPathIsNull() {
-    var result = WorkspaceFiles.resolveFilesDir(null);
-
-    assertNull(result);
-  }
 
   @Test
   void listFilesFindsSingleFile() throws IOException {
@@ -177,18 +133,6 @@ class WorkspaceFilesTest {
   }
 
   @Test
-  void resolveFilesDirWorksWithAbsolutePath() throws IOException {
-    var filesDir = tempDir.resolve("files");
-    Files.createDirectories(filesDir);
-    var sailYaml = tempDir.resolve("sail.yaml").toAbsolutePath();
-    Files.writeString(sailYaml, "name: test");
-
-    var result = WorkspaceFiles.resolveFilesDir(sailYaml);
-
-    assertNotNull(result);
-  }
-
-  @Test
   void listFilesResultIsImmutable() throws IOException {
     var filesDir = tempDir.resolve("files");
     Files.createDirectories(filesDir);
@@ -197,19 +141,6 @@ class WorkspaceFilesTest {
     var entries = WorkspaceFiles.listFiles(filesDir);
 
     assertThrows(UnsupportedOperationException.class, () -> entries.add(null));
-  }
-
-  @Test
-  void resolveFilesDirFromSubdirectory() throws IOException {
-    var projectDir = tempDir.resolve("myproject");
-    Files.createDirectories(projectDir.resolve("files"));
-    var sailYaml = projectDir.resolve("sail.yaml");
-    Files.writeString(sailYaml, "name: test");
-
-    var result = WorkspaceFiles.resolveFilesDir(sailYaml);
-
-    assertNotNull(result);
-    assertTrue(result.toString().endsWith("files"));
   }
 
   @Test

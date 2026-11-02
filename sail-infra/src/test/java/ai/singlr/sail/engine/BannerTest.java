@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.ProjectScope;
@@ -418,10 +418,10 @@ class BannerTest {
   @Test
   void projectSummaryShowsAllFields() {
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
             List.of("postgresql-client-16"),
             null,
@@ -429,8 +429,7 @@ class BannerTest {
             null,
             null,
             null,
-            null,
-            new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            null);
     var out = new ByteArrayOutputStream();
     Banner.printProjectSummary(config, new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
@@ -448,11 +447,10 @@ class BannerTest {
   @Test
   void projectSummaryBordersAlign() {
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "test-proj",
             null,
-            new SailYaml.Resources(2, "4GB", "50GB"),
-            null,
+            new ProjectDefinition.Resources(2, "4GB", "50GB"),
             null,
             null,
             null,
@@ -735,8 +733,8 @@ class BannerTest {
   @Test
   void aTitleLongerThanItsBoxIsCutInsideTheBorder() {
     var config =
-        new SailYaml(
-            "p".repeat(63), null, null, null, null, null, null, null, null, null, null, null);
+        new ProjectDefinition(
+            "p".repeat(63), null, null, null, null, null, null, null, null, null, null);
 
     var lines =
         printedAt(
@@ -751,8 +749,8 @@ class BannerTest {
   @Test
   void aWideCharacterTakesTwoOfTheColumnsARowFits() {
     var config =
-        new SailYaml(
-            "acme", "界".repeat(100), null, null, null, null, null, null, null, null, null, null);
+        new ProjectDefinition(
+            "acme", "界".repeat(100), null, null, null, null, null, null, null, null, null);
 
     var lines =
         printedAt(
@@ -769,10 +767,9 @@ class BannerTest {
   @Test
   void anEmojiTakesTwoOfTheColumnsARowFits() {
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "acme",
             "\uD83D\uDE80".repeat(100),
-            null,
             null,
             null,
             null,
@@ -798,10 +795,9 @@ class BannerTest {
   @Test
   void anEmojiPresentedByASelectorTakesTwoOfTheColumnsARowFits() {
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "acme",
             "\u263A\uFE0F".repeat(100),
-            null,
             null,
             null,
             null,
@@ -827,19 +823,8 @@ class BannerTest {
   @Test
   void aTabOrLineBreakInAValueIsASpaceTheRowFits() {
     var config =
-        new SailYaml(
-            "acme",
-            "a\tb\nc\r".repeat(30),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null);
+        new ProjectDefinition(
+            "acme", "a\tb\nc\r".repeat(30), null, null, null, null, null, null, null, null, null);
 
     var lines =
         printedAt(
@@ -856,8 +841,8 @@ class BannerTest {
   @Test
   void aCursorMoveInAValueIsTextTheRowFits() {
     var config =
-        new SailYaml(
-            "acme", "\033[99CXX", null, null, null, null, null, null, null, null, null, null);
+        new ProjectDefinition(
+            "acme", "\033[99CXX", null, null, null, null, null, null, null, null, null);
 
     var lines =
         printedAt(
@@ -1278,25 +1263,26 @@ class BannerTest {
 
   @Test
   void projectConfigShowsAllFields() {
-    var services = new LinkedHashMap<String, SailYaml.Service>();
-    services.put("postgres", new SailYaml.Service("postgres:16", List.of(5432), null, null, null));
+    var services = new LinkedHashMap<String, ProjectDefinition.Service>();
+    services.put(
+        "postgres", new ProjectDefinition.Service("postgres:16", List.of(5432), null, null, null));
     services.put(
         "meilisearch",
-        new SailYaml.Service("getmeili/meilisearch:latest", List.of(7700), null, null, null));
+        new ProjectDefinition.Service(
+            "getmeili/meilisearch:latest", List.of(7700), null, null, null));
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "acme-health",
             "Acme Health Platform",
-            new SailYaml.Resources(4, "12GB", "150GB"),
+            new ProjectDefinition.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
             List.of("postgresql-client-16"),
-            new SailYaml.Runtimes(25, "22", null),
-            null,
+            new ProjectDefinition.Runtimes(25, "22", null),
             null,
             services,
             null,
-            new SailYaml.Agent("claude-code", true, "sail/", true, null, null, null, null),
-            new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
+            new ProjectDefinition.Agent("claude-code", true, "sail/", true, null, null, null, null),
+            null);
     var state = new ContainerState.Running("10.0.0.42");
     var out = new ByteArrayOutputStream();
     Banner.printProjectConfig(config, state, new PrintStream(out), Ansi.OFF);
@@ -1320,11 +1306,10 @@ class BannerTest {
   @Test
   void projectConfigWithStoppedContainer() {
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "test",
             null,
-            new SailYaml.Resources(2, "4GB", "50GB"),
-            null,
+            new ProjectDefinition.Resources(2, "4GB", "50GB"),
             null,
             null,
             null,
@@ -1344,11 +1329,10 @@ class BannerTest {
   @Test
   void projectConfigMinimalConfig() {
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "minimal",
             null,
-            new SailYaml.Resources(2, "4GB", "50GB"),
-            null,
+            new ProjectDefinition.Resources(2, "4GB", "50GB"),
             null,
             null,
             null,
@@ -1366,25 +1350,24 @@ class BannerTest {
     assertTrue(output.contains("Not created"));
     assertFalse(output.contains("JDK:"));
     assertFalse(output.contains("Agent:"));
-    assertFalse(output.contains("SSH user:"));
+    assertTrue(output.contains("SSH user:    dev"));
   }
 
   @Test
   void projectConfigBordersAlign() {
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "acme",
             "Desc",
-            new SailYaml.Resources(2, "4GB", "50GB"),
+            new ProjectDefinition.Resources(2, "4GB", "50GB"),
             "ubuntu/24.04",
             null,
-            new SailYaml.Runtimes(25, null, null),
+            new ProjectDefinition.Runtimes(25, null, null),
             null,
             null,
             null,
-            null,
-            new SailYaml.Agent("claude-code", false, null, true, null, null, null, null),
-            new SailYaml.Ssh("dev", null));
+            new ProjectDefinition.Agent("claude-code", false, null, true, null, null, null, null),
+            null);
     var state = new ContainerState.Running("10.0.0.1");
     var out = new ByteArrayOutputStream();
     Banner.printProjectConfig(config, state, new PrintStream(out), Ansi.OFF);
@@ -1399,12 +1382,12 @@ class BannerTest {
   }
 
   @Test
-  void anSshBlockWithKeysAndNoUserSummarizesAsDev() {
+  void everyProjectSummarizesItsSshUserAsDev() {
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             "acme",
             null,
-            new SailYaml.Resources(2, "4GB", "50GB"),
+            new ProjectDefinition.Resources(2, "4GB", "50GB"),
             null,
             null,
             null,
@@ -1412,8 +1395,7 @@ class BannerTest {
             null,
             null,
             null,
-            null,
-            new SailYaml.Ssh(null, List.of("ssh-ed25519 AAAA...")));
+            null);
     var summary = new ByteArrayOutputStream();
     var projectConfig = new ByteArrayOutputStream();
 

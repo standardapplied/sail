@@ -8,8 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
-import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import java.nio.charset.StandardCharsets;
@@ -38,9 +37,8 @@ class LocalApiStackTest {
                         shell,
                         project ->
                             Optional.of(
-                                SailYaml.fromMap(
-                                    YamlUtil.parseMap(
-                                        StackOperationsTest.ACME.replace("acme", project))))),
+                                TestDefinitions.yaml(
+                                    StackOperationsTest.ACME.replace("acme", project)))),
                     duration -> {},
                     System::nanoTime);
 

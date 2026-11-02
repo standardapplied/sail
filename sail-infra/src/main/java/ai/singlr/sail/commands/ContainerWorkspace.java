@@ -5,9 +5,7 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
@@ -20,8 +18,8 @@ import picocli.CommandLine.Help.Ansi;
 /**
  * Resolves a project's container workspace ({@code /home/<user>/workspace}) so commands can read
  * the project's files where they actually live — in the running container — rather than asking the
- * engineer to {@code cd} anywhere. The user is read from the project's database-backed descriptor;
- * the directory only resolves when the container is running.
+ * engineer to {@code cd} anywhere, as the account every container runs as ({@link
+ * ProjectDefinition#USER}); the directory only resolves when the container is running.
  */
 final class ContainerWorkspace {
 
@@ -48,18 +46,6 @@ final class ContainerWorkspace {
               "Could not reach project '" + project + "': " + e.getMessage(), Ansi.AUTO));
       return Optional.empty();
     }
-    return Optional.of(Path.of("/home/" + sshUser(project, operator) + "/workspace"));
-  }
-
-  private static String sshUser(String project, OperatorCommand operator) {
-    try (var operations = OperationsFactory.open()) {
-      return operations
-          .catalog()
-          .project(project)
-          .map(row -> SailYaml.fromMap(YamlUtil.parseMap(row.definition())).sshUser())
-          .orElse("dev");
-    } catch (Exception e) {
-      return "dev";
-    }
+    return Optional.of(Path.of("/home/" + ProjectDefinition.USER + "/workspace"));
   }
 }

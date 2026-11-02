@@ -5,13 +5,14 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Builds {@code podman run} command lists from {@link SailYaml.Service} records. Pure utility — no
- * side effects, no shell execution. The returned lists are passed directly to {@link ShellExec}.
+ * Builds {@code podman run} command lists from {@link ProjectDefinition.Service} records. Pure
+ * utility — no side effects, no shell execution. The returned lists are passed directly to {@link
+ * ShellExec}.
  */
 public final class PodmanCommands {
 
@@ -21,10 +22,11 @@ public final class PodmanCommands {
    * Builds a {@code podman run -d --restart=always} command for the given service.
    *
    * @param serviceName the container name (e.g. "postgres")
-   * @param service the service definition from sail.yaml
+   * @param service the service as the definition declares it
    * @return an unmodifiable command list ready for {@link ShellExec#exec}
    */
-  public static List<String> buildRunCommand(String serviceName, SailYaml.Service service) {
+  public static List<String> buildRunCommand(
+      String serviceName, ProjectDefinition.Service service) {
     var cmd = new ArrayList<String>();
     cmd.addAll(List.of("podman", "run", "-d", "--restart=always", "--name", serviceName));
 

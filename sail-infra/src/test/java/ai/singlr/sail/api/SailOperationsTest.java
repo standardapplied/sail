@@ -13,7 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Lane;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
@@ -207,8 +209,8 @@ class SailOperationsTest {
         operationsWith(
             shell().on("incus list --format json", LIST_ALL_JSON),
             store -> {
-              store.upsert("beta", "name: beta");
-              store.upsert("acme", "name: acme");
+              store.upsert(TestDefinitions.yaml("name: beta"));
+              store.upsert(TestDefinitions.yaml("name: acme"));
             },
             environment());
 
@@ -224,6 +226,47 @@ class SailOperationsTest {
   }
 
   @Test
+  void aDefinitionIsCreatedReadAndWrittenASectionAtATimeThroughTheCatalog() throws Exception {
+    var operations = operationsWith(shell(), store -> {}, environment());
+
+    var created =
+        Acting.by(
+                ADMIN, () -> operations.createProject(Map.of("name", "storefront", "image", "x/1")))
+            .orThrow();
+    var written =
+        Acting.by(
+                ADMIN,
+                () ->
+                    operations.writeProjectSection(
+                        "storefront", "image", "x/2", created.tags().get("image")))
+            .orThrow();
+
+    assertEquals("x/2", ProjectDefinitionJson.read(written.document()).image());
+    assertEquals(
+        written, Acting.by(ADMIN, () -> operations.projectDefinition("storefront")).orThrow());
+    assertError(
+        ErrorCode.PRECONDITION_FAILED,
+        Acting.by(
+            ADMIN,
+            () ->
+                operations.writeProjectSection(
+                    "storefront", "image", "x/3", created.tags().get("image"))));
+  }
+
+  @Test
+  void definitionsWithoutACatalogAreUnavailable() throws Exception {
+    var operations = operations(shell());
+
+    assertError(ErrorCode.INTERNAL, Acting.by(ADMIN, () -> operations.projectDefinition("acme")));
+    assertError(
+        ErrorCode.INTERNAL,
+        Acting.by(ADMIN, () -> operations.createProject(Map.of("name", "acme"))));
+    assertError(
+        ErrorCode.INTERNAL,
+        Acting.by(ADMIN, () -> operations.writeProjectSection("acme", "image", "x/1", "*")));
+  }
+
+  @Test
   void projectsFailsLegiblyWhenContainerListingFails() throws Exception {
     var result = operations(shell()).projects();
 
@@ -236,7 +279,7 @@ class SailOperationsTest {
     var db = Sqlite.open(tempDir.resolve("catalog-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     var projectStore = new ProjectStore(db);
-    projectStore.upsert("beta", "name: beta");
+    projectStore.upsert(TestDefinitions.yaml("name: beta"));
     var operations =
         new SailOperations(
             shell().on("incus list --format json", EMPTY_JSON),
@@ -2159,9 +2202,9 @@ class SailOperationsTest {
               type: claude-code
               guardrails:
                 max_duration: 6h
-              review_pipeline:
-                guardrails:
-                  max_duration: 90m
+            pipeline:
+              guardrails:
+                max_duration: 90m
             """,
             shell,
             (command, logPath) -> 4242L);
@@ -2232,8 +2275,6 @@ class SailOperationsTest {
         operations(
             """
             name: acme
-            ssh:
-              user: dev
             """,
             shell()
                 .on("incus list ^acme$", RUNNING_JSON)
@@ -2568,17 +2609,17 @@ class SailOperationsTest {
   }
 
   @Test
-  void missingDescriptorMapsToNotFound() {
+  void aProjectNotInTheCatalogMapsToNotFound() {
     var operations =
         new SailOperations(shell(), TestProjects.reading(tempDir.resolve("missail.yaml")));
 
     var error = operations.project("acme");
 
-    assertError(ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND, error);
+    assertError(ErrorCode.PROJECT_NOT_IN_CATALOG, error);
   }
 
   @Test
-  void malformedDescriptorMapsToProjectLoadFailure() throws Exception {
+  void anUnreadableDefinitionMapsToProjectLoadFailure() throws Exception {
     var operations = operations("name: [", shell().on("incus list ^acme$", RUNNING_JSON));
 
     var error = operations.project("acme");
@@ -3391,8 +3432,6 @@ class SailOperationsTest {
   private static String baseYaml() {
     return """
         name: acme
-        ssh:
-          user: dev
         agent:
           type: claude-code
         """;
@@ -3401,8 +3440,6 @@ class SailOperationsTest {
   private static String multiRepoYaml() {
     return """
         name: acme
-        ssh:
-          user: dev
         repos:
           - url: https://github.com/acme/app.git
             path: app
@@ -3416,16 +3453,12 @@ class SailOperationsTest {
   private static String noAgentYaml() {
     return """
         name: acme
-        ssh:
-          user: dev
         """;
   }
 
   private static String branchYaml() {
     return """
         name: acme
-        ssh:
-          user: dev
         repos:
           - url: https://github.com/acme/app.git
             path: app
@@ -3439,8 +3472,6 @@ class SailOperationsTest {
   private static String snapshotYaml() {
     return """
         name: acme
-        ssh:
-          user: dev
         agent:
           type: claude-code
           auto_snapshot: true
@@ -3450,8 +3481,6 @@ class SailOperationsTest {
   private static String guardrailsYaml() {
     return """
         name: acme
-        ssh:
-          user: dev
         agent:
           type: claude-code
           guardrails:

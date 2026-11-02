@@ -70,8 +70,6 @@ class DispatchBranchBaseTest {
   private static final String YAML =
       """
       name: acme
-      ssh:
-        user: dev
       repos:
         - url: https://github.com/acme/app.git
           path: app

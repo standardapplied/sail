@@ -14,6 +14,7 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 class TestOperations implements Operations {
@@ -249,6 +250,24 @@ class TestOperations implements Operations {
   @Override
   public Result<ProjectResponse> project(String project) {
     return Result.success(new ProjectResponse(project, "running", null, null, null));
+  }
+
+  @Override
+  public Result<ProjectDefinitionResponse> projectDefinition(String project) {
+    return Result.success(
+        new ProjectDefinitionResponse(
+            project, "{\"name\": \"" + project + "\"}", Map.of(), null, null));
+  }
+
+  @Override
+  public Result<ProjectDefinitionResponse> createProject(Map<String, Object> document) {
+    return projectDefinition(String.valueOf(document.get("name")));
+  }
+
+  @Override
+  public Result<ProjectDefinitionResponse> writeProjectSection(
+      String project, String section, Object value, String ifMatch) {
+    return projectDefinition(project);
   }
 
   @Override

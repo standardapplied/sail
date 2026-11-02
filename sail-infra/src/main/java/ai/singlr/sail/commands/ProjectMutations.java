@@ -5,66 +5,104 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinition.Section;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
-import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.identity.Actor;
-import java.io.IOException;
 import java.io.PrintStream;
-import java.nio.file.Path;
+import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
- * Shared read/write seam for the commands that mutate one field of a project definition (add a repo
- * or service, remove a service, change resources). They all read the current definition
- * catalog-first and persist the result back to the catalog, so an edit can never read a stale
- * on-disk copy or be silently dropped on the next sync. Centralizing it keeps every mutation on the
- * same database-authoritative path as {@code project edit}.
+ * Shared read/write seam for the commands that change one section of a project's definition (add a
+ * repo or service, remove a service, change resources). Each reads the definition from the catalog,
+ * checks its edit whole before it touches the container, and writes the one section it changed,
+ * refused if another write changed that section since it was read.
  */
 final class ProjectMutations {
 
-  private ProjectMutations() {}
+  private final ProjectCatalog catalog;
+  private final Supplier<Actor> operator;
 
-  /** The current definition text, catalog-first; throws with guidance if the project is unknown. */
-  static String currentDefinition(String name, Path explicitFile, OperatorCommand operator) {
-    return ProjectDefinitions.definition(name, explicitFile)
-        .orElseThrow(() -> notFound(name, operator));
+  /** Mutations of {@code catalog}, written as the actor {@code operator} names. */
+  ProjectMutations(ProjectCatalog catalog, Supplier<Actor> operator) {
+    this.catalog = Objects.requireNonNull(catalog, "catalog");
+    this.operator = Objects.requireNonNull(operator, "operator");
+  }
+
+  /** Mutations of this box's catalog, written as this box's operator ({@link CliOperator}). */
+  static ProjectMutations here() {
+    return new ProjectMutations(ProjectCatalog.here(), CliOperator::current);
+  }
+
+  /** The catalog these mutations read and write. */
+  ProjectCatalog catalog() {
+    return catalog;
+  }
+
+  /** The definition project {@code name} holds, or a refusal naming how to make one. */
+  ProjectDefinition current(String name, OperatorCommand command) {
+    return catalog.read(name).orElseThrow(() -> notFound(name, command));
   }
 
   /**
    * This box's operator, resolved before a command changes anything, for the catalog write of
    * project {@code name} that ends it: a node that cannot name its operator, or whose operator the
    * journal will refuse that write, refuses up front, never after cloning, starting or editing.
-   * Null for a dry run or an explicit {@code -f} file, neither of which touches the catalog.
+   * Null for a dry run, which touches no catalog.
    */
-  static Actor catalogOperator(String name, Path explicitFile, boolean dryRun) {
-    if (dryRun || explicitFile != null) {
+  Actor writer(String name, boolean dryRun) {
+    if (dryRun) {
       return null;
     }
-    var operator = CliOperator.current();
-    ProjectCatalog.requireRecordable(name, operator);
-    return operator;
+    var actor = operator.get();
+    catalog.requireRecordable(name, actor);
+    return actor;
+  }
+
+  /** {@code edited} checked whole, before any side effect it would follow. */
+  static ProjectDefinition checked(ProjectDefinition edited) {
+    return ProjectDefinitionJson.validated(edited);
   }
 
   /**
-   * Persists an edited definition through the catalog seam as {@code operator} (see {@link
-   * #catalogOperator}), or prints the intent under {@code --dry-run}. {@code dryRunLabel} describes
-   * the change for the dry-run line.
+   * Writes {@code section} of {@code read}'s project as {@code edited} holds it, as {@code actor}
+   * (see {@link #writer}), or prints the intent under {@code --dry-run}.
    */
-  static void persist(
-      String name,
-      Path explicitFile,
-      String definition,
+  void write(
+      Section section,
+      ProjectDefinition read,
+      ProjectDefinition edited,
       boolean dryRun,
       PrintStream out,
       String dryRunLabel,
-      Actor operator)
-      throws IOException {
+      Actor actor) {
     if (dryRun) {
       out.println("[dry-run] " + dryRunLabel);
       return;
     }
-    ProjectDefinitions.persist(name, explicitFile, definition, operator);
+    catalog.writeSection(read.name(), section, read, edited, actor);
+  }
+
+  /**
+   * {@code config} when it sets resources, which a container is made with; else a refusal naming
+   * the line that sets them.
+   */
+  static ProjectDefinition requireResources(ProjectDefinition config, OperatorCommand operator) {
+    if (config.resources() != null) {
+      return config;
+    }
+    throw new IllegalStateException(
+        "Project '"
+            + config.name()
+            + "' sets no resources, so its container cannot be made. Set them with: "
+            + operator.sail(
+                "project config set "
+                    + config.name()
+                    + " resources '{\"cpu\": 2, \"memory\": \"8GB\", \"disk\": \"50GB\"}'"));
   }
 
   static IllegalStateException notFound(String name, OperatorCommand operator) {
@@ -72,7 +110,7 @@ final class ProjectMutations {
         "No project '"
             + name
             + "' in the catalog. Create it with '"
-            + operator.sail("project apply")
+            + operator.sail("project create " + name)
             + "', or sync it from main with '"
             + operator.sail("sync")
             + "'.");

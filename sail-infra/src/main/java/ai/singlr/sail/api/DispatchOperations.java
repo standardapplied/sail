@@ -7,7 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Engagement;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.ShellExec;
@@ -122,7 +122,7 @@ public final class DispatchOperations {
    */
   @FunctionalInterface
   public interface Snapshotter {
-    String snapshot(String project, SailYaml config);
+    String snapshot(String project, ProjectDefinition config);
   }
 
   /**
@@ -391,8 +391,8 @@ public final class DispatchOperations {
    * agent keeps its remaining budget rather than getting a fresh one.
    */
   public Optional<WatcherSpawner.Unit> relaunchWatcher(RunStore.RunRow run) throws IOException {
-    var agent = projects.load(run.project()).config().agent();
-    if (agent == null) {
+    var config = projects.load(run.project()).config();
+    if (config.agent() == null) {
       return Optional.empty();
     }
     return watcherSpawner.spawnUnitForRun(
@@ -400,7 +400,7 @@ public final class DispatchOperations {
         run.id(),
         run.unit(),
         DateTimeUtils.format(run.startedAt()),
-        agent.guardrailsFor(run.lane().orElse(null)));
+        config.guardrailsFor(run.lane().orElse(null)));
   }
 
   /**

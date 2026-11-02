@@ -15,6 +15,7 @@ import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
@@ -76,10 +77,12 @@ class CatalogAuthorityAuditTest {
 
     var upFront =
         assertThrows(
-            WriteRefused.class, () -> ProjectCatalog.requireRecordable(catalog, "acme", viewer));
+            WriteRefused.class,
+            () -> new ProjectCatalog(catalog).requireRecordable("acme", viewer));
     var atTheWrite =
         assertThrows(
-            WriteRefused.class, () -> ProjectCatalog.record(catalog, "acme", DEFINITION, viewer));
+            WriteRefused.class,
+            () -> new ProjectCatalog(catalog).create(TestDefinitions.yaml(DEFINITION), viewer));
 
     assertEquals(readOnly, upFront.refusal(), "asked before a command changes anything");
     assertEquals(readOnly, atTheWrite.refusal(), "and decided where the revision is recorded");
@@ -90,10 +93,12 @@ class CatalogAuthorityAuditTest {
   void aMemberOperatorsCatalogEditLands() {
     var member = operatorWithRole("member");
 
-    ProjectCatalog.requireRecordable(catalog, "acme", member);
-    ProjectCatalog.record(catalog, "acme", DEFINITION, member);
+    new ProjectCatalog(catalog).requireRecordable("acme", member);
+    new ProjectCatalog(catalog).create(TestDefinitions.yaml(DEFINITION), member);
 
-    assertEquals(DEFINITION, new ProjectStore(db).findByName("acme").orElseThrow().definition());
+    assertEquals(
+        TestDefinitions.yaml(DEFINITION),
+        new ProjectStore(db).findByName("acme").orElseThrow().definition());
   }
 
   @Test
@@ -128,7 +133,7 @@ class CatalogAuthorityAuditTest {
   @Test
   void aMembersRenameMovesNoSpecAndAnAdminsMovesEveryOne() {
     var member = operatorWithRole("member");
-    Acting.system(() -> new ProjectStore(db).upsert("acme", DEFINITION));
+    Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.yaml(DEFINITION)));
     Acting.as("bob", () -> new SpecStore(db).create(bobsSpec()));
 
     var refused =

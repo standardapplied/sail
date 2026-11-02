@@ -6,7 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.HostInfo;
@@ -59,14 +59,14 @@ public final class RoomCommitGuard {
    * worktree state cannot be read at launch records no fingerprint and is exempt from the dirty
    * check rather than misjudged by it.
    */
-  public void captureRoomBaseline(String project, SailYaml config, String runId) {
+  public void captureRoomBaseline(String project, ProjectDefinition config, String runId) {
     if (runStore == null) {
       return;
     }
     try {
       var baseline = new LinkedHashMap<String, Object>();
       for (var repo : config.repos()) {
-        var repoDir = "/home/" + config.sshUser() + "/workspace/" + repo.path();
+        var repoDir = "/home/" + ProjectDefinition.USER + "/workspace/" + repo.path();
         var head =
             exec(
                 ContainerExec.asDevUser(
@@ -218,13 +218,14 @@ public final class RoomCommitGuard {
    * with a changed content fingerprint names the currently-dirty paths.
    */
   @SuppressWarnings("unchecked")
-  private String repoViolation(String project, SailYaml config, String repo, Object recorded) {
+  private String repoViolation(
+      String project, ProjectDefinition config, String repo, Object recorded) {
     if (!(recorded instanceof Map<?, ?> state)) {
       return null;
     }
     var entry = (Map<String, Object>) state;
     var before = Objects.toString(entry.get("head"), "");
-    var repoDir = "/home/" + config.sshUser() + "/workspace/" + repo;
+    var repoDir = "/home/" + ProjectDefinition.USER + "/workspace/" + repo;
     var current =
         exec(ContainerExec.asDevUser(project, List.of("git", "-C", repoDir, "rev-parse", "HEAD")));
     if (!current.ok() || current.stdout().isBlank()) {

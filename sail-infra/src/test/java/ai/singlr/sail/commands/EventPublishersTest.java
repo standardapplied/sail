@@ -29,6 +29,7 @@ import ai.singlr.sail.api.TestControlPlane;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -78,8 +79,6 @@ class EventPublishersTest {
   private static final String YAML =
       """
       name: acme
-      ssh:
-        user: dev
       repos:
         - url: https://github.com/acme/app.git
           path: app
@@ -318,7 +317,7 @@ class EventPublishersTest {
     box = new SyncBox(tempDir, "box");
     new FdeStore(box.db).add(config.handle(), null, null, role);
     var token = new TokenStore(box.db).create(HostToken.NAME, "admin").token();
-    Acting.system(() -> new ProjectStore(box.db).upsert("acme", YAML));
+    Acting.system(() -> new ProjectStore(box.db).upsert(TestDefinitions.yaml(YAML)));
     bus = new EventBus();
     bus.subscribe(recorder());
     serverOperations =

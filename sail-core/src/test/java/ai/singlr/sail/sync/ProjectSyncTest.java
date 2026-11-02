@@ -8,8 +8,13 @@ package ai.singlr.sail.sync;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.ProjectDefinition.Section;
+import ai.singlr.sail.config.ProjectDefinitionJson;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -88,24 +93,24 @@ class ProjectSyncTest {
     engine.reconcile(box.replica, main.replica);
   }
 
-  private String definitionOn(Box box, String name) {
+  private ProjectDefinition definitionOn(Box box, String name) {
     return box.projects.findByName(name).orElseThrow().definition();
   }
 
   @Test
   void aViewersPushOfAProjectIsDeniedAndMainKeepsItsDefinition() {
-    main.projects.upsert("zenith", "A1");
+    main.projects.upsert(TestDefinitions.described("zenith", "A1"));
     var viewer = Actor.sync("ada", Role.VIEWER);
     var rev = main.replica.currentRev("zenith");
     var edit = new LinkedHashMap<>(main.replica.current("zenith"));
-    edit.put("definition", "A2");
+    edit.put("description", "\"A2\"");
 
     var edited = Actor.call(viewer, () -> main.replica.commit("zenith", edit, rev));
     var deleted = Actor.call(viewer, () -> main.replica.commit("zenith", null, rev));
 
     assertInstanceOf(CommitOutcome.Denied.class, edited);
     assertInstanceOf(CommitOutcome.Denied.class, deleted);
-    assertEquals("A1", definitionOn(main, "zenith"));
+    assertEquals("A1", definitionOn(main, "zenith").description());
     assertEquals(rev, main.replica.currentRev("zenith"));
 
     assertConverged();
@@ -113,46 +118,48 @@ class ProjectSyncTest {
 
   @Test
   void aProjectCreatedOnMainLandsOnEveryNode() {
-    main.projects.upsert("zenith", "name: zenith\nimage: ubuntu/24.04\n");
+    main.projects.upsert(TestDefinitions.yaml("name: zenith\nimage: ubuntu/24.04\n"));
 
     sync(node);
-    assertEquals("name: zenith\nimage: ubuntu/24.04\n", definitionOn(node, "zenith"));
+    assertEquals(
+        TestDefinitions.yaml("name: zenith\nimage: ubuntu/24.04\n"), definitionOn(node, "zenith"));
 
     sync(other);
-    assertEquals("name: zenith\nimage: ubuntu/24.04\n", definitionOn(other, "zenith"));
+    assertEquals(
+        TestDefinitions.yaml("name: zenith\nimage: ubuntu/24.04\n"), definitionOn(other, "zenith"));
 
     assertConverged();
   }
 
   @Test
   void aProjectCreatedOnANodePushesToMainAndOtherNodes() {
-    node.projects.upsert("zenith", "from-node");
+    node.projects.upsert(TestDefinitions.described("zenith", "from-node"));
 
     sync(node);
-    assertEquals("from-node", definitionOn(main, "zenith"));
+    assertEquals("from-node", definitionOn(main, "zenith").description());
 
     sync(other);
-    assertEquals("from-node", definitionOn(other, "zenith"));
+    assertEquals("from-node", definitionOn(other, "zenith").description());
 
     assertConverged();
   }
 
   @Test
   void editsToDifferentProjectsAutoConvergeWithoutConflict() {
-    node.projects.upsert("zenith", "A1");
+    node.projects.upsert(TestDefinitions.described("zenith", "A1"));
     sync(node);
     sync(other);
 
-    node.projects.upsert("zenith", "A2");
-    other.projects.upsert("beta", "B1");
+    node.projects.upsert(TestDefinitions.described("zenith", "A2"));
+    other.projects.upsert(TestDefinitions.described("beta", "B1"));
 
     sync(node);
     sync(other);
     sync(node);
 
-    assertEquals("A2", definitionOn(node, "zenith"));
-    assertEquals("B1", definitionOn(node, "beta"));
-    assertEquals("B1", definitionOn(other, "beta"));
+    assertEquals("A2", definitionOn(node, "zenith").description());
+    assertEquals("B1", definitionOn(node, "beta").description());
+    assertEquals("B1", definitionOn(other, "beta").description());
     assertTrue(node.conflicts.pending().isEmpty());
     assertTrue(other.conflicts.pending().isEmpty());
 
@@ -161,21 +168,22 @@ class ProjectSyncTest {
 
   @Test
   void editsToTheSameProjectConflictAndLeaveTheLocalCopyUntouched() {
-    node.projects.upsert("zenith", "v1");
+    node.projects.upsert(TestDefinitions.described("zenith", "v1"));
     sync(node);
     sync(other);
 
-    node.projects.upsert("zenith", "from-node");
-    other.projects.upsert("zenith", "from-other");
+    node.projects.upsert(TestDefinitions.described("zenith", "from-node"));
+    other.projects.upsert(TestDefinitions.described("zenith", "from-other"));
 
     sync(node);
     var report = engine.reconcile(other.replica, main.replica);
 
     assertEquals(1, report.conflicts());
-    assertEquals("from-node", definitionOn(main, "zenith"));
+    assertEquals("from-node", definitionOn(main, "zenith").description());
     var pending = other.conflicts.pendingFor("project", "zenith");
-    assertEquals(List.of("definition"), pending.orElseThrow().fields());
-    assertEquals("from-other", definitionOn(other, "zenith"), "local copy is left untouched");
+    assertEquals(List.of("description"), pending.orElseThrow().fields());
+    assertEquals(
+        "from-other", definitionOn(other, "zenith").description(), "local copy is left untouched");
 
     resolveTakingMains(other, "project", "zenith");
 
@@ -183,8 +191,79 @@ class ProjectSyncTest {
   }
 
   @Test
+  void editsToDifferentSectionsOfOneProjectMergeOnEveryBox() {
+    node.projects.upsert(TestDefinitions.described("zenith", "v1"));
+    sync(node);
+    sync(other);
+
+    write(node, "zenith", Section.IMAGE, "\"debian/12\"");
+    write(
+        other,
+        "zenith",
+        Section.RESOURCES,
+        "{\"cpu\": 4, \"memory\": \"16GB\", \"disk\": \"80GB\"}");
+    sync(node);
+    sync(other);
+    sync(node);
+
+    for (var box : List.of(main, node, other)) {
+      var zenith = definitionOn(box, "zenith");
+      assertEquals("debian/12", zenith.image(), box.id);
+      assertEquals(new ProjectDefinition.Resources(4, "16GB", "80GB"), zenith.resources(), box.id);
+      assertEquals("v1", zenith.description(), box.id);
+      assertTrue(box.conflicts.pending().isEmpty(), box.id);
+    }
+    assertConverged();
+  }
+
+  @Test
+  void aMergeOfSectionsThatClashOnAPortStillReplicatesAndIsRefusedOnlyWhereItIsServed() {
+    node.projects.upsert(TestDefinitions.described("zenith", "v1"));
+    sync(node);
+    sync(other);
+
+    write(
+        node,
+        "zenith",
+        Section.SERVICES,
+        "{\"pg\": {\"image\": \"postgres:16\", \"ports\": [3000]}}");
+    write(
+        other,
+        "zenith",
+        Section.PROCESSES,
+        "{\"web\": {\"command\": \"npm run dev\", \"port\": 3000}}");
+    sync(node);
+    sync(other);
+    sync(node);
+
+    for (var box : List.of(main, node, other)) {
+      var zenith = definitionOn(box, "zenith");
+      assertEquals(3000, zenith.processes().get("web").port(), box.id);
+      assertEquals(List.of(3000), zenith.services().get("pg").ports(), box.id);
+      assertTrue(box.conflicts.pending().isEmpty(), box.id);
+    }
+    assertEquals(
+        "Port 3000 is claimed by both service 'pg' and process 'web'. Give one of them another"
+            + " port.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> definitionOn(main, "zenith").requirePortsClaimedOnce())
+            .getMessage());
+    assertConverged();
+  }
+
+  private static void write(Box box, String project, Section section, String json) {
+    var held = box.projects.findByName(project).orElseThrow();
+    box.projects.writeSection(
+        project,
+        section,
+        json,
+        ProjectStore.tagOf(ProjectDefinitionJson.section(held.definition(), section)));
+  }
+
+  @Test
   void aDeleteOnOneBoxPropagates() {
-    node.projects.upsert("zenith", "x");
+    node.projects.upsert(TestDefinitions.described("zenith", "x"));
     sync(node);
     sync(other);
 
@@ -200,28 +279,28 @@ class ProjectSyncTest {
 
   @Test
   void aStaleCommitOnTheProjectReplicaIsRejected() {
-    main.projects.upsert("zenith", "AAA");
+    main.projects.upsert(TestDefinitions.described("zenith", "AAA"));
     sync(node);
 
-    var outcome = node.replica.commit("zenith", Map.of("definition", "BBB"), "9-stale");
+    var outcome = node.replica.commit("zenith", Map.of("description", "\"BBB\""), "9-stale");
 
     assertInstanceOf(CommitOutcome.Rejected.class, outcome);
-    assertEquals("AAA", definitionOn(node, "zenith"));
+    assertEquals("AAA", definitionOn(node, "zenith").description());
 
     assertConverged();
   }
 
   @Test
   void aRenameOnMainDeletesAStaleUnbasedNodeCopyInsteadOfResurrectingIt() {
-    main.projects.upsert("p", "name: p\n");
-    node.projects.upsert("p", "name: p\n");
+    main.projects.upsert(TestDefinitions.named("p"));
+    node.projects.upsert(TestDefinitions.named("p"));
 
-    main.projects.rename("p", "q", "name: q\n");
+    main.projects.rename("p", "q", TestDefinitions.named("q"));
     sync(node);
 
     assertTrue(
         node.projects.findByName("p").isEmpty(), "the stale unbased copy adopts main's deletion");
-    assertEquals("name: q\n", definitionOn(node, "q"), "the new name propagates");
+    assertEquals(TestDefinitions.named("q"), definitionOn(node, "q"), "the new name propagates");
     assertTrue(main.projects.findByName("p").isEmpty(), "the node never resurrected p on main");
 
     assertConverged();
@@ -229,14 +308,14 @@ class ProjectSyncTest {
 
   @Test
   void aRenameOnMainRemovesASyncedProjectFromNodesWithoutConflict() {
-    main.projects.upsert("p", "name: p\n");
+    main.projects.upsert(TestDefinitions.named("p"));
     sync(node);
 
-    main.projects.rename("p", "q", "name: q\n");
+    main.projects.rename("p", "q", TestDefinitions.named("q"));
     sync(node);
 
     assertTrue(node.projects.findByName("p").isEmpty());
-    assertEquals("name: q\n", definitionOn(node, "q"));
+    assertEquals(TestDefinitions.named("q"), definitionOn(node, "q"));
     assertTrue(node.conflicts.pending().isEmpty(), "a clean rename is a pull, not a conflict");
 
     assertConverged();
@@ -244,24 +323,24 @@ class ProjectSyncTest {
 
   @Test
   void aRenameOnANodePushesBothTheDeletionAndTheNewNameToMain() {
-    node.projects.upsert("p", "name: p\n");
-    node.projects.rename("p", "q", "name: q\n");
+    node.projects.upsert(TestDefinitions.named("p"));
+    node.projects.rename("p", "q", TestDefinitions.named("q"));
 
     sync(node);
 
     assertTrue(main.projects.findByName("p").isEmpty(), "main receives the deletion");
-    assertEquals("name: q\n", definitionOn(main, "q"), "main receives the new name");
+    assertEquals(TestDefinitions.named("q"), definitionOn(main, "q"), "main receives the new name");
 
     assertConverged();
   }
 
   @Test
   void aRenameDuringTheCommitOfAnEditKeepsItsBlockSoAStaleCopyNeverResurrects() {
-    main.projects.upsert("p", "name: p\n");
+    main.projects.upsert(TestDefinitions.named("p"));
     sync(node);
-    node.projects.upsert("p", "name: p\nedited: true\n");
+    node.projects.upsert(TestDefinitions.described("p", "edited"));
     var racing = new ScriptedMain(main.replica);
-    racing.onFirstCommit = () -> node.projects.rename("p", "q", "name: q\n");
+    racing.onFirstCommit = () -> node.projects.rename("p", "q", TestDefinitions.named("q"));
 
     engine.reconcile(node.replica, racing);
 
@@ -269,7 +348,7 @@ class ProjectSyncTest {
         Snapshots.isDeletionMark(node.projects.currentForSync("p")),
         "the rename's block survives on the node");
     assertTrue(Snapshots.isDeletionMark(main.projects.currentForSync("p")), "and reaches main");
-    other.projects.upsert("p", "name: p\n");
+    other.projects.upsert(TestDefinitions.named("p"));
     sync(other);
     assertTrue(main.projects.findByName("p").isEmpty(), "a stale copy never resurrects p");
 
@@ -279,7 +358,7 @@ class ProjectSyncTest {
   @Test
   void aRenameAfterADeletionWhoseAnswerIsLostKeepsItsBlockSoAStaleCopyNeverResurrects()
       throws IOException {
-    main.projects.upsert("p", "name: p\n");
+    main.projects.upsert(TestDefinitions.named("p"));
     sync(node);
     Acting.as(node.id, () -> node.projects.delete("p"));
     try (var mainBox = opened(main);
@@ -291,8 +370,8 @@ class ProjectSyncTest {
       Acting.as(
           node.id,
           () -> {
-            node.projects.upsert("p", "name: p\n");
-            node.projects.rename("p", "q", "name: q\n");
+            node.projects.upsert(TestDefinitions.named("p"));
+            node.projects.rename("p", "q", TestDefinitions.named("q"));
           });
 
       SyncBox.quiesce(mainBox, nodeBox);
@@ -301,7 +380,7 @@ class ProjectSyncTest {
     assertTrue(
         Snapshots.isDeletionMark(main.projects.currentForSync("p")),
         "the later rename's block reaches main");
-    other.projects.upsert("p", "name: p\n");
+    other.projects.upsert(TestDefinitions.named("p"));
     sync(other);
     assertTrue(main.projects.findByName("p").isEmpty(), "a stale copy never resurrects p");
     assertConverged();

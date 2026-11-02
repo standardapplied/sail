@@ -14,8 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.Guardrails;
-import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentProcess;
@@ -161,8 +161,6 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
         yaml,
         """
         name: %s
-        ssh:
-          user: dev
         repos:
           - url: https://example.invalid/app.git
             path: app
@@ -192,7 +190,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
             DispatchOperations.Listener.NONE,
             SessionYield.NONE);
     var config =
-        ReviewPipelineConfig.fromMap(
+        TestDefinitions.pipeline(
             Map.of(
                 "max_iterations",
                 3,

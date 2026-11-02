@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,7 +26,7 @@ public final class TestProjects {
         return Optional.empty();
       }
       try {
-        return Optional.of(SailYaml.fromMap(YamlUtil.parseFile(file)));
+        return Optional.of(TestDefinitions.map(YamlUtil.parseFile(file)));
       } catch (Exception e) {
         throw new ProjectReader.Unreadable(project, e);
       }

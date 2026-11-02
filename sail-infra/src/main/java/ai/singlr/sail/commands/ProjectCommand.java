@@ -12,7 +12,7 @@ import picocli.CommandLine.Command;
     description = "Manage project environments.",
     mixinStandardHelpOptions = true,
     subcommands = {
-      ProjectInitCommand.class,
+      ProjectCreateCommand.class,
       ProjectApplyCommand.class,
       ProjectEditCommand.class,
       ProjectRenameCommand.class,

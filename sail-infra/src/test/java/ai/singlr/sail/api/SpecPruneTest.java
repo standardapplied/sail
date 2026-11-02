@@ -15,6 +15,7 @@ import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -203,7 +204,7 @@ class SpecPruneTest {
   void aWholeProjectGoesWithEverythingInIt() {
     archived("old", "uday");
     run(new RunStore(db), "running", null, "old");
-    new ProjectStore(db).upsert("proj", "name: proj\n");
+    new ProjectStore(db).upsert(TestDefinitions.named("proj"));
 
     var report = Acting.by(ADMIN, () -> pruner.prune(PruneRequest.project("proj", false)));
 

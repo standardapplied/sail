@@ -5,8 +5,7 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.ContainerManager.ResourceLimits;
 import ai.singlr.sail.store.ProjectStore;
 import java.io.IOException;
@@ -62,7 +61,7 @@ public final class ProjectResourceReconciler {
     var resized = new ArrayList<String>();
     var diskSkipped = new ArrayList<String>();
     for (var project : projects) {
-      var desired = resourcesOf(project.definition());
+      var desired = resourcesOf(project);
       if (desired == null) {
         continue;
       }
@@ -84,15 +83,15 @@ public final class ProjectResourceReconciler {
     return new FleetOutcome(resized, diskSkipped);
   }
 
-  private static SailYaml.Resources resourcesOf(String definition) {
+  private static ProjectDefinition.Resources resourcesOf(ProjectStore.ProjectRow project) {
     try {
-      return SailYaml.fromMap(YamlUtil.parseMap(definition)).resources();
+      return project.definition().resources();
     } catch (RuntimeException e) {
       return null;
     }
   }
 
-  public Outcome reconcile(String name, SailYaml.Resources desired)
+  public Outcome reconcile(String name, ProjectDefinition.Resources desired)
       throws IOException, InterruptedException, TimeoutException {
     if (desired == null) {
       return Outcome.absent();
@@ -127,7 +126,7 @@ public final class ProjectResourceReconciler {
     return state instanceof ContainerState.Running || state instanceof ContainerState.Stopped;
   }
 
-  private static boolean limitsDiffer(ResourceLimits limits, SailYaml.Resources desired) {
+  private static boolean limitsDiffer(ResourceLimits limits, ProjectDefinition.Resources desired) {
     if (limits == null) {
       return true;
     }

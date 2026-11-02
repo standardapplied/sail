@@ -17,6 +17,7 @@ import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
@@ -41,7 +42,7 @@ class ProjectRenamerTest {
   private static final String DEFINITION =
       "name: old\nimage: ubuntu/24.04\n"
           + "resources:\n  cpu: 2\n  memory: 4GB\n  disk: 20GB\n"
-          + "agent:\n  type: claude-code\nssh:\n  user: dev\n";
+          + "agent:\n  type: claude-code\n";
 
   @TempDir Path tempDir;
   private Sqlite db;
@@ -51,7 +52,7 @@ class ProjectRenamerTest {
   void setUp() throws Exception {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
-    new ProjectStore(db).upsert("old", DEFINITION);
+    new ProjectStore(db).upsert(TestDefinitions.yaml(DEFINITION));
     new SpecStore(db).create(spec("s1", "old"));
     ai.singlr.sail.store.ContentFixtures.put(new FileStore(db), "old", "start-dev.sh", "echo hi");
     projectsDir = tempDir.resolve("projects");
@@ -247,7 +248,7 @@ class ProjectRenamerTest {
 
   @Test
   void rejectsATargetNameAlreadyInTheCatalog() throws Exception {
-    new ProjectStore(db).upsert("taken", "name: taken\n");
+    new ProjectStore(db).upsert(TestDefinitions.named("taken"));
 
     assertThrows(IllegalStateException.class, () -> renamer(runningShell()).rename("old", "taken"));
   }

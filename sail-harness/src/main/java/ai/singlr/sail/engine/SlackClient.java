@@ -25,7 +25,7 @@ import java.util.function.UnaryOperator;
  * logged loudly to stderr and never thrown. The token is never logged.
  *
  * <p>The token is resolved from the {@code SAIL_SLACK_TOKEN} environment variable or the file named
- * by {@code SAIL_SLACK_TOKEN_FILE} — never from sail.yaml.
+ * by {@code SAIL_SLACK_TOKEN_FILE} — never from a project's definition.
  */
 public final class SlackClient implements SlackPoster {
 

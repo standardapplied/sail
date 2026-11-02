@@ -97,8 +97,8 @@ public final class LaunchAdmission {
 
   /**
    * Refuses the launch before any reservation or snapshot when the chosen agent's binary is not on
-   * the container's PATH — sail.yaml's agent block declares what a project apply installed, but the
-   * container is the authority on what can actually launch.
+   * the container's PATH — the definition's agent section declares what a project apply installed,
+   * but the container is the authority on what can actually launch.
    */
   public void requireInstalled(Harness harness, String project) {
     var found =
@@ -119,7 +119,9 @@ public final class LaunchAdmission {
         ErrorCode.AGENT_NOT_CONFIGURED,
         "Agent '" + harness.yamlName() + "' is not installed in project '" + project + "'.",
         Remedy.of(
-            "Add " + harness.yamlName() + " to sail.yaml's agent.install list and run '",
+            "Add " + harness.yamlName() + " to the agent's install list with '",
+            Remedy.sail("project edit", project, "--section", "agent"),
+            "', then run '",
             Remedy.sail("project apply", project),
             "'."));
   }

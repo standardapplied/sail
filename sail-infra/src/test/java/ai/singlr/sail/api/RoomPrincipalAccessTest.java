@@ -46,8 +46,6 @@ class RoomPrincipalAccessTest {
   private static final String YAML =
       """
       name: acme
-      ssh:
-        user: dev
       agent:
         type: claude-code
       """;

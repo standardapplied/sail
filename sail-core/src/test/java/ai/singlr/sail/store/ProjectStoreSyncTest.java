@@ -12,6 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.authority.WriterAuthority;
+import ai.singlr.sail.config.ProjectDefinition.Section;
+import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -48,16 +51,35 @@ class ProjectStoreSyncTest {
     db.close();
   }
 
-  private static Map<String, Object> def(String definition) {
-    return Map.of("definition", definition);
+  /**
+   * The comparable of a definition whose description is {@code description} (none for null): a
+   * field per section, each the JSON value it holds.
+   */
+  private static Map<String, Object> def(String description) {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("name", "acme");
+    if (description != null) {
+      map.put(Section.DESCRIPTION.key(), YamlUtil.dumpJsonValue(description));
+    }
+    return map;
   }
 
-  private static Map<String, Object> def(String definition, String actor) {
-    return Map.of("definition", definition, "_actor", actor);
+  private static Map<String, Object> def(String description, String actor) {
+    var map = def(description);
+    map.put("_actor", actor);
+    return map;
   }
 
-  private static Map<String, Object> def(String definition, String actor, String creator) {
-    return Map.of("definition", definition, "_actor", actor, Snapshots.CREATOR, creator);
+  private static Map<String, Object> def(String description, String actor, String creator) {
+    var map = def(description, actor);
+    map.put(Snapshots.CREATOR, creator);
+    return map;
+  }
+
+  private static Map<String, Object> timed(Map<String, Object> snapshot) {
+    snapshot.put(Snapshots.CREATED_AT, Snapshots.millis(Instant.parse("2026-01-01T00:00:00Z")));
+    snapshot.put(Snapshots.UPDATED_AT, Snapshots.millis(Instant.parse("2026-01-02T00:00:00Z")));
+    return snapshot;
   }
 
   private static Map<String, Object> untimed(Map<String, Object> snapshot) {
@@ -69,19 +91,19 @@ class ProjectStoreSyncTest {
 
   @Test
   void upsertJournalsAComparableRevision() {
-    store.upsert("acme", "name: acme\n");
+    store.upsert(TestDefinitions.named("acme"));
 
-    assertEquals(def("name: acme\n", "uday", "uday"), untimed(store.comparableSnapshot("acme")));
+    assertEquals(def(null, "uday", "uday"), untimed(store.comparableSnapshot("acme")));
     assertNotEquals(null, store.latestRev("acme"));
     assertTrue(store.syncEntityIds().contains("acme"));
   }
 
   @Test
   void editingMintsANewRevisionAndComparableSnapshotFollows() {
-    store.upsert("acme", "v1");
+    store.upsert(TestDefinitions.described("acme", "v1"));
     var rev1 = store.latestRev("acme");
 
-    store.upsert("acme", "v2");
+    store.upsert(TestDefinitions.described("acme", "v2"));
 
     assertNotEquals(rev1, store.latestRev("acme"));
     assertEquals(def("v2", "uday", "uday"), untimed(store.comparableSnapshot("acme")));
@@ -120,7 +142,7 @@ class ProjectStoreSyncTest {
 
   @Test
   void aNodeAdoptingMainsRevisionOfARowItHoldsTakesTheCreatorMainNames() {
-    store.upsert("acme", "v1");
+    store.upsert(TestDefinitions.described("acme", "v1"));
 
     Acting.by(
         Actor.main("sail"), () -> store.applyRevision("acme", def("v1", "sail", "sail"), "1-main"));
@@ -149,21 +171,9 @@ class ProjectStoreSyncTest {
 
   @Test
   void anEditHereKeepsTheCreationTimeAndStampsItsOwn() {
-    Acting.by(
-        Actor.main("sumesh"),
-        () ->
-            store.applyRevision(
-                "acme",
-                Map.of(
-                    "definition",
-                    "v1",
-                    Snapshots.CREATED_AT,
-                    Snapshots.millis(Instant.parse("2026-01-01T00:00:00Z")),
-                    Snapshots.UPDATED_AT,
-                    Snapshots.millis(Instant.parse("2026-01-02T00:00:00Z"))),
-                "rev-1"));
+    Acting.by(Actor.main("sumesh"), () -> store.applyRevision("acme", timed(def("v1")), "rev-1"));
 
-    store.upsert("acme", "v2");
+    store.upsert(TestDefinitions.described("acme", "v2"));
 
     var row = store.findByName("acme").orElseThrow();
     assertEquals(Instant.parse("2026-01-01T00:00:00Z"), row.createdAt());
@@ -213,7 +223,7 @@ class ProjectStoreSyncTest {
 
   @Test
   void applyRevisionNullAdoptsADeletionFromMain() {
-    store.upsert("acme", "local");
+    store.upsert(TestDefinitions.described("acme", "local"));
 
     store.applyRevision("acme", null, "rev-del");
 
@@ -223,7 +233,7 @@ class ProjectStoreSyncTest {
 
   @Test
   void resolveConflictTakeTheirsAdoptsMainsDefinitionUnderMainsAuthor() {
-    store.upsert("acme", "mine");
+    store.upsert(TestDefinitions.described("acme", "mine"));
 
     store.resolveConflict(
         "acme", def("theirs", "mady"), new MainVersion(def("theirs", "mady"), "9-main", "mady"));

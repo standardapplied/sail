@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -41,12 +42,14 @@ class CatalogRevisionBySyncTest {
       var notifications = new CatalogNotificationsResolver(reader);
       assertTrue(reader.read("zenith").isEmpty(), "the node holds no project yet");
 
-      Acting.system(() -> authored.upsert("zenith", ZENITH));
+      Acting.system(() -> authored.upsert(TestDefinitions.yaml(ZENITH)));
       SyncBox.round(main, node);
       assertEquals("https://ntfy.sh/zenith", notifications.resolve("zenith").url());
 
       Acting.system(
-          () -> authored.upsert("zenith", ZENITH.replace("ntfy.sh/zenith", "ntfy.sh/moved")));
+          () ->
+              authored.upsert(
+                  TestDefinitions.yaml(ZENITH.replace("ntfy.sh/zenith", "ntfy.sh/moved"))));
       SyncBox.round(main, node);
 
       assertEquals("https://ntfy.sh/moved", reader.require("zenith").agent().notifications().url());

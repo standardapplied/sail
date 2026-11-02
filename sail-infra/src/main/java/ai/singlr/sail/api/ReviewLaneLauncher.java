@@ -7,7 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ShellExec;
@@ -20,11 +20,11 @@ import java.util.List;
  * The review and fix lanes: a thin lane over the launch seams every lane shares. A reviewer or a
  * fix agent is recorded as its own run that names the review it serves, launched through {@link
  * RunLauncher} as that run's systemd unit with the one hook set and environment a build runs with,
- * and watched under the project's {@code agent.review_pipeline.guardrails}. The run reserves its
- * spec's repos through the gate a dispatch passes ({@link RunReservation#reserveForReview}), so a
- * refusal — a live build of the same spec, a full chat turn over the same repos — is a launch
- * deferred before anything starts or is written, naming the run it waits on. Nothing waits on the
- * agent: the run's stop reaches the pipeline over the bus.
+ * and watched under the project's {@code pipeline.guardrails}. The run reserves its spec's repos
+ * through the gate a dispatch passes ({@link RunReservation#reserveForReview}), so a refusal — a
+ * live build of the same spec, a full chat turn over the same repos — is a launch deferred before
+ * anything starts or is written, naming the run it waits on. Nothing waits on the agent: the run's
+ * stop reaches the pipeline over the bus.
  */
 final class ReviewLaneLauncher implements ReviewLanes {
 
@@ -78,7 +78,7 @@ final class ReviewLaneLauncher implements ReviewLanes {
       Invocation invocation,
       String runId,
       AgentUnit unit,
-      SailYaml config,
+      ProjectDefinition config,
       String credential,
       Runnable claimed) {
     var project = invocation.project();

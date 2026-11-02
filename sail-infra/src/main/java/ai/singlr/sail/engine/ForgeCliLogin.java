@@ -7,7 +7,7 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
@@ -39,7 +39,7 @@ public final class ForgeCliLogin {
       String container,
       String user,
       Map<String, String> tokens,
-      List<SailYaml.Repo> repos)
+      List<ProjectDefinition.Repo> repos)
       throws IOException, InterruptedException, TimeoutException {
     for (var host : GitCredentials.githubHosts(repos)) {
       var token = GitCredentials.resolveTokenForHost(host, tokens);

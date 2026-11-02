@@ -44,6 +44,7 @@ public final class ApiRouter implements HttpHandler {
   private static final String WHOAMI = "whoami";
   private static final String FDES = "fdes";
   private static final String PROJECTS = "projects";
+  private static final String DEFINITION = "definition";
   private static final String SPECS = "specs";
   private static final String SPECS_PRUNE = "specs:prune";
   private static final String DISPATCH = "dispatch";
@@ -240,6 +241,9 @@ public final class ApiRouter implements HttpHandler {
     }
 
     if (request.isProjectCollection()) {
+      if (request.is(POST)) {
+        return ApiResponse.fromCreated(operations.createProject(JsonBody.readMap(exchange)));
+      }
       requireMethod(request, GET);
       return ApiResponse.from(operations.projects());
     }
@@ -259,6 +263,7 @@ public final class ApiRouter implements HttpHandler {
       case "files" -> routeFiles(exchange, request, project);
       case SERVE -> routeServe(request, project);
       case PORTS -> routePorts(request, project);
+      case DEFINITION -> routeDefinition(exchange, request, project);
       default -> throw notFound();
     };
   }
@@ -412,6 +417,34 @@ public final class ApiRouter implements HttpHandler {
           operations.restoreSnapshot(project, request.subResource(), nodeHandle.get()));
     }
     throw notFound();
+  }
+
+  /**
+   * {@code GET /v1/projects/{p}/definition} reads the definition and its sections' tags; {@code PUT
+   * /v1/projects/{p}/definition/{section}} with {@code {"value": ...}} writes one section, only
+   * over the one its {@code If-Match} tag names when it names one.
+   */
+  private ApiResponse routeDefinition(HttpExchange exchange, RouteRequest request, String project)
+      throws IOException {
+    if (request.size() == 4) {
+      requireMethod(request, GET);
+      return ApiResponse.from(operations.projectDefinition(project));
+    }
+    if (request.size() != 5) {
+      throw notFound();
+    }
+    requireMethod(request, PUT);
+    var body = JsonBody.readMap(exchange);
+    if (!body.containsKey("value")) {
+      throw new IllegalArgumentException(
+          "The body names the section's new value as {\"value\": ...}; null unsets it.");
+    }
+    return ApiResponse.from(
+        operations.writeProjectSection(
+            project,
+            request.subResource(),
+            body.get("value"),
+            exchange.getRequestHeaders().getFirst("If-Match")));
   }
 
   private ApiResponse routeProject(RouteRequest request, String project) {

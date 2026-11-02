@@ -11,10 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.SyncRequest;
-import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
-import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -105,11 +104,11 @@ class DemoSeederTest {
   @Test
   void aDemoAnyoneChangedStaysAsWork() {
     DemoSeeder.seedIfAbsent(db, true);
-    Acting.as("ada", () -> store.upsert(DemoProject.NAME, "name: demo\ndescription: mine\n"));
+    Acting.as("ada", () -> store.upsert(TestDefinitions.yaml("name: demo\ndescription: mine\n")));
 
     assertFalse(DemoSeeder.unseed(db));
     assertEquals(
-        "name: demo\ndescription: mine\n",
+        TestDefinitions.described("demo", "mine"),
         store.findByName(DemoProject.NAME).orElseThrow().definition());
   }
 
@@ -154,11 +153,11 @@ class DemoSeederTest {
 
   @Test
   void isIdempotentAndNeverClobbersAnExistingDemo() {
-    Acting.system(() -> store.upsert(DemoProject.NAME, "name: demo\ndescription: mine\n"));
+    Acting.system(() -> store.upsert(TestDefinitions.yaml("name: demo\ndescription: mine\n")));
 
     assertFalse(DemoSeeder.seedIfAbsent(db, true), "must not re-seed when a demo already exists");
     assertEquals(
-        "name: demo\ndescription: mine\n",
+        TestDefinitions.described("demo", "mine"),
         store.findByName(DemoProject.NAME).orElseThrow().definition(),
         "a customised demo is left untouched");
   }
@@ -180,10 +179,9 @@ class DemoSeederTest {
   @Test
   void seededDemoDefinitionParsesAsAValidProject() {
     DemoSeeder.seedIfAbsent(db, true);
-    var definition = store.findByName(DemoProject.NAME).orElseThrow().definition();
+    var config = store.findByName(DemoProject.NAME).orElseThrow().definition();
 
-    var config = SailYaml.fromMap(YamlUtil.parseMap(definition));
-    assertEquals("demo", config.name());
+    assertEquals(DemoProject.DEFINITION, config);
   }
 
   @Test

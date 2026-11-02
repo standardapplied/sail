@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -54,7 +55,7 @@ class AgentAttachCommandTest {
     var acme = new AgentAttachCommand(operator -> OperationsFactory.open(dbPath));
     new CommandLine(acme).parseArgs("acme");
     var absent = new AgentAttachCommand(operator -> OperationsFactory.open(dbPath));
-    new CommandLine(absent).parseArgs("absent", "-f", "/abs/sail.yaml");
+    new CommandLine(absent).parseArgs("absent");
 
     assertEquals("codex", acme.resolveHarness(OperatorCommand.PLAIN).yamlName());
     assertSame(Harnesses.DEFAULT, absent.resolveHarness(OperatorCommand.PLAIN));
@@ -478,7 +479,7 @@ class AgentAttachCommandTest {
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
       HeldProjects.hold(db, "acme");
-      Acting.system(() -> new ProjectStore(db).upsert(project, definition));
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.yaml(definition)));
     }
     return dbPath;
   }

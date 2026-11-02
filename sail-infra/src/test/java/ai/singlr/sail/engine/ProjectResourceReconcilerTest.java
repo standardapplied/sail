@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.store.ProjectStore;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -20,8 +20,8 @@ import org.junit.jupiter.api.Test;
 
 class ProjectResourceReconcilerTest {
 
-  private static SailYaml.Resources resources(int cpu, String memory, String disk) {
-    return new SailYaml.Resources(cpu, memory, disk);
+  private static ProjectDefinition.Resources resources(int cpu, String memory, String disk) {
+    return new ProjectDefinition.Resources(cpu, memory, disk);
   }
 
   @Test

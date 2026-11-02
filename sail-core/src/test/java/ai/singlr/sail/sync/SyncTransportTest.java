@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -158,8 +159,8 @@ class SyncTransportTest {
   @Test
   void replayingAnAlreadyAdoptedRenameTombstoneDoesNotJournalItAgain() throws Exception {
     var projects = new ProjectStore(main.db);
-    projects.upsert("old", "name: old\n");
-    projects.rename("old", "new", "name: new\n");
+    projects.upsert(TestDefinitions.named("old"));
+    projects.rename("old", "new", TestDefinitions.named("new"));
     try (var link = connect(nodeA)) {
       link.reconcile(
           "project", SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("project"));
@@ -180,10 +181,10 @@ class SyncTransportTest {
 
   @Test
   void anUnbasedLocalRenameConflictsWithMainsExistingProject() throws Exception {
-    new ProjectStore(main.db).upsert("old", "name: old\n");
+    new ProjectStore(main.db).upsert(TestDefinitions.named("old"));
     var projects = new ProjectStore(nodeA.db);
-    projects.upsert("old", "name: old\n");
-    projects.rename("old", "new", "name: new\n");
+    projects.upsert(TestDefinitions.named("old"));
+    projects.rename("old", "new", TestDefinitions.named("new"));
 
     try (var link = connect(nodeA)) {
       assertEquals(

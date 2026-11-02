@@ -15,6 +15,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -498,7 +499,7 @@ class ScopedSyncTest {
 
   @Test
   void aProjectRowOutsideTheScopeIsDeniedAndOneInsideIsTaken() throws Exception {
-    var definition = Map.<String, Object>of("definition", "name: any\n");
+    var definition = Map.<String, Object>of("description", "\"any\"");
 
     var results =
         assertInstanceOf(
@@ -526,7 +527,8 @@ class ScopedSyncTest {
     assertInstanceOf(SyncWire.Accepted.class, results.get(2));
     assertTrue(new ProjectStore(main.db).findByName("gamma").isEmpty());
     assertEquals(
-        "name: beta\n", new ProjectStore(main.db).findByName(B).orElseThrow().definition());
+        TestDefinitions.yaml("name: beta\n"),
+        new ProjectStore(main.db).findByName(B).orElseThrow().definition());
     assertTrue(new ProjectStore(main.db).findByName(A).isPresent());
   }
 
@@ -1271,7 +1273,7 @@ class ScopedSyncTest {
    */
   private static void seed(SyncBox box, String project, String owner) {
     var id = project + "-work";
-    new ProjectStore(box.db).upsert(project, "name: " + project + "\n");
+    new ProjectStore(box.db).upsert(TestDefinitions.named(project));
     box.specs.create(spec(id, project, owner));
     box.specs.setContent(id, "a body only " + project + " holds", "the plan of " + project);
     new RoomStore(box.db)

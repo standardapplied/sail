@@ -57,6 +57,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -1048,13 +1050,67 @@ class ApiRouterTest {
   }
 
   @Test
-  void projectsCollectionRejectsWrites() throws Exception {
+  void theProjectsCollectionCreatesADefinitionAndTakesNoOtherWrite() throws Exception {
     try (var server = server()) {
-      var response = post(server, "/v1/projects", "token", "{}");
+      var created = post(server, "/v1/projects", "token", "{\"name\": \"acme\"}");
+      var replaced = put(server, "/v1/projects", "token", "{}");
 
-      assertEquals(405, response.statusCode());
-      assertTrue(response.body().contains("method_not_allowed"));
+      assertEquals(201, created.statusCode());
+      assertEquals("acme", ((Map<?, ?>) YamlUtil.parseMap(created.body())).get("name"));
+      assertEquals(405, replaced.statusCode());
+      assertEquals("method_not_allowed", errorOf(replaced).get("code"));
     }
+  }
+
+  @Test
+  void aDefinitionIsReadWholeAndWrittenASectionAtATimeOverTheTagItWasReadAt() throws Exception {
+    var written = new ArrayList<List<Object>>();
+    var operations =
+        new TestOperations() {
+          @Override
+          public Result<ProjectDefinitionResponse> writeProjectSection(
+              String project, String section, Object value, String ifMatch) {
+            written.add(Arrays.asList(project, section, value, ifMatch));
+            return projectDefinition(project);
+          }
+        };
+    try (var server = serverWith(operations, true)) {
+      var read = get(server, "/v1/projects/acme/definition", "token");
+      var request =
+          HttpRequest.newBuilder(uri(server, "/v1/projects/acme/definition/image"))
+              .header("Content-Type", "application/json")
+              .header("Authorization", "Bearer token")
+              .header("If-Match", "\"3f2a\"")
+              .PUT(HttpRequest.BodyPublishers.ofString("{\"value\": \"ubuntu/24.04\"}"))
+              .build();
+      var section = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+      var unset =
+          put(server, "/v1/projects/acme/definition/pipeline", "token", "{\"value\": null}");
+      var valueless = put(server, "/v1/projects/acme/definition/image", "token", "{}");
+      var posted = post(server, "/v1/projects/acme/definition/image", "token", "{}");
+      var deeper = get(server, "/v1/projects/acme/definition/image/x", "token");
+
+      assertEquals(200, read.statusCode());
+      assertEquals(
+          Map.of("name", "acme"), ((Map<?, ?>) YamlUtil.parseMap(read.body())).get("definition"));
+      assertEquals(200, section.statusCode());
+      assertEquals(200, unset.statusCode());
+      assertEquals(
+          List.of(
+              Arrays.asList("acme", "image", "ubuntu/24.04", "\"3f2a\""),
+              Arrays.asList("acme", "pipeline", null, null)),
+          written);
+      assertEquals(422, valueless.statusCode(), valueless.body());
+      assertEquals(
+          "The body names the section's new value as {\"value\": ...}; null unsets it.",
+          errorOf(valueless).get("message"));
+      assertEquals(405, posted.statusCode());
+      assertEquals(404, deeper.statusCode());
+    }
+  }
+
+  private static Map<?, ?> errorOf(HttpResponse<String> response) {
+    return (Map<?, ?>) YamlUtil.parseMap(response.body()).get("error");
   }
 
   private static Operations withStack() {

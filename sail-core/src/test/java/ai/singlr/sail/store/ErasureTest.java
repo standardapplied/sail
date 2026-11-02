@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -475,7 +476,7 @@ class ErasureTest {
     var fdes = new FdeStore(db);
     fdes.add("bob", null, null, "member");
     fdes.restrict("bob");
-    new ProjectStore(db).upsert("alpha", "name: alpha\n");
+    new ProjectStore(db).upsert(TestDefinitions.named("alpha"));
     fdes.grant("bob", "alpha");
     fdes.grant("bob", "beta");
 

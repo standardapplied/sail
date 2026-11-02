@@ -18,6 +18,17 @@ import org.junit.jupiter.api.Test;
 class GuardrailsTest {
 
   @Test
+  void anUnknownKeyIsRefusedNamingItsBlockAndTheKeysItHas() {
+    assertEquals(
+        "agent.guardrails.idle_timeout is not a key of agent.guardrails. Its keys are:"
+            + " max_duration, max_idle, action.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> Guardrails.fromMap(Map.of("idle_timeout", "90m"), Guardrails.BUILD_BLOCK))
+            .getMessage());
+  }
+
+  @Test
   void parsesCompleteConfig() {
     var map =
         Map.<String, Object>of(
@@ -35,36 +46,6 @@ class GuardrailsTest {
     var g = Guardrails.fromMap(Map.of("max_duration", "4h"));
 
     assertEquals("stop", g.action());
-  }
-
-  @Test
-  void retiredIdleTimeoutIsRejectedWithAnExactEdit() {
-    var refusal =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                Guardrails.fromMap(
-                    Map.of("idle_timeout", "90m"), Guardrails.BUILD_BLOCK, "acme/sail.yaml"));
-
-    assertEquals(
-        "Unknown guardrail key `idle_timeout` in acme/sail.yaml; rename `idle_timeout` to"
-            + " `max_idle` in acme/sail.yaml.",
-        refusal.getMessage());
-  }
-
-  @Test
-  void retiredCommitBurstIsRejectedWithAnExactEdit() {
-    var refusal =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                Guardrails.fromMap(
-                    Map.of("commit_burst", 20), Guardrails.BUILD_BLOCK, "acme/sail.yaml"));
-
-    assertEquals(
-        "Unknown guardrail key `commit_burst` in acme/sail.yaml; rename `commit_burst` to"
-            + " `max_idle` in acme/sail.yaml.",
-        refusal.getMessage());
   }
 
   @Test
@@ -171,7 +152,7 @@ class GuardrailsTest {
             () -> Guardrails.fromMap(Map.of("max_duration", "45 minutes")));
 
     assertTrue(
-        refused.getMessage().startsWith("Invalid `agent.guardrails.max_duration` in sail.yaml: "),
+        refused.getMessage().startsWith("Invalid `agent.guardrails.max_duration`: "),
         refused.getMessage());
     assertTrue(refused.getMessage().contains("4h, 90m, 30s"), refused.getMessage());
   }

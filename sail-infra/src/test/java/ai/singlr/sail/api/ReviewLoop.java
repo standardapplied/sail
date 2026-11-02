@@ -9,10 +9,11 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.Notifications;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ReviewPipelineConfig;
-import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SlackNotifications;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.SharedProjectFiles;
@@ -74,8 +75,6 @@ final class ReviewLoop implements AutoCloseable {
   static final String YAML =
       """
       name: test-project
-      ssh:
-        user: dev
       repos:
         - url: https://github.com/acme/api.git
           path: api
@@ -141,7 +140,7 @@ final class ReviewLoop implements AutoCloseable {
     projects = new ProjectStore(db);
     reader = ProjectReader.ofCatalog(projects);
     describe(yamlContent);
-    Function<String, SailYaml> loader = project -> load();
+    Function<String, ProjectDefinition> loader = project -> load();
     this.config = config != null ? config : ReviewWiring.configResolver(loader);
     this.reviewer = reviewer != null ? reviewer : ReviewWiring.reviewerResolver(loader);
     specs = new SpecStore(db);
@@ -256,7 +255,7 @@ final class ReviewLoop implements AutoCloseable {
    * does.
    */
   void describe(String yamlContent) {
-    Acting.system(() -> projects.upsert(PROJECT, yamlContent));
+    Acting.system(() -> projects.upsert(TestDefinitions.yaml(yamlContent)));
   }
 
   /** Leaves the project's row holding text that is not a definition. */
@@ -265,13 +264,13 @@ final class ReviewLoop implements AutoCloseable {
         "UPDATE projects SET definition = ? WHERE name = ?", "agent: [unterminated", PROJECT);
   }
 
-  private SailYaml load() {
+  private ProjectDefinition load() {
     return reader.read(PROJECT).orElse(null);
   }
 
   /** One agent stage per name, each reviewed by the agent of that name, gated on no critical. */
   static ReviewPipelineConfig stages(String... names) {
-    return ReviewPipelineConfig.fromMap(
+    return TestDefinitions.pipeline(
         Map.of(
             "max_iterations",
             3,

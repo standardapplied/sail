@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -30,14 +31,12 @@ class ProjectReaderTest {
     try (var db = Sqlite.open(dir.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
       var store = new ProjectStore(db);
-      Acting.system(
-          () -> store.upsert("acme", ACME + "git:\n  name: Mady\n  email: mady@example.dev\n"));
+      Acting.system(() -> store.upsert(TestDefinitions.yaml(ACME)));
       var reader = ProjectReader.ofCatalog(store);
 
       var acme = reader.require("acme");
 
       assertEquals("codex", acme.agent().type());
-      assertEquals("${GIT_NAME}", acme.git().name(), "placeholders are left as the row holds them");
       assertTrue(reader.read("other").isEmpty());
     }
   }
@@ -49,23 +48,22 @@ class ProjectReaderTest {
     assertTrue(reader.read("acme").isEmpty(), "a null store holds no project");
     var refused = assertThrows(ApiException.class, () -> reader.require("acme"));
 
-    assertEquals(ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND, refused.failure().errorCode());
+    assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, refused.failure().errorCode());
     assertEquals("Project 'acme' is not in the catalog.", refused.getMessage());
     assertEquals(
-        "If its descriptor is on this box, import it with 'sail migrate'. To create the project,"
-            + " run 'sail project apply -f <file>'.",
+        "Create it with 'sail project create acme', or sync it from main with 'sail sync'.",
         refused.failure().remedy().plain());
   }
 
   @Test
-  void aRowThatSetsADeletedKeyIsUnreadableNamingTheProjectAndWhereTheTextGoes() {
+  void aRowThatSetsAKeyNoDefinitionHasIsUnreadableNamingTheProjectAndTheKey() {
     try (var db = Sqlite.open(dir.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
       var store = new ProjectStore(db);
-      Acting.system(() -> store.upsert("acme", ACME));
+      Acting.system(() -> store.upsert(TestDefinitions.yaml(ACME)));
       db.execute(
           "UPDATE projects SET definition = ? WHERE name = ?",
-          ACME + "  build_skill: acme-build\n",
+          "{\"name\": \"acme\", \"agent\": {\"type\": \"codex\", \"build_skill\": \"x\"}}",
           "acme");
 
       var unreadable =
@@ -77,8 +75,7 @@ class ProjectReaderTest {
               .getMessage()
               .startsWith(
                   "The definition of project 'acme' in the catalog could not be read:"
-                      + " agent.build_skill is no longer read: sail's work prompt says how a build"
-                      + " runs."),
+                      + " agent.build_skill is not a key of agent."),
           unreadable.getMessage());
     }
   }
@@ -88,7 +85,7 @@ class ProjectReaderTest {
     try (var db = Sqlite.open(dir.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
       var store = new ProjectStore(db);
-      Acting.system(() -> store.upsert("acme", ACME));
+      Acting.system(() -> store.upsert(TestDefinitions.yaml(ACME)));
       db.execute(
           "UPDATE projects SET definition = ? WHERE name = ?", "agent: [unterminated", "acme");
 
@@ -111,10 +108,10 @@ class ProjectReaderTest {
     try (var db = Sqlite.open(dir.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
       var store = new ProjectStore(db);
-      Acting.system(() -> store.upsert("acme", ACME));
+      Acting.system(() -> store.upsert(TestDefinitions.yaml(ACME)));
       db.execute(
           "UPDATE projects SET definition = ? WHERE name = ?",
-          ACME + "  review_pipeline:\n    stages:\n      - type: agent\n",
+          "{\"name\": \"acme\", \"pipeline\": {\"stages\": [{\"type\": \"agent\"}]}}",
           "acme");
 
       var unreadable =
@@ -125,7 +122,7 @@ class ProjectReaderTest {
           unreadable.getMessage().startsWith("The definition of project 'acme' in the catalog"),
           unreadable.getMessage());
       assertTrue(
-          unreadable.getCause().getMessage().contains("requires a name"),
+          unreadable.getCause().getMessage().contains("pipeline.stages[].name is required."),
           unreadable.getCause().getMessage());
     }
   }

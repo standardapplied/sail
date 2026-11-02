@@ -6,10 +6,10 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.ChangeLog;
@@ -133,8 +133,8 @@ class FleetSyncTest {
     main.specs.create(spec("oauth", "OAuth flow", "done", List.of()));
     main.specs.create(spec("billing", "Billing", "pending", List.of("oauth")));
     ai.singlr.sail.store.ContentFixtures.put(main.files, "acme", "scripts/deploy.sh", "deploy");
-    main.projects.upsert("acme", "name: acme\nimage: ubuntu/24.04\n");
-    main.projects.upsert("outline", "name: outline\n");
+    main.projects.upsert(TestDefinitions.yaml("name: acme\nimage: ubuntu/24.04\n"));
+    main.projects.upsert(TestDefinitions.named("outline"));
     main.fdes.add("uday", "Alex Morgan", "uday@example.com", "admin");
     main.fdes.add("mady", "Mady M", "mady@example.com", "member");
   }
@@ -151,7 +151,7 @@ class FleetSyncTest {
         "a dependent spec replicates without a foreign-key abort");
 
     assertEquals(
-        "name: acme\nimage: ubuntu/24.04\n",
+        TestDefinitions.yaml("name: acme\nimage: ubuntu/24.04\n"),
         node.projects.findByName("acme").orElseThrow().definition());
     assertTrue(node.projects.findByName("outline").isPresent());
 
@@ -165,37 +165,10 @@ class FleetSyncTest {
   }
 
   @Test
-  void aSyncedProjectNeverCarriesMainsIdentityOrKeysToANode() {
-    main.projects.upsert(
-        "acme",
-        "name: acme\n"
-            + "git:\n  name: Alex Morgan\n  email: uday@example.com\n"
-            + "ssh:\n  authorized_keys:\n    - ssh-ed25519 UDAYKEY uday@main\n");
-
-    syncFromMain();
-
-    var onNode = node.projects.findByName("acme").orElseThrow().definition();
-    assertTrue(onNode.contains("${GIT_NAME}"), "the node sees a placeholder, not Uday's name");
-    assertTrue(onNode.contains("${SSH_PUBLIC_KEY}"), "and a placeholder, not Uday's key");
-    assertFalse(onNode.contains("Alex Morgan"));
-    assertFalse(onNode.contains("uday@example.com"));
-    assertFalse(onNode.contains("UDAYKEY"), "main's SSH key never lands on the node");
-
-    assertConverged();
-  }
-
-  private static void insertLegacyProject(Box box, String name, String definition) {
-    box.db.execute(
-        "INSERT INTO projects (name, definition, created_at, updated_at) VALUES (?, ?, ?, ?)",
-        name,
-        definition,
-        "2026-01-01",
-        "2026-01-01");
-  }
-
-  @Test
   void aSyncedProjectIsAttributedToItsRealAuthorNotSync() {
-    Acting.as("uday", () -> main.projects.upsert("acme", "name: acme\nimage: ubuntu/24.04\n"));
+    Acting.as(
+        "uday",
+        () -> main.projects.upsert(TestDefinitions.yaml("name: acme\nimage: ubuntu/24.04\n")));
 
     syncFromMain();
 

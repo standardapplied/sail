@@ -6,10 +6,8 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
-import ai.singlr.sail.config.PlaceholderResolver;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
@@ -19,26 +17,24 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DemoProject;
 import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
-import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionListener;
 import ai.singlr.sail.engine.ProvisionTracker;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.engine.WorkstationIdentity;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.ssh.SshPublicKey;
-import java.io.IOException;
+import java.io.ByteArrayInputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -130,27 +126,30 @@ public final class ProjectDemoCommand implements Runnable {
       out.println();
     }
 
-    var yamlContent = loadDemoDefinition(out, ansi, operator);
+    var config = loadDemoDefinition(out, ansi);
     var registered = WorkstationIdentity.registered();
-    var config = resolveAutoDetected(yamlContent, registered.isPresent(), out, ansi, operator);
-
-    var outputDir = Path.of(DEMO_PROJECT);
-    var sailYamlPath = outputDir.resolve(SailPaths.PROJECT_DESCRIPTOR);
-    Files.createDirectories(outputDir);
-    Files.writeString(sailYamlPath, YamlUtil.dumpToString(config.toMap()));
+    var git = LocalIdentity.detect().git();
     if (!json) {
-      out.println(ansi.string("  @|green \u2713|@ " + sailYamlPath + " written"));
+      out.println();
+      out.println(ansi.string("  @|bold Auto-detected configuration:|@"));
+      out.println(ansi.string("    Git:         " + git.name() + " <" + git.email() + ">"));
+      out.println(
+          ansi.string(
+              "    Laptop key:  "
+                  + (registered.isPresent()
+                      ? "@|green registered|@"
+                      : "@|yellow not registered \u2014 remote access won't work|@")));
+      out.println();
     }
 
-    var filesPulled = writeDemoFiles(outputDir, out, ansi);
+    var filesShared = dryRun ? DemoProject.files().size() : shareDemoFiles(out, ansi);
 
     if (dryRun) {
       if (json) {
         var map = new LinkedHashMap<String, Object>();
         map.put("name", DEMO_PROJECT);
         map.put("source", "catalog");
-        map.put("output", sailYamlPath.toAbsolutePath().toString());
-        map.put("files_pulled", filesPulled);
+        map.put("files_shared", filesShared);
         map.put("dry_run", true);
         out.println(YamlUtil.dumpJson(map));
       } else {
@@ -179,13 +178,17 @@ public final class ProjectDemoCommand implements Runnable {
         workstationKey ->
             new ProjectProvisioner(shell, tracker, listener, workstationKey, operator)
                 .provision(
-                    config, hostYaml, GitCredentials.singleTokenMap(gitToken), sailYamlPath));
+                    config,
+                    hostYaml,
+                    GitCredentials.singleTokenMap(gitToken),
+                    git,
+                    SailPaths.projectFilesDir(config.name())));
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", config.name());
       map.put("status", "created");
-      map.put("files_pulled", filesPulled);
+      map.put("files_shared", filesShared);
       out.println(YamlUtil.dumpJson(map));
       return;
     }
@@ -213,12 +216,12 @@ public final class ProjectDemoCommand implements Runnable {
 
       var ports = ContainerExec.queryServicePorts(shell, config.name());
       if (!ports.isEmpty()) {
-        Banner.printSshTunnels(config.name(), config.sshUser(), ports, out, ansi);
+        Banner.printSshTunnels(config.name(), ProjectDefinition.USER, ports, out, ansi);
       }
     }
   }
 
-  private String loadDemoDefinition(PrintStream out, Ansi ansi, OperatorCommand operator) {
+  private ProjectDefinition loadDemoDefinition(PrintStream out, Ansi ansi) {
     try (var operations = OperationsFactory.open()) {
       var definition = operations.catalog().demoDefinition();
       if (!json) {
@@ -228,164 +231,32 @@ public final class ProjectDemoCommand implements Runnable {
     }
   }
 
-  private int writeDemoFiles(Path outputDir, PrintStream out, Ansi ansi) throws IOException {
+  /**
+   * Shares the demo's bundled files through the catalog's file store and writes them where apply
+   * pushes a project's shared files from, so provisioning puts them in the container's workspace.
+   */
+  private int shareDemoFiles(PrintStream out, Ansi ansi) throws Exception {
     var files = DemoProject.files();
-    var filesDir = outputDir.resolve("files");
-    for (var entry : files.entrySet()) {
-      var localPath = filesDir.resolve(entry.getKey());
-      if (localPath.getParent() != null) {
-        Files.createDirectories(localPath.getParent());
-      }
-      Files.writeString(localPath, entry.getValue());
-      WorkspaceFiles.mode(localPath, localPath.toString().endsWith(".sh") ? 0755 : 0644);
-      if (!json) {
-        out.println(ansi.string("  @|green \u2713|@ files/" + entry.getKey()));
-      }
+    try (var operations = OperationsFactory.open()) {
+      var shared = operations.projectFiles(DEMO_PROJECT);
+      Actor.call(
+          operations.identity().operator(),
+          () -> {
+            for (var entry : files.entrySet()) {
+              var bytes = entry.getValue().getBytes(StandardCharsets.UTF_8);
+              shared.put(
+                  entry.getKey(),
+                  new ByteArrayInputStream(bytes),
+                  bytes.length,
+                  entry.getKey().endsWith(".sh") ? 0755 : 0644);
+              if (!json) {
+                out.println(ansi.string("  @|green \u2713|@ shared " + entry.getKey()));
+              }
+            }
+            return null;
+          });
+      shared.materialize();
     }
     return files.size();
-  }
-
-  /**
-   * The demo definition with the box's git identity and the caller's own SSH key filled in. The
-   * registered workstation key is never written into it: every container trusts that key as the box
-   * holds it when provisioned, so a revoked key is never put back by a later apply.
-   */
-  private SailYaml resolveAutoDetected(
-      String yamlContent,
-      boolean workstationKeyRegistered,
-      PrintStream out,
-      Ansi ansi,
-      OperatorCommand operator) {
-    var gitName = detectGitConfig("user.name");
-    var gitEmail = detectGitConfig("user.email");
-    var sshKey = detectSshPublicKey();
-
-    if (!json) {
-      out.println();
-      out.println(ansi.string("  @|bold Auto-detected configuration:|@"));
-      out.println(
-          ansi.string(
-              "    Git name:  " + (gitName != null ? gitName : "@|yellow not configured|@")));
-      out.println(
-          ansi.string(
-              "    Git email: " + (gitEmail != null ? gitEmail : "@|yellow not configured|@")));
-      out.println(
-          ansi.string(
-              "    SSH key:   "
-                  + (sshKey != null || workstationKeyRegistered
-                      ? "@|green found|@"
-                      : "@|yellow not found \u2014 remote access won't work|@")));
-      out.println();
-    }
-
-    if (gitName == null && !json) {
-      out.print(ansi.string("  @|bold Git name (for commits)|@: "));
-      out.flush();
-      gitName = ConsoleHelper.readLine();
-      if (Strings.isBlank(gitName)) {
-        throw new IllegalArgumentException(
-            "Git name is required."
-                + "\n  Set it with: git config --global user.name \"Your Name\"");
-      }
-      gitName = gitName.strip();
-    }
-    if (gitEmail == null && !json) {
-      out.print(ansi.string("  @|bold Git email|@: "));
-      out.flush();
-      gitEmail = ConsoleHelper.readLine();
-      if (Strings.isBlank(gitEmail)) {
-        throw new IllegalArgumentException(
-            "Git email is required."
-                + "\n  Set it with: git config --global user.email you@example.com");
-      }
-      gitEmail = gitEmail.strip();
-    }
-
-    if (gitName == null || gitEmail == null) {
-      throw new IllegalArgumentException(
-          "Git name and email are required."
-              + "\n  Set them with:"
-              + "\n    git config --global user.name \"Your Name\""
-              + "\n    git config --global user.email you@example.com");
-    }
-
-    return resolvedDefinition(yamlContent, gitName, gitEmail, sshKey, operator);
-  }
-
-  /**
-   * The definition with the identity filled in, resolved as every descriptor is ({@link
-   * ProjectDefinitions#resolveForProvisioning}): in the parsed tree, so a quoted placeholder and an
-   * apostrophe in a name are fine, and under the same checks. With no key of the caller's own the
-   * key entry goes: step 6 trusts the registered workstation key whatever the definition says, and
-   * a key written into the definition would be put back by an apply after it was revoked.
-   */
-  static SailYaml resolvedDefinition(
-      String yamlContent,
-      String gitName,
-      String gitEmail,
-      String sshKey,
-      OperatorCommand operator) {
-    var text = sshKey == null ? withoutKeyEntry(yamlContent) : yamlContent;
-    return ProjectDefinitions.resolveForProvisioning(
-        text,
-        field ->
-            switch (field) {
-              case PlaceholderResolver.GIT_NAME -> gitName;
-              case PlaceholderResolver.GIT_EMAIL -> gitEmail;
-              case PlaceholderResolver.SSH_PUBLIC_KEY -> sshKey;
-              default -> null;
-            },
-        operator);
-  }
-
-  @SuppressWarnings("unchecked")
-  private static String withoutKeyEntry(String yamlContent) {
-    var map = YamlUtil.parseMap(yamlContent);
-    if (map.get("ssh") instanceof Map<?, ?> ssh
-        && ssh.get("authorized_keys") instanceof List<?> keys) {
-      var token = PlaceholderResolver.token(PlaceholderResolver.SSH_PUBLIC_KEY);
-      ((Map<String, Object>) ssh)
-          .put("authorized_keys", keys.stream().filter(key -> !token.equals(key)).toList());
-    }
-    return YamlUtil.dumpToString(map);
-  }
-
-  String detectGitConfig(String key) {
-    try {
-      var sudoUser = System.getenv("SUDO_USER");
-      var pb =
-          Strings.isNotBlank(sudoUser)
-              ? new ProcessBuilder("su", "-", sudoUser, "-c", "git config --global " + key)
-              : new ProcessBuilder("git", "config", "--global", key);
-      pb.redirectErrorStream(true);
-      var process = pb.start();
-      var output =
-          new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
-      var exitCode = process.waitFor();
-      return exitCode == 0 && !output.isEmpty() ? output : null;
-    } catch (Exception e) {
-      return null;
-    }
-  }
-
-  static String detectSshPublicKey() {
-    return detectSshPublicKey(SailPaths.invokingHome().resolve(".ssh"));
-  }
-
-  /**
-   * The caller's own public key: the first of the usual files in {@code sshDir} that holds one. A
-   * file that holds no key, or cannot be read, counts as none.
-   */
-  static String detectSshPublicKey(Path sshDir) {
-    for (var name : List.of("id_ed25519.pub", "id_rsa.pub", "id_ecdsa.pub")) {
-      try {
-        return SshPublicKey.parse(
-                new String(Files.readAllBytes(sshDir.resolve(name)), StandardCharsets.UTF_8))
-            .line();
-      } catch (IOException | IllegalArgumentException unusable) {
-        continue;
-      }
-    }
-    return null;
   }
 }

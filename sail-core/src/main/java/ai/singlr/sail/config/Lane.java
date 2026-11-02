@@ -102,7 +102,7 @@ public enum Lane {
   /**
    * Whether this lane is one of the review pipeline's own — a reviewer or the fix agent that
    * answers it. Their runs name the review they serve, their stops advance it, and the project's
-   * {@code agent.review_pipeline.guardrails} bound them.
+   * {@code pipeline.guardrails} bound them.
    */
   public boolean servesReview() {
     return this == REVIEW || this == FIX;

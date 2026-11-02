@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.Main;
 import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
-import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -57,8 +56,7 @@ class InitCommandTest {
 
   private final Map<String, String> gitConfig = new HashMap<>();
   private final Map<String, String> answers = new HashMap<>();
-  private final LocalIdentity identity =
-      new LocalIdentity(new GitConfig(), Path.of("no-workstation-key.pub"), OperatorCommand.PLAIN);
+  private final LocalIdentity identity = new LocalIdentity(new GitConfig());
 
   private int init(String... args) {
     refusal = null;
@@ -498,18 +496,8 @@ class InitCommandTest {
     }
   }
 
-  private static final String BY_NAME =
-      """
-      name: gamma
-      git:
-        name: ${GIT_NAME}
-        email: ${GIT_EMAIL}
-      ssh:
-        user: dev
-      """;
-
   @Test
-  void aNodesNameAndEmailBecomeRootsGitIdentitySoAByNameApplyResolvesIt() {
+  void aNodesNameAndEmailBecomeRootsGitIdentitySoEveryContainerCommitsAsThem() {
     gitConfig.clear();
     assertEquals(0, init("--main", "m", "--name", "A B", "--email", "a@b"));
 
@@ -520,10 +508,7 @@ class InitCommandTest {
             "HostServiceInstallCommand",
             "JoinCommand m --name A B --email a@b"),
         ran);
-    var git =
-        ProjectDefinitions.resolveForProvisioning(
-                BY_NAME, identity::valueFor, OperatorCommand.PLAIN)
-            .git();
+    var git = identity.git();
     assertEquals("A B", git.name());
     assertEquals("a@b", git.email());
   }
@@ -540,15 +525,12 @@ class InitCommandTest {
   }
 
   @Test
-  void aMainTakesItsGitIdentityFromInitSoItsSecondApplyByNameConverges() {
+  void aMainTakesItsGitIdentityFromInitSoItsContainersCommitAsIt() {
     gitConfig.clear();
     assertEquals(0, init("--as-main", "--handle", "ada", "--name", "A B", "--email", "a@b"));
 
     assertEquals(Map.of("user.name", "A B", "user.email", "a@b"), gitConfig);
-    var git =
-        ProjectDefinitions.resolveForProvisioning(
-                BY_NAME, identity::valueFor, OperatorCommand.PLAIN)
-            .git();
+    var git = identity.git();
     assertEquals("A B", git.name());
     assertEquals("a@b", git.email());
   }

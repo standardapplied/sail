@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import java.io.ByteArrayInputStream;
 import java.nio.file.Path;
@@ -60,7 +61,8 @@ class UnboundWriteTest {
 
   @Test
   void aProjectWrittenByNoOneIsRefused() {
-    assertRefused(() -> new ProjectStore(db).upsert("acme", "name: acme\n"), "projects", "project");
+    assertRefused(
+        () -> new ProjectStore(db).upsert(TestDefinitions.named("acme")), "projects", "project");
   }
 
   @Test

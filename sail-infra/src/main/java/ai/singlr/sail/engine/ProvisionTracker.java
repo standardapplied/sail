@@ -46,7 +46,7 @@ public final class ProvisionTracker<P extends Enum<P>> {
   /**
    * Loads the progress recorded for {@code inputs}, or starts with empty state if no file exists.
    * Call once before the provisioning loop. Progress recorded for other inputs, or by a release
-   * that recorded none, was made for another descriptor: the run restarts from the first phase,
+   * that recorded none, was made for another definition: the run restarts from the first phase,
    * each of which re-checks its own effect, and the restart is persisted so an interrupted restart
    * is still a run to resume. A completed phase this version no longer has — a run that stopped at
    * a phase a later release removed — is likewise read as no progress.

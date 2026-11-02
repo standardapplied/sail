@@ -20,6 +20,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.identity.Acting;
@@ -1132,10 +1133,10 @@ class ReviewLoopRecoveryTest {
   }
 
   @Test
-  void aDescriptorThatCannotBeReadIsNeverTakenForAPipelineThatChanged() {
+  void aDefinitionThatCannotBeReadIsNeverTakenForAPipelineThatChanged() {
     var custom =
         ReviewLoop.YAML
-            + "  review_pipeline:\n"
+            + "pipeline:\n"
             + "    stages:\n"
             + "      - name: security\n"
             + "        type: agent\n"
@@ -1165,7 +1166,7 @@ class ReviewLoopRecoveryTest {
     loop = ReviewLoop.wired(tempDir, ReviewLoop.YAML);
     loop.describe(
         ReviewLoop.YAML
-            + "  review_pipeline:\n"
+            + "pipeline:\n"
             + "    stages:\n"
             + "      - name: security\n"
             + "        type: agent\n"
@@ -1190,7 +1191,7 @@ class ReviewLoopRecoveryTest {
         ReviewLoop.wired(
             tempDir,
             ReviewLoop.YAML
-                + "  review_pipeline:\n"
+                + "pipeline:\n"
                 + "    stages:\n"
                 + "      - name: codex\n"
                 + "        type: agent\n"
@@ -1200,7 +1201,7 @@ class ReviewLoopRecoveryTest {
     var reviewer = loop.onlyLive();
     loop.describe(
         ReviewLoop.YAML
-            + "  review_pipeline:\n"
+            + "pipeline:\n"
             + "    stages:\n"
             + "      - name: codex\n"
             + "        type: human\n");
@@ -1252,7 +1253,7 @@ class ReviewLoopRecoveryTest {
   }
 
   @Test
-  void aBuildThatEndsWhileItsProjectsDescriptorCannotBeReadIsHandedToAPersonNotReplayed() {
+  void aBuildThatEndsWhileItsProjectsDefinitionCannotBeReadIsHandedToAPersonNotReplayed() {
     loop = ReviewLoop.wired(tempDir, ReviewLoop.YAML);
     loop.corruptDefinition();
 
@@ -1281,7 +1282,7 @@ class ReviewLoopRecoveryTest {
     assertEquals(1, sweeps(reconciler, 3), "one replay, and the review is a person's");
 
     var reason =
-        "the project's review pipeline has no stages; set agent.review_pipeline.stages, then"
+        "the project's review pipeline has no stages; set pipeline.stages, then"
             + " re-dispatch with --restart";
     assertEquals("escalated", loop.statusOf(review));
     assertEquals(reason, loop.reviews.findReview(review).orElseThrow().error());
@@ -1293,7 +1294,7 @@ class ReviewLoopRecoveryTest {
   }
 
   private static final String NO_STAGES =
-      "the project's review pipeline has no stages; set agent.review_pipeline.stages, then"
+      "the project's review pipeline has no stages; set pipeline.stages, then"
           + " re-dispatch with --restart";
 
   /** A loop whose project's pipeline is whatever {@code pipeline} holds when it is asked. */
@@ -1444,7 +1445,7 @@ class ReviewLoopRecoveryTest {
     loop =
         ReviewLoop.of(
             tempDir,
-            ReviewPipelineConfig.fromMap(
+            TestDefinitions.pipeline(
                 Map.of(
                     "max_iterations",
                     3,
@@ -1472,7 +1473,7 @@ class ReviewLoopRecoveryTest {
     loop =
         ReviewLoop.of(
             tempDir,
-            ReviewPipelineConfig.fromMap(
+            TestDefinitions.pipeline(
                 Map.of(
                     "max_iterations",
                     3,

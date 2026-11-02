@@ -99,8 +99,6 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
         yaml,
         """
         name: %s
-        ssh:
-          user: dev
         repos:
           - url: https://example.invalid/app.git
             path: app

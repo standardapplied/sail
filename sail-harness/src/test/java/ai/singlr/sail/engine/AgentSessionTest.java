@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import java.io.ByteArrayOutputStream;
@@ -1346,15 +1346,15 @@ class AgentSessionTest {
 
   @Test
   void launchWorkDirUsesSingleTargetRepo() {
-    var repo = new SailYaml.Repo("https://github.com/org/web.git", "web", null);
+    var repo = new ProjectDefinition.Repo("https://github.com/org/web.git", "web", null);
 
     assertEquals("/home/dev/workspace/web", AgentSession.launchWorkDir("dev", List.of(repo)));
   }
 
   @Test
   void launchWorkDirUsesWorkspaceForMultipleTargets() {
-    var first = new SailYaml.Repo("https://github.com/org/web.git", "web", null);
-    var second = new SailYaml.Repo("https://github.com/org/api.git", "api", null);
+    var first = new ProjectDefinition.Repo("https://github.com/org/web.git", "web", null);
+    var second = new ProjectDefinition.Repo("https://github.com/org/api.git", "api", null);
 
     assertEquals("/home/dev/workspace", AgentSession.launchWorkDir("dev", List.of(first, second)));
   }

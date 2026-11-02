@@ -5,15 +5,14 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.SailYamlUpdater;
+import ai.singlr.sail.config.DefinitionEdits;
+import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectApplier;
-import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,12 +33,6 @@ public final class ProjectRemoveServiceCommand implements Runnable {
   @Parameters(index = "1", description = "Service name to remove.")
   private String serviceName;
 
-  @Option(
-      names = {"-f", "--file"},
-      description = "Path to sail.yaml project descriptor.",
-      defaultValue = "sail.yaml")
-  private String file;
-
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
@@ -57,11 +50,9 @@ public final class ProjectRemoveServiceCommand implements Runnable {
     var ansi = Ansi.AUTO;
     var out = System.out;
 
-    var explicit = ProjectDefinitions.explicitFile(file);
-    var actor = ProjectMutations.catalogOperator(name, explicit, dryRun);
-    var config =
-        SailYaml.fromMap(
-            YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit, operator)));
+    var mutations = ProjectMutations.here();
+    var actor = mutations.writer(name, dryRun);
+    var config = mutations.current(name, operator);
     if (config.services() == null || !config.services().containsKey(serviceName)) {
       throw new IllegalStateException(
           "Service '" + serviceName + "' is not defined in project '" + name + "'.");
@@ -73,15 +64,13 @@ public final class ProjectRemoveServiceCommand implements Runnable {
 
     ContainerStateGuard.requireRunning(state, name);
 
+    var edited = ProjectMutations.checked(DefinitionEdits.removeService(config, serviceName));
     var applier = new ProjectApplier(shell, out);
     var result = applier.removeServices(name, List.of(serviceName));
-
-    var updatedText =
-        YamlUtil.dumpToString((SailYamlUpdater.removeService(config, serviceName)).toMap());
-    ProjectMutations.persist(
-        name,
-        explicit,
-        updatedText,
+    mutations.write(
+        Section.SERVICES,
+        config,
+        edited,
         dryRun,
         out,
         "remove service '" + serviceName + "' from the catalog",
@@ -104,6 +93,6 @@ public final class ProjectRemoveServiceCommand implements Runnable {
                 + serviceName
                 + "' removed from "
                 + name
-                + " and sail.yaml updated"));
+                + " and its definition"));
   }
 }

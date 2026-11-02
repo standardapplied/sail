@@ -11,7 +11,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Who may write a type every writer may change — a project's files and descriptors: any role that
+ * Who may write a type every writer may change — a project's files and definitions: any role that
  * can write, since there is no project membership to mirror. A pushed revision still names only
  * whom its pusher may write as.
  */

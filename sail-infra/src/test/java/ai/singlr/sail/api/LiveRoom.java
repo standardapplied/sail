@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.LiveMemberPrompt;
 import ai.singlr.sail.engine.LiveStream;
@@ -113,7 +114,7 @@ final class LiveRoom implements AutoCloseable {
     new SchemaManager(db).migrate();
     var projects = new ProjectStore(db);
     reader = ProjectReader.ofCatalog(projects);
-    Acting.system(() -> projects.upsert(PROJECT, yaml));
+    Acting.system(() -> projects.upsert(TestDefinitions.yaml(yaml)));
     new FdeStore(db).add(HANDLE, null, null, "admin");
     specs = new SpecStore(db);
     runs = new RunStore(db);

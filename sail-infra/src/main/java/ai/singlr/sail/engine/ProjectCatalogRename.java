@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.api.HostCatalog;
+import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
@@ -33,17 +34,21 @@ public final class ProjectCatalogRename {
           if (projects.findByName(to).isPresent()) {
             throw new IllegalStateException("A project named '" + to + "' already exists.");
           }
-          projects.rename(from, to, ProjectRenamer.withName(existing.definition(), to));
+          projects.rename(from, to, existing.definition().withName(to));
           new SpecStore(db).reproject(from, to);
           new FileStore(db).reproject(from, to);
-          return new HostCatalog.Renamed(from, to, existing.definition());
+          return new HostCatalog.Renamed(from, to, existing.document());
         });
   }
 
   public static void restore(Sqlite db, HostCatalog.Renamed renamed) {
     db.transaction(
         () -> {
-          new ProjectStore(db).rename(renamed.to(), renamed.from(), renamed.previousDefinition());
+          new ProjectStore(db)
+              .rename(
+                  renamed.to(),
+                  renamed.from(),
+                  ProjectDefinitionJson.read(renamed.previousDefinition()));
           new SpecStore(db).reproject(renamed.to(), renamed.from());
           new FileStore(db).reproject(renamed.to(), renamed.from());
         });

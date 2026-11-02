@@ -13,6 +13,7 @@ import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.WorkspaceFiles;
@@ -60,7 +61,7 @@ class ProjectSkillsCommandTest {
     database = dir.resolve("sail.db");
     db = Sqlite.open(database);
     new SchemaManager(db).migrate();
-    Acting.system(() -> new ProjectStore(db).upsert("acme", ACME));
+    Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.yaml(ACME)));
   }
 
   @AfterEach

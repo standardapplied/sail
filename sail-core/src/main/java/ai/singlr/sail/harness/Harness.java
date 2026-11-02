@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
 /**
  * A coding harness sail drives inside a project container: everything that differs between Claude
  * Code, Codex and the next one, asked of one adapter. Sail names a harness by its {@link #yamlName}
- * in {@code sail.yaml} and resolves it through {@link Harnesses}; nothing outside this package
+ * in a project's definition and resolves it through {@link Harnesses}; nothing outside this package
  * compares a harness with a name or branches on one. Each adapter builds its own launch commands,
  * declares the file of hooks it runs sail's scripts from, and answers for its own capabilities, so
  * adding a harness is adding one adapter.
@@ -95,7 +95,7 @@ public interface Harness {
     }
   }
 
-  /** The name used in {@code sail.yaml}, such as {@code claude-code}. */
+  /** The name a definition uses, such as {@code claude-code}. */
   String yamlName();
 
   /** The CLI binary name on PATH. */

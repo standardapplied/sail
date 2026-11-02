@@ -9,7 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.io.IOException;
@@ -58,7 +59,7 @@ class WorkBranchTest {
             reported.add(branch + " in " + repoPath);
           }
         };
-    var config = SailYaml.fromMap(Map.of("name", "acme"));
+    var config = TestDefinitions.map(Map.of("name", "acme"));
 
     var cut =
         new WorkBranch(new LocalGit(tempDir), listener)
@@ -87,7 +88,7 @@ class WorkBranchTest {
             unavailable.add(branch);
           }
         };
-    var config = SailYaml.fromMap(Map.of("name", "acme"));
+    var config = TestDefinitions.map(Map.of("name", "acme"));
 
     var cut =
         new WorkBranch(new LocalGit(tempDir), listener)
@@ -106,7 +107,7 @@ class WorkBranchTest {
   @Test
   void aPathBranchesInTheDeepestRepoHoldingItAsTheFilesystemResolvesIt() {
     var config =
-        SailYaml.fromMap(
+        TestDefinitions.map(
             Map.of(
                 "name",
                 "acme",
@@ -122,7 +123,7 @@ class WorkBranchTest {
     assertEquals(3, WorkBranch.repos(config, "web/..").size());
   }
 
-  private static String only(List<SailYaml.Repo> repos) {
+  private static String only(List<ProjectDefinition.Repo> repos) {
     assertEquals(1, repos.size(), repos.toString());
     return repos.getFirst().path();
   }

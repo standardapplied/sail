@@ -11,7 +11,7 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
@@ -36,7 +36,6 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -74,8 +73,6 @@ public final class AgentAttachCommand implements Runnable {
       arity = "0..1",
       description = "Project name (default: the current project).")
   private String name;
-
-  @Mixin private IgnoredFileOption file;
 
   @Option(names = "--dry-run", description = "Print the exact command instead of attaching.")
   private boolean dryRun;
@@ -503,8 +500,8 @@ public final class AgentAttachCommand implements Runnable {
           .catalog()
           .definitions()
           .read(name)
-          .map(SailYaml::agent)
-          .map(SailYaml.Agent::type)
+          .map(ProjectDefinition::agent)
+          .map(ProjectDefinition.Agent::type)
           .map(Harnesses::of)
           .orElse(Harnesses.DEFAULT);
     }

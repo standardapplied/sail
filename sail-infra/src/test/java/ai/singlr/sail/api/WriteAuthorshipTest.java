@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
@@ -188,7 +189,7 @@ class WriteAuthorshipTest {
   @Test
   void aCatalogRenameAndItsUndoAreTheOperatorsWrites() {
     try (var operations = operations(() -> MAIN)) {
-      Acting.as("mady", () -> new ProjectStore(db).upsert("acme", "name: acme\n"));
+      Acting.as("mady", () -> new ProjectStore(db).upsert(TestDefinitions.named("acme")));
 
       var renamed = operations.catalog().rename("acme", "web");
       assertEquals("uday", projectHead("web").actor());
@@ -201,7 +202,7 @@ class WriteAuthorshipTest {
   @Test
   void aProjectPurgeIsTheOperatorsErasureAndItsRehearsalWritesNothing() {
     try (var operations = operations(() -> MAIN)) {
-      Acting.as("mady", () -> new ProjectStore(db).upsert("acme", "name: acme\n"));
+      Acting.as("mady", () -> new ProjectStore(db).upsert(TestDefinitions.named("acme")));
 
       operations.catalog().purgeSummary("acme");
       assertEquals("mady", projectHead("acme").actor(), "a rehearsal rolls back");

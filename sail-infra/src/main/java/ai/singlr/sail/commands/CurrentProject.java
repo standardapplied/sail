@@ -8,7 +8,6 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.SailPaths;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -18,10 +17,9 @@ import java.util.Optional;
 
 /**
  * The current project, resolved the same way by every command: an explicit flag or positional
- * always wins, then the {@code sail.yaml} found upward from the working directory, then the project
- * {@code sail project switch} last selected (a single line under {@code ~/.sail}; the project
- * catalog itself lives in the database, this is only the pointer). Commands that need a project
- * fail with guidance naming both options when none of the three yields one.
+ * always wins, then the project {@code sail project switch} last selected (a single line under
+ * {@code ~/.sail}; the project catalog itself lives in the database, this is only the pointer).
+ * Commands that need a project fail with guidance naming both options when neither yields one.
  */
 final class CurrentProject {
 
@@ -62,43 +60,23 @@ final class CurrentProject {
     }
   }
 
-  /** The project named by the {@code sail.yaml} found upward from the working directory. */
-  static Optional<String> fromCwd() {
-    var yaml = SailPaths.findSailYamlUpward(Path.of(".")).orElse(null);
-    if (yaml == null) {
-      return Optional.empty();
-    }
-    try {
-      var name = (String) YamlUtil.parseFile(yaml).get("name");
-      return Strings.isBlank(name) ? Optional.<String>empty() : Optional.of(name);
-    } catch (Exception unreadable) {
-      return Optional.empty();
-    }
-  }
-
-  static Optional<String> infer(String cwdProject, Path stateFile) {
-    return Optional.ofNullable(cwdProject).or(() -> get(stateFile));
-  }
-
   /**
-   * Resolves the project a command should act on: the explicit name when given, otherwise the cwd's
-   * {@code sail.yaml}, otherwise the current project. Throws with actionable guidance when none is
-   * available.
+   * Resolves the project a command should act on: the explicit name when given, otherwise the
+   * current project. Throws with actionable guidance when neither is.
    */
   static String require(String explicit) {
-    return require(explicit, fromCwd().orElse(null), file());
+    return require(explicit, file());
   }
 
-  static String require(String explicit, String cwdProject, Path stateFile) {
+  static String require(String explicit, Path stateFile) {
     if (Strings.isNotBlank(explicit)) {
       return explicit;
     }
-    return infer(cwdProject, stateFile)
+    return get(stateFile)
         .orElseThrow(
             () ->
                 Remedied.state(
-                    "No project given and none could be inferred (no sail.yaml in the current"
-                        + " directory tree, no current project).",
+                    "No project given, and no current project.",
                     Remedy.of(
                         "Name the project on the command line (-p/--project or the <project>"
                             + " argument), or run '",
@@ -111,11 +89,10 @@ final class CurrentProject {
    * {@code --all-projects} or {@code --project '*'}), otherwise {@link #require} semantics apply.
    */
   static Optional<String> scope(String explicit, boolean allProjects) {
-    return scope(explicit, allProjects, fromCwd().orElse(null), file());
+    return scope(explicit, allProjects, file());
   }
 
-  static Optional<String> scope(
-      String explicit, boolean allProjects, String cwdProject, Path stateFile) {
+  static Optional<String> scope(String explicit, boolean allProjects, Path stateFile) {
     if (allProjects && Strings.isNotBlank(explicit) && !"*".equals(explicit)) {
       throw new IllegalArgumentException("Pass either --project or --all-projects, not both.");
     }
@@ -126,12 +103,11 @@ final class CurrentProject {
       return Optional.of(explicit);
     }
     var inferred =
-        infer(cwdProject, stateFile)
+        get(stateFile)
             .orElseThrow(
                 () ->
                     Remedied.state(
-                        "No project given and none could be inferred (no sail.yaml in the current"
-                            + " directory tree, no current project).",
+                        "No project given, and no current project.",
                         Remedy.of(
                             "Pass -p/--project <project> (or --all-projects for every project), or"
                                 + " run '",

@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.HostAccess;
@@ -153,6 +154,7 @@ class ScopedReadsTest {
           "/v1/projects/{project}/agent",
           "POST /v1/projects/{project}/agent/report",
           "/v1/projects/{project}/connect",
+          "/v1/projects/{project}/definition",
           "/v1/projects/{project}/ports",
           "/v1/projects/{project}/snapshots",
           "/v1/projects/{project}/files",
@@ -169,6 +171,8 @@ class ScopedReadsTest {
       Set.of(
           "sync",
           "skills",
+          "createProject",
+          "writeProjectSection",
           "resolveConflict",
           "approveReview",
           "dismissFinding",
@@ -228,6 +232,7 @@ class ScopedReadsTest {
           List.of("POST", "/v1/events", event("{project}", "\"spec\": \"{spec}\", ", "")),
           List.of("POST", "/v1/events", event("alpha", "\"spec\": \"{spec}\", ", "")),
           List.of("POST", "/v1/events", event("alpha", "", ", \"run_id\": \"{run}\"")),
+          List.of("PUT", "/v1/projects/{project}/definition/image", "{\"value\": \"x/1\"}"),
           List.of("PUT", "/v1/projects/{project}/files/{file}", "sneaked in"),
           List.of("DELETE", "/v1/projects/{project}/files/{file}", ""),
           List.of("POST", "/v1/projects/{project}/dispatch", "{}"),
@@ -473,6 +478,10 @@ class ScopedReadsTest {
             "{\"id\": \"sneak-room\", \"project\": \"bravo\", \"title\": \"t\"}"));
     assertEquals(
         "404", send(sam, "PUT", "/v1/projects/bravo/files/notes.md", "sneaked in").substring(0, 3));
+    assertEquals(
+        """
+        404 {"schema_version": 1, "error": {"code": "not_found", "message": "Project 'ghost' was not found.", "action": "Ask an admin on main for the project: fde grant <handle> <project>.", "remedy": [{"text": "Ask an admin on main for the project: "}, {"run": "sail", "verb": "fde grant", "args": ["<handle>", "<project>"]}, {"text": "."}], "field_errors": []}}""",
+        send(sam, "POST", "/v1/projects", "{\"name\": \"ghost\"}"));
     assertEquals(before, entries(), "nothing of any refused write was recorded");
 
     assertEquals(
@@ -1328,7 +1337,7 @@ class ScopedReadsTest {
     var spec = project + "-spec";
     var room = project + "-room";
     new ProjectStore(db)
-        .upsert(project, "name: " + project + "\nssh:\n  user: dev\nagent:\n  type: claude-code\n");
+        .upsert(TestDefinitions.yaml("name: " + project + "\nagent:\n  type: claude-code\n"));
     containers.add(project);
     var specs = new SpecStore(db);
     specs.create(

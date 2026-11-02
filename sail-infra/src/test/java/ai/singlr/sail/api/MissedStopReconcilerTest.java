@@ -13,8 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
-import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -699,7 +699,7 @@ class MissedStopReconcilerTest {
 
   private void subscribeController(CountDownLatch latch) {
     var config =
-        ReviewPipelineConfig.fromMap(
+        TestDefinitions.pipeline(
             Map.of(
                 "max_iterations",
                 3,

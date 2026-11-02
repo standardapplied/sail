@@ -57,13 +57,13 @@ class ApiOperatorHintsTest {
     assertEquals(
         List.of(
             "Start it with sudo sail project start gamma.",
-            "If its descriptor is on this box, import it with 'sudo sail migrate'. To create the"
-                + " project, run 'sudo sail project apply -f <file>'.",
+            "Create it with 'sudo sail project create gamma', or sync it from main with 'sudo sail"
+                + " sync'.",
             "Claim it first: sudo sail spec update auth --assignee ada",
             "Reassign it to dispatch here: sudo sail spec update auth --assignee ada",
             "Set it with: sudo sail host config set sync-handle <handle>",
-            "Add claude-code to sail.yaml's agent.install list and run 'sudo sail project apply"
-                + " gamma'.",
+            "Add claude-code to the agent's install list with 'sudo sail project edit gamma --section"
+                + " agent', then run 'sudo sail project apply gamma'.",
             "Run store not available. Start the server with 'sudo sail server start'."),
         hints(SUDO));
   }
@@ -73,13 +73,12 @@ class ApiOperatorHintsTest {
     assertEquals(
         List.of(
             "Start it with sail project start gamma.",
-            "If its descriptor is on this box, import it with 'sail migrate'. To create the"
-                + " project, run 'sail project apply -f <file>'.",
+            "Create it with 'sail project create gamma', or sync it from main with 'sail sync'.",
             "Claim it first: sail spec update auth --assignee ada",
             "Reassign it to dispatch here: sail spec update auth --assignee ada",
             "Set it with: sail host config set sync-handle <handle>",
-            "Add claude-code to sail.yaml's agent.install list and run 'sail project apply"
-                + " gamma'.",
+            "Add claude-code to the agent's install list with 'sail project edit gamma --section"
+                + " agent', then run 'sail project apply gamma'.",
             "Run store not available. Start the server with 'sail server start'."),
         hints(PLAIN));
   }

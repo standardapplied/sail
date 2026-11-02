@@ -6,7 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Remedy;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ContainerStateGuard;
@@ -20,7 +20,7 @@ import java.util.Objects;
  */
 final class ProjectLoader {
 
-  record LoadedProject(SailYaml config, ContainerState state) {}
+  record LoadedProject(ProjectDefinition config, ContainerState state) {}
 
   private final ShellExec shell;
   private final ProjectReader definitions;
@@ -40,7 +40,7 @@ final class ProjectLoader {
     }
   }
 
-  SailYaml definition(String project) {
+  ProjectDefinition definition(String project) {
     try {
       return definitions.require(project);
     } catch (ProjectReader.Unreadable e) {

@@ -15,10 +15,9 @@ import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PipedSyncChannel;
-import ai.singlr.sail.engine.ProjectImporter;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -46,7 +45,6 @@ import ai.singlr.sail.sync.SyncWire;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -131,7 +129,7 @@ class MainRebuiltRoundTest {
     var fdes = new FdeStore(database.db());
     fdes.add("ada", "Ada", "ada@x.dev", "admin");
     fdes.add("nia", "Nia", "nia@x.dev", "member");
-    Acting.system(() -> new ProjectStore(database.db()).upsert(project, "name: " + project + "\n"));
+    Acting.system(() -> new ProjectStore(database.db()).upsert(TestDefinitions.named(project)));
     return new Main(database, id, token(database.db()));
   }
 
@@ -411,7 +409,7 @@ class MainRebuiltRoundTest {
     var fdes = new FdeStore(serving.db());
     fdes.restrict("nia");
     fdes.grant("nia", "gamma");
-    Acting.system(() -> new ProjectStore(serving.db()).upsert("delta", "name: delta\n"));
+    Acting.system(() -> new ProjectStore(serving.db()).upsert(TestDefinitions.named("delta")));
     round();
     var copy = copyOf(serving, "copy.db", serving.id());
     Acting.as("ada", () -> new SpecStore(serving.db()).create(spec("d1", "delta")));
@@ -572,7 +570,7 @@ class MainRebuiltRoundTest {
     var copy = copyOf(serving, "copy.db", serving.id());
     Acting.system(
         () -> {
-          new ProjectStore(serving.db()).upsert("delta", "name: delta\n");
+          new ProjectStore(serving.db()).upsert(TestDefinitions.named("delta"));
           new RoomStore(serving.db()).ensureFor("r-room", "gamma", "late", null, null);
         });
     var message =
@@ -792,7 +790,7 @@ class MainRebuiltRoundTest {
     var fdes = new FdeStore(serving.db());
     fdes.restrict("nia");
     fdes.grant("nia", "gamma");
-    Acting.system(() -> new ProjectStore(serving.db()).upsert("delta", "name: delta\n"));
+    Acting.system(() -> new ProjectStore(serving.db()).upsert(TestDefinitions.named("delta")));
     Acting.as("ada", () -> new SpecStore(serving.db()).create(spec("d1", "delta")));
     serving = pulledAfterACopy("copy.db", serving.id(), "r-late-1");
 
@@ -942,20 +940,13 @@ class MainRebuiltRoundTest {
   }
 
   @Test
-  void aProjectMigrateImportsIntoAMainRestoredInPlaceReachesTheNode() throws Exception {
+  void aProjectMadeOnAMainRestoredInPlaceReachesTheNode() throws Exception {
     round();
     var copy = copyOf(serving, "copy.db", serving.id());
-    Acting.as("nia", () -> new ProjectStore(serving.db()).upsert("delta", "name: delta\n"));
+    Acting.as("nia", () -> new ProjectStore(serving.db()).upsert(TestDefinitions.named("delta")));
     round();
     serving = copy;
-    var projects = tempDir.resolve("main-projects");
-    Files.createDirectories(projects.resolve("delta"));
-    Files.writeString(
-        projects.resolve("delta").resolve(SailPaths.PROJECT_DESCRIPTOR), "name: delta\n");
-    Acting.system(
-        () ->
-            new ProjectImporter(projects, new ProjectStore(serving.db()), ProjectScope.all())
-                .importAll());
+    Acting.system(() -> new ProjectStore(serving.db()).upsert(TestDefinitions.named("delta")));
 
     round();
 

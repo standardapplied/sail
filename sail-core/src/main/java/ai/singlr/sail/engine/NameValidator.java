@@ -189,7 +189,7 @@ public final class NameValidator {
     }
   }
 
-  /** Validates a POSIX username (ssh.user from sail.yaml). Throws if invalid. */
+  /** Validates a POSIX username (an account name). Throws if invalid. */
   public static void requireValidSshUser(String user) {
     if (user == null
         || user.length() > MAX_USERNAME_LENGTH

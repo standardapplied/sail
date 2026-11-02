@@ -56,7 +56,7 @@ public final class SyncWire {
    * The protocol this build speaks; a peer announcing another is refused at the hello, so nothing
    * here reads a message another protocol wrote. Bump it with any change to what a message carries.
    */
-  public static final int PROTOCOL = 6;
+  public static final int PROTOCOL = 7;
 
   /** The byte ceiling for a JSON announcing line, including a whole blob manifest. */
   public static final int MAX_FRAME = 16 * 1024 * 1024;

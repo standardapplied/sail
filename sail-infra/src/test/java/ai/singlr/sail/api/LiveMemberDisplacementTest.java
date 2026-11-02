@@ -50,8 +50,6 @@ class LiveMemberDisplacementTest {
   private static final String LIMITED =
       """
       name: test-project
-      ssh:
-        user: dev
       repos:
         - url: https://github.com/acme/api.git
           path: api

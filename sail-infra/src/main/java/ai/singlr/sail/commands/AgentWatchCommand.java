@@ -39,7 +39,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -113,8 +112,6 @@ public final class AgentWatchCommand implements Runnable {
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
-
-  @Mixin private IgnoredFileOption file;
 
   @Option(names = "--host", description = "sail-api host.", defaultValue = "127.0.0.1")
   private String apiHost;

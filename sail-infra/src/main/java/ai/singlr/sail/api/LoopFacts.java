@@ -55,7 +55,7 @@ record LoopFacts(
     /** The project has no pipeline with stages. */
     record None() implements Pipeline {}
 
-    /** The descriptor could not be read: nothing is known of the pipeline, not even its absence. */
+    /** The definition could not be read: nothing is known of the pipeline, not even its absence. */
     record Unreadable(String why) implements Pipeline {}
   }
 

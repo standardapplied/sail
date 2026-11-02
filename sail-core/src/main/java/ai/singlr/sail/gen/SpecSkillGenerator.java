@@ -171,7 +171,7 @@ public final class SpecSkillGenerator {
            ```
            Add options as the conversation warrants:
            - `--depends-on a,b` — spec ids that must be `done` first
-           - `--repos repo-a,repo-b` — target repos (must match `repos[].path` in `sail.yaml`)
+           - `--repos repo-a,repo-b` — target repos (must match `repos[].path` in the project's definition)
            - `--agent codex|claude-code` — overrides the project default
            - `--model <id>` `--reasoning-effort none|low|medium|high|xhigh` — for agents that \
         support them
@@ -248,14 +248,14 @@ public final class SpecSkillGenerator {
           run's principal); the agent type goes in `--agent`. An agent claims an unassigned spec
           for the FDE it acts for
         - **depends-on**: spec ids that must be done first
-        - **repos**: target repository paths from `sail.yaml` `repos[].path`
+        - **repos**: target repository paths from the project's definition (`repos[].path`)
         - **agent**: agent CLI for this spec (`claude-code` or `codex`)
         - **model** / **reasoning-effort**: for agents that support them
         - **branch**: git branch name for this spec's work
 
         In multi-repo projects, always set `--repos` before dispatch so Sail branches the right
         repository. In multi-agent projects, set `--agent` when a spec should run on a non-default
-        agent; otherwise dispatch uses `agent.type` from `sail.yaml`.
+        agent; otherwise dispatch uses the definition's `agent.type`.
 
         ### Dependency Rules
         A spec cannot be started until every id in its `depends-on` is `done`. When listing specs,

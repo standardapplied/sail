@@ -162,8 +162,7 @@ is, and any other is refused with a remedy: one made by a release before v1 is r
 it aside, `sail init`), a newer one needs a newer binary. There is no version to walk and no
 data fix-up framework. `BoxDatabase.prepare` opens the schema on every daemon start and every
 `sail migrate`, then lets a box that is not a node forget the scope main last named it.
-`sail migrate` is how a release converges its box: it prepares the database, imports the project
-descriptors on disk the catalog lacks (`ProjectImporter`, within the box's scope), seeds the demo
+`sail migrate` is how a release converges its box: it prepares the database, seeds the demo
 project, and on the box itself re-issues the host token, re-syncs the `sail` user's
 `authorized_keys`, writes the host's drop-ins, holds Incus and reinstalls the pty session host, and `sail upgrade` runs the new
 binary's `migrate` once it is installed, so new-release code does that as root. Host state
@@ -214,7 +213,7 @@ and the spec that closes it.
 | S1 | A scoped node holds exactly the rows of its granted projects: no row, erasure, blob or roster email of another project reaches it over any wire. | `ScopedSyncTest` (every type from an empty node; a blob fetched by hash and a chunk no served manifest lists are refused; an erasure reaches the nodes that held the row and no other; a version main took in a project since revoked is neither handed back nor its content served; an offer names only content its session sent or was served, and a scoped session is asked for every blob and chunk it announces, held on main or not), `ScopedSyncServerTest` (the roster of those who share a project, no email but the node's own, no assignee disabled; a scoped node removes whom main no longer lists, with their credentials, and never its own FDE), `NativeFleetIT` (real processes: rows, heads, blobs and roster) |
 | S2 | A scoped actor reads and writes inside its scope on every box; a write outside it is refused in the journal, on every lane, before the type's own rule. | `ScopeRuleTest` (a create into a hidden project is a project not found; a write over a hidden row says only that the id is taken; specs, posts, files and catalog rows on this box's lanes; a write over a review is decided by where the review is filed, wherever its spec is now; a prune), `MessageStoreTest` (a conversation is read message by message by the project each was filed under, the page as long as its limit of what its reader sees; a reply answers only a message its writer may read), `ScopedSyncTest` (a forged push, a project row, an erase request, and one for a spec moved into the scope whose earlier review is not; a row is born naming only what its pusher may see: a spec into or over a conversation outside the scope, a room over one, a run of a spec or room outside it, none told whose it is), `EraseAuthorityTest` (a scoped owner erases a spec only when all that belongs to it is inside the scope), `ScopedReadsTest` (every read route under `/v1` answers a scoped caller byte for byte the same whether or not another project exists, held complete against `Operations`; a write into a hidden project is a project not found and one addressed to a hidden row meets what a missing row answers; the terminal door; a run sees its owner's scope; a spec is born neither into nor over a hidden room; a spec moved into the scope shows nothing of the room and run it left behind, nor any review written before the move, its findings, their count or a follow-up drafted from them, and is not its owner's to prune, rehearsed or real, while anything belonging to it is filed outside the scope; a room's refusal names only the specs its reader sees; every write route that addresses a row answers one of a hidden project as one nobody holds, held complete against `Operations`; a moved spec is neither seated in nor restored to what it left behind, and shows no question asked in the room it left, nor is a message of that room announced under the spec's project; a run never names the owner of a spec that left the scope; a spec moved into the scope brings none of the talk held in the project it left, through its room, its page cursors, its open question or a run's inbox; a run is delivered nothing of a project its FDE no longer holds; a scoped owner's write on its spec rewrites no review filed outside its scope), `BuildDispatchCoverageTest` (a scoped caller dispatches no spec whose earlier review is filed outside its scope, and its prompt carries no talk filed outside it), `ScopedTest`, `SseHandlerTest` and `AgentLogStreamerTest` (the event and run-log streams; a scope changed while a run-log stream is open), `OpenStreamRecheckTest` (an open event stream follows a grant and a revoke from the next event a second later, asks once per second, and ends when its FDE is removed or disabled), `ConflictOperationsTest`, `ScopedRosterApiTest` (a session and a token of a scoped FDE both resolve to a scoped caller), `NativeFleetIT` (the gateway's `spec list` with a scoped node's key) |
 | S3 | Main decides scope alone, from its grants and the project each change head carries, and remembers nothing of what it sent. | `ScopedHeadsTest` (every type's head carries its project from its first write, through a deletion, a withdrawal, an erasure and a purge; a review and a message stay filed where they were first written when their spec moves and they are written again; the backfill), `MessageStoreTest` (a reply is filed with the message it answers), `ScopedSyncTest` (a thousand foreign heads are paged past by their heads alone, no row loaded, and the checkpoint reaches main's tip), `ProjectScopeTest` |
-| S4 | A grant shows after the next round; a revocation removes the project in the same round with its container and directory, unpushed work included, announced once and counting the unpushed rows only when there are any; a narrowing revokes every project it does not grant, and a widening grants every project. | `ScopedSyncTest` (a grant resets the checkpoints and what was held re-adopts unwritten; a revocation with nothing unpushed says so; a revocation drops rows, history, heads, offers, requests and content at the round's start; a project with a run under way here is kept until the run ends; what was erased or deleted before the node first synced leaves with its project; with a spec moved each way between two projects, a revocation takes what main files under the project and leaves what it files under the other, and the node equals main within its scope; a thread begun before its room moved arrives and leaves whole), `SyncScopeTest`, `ScopeChangeRoundTest` (a narrowing and a widening through a whole round; a container Sail provisioned deleted and one it did not kept; an unreachable Incus leaves the container to the next round; a run under way keeps both; an out-of-scope project's leftovers taken by the first round; an unchanged round's one `incus list`, and none unscoped; a leftover descriptor never imported), `ProjectTeardownTest`, `ProjectImporterTest` (a project out of scope is never read), `ScopeTeardownIT` (a real Incus daemon), `NativeFleetIT` (an FDE that joined unscoped narrowed in place, keeping its key) |
+| S4 | A grant shows after the next round; a revocation removes the project in the same round with its container and directory, unpushed work included, announced once and counting the unpushed rows only when there are any; a narrowing revokes every project it does not grant, and a widening grants every project. | `ScopedSyncTest` (a grant resets the checkpoints and what was held re-adopts unwritten; a revocation with nothing unpushed says so; a revocation drops rows, history, heads, offers, requests and content at the round's start; a project with a run under way here is kept until the run ends; what was erased or deleted before the node first synced leaves with its project; with a spec moved each way between two projects, a revocation takes what main files under the project and leaves what it files under the other, and the node equals main within its scope; a thread begun before its room moved arrives and leaves whole), `SyncScopeTest`, `ScopeChangeRoundTest` (a narrowing and a widening through a whole round; a container Sail provisioned deleted and one it did not kept; an unreachable Incus leaves the container to the next round; a run under way keeps both; an out-of-scope project's leftovers taken by the first round; an unchanged round's one `incus list`, and none unscoped), `ProjectTeardownTest`, `ScopeTeardownIT` (a real Incus daemon), `NativeFleetIT` (an FDE that joined unscoped narrowed in place, keeping its key) |
 | S5 | An unscoped FDE is untouched: a fleet with no scoped FDE behaves as it did. | every sync test, unchanged; `ScopedSyncTest` and `NativeFleetIT` (an unscoped node beside a scoped one equals main), `ScopedSyncServerTest` (the whole roster, with emails) |
 | S6 | A welcome that names no scope is an unscoped FDE's: the node holds every project. | `SyncWireTest` (a welcome naming no scope; a key this build does not know), `ScopedSyncTest` (a welcome naming none after one naming an empty scope pages everything), `NativeFleetIT` (two scoped nodes are each sent only their scope and drop the project main revokes) |
 | S7 | Scope fails closed: an FDE added or narrowed scoped sees nothing until granted, a session naming no FDE receives nothing, a head of unknown project reaches unscoped nodes only, and a request whose auth stamped no scope reads none. | `ScopedSyncServerTest` (no grant; no token, a blank one and one never issued), `ScopedSyncTest`, `ScopedHeadsTest` (a head pruned before heads carried a project stays unknown), `SyncWireTest` (a scope key that names nothing readable grants nothing), `ProjectScopeTest` (an admin is never scoped; a widening forgets the grants), `FdeCommandTest` (a narrowing keeps the FDE's id and every credential, commits with its grants or not at all, and is refused for this box's own FDE and an admin) |
@@ -355,9 +354,7 @@ that drops its project. One `incus list` serves the round, a device query is ask
 container outside the scope, and an unscoped box asks Incus nothing. When `incus list` fails
 (an unprivileged `sail sync`), nothing is deleted and the round that dropped a project says
 the next round that can reach Incus deletes its container. A project kept for a run under way
-here is still held, so it keeps both until the round after the run ends. `sail migrate`
-imports no descriptor of a project the box's scope does not admit (`ProjectImporter`), so it
-never re-imports what the next round would take off again.
+here is still held, so it keeps both until the round after the run ends.
 
 **Main's API** has no single read seam, so one helper (`Scoped`) is applied in each read:
 a row outside the caller's scope is the same not-found a missing row is, a list leaves it
@@ -431,7 +428,7 @@ one-way roster pull:
 |---|---|---|
 | specs | Bidirectional, field-level three-way merge | The team board |
 | rooms and messages | Bidirectional; messages are immutable once posted | The conversation |
-| project definitions | Bidirectional | The `sail.yaml` catalog |
+| project definitions | Bidirectional | The catalog: one definition per project, each section a field of its own |
 | shared workspace files | Bidirectional; what this box wrote of each stays box-local (`MaterializedFiles`) | The `files/` bundle, opaque content |
 | runs and reviews | Bidirectional; a run is pushed only by the box that executes it; a review carries its findings as content | Execution provenance |
 | FDE roster | One-way, main-authoritative pull | Handle, name, email, role, status, and never keys or tokens |
@@ -484,7 +481,7 @@ against exactly that state and main's edits the offer merged in stay. The record
 when main's answer is to that offer: main answers the latest version it took from the box, which
 is an earlier offer's when the recorded one never reached it.
 
-### The wire: sync protocol 5
+### The wire: sync protocol 7
 
 A session opens with `hello` (protocol, build, box id) and is `welcome`d or `refuse`d once: a node
 on another protocol is refused, told to upgrade itself when its protocol is older and to upgrade
@@ -730,7 +727,7 @@ Retention is opt-in. A `retention` block in main's `host.yaml` sets the ages: ar
 
 History compaction never crosses the wire. It is a compiled constant (`ChangeLog.HISTORY_REVISIONS`), so no two boxes can disagree. Every box keeps each entity's newest 20 entries, its synced base (the merge base of an open conflict included), and every tombstone and erasure. A node compacts what each round touched; main compacts daily and from `sail sync gc`. Protocol 4 pages the latest entry per entity, so a node whose checkpoint predates main's compaction still converges. Compaction runs under the exclusive content lease and is refused inside a transaction. Once a revision's row is gone its blob is unreferenced, and the collection that follows frees it.
 
-A purge erases a project's rows everywhere, not other boxes' containers: their project directories and materialized files stay on disk with the container, and neither `sail migrate`'s import nor the materializer touches the files of a pruned project again.
+A purge erases a project's rows everywhere, not other boxes' containers: their project directories and materialized files stay on disk with the container, and the materializer never touches the files of a pruned project again.
 
 ### The transport: pure SSH keys, no network enroll
 
@@ -756,41 +753,72 @@ user's `authorized_keys` as a forced command,
 admits the `_sync` session. The write gate lives next to the write: every commit of a `_sync`
 session is denied to a read-only viewer role, which may still pull.
 
+### A project's definition
+
+A project is one typed definition (`ProjectDefinition`) held in its catalog row as a JSON
+document, its only copy. It holds a name and ten sections (`ProjectDefinition.Section`):
+`description`, `image`, `resources`, `runtimes`, `repos`, `services`, `processes`, `packages`,
+`agent` and `pipeline`, the review loop's stages and limits. `ProjectDefinitionJson` is the one
+codec, for the whole document and for each section's JSON value, and every definition it reads
+is checked whole, so whatever any door writes is a definition the catalog can hold.
+
+A section is written on its own over the version its writer read. Each section has a tag, a
+hash of its JSON value (`ProjectStore.tagOf`); `ProjectStore.writeSection` takes the tag its
+writer last read and refuses a section changed since as `StaleSection`, leaving the project as
+it is, and `writeSections` writes several in one revision or none. `sail project create` writes
+a new definition, from flags, prompts on a terminal or a whole document on stdin
+(`--definition -`), refused when the name is catalogued; `sail project edit` opens the
+definition or one `--section` in `$EDITOR` as JSON and writes each section that changed;
+`sail project config show|get|set` shows the definition and reads or writes one section. Over
+HTTP, `GET /v1/projects/{p}/definition` answers the document with each section's tag,
+`PUT /v1/projects/{p}/definition/{section}` writes `{"value": …}` (null unsets it) over the tag
+its `If-Match` names and answers 412 when the section changed, and `POST /v1/projects`
+creates one, 409 when the name is taken; each is a project not found to a caller whose scope
+does not admit it
+(`ProjectStoreTest.aSectionWriteIsOneRevisionOverTheSectionItsWriterRead`,
+`ProjectStoreTest.aWriteOfSeveralSectionsIsOneRevisionOrNone`,
+`ProjectStoreTest.createRefusesANameTheCatalogHolds`,
+`ProjectDefinitionOperationsTest.aSectionIsWrittenOverTheTagItWasReadAtAndAStaleOneIsRefused`,
+`ProjectDefinitionOperationsTest.aProjectIsCreatedOnceAndAnExistingNameIsAConflict`,
+`ProjectDefinitionOperationsTest.aProjectOutsideTheReadersScopeOrNotHeldIsNotFound`,
+`ProjectEditCommandTest.anEditOfOneSectionReplacesItAndKeepsTheRest`). A sync round names the
+projects new to the box with the `sail project apply` that provisions each
+(`SyncOperations.announceNewProjects`); no definition is written to disk, only the
+project's shared files the materializer writes under `files/`.
+
 ### Identity isolation in synced projects
 
-A project definition mixes shared infrastructure with two fields that are inherently
-per-developer: the git identity that commits are authored with, and the SSH key authorized
-into that box's containers. Neither may ride onto a teammate's box.
+A project definition is shared infrastructure only. It has no field for the two things that
+are inherently per-developer, the git identity commits are authored with and the SSH key
+authorized into a box's containers, so neither can ride onto a teammate's box: a definition
+naming a `git` or `ssh` key is refused like any key no definition has
+(`ProjectDefinitionTest.aDefinitionHoldsItsNameAndItsSectionsAndNothingElse`).
 
-The synced definition therefore carries placeholders, not concrete values.
-`PersonalFields.redact` rewrites `git.name` and `git.email` to `${GIT_NAME}` and
-`${GIT_EMAIL}`, and `ssh.authorized_keys` to `[${SSH_PUBLIC_KEY}]`, at the single
-catalog-write seam (`ProjectStore.upsert`). Redaction is pure, idempotent, and
-deterministic, so every box agrees on an identity-free definition and the engine converges.
+Each box supplies both itself, when it provisions or applies. The git identity is the box's
+own `git config --global user.name` and `user.email` (`LocalIdentity.detect().git()`): on a
+box `sudo sail init` set up, root's, which init gives the `--name` and `--email` it is passed
+(or asked for) when root has none, never overwriting one. A missing value fails before
+anything is provisioned, naming the command that sets it for the account it is read from,
+`sudo git config --global …` when root's identity is read for a `sudo` caller
+(`LocalIdentityTest.aBoxWithoutGitFailsNamingTheCommandThatSetsTheValue`,
+`LocalIdentityTest.rootsMissingIdentityUnderSudoNamesTheSudoThatSetsRootsGitConfig`). The
+git step writes it into the container's global git config, so everything that commits there,
+an agent included, commits as the box's owner. Repos clone over https with the box's forge
+token; a repo URL in ssh form is refused when the definition is read, naming its https form
+(`ProjectDefinitionTest.aRepoIsClonedOverHttpsAndAnSshUrlIsRefusedNamingItsHttpsForm`).
 
-Each box resolves the placeholders locally, once, at provision time
-(`ProjectDefinitions.resolveForProvisioning` calling `LocalIdentity`). Git fields come from
-the box's local `git config`: on a box `sudo sail init` set up, root's, which init gives the
-`--name` and `--email` it is passed (or asked for) when root has none, never overwriting one.
-A missing value names the command that sets it for the account it is read from, `sudo git
-config --global …` when root's identity is read for a `sudo` caller. The definition `agent run` launches under
-(`ProjectDefinitions.definitionWithBoxIdentity`) names the same identity: the row's
-`${GIT_NAME}` and `${GIT_EMAIL}` are replaced
-by the box's git values where it has them and left as they are where it has none, and no
-other placeholder is touched. Both paths substitute into the parsed definition, never its
-text (`PlaceholderResolver.substitute`): a redacted row holds its placeholders quoted, so a
-value's own characters, such as the apostrophe in `O'Neil`, land in the value and never in the
-YAML around it. `${SSH_PUBLIC_KEY}` resolves to the box's registered
-workstation key at `.sail/workstation_key.pub` in the box owner's home
-(`SailPaths.workstationPublicKeyPath`, the one resolver a pairing, `host config set
-ssh-public-key`, connect's warning and the key a container trusts all read), which is the laptop key the box owner
-connects to containers with. This is a different key from the machine sync key that a node
-presents to main. Because each box has a single owner, one workstation key authorizes that
-owner into every container the box provisions. It is registered once with `sail host config
-set ssh-public-key`, which auto-detects it from the box's `authorized_keys` when no value is
-given and writes it under `PairingTrust`, as a pairing does, so an apply never reads the key on
-one side of a change and installs it on the other. A missing or invalid value fails loud with the fixing command rather than
-provisioning a container no laptop can reach. The result is that each engineer's containers
+The one key a container trusts is the box's registered workstation key at
+`.sail/workstation_key.pub` in the box owner's home (`SailPaths.workstationPublicKeyPath`, the
+one resolver a pairing, `host config set ssh-public-key`, connect's warning and the key a
+container trusts all read), which is the laptop key the box owner connects to containers
+with. This is a different key from the machine sync key that a node presents to main. Because
+each box has a single owner, one workstation key authorizes that owner into every container the
+box provisions. It is registered once with `sail host config set ssh-public-key`, which
+auto-detects it from the box's `authorized_keys` when no value is given and writes it under
+`PairingTrust`, as a pairing does, so an apply never reads the key on one side of a change and
+installs it on the other. A box with none registered provisions containers that trust no
+laptop, and connect warns of it; a key file that holds no readable key is refused rather than
+read as none (`WorkstationIdentity.registered`). The result is that each engineer's containers
 commit as them and trust only their own key.
 
 ### Live resource resync
@@ -805,11 +833,11 @@ quiet no-op, and a disk shrink the backend refuses (below used space on ZFS, adv
 
 ### No GitHub in the project loop
 
-Project descriptors are distributed entirely by DB sync. There is no `project pull` or
+Project definitions are distributed entirely by DB sync. There is no `project pull` or
 `project push`, and the demo project is bundled in the binary and seeded into the catalog of
 main or a standalone box idempotently, never resurrected once purged; a node gets it from main
 like any project, once granted. The remaining git-token plumbing exists only to
-clone a project's source repos into its container at provision time, not to move descriptors.
+clone a project's source repos into its container at provision time, not to move definitions.
 
 ## Runtime modes: host vs client
 
@@ -913,26 +941,29 @@ SHA-256, and strips the Gatekeeper quarantine flag.
 `ShellExecutor`, and every command maps to calls the operator could run by hand.
 
 **Container provisioning** (`ProjectProvisioner`) is an idempotent, resumable pipeline of
-roughly twenty steps, and a `ProvisionTracker` lets a failed run pick up where it stopped. The
-tracker resumes only for the descriptor it was written for: its state carries the SHA-256 of the
-resolved descriptor, and progress recorded for another (or by a release that recorded none)
+nineteen steps, one per `ProjectPhase`, and a `ProvisionTracker` lets a failed run pick up where
+it stopped. The tracker resumes only for the definition it was written for: its state carries the
+SHA-256 of the definition's JSON document (`ProjectDefinitionJson.write`) and the workstation
+key's fingerprint (`ProjectProvisioner.inputs`), and progress recorded for another (or by a release that recorded none)
 restarts the run from the first step, each step re-checking its own effect. A finished run records
 that SHA-256 on the container itself (the Incus key `user.sail.inputs`) and deletes its progress
 file: root, which provisions, and the operator, whose plain apply only converges, read the one
 record on any box, and a deleted container takes its record with it. A run clears that record
-before it changes an existing container, so a run that fails part way leaves none. An apply whose descriptor
+before it changes an existing container, so a run that fails part way leaves none. An apply whose definition
 differs from the container's record, or finds none, runs every step again and installs only the
-difference. The container's user is always `dev` at uid 1000; step 6 is recorded only once that
-user exists at that uid, and `resolveForProvisioning` refuses an `ssh.user` naming any
-other.
+difference. The container's user is always `dev` (`ProjectDefinition.USER`) at uid 1000, and a
+definition has no field that names another; step 6 is recorded only once that user exists at
+that uid.
 It launches the Incus container from the configured image, bind-mounts the host `sail-api`
 Unix socket in, installs the in-container `spec` CLI and event hooks, applies the disk quota
 (advisory on `dir`, hard via `refquota` on `zfs`) and the cpu and memory limits (with
 `security.nesting` and unconfined AppArmor so rootless Podman runs inside), installs
-packages, the SSH user and its authorized key, Podman (with linger and a restart service),
-Testcontainers wiring, and the JDK, Node, and Maven runtimes, configures the git identity
-and clones the source repos, pushes the shared `files/` bundle, starts the Podman services
-under `--restart=always`, installs the agent CLIs, and generates agent context.
+packages, the SSH user and the workstation key it trusts, Podman (with linger and a restart
+service), Testcontainers wiring, and the JDK, Node, and Maven runtimes, configures the box's git
+identity and forge credentials and clones the source repos over https, pushes the project's
+shared files as the catalog's file store materialized them (`SailPaths.projectFilesDir`), starts
+the Podman services under `--restart=always`, installs the agent CLIs, and installs the
+project's skills and sail's.
 `ProjectApplier` is the live-delta path for `sail project apply` on an already-running
 container. CPU and memory changes that need a restart are applied by the dedicated resources
 path, not silently here. Neither path deletes or re-clones a checkout already in the
@@ -947,8 +978,8 @@ verb; Mast's Portal forwards what it reports. Each row with the tests that prove
 
 - **I1. The definition says how the project comes up.** `processes.<name>` holds `command`,
   `workdir`, `port` and `env`, checked when it is read: a port is 1024 to 65535 and claimed by
-  one process or service. *`SailYamlTest.aPortIsClaimedByOneProcessOrServiceOnly`,
-  `SailYamlTest.aProcessThatCannotRunAsDeclaredIsRefusedNamingItsField`.*
+  one process or service. *`ProjectDefinitionTest.aPortIsClaimedByOneProcessOrServiceOnly`,
+  `ProjectDefinitionTest.aProcessThatCannotRunAsDeclaredIsRefusedNamingItsField`.*
 - **I2. `serve` brings the stack up and says what listens where.** Services start as apply
   starts them; each process is a script and a `systemd --user` unit `sail-process-<name>`
   whose command is the script's last line, so systemd never expands it; a changed unit restarts,
@@ -1027,14 +1058,14 @@ beside the project's own skills so an interactive session finds the `spec` CLI.
 **The harness contract** (`ai.singlr.sail.harness`): sail drives two coding harnesses,
 Claude Code and Codex, and will drive more. Everything that differs between them sits behind
 one interface, `Harness`, with one package-private adapter per harness (`ClaudeCode`,
-`Codex`) and a registry, `Harnesses`, that resolves a `sail.yaml` name (`of`), lists every
+`Codex`) and a registry, `Harnesses`, that resolves the name a definition uses (`of`), lists every
 harness (`all`) and names the default (`DEFAULT`). No main code outside the adapters names
 one, compares a harness with a name or switches on one: a capability is an answer the
 adapter gives, not a name a caller recognises. Adding a harness is adding one adapter.
 
 | `Harness` method | What it answers |
 |---|---|
-| `yamlName()`, `binaryName()`, `displayName()`, `installCommand()` | identity: the `sail.yaml` name, the binary on PATH, the name people read, how to install it |
+| `yamlName()`, `binaryName()`, `displayName()`, `installCommand()` | identity: the name a definition uses (`agent.type`, `agent.install`), the binary on PATH, the name people read, how to install it |
 | `skillsDir()`, `skillFolder(name)` | where skills live under `$HOME`, and the folder of one |
 | `headless(Launch)` | the command for a build, a reviewer, a fix agent or a full chat turn; fresh when the launch's `resumeSessionId` is null, resumed otherwise |
 | `readOnly(Launch)`, `readOnlyRefusal()` | the room lane's harness-restricted command, or why the harness has none |
@@ -1091,9 +1122,9 @@ both hook files as text; `HarnessContractTest` runs what every harness must answ
 **Guardrails and rollback:** a guardrails block sets a `max_duration`, a `max_idle` stall
 window, and an action (`snapshot-and-stop`, `stop`, or `notify`), and each lane reads its
 own: `agent.guardrails` bounds a build, a fix run, an ad-hoc run and a chat turn (default
-`4h` / `20m` / `stop`), `agent.review_pipeline.guardrails` a reviewer (default `45m` / `20m`
+`4h` / `20m` / `stop`), `pipeline.guardrails` a reviewer (default `45m` / `20m`
 / `stop`). Both parse through the one `Guardrails` record, which refuses an invalid
-duration, a zero limit or an unknown action where the descriptor is read, naming the block,
+duration, a zero limit or an unknown action where the definition is read, naming the block,
 the key and the accepted forms. A watcher (`sail agent watch`, started with every run; the
 loop is `RunWatch`) waits on the project's event stream for the sooner of the wall-clock
 deadline and the stall deadline, and asks the container whether the unit is still active at
@@ -1275,13 +1306,13 @@ watcher):
   `SailStopGateTest.aReviewerIsNeverBlockedByADirtyTreeNorByTheRoom`, and the launch
   environment asserted in P1's first test.*
 - **P5. One guardrails record, per-lane values.** `Guardrails` is the only limits type,
-  parsed one way; `SailYaml.Agent.guardrailsFor(lane)` is the one place a lane is mapped to
+  parsed one way; `ProjectDefinition.guardrailsFor(lane)` is the one place a lane is mapped to
   its block and its defaults, and `lifetimeFor(lane)` beside it bounds the run's credential.
   The watcher receives its run's limits at spawn.
   *`aReviewersLimitsDefaultTo45MinutesAFixRunTakesTheBuildLanesAndAnEditAppliesToTheNextRun`,
-  `SailYamlTest.eachLaneReadsItsOwnGuardrailsAndItsOwnDefaults`,
-  `SailYamlTest.aRunsLifetimeIsItsLanesLimitAndABuildNothingBoundsHasNone`,
-  `SailYamlTest.aReviewLaneGuardrailsValueThatIsNoBlockIsRefusedRatherThanReadAsTheDefaults`,
+  `ProjectDefinitionTest.eachLaneReadsItsOwnGuardrailsAndItsOwnDefaults`,
+  `ProjectDefinitionTest.aRunsLifetimeIsItsLanesLimitAndABuildNothingBoundsHasNone`,
+  `ProjectDefinitionTest.aReviewLaneGuardrailsValueThatIsNoBlockIsRefusedRatherThanReadAsTheDefaults`,
   `GuardrailsTest.anInvalidDurationIsRefusedWhereTheBlockIsParsedNamingItsKeyAndTheAcceptedForms`.*
 - **P6. The loop's state is rows that already exist.** Which stage a review is in is its
   stage rows' statuses; which iteration, the review row's `iteration`; which run it waits on,
@@ -1569,9 +1600,9 @@ it (`HomeRoomTest` unless another class is named):
   that is not one shell-safe token is refused when the definition is read, before anything is
   provisioned.
   *`aLaterDefinitionDoesNotRewriteAnEngagedRoster`, `aRoomTheFdeDisengagedStaysDisengaged`,
-  `SailYamlTest.aMemberTheProjectDoesNotInstallIsRefusedNamingTheField`,
-  `SailYamlTest.anImplicitMemberTheProjectDoesNotInstallIsRefusedNamingTheField`,
-  `SailYamlTest.aMemberWithAnUnknownModeOrAnUnsafeModelIsRefused`.*
+  `ProjectDefinitionTest.aMemberTheProjectDoesNotInstallIsRefusedNamingTheField`,
+  `ProjectDefinitionTest.anImplicitMemberTheProjectDoesNotInstallIsRefusedNamingTheField`,
+  `ProjectDefinitionTest.aMemberWithAnUnknownModeOrAnUnsafeModelIsRefused`.*
 - **H5. Mast shows one conversation per project.** `GET /v1/projects/{p}` names the project's
   `member` and the reader's `home_room` id, so the id is derived in one place; Mast places that
   room first under the project's name and presets its agent selects to the member. A reader
@@ -1629,13 +1660,10 @@ class is named):
   replayed. What runs a project reads its definition from the catalog row (`ProjectReader`,
   handed to commands as `HostCatalog.definitions`): the loop's pipeline and reviewer, every
   API lane, Slack and webhook notifications, and `agent watch`, `status`, `report`,
-  `attach` and `run`. None opens `~/.sail/projects/<name>/sail.yaml`, and no
-  row is ever substituted by a file, so a revision that reaches the catalog by sync or by a
-  command is what the next loop event, dispatch and notification use, with nothing else run;
-  a watcher already running keeps the notifications it started with. The file is still
-  written, in one move (`ProjectDefinitions.write`), as a copy nothing running reads; only
-  the management commands of `ProjectDefinitions` read it, as their fallback. An escalation
-  closes any stage still `running`.
+  `attach` and `run`. The row is the definition's only copy, with no file beside it, so a
+  revision that reaches the catalog by sync or by a command is what the next loop event,
+  dispatch and notification use, with nothing else run; a watcher already running keeps the
+  notifications it started with. An escalation closes any stage still `running`.
   *`ReviewLoopEveryStateTest.everyStateTheStoresCanHoldIsOneStepFromServedWaitingOwnedPassedOrEscalated`
   (every review status and error × stage statuses × pipeline as written or changed × spec
   status × serving run × recorded wait, walked on `LoopDecision.next`),
@@ -1651,10 +1679,8 @@ class is named):
   `aStageThePipelineMadeAPersonsWhileItsReviewerRanEscalatesItsReview`,
   `anErroredReviewIsNotRetriedUnderAPipelineThatChangedSinceItsStagesWereWritten`,
   `aFixIsNotReReviewedUnderAPipelineThatChangedWhileItRan`,
-  `aDescriptorThatCannotBeReadIsNeverTakenForAPipelineThatChanged`,
-  `aBuildThatEndsWhileItsProjectsDescriptorCannotBeReadIsHandedToAPersonNotReplayed`,
-  `ProjectDefinitionsTest.aDescriptorIsReplacedInOneMoveKeepingItsModeAndLeavingNothingBeside`,
-  `ProjectDefinitionsTest.aDefinitionTheCatalogDidNotTakeIsWrittenNowhereAndOneItTookIsWrittenAfterIt`,
+  `aDefinitionThatCannotBeReadIsNeverTakenForAPipelineThatChanged`,
+  `aBuildThatEndsWhileItsProjectsDefinitionCannotBeReadIsHandedToAPersonNotReplayed`,
   `CatalogRevisionBySyncTest.aRevisionAppliedBySyncIsWhatTheNodesNextReadTheLoopAndTheNextNotificationUse`,
   `ProjectReaderTest.aRowThatDoesNotParseIsUnreadableNamingTheProjectAndWhatTheParserSaid`,
   `ReviewLoopRecoveryTest.aPipelineRevisionInTheCatalogIsWhatTheNextLoopEventRunsUnderWithNothingElseRun`,
@@ -1764,15 +1790,17 @@ class is named):
   `SyncTransitionEventsTest.aStageClosedForAnErrorIsToldByItsReviewNotAsAFailedGate`,
   `SlackReactorTest.aStopTheReconcilerReplaysIsNotSaidAgainAndItsFirstStopIs`,
   `WebhookReactorTest.aStopTheReconcilerReplaysIsNotNotifiedAgainAndItsFirstStopIs`.*
-- **C11. `generate` then parse returns the configuration it was given.** The `agent` block
-  `sail project init` writes is `SailYaml.Agent.toMap()`, the one writer. A review limit left
-  at its default is not written, so rewriting a project's `sail.yaml` never pins it to
-  today's defaults; an empty list of notification events is no list; and written YAML
-  indents a list's items under their key and never folds a long value.
-  *`SailYamlGeneratorTest.anAgentWithEveryFieldSetComesBackFromGenerateThenParseAsItWent`,
+- **C11. A definition written then read is the definition it was.** `ProjectDefinitionJson`
+  is the one codec: the document `write` gives and each section's JSON value read back to the
+  same definition, and a section written alone leaves the rest as they were. A review limit
+  left at its default is not written, so rewriting a project's `pipeline` never pins it to
+  today's defaults, and an empty list of notification events is no list.
+  *`ProjectDefinitionJsonTest.aDocumentIsReadWholeAndWrittenBackAsTheSameDefinition`,
+  `ProjectDefinitionJsonTest.eachSectionIsTheJsonValueItHoldsAndAnUnsetOneIsNull`,
+  `ProjectDefinitionJsonTest.aSectionWriteSetsOrUnsetsItAndChecksTheDefinitionWhole`,
+  `ProjectDefinitionTest.toMapRoundTripsCompleteConfig`,
   `ReviewPipelineConfigTest.aLimitTheProjectLeftAtItsDefaultIsNotWrittenIntoItsBlock`,
-  `NotificationsTest.anEmptyListOfEventsIsNoListOfEventsSoItIsWrittenBackAsItWasRead`,
-  `YamlUtilTest.aListsItemsSitUnderTheirKeyAndALongValueStaysOnItsLine`.*
+  `NotificationsTest.anEmptyListOfEventsIsNoListOfEventsSoItIsWrittenBackAsItWasRead`.*
 - **P1. Two prompts, sail's, fixed.** The work prompt and the judge prompt are pinned whole
   by golden tests, and every paragraph of the three prompts and three skills of 0.46.5 is in
   one of them or named as reworded or deleted by the coverage test. Nothing in a project's
@@ -1791,13 +1819,13 @@ class is named):
   request open, CI green, checked in short polls because the stall guard counts from the
   agent's last tool call — and `SailStopGate` holds a fix run to the pull-request check and
   to the build's reason. The fix lane runs under `agent.guardrails` and the lifetime that
-  follows (`SailYaml.Agent.guardrailsFor`, `lifetimeFor`: only `REVIEW` reads
-  `review_pipeline.guardrails`); it keeps its own run row and its own stop.
+  follows (`ProjectDefinition.guardrailsFor`, `lifetimeFor`: only `REVIEW` reads
+  `pipeline.guardrails`); it keeps its own run row and its own stop.
   *`WorkPromptGoldenTest.theFixPromptIsTheBuildPromptWithTheFindingsSection`,
   `SailStopGateTest.aFixRunIsHeldToTheBuildsProtocolAndToldToWatchItsChecks`,
   `SailStopGateTest.aFixRunIsAskedToOpenAPullRequest`,
-  `SailYamlTest.eachLaneReadsItsOwnGuardrailsAndItsOwnDefaults`,
-  `SailYamlTest.aRunsLifetimeIsItsLanesLimitAndABuildNothingBoundsHasNone`,
+  `ProjectDefinitionTest.eachLaneReadsItsOwnGuardrailsAndItsOwnDefaults`,
+  `ProjectDefinitionTest.aRunsLifetimeIsItsLanesLimitAndABuildNothingBoundsHasNone`,
   `ReviewLanesTest.aFixAgentPastItsTimeLimitIsKilledNothingOfItsLandsAndTheRoomIsToldWhy`,
   `ReviewLanesTest.aReviewersLimitsDefaultTo45MinutesAFixRunTakesTheBuildLanesAndAnEditAppliesToTheNextRun`.*
 - **P3. The brief is the only agent-facing text a project writes,** one per judging stage,
@@ -1808,7 +1836,7 @@ class is named):
   *`JudgePromptGoldenTest.aStagesBriefGoesWhereTheDefaultWentAndNothingElseDiffers`,
   `aStageWithABriefJudgesUnderItWhereTheDefaultWentAndNothingElseDiffers`,
   `aVerdictUnderABriefThatAsksForProseIsStillReadByTheVerdictContract`,
-  `SailYamlTest.aBriefIsTextOnAnAgentStageWithinThePromptBudget`.*
+  `ProjectDefinitionTest.aBriefIsTextOnAnAgentStageWithinThePromptBudget`.*
 - **P4. The judge reads the spec.** The judge prompt carries the spec's title and body, cut
   at a markdown section boundary to the prompt budget and saying what it left out — the
   sections omitted whole, and the rest of a section it had to cut inside — so a stage can find
@@ -1855,7 +1883,7 @@ class is named):
   `RunCommandTest.anInteractiveSessionInstallsTheProjectsSkillsForItsHarnessBeforeTheSsh`,
   `ProjectSkillsTest.everyFolderIsReadWithItsFilesHashesSizesAndModesInNameOrder`,
   `ProjectSkillsTest.aFolderUnderAReservedNameIsInvalidSayingWhichNamesAreSails`,
-  `ProjectApplierTest.applySkillsInstallsTheProjectsSkillsAndWarnsOfAFolderThatIsNone`,
+  `ProjectApplierTest.applySkillsInstallsTheProjectsSkillsAndWarnsOfAFolderThatIsNoneAndALongBody`,
   `ProjectApplierTest.applySkillsInstallsForEveryHarnessTheProjectInstalls`,
   `ProjectProvisionerTest.provisioningInstallsSailsSkillAndWritesNoContextFile`,
   `ProjectSkillsCommandTest`, `ReviewAgentLoopIT.theReviewLoopReachesAwaitingMergeWithEveryAgentAsItsOwnUnit`.*
@@ -1863,27 +1891,30 @@ class is named):
   path and no rule channel; provisioning, apply and a launch push nothing named `CLAUDE.md`
   or `AGENTS.md`, in the home or the workspace. `spec-board`'s front matter is pinned whole:
   a description a model acts on, and nothing keeping the harness from invoking it.
-  *`ProjectApplierTest.applySkillsInstallsSailsSkillForTheProjectsHarnessAndWritesNoContextFile`,
+  *`ProjectApplierTest.applySkillsInstallsSailsSkillsForTheProjectsHarnessAndWritesNoContextFile`,
   `ProjectProvisionerTest.provisioningInstallsSailsSkillAndWritesNoContextFile`,
   `HarnessContractTest.everyPathAHarnessNamesUnderTheHomeDirectoryIsRelativeToIt`,
   `SpecSkillGeneratorTest.theFrontMatterSaysWhenToUseTheSkillAndLetsTheHarnessInvokeIt`.*
 - **P7. Zero configuration is the whole loop.** A project with an `agent.type` and nothing
   else builds under the work prompt, is judged by one stage named `review` under sail's brief
   by the roster's reviewer, gated `no_critical`, fixed under today's limits, and parks in
-  `awaiting_merge`. A `review_pipeline` block with no stages runs the default's stages under
+  `awaiting_merge`. A `pipeline` section with no stages runs the default's stages under
   the default's limits.
   *`aProjectThatConfiguresNothingRunsTheLoopUnderTheTwoPromptsAndSailsSkill`,
   `ReviewWiringTest.aBlockWithNoStagesRunsTheDefaultStagesUnderTheDefaultsLimits`,
   `ReviewWiringTest.aBlockWithStagesIsThePipelineWholeBriefIncluded`.*
-- **P8. A deleted key is refused, naming its replacement.** `agent.build_skill`,
-  `agent.review_pipeline.fix_skill`, `stages[].skill`, `stages[].categories`,
-  `agent.methodology` and `agent_context` fail `SailYaml.fromMap` with one sentence each
-  saying where the text now goes, so a row that arrives by sync with one is
+- **P8. A key no section has is refused, naming the section's keys.** A definition holds its
+  name and its sections (`ProjectDefinition.Section`) and nothing else, and each block reads
+  only its own keys (`Fields.only`): `git`, `ssh`, `agent.review_pipeline` or
+  `agent.build_skill` fail `ProjectDefinition.fromMap` with "X is not a key of Y. Its keys are:
+  …", and a value of the wrong type names its field. Every door reads through it, so an edit is
+  refused before it is written and a row that arrives by sync with such a key is
   `ProjectReader.Unreadable` with that sentence.
-  *`SailYamlTest.aDeletedKeyIsRefusedInOneSentenceNamingWhereItsTextGoes`,
-  `ProjectReaderTest.aRowThatSetsADeletedKeyIsUnreadableNamingTheProjectAndWhereTheTextGoes`,
-  `ProjectApplyCommandTest.planTargetRefusesADeletedKeyNamingWhereItsTextGoes`,
-  `ProjectEditCommandTest.rejectsADeletedKeyNamingWhereItsTextGoes`.*
+  *`ProjectDefinitionTest.aDefinitionHoldsItsNameAndItsSectionsAndNothingElse`,
+  `ProjectDefinitionTest.aValueOfTheWrongTypeIsRefusedNamingItsField`,
+  `ProjectReaderTest.aRowThatSetsAKeyNoDefinitionHasIsUnreadableNamingTheProjectAndTheKey`,
+  `ProjectEditCommandTest.anEditThatIsNoDefinitionIsRefusedNamingWhatIsWrong`,
+  `ProjectDefinitionOperationsTest.aSectionThereIsNoneOfOrAValueThatIsNoneIsRefused`.*
 - **P9. The forge CLI the prompt relies on is authenticated by sail.** Where provisioning
   or `project apply` writes a token into `~/.git-credentials` for a GitHub host
   (`github.com`, or a repo marked `repos[].forge: github`), `ForgeCliLogin` logs `gh` in for
@@ -1898,11 +1929,10 @@ class is named):
   `ProjectApplierTest.applyReposLogsGhInForAGitHubEnterpriseHostMarkedAsGitHubAndNotForGitLab`,
   `ProjectApplierTest.applyReposWithOnlyAGitLabTokenNeverTouchesGh`,
   `ProjectApplierTest.aFailedGhLoginFailsTheStepNamingTheHost`,
-  `ProjectProvisionerTest.gitConfiguredWithTokenSetsCredentials`,
-  `ProjectProvisionerTest.gitConfiguredWithSshNeverLogsGhIn`,
+  `ProjectProvisionerTest.gitTakesTheBoxsIdentityAndTheTokenSetsCredentialsWithNoSshKeyScan`,
   `ProjectProvisionerTest.aFailedGhLoginFailsTheGitStepNamingTheHost`,
   `GitCredentialsTest.githubHostsAreGithubComAndEveryHostMarkedAsGithub`,
-  `SailYamlTest.aRepoMayBeMarkedAsAGitHubHostAndNothingElse`,
+  `ProjectDefinitionTest.aRepoMayBeMarkedAsAGitHubHostAndNothingElse`,
   `HarnessHooksTest.claudeCodeDeniesReadsOfTheContainerCredentialsAndKeys`, `HarnessHooksGoldenTest`.*
 
 **The loop machine.** From a build's stop to `awaiting_merge`, one pure function decides every
@@ -2010,7 +2040,7 @@ review and go on with the latest.
 | G6c | | (**P**) a stage has yet to pass, and the spec is no longer the loop's: someone took it while the step before ran | `Nothing` |
 | G7 | | (**P**) the stage the review is in is human and not running | `AwaitAPerson` |
 | G8 | | (**P**) the stage the review is in is human and running | `Nothing` |
-| G9 | | (**P**) the stage the review is in is an agent stage and no reviewer resolves for it | `ErrorReview(stage, "no reviewer agent resolved; set stages[].agent or agent.install in sail.yaml")` |
+| G9 | | (**P**) the stage the review is in is an agent stage and no reviewer resolves for it | `ErrorReview(stage, "no reviewer agent resolved; set pipeline.stages[].agent or agent.install in the definition")` |
 | G9b | | (**P**) the stage the review is in is an agent stage | `LaunchReviewer` |
 | G10 | | (**P**) every configured stage has a row and it is `passed` | `Pass` |
 | R1 | `ReviewerEnded` | not awaited in `pending`, `running` | as `GoOn` |
@@ -2257,7 +2287,7 @@ operator's login and home are the JVM's `user.name` and `user.home`.
   `/home` in every container of the box, running or stopped (`ContainerAuthorizedKeys`, `incus
   file pull` and `push`; virtual machines are left out: sail provisions none, and a stopped one
   serves no file). The accounts come from each container's `/etc/passwd`, never from the
-  catalog, whose `ssh.user` may have changed since the container was provisioned; a line goes
+  catalog; a line goes
   only when its key type and blob are the pairing's, so other keys stay, whatever their comments
   or options mention. Then the workstation key file goes when it holds that key (a file that
   cannot be read fails the revocation; only a missing one holds nothing), and last the token
@@ -2304,9 +2334,8 @@ operator's login and home are the JVM's `user.name` and `user.home`.
   containers: the command names it after the code with the `project apply` that makes it trust the
   key (`FdeCommandTest`). Containers that cannot be listed are named once, as the box's, with
   `project apply --all`: the catalog holds projects a box never ran, and applying one of those
-  would create it. Step 6 writes the workstation key whatever the definition
-  says, first, then the definition's own keys, each key once (`ProjectProvisioner.trustedKeys`),
-  and its fingerprint is an input of the run's digest (`ProjectProvisioner.inputs`), so
+  would create it. Step 6 writes the workstation key, the one key a container trusts
+  (`ProjectProvisioner.trustedKeys`), and its fingerprint is an input of the run's digest (`ProjectProvisioner.inputs`), so
   registering, replacing or revoking it makes the next apply of every project revisit step 6
   (`ProjectProvisionerTest`). A box trusts one workstation key: a pairing replaces the
   key of the same FDE's earlier pairing, and refuses to replace any other, naming its
@@ -2315,9 +2344,7 @@ operator's login and home are the JVM's `user.name` and `user.home`.
   including those no project names (`ContainerAuthorizedKeys.removeFromEach`). A container it could
   not edit is named with the replaced key's fingerprint and comment and the line to take out by
   hand, never an apply: apply writes only the SSH user's file, and the workstation key file names
-  the new key by then. A replaced key a definition names as text, not through
-  `${SSH_PUBLIC_KEY}`, comes back with that project's next apply, which writes the definition's
-  keys. Revoking the pairing takes
+  the new key by then. Revoking the pairing takes
   its key back out of the workstation key and the containers (C3); a key set by `sail host
   config set ssh-public-key` is never touched.
 - **C5. The code is a secret, handled as one.** It is printed to the terminal and nowhere else:
@@ -2710,12 +2737,11 @@ Review every control-plane change with `CommandsUseTheSeamTest` and these search
 
 - One binary, zero runtime dependencies, fully declarative. A project's definition is the
   source of truth, and the container is derived state that can be destroyed and recreated.
-- The database is the replicated source of truth for specs, projects, and shared files, and
-  on-disk descriptors are a copy nothing running reads: the loop, the API lanes, notifications
-  and the agent commands read a project's catalog row through `ProjectReader`, with no file
-  fallback. Writes go through the catalog first (`ProjectDefinitions.persist`), and a definition
-  the catalog did not take is not written as the canonical descriptor either, so an edit can
-  never diverge or be lost on the next sync.
+- The database is the replicated source of truth for specs, projects, and shared files, and a
+  project's catalog row is its definition's only copy: the loop, the API lanes, notifications
+  and the agent commands read it through `ProjectReader`, and every write goes to it a section
+  at a time (`ProjectStore.writeSection`), over the tag of the section its writer read, so an
+  edit never lands unseen over another's and is never lost on the next sync.
 - Every write names who is acting: one bound `Actor`, read by the journal and by every policy,
   never a string or an argument a caller threads through. A write with nothing bound fails.
 - One owner rule (`Ownership.ownerOf`) and one role rule (`RoleRule`), each implemented once

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.commands.CliCommand;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -202,26 +203,22 @@ class RemedyOverHttpTest {
   }
 
   @Test
-  void aCatalogDefinitionRefusedByItsReaderKeepsItsRemedy() {
-    Actor.run(
-        Actor.system(),
-        () -> new ProjectStore(db).upsert("beta", "name: beta\nagent_context: old\n"));
+  void aCatalogDefinitionRefusedByItsReaderSaysWhyOverHttp() {
+    Actor.run(Actor.system(), () -> new ProjectStore(db).upsert(TestDefinitions.named("beta")));
+    db.execute(
+        "UPDATE projects SET definition = ? WHERE name = 'beta'",
+        "{\"name\": \"beta\", \"agent_context\": \"old\"}");
     SailApiClient.Refused refused;
     try (var client = client()) {
       refused = assertThrows(SailApiClient.Refused.class, () -> client.get("/v1/projects/beta"));
     }
 
-    assertEquals(
-        List.of(catalogRefusal("sudo sail")), CliCommand.lines(refused, OperatorCommand.SUDO));
-    assertEquals(List.of(catalogRefusal("sail")), CliCommand.lines(refused, OperatorCommand.PLAIN));
-  }
-
-  private static String catalogRefusal(String sail) {
-    return "The definition of project 'beta' in the catalog could not be read: agent_context is no"
-        + " longer read: sail writes no context file. Put what it said in the repo's AGENTS.md,"
-        + " and a rule in a project skill ("
-        + sail
-        + " project skills add). Then remove `agent_context` from beta/sail.yaml. (HTTP 500)";
+    var reason =
+        "The definition of project 'beta' in the catalog could not be read: agent_context is not"
+            + " a key of a project definition. Its keys are: name, description, image, resources,"
+            + " runtimes, repos, services, processes, packages, agent, pipeline. (HTTP 500)";
+    assertEquals(List.of(reason), CliCommand.lines(refused, OperatorCommand.SUDO));
+    assertEquals(List.of(reason), CliCommand.lines(refused, OperatorCommand.PLAIN));
   }
 
   @Test

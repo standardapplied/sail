@@ -11,7 +11,7 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.CliOperator;
@@ -28,7 +28,6 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.ProjectCatalog;
-import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionListener;
@@ -39,15 +38,12 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.ssh.SshPublicKey;
-import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -63,17 +59,17 @@ import picocli.CommandLine.Spec;
 
 /**
  * The one verb that makes a project container match intent, from any starting state. Desired state
- * is the resolved descriptor plus the machinery this binary generates; observed state is the
- * container. Apply converges the difference: an absent container is provisioned, a stopped one is
- * started, and a running one has its services, repos, workspace files, agent tools, git config,
- * agent context, cleanup cron, sail machinery, and hostname reconciled. Idempotent: applying a
- * current project changes nothing.
+ * is the project's definition in the catalog plus the machinery this binary generates; observed
+ * state is the container. Apply converges the difference: an absent container is provisioned, a
+ * stopped one is started, and a running one has its services, repos, agent tools, git identity,
+ * skills, cleanup cron, sail machinery, and hostname reconciled. Idempotent: applying a current
+ * project changes nothing.
  */
 @Command(
     name = "apply",
     description =
-        "Make a project match its descriptor: create it if absent, start it if stopped, and"
-            + " converge services, repos, files, agent context, and the sail machinery.",
+        "Make a project's container match its definition: create it if absent, start it if"
+            + " stopped, and converge services, repos, agent tools and the sail machinery.",
     mixinStandardHelpOptions = true)
 public final class ProjectApplyCommand implements Runnable {
 
@@ -82,18 +78,11 @@ public final class ProjectApplyCommand implements Runnable {
   @Parameters(
       index = "0",
       arity = "0..1",
-      description =
-          "Project name (uses ~/.sail/projects/<name>/sail.yaml if -f not given)."
-              + " Omit when --all is set.")
+      description = "Project name, as the catalog holds it. Omit when --all is set.")
   private String name;
 
   @Option(names = "--all", description = "Apply every existing project container.")
   private boolean all;
-
-  @Option(
-      names = {"-f", "--file"},
-      description = "Path to sail.yaml project descriptor.")
-  private String file;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -161,8 +150,8 @@ public final class ProjectApplyCommand implements Runnable {
     if (all && Strings.isNotBlank(name)) {
       throw new IllegalArgumentException("Pass a project name OR --all, not both.");
     }
-    if (all && file != null) {
-      throw new IllegalArgumentException("--file applies to a single project, not --all.");
+    if (!all && Strings.isBlank(name)) {
+      throw new IllegalArgumentException("Name the project to apply, or pass --all.");
     }
     if (dryRun) {
       converge(operator);
@@ -182,26 +171,13 @@ public final class ProjectApplyCommand implements Runnable {
   }
 
   private void applyOne(OperatorCommand operator) throws Exception {
-    var definition = loadDefinition(operator);
-    var sailYamlPath = definition.path();
-
-    var identity =
-        new InteractiveIdentity(
-            LocalIdentity.detect(operator),
-            InteractiveIdentity.canPrompt(yes, json, dryRun, ConsoleHelper.hasConsole()));
-    SailYaml config =
-        ProjectDefinitions.resolveForProvisioning(definition.text(), identity, operator);
-    if (config.name() == null || config.name().isBlank()) {
-      throw new IllegalStateException("sail.yaml must have a 'name' field.");
-    }
-    NameValidator.requireValidProjectName(config.name());
-    requireMatchingName(name, config.name(), sailYamlPath);
-    if (config.resources() == null) {
-      throw new IllegalStateException(
-          "sail.yaml must have a 'resources' section with cpu, memory, and disk.");
-    }
-
+    NameValidator.requireValidProjectName(name);
+    var config =
+        ProjectMutations.requireResources(
+            catalog().read(name).orElseThrow(() -> ProjectMutations.notFound(name, operator)),
+            operator);
     requireReadyBox(operator);
+    var git = LocalIdentity.detect().git();
 
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);
@@ -227,7 +203,7 @@ public final class ProjectApplyCommand implements Runnable {
     if (!ProjectProvisioner.provisionedFrom(recorded, config, workstationKey)) {
       provision(
           config,
-          sailYamlPath,
+          git,
           shell,
           action == Action.CREATED,
           recorded.isPresent(),
@@ -241,7 +217,7 @@ public final class ProjectApplyCommand implements Runnable {
       System.out.println();
     }
 
-    var outcome = converge(observer, shell, config, sailYamlPath, operator);
+    var outcome = converge(observer, shell, config, git, operator);
 
     if (json) {
       System.out.println(YamlUtil.dumpJson(jsonSummary(config.name(), action, outcome)));
@@ -275,7 +251,7 @@ public final class ProjectApplyCommand implements Runnable {
 
   /**
    * Converges every Sail-managed container: one with a definition in the store, or a legacy
-   * descriptor-less one an earlier release provisioned (recognizable by its API-socket device) —
+   * definition-less one an earlier release provisioned (recognizable by its API-socket device) —
    * the latter still gets its machinery and hostname healed, reported with a warning line, never a
    * failure. Unrelated Incus instances on the same host are never targets: starting one or
    * attaching the API-socket mount would hand the box credential to a container Sail did not
@@ -300,14 +276,15 @@ public final class ProjectApplyCommand implements Runnable {
     }
 
     var workstationKey = WorkstationIdentity.registered();
+    var git = LocalIdentity.detect().git();
     var rows = new ArrayList<LinkedHashMap<String, Object>>();
     var applied = 0;
     var failed = 0;
 
     for (var target : targets) {
       var project = target.name();
-      var definition = definitionFor(project);
       try {
+        var definition = definitionFor(project);
         if (!devices.sailManaged(project)) {
           var warning = unmanagedSkipWarning(project, definition.isPresent(), operator);
           if (warning != null) {
@@ -322,7 +299,10 @@ public final class ProjectApplyCommand implements Runnable {
           }
           continue;
         }
-        var targetPlan = planTarget(project, target.state(), definition.orElse(null), operator);
+        if (definition.isPresent()) {
+          ProjectMutations.requireResources(definition.get(), operator);
+        }
+        var targetPlan = planTarget(target.state(), definition.orElse(null));
         var action = targetPlan.action();
         if (action == Action.STARTED) {
           mgr.start(project);
@@ -330,12 +310,11 @@ public final class ProjectApplyCommand implements Runnable {
         }
         Outcome outcome;
         if (targetPlan.config() != null) {
-          var sailYamlPath = materializeUnlessDryRun(project, definition.get(), dryRun);
           var recorded = ProjectProvisioner.provisionedInputs(observer, project);
           if (!ProjectProvisioner.provisionedFrom(recorded, targetPlan.config(), workstationKey)) {
             provision(
                 targetPlan.config(),
-                sailYamlPath,
+                git,
                 shell,
                 false,
                 recorded.isPresent(),
@@ -343,7 +322,7 @@ public final class ProjectApplyCommand implements Runnable {
                 operator);
             action = Action.CREATED;
           }
-          outcome = converge(observer, shell, targetPlan.config(), sailYamlPath, operator);
+          outcome = converge(observer, shell, targetPlan.config(), git, operator);
         } else {
           outcome = convergeMachineryOnly(observer, shell, project);
         }
@@ -404,29 +383,18 @@ public final class ProjectApplyCommand implements Runnable {
         + "' if it is yours.";
   }
 
-  record TargetPlan(Action action, SailYaml config) {}
+  record TargetPlan(Action action, ProjectDefinition config) {}
 
   /**
-   * Resolves and validates a bulk-apply target before any lifecycle mutation: a descriptor that
-   * fails to parse or names a different project must fail while the container's observed state is
-   * still untouched — the same fail-fast contract the single-project path keeps. A target without a
-   * descriptor plans a machinery-only convergence ({@code config} null).
+   * A bulk-apply target's plan, decided before any lifecycle mutation: a target without a
+   * definition in the catalog plans a machinery-only convergence ({@code config} null).
    */
-  static TargetPlan planTarget(
-      String project, ContainerState state, String definitionText, OperatorCommand operator) {
-    var action = plan(state);
-    if (definitionText == null) {
-      return new TargetPlan(action, null);
-    }
-    var config = ProjectDefinitions.resolveForProvisioning(definitionText, operator);
-    requireMatchingName(project, config.name(), null);
-    return new TargetPlan(action, config);
+  static TargetPlan planTarget(ContainerState state, ProjectDefinition config) {
+    return new TargetPlan(plan(state), config);
   }
 
-  private static Optional<String> definitionFor(String project) {
-    return NameValidator.isValidProjectName(project)
-        ? ProjectDefinitions.definition(project, null)
-        : Optional.empty();
+  private Optional<ProjectDefinition> definitionFor(String project) {
+    return NameValidator.isValidProjectName(project) ? catalog().read(project) : Optional.empty();
   }
 
   static String allSummaryLine(int applied, int failed) {
@@ -442,25 +410,6 @@ public final class ProjectApplyCommand implements Runnable {
   static void requireAllApplied(int failed) {
     if (failed > 0) {
       throw new IllegalStateException("Failed to apply " + failed + " project(s).");
-    }
-  }
-
-  /**
-   * The requested name selects the target; the descriptor must agree. Silently letting the
-   * descriptor's name win would redirect a destructive converge — undeclared-service removal
-   * included — at a container the operator never named.
-   */
-  static void requireMatchingName(String requested, String declared, Path descriptorPath) {
-    if (Strings.isNotBlank(requested) && !requested.equals(declared)) {
-      var source = descriptorPath != null ? descriptorPath.toString() : "its catalog descriptor";
-      throw new IllegalStateException(
-          "Requested project '"
-              + requested
-              + "' but "
-              + source
-              + " declares name '"
-              + declared
-              + "'.\n  Fix the 'name' field or apply the project the descriptor names.");
     }
   }
 
@@ -482,15 +431,15 @@ public final class ProjectApplyCommand implements Runnable {
       HomeRoom.Outcome homeRoom) {}
 
   /**
-   * The full convergence pass: descriptor state, sail machinery, skills, hostname. The {@code
+   * The full convergence pass: the definition's state, sail machinery, skills, hostname. The {@code
    * observer} always executes, so every state probe sees the live container; only mutations ride
    * {@code shell}, which a dry run swaps for command narration.
    */
   private Outcome converge(
       ShellExecutor observer,
       ShellExecutor shell,
-      SailYaml config,
-      Path sailYamlPath,
+      ProjectDefinition config,
+      LocalIdentity.GitIdentity git,
       OperatorCommand operator)
       throws Exception {
     var project = config.name();
@@ -503,7 +452,7 @@ public final class ProjectApplyCommand implements Runnable {
     var info = observed.queryInfo(project);
     var warnings =
         new ArrayList<>(applier.checkUnsupportedChanges(config, info.limits(), operator));
-    var sshUser = config.sshUser();
+    var sshUser = ProjectDefinition.USER;
     var token = Strings.isNotBlank(gitToken) ? gitToken : null;
 
     var results = new ArrayList<ProjectApplier.ApplyResult>();
@@ -511,12 +460,11 @@ public final class ProjectApplyCommand implements Runnable {
     results.add(applier.applyServices(project, config.services()));
     results.add(applier.reconcileServices(project, config.services()));
     results.add(
-        applier.applyRepos(
-            project, config.repos(), sshUser, GitCredentials.singleTokenMap(token), config.git()));
-    results.add(applier.applyWorkspaceFiles(project, sailYamlPath, sshUser));
+        applier.applyRepos(project, config.repos(), sshUser, GitCredentials.singleTokenMap(token)));
+    results.add(applier.applyWorkspaceFiles(project, SailPaths.projectFilesDir(project), sshUser));
     var agentInstall = config.agent() != null ? config.agent().installs() : null;
     results.add(applier.applyAgentTools(project, agentInstall));
-    results.add(applier.applyGitConfig(project, config.git(), sshUser));
+    results.add(applier.applyGitConfig(project, git));
     HomeRoom.Outcome homeRoom;
     try (var operations = OperationsFactory.open()) {
       results.add(
@@ -540,7 +488,7 @@ public final class ProjectApplyCommand implements Runnable {
    * its harnesses installed. A box that names no FDE acts as no one: it has no home room to make.
    */
   static HomeRoom.Outcome ensureHomeRoom(
-      Operations operations, SailYaml config, String handle, Supplier<Actor> operator) {
+      Operations operations, ProjectDefinition config, String handle, Supplier<Actor> operator) {
     if (Strings.isBlank(handle)) {
       return HomeRoom.ensure(operations, config, handle);
     }
@@ -559,7 +507,7 @@ public final class ProjectApplyCommand implements Runnable {
         0,
         machinery,
         hostnameRealigned,
-        List.of("no descriptor in the catalog — converged machinery only"),
+        List.of("no definition in the catalog — converged machinery only"),
         null);
   }
 
@@ -616,18 +564,18 @@ public final class ProjectApplyCommand implements Runnable {
    * Why an existing container is provisioned again from its first step: the interrupted run's
    * progress ({@code superseded}) was recorded for other inputs, the container was last provisioned
    * from other inputs ({@code recorded}), or the container records none at all. The inputs are the
-   * descriptor and this box's workstation key ({@link ProjectProvisioner#inputs}).
+   * definition and this box's workstation key ({@link ProjectProvisioner#inputs}).
    */
   static String recheckLine(ProvisionState superseded, boolean recorded) {
     if (superseded != null && !ProjectPhase.COMPLETE.name().equals(superseded.completedPhase())) {
-      return "The descriptor or this box's workstation key changed since the interrupted run: every"
+      return "The definition or this box's workstation key changed since the interrupted run: every"
           + " step is checked again.";
     }
     if (recorded) {
-      return "The descriptor or this box's workstation key changed since the last provisioning run:"
-          + " every step is checked again.";
+      return "The definition or this box's workstation key changed since the last provisioning"
+          + " run: every step is checked again.";
     }
-    return "No record of the descriptor this container was provisioned from: every step is checked"
+    return "No record of the definition this container was provisioned from: every step is checked"
         + " again.";
   }
 
@@ -639,17 +587,23 @@ public final class ProjectApplyCommand implements Runnable {
     }
   }
 
+  /** The catalog of the box this command runs on. */
+  private ProjectCatalog catalog() {
+    return new ProjectCatalog(box.get().database());
+  }
+
   /**
-   * Provisions from the resolved descriptor with resumable progress: a fresh container from
-   * scratch, the remaining phases of an interrupted earlier run, or every phase again for a
-   * container whose descriptor changed since it was provisioned.
+   * Provisions from the definition with resumable progress: a fresh container from scratch, the
+   * remaining phases of an interrupted earlier run, or every phase again for a container whose
+   * definition changed since it was provisioned.
    *
+   * @param git this box's git identity, the one the container commits as
    * @param fresh whether the container is created by this run
-   * @param recorded whether the container records the descriptor it was last provisioned from
+   * @param recorded whether the container records the definition it was last provisioned from
    */
   private void provision(
-      SailYaml config,
-      Path sailYamlPath,
+      ProjectDefinition config,
+      LocalIdentity.GitIdentity git,
       ShellExecutor shell,
       boolean fresh,
       boolean recorded,
@@ -657,8 +611,7 @@ public final class ProjectApplyCommand implements Runnable {
       OperatorCommand operator)
       throws Exception {
     requireRootToProvision(config.name(), dryRun, ConsoleHelper.isRoot(), spec);
-    ProjectCatalog.requireUnpruned(config.name());
-    persistCanonicalBundle(config.name(), sailYamlPath, dryRun, operator);
+    catalog().requireUnpruned(config.name());
 
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(box.get().hostConfig()));
 
@@ -708,7 +661,8 @@ public final class ProjectApplyCommand implements Runnable {
               new ProjectSkills(operations::projectFiles),
               workstationKey,
               operator);
-      provisioner.provision(config, hostYaml, gitTokens, sailYamlPath);
+      provisioner.provision(
+          config, hostYaml, gitTokens, git, SailPaths.projectFilesDir(config.name()));
     }
 
     if (!json) {
@@ -718,7 +672,7 @@ public final class ProjectApplyCommand implements Runnable {
   }
 
   private void printConnectHints(
-      SailYaml config, ShellExecutor shell, ContainerManager mgr, OperatorCommand operator)
+      ProjectDefinition config, ShellExecutor shell, ContainerManager mgr, OperatorCommand operator)
       throws Exception {
     var state = mgr.queryState(config.name());
     if (!(state instanceof ContainerState.Running r) || r.ipv4() == null) {
@@ -743,7 +697,7 @@ public final class ProjectApplyCommand implements Runnable {
     }
     var ports = ContainerExec.queryServicePorts(shell, config.name());
     if (!ports.isEmpty()) {
-      Banner.printSshTunnels(config.name(), config.sshUser(), ports, System.out, Ansi.AUTO);
+      Banner.printSshTunnels(config.name(), ProjectDefinition.USER, ports, System.out, Ansi.AUTO);
     }
   }
 
@@ -756,10 +710,7 @@ public final class ProjectApplyCommand implements Runnable {
         + " for SSH config snippet.";
   }
 
-  private Map<String, String> resolveGitTokens(SailYaml config, OperatorCommand operator) {
-    if (config.git() == null || !"token".equals(config.git().auth())) {
-      return Map.of();
-    }
+  private Map<String, String> resolveGitTokens(ProjectDefinition config, OperatorCommand operator) {
     if (Strings.isNotBlank(gitToken)) {
       return GitCredentials.singleTokenMap(gitToken);
     }
@@ -796,159 +747,5 @@ public final class ProjectApplyCommand implements Runnable {
       }
     }
     return Map.copyOf(tokens);
-  }
-
-  private record Definition(String text, Path path) {}
-
-  /**
-   * Loads the definition text catalog-first (the source of truth), so apply converges a definition
-   * edited or synced on main rather than a stale local copy. Falls back to the resolved descriptor
-   * file when {@code -f} is given (an explicit override), the project is absent from the catalog (a
-   * brand-new local authoring), or no name was supplied. The plan always reads the same desired
-   * state; only a real apply re-materializes the canonical descriptor from the catalog.
-   */
-  /**
-   * Whether apply reads the catalog: only when no {@code -f} was given and a project was named.
-   * This command's {@code -f} has no default value, so any non-null path — including the literal
-   * {@code sail.yaml} that older commands' default-value handling maps to absent — is an explicit
-   * operator override and must win over the catalog.
-   */
-  static boolean usesCatalog(String file, String name) {
-    return file == null && name != null;
-  }
-
-  private Definition loadDefinition(OperatorCommand operator) throws IOException {
-    if (usesCatalog(file, name)) {
-      NameValidator.requireValidProjectName(name);
-      var catalog = ProjectDefinitions.definition(name, null);
-      if (catalog.isPresent()) {
-        return new Definition(catalog.get(), materializeUnlessDryRun(name, catalog.get(), dryRun));
-      }
-    }
-    var sailYamlPath = resolveSailYamlPath(name, file);
-    if (!Files.exists(sailYamlPath)) {
-      throw new IllegalStateException(descriptorNotFound(sailYamlPath, file != null, operator));
-    }
-    return new Definition(Files.readString(sailYamlPath), sailYamlPath);
-  }
-
-  /**
-   * The refusal of an apply that finds no definition of its project at {@code path}: a path the
-   * caller {@code given} with {@code --file} is named alone, since the way out is the right path.
-   */
-  static String descriptorNotFound(Path path, boolean given, OperatorCommand operator) {
-    var missing = "Project descriptor not found: " + path.toAbsolutePath();
-    if (given) {
-      return missing;
-    }
-    return missing
-        + "\n  Run '"
-        + operator.sail("project init")
-        + "' to author one, sync it from main with '"
-        + operator.sail("sync")
-        + "', or specify one with --file.";
-  }
-
-  /**
-   * A dry run promises to leave the host untouched, so it plans against the in-memory definition
-   * and only resolves where the canonical descriptor would live; a real apply materializes it.
-   */
-  static Path materializeUnlessDryRun(String name, String definition, boolean dryRun)
-      throws IOException {
-    if (dryRun) {
-      return defaultDescriptorPath(name);
-    }
-    return ProjectDefinitions.materialize(name, definition);
-  }
-
-  static Path defaultDescriptorPath(String name) {
-    return SailPaths.projectDir(name).resolve(SailPaths.PROJECT_DESCRIPTOR);
-  }
-
-  static Path resolveSailYamlPath(String name, String file) {
-    if (file != null) {
-      return Path.of(file);
-    }
-    if (name != null) {
-      var canonicalPath = defaultDescriptorPath(name);
-      if (Files.exists(canonicalPath)) {
-        return canonicalPath;
-      }
-      var namedPath = Path.of(name, SailPaths.PROJECT_DESCRIPTOR);
-      if (Files.exists(namedPath)) {
-        return namedPath;
-      }
-    }
-    var cwdPath = Path.of(SailPaths.PROJECT_DESCRIPTOR);
-    if (Files.exists(cwdPath)) {
-      return cwdPath;
-    }
-    if (name != null) {
-      return defaultDescriptorPath(name);
-    }
-    return cwdPath;
-  }
-
-  /**
-   * Records the descriptor in the catalog as this box's operator, resolved first so a node that
-   * cannot name it refuses before anything is written, then writes it as the canonical descriptor
-   * and copies its {@code files/} directory beside it ({@link ProjectDefinitions#persist}: a
-   * definition the catalog did not take is written nowhere). A dry run must not touch the host
-   * filesystem at all — the plan is computed from the source descriptor, and the sync starts by
-   * deleting the canonical files directory, so running it under dry-run would destroy locally
-   * authored project files.
-   */
-  static void persistCanonicalBundle(
-      String name, Path sailYamlPath, boolean dryRun, OperatorCommand operator) throws Exception {
-    if (dryRun) {
-      return;
-    }
-    var actor = CliOperator.current();
-    ProjectDefinitions.persist(name, null, Files.readString(sailYamlPath), actor);
-    syncFilesDirectory(
-        sailYamlPath.toAbsolutePath().getParent().resolve("files"),
-        SailPaths.projectDir(name).resolve("files"));
-  }
-
-  static void syncFilesDirectory(Path sourceDir, Path targetDir) throws Exception {
-    var source = sourceDir.toAbsolutePath().normalize();
-    var target = targetDir.toAbsolutePath().normalize();
-    if (source.equals(target)) {
-      return;
-    }
-    if (!Files.isDirectory(source)) {
-      deleteDirectory(target);
-      return;
-    }
-    deleteDirectory(target);
-    try (var walk = Files.walk(source)) {
-      for (var path : walk.toList()) {
-        var relative = source.relativize(path);
-        var destination = target.resolve(relative);
-        if (Files.isDirectory(path)) {
-          Files.createDirectories(destination);
-        } else {
-          if (destination.getParent() != null) {
-            Files.createDirectories(destination.getParent());
-          }
-          Files.copy(
-              path,
-              destination,
-              StandardCopyOption.REPLACE_EXISTING,
-              StandardCopyOption.COPY_ATTRIBUTES);
-        }
-      }
-    }
-  }
-
-  private static void deleteDirectory(Path dir) throws Exception {
-    if (!Files.exists(dir)) {
-      return;
-    }
-    try (var walk = Files.walk(dir)) {
-      for (var path : walk.sorted(Comparator.reverseOrder()).toList()) {
-        Files.deleteIfExists(path);
-      }
-    }
   }
 }

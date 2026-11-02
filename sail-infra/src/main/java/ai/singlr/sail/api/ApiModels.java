@@ -8,11 +8,12 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Engagement;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Roster;
-import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.NameValidator;
@@ -153,7 +154,7 @@ record ProjectResponse(
     String name,
     String containerStatus,
     AgentConfigView agent,
-    SailYaml.Member member,
+    ProjectDefinition.Member member,
     String homeRoom)
     implements Mappable {
   @Override
@@ -168,8 +169,27 @@ record ProjectResponse(
   }
 }
 
+/**
+ * A project's definition as the API serves it: the document, and each section's tag, which a client
+ * names in {@code If-Match} to write only over the section it read.
+ */
+record ProjectDefinitionResponse(
+    String name, String document, Map<String, String> tags, String updatedBy, String updatedAt)
+    implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("name", name);
+    m.put("definition", YamlUtil.parseMap(document));
+    m.put("tags", new LinkedHashMap<>(tags));
+    m.put("updated_by", updatedBy);
+    m.put("updated_at", updatedAt);
+    return m;
+  }
+}
+
 record AgentConfigView(String type, boolean autoSnapshot, boolean autoBranch) implements Mappable {
-  static AgentConfigView from(SailYaml config) {
+  static AgentConfigView from(ProjectDefinition config) {
     var agent = config.agent();
     return new AgentConfigView(agent.type(), agent.autoSnapshot(), agent.autoBranch());
   }

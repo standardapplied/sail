@@ -17,6 +17,7 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.QuietNarrator;
 import ai.singlr.sail.api.RunWatch;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
@@ -44,7 +45,7 @@ class AgentWatchCommandTest {
   @TempDir Path dir;
 
   @Test
-  void theNotificationsAreTheCatalogRowsAndTheArgumentsAServerBuiltWithTheFileStillStart() {
+  void theNotificationsAreTheCatalogRows() {
     var dbPath =
         seeded(
             "acme",
@@ -60,8 +61,6 @@ class AgentWatchCommandTest {
             "sail-agent-" + RUN_ID,
             "--started-at",
             STARTED_AT,
-            "-f",
-            "/home/uday/.sail/projects/acme/sail.yaml",
             "--action",
             "stop");
 
@@ -335,7 +334,7 @@ class AgentWatchCommandTest {
     var dbPath = dir.resolve("control-plane.db");
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
-      Acting.system(() -> new ProjectStore(db).upsert(project, definition));
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.yaml(definition)));
     }
     return dbPath;
   }

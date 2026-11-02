@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -33,7 +34,7 @@ final class LoopRows {
 
   /** An agent stage reviewed by {@code codex}, then a person's. */
   static final ReviewPipelineConfig AN_AGENT_THEN_A_PERSON =
-      ReviewPipelineConfig.fromMap(
+      TestDefinitions.pipeline(
           Map.of(
               "max_iterations",
               3,

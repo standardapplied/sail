@@ -19,9 +19,9 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerExec;
-import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -38,7 +38,6 @@ import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -108,13 +107,11 @@ class RunCommandTest {
   }
 
   @Test
-  void aProjectNotInTheCatalogFailsSayingSoWhateverFileIsNamed() {
+  void aProjectNotInTheCatalogFailsSayingSo() {
     var cmd = command(tempDir.resolve("control-plane.db"));
     cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
 
-    var exitCode =
-        cmd.execute(
-            "test-project", "--dry-run", "--file", tempDir.resolve("nonexistent.yaml").toString());
+    var exitCode = cmd.execute("test-project", "--dry-run");
 
     assertNotEquals(0, exitCode);
     var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
@@ -122,22 +119,11 @@ class RunCommandTest {
   }
 
   @Test
-  void invalidProjectNameFails() throws Exception {
-    var yamlFile = tempDir.resolve("sail.yaml");
-    Files.writeString(
-        yamlFile,
-        """
-            name: test-proj
-            resources:
-              cpu: 2
-              memory: 4GB
-              disk: 50GB
-            """);
+  void invalidProjectNameFails() {
     var cmd = new CommandLine(new Sail());
     cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
 
-    var exitCode =
-        cmd.execute("agent", "run", "INVALID NAME!", "--dry-run", "--file", yamlFile.toString());
+    var exitCode = cmd.execute("agent", "run", "INVALID NAME!", "--dry-run");
 
     assertNotEquals(0, exitCode);
     var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
@@ -153,8 +139,8 @@ class RunCommandTest {
           () ->
               new ProjectStore(db)
                   .upsert(
-                      "test-proj",
-                      """
+                      TestDefinitions.yaml(
+                          """
                       name: test-proj
                       resources:
                         cpu: 2
@@ -162,12 +148,12 @@ class RunCommandTest {
                         disk: 50GB
                       agent:
                         type: claude-code
-                      """));
+                      """)));
     }
     var cmd = command(dbPath);
     cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
 
-    var exitCode = cmd.execute("test-proj", "--dry-run", "--file", "ignored.yaml");
+    var exitCode = cmd.execute("test-proj", "--dry-run");
 
     assertNotEquals(0, exitCode);
     var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
@@ -200,7 +186,6 @@ class RunCommandTest {
    */
   private RunCommand runCommand(
       Path dbPath, ScriptedShellExecutor shell, DispatchOperations.AgentLauncher terminal) {
-    var noGit = new ScriptedShellExecutor();
     return new RunCommand(
         operator -> OperationsFactory.open(dbPath),
         (host, hooks) -> {
@@ -218,7 +203,6 @@ class RunCommandTest {
                   hooks.stopListener()),
               SessionYield.NONE);
         },
-        operator -> new LocalIdentity(noGit, dbPath.resolveSibling("none.pub"), operator),
         dryRun -> shell,
         terminal);
   }
@@ -555,7 +539,7 @@ class RunCommandTest {
     var dbPath = tempDir.resolve("control-plane.db");
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
-      Acting.system(() -> new ProjectStore(db).upsert("test-proj", yaml));
+      Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.yaml(yaml)));
     }
     return dbPath;
   }
@@ -578,7 +562,7 @@ class RunCommandTest {
       Acting.system(
           () -> {
             new ProjectStore(db)
-                .upsert("test-proj", "name: test-proj\nagent:\n  type: claude-code\n");
+                .upsert(TestDefinitions.yaml("name: test-proj\nagent:\n  type: claude-code\n"));
             new FileStore(db)
                 .put(
                     "test-proj",

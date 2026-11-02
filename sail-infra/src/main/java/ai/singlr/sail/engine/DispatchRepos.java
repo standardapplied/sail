@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,7 +14,8 @@ public final class DispatchRepos {
 
   private DispatchRepos() {}
 
-  public static List<SailYaml.Repo> resolve(SailYaml config, Spec spec, List<String> overrides) {
+  public static List<ProjectDefinition.Repo> resolve(
+      ProjectDefinition config, Spec spec, List<String> overrides) {
     var configured = configuredRepos(config);
     var requested = requestedRepos(spec, overrides);
     if (requested.isEmpty()) {
@@ -23,8 +24,9 @@ public final class DispatchRepos {
     return requested.stream().map(path -> requireConfigured(configured, path)).toList();
   }
 
-  private static LinkedHashMap<String, SailYaml.Repo> configuredRepos(SailYaml config) {
-    var repos = new LinkedHashMap<String, SailYaml.Repo>();
+  private static LinkedHashMap<String, ProjectDefinition.Repo> configuredRepos(
+      ProjectDefinition config) {
+    var repos = new LinkedHashMap<String, ProjectDefinition.Repo>();
     if (config.repos() == null) {
       return repos;
     }
@@ -40,8 +42,8 @@ public final class DispatchRepos {
   }
 
   /** Returns a copy of {@code spec} whose repos are the resolved target repo paths. */
-  public static Spec withTargetRepos(Spec spec, List<SailYaml.Repo> targetRepos) {
-    return spec.withRepos(targetRepos.stream().map(SailYaml.Repo::path).toList());
+  public static Spec withTargetRepos(Spec spec, List<ProjectDefinition.Repo> targetRepos) {
+    return spec.withRepos(targetRepos.stream().map(ProjectDefinition.Repo::path).toList());
   }
 
   private static String validatedPath(String path) {
@@ -49,12 +51,12 @@ public final class DispatchRepos {
     return path;
   }
 
-  private static SailYaml.Repo requireConfigured(
-      LinkedHashMap<String, SailYaml.Repo> configured, String path) {
+  private static ProjectDefinition.Repo requireConfigured(
+      LinkedHashMap<String, ProjectDefinition.Repo> configured, String path) {
     var repo = configured.get(path);
     if (repo == null) {
       throw new IllegalArgumentException(
-          "Spec targets repo '" + path + "', but that repo is not configured in sail.yaml.");
+          "Spec targets repo '" + path + "', but the project's definition has no such repo.");
     }
     return repo;
   }

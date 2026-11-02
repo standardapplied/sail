@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -70,7 +71,7 @@ class ReviewLoopIntegrationTest {
   }
 
   private ReviewPipelineConfig singleStage(String gate, int maxIterations) {
-    return ReviewPipelineConfig.fromMap(
+    return TestDefinitions.pipeline(
         Map.of(
             "max_iterations",
             maxIterations,

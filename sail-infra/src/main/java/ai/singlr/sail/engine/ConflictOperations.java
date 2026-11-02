@@ -26,11 +26,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public final class ConflictOperations {
+
+  private static final Set<String> MERGEABLE = Set.of("spec", "project");
   private static final String FINGERPRINT_PREFIX = "sha256:";
   private static final int FINGERPRINT_LENGTH = 16;
 
@@ -197,11 +200,12 @@ public final class ConflictOperations {
 
   /**
    * A field-level merge needs both sides present and a structure with mergeable fields, so it is
-   * offered only for spec conflicts that are not delete-vs-edit. A file's content is an opaque blob
-   * and a project's definition is a single descriptor field, so both resolve mine or theirs only.
+   * offered for spec and project conflicts that are not delete-vs-edit: a project's fields are its
+   * definition's sections, each merged on its own. A file's content is an opaque blob, so it
+   * resolves mine or theirs only.
    */
   private static void requireMergeable(SyncConflicts.Conflict conflict) {
-    if (!conflict.entityType().equals("spec")
+    if (!MERGEABLE.contains(conflict.entityType())
         || parse(conflict.baseSnapshot()) == null
         || parse(conflict.localSnapshot()) == null
         || parse(conflict.remoteSnapshot()) == null) {

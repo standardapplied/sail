@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.BlobStore;
@@ -201,7 +202,7 @@ class FilesAuditTest {
 
   @Test
   void aRenameReKeysTheRecordAndAMaterializeAfterItWritesNothingTwice() throws Exception {
-    Acting.system(() -> new ProjectStore(mainDb).upsert("acme", "name: acme\n"));
+    Acting.system(() -> new ProjectStore(mainDb).upsert(TestDefinitions.named("acme")));
     ContentFixtures.put(main, "acme", "app.conf", "v1");
     materialize();
     var hash = main.find("acme", "app.conf").orElseThrow().contentHash();

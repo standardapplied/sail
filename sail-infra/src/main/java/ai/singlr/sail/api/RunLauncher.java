@@ -8,7 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
-import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
@@ -88,7 +88,7 @@ public final class RunLauncher {
    */
   record LaunchSpec(
       String project,
-      SailYaml config,
+      ProjectDefinition config,
       String workDir,
       boolean fullPermissions,
       String model,
@@ -127,8 +127,8 @@ public final class RunLauncher {
 
   LaunchOutcome launchAgent(
       String project,
-      SailYaml config,
-      List<SailYaml.Repo> targetRepos,
+      ProjectDefinition config,
+      List<ProjectDefinition.Repo> targetRepos,
       String task,
       String branch,
       boolean background,
@@ -140,7 +140,7 @@ public final class RunLauncher {
         new LaunchSpec(
             project,
             config,
-            AgentSession.launchWorkDir(config.sshUser(), targetRepos),
+            AgentSession.launchWorkDir(ProjectDefinition.USER, targetRepos),
             true,
             spec.model(),
             spec.reasoningEffort(),
@@ -148,7 +148,7 @@ public final class RunLauncher {
             agentType,
             task,
             branch,
-            targetRepos.stream().map(SailYaml.Repo::path).toList(),
+            targetRepos.stream().map(ProjectDefinition.Repo::path).toList(),
             background,
             runId,
             runCredential,
@@ -267,7 +267,7 @@ public final class RunLauncher {
     return s.background()
         ? AgentSession.buildBackgroundLaunchCommand(
             s.project(),
-            s.config().sshUser(),
+            ProjectDefinition.USER,
             s.workDir(),
             s.fullPermissions(),
             harness,
@@ -282,7 +282,7 @@ public final class RunLauncher {
             s.resumeSessionId())
         : AgentSession.buildForegroundTaskCommand(
             s.project(),
-            s.config().sshUser(),
+            ProjectDefinition.USER,
             s.workDir(),
             s.fullPermissions(),
             harness,
@@ -299,14 +299,13 @@ public final class RunLauncher {
   /**
    * Spawns the detached run-addressed watcher whenever the project declares an agent block —
    * supervision is on by default, under the limits of the run's lane ({@link
-   * SailYaml.Agent#guardrailsFor}) as the project sets them at this launch, and the watcher is also
-   * the authoritative stop observer the review pipeline advances on. One watcher per run,
+   * ProjectDefinition#guardrailsFor}) as the project sets them at this launch, and the watcher is
+   * also the authoritative stop observer the review pipeline advances on. One watcher per run,
    * supervising exactly this run's unit, its wall clock anchored to the run row's {@code
    * started_at}.
    */
   private Optional<WatcherSpawner.Spawned> launchWatcherIfAgent(LaunchSpec s) throws IOException {
-    var agent = s.config().agent();
-    if (agent == null) {
+    if (s.config().agent() == null) {
       return Optional.empty();
     }
     return Optional.of(
@@ -315,7 +314,7 @@ public final class RunLauncher {
             s.runId(),
             s.unit().unitName(),
             startedAt(s.runId()),
-            agent.guardrailsFor(Lane.of(s.role()).orElse(null))));
+            s.config().guardrailsFor(Lane.of(s.role()).orElse(null))));
   }
 
   /**

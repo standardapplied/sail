@@ -9,8 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.config.ProjectDefinition;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ProjectServer.State;
 import java.io.OutputStream;
 import java.io.PrintStream;
@@ -28,8 +28,8 @@ class ProjectServeIT extends AbstractIncusIT {
 
   private static final String CONTAINER = "sail-it-project-serve";
 
-  private static SailYaml definition(String processes) {
-    return SailYaml.fromMap(YamlUtil.parseMap("name: " + CONTAINER + "\nprocesses:\n" + processes));
+  private static ProjectDefinition definition(String processes) {
+    return TestDefinitions.yaml("name: " + CONTAINER + "\nprocesses:\n" + processes);
   }
 
   private String mainPid(String process) throws Exception {

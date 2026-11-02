@@ -158,50 +158,54 @@ forwarded over SSH; no control plane runs locally.
 
 ## Projects
 
-A project is one definition: runtimes, services, repos and agent config. The database is the
-source of truth and the on-disk `sail.yaml` is a copy. `sail project apply` makes the container
-match the definition from any starting state: an absent container is provisioned, a stopped one
-started, a running one converged in place. Run it again any time.
+A project is one definition in the catalog: runtimes, services, repos and agent config. The
+catalog is the only copy, synced to every box with the project; there is no file to keep beside
+it. `sail project apply` makes the container match the definition from any starting state: an
+absent container is provisioned, a stopped one started, a running one converged in place. Run
+it again any time.
 
 ```bash
-sail project init        # author a definition
-sail project apply web   # make it real: create, start or converge, one verb
-sail project edit web    # change the definition, saved to the catalog and synced
-sail project connect web # print SSH config for your editor
+sail project create web --cpu 4 --memory 12GB --repo https://github.com/acme/web.git
+sail project apply web           # make it real: create, start or converge, one verb
+sail project edit web            # the definition in $EDITOR, each changed section saved
+sail project config get web agent
+sail project connect web         # print SSH config for your editor
 ```
 
-The synced definition is identity-free. Per-engineer fields are placeholders (`${GIT_NAME}`,
-`${GIT_EMAIL}`, `${SSH_PUBLIC_KEY}`) resolved from your own box at provision time, so a
-teammate's project commits as you and trusts only your key. On a box `sudo sail init` set up, the
-git identity is root's, the one `sudo sail init --name … --email …` gave it.
+`create` with no flags asks for each field; `--definition -` reads a whole definition from
+stdin. A definition is JSON, one section per key, and only `name` is required:
 
-```yaml
-# sail.yaml (name, resources and image are the only required fields)
-name: web
-resources: { cpu: 4, memory: 12GB, disk: 150GB }
-image: ubuntu/24.04
-runtimes: { jdk: 25, node: 22 }
-git: { name: ${GIT_NAME}, email: ${GIT_EMAIL} }     # per-developer, never synced
-repos:
-  - { url: "https://github.com/acme/web.git", path: web }
-services:
-  postgres: { image: postgres:16, ports: [5432] }
-processes:
-  web: { command: npm run dev, workdir: web, port: 3000 }   # an app the portal opens
-agent:
-  type: claude-code
-  guardrails:  { max_duration: 4h, max_idle: 20m, action: snapshot-and-stop }   # builds and fix runs
-  review_pipeline:
-    guardrails: { max_duration: 45m, max_idle: 20m, action: stop }              # reviewers
-ssh:
-  authorized_keys: [ ${SSH_PUBLIC_KEY} ]            # per-developer, never synced
+```json
+{
+  "name": "web",
+  "resources": {"cpu": 4, "memory": "12GB", "disk": "150GB"},
+  "image": "ubuntu/24.04",
+  "runtimes": {"jdk": 25, "node": "22"},
+  "repos": [{"url": "https://github.com/acme/web.git", "path": "web"}],
+  "services": {"postgres": {"image": "postgres:16", "ports": [5432]}},
+  "processes": {"web": {"command": "npm run dev", "workdir": "web", "port": 3000}},
+  "agent": {
+    "type": "claude-code",
+    "guardrails": {"max_duration": "4h", "max_idle": "20m", "action": "snapshot-and-stop"}
+  },
+  "pipeline": {"guardrails": {"max_duration": "45m", "max_idle": "20m", "action": "stop"}}
+}
 ```
+
+Each section is written on its own, over the version it was read from: a section someone else
+changed meanwhile is refused, never overwritten unseen. A wrong value is refused naming the
+field.
+
+The definition holds no identity. Every container commits as the git identity of the box that
+provisions it (`git config --global user.name` and `user.email`; on a box `sudo sail init` set
+up, root's, the one `sudo sail init --name … --email …` gave it) and trusts only that box's
+key. Repos clone over https with the box's forge token; an ssh-style URL is refused naming its
+https form.
 
 The container's user is always `dev` (uid 1000, `/home/dev`): every agent, shell and hook runs
-as it. `ssh.user` may be omitted and, if set, must be `dev`; apply refuses any other before it
-creates anything. Apply records each provisioning step for the definition it ran with, so an
-edit made after a failed or finished run is provisioned again from the first step, each step
-installing only what is missing.
+as it. Apply records each provisioning step for the definition it ran with, so an edit made
+after a failed or finished run is provisioned again from the first step, each step installing
+only what is missing.
 
 `sudo sail project demo` spins up a bundled zero-config demo (an Outline wiki) end to end.
 
@@ -231,7 +235,7 @@ sail spec dispatch --project web # pick the next ready spec, launch the agent, w
 
 `dispatch` honors dependencies and assignee, snapshots the container for rollback, creates the
 work branch and launches the agent with its generated context. When the build stops, the review
-loop runs: each stage of `agent.review_pipeline` has a reviewer that checks the branch, a fix
+loop runs: each stage of the definition's `pipeline` has a reviewer that checks the branch, a fix
 agent addresses its findings, and the loop repeats up to `max_iterations` before escalating to
 a person. Sail is agent-agnostic across claude-code and codex, so one agent can implement and
 another review. Every run is held to its lane's guardrails: a wall-clock `max_duration`, a
@@ -258,20 +262,22 @@ review, the verdict contract). How *this codebase* is built, tested and verified
 repository's own `AGENTS.md` to say; sail writes no context file.
 
 The one agent-facing text a project writes is a stage's **brief**: a paragraph saying what
-that stage judges, in the definition (`sail project edit web`). A stage with no brief judges
+that stage judges, in the definition's `pipeline` section (`sail project edit web --section
+pipeline`). A stage with no brief judges
 under sail's default (the spec first, then correctness, security and tests). A brief that
 orders a skill makes a validation stage without new machinery:
 
-```yaml
-agent:
-  review_pipeline:
-    stages:
-      - name: review
-      - name: validate
-        brief: |
-          Run the project's e2e skill against this branch and report every failure as a
-          finding, with the command and its output as evidence. Pass only on a clean run.
-        gate: all_clear
+```json
+{
+  "stages": [
+    {"name": "review"},
+    {
+      "name": "validate",
+      "brief": "Run the project's e2e skill against this branch and report every failure as a finding, with the command and its output as evidence. Pass only on a clean run.",
+      "gate": "all_clear"
+    }
+  ]
+}
 ```
 
 ### Project skills
