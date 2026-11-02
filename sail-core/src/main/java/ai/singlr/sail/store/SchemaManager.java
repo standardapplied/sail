@@ -573,9 +573,19 @@ public final class SchemaManager {
           if (current == CURRENT_VERSION) return;
           if (current != 0) throw refused(current);
           if (holdsOtherTables()) throw unversioned();
-          BASELINE.forEach(db::execute);
-          stamp(CURRENT_VERSION);
+          createBaseline();
         });
+  }
+
+  /**
+   * Creates this release's schema and stamps it, beside whatever the database holds: the one place
+   * the baseline is made, by {@link #migrate} on a fresh database and by {@link LegacyConversion}
+   * beside the 0.58 tables it has set aside.
+   */
+  void createBaseline() {
+    db.execute(SCHEMA_VERSION_TABLE);
+    BASELINE.forEach(db::execute);
+    stamp(CURRENT_VERSION);
   }
 
   private boolean holdsOtherTables() {
@@ -607,6 +617,11 @@ public final class SchemaManager {
               + CURRENT_VERSION
               + ").",
           Remedy.of("Run '", Remedy.sail("upgrade"), "' before opening this database."));
+    }
+    if (version == LegacyConversion.VERSION) {
+      return Remedied.state(
+          "Database " + db.path() + " was made by Sail 0.58.",
+          Remedy.of("Run '", Remedy.sail("migrate"), "' to convert it to this release."));
     }
     return Remedied.state(
         "Database schema v"

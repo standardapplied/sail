@@ -136,6 +136,20 @@ class SchemaManagerTest {
   }
 
   @Test
+  void aDatabaseSail058MadeIsRefusedNamingTheMigrateThatConvertsIt() {
+    stageAtVersion(LegacyConversion.VERSION);
+    var schema = new SchemaManager(db);
+
+    var refusal = assertThrows(Remedied.State.class, schema::migrate);
+
+    assertEquals(
+        "Database " + tempDir.resolve("test.db") + " was made by Sail 0.58.", refusal.reason());
+    assertEquals(List.of(Remedy.sail("migrate")), refusal.remedy().commands());
+    assertEquals("Run 'sail migrate' to convert it to this release.", refusal.remedy().plain());
+    assertEquals(LegacyConversion.VERSION, schema.currentVersion());
+  }
+
+  @Test
   void migrateRefusesADatabaseNewerThanThisBinary() {
     var newer = SchemaManager.CURRENT_VERSION + 1;
     stageAtVersion(newer);

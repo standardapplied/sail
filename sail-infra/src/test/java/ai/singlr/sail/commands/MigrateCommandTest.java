@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
@@ -18,6 +19,7 @@ import ai.singlr.sail.engine.Apt;
 import ai.singlr.sail.engine.HostProvisioner;
 import ai.singlr.sail.engine.NeedrestartPolicy;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
@@ -25,6 +27,8 @@ import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.LegacyConversion;
+import ai.singlr.sail.store.LegacyDatabase;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -41,6 +45,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import picocli.CommandLine;
 import picocli.CommandLine.Help.Ansi;
 
 class MigrateCommandTest {
@@ -229,6 +234,65 @@ class MigrateCommandTest {
 
     assertEquals(List.of(Remedy.sail("init")), refused.remedy().commands());
     assertEquals(List.of(), steps);
+  }
+
+  @Test
+  void aDatabaseSail058MadeIsConvertedThenPreparedAndItsDeletedDemoIsNotSeededAgain()
+      throws Exception {
+    var path = Files.createDirectories(tempDir.resolve("legacy")).resolve("sail.db");
+    try (var legacy = LegacyDatabase.create(path, "catalog")) {
+      legacy.project("sail", "name: sail\n", "uday", "uday");
+      legacy.journal("project", "demo", "2-demo", "uday", "erasure");
+    }
+    var steps = new ArrayList<String>();
+
+    var said =
+        captureStderr(
+            () ->
+                MigrateCommand.converge(
+                    path,
+                    true,
+                    new MigrateCommand.Scope.DatabaseOnly(""),
+                    (db, json) -> steps.add("host")));
+
+    assertTrue(said.contains("Converted " + path + " from Sail 0.58."), said);
+    try (var migrated = Sqlite.open(path)) {
+      assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(migrated).currentVersion());
+      assertEquals(
+          List.of("sail"),
+          new ProjectStore(migrated).list().stream().map(ProjectStore.ProjectRow::name).toList());
+    }
+    assertTrue(Files.exists(path.resolveSibling("sail.db.0.58.bak")));
+    assertEquals(List.of(), steps);
+  }
+
+  @Test
+  void aBoxIsConvertedOnlyByRootWhichSeesEveryProcessHoldingItsDatabase() throws Exception {
+    assumeFalse(SailPaths.isRoot(), "the refusal is of a migrate not run as root");
+    var path = Files.createDirectories(tempDir.resolve("box")).resolve("sail.db");
+    LegacyDatabase.create(path, "catalog").close();
+    var steps = new ArrayList<String>();
+
+    var refused =
+        assertThrows(
+            Remedied.State.class,
+            () ->
+                MigrateCommand.converge(
+                    path, true, new MigrateCommand.Scope.Box(), (db, json) -> steps.add("host")));
+
+    assertEquals(
+        "A 0.58 database is converted as root, which sees every process holding it.",
+        refused.reason());
+    assertEquals(List.of(Remedy.sail("migrate")), refused.remedy().commands());
+    assertEquals(List.of(), steps);
+    try (var legacy = Sqlite.open(path)) {
+      assertEquals(LegacyConversion.VERSION, new SchemaManager(legacy).currentVersion());
+    }
+  }
+
+  @Test
+  void migrateTakesTheFlagSail058sUpgradePassesIt() {
+    assertDoesNotThrow(() -> new CommandLine(new MigrateCommand()).parseArgs("--non-interactive"));
   }
 
   private static String captureStderr(Runnable action) {

@@ -16,9 +16,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /**
- * The sync lane on the binary engineers install, a fleet of the build under test, across real sshd
- * and the gateway's forced command. See {@link NativeFleet} for how the binaries arrive and why a
- * box is a container.
+ * The sync lane on the binaries engineers install, a fleet of the build under test and one upgraded
+ * to it from the release before, across real sshd and the gateway's forced command. See {@link
+ * NativeFleet} for how the binaries arrive and why a box is a container.
  */
 @Timeout(value = 15, unit = TimeUnit.MINUTES)
 class NativeFleetIT {
@@ -28,6 +28,54 @@ class NativeFleetIT {
 
   private static final int BODY_BYTES = 48_000;
   private static final int CUT_AFTER_BYTES = 3_000_000;
+
+  @Test
+  void a058FleetConvertsMainThenItsNodeKeepingProjectsFilesAndOpenWorkOnly() throws Exception {
+    try (var fleet = NativeFleet.openOrSkip()) {
+      var main = fleet.main("uday", fleet.released());
+      var mady = fleet.node("mady", fleet.released());
+      main.serving(
+          () -> {
+            main.createSpecs("open", 2, BODY_BYTES);
+            main.createSpecs("closed", 1, BODY_BYTES);
+            main.apiOk("spec", "update", "closed-1", "--status", "archived");
+            main.apiOk("spec", "comment", "open-1", "--body", "kept with its spec");
+            main.apiOk("spec", "comment", "closed-1", "--body", "dropped with its spec");
+            main.shOk("printf 'echo up\\n' > /tmp/setup.sh && chmod 755 /tmp/setup.sh");
+            main.sailOk(
+                "project", "files", "add", "-p", "demo", "/tmp/setup.sh", "--as", "setup.sh");
+          });
+      mady.sailOk("sync");
+      assertEquals(
+          "closed-1\nopen-1\nopen-2", mady.query("SELECT id FROM specs ORDER BY id").strip());
+
+      var converted = main.upgrade(fleet.candidate());
+
+      assertTrue(converted.contains("from Sail 0.58. Kept"), converted);
+      assertEquals("open-1\nopen-2", main.query("SELECT id FROM specs ORDER BY id").strip());
+      var notYet = mady.sail("sync");
+      assertNotEquals(0, notYet.exit(), notYet::output);
+      assertTrue(notYet.output().contains("upgrade"), notYet::output);
+
+      var node = mady.upgrade(fleet.candidate());
+      mady.sailOk("sync");
+
+      assertTrue(node.contains("from Sail 0.58 as a node"), node);
+      assertEquals("open-1\nopen-2", mady.query("SELECT id FROM specs ORDER BY id").strip());
+      assertEquals("kept with its spec", mady.query("SELECT body FROM room_messages").strip());
+      assertEquals(
+          main.query("SELECT id, content_hash, size, mode FROM project_files ORDER BY id"),
+          mady.query("SELECT id, content_hash, size, mode FROM project_files ORDER BY id"));
+      fleet.assertConverged(mady);
+      fleet.assertHeadsAgree(mady);
+
+      fleet.offline(mady, () -> mady.retitle("open-1", "edited on the node"));
+      mady.sailOk("sync");
+
+      assertEquals("edited on the node", main.title("open-1"));
+      fleet.assertConverged(mady);
+    }
+  }
 
   @Test
   void aFleetKeepsEveryWriteOfAnOfflineNodeAndSurfacesTheConflict() throws Exception {
