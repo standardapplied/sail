@@ -31,6 +31,8 @@ import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 @ActingAs(value = Actor.Lane.CLI, handle = "uday")
@@ -738,7 +740,9 @@ class LegacyConversionTest {
     assertEquals(LegacyConversion.VERSION, versionOf(file));
   }
 
+  /** Ubuntu's SQLite refuses a path of 512 characters or more; Apple's takes longer ones. */
   @Test
+  @EnabledOnOs(OS.LINUX)
   void aCopySqliteCannotMakeFailsWithTheRemedyAndChangesNothing() throws IOException {
     var deep = dir;
     while (482 - deep.toString().length() > 150) {
