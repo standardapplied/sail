@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -371,6 +372,22 @@ class PtySessionTest {
       }
     } finally {
       session.close();
+    }
+  }
+
+  @Test
+  void aSessionWhoseShellIsGoneWhileAJobHoldsItsTerminalEndsAtItsCloseNotAtTheEscalation()
+      throws Exception {
+    var session = session("trap '' HUP; sleep 60 & echo job:$!:started");
+    var client = new Collector();
+    session.attach(client, true, "uday");
+    client.awaitOutput(":started");
+    var job = Long.parseLong(client.outputText().replaceAll("(?s).*job:(\\d+):started.*", "$1"));
+    try {
+      assertTimeoutPreemptively(Duration.ofSeconds(3), session::close);
+      assertEquals("exited(0)", session.endedReason());
+    } finally {
+      ProcessHandle.of(job).ifPresent(ProcessHandle::destroyForcibly);
     }
   }
 

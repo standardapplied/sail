@@ -365,7 +365,7 @@ public final class Pty implements AutoCloseable {
    * end of stream (a closed fd reports {@code EBADF}).
    */
   @Override
-  public void close() {
+  public synchronized void close() {
     if (closed) {
       return;
     }
