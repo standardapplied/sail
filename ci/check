@@ -5,6 +5,7 @@ cd "$(dirname "$0")/.."
 
 readonly MODULES="sail-core sail-harness sail-infra"
 readonly DEFAULT_IT_SECONDS=10
+readonly PREPARED_SOURCE=sail-infra/src/test/java/ai/singlr/sail/engine/AbstractIncusIT.java
 
 usage() {
   cat >&2 <<'EOF'
@@ -17,6 +18,8 @@ Usage:
                                 print the IT classes of shard INDEX (1-based) of COUNT
   ci/check its INDEX COUNT [EXCLUDED_IT...] -- [MAVEN_ARG...]
                                 run the IT classes of that shard under -Pintegration
+  ci/check prepared-image import|export DIR
+                                load the incus suites' prepared image from DIR, or keep it there
 EOF
   exit 2
 }
@@ -129,6 +132,43 @@ its() {
     "$@"
 }
 
+prepared_alias() {
+  local alias
+  alias=$(sed -n 's/.*PREPARED_ALIAS = "\([^"]*\)";.*/\1/p' "$PREPARED_SOURCE")
+  if [[ -z $alias ]]; then
+    echo "ci/check: $PREPARED_SOURCE names no PREPARED_ALIAS." >&2
+    exit 1
+  fi
+  echo "$alias"
+}
+
+prepared_image() {
+  local verb=${1:-} dir=${2:-}
+  [[ -n $dir ]] || usage
+  local alias
+  alias=$(prepared_alias)
+  case $verb in
+    import)
+      if [[ -f $dir/prepared.tar.gz ]]; then
+        incus image import "$dir/prepared.tar.gz" --alias "$alias"
+        echo "Imported $alias from $dir."
+      else
+        echo "No prepared image in $dir; the first suite bakes $alias."
+      fi
+      ;;
+    export)
+      if incus image show "$alias" > /dev/null 2>&1; then
+        mkdir -p "$dir"
+        incus image export "$alias" "$dir/prepared"
+        echo "Kept $alias in $dir."
+      else
+        echo "No $alias on this host; nothing to keep."
+      fi
+      ;;
+    *) usage ;;
+  esac
+}
+
 changed_tests() {
   local base
   base=$(git merge-base origin/main HEAD)
@@ -167,5 +207,6 @@ case ${1:-} in
   unit) shift; unit "$@" ;;
   shard) shift; shard "$@" ;;
   its) shift; its "$@" ;;
+  prepared-image) shift; prepared_image "$@" ;;
   *) usage ;;
 esac

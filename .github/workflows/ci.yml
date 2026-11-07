@@ -253,10 +253,10 @@ jobs:
           job-status: ${{ job.status }}
 
   # The incus suites in shards balanced on ci/it-seconds. `ci/check shard` places every IT class,
-  # one with no recorded time included, in exactly one shard; NativeFleetIT runs in its own job.
+  # one with no recorded time included, in exactly one shard. The two suites that take the native
+  # binaries run in their own jobs, so no shard waits for the native build.
   incus-integration:
     name: Incus-backed integration tests (shard ${{ matrix.shard }} of 4)
-    needs: native
     strategy:
       fail-fast: false
       matrix:
@@ -279,36 +279,52 @@ jobs:
       - name: Enable the runner's systemd user manager
         uses: ./.github/actions/systemd-user
 
-      - name: Install and initialize incus
-        # incus ships in Ubuntu 24.04 itself. The runner image also carries third-party apt
-        # sources (Chrome, Microsoft, ...) whose index fetches fail on their own schedule, and a
-        # plain update refreshes them all — so only Ubuntu's own sources are refreshed here.
-        run: |
-          sudo find /etc/apt/sources.list.d -type f ! -name ubuntu.sources -delete
-          sudo apt-get update
-          sudo apt-get install -y incus
-          sudo incus admin init --minimal
-          sudo chmod o+rw /var/lib/incus/unix.socket
+      - name: Set up incus
+        id: incus
+        uses: ./.github/actions/incus
 
-      - name: Give launched containers outbound internet
-        # The runner's Docker install sets the iptables FORWARD policy to DROP, which silently
-        # drops the incus NAT bridge's egress, so containers can resolve DNS but cannot connect
-        # out (apt/image pulls time out). Allow forwarding so provisioned containers reach the net.
-        run: |
-          sudo sysctl -w net.ipv4.ip_forward=1
-          sudo iptables -P FORWARD ACCEPT
+      - name: Run incus integration tests
+        run: >
+          ci/check its ${{ matrix.shard }} 4 NativeFleetIT UpgradeE2EIT
+          2>&1 | tee "$RUNNER_TEMP/maven.log"
 
-      - name: Verify incus is reachable by the runner
-        run: |
-          which incus
-          incus version
-          incus list
+      - name: Keep the prepared image for the next run
+        if: success() && steps.incus.outputs.prepared-hit != 'true'
+        run: ci/check prepared-image export "$RUNNER_TEMP/prepared-image"
 
-      # Every suite launches this image; fetched once here, its download is no test class's time,
-      # so the shards' weights in ci/it-seconds hold whichever class a shard runs first.
-      - name: Fetch the base image
-        run: |
-          incus image copy images:ubuntu/24.04 local: --alias ubuntu-24.04-base --quiet
+      - name: Leave the test evidence
+        if: always()
+        uses: ./.github/actions/test-evidence
+        with:
+          job-status: ${{ job.status }}
+          label: shard-${{ matrix.shard }}
+
+  # The upgrade end to end on incus: the release .github/released-tag pins, upgraded to this
+  # commit's native binary.
+  native-upgrade:
+    name: Native upgrade tests
+    needs: native
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: incus
+
+      - name: Enable the runner's systemd user manager
+        uses: ./.github/actions/systemd-user
+
+      - name: Set up incus
+        id: incus
+        uses: ./.github/actions/incus
 
       - name: Take this commit's native binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -316,10 +332,15 @@ jobs:
           name: native-binaries
           path: ${{ runner.temp }}/native
 
-      - name: Run incus integration tests
+      - name: Run the native upgrade tests
         run: |
           chmod +x "$RUNNER_TEMP/native/sail" "$RUNNER_TEMP/native/sail-linux-amd64"
-          ci/check its ${{ matrix.shard }} 4 NativeFleetIT -- \
+          mvn -B -Pintegration verify \
+            -Dit.test=UpgradeE2EIT \
+            -Dtest=NoUnitTests \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dfailsafe.failIfNoSpecifiedTests=false \
+            -Djacoco.skip=true \
             -Dsail.it.requireNative=true \
             -Dsail.it.nativeBinary="$RUNNER_TEMP/native/sail" \
             -Dsail.it.releasedBinary="$RUNNER_TEMP/native/sail-linux-amd64" \
@@ -330,14 +351,14 @@ jobs:
         uses: ./.github/actions/test-evidence
         with:
           job-status: ${{ job.status }}
-          label: shard-${{ matrix.shard }}
 
   # The one check a branch rule requires. A job that needs another reads as skipped when that one
   # fails, and a skipped check reads as passing, so this fails unless every job succeeded.
   ci-passed:
     name: CI passed
     if: always()
-    needs: [unit, dependency-scan, native, native-fleet, fleet-integration, incus-integration]
+    needs:
+      [unit, dependency-scan, native, native-fleet, native-upgrade, fleet-integration, incus-integration]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

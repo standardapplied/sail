@@ -2623,8 +2623,8 @@ no pairing is removed through the gateway as before, and no key file is touched.
 ## Continuous integration
 
 One workflow, `.github/workflows/ci.yml`, runs on a pull request, on a push to main and on
-`workflow_dispatch`. Every job starts at once except the native suites, which wait only for the
-one native build:
+`workflow_dispatch`. Every job starts at once except the two native suites, which wait only for
+the one native build:
 
 | Check | What it runs | What it needs |
 |---|---|---|
@@ -2633,7 +2633,9 @@ one native build:
 | `Native binaries` | the candidate (`-Ob` quick build) and the release `.github/released-tag` pins, each smoke-tested, uploaded as `native-binaries` | nothing else |
 | `Native fleet sync tests` | `NativeFleetIT`: sync end to end on native binaries in Podman boxes | `native-binaries` |
 | `Multi-node control-plane integration tests` | every `*IT` that runs without incus | the runner's systemd user manager |
-| `Incus-backed integration tests (shard i of 4)` | `ci/check its i 4 NativeFleetIT`: that shard's `*IT` classes on a real incus | incus and `native-binaries` |
+| `Native upgrade tests` | `UpgradeE2EIT`: the pinned release upgraded to this commit's binary on a real incus | incus and `native-binaries` |
+| `Incus-backed integration tests (shard i of 4)` | `ci/check its i 4 NativeFleetIT UpgradeE2EIT`: that shard's `*IT` classes on a real incus | incus |
+| `CI passed` | nothing: it fails unless every job above succeeded | every job |
 
 - **One entry point.** `ci/check` is what CI runs and what a contributor runs, so the two cannot
   drift; see CONTRIBUTING.
@@ -2655,6 +2657,10 @@ one native build:
   class, one with no recorded time included, in exactly one shard, longest first onto the
   lightest, from the per-class seconds in `ci/it-seconds`. A class's line there is only a weight:
   refresh it from a run's failsafe times when the shards drift apart.
+- **Incus is set up by one action.** `.github/actions/incus` installs it, opens its containers'
+  egress, fetches the base image and restores the suites' prepared image (the base plus every
+  package they install, `AbstractIncusIT`'s bake) from a cache kept per week and per source that
+  defines it; a shard that baked it on a miss keeps it with `ci/check prepared-image export`.
 - **Dependencies come from a cache.** Every job restores `~/.m2` through the `maven-cache`
   action, one cache per kind of job keyed on the poms, so each kind keeps what it alone resolves;
   this repository's own modules are never cached.
