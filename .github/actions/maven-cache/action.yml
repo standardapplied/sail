@@ -1,0 +1,23 @@
+name: Maven cache
+description: >
+  Restores ~/.m2/repository for one kind of job and saves it when that job first resolves a new
+  set of poms, so each kind keeps the plugins and dependencies it alone needs. This repository's
+  own modules are never cached: every job builds or installs them from the checkout.
+
+inputs:
+  kind:
+    description: The kind of job, e.g. `unit-sail-infra` or `incus`; jobs of one kind share a cache.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          ~/.m2/repository
+          !~/.m2/repository/ai/singlr
+        key: maven-${{ runner.os }}-${{ inputs.kind }}-${{ hashFiles('**/pom.xml') }}
+        restore-keys: |
+          maven-${{ runner.os }}-${{ inputs.kind }}-
+          maven-${{ runner.os }}-

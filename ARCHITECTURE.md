@@ -2647,13 +2647,20 @@ one native build:
   its own tests see Apple's libraries; a test of Linux-only behaviour says so with
   `@EnabledOnOs(OS.LINUX)`.
 - **One native build per commit.** The `Native binaries` job builds the candidate once and every
-  native suite downloads it. CI tests the quick build; `release.yml` builds the optimized one.
+  native suite downloads it. CI tests the quick build (`-Ob`, about half the build time);
+  `release.yml` builds the optimized one (`-O2`), which only its smoke test (`-V`,
+  `_pty-selftest`) runs. The two compile the same program; what only `-O2` could expose — a race
+  faster code opens, a miscompile — is the accepted gap.
 - **The incus suites run in balanced shards.** `ci/check shard` places every concrete `*IT`
   class, one with no recorded time included, in exactly one shard, longest first onto the
   lightest, from the per-class seconds in `ci/it-seconds`. A class's line there is only a weight:
   refresh it from a run's failsafe times when the shards drift apart.
-- **Dependencies come from a cache.** Every job restores `~/.m2` (`setup-graalvm`'s `cache:
-  maven`), keyed on the poms.
+- **Dependencies come from a cache.** Every job restores `~/.m2` through the `maven-cache`
+  action, one cache per kind of job keyed on the poms, so each kind keeps what it alone resolves;
+  this repository's own modules are never cached.
+- **One check proves a commit.** `CI passed` fails unless every other job succeeded: a job that
+  needs a failed one reads as skipped, and a skipped check reads as passing, so a branch rule
+  requires this check, not the jobs one by one. `release.yml` waits for the whole run.
 - **Every fleet runs one build.** The fleet suites run boxes of the candidate only: a box of
   another release is refused at the sync hello, so there is no hop to rehearse.
 - **A job leaves its evidence.** Each job that runs tests tees its maven log and ends with the

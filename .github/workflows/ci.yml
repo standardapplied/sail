@@ -17,9 +17,10 @@ defaults:
     shell: bash
 
 jobs:
-  # The unit verdict, one module per job so the slowest module bounds it, not their sum. Each
-  # module's coverage gates run on Linux; macOS runs the same tests, since a release ships a macOS
-  # binary and only its own tests see Apple's libraries. No other job runs a unit test.
+  # The unit verdict, one module per job so the slowest module bounds it, not their sum. `ci/check
+  # unit` runs the module's wildcard-import check, its tests and spotless, with its coverage gates
+  # on Linux. macOS runs the same tests, since a release ships a macOS binary and only its own
+  # tests see Apple's libraries. No other job runs a unit test.
   unit:
     name: Unit tests (${{ matrix.module }}, ${{ matrix.os }})
     strategy:
@@ -37,14 +38,10 @@ jobs:
           java-version: '25'
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache: 'maven'
 
-      - name: Forbid wildcard imports
-        run: |
-          if grep -rEn 'import +(static +)?[a-zA-Z0-9_.]+\.\*;' --include='*.java' ${{ matrix.module }}; then
-            echo "::error::Wildcard imports are forbidden. Import each symbol explicitly."
-            exit 1
-          fi
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: unit-${{ matrix.module }}
 
       - name: Unit tests and quality gates
         run: >
@@ -80,7 +77,10 @@ jobs:
           java-version: '25'
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache: 'maven'
+
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: scan
 
       # The NVD database is project-independent, so the cache key is keyed only on the OS,
       # never on pom.xml — a version bump must not cold-start the cache. github.run_id makes the
@@ -142,7 +142,10 @@ jobs:
           java-version: '25'
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache: 'maven'
+
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: native
 
       - name: Build and fetch the native binaries
         id: binaries
@@ -161,7 +164,7 @@ jobs:
         with:
           name: native-binaries
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 14
           path: ${{ runner.temp }}/native
 
   native-fleet:
@@ -177,7 +180,10 @@ jobs:
           java-version: '25'
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache: 'maven'
+
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: native-fleet
 
       - name: Take this commit's native binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -222,7 +228,10 @@ jobs:
           java-version: '25'
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache: 'maven'
+
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: multi-node
 
       - name: Enable the runner's systemd user manager
         uses: ./.github/actions/systemd-user
@@ -262,7 +271,10 @@ jobs:
           java-version: '25'
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache: 'maven'
+
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: incus
 
       - name: Enable the runner's systemd user manager
         uses: ./.github/actions/systemd-user
@@ -292,6 +304,11 @@ jobs:
           incus version
           incus list
 
+      # Every suite launches this image; fetched once here, its download is no test class's time,
+      # so the shards' weights in ci/it-seconds hold whichever class a shard runs first.
+      - name: Fetch the base image
+        run: incus image copy images:ubuntu/24.04 local: --alias ubuntu-24.04-base --quiet
+
       - name: Take this commit's native binaries
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -313,3 +330,24 @@ jobs:
         with:
           job-status: ${{ job.status }}
           label: shard-${{ matrix.shard }}
+
+  # The one check a branch rule requires. A job that needs another reads as skipped when that one
+  # fails, and a skipped check reads as passing, so this fails unless every job succeeded.
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [unit, dependency-scan, native, native-fleet, fleet-integration, incus-integration]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != success ]; then
+              echo "::error::A job ended $result, so this commit is not proven."
+              exit 1
+            fi
+          done

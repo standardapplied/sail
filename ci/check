@@ -3,16 +3,16 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-readonly MODULES=(sail-core sail-harness sail-infra)
+readonly MODULES="sail-core sail-harness sail-infra"
 readonly DEFAULT_IT_SECONDS=10
 
 usage() {
   cat >&2 <<'EOF'
 Usage:
   ci/check                      format, then run the tests of classes changed against origin/main
-  ci/check full                 the whole verify, as CI's unit jobs run it together
+  ci/check full                 every module's tests and gates, as CI's unit jobs run them together
   ci/check unit MODULE [--no-coverage]
-                                one module's tests and gates, its upstream modules installed first
+                                one module's import check, tests and gates, its upstream installed first
   ci/check shard INDEX COUNT [EXCLUDED_IT...]
                                 print the IT classes of shard INDEX (1-based) of COUNT
   ci/check its INDEX COUNT [EXCLUDED_IT...] -- [MAVEN_ARG...]
@@ -22,29 +22,40 @@ EOF
 }
 
 upstream_of() {
-  local module=$1 upstream=()
-  for candidate in "${MODULES[@]}"; do
+  local module=$1 upstream="" candidate
+  for candidate in $MODULES; do
     [[ $candidate == "$module" ]] && break
-    upstream+=("$candidate")
+    upstream="${upstream:+$upstream,}$candidate"
   done
-  local IFS=,
-  echo "${upstream[*]}"
+  echo "$upstream"
 }
 
 require_module() {
-  local module=$1
-  for candidate in "${MODULES[@]}"; do
+  local module=$1 candidate
+  for candidate in $MODULES; do
     [[ $candidate == "$module" ]] && return
   done
-  echo "ci/check: '$module' is not one of ${MODULES[*]}." >&2
+  echo "ci/check: '$module' is not one of $MODULES." >&2
   exit 2
+}
+
+forbid_wildcard_imports() {
+  if grep -rEn 'import +(static +)?[a-zA-Z0-9_.]+\.\*;' --include='*.java' "$@"; then
+    echo "ci/check: wildcard imports are forbidden. Import each symbol explicitly." >&2
+    exit 1
+  fi
 }
 
 unit() {
   local module=${1:-} coverage=true
   [[ -n $module ]] || usage
   require_module "$module"
-  [[ ${2:-} == --no-coverage ]] && coverage=false
+  case ${2:-} in
+    "") ;;
+    --no-coverage) coverage=false ;;
+    *) usage ;;
+  esac
+  forbid_wildcard_imports "$module"
   local upstream
   upstream=$(upstream_of "$module")
   if [[ -n $upstream ]]; then
@@ -57,9 +68,14 @@ unit() {
   fi
 }
 
+full() {
+  forbid_wildcard_imports $MODULES
+  mvn -B clean verify
+}
+
 it_classes() {
   local excluded=" $* "
-  grep -rL --include='*IT.java' 'abstract class' sail-*/src/test/java \
+  grep -rLE --include='*IT.java' '^(public )?abstract class [A-Za-z0-9_]+IT\b' sail-*/src/test/java \
     | sed -E 's#.*/([^/]+)\.java$#\1#' \
     | while read -r name; do
         [[ $excluded == *" $name "* ]] || echo "$name"
@@ -89,16 +105,16 @@ shard() {
 }
 
 its() {
-  local index=${1:-} count=${2:-}
-  shift 2 || usage
-  local excluded=()
-  while (($#)) && [[ $1 != -- ]]; do
-    excluded+=("$1")
+  [[ $# -ge 2 ]] || usage
+  local index=$1 count=$2 excluded=""
+  shift 2
+  while [[ $# -gt 0 && $1 != -- ]]; do
+    excluded="$excluded $1"
     shift
   done
-  [[ ${1:-} == -- ]] && shift
+  [[ $# -gt 0 ]] && shift
   local members
-  members=$(shard "$index" "$count" "${excluded[@]}")
+  members=$(shard "$index" "$count" $excluded)
   if [[ -z $members ]]; then
     echo "ci/check: shard $index of $count holds no IT class." >&2
     exit 1
@@ -134,7 +150,7 @@ changed_tests() {
 }
 
 changed() {
-  mvn -B -q -o spotless:apply
+  mvn -B -q spotless:apply
   local tests
   tests=$(changed_tests)
   if [[ -z $tests ]]; then
@@ -142,12 +158,12 @@ changed() {
     return
   fi
   echo "Testing: $tests"
-  mvn -B -o test -Dtest="$tests" -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true
+  mvn -B test -Dtest="$tests" -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true
 }
 
 case ${1:-} in
   "") changed ;;
-  full) mvn -B clean verify ;;
+  full) full ;;
   unit) shift; unit "$@" ;;
   shard) shift; shard "$@" ;;
   its) shift; its "$@" ;;

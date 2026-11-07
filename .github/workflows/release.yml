@@ -15,7 +15,7 @@ jobs:
   ci-passed:
     name: CI passed on this commit
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       actions: read
       contents: read
@@ -27,7 +27,7 @@ jobs:
           run=""
           for attempt in $(seq 1 20); do
             run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" \
-              --event push --json databaseId --jq '.[0].databaseId // empty')
+              --branch main --event push --json databaseId --jq '.[0].databaseId // empty')
             [ -n "$run" ] && break
             sleep 15
           done
@@ -65,7 +65,10 @@ jobs:
           java-version: '25'
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          cache: 'maven'
+
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: release
 
       - name: Build native image
         run: mvn package -Pnative -DskipTests
