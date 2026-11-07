@@ -327,6 +327,41 @@ class EventBusTest {
     }
   }
 
+  @Test
+  void aSubscriberIsToldWhenItsSubscriptionClosesByItselfOrByTheBus() {
+    var bus = new EventBus();
+    var told = new ArrayList<String>();
+    var own = bus.subscribe(closing("own", told));
+    bus.subscribe(closing("bus", told));
+
+    own.close();
+    bus.close();
+
+    assertEquals(List.of("own", "bus"), told);
+  }
+
+  private static EventSubscriber closing(String name, List<String> told) {
+    return new EventSubscriber() {
+      @Override
+      public String name() {
+        return name;
+      }
+
+      @Override
+      public Predicate<Event> filter() {
+        return EventSubscriber.all();
+      }
+
+      @Override
+      public void onEvent(Event event) {}
+
+      @Override
+      public void closed() {
+        told.add(name);
+      }
+    };
+  }
+
   private static EventSubscriber subscriber(
       String name, Predicate<Event> filter, Consumer<Event> sink) {
     return new EventSubscriber() {

@@ -9,6 +9,38 @@ permissions:
   contents: write
 
 jobs:
+  # A release tests nothing again: it ships the commit CI already proved on main, Linux and macOS.
+  # This waits for that run, so the binaries build meanwhile and a red or missing run stops the
+  # publish.
+  ci-passed:
+    name: CI passed on this commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Wait for this commit's CI run on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run=""
+          for attempt in $(seq 1 20); do
+            run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" \
+              --event push --json databaseId --jq '.[0].databaseId // empty')
+            [ -n "$run" ] && break
+            sleep 15
+          done
+          if [ -z "$run" ]; then
+            echo "::error::No CI run on main for $GITHUB_SHA. Push the commit to main, let CI pass, then tag it."
+            exit 1
+          fi
+          if ! gh run watch "$run" --repo "$GITHUB_REPOSITORY" --exit-status --interval 30 > /dev/null; then
+            echo "::error::CI run $run for $GITHUB_SHA did not pass. Fix main, then move the tag to a green commit."
+            exit 1
+          fi
+          echo "CI run $run passed for $GITHUB_SHA."
+
   build:
     strategy:
       fail-fast: false
@@ -33,9 +65,7 @@ jobs:
           java-version: '25'
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Run tests
-        run: mvn clean test
+          cache: 'maven'
 
       - name: Build native image
         run: mvn package -Pnative -DskipTests
@@ -70,7 +100,7 @@ jobs:
             sail-infra/target/${{ matrix.binary-name }}.cosign.bundle
 
   release:
-    needs: build
+    needs: [ci-passed, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

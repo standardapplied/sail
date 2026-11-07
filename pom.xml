@@ -35,6 +35,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <sail.it.requireIncus>false</sail.it.requireIncus>
+        <sail.native.optimization>-O2</sail.native.optimization>
     </properties>
 
     <dependencyManagement>
@@ -71,6 +72,9 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.5.4</version>
                 <configuration>
+                    <!-- one fork per core: each class runs in some fork, so classes share no state -->
+                    <forkCount>1C</forkCount>
+                    <reuseForks>true</reuseForks>
                     <argLine>
                         @{argLine}
                         -Duser.timezone=UTC

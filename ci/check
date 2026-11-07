@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+readonly MODULES=(sail-core sail-harness sail-infra)
+readonly DEFAULT_IT_SECONDS=10
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  ci/check                      format, then run the tests of classes changed against origin/main
+  ci/check full                 the whole verify, as CI's unit jobs run it together
+  ci/check unit MODULE [--no-coverage]
+                                one module's tests and gates, its upstream modules installed first
+  ci/check shard INDEX COUNT [EXCLUDED_IT...]
+                                print the IT classes of shard INDEX (1-based) of COUNT
+  ci/check its INDEX COUNT [EXCLUDED_IT...] -- [MAVEN_ARG...]
+                                run the IT classes of that shard under -Pintegration
+EOF
+  exit 2
+}
+
+upstream_of() {
+  local module=$1 upstream=()
+  for candidate in "${MODULES[@]}"; do
+    [[ $candidate == "$module" ]] && break
+    upstream+=("$candidate")
+  done
+  local IFS=,
+  echo "${upstream[*]}"
+}
+
+require_module() {
+  local module=$1
+  for candidate in "${MODULES[@]}"; do
+    [[ $candidate == "$module" ]] && return
+  done
+  echo "ci/check: '$module' is not one of ${MODULES[*]}." >&2
+  exit 2
+}
+
+unit() {
+  local module=${1:-} coverage=true
+  [[ -n $module ]] || usage
+  require_module "$module"
+  [[ ${2:-} == --no-coverage ]] && coverage=false
+  local upstream
+  upstream=$(upstream_of "$module")
+  if [[ -n $upstream ]]; then
+    mvn -B -q install -pl "$upstream" -am -DskipTests -Djacoco.skip=true
+  fi
+  if $coverage; then
+    mvn -B verify -pl "$module"
+  else
+    mvn -B verify -pl "$module" -Djacoco.skip=true
+  fi
+}
+
+it_classes() {
+  local excluded=" $* "
+  grep -rL --include='*IT.java' 'abstract class' sail-*/src/test/java \
+    | sed -E 's#.*/([^/]+)\.java$#\1#' \
+    | while read -r name; do
+        [[ $excluded == *" $name "* ]] || echo "$name"
+      done \
+    | sort
+}
+
+shard() {
+  local index=${1:-} count=${2:-}
+  [[ $index =~ ^[1-9][0-9]*$ && $count =~ ^[1-9][0-9]*$ && $index -le $count ]] || usage
+  shift 2
+  it_classes "$@" \
+    | awk -v fallback="$DEFAULT_IT_SECONDS" '
+        NR == FNR { seconds[$2] = $1; next }
+        { cost = ($1 in seconds) ? seconds[$1] : fallback; print cost, $1 }
+      ' ci/it-seconds - \
+    | sort -k1,1nr -k2,2 \
+    | awk -v index_="$index" -v count="$count" '
+        {
+          best = 1
+          for (i = 2; i <= count; i++) if (load[i] < load[best]) best = i
+          load[best] += $1
+          if (best == index_) members = members (members ? "," : "") $2
+        }
+        END { print members }
+      '
+}
+
+its() {
+  local index=${1:-} count=${2:-}
+  shift 2 || usage
+  local excluded=()
+  while (($#)) && [[ $1 != -- ]]; do
+    excluded+=("$1")
+    shift
+  done
+  [[ ${1:-} == -- ]] && shift
+  local members
+  members=$(shard "$index" "$count" "${excluded[@]}")
+  if [[ -z $members ]]; then
+    echo "ci/check: shard $index of $count holds no IT class." >&2
+    exit 1
+  fi
+  echo "Shard $index of $count: $members"
+  mvn -B -Pintegration verify \
+    -Dit.test="$members" \
+    -Dfailsafe.failIfNoSpecifiedTests=false \
+    -Dtest=NoUnitTests \
+    -Dsurefire.failIfNoSpecifiedTests=false \
+    -Djacoco.skip=true \
+    "$@"
+}
+
+changed_tests() {
+  local base
+  base=$(git merge-base origin/main HEAD)
+  { git diff --name-only "$base"; git ls-files --others --exclude-standard; } \
+    | { grep -E '^sail-[a-z]+/src/(main|test)/java/.+\.java$' || true; } \
+    | sort -u \
+    | while read -r path; do
+        [[ -f $path ]] || continue
+        local name
+        name=$(basename "$path" .java)
+        if [[ $path == */src/test/* ]]; then
+          [[ $name == *Test ]] && echo "$name"
+        else
+          echo "${name}*Test"
+        fi
+      done \
+    | sort -u \
+    | paste -sd, -
+}
+
+changed() {
+  mvn -B -q -o spotless:apply
+  local tests
+  tests=$(changed_tests)
+  if [[ -z $tests ]]; then
+    echo "ci/check: no Java class changed against origin/main; nothing to test."
+    return
+  fi
+  echo "Testing: $tests"
+  mvn -B -o test -Dtest="$tests" -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true
+}
+
+case ${1:-} in
+  "") changed ;;
+  full) mvn -B clean verify ;;
+  unit) shift; unit "$@" ;;
+  shard) shift; shard "$@" ;;
+  its) shift; its "$@" ;;
+  *) usage ;;
+esac
