@@ -48,8 +48,8 @@ run. Each check is a line in `~/.sail-fleet/<run>/report.txt`, beside the log of
 
 The scenarios: the roster and each node's projects, each role's spec writes at the node CLI, the
 in-container `spec` CLI and the HTTP API Mast calls, a conflict parked and resolved the same
-everywhere, a room's conversation and who may post in it, and shared files reaching exactly the
-nodes granted their project.
+everywhere, a room's conversation and who may post in it, shared files reaching exactly the nodes
+granted their project, and a project's app served and reached at every door, never by a viewer.
 
 ## Coverage policy
 

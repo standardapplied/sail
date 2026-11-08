@@ -34,6 +34,8 @@ Usage:
                                 conversation reads the same on every box; no other project's room leaks
   ci/fleet files RUN            files shared on main and on client reach exactly the nodes granted their
                                 project, updates and removals follow, and a viewer cannot share
+  ci/fleet portal RUN           main declares beta's app; eng serves it, it answers in the container, at
+                                the portal skill and over HTTP; the viewer cannot bring it up at any door
   ci/fleet upgrade RUN TARGET   upgrade main, then every node, to TARGET, and check that the projects
                                 and the conflicts scenario's spec and conversation held
   ci/fleet ssh RUN BOX COMMAND  run COMMAND on BOX as the operator account
@@ -528,6 +530,40 @@ files() {
   check "$run" "plan.md is gone from every box" file_gone "$run" acme plan.md main eng client observer
 }
 
+readonly PORTAL='$(find /home/dev -path "*sail-portal/scripts/portal" -print -quit)'
+
+serves() {
+  local out
+  out=$(on "$1" "$2" "sudo sail project serve $3") || { echo "$out"; return 1; }
+  echo "$out"
+  grep -qE "$4" <<< "$out"
+}
+
+portal() {
+  local run=${1:-}
+  [[ -n $run ]] || usage
+  check "$run" "main declares beta's app on port 8080" \
+    on "$run" main "echo '{\"app\":{\"command\":\"python3 -m http.server 8080\",\"port\":8080}}' | sudo sail project config set beta processes -"
+  check "$run" "main declares codex as beta's agent, so its skills are installed" \
+    on "$run" main "echo '{\"type\":\"codex\"}' | sudo sail project config set beta agent -"
+  check "$run" "every node syncs twice" sync_all "$run"
+  check "$run" "eng applies beta" apply_project "$run" eng beta
+  check "$run" "observer applies beta" apply_project "$run" observer beta
+  check "$run" "eng serves beta and says its port listens" serves "$run" eng beta 'app +8080 +listening'
+  check "$run" "inside eng's beta, the app answers on 8080" container_allows "$run" eng beta "curl -sf localhost:8080/ > /dev/null"
+  check "$run" "inside eng's beta, the portal skill reads the port" \
+    container_allows "$run" eng beta "$PORTAL ports | grep -qE '8080.*listening'"
+  check "$run" "over HTTP, eng reads beta's ports" http_door "$run" eng eng 200 GET /v1/projects/beta/ports
+  check "$run" "observer (viewer) cannot serve beta at the CLI" \
+    refused "$run" observer "credential is read-only" "sudo sail project serve beta"
+  check "$run" "over HTTP, the viewer cannot serve beta" http_door "$run" observer obs 403 POST /v1/projects/beta/serve '{}'
+  check "$run" "inside observer's beta, the portal skill cannot bring it up" \
+    container_refuses "$run" observer beta "read_only_credential" "$PORTAL up 5"
+  check "$run" "eng stops beta's processes" on "$run" eng "sudo sail project serve beta --stop"
+  check "$run" "inside eng's beta, the app no longer answers" \
+    container_refuses "$run" eng beta "" "curl -sf localhost:8080/ > /dev/null"
+}
+
 runs_version() {
   local run=$1 box=$2 expected=$3 printed
   printed=$(on "$run" "$box" "sail -V")
@@ -618,6 +654,7 @@ run() {
   [[ -n $target ]] || step conflicts "$id"
   step rooms "$id"
   step files "$id"
+  step portal "$id"
   if [[ ${FLEET_KEEP:-0} != always && ( $status == 0 || ${FLEET_KEEP:-0} != 1 ) ]]; then
     down "$id"
   else
@@ -640,6 +677,7 @@ case ${1:-} in
   conflicts) shift; conflicts "$@" ;;
   rooms) shift; rooms "$@" ;;
   files) shift; files "$@" ;;
+  portal) shift; portal "$@" ;;
   ssh) shift; [[ $# -ge 3 ]] || usage; r=$1 b=$2; shift 2; on "$r" "$b" "$@" ;;
   down) shift; down "$@" ;;
   *) usage ;;
