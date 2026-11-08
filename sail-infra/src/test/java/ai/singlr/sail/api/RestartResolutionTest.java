@@ -88,10 +88,26 @@ class RestartResolutionTest {
         RestartResolution.decide("oauth-flow", spec(SpecStatus.PENDING, null), restart));
   }
 
+  @Test
+  void aDraftIsRefusedWithTheCommandThatMakesItReadyNotARestart() {
+    var decision = RestartResolution.decide("oauth-flow", spec(SpecStatus.DRAFT, null), false);
+
+    var refused = assertInstanceOf(RestartResolution.Refused.class, decision);
+    assertEquals(ErrorCode.SPEC_NOT_READY, refused.code());
+    assertEquals(
+        "Spec 'oauth-flow' is a draft. A spec is dispatched only when pending.", refused.message());
+    assertEquals(
+        "Make it ready with sail spec update oauth-flow --status pending, then dispatch it.",
+        refused.fix().plain());
+    assertEquals(
+        List.of(Remedy.sail("spec update", "oauth-flow", "--status", "pending")),
+        refused.fix().commands());
+  }
+
   @ParameterizedTest
   @EnumSource(
       value = SpecStatus.class,
-      names = {"PENDING"},
+      names = {"PENDING", "DRAFT"},
       mode = EnumSource.Mode.EXCLUDE)
   void everyNonPendingStatusWithoutRestartIsRefusedSpecNotReady(SpecStatus status) {
     var decision = RestartResolution.decide("oauth-flow", spec(status, "agent/x"), false);

@@ -3,6 +3,7 @@
 ## 0.62.0
 
 - **A review whose finding quotes a fenced code block is read whole.** The GCP fleet's agent loop found every review of a README change erroring three times and escalating ("reviewer output unparseable: Failed to parse JSON: while scanning a quoted scalar"): the reviewer's finding quoted the fix it wanted, a markdown section with a ```` ```bash ```` block, and the verdict's block ended at that inner fence, so the JSON was cut short. A verdict's block now ends only at a fence that opens its own line, which a JSON string, holding no line break, never does, and the next block is looked for after that fence, so a fence quoted inside a finding opens no block of its own either.
+- **Dispatching a draft says how to make it ready.** `sail spec dispatch --spec <id>` of a draft answered "To dispatch it again, run … --restart (this resets its status to pending and records the restart as a lifecycle event)", for a spec never dispatched, whose restart would be recorded though none happened. It now says "Spec '<id>' is a draft. A spec is dispatched only when pending. Make it ready with sail spec update <id> --status pending, then dispatch it." Every other status keeps the `--restart` remedy.
 
 ## 0.61.0
 
