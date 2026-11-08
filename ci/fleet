@@ -1,0 +1,281 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+readonly PROJECT=${FLEET_PROJECT:-sail-mast-511621}
+readonly ZONE=${FLEET_ZONE:-us-central1-a}
+readonly MACHINE=${FLEET_MACHINE:-e2-standard-4}
+readonly RUNS=${FLEET_RUNS:-$HOME/.sail-fleet}
+readonly BOXES="main eng client observer"
+readonly MAX_RUN=6h
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  ci/fleet run VERSION          a fresh fleet on release VERSION (e.g. 0.59.0), every scenario, then down
+  ci/fleet up RUN               create the run's four VMs and wait until each answers ssh
+  ci/fleet install RUN VERSION  install release VERSION on every box from the README's install line
+  ci/fleet join RUN             init main, join the three nodes with their roles, sync
+  ci/fleet projects RUN         create acme, beta, gamma on main, grant them, check each node holds its own
+  ci/fleet doors RUN            each role's spec writes at the node CLI, and where each spec syncs to
+  ci/fleet ssh RUN BOX COMMAND  run COMMAND on BOX as the operator account
+  ci/fleet down [RUN]           delete the run's VMs, or every fleet VM when RUN is left out
+
+Each step logs to $FLEET_RUNS/RUN/ (default ~/.sail-fleet); report.txt holds one line per check.
+FLEET_KEEP=1 leaves a failed run's VMs up for diagnosis.
+EOF
+  exit 2
+}
+
+vm() { echo "sail-fleet-$1-$2"; }
+
+gc() { gcloud --project "$PROJECT" --quiet "$@"; }
+
+on() {
+  local run=$1 box=$2
+  shift 2
+  gc compute ssh "$(vm "$run" "$box")" --zone "$ZONE" --command "$*" \
+    -- -o ConnectTimeout=15 -o ServerAliveInterval=30 -o BatchMode=yes
+}
+
+log_dir() {
+  mkdir -p "$RUNS/$1"
+  echo "$RUNS/$1"
+}
+
+check() {
+  local run=$1 name=$2
+  shift 2
+  local dir log
+  dir=$(log_dir "$run")
+  log="$dir/$(echo "$name" | tr -c 'A-Za-z0-9._-' '_').log"
+  if "$@" > "$log" 2>&1; then
+    echo "PASS $name" | tee -a "$dir/report.txt"
+  else
+    echo "FAIL $name (see $log)" | tee -a "$dir/report.txt"
+    return 1
+  fi
+}
+
+internal_ip() {
+  gc compute instances describe "$(vm "$1" "$2")" --zone "$ZONE" \
+    --format='value(networkInterfaces[0].networkIP)'
+}
+
+up() {
+  local run=${1:-} box
+  [[ -n $run ]] || usage
+  for box in $BOXES; do
+    gc compute instances create "$(vm "$run" "$box")" --zone "$ZONE" --machine-type "$MACHINE" \
+      --image-family ubuntu-2404-lts-amd64 --image-project ubuntu-os-cloud \
+      --boot-disk-size 50GB --boot-disk-type pd-balanced \
+      --provisioning-model SPOT --instance-termination-action DELETE --max-run-duration "$MAX_RUN" \
+      --labels "purpose=sail-fleet,run=$run,box=$box" > /dev/null &
+  done
+  wait
+  for box in $BOXES; do
+    local attempt
+    for attempt in $(seq 1 30); do
+      on "$run" "$box" true > /dev/null 2>&1 && break
+      [[ $attempt == 30 ]] && { echo "ci/fleet: $box never answered ssh." >&2; exit 1; }
+      sleep 5
+    done
+  done
+}
+
+install_box() {
+  local run=$1 box=$2 version=$3
+  on "$run" "$box" "curl -fsSL https://raw.githubusercontent.com/standardapplied/sail/main/install.sh | bash -s $version && sail -V"
+}
+
+install() {
+  local run=${1:-} version=${2:-} box failed=0
+  [[ -n $run && -n $version ]] || usage
+  for box in $BOXES; do
+    check "$run" "install $version on $box" install_box "$run" "$box" "$version" &
+  done
+  for box in $BOXES; do
+    wait -n || failed=1
+  done
+  return $failed
+}
+
+init_main() {
+  on "$1" main "sudo sail init --as-main --handle uday --name 'Uday Fleet' --email uday@fleet.example"
+}
+
+join_node() {
+  local run=$1 box=$2 handle=$3 role=$4 scoped=$5 main_ip=$6 dir
+  dir=$(log_dir "$run")
+  on "$run" "$box" "sudo sail init --main $main_ip --handle $handle --name '${handle^} Fleet' --email $handle@fleet.example" \
+    | tee "$dir/init-$box.out"
+  local line
+  line=$(grep -m1 -oE "sudo sail fde add .*" "$dir/init-$box.out" | sed -E "s/--role [a-z]+/--role $role/")
+  if [[ -z $line ]]; then
+    echo "ci/fleet: $box's init printed no fde add line." >&2
+    return 1
+  fi
+  if [[ $scoped == scoped ]]; then
+    line="$line --scoped"
+  fi
+  on "$run" main "$line"
+  on "$run" "$box" "sudo sail sync && sudo sail sync status --json"
+}
+
+join() {
+  local run=${1:-}
+  [[ -n $run ]] || usage
+  check "$run" "init main as uday (admin)" init_main "$run"
+  local main_ip
+  main_ip=$(internal_ip "$run" main)
+  check "$run" "join eng (member, every project)" join_node "$run" eng eng member all "$main_ip"
+  check "$run" "join client (member, scoped)" join_node "$run" client client member scoped "$main_ip"
+  check "$run" "join observer (viewer, scoped)" join_node "$run" observer obs viewer scoped "$main_ip"
+  check "$run" "main's roster has every FDE with its role" roster "$run"
+}
+
+roster() {
+  local listed
+  listed=$(on "$1" main "sudo sail fde list" | tr -s ' ')
+  echo "$listed"
+  local row
+  for row in "client Client Fleet client@fleet.example member active" \
+    "eng Eng Fleet eng@fleet.example member active all" \
+    "obs Obs Fleet obs@fleet.example viewer active" \
+    "uday Uday Fleet uday@fleet.example admin active all"; do
+    grep -qF "$row" <<< "$listed" || { echo "missing: $row"; return 1; }
+  done
+}
+
+create_project() {
+  on "$1" main "echo '{\"name\":\"$2\",\"resources\":{\"cpu\":2,\"memory\":\"4GB\",\"disk\":\"20GB\"}}' | sudo sail project create $2 --definition -"
+}
+
+holds() {
+  local run=$1 box=$2 expected=$3 listed
+  on "$run" "$box" "sudo sail sync" > /dev/null
+  listed=$(on "$run" "$box" "sudo sail project list --json 2>/dev/null" \
+    | python3 -I -c 'import json,sys; print(" ".join(sorted(p["name"] for p in json.load(sys.stdin))))')
+  echo "$box holds: $listed"
+  [[ $listed == "$expected" ]]
+}
+
+holds_no_trace_of() {
+  local run=$1 box=$2 counts
+  shift 2
+  counts=$(on "$run" "$box" "sudo apt-get install -y -qq sqlite3 > /dev/null 2>&1; for w in $*; do printf '%s=%s ' \$w \$(sudo sqlite3 -readonly /root/.sail/sail.db .dump | grep -ci \"\\b\$w\\b\"); done")
+  echo "$box: $counts"
+  ! grep -qE '=[1-9]' <<< "$counts"
+}
+
+allowed() {
+  local run=$1 box=$2
+  shift 2
+  on "$run" "$box" "$*"
+}
+
+refused() {
+  local run=$1 box=$2 because=$3 out
+  shift 3
+  if out=$(on "$run" "$box" "$*" 2>&1); then
+    echo "$out"
+    echo "expected a refusal"
+    return 1
+  fi
+  echo "$out"
+  grep -qF "$because" <<< "$out"
+}
+
+specs_on() {
+  local run=$1 box=$2 expected=$3 listed
+  listed=$(on "$run" "$box" "sudo sail spec list --all-projects --all --json --no-sync 2>/dev/null" \
+    | python3 -I -c 'import json,sys; print(" ".join(sorted(s["project"] + "/" + s["id"] for s in json.load(sys.stdin)["specs"])))')
+  echo "$box holds: $listed"
+  [[ $listed == "$expected" ]]
+}
+
+sync_all() {
+  local run=$1 round box
+  for round in 1 2; do
+    for box in eng client observer; do
+      on "$run" "$box" "sudo sail sync" > /dev/null
+    done
+  done
+}
+
+doors() {
+  local run=${1:-}
+  [[ -n $run ]] || usage
+  check "$run" "observer (viewer) cannot create a spec" \
+    refused "$run" observer "credential is read-only" "sudo sail spec create -p acme --id obs-try --title 'viewer writes'"
+  check "$run" "client creates a spec in acme" \
+    allowed "$run" client "sudo sail spec create -p acme --id client-acme --title 'client in acme'"
+  check "$run" "client cannot create a spec in beta, which it was never granted" \
+    refused "$run" client "sudo sail fde grant client beta" "sudo sail spec create -p beta --id client-beta --title 'client in beta'"
+  check "$run" "eng creates a spec in gamma" \
+    allowed "$run" eng "sudo sail spec create -p gamma --id eng-gamma --title 'eng in gamma'"
+  check "$run" "every node syncs twice" sync_all "$run"
+  check "$run" "observer reads client's spec" allowed "$run" observer "sudo sail spec show client-acme"
+  check "$run" "observer cannot comment on it" \
+    refused "$run" observer "credential is read-only" "sudo sail spec comment client-acme --body 'a viewer speaks'"
+  check "$run" "main holds both specs" specs_on "$run" main "acme/client-acme gamma/eng-gamma"
+  check "$run" "eng holds both specs" specs_on "$run" eng "acme/client-acme gamma/eng-gamma"
+  check "$run" "client holds the acme spec alone" specs_on "$run" client "acme/client-acme"
+  check "$run" "observer holds the acme spec alone" specs_on "$run" observer "acme/client-acme"
+}
+
+projects() {
+  local run=${1:-} p
+  [[ -n $run ]] || usage
+  for p in acme beta gamma; do
+    check "$run" "main creates $p" create_project "$run" "$p"
+  done
+  check "$run" "main grants client acme, obs acme and beta" \
+    on "$run" main "sudo sail fde grant client acme && sudo sail fde grant obs acme && sudo sail fde grant obs beta"
+  check "$run" "eng holds every project" holds "$run" eng "acme beta demo gamma"
+  check "$run" "client holds acme alone" holds "$run" client "acme"
+  check "$run" "observer holds acme and beta" holds "$run" observer "acme beta"
+  check "$run" "client's database has no trace of beta, gamma or demo" holds_no_trace_of "$run" client beta gamma demo
+  check "$run" "observer's database has no trace of gamma or demo" holds_no_trace_of "$run" observer gamma demo
+}
+
+down() {
+  local run=${1:-} filter="labels.purpose=sail-fleet"
+  [[ -n $run ]] && filter="$filter AND labels.run=$run"
+  local names
+  names=$(gc compute instances list --filter="$filter" --format='value(name)')
+  [[ -z $names ]] && { echo "No fleet VMs to delete."; return; }
+  gc compute instances delete $names --zone "$ZONE" > /dev/null
+  echo "Deleted: $names"
+}
+
+run() {
+  local version=${1:-}
+  [[ -n $version ]] || usage
+  local id
+  id="r$(date -u +%Y%m%d-%H%M)"
+  echo "Fleet run $id on $version; logs in $RUNS/$id"
+  local status=0
+  { up "$id" && install "$id" "$version" && join "$id" && projects "$id" && doors "$id"; } || status=1
+  if [[ $status == 0 || ${FLEET_KEEP:-0} != 1 ]]; then
+    down "$id"
+  else
+    echo "Kept $id for diagnosis: ci/fleet down $id when done."
+  fi
+  echo "--- $RUNS/$id/report.txt"
+  cat "$RUNS/$id/report.txt"
+  return $status
+}
+
+case ${1:-} in
+  run) shift; run "$@" ;;
+  up) shift; up "$@" ;;
+  install) shift; install "$@" ;;
+  join) shift; join "$@" ;;
+  projects) shift; projects "$@" ;;
+  doors) shift; doors "$@" ;;
+  ssh) shift; [[ $# -ge 3 ]] || usage; r=$1 b=$2; shift 2; on "$r" "$b" "$@" ;;
+  down) shift; down "$@" ;;
+  *) usage ;;
+esac
