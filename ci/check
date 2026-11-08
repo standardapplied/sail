@@ -146,8 +146,16 @@ methods() {
   local annotated all picked
   annotated=$(grep -cE '^[[:space:]]*@(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\b' "$file" || true)
   all=$(awk '/^[[:space:]]*@(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)([^A-Za-z]|$)/ { test = 1 }
-             test && match($0, /void [A-Za-z0-9_]+\(/) {
-               print substr($0, RSTART + 5, RLENGTH - 6); test = 0 }' "$file")
+             test {
+               line = $0
+               gsub(/@[A-Za-z0-9_.]+(\([^)]*\))?/, "", line)
+               if (match(line, /[A-Za-z0-9_]+[[:space:]]*\(/)) {
+                 name = substr(line, RSTART, RLENGTH)
+                 sub(/[[:space:]]*\($/, "", name)
+                 print name
+                 test = 0
+               }
+             }' "$file")
   if [[ $(printf '%s\n' "$all" | grep -c .) != "$annotated" ]]; then
     echo "ci/check: $class has $annotated tests but $(printf '%s\n' "$all" | grep -c .) were read; split it by hand." >&2
     exit 1
