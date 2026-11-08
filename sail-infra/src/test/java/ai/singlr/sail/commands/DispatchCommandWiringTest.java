@@ -386,7 +386,7 @@ class DispatchCommandWiringTest {
   }
 
   @Test
-  void aDraftSpecIsRefusedWithTheCommandThatDispatchesItAgain() throws Exception {
+  void aDraftSpecIsRefusedWithTheCommandThatMakesItReady() throws Exception {
     seed();
     Acting.system(
         () ->
@@ -396,11 +396,9 @@ class DispatchCommandWiringTest {
 
     assertEquals(1, ran.exit(), ran.out());
     assertEquals(
-        "  ✗ Spec 'auth' is not pending (current status: draft). A spec is dispatched only when"
-            + " pending. To dispatch it again, run "
-            + OperatorCommand.here().sail("spec dispatch -p acme --spec auth --restart")
-            + " (this resets its status to pending and records the restart as a lifecycle"
-            + " event).\n",
+        "  ✗ Spec 'auth' is a draft. A spec is dispatched only when pending. Make it ready with "
+            + OperatorCommand.here().sail("spec update auth --status pending")
+            + ", then dispatch it.\n",
         ran.err());
   }
 

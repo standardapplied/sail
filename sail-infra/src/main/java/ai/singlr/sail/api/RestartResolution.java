@@ -60,6 +60,15 @@ public sealed interface RestartResolution
     if (spec.status() == SpecStatus.PENDING) {
       return new NotRestarted();
     }
+    if (!restart && spec.status() == SpecStatus.DRAFT) {
+      return new Refused(
+          ErrorCode.SPEC_NOT_READY,
+          "Spec '" + specId + "' is a draft. A spec is dispatched only when pending.",
+          Remedy.of(
+              "Make it ready with ",
+              Remedy.sail("spec update", specId, "--status", "pending"),
+              ", then dispatch it."));
+    }
     if (!restart) {
       return new Refused(
           ErrorCode.SPEC_NOT_READY,
