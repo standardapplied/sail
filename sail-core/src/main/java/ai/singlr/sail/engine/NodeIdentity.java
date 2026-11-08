@@ -74,7 +74,9 @@ public final class NodeIdentity {
   }
 
   /**
-   * Whether this box narrates its own work to Slack: main or standalone. A box with no {@code
+   * Whether this box narrates its own work to Slack: main or standalone. A node never posts — its
+   * transitions sync to main, whose {@code _sync} process turns them into the lifecycle events
+   * main's reactor announces — so there is exactly one notifier per fleet. A box with no {@code
    * host.yaml} was never made a node, so it narrates; one whose file is empty or unreadable —
    * caught mid-write — posts nothing until the file reads whole ({@link #declaresNotNode}).
    */

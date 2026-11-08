@@ -6,12 +6,10 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.EventSubscriber;
-import ai.singlr.sail.config.SyncConfig;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -23,21 +21,6 @@ import org.junit.jupiter.api.Test;
  * does), and what a restart orphaned is failed by this box's machinery.
  */
 class ServerStartCommandTest {
-
-  @Test
-  void mainNarratesSlack() {
-    assertTrue(ServerStartCommand.narratesSlack(new SyncConfig("main", null, "uday")));
-  }
-
-  @Test
-  void aStandaloneBoxNarratesItsOwnWork() {
-    assertTrue(ServerStartCommand.narratesSlack(SyncConfig.unset()));
-  }
-
-  @Test
-  void aNodePointedAtMainNeverPosts() {
-    assertFalse(ServerStartCommand.narratesSlack(new SyncConfig("node", "sail@main", "uday")));
-  }
 
   @Test
   void slackIsNarratedOnlyWhileTheBoxSaysItNarratesAskedForEachEvent() throws Exception {

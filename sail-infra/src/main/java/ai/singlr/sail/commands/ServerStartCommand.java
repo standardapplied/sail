@@ -36,7 +36,6 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
-import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.BindPolicy;
@@ -435,20 +434,11 @@ public final class ServerStartCommand implements Runnable {
   }
 
   /**
-   * Whether this box is the single Slack notification authority. Main and a standalone box narrate
-   * their own state; a node never posts — its transitions sync to main, whose {@code _sync} process
-   * turns them into the lifecycle events main's reactor announces. Exactly one notifier per fleet.
-   */
-  public static boolean narratesSlack(SyncConfig sync) {
-    return !HostSync.isNode(sync);
-  }
-
-  /**
    * {@code reactor}, acting only while {@code narrates} answers yes for the event at hand: sail-api
    * passes {@link NodeIdentity#narrates}, so a box that joins a main after sail-api started stops
    * posting at once, one that becomes main starts, and a file caught mid-write posts nothing.
    */
-  static EventSubscriber whileNarrating(EventSubscriber reactor, BooleanSupplier narrates) {
+  public static EventSubscriber whileNarrating(EventSubscriber reactor, BooleanSupplier narrates) {
     return new EventSubscriber() {
       @Override
       public String name() {

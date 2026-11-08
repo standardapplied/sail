@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 import picocli.CommandLine.Help.Ansi;
 
@@ -24,6 +25,8 @@ import picocli.CommandLine.Help.Ansi;
  * through environment variables for scripts and tests.
  */
 final class NodeSync {
+
+  private static final System.Logger LOG = System.getLogger(NodeSync.class.getName());
 
   static final String DEBOUNCE_ENV = "SAIL_SYNC_DEBOUNCE_MS";
   static final String FRESHEN_TTL_ENV = "SAIL_SYNC_FRESHEN_TTL_MS";
@@ -59,6 +62,7 @@ final class NodeSync {
    */
   static SyncScheduler serverScheduler(
       Supplier<SyncConfig> sync, Map<String, String> env, SyncScheduler.Reconcile reconcile) {
+    var unreadable = new AtomicBoolean();
     return new SyncScheduler(
             reconcile,
             millis(env, DEBOUNCE_ENV, SyncScheduler.DEFAULT_DEBOUNCE),
@@ -66,14 +70,19 @@ final class NodeSync {
         .onlyWhile(
             () -> {
               try {
-                return HostSync.isNode(sync.get());
-              } catch (RuntimeException unreadable) {
-                System.getLogger(NodeSync.class.getName())
-                    .log(
-                        System.Logger.Level.WARNING,
-                        "host.yaml could not be read ("
-                            + unreadable.getMessage()
-                            + "); sync waits until it reads whole");
+                var node = HostSync.isNode(sync.get());
+                if (unreadable.getAndSet(false)) {
+                  LOG.log(System.Logger.Level.INFO, "host.yaml reads whole again; sync resumes");
+                }
+                return node;
+              } catch (RuntimeException failure) {
+                if (!unreadable.getAndSet(true)) {
+                  LOG.log(
+                      System.Logger.Level.WARNING,
+                      "host.yaml could not be read ("
+                          + failure.getMessage()
+                          + "); sync waits until it reads whole");
+                }
                 return false;
               }
             });
