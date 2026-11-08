@@ -104,7 +104,7 @@ class SkillCliHelperTest {
   }
 
   private String call(String... rest) {
-    return "--silent --show-error --fail-with-body --max-time 20 --unix-socket "
+    return "--silent --fail-with-body --max-time 20 --unix-socket "
         + socket
         + " -H Authorization: Bearer sailbox_test "
         + String.join(" ", rest);

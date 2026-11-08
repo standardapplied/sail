@@ -33,8 +33,15 @@ public final class SocketPreamble {
       [ -n "$CREDENTIAL" ] || die "no credential: SAIL_RUN_CREDENTIAL is unset and $BOX_CREDENTIAL_FILE is unreadable: this box has no sync handle. Give it one on the host: __SAIL_SET_HANDLE__"
 
       api() {
-        curl --silent --show-error --fail-with-body --max-time 20 --unix-socket "$SOCKET" \\
-          -H "Authorization: Bearer $CREDENTIAL" "$@"
+        local status=0
+        curl --silent --fail-with-body --max-time 20 --unix-socket "$SOCKET" \\
+          -H "Authorization: Bearer $CREDENTIAL" "$@" || status=$?
+        echo
+        case $status in
+          0) ;;
+          22) exit 1 ;;
+          *) die "the sail API at $SOCKET did not answer (curl exit $status)" ;;
+        esac
       }
       """;
 
