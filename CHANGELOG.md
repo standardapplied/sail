@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.62.0
+
+- **A review whose finding quotes a fenced code block is read whole.** The GCP fleet's agent loop found every review of a README change erroring three times and escalating ("reviewer output unparseable: Failed to parse JSON: while scanning a quoted scalar"): the reviewer's finding quoted the fix it wanted, a markdown section with a ```` ```bash ```` block, and the verdict's block ended at that inner fence, so the JSON was cut short. A verdict's block now ends only at a fence that opens its own line, which a JSON string, holding no line break, never does, and the next block is looked for after that fence, so a fence quoted inside a finding opens no block of its own either.
+
 ## 0.61.0
 
 - **A project this box does not hold is refused, never answered as empty.** The GCP fleet found that on a node granted only `acme`, `sail project files ls -p beta` printed "No shared files on beta." and `sail spec list -p beta` "No specs found for project 'beta'", both exiting 0, though beta has files and specs; a misspelt name read the same way, and `sail project files add` wrote into a project the catalog did not hold. Every read and act that names a project, at the CLI and over the API, now refuses one this box's catalog does not hold with "Project 'beta' is not in the catalog.", exactly as one outside the caller's scope is refused, so a node cannot tell a project it was not granted from one that does not exist.

@@ -230,16 +230,33 @@ public final class FindingParser {
     while (true) {
       var start = haystack.indexOf(marker, from);
       if (start < 0) return;
-      from = start + marker.length();
       var contentStart = output.indexOf('\n', start);
       if (contentStart < 0) return;
       contentStart++;
-      var end = output.indexOf("```", contentStart);
+      var end = closingFence(output, contentStart);
       var candidate =
           (end < 0 ? output.substring(contentStart) : output.substring(contentStart, end)).strip();
       if (candidate.startsWith("{")) {
         blocks.add(candidate);
       }
+      if (end < 0) return;
+      from = end + 3;
+    }
+  }
+
+  /**
+   * Where the fence closing a block whose content starts at {@code from} begins, or -1: the first
+   * {@code ```} that opens its line. A JSON string holds no line break, so a fence a finding quotes
+   * inside one never opens a line and never ends the block.
+   */
+  private static int closingFence(String output, int from) {
+    var at = from;
+    while (true) {
+      var fence = output.indexOf("```", at);
+      if (fence < 0 || output.substring(output.lastIndexOf('\n', fence - 1) + 1, fence).isBlank()) {
+        return fence;
+      }
+      at = fence + 3;
     }
   }
 

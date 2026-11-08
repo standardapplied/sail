@@ -76,6 +76,39 @@ class FindingParserTest {
   }
 
   @Test
+  void aFindingThatQuotesAFencedCodeBlockIsReadWhole() {
+    var output =
+        """
+        ```json
+        {"verdicts": [], "findings": [{"severity": "HIGH", "category": "API_CONTRACT", \
+        "file": "README.md", "title": "No Building section", "description": "Add, after the \
+        image:\\n\\n## Building\\n\\n```bash\\nmvn -q verify\\n```\\n\\nThis builds every module."}]}
+        ```
+        """;
+
+    var findings = parsed(output).findings();
+
+    assertEquals(1, findings.size());
+    assertTrue(findings.getFirst().description().contains("```bash\nmvn -q verify\n```"));
+  }
+
+  @Test
+  void aFenceQuotedInsideTheLastEnvelopeStartsNoLaterBlock() {
+    var output =
+        """
+        ```json
+        {"verdicts": [], "findings": [{"severity": "LOW", "category": "LOGIC", "title": "T", \
+        "description": "The reply should open with ```json and close with a fence."}]}
+        ```
+        """;
+
+    var findings = parsed(output).findings();
+
+    assertEquals(1, findings.size());
+    assertEquals("T", findings.getFirst().title());
+  }
+
+  @Test
   void parsesVerdictsAlongsideNewFindings() {
     var output =
         """
