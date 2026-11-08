@@ -26,7 +26,6 @@
 113 ReviewAgentLoopIT
 0 RoomRelayDeliveryIT
 0 RoomStreamIT
-111 RyukReapsContainersIT
 16 ScopeTeardownIT
 1 ServerStartShutdownIT
 0 SessionReportDeliveryIT
