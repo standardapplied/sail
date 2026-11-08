@@ -43,7 +43,8 @@ public final class MessageAuthority implements WriteAuthority {
       return Optional.empty();
     }
     var roomId = MessageStore.roomIdOf(next);
-    var posting = PostingRule.decide(actor, roomId, rooms.owners(roomId));
+    var posting =
+        PostingRule.decide(actor, roomId, rooms.holds(roomId, null), rooms.owners(roomId));
     if (posting.isPresent()) {
       return posting;
     }

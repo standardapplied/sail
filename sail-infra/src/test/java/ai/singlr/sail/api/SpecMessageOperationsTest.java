@@ -159,20 +159,28 @@ class SpecMessageOperationsTest {
   }
 
   @Test
-  void onlyTheSpecOwnerOrAnAdminCanPost() {
-    var refused =
+  void everyWriterOfTheProjectPostsAndAViewerCannot() {
+    var byMember =
         Actor.call(
                 member("mallory"),
                 () ->
                     operations.postRoomMessage(
                         "room",
                         new SpecMessageRequest(
-                            "foreign instruction", null, MessageStore.Mark.PLAIN),
+                            "a word from mallory", null, MessageStore.Mark.PLAIN),
                         "mallory"))
+            .orThrow();
+    assertEquals("mallory", byMember.message().author());
+    var refused =
+        Actor.call(
+                new Actor("peek", Role.VIEWER, Actor.Lane.CLI),
+                () ->
+                    operations.postRoomMessage(
+                        "room",
+                        new SpecMessageRequest("a viewer speaks", null, MessageStore.Mark.PLAIN),
+                        "peek"))
             .asFailure();
-
-    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.errorCode());
-    assertTrue(operations.roomMessages("room", null, null, 50).orThrow().messages().isEmpty());
+    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, refused.errorCode());
 
     var agent = Actor.agentPrincipal("codex/run-1", "ada");
     var posted =

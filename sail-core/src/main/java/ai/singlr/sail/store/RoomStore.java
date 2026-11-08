@@ -254,6 +254,26 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   }
 
   /**
+   * Whether conversation {@code roomId} is on this box: a spec lives in it (its own room, or the
+   * room it was born in), or a room's row names it. {@code specId}, a spec whose revision is being
+   * decided (null for none), never counts, so a spec cannot make the room it asks to enter exist.
+   */
+  public boolean holds(String roomId, String specId) {
+    return !db.query(
+            """
+            SELECT 1 FROM specs
+            WHERE (room_id = ?1 OR (coalesce(room_id, '') = '' AND id = ?1))
+                AND (?2 IS NULL OR id <> ?2)
+            UNION ALL
+            SELECT 1 FROM rooms WHERE id = ?1
+            LIMIT 1""",
+            row -> 1,
+            roomId,
+            specId)
+        .isEmpty();
+  }
+
+  /**
    * Who owns conversation {@code roomId}: the one rule every door that admits a post, a terminal
    * pin or a birth into a room decides by, and main's check of a synced post too. A room belongs to
    * the owner of each spec that lives in it (the spec's own room, or the room it was born in) and,

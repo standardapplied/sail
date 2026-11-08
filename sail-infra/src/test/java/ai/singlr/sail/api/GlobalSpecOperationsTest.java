@@ -1481,7 +1481,7 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
-  void aMemberCannotBindTheirSpecIntoSomebodyElsesRoom() {
+  void aMemberSeatsTheirSpecInAnotherMembersRoomAndTheRoomStaysTheirs() {
     var rooms = new RoomStore(db);
     var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
     Acting.as(
@@ -1501,17 +1501,14 @@ class GlobalSpecOperationsTest {
                     "ada")));
     var mallory = new Actor("mallory", Role.MEMBER, Actor.Lane.API);
 
-    var explicit =
-        assertThrows(
-            WriteRefused.class,
-            () ->
-                Acting.by(
-                    mallory,
-                    () ->
-                        withRooms.create(
-                            createReq(Map.of("room_id", "adas-room", "assignee", "mallory")))));
-    assertEquals(Refusal.Kind.NOT_OWNER, explicit.refusal().kind());
-    assertTrue(specStore.findById("auth").isEmpty(), "a refused binding creates no spec");
+    Acting.by(
+        mallory,
+        () -> withRooms.create(createReq(Map.of("room_id", "adas-room", "assignee", "mallory"))));
+    assertEquals(
+        "adas-room",
+        specStore.findById("auth").orElseThrow().roomIdOrIdentity(),
+        "every writer of the project may start work in any of its rooms");
+    assertEquals("ada", rooms.ownerOf("adas-room"), "the room's settings stay ada's");
 
     var byId =
         assertThrows(
@@ -1534,15 +1531,20 @@ class GlobalSpecOperationsTest {
             WriteRefused.class,
             () ->
                 Acting.by(
-                    viewer, () -> withRooms.create(createReq(Map.of("room_id", "adas-room")))));
+                    viewer,
+                    () ->
+                        withRooms.create(
+                            createReq(Map.of("id", "viewers", "room_id", "adas-room")))));
     assertEquals(Refusal.Kind.READ_ONLY, readOnly.refusal().kind());
 
     Acting.by(
         ADMIN,
-        () -> withRooms.create(createReq(Map.of("room_id", "adas-room", "assignee", "mallory"))));
+        () ->
+            withRooms.create(
+                createReq(Map.of("id", "seated", "room_id", "adas-room", "assignee", "mallory"))));
     assertEquals(
         "adas-room",
-        specStore.findById("auth").orElseThrow().roomIdOrIdentity(),
+        specStore.findById("seated").orElseThrow().roomIdOrIdentity(),
         "an admin may seat work in any room");
   }
 

@@ -33,8 +33,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * The posting rule's matrix: off the room lane a writer who is an admin or acts for an owner, on
- * the room lane a principal that acts for an owner.
+ * The posting rule's matrix: off the room lane any writer who acts for an FDE, whoever owns the
+ * conversation; on the room lane a principal that acts for an owner.
  */
 class PostingRuleTest {
 
@@ -59,13 +59,17 @@ class PostingRuleTest {
         new Case("an admin posts anywhere", ADMIN, ownedByAda, null),
         new Case("an admin's push posts anywhere", ADMIN_SYNC, ownedByAda, null),
         new Case("an admin posts where no one owns", ADMIN, List.of(), null),
-        new Case("another member may not", OTHER_API, ownedByAda, Kind.NOT_OWNER),
-        new Case("another member's push may not", OTHER_SYNC, ownedByAda, Kind.NOT_OWNER),
-        new Case("another FDE's agent may not", OTHERS_AGENT, ownedByAda, Kind.NOT_OWNER),
-        new Case("a machine credential may not", MACHINE, ownedByAda, Kind.NOT_OWNER),
+        new Case("another member posts where ada owns", OTHER_API, ownedByAda, null),
+        new Case("another member's push posts where ada owns", OTHER_SYNC, ownedByAda, null),
+        new Case("another FDE's agent posts where ada owns", OTHERS_AGENT, ownedByAda, null),
+        new Case(
+            "a machine credential posts as no one, so may not",
+            MACHINE,
+            ownedByAda,
+            Kind.NOT_AUTHOR),
         new Case("a room principal of another FDE may not", ROOM, List.of(OTHER), Kind.NOT_OWNER),
         new Case("a room principal may not where no one owns", ROOM, List.of(), Kind.NOT_OWNER),
-        new Case("a member may not where no one owns", OWNER_API, List.of(), Kind.NOT_OWNER),
+        new Case("a member posts where no one owns", OWNER_API, List.of(), null),
         new Case("a viewer may not, even as the owner", VIEWER, ownedByAda, Kind.READ_ONLY),
         new Case("a viewer's push may not", VIEWER_SYNC, ownedByAda, Kind.READ_ONLY),
         new Case(
@@ -80,7 +84,33 @@ class PostingRuleTest {
   void decides(Case row) {
     assertEquals(
         Optional.ofNullable(row.refused()),
-        PostingRule.decide(row.actor(), "lobby", row.owners()).map(Refusal::kind));
+        PostingRule.decide(row.actor(), "lobby", true, row.owners()).map(Refusal::kind));
+  }
+
+  @Test
+  void aConversationThisBoxDoesNotHoldTakesNoPostFromAWriterWhoIsNoAdmin() {
+    for (var actor : List.of(OWNER_API, OTHER_SYNC, AGENT, OTHERS_AGENT)) {
+      assertEquals(
+          Optional.of(
+              new Refusal(
+                  Kind.NO_CONVERSATION,
+                  "No conversation 'gone' is on this box: it was deleted, or never here.",
+                  "Check the spec or room id.")),
+          PostingRule.decide(actor, "gone", false, List.of(OWNER)),
+          actor.toString());
+    }
+    assertEquals(
+        Optional.of(Kind.READ_ONLY),
+        PostingRule.decide(VIEWER, "gone", false, List.of()).map(Refusal::kind),
+        "a viewer hears that it is read-only first");
+    assertEquals(
+        Optional.empty(),
+        PostingRule.decide(ADMIN, "gone", false, List.of()),
+        "an admin is decided as before, by no conversation's rows");
+    assertEquals(
+        Optional.of(Kind.NOT_OWNER),
+        PostingRule.decide(ROOM, "gone", false, List.of()).map(Refusal::kind),
+        "the room lane is decided by its owners, as before");
   }
 
   @Test
@@ -88,20 +118,26 @@ class PostingRuleTest {
     assertEquals(
         new Refusal(
             Kind.NOT_OWNER,
-            "'lobby' belongs to bob or ada: only bob or ada or an admin may post there, not you.",
-            "Ask bob or ada to post it, or have an admin do it."),
-        PostingRule.decide(MACHINE, "lobby", List.of(OTHER, OWNER)).orElseThrow());
+            "'lobby' belongs to bob: only bob or an admin may post there, not you.",
+            "Ask bob to post it, or have an admin do it."),
+        PostingRule.decide(ROOM, "lobby", true, List.of(OTHER)).orElseThrow());
     assertEquals(
         new Refusal(
             Kind.NOT_OWNER,
             "No one owns 'lobby' yet, so only an admin may post there.",
             "Claim its spec first with --assignee <you>, or have an admin post."),
-        PostingRule.decide(OWNER_API, "lobby", List.of()).orElseThrow());
+        PostingRule.decide(ROOM, "lobby", true, List.of()).orElseThrow());
+    assertEquals(
+        new Refusal(
+            Kind.NOT_AUTHOR,
+            "This credential acts for no FDE, so a post in 'lobby' would be no one's.",
+            "Post with an FDE's own credential."),
+        PostingRule.decide(MACHINE, "lobby", true, List.of(OWNER)).orElseThrow());
     assertEquals(
         new Refusal(
             Kind.READ_ONLY,
             "Your credential is read-only and cannot change specs.",
             "Ask an admin for a member or admin credential."),
-        PostingRule.decide(VIEWER, "lobby", List.of(OWNER)).orElseThrow());
+        PostingRule.decide(VIEWER, "lobby", true, List.of(OWNER)).orElseThrow());
   }
 }

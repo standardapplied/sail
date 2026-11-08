@@ -83,7 +83,7 @@ public final class SpecAuthority implements WriteAuthority {
         return refused;
       }
     }
-    return claim(actor, id, held, assigneeOf(next), bornIn(id, held));
+    return claim(actor, id, held, assigneeOf(next));
   }
 
   /**
@@ -113,12 +113,13 @@ public final class SpecAuthority implements WriteAuthority {
     if (bornIn == null) {
       return Optional.empty();
     }
-    var posting = PostingRule.decide(actor, bornIn, rooms.owners(bornIn, id, null));
+    var posting =
+        PostingRule.decide(actor, bornIn, rooms.holds(bornIn, id), rooms.owners(bornIn, id, null));
     if (posting.isPresent()) {
       return posting;
     }
     var assignee = assigneeOf(next);
-    return assignee == null ? Optional.empty() : claim(actor, id, null, assignee, bornIn);
+    return assignee == null ? Optional.empty() : claim(actor, id, null, assignee);
   }
 
   /**
@@ -152,12 +153,11 @@ public final class SpecAuthority implements WriteAuthority {
 
   /**
    * The claim rule: an admin assigns anyone; anyone else may only claim a spec that is unassigned,
-   * for the FDE they act as ({@link Actor#actingFde}), and one born in {@code bornIn} only where
-   * they may already post — the spec itself counted as {@code held}, never as the claim would leave
-   * it.
+   * for the FDE they act as ({@link Actor#actingFde}). Claiming gives no voice in a room: every
+   * writer of the project has one already ({@link PostingRule}).
    */
   private Optional<Refusal> claim(
-      Actor actor, String id, Map<String, Object> held, String requested, String bornIn) {
+      Actor actor, String id, Map<String, Object> held, String requested) {
     if (actor.isAdmin()) {
       return Optional.empty();
     }
@@ -172,17 +172,6 @@ public final class SpecAuthority implements WriteAuthority {
               + (current != null ? " (currently '" + current + "')" : "")
               + ".",
           "Ask an admin to reassign it. You may grab a spec only while it is unassigned.");
-    }
-    if (bornIn != null
-        && PostingRule.decide(actor, bornIn, rooms.owners(bornIn, id, held)).isPresent()) {
-      return Refusal.of(
-          Refusal.Kind.ADMIN_ONLY,
-          "Spec '"
-              + id
-              + "' lives in '"
-              + bornIn
-              + "', where you may not post, and claiming it would give you a voice there.",
-          "Ask an admin to assign it to you.");
     }
     return Optional.empty();
   }

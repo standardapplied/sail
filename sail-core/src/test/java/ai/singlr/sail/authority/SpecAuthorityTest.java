@@ -114,10 +114,16 @@ class SpecAuthorityTest {
         allows("the room's owner is born into it", OWNER_API, null, inLobby),
         allows("an agent of the room's owner is born into it", AGENT, null, inLobby),
         allows("an admin is born into any room", ADMIN, null, inLobby),
-        refuses("another member is not born in", OTHER_API, null, inLobby, Kind.NOT_OWNER),
-        refuses("another FDE's agent is not born in", OTHERS_AGENT, null, inLobby, Kind.NOT_OWNER),
-        refuses("a machine credential is not born in", MACHINE, null, inLobby, Kind.NOT_OWNER),
-        refuses("another member's push is not born in", OTHER_SYNC, null, inLobby, Kind.NOT_OWNER),
+        allows("another member is born in", OTHER_API, null, inLobby),
+        allows("another FDE's agent is born in", OTHERS_AGENT, null, inLobby),
+        refuses("a machine credential is not born in", MACHINE, null, inLobby, Kind.NOT_AUTHOR),
+        allows("another member's push is born in", OTHER_SYNC, null, inLobby),
+        refuses(
+            "a member is not born in a room this box does not hold",
+            OTHER_API,
+            null,
+            with(inLobby, "room_id", "nowhere"),
+            Kind.NO_CONVERSATION),
         allows("a birth claims for oneself", OWNER_API, null, with(inLobby, "assignee", OWNER)),
         refuses(
             "a birth naming another is admin-only",
@@ -231,18 +237,16 @@ class SpecAuthorityTest {
             OWNER_API,
             BORN_IN_LOBBY,
             with(BORN_IN_LOBBY, "assignee", OWNER)),
-        refuses(
-            "a member claims no spec born where they may not post",
+        allows(
+            "a member claims an unassigned spec born in another's room",
             OTHER_API,
             BORN_IN_LOBBY,
-            with(BORN_IN_LOBBY, "assignee", OTHER),
-            Kind.ADMIN_ONLY),
-        refuses(
-            "a push claims no spec born where it may not post",
+            with(BORN_IN_LOBBY, "assignee", OTHER)),
+        allows(
+            "a push claims an unassigned spec born in another's room",
             OTHER_SYNC,
             BORN_IN_LOBBY,
-            with(BORN_IN_LOBBY, "assignee", OTHER),
-            Kind.ADMIN_ONLY),
+            with(BORN_IN_LOBBY, "assignee", OTHER)),
         allows(
             "an admin assigns a spec born anywhere",
             ADMIN,
@@ -348,15 +352,15 @@ class SpecAuthorityTest {
   }
 
   @Test
-  void aBirthNeverAdmitsItselfButOwningASpecBornThereIsAVoice() {
-    var claimingBirth = with(BORN_IN_DEN, "assignee", OWNER);
+  void aBirthNeverMakesItsRoomExistButASpecAlreadyBornThereDoes() {
+    var claimingBirth = with(with(BORN_IN_DEN, "room_id", "attic"), "assignee", OWNER);
 
     assertEquals(
-        Optional.of(Kind.NOT_OWNER),
+        Optional.of(Kind.NO_CONVERSATION),
         rule.decide(OWNER_API, SPEC, null, claimingBirth).map(Refusal::kind),
         "the spec being born is not yet one of the room's");
 
-    board.spec("child", "den", OWNER, OWNER);
+    board.spec("child", "attic", OWNER, OWNER);
 
     assertEquals(Optional.empty(), rule.decide(OWNER_API, SPEC, null, claimingBirth));
   }
@@ -435,14 +439,6 @@ class SpecAuthorityTest {
                 + " (currently 'ada').",
             "Ask an admin to reassign it. You may grab a spec only while it is unassigned."),
         rule.decide(OTHER_API, SPEC, OWNED, with(OWNED, "assignee", OTHER)).orElseThrow());
-    assertEquals(
-        new Refusal(
-            Kind.ADMIN_ONLY,
-            "Spec 'auth' lives in 'lobby', where you may not post, and claiming it would give you"
-                + " a voice there.",
-            "Ask an admin to assign it to you."),
-        rule.decide(OTHER_API, SPEC, BORN_IN_LOBBY, with(BORN_IN_LOBBY, "assignee", OTHER))
-            .orElseThrow());
     assertEquals(
         new Refusal(
             Kind.READ_ONLY,

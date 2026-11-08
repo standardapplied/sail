@@ -2066,7 +2066,7 @@ public final class SailOperations implements HostOperations {
           }
           var room = requireRoomOrSpec(roomId);
           Refusals.enforce(
-              PostingRule.decide(actor, room.id(), requireRoomStore().owners(room.id())));
+              PostingRule.decide(actor, room.id(), true, requireRoomStore().owners(room.id())));
           var cli = Strings.isBlank(agent) ? null : agent.strip();
           var data = new LinkedHashMap<String, Object>();
           data.put("room_id", room.id());

@@ -2180,7 +2180,7 @@ the spec. Each listed type has one rule:
 |---|---|---|---|
 | `DRIVES` | an admin; this box's FDE, for a run this box executed (`RunRow.ownedBy`) or a spec or room it owns; retold, an actor who acts for the owner of the spec (`Ownership.ownerOf`) or room (`RoomStore.owners`) it names or that the run it names works — a run that works neither is its own owners' (`RunAuthority.owners`). Never a run's own principal | `agent_session_stopped`, `agent_cancelled`, `agent_failed`, `spec_dispatched`, `spec_restarted`, `review_iteration_started`, `review_stage_started`, `review_stage_passed`, `review_stage_failed`, `review_completed`, `review_errored`, `review_escalated` | the watcher (`agent_session_stopped`); the host CLI's dispatch (`spec_dispatched`, `spec_restarted`) and stop (`agent_cancelled`); main's sync bridge, retelling what a node's synced transition tells (`SyncTransitionEvents`) |
 | `NARRATES` | an admin; this box's FDE for a run this box executed; a run's own principal for that run alone | `agent_session_started`, `agent_stop_nudged`, `agent_tool_started`, `agent_tool_finished` | the in-container hooks over the socket; the host CLI's dispatch and `sail run` (`agent_session_started`) |
-| `ANNOUNCES` | an admin; this box's FDE; retold, an actor who acts for an owner of the conversation the message is in (`RoomStore.owners`), who may post there | `spec_message_posted` | a node's sync, for each message it pulled |
+| `ANNOUNCES` | an admin; this box's FDE; retold, any writer who acts for an FDE, about a message in a conversation, since every writer of the project may post there (`PostingRule`) | `spec_message_posted` | a node's sync, for each message it pulled |
 | `BOX` | an admin, or this box's FDE | `snapshot_created`, `board_updated` | the host CLI's dispatch (`snapshot_created`); a node's sync, for a round that changed the board |
 
 The host token acts as the box's FDE: an admin on main or a standalone box, the synced
@@ -2420,9 +2420,11 @@ no pairing is removed through the gateway as before, and no key file is touched.
     this box last knew the spec, live or deleted (`SpecStore.lastKnown`); any other room is its
     own row's. A room's settings (roster, wake, title, assignee) are its owner's.
   - **Who owns a conversation** (`RoomStore.owners`): the room's owner, and the owner of every
-    spec born in it. The posting rule (`PostingRule`, room lane included), the terminal door and
-    main's decision on a synced message all read it, so the same post is admitted or refused
-    alike on every box. Owning a spec born in a room is a voice there, never its settings.
+    spec born in it. Only the room lane reads it: a room principal posts exactly where it acts for
+    one of them. Every writer who acts for an FDE posts in every conversation of the projects its
+    scope admits that this box holds (`PostingRule`, `RoomStore.holds`), at the terminal door and
+    at main's decision on a synced message alike. Owning a spec born in a room is never its
+    settings.
   - **Who owns a run** (`RunAuthority.owners`): the FDE the run acts for, and its spec's owner
     (for a spec-less run, the box that ran it). Its owners or an admin read its log, stop it and
     change it; a run's own FDE keeps it after its spec is reassigned. A run is born only for
@@ -2456,8 +2458,8 @@ no pairing is removed through the gateway as before, and no key file is touched.
   revision never admits itself. `held` is the projection at the journal's head
   (`RevisionJournal.held`: the last live state over a tombstone, nothing over a withdrawal or
   an erasure), never the row, which the write being decided has already reached. A rule
-  answers a `Refusal` (`READ_ONLY`, `NOT_OWNER`, `ADMIN_ONLY`, `NOT_AUTHOR`, `FIXED`, and the
-  erase rule's `NOT_PRUNABLE`) with the message and fix clients see. `MAIN` and `SYSTEM`
+  answers a `Refusal` (`READ_ONLY`, `NOT_OWNER`, `NO_CONVERSATION`, `ADMIN_ONLY`, `NOT_AUTHOR`,
+  `FIXED`, and the erase rule's `NOT_PRUNABLE`) with the message and fix clients see. `MAIN` and `SYSTEM`
   always pass; a read-only role is refused, except a run's principal reporting its own
   session and a room principal posting where the posting rule lets it. A write is decided at
   exactly one of two points:
@@ -2483,7 +2485,7 @@ no pairing is removed through the gateway as before, and no key file is touched.
     admission with the same refusal. One translator (`Refusals`) turns a refusal, thrown by
     the journal or answered by an admission, into the error clients get, so a kind has one
     code at every door: `READ_ONLY` → `read_only_credential`, `NOT_OWNER` →
-    `forbidden_not_assignee`, `ADMIN_ONLY` → `forbidden_admin_only`, `NOT_AUTHOR` →
+    `forbidden_not_assignee`, `NO_CONVERSATION` → `room_not_found`, `ADMIN_ONLY` → `forbidden_admin_only`, `NOT_AUTHOR` →
     `forbidden_not_author`, `FIXED` → `invalid_request`, `NOT_PRUNABLE` → `spec_not_prunable`,
     `NOT_PUBLISHABLE` → `forbidden`. The socket answers a thrown refusal in HTTP's envelope
     (code, message, fix); the terminal keeps its message-and-fix text.

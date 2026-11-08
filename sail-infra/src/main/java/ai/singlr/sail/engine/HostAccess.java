@@ -69,7 +69,7 @@ public record HostAccess(Sqlite db, RoleRule roles) {
               + room.project()
               + ".");
     }
-    var refused = PostingRule.decide(actor, room.id(), new RoomStore(db).owners(room.id()));
+    var refused = PostingRule.decide(actor, room.id(), true, new RoomStore(db).owners(room.id()));
     if (refused.isPresent()) {
       throw Remedied.io(refused.get().message(), refused.get().fix());
     }

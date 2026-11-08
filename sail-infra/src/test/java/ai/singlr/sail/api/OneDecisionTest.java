@@ -7,7 +7,6 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -228,39 +227,41 @@ class OneDecisionTest {
   }
 
   @Test
-  void postingInAnotherMembersRoomIsRefusedAlikeThroughEveryDoorAndOnMain() throws Exception {
-    assertRefusedOverHttp(
-        http("POST", "/v1/rooms/den/messages", token, "{\"body\":\"hi\"}"), NOT_ADAS_ROOM);
-    assertRefusedOverHttp(
-        http("POST", "/v1/rooms/den/messages", session, "{\"body\":\"hi\"}"), NOT_ADAS_ROOM);
+  void postingInAnotherMembersRoomIsAllowedAlikeThroughEveryDoorAndOnMainButNotOnTheRoomLane()
+      throws Exception {
+    var byToken = http("POST", "/v1/rooms/den/messages", token, "{\"body\":\"by token\"}");
+    assertEquals(201, byToken.statusCode(), byToken.body());
+    var bySession = http("POST", "/v1/rooms/den/messages", session, "{\"body\":\"by session\"}");
+    assertEquals(201, bySession.statusCode(), bySession.body());
     var cli =
         Actor.call(
             CliOperator.of(ADAS_NODE, new FdeStore(db)),
             () ->
                 operations.postRoomMessage(
-                    "den", new SpecMessageRequest("hi", null, MessageStore.Mark.PLAIN), "ada"));
-    var failure = assertInstanceOf(Result.Failure.class, cli, "the host CLI");
-    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, failure.errorCode());
-    assertEquals(NOT_ADAS_ROOM, failure.errorMessage());
-    for (var credential : List.of(boxCredential, agentRun, roomRun)) {
-      assertRefusedOnSocket(
-          socket("POST", "/v1/specs/den/messages", credential, "body=hi"),
-          "forbidden_not_assignee",
-          NOT_ADAS_ROOM);
+                    "den",
+                    new SpecMessageRequest("by the host CLI", null, MessageStore.Mark.PLAIN),
+                    "ada"));
+    assertTrue(cli.isSuccess(), "the host CLI: " + cli);
+    for (var credential : List.of(boxCredential, agentRun)) {
+      var answered = socket("POST", "/v1/specs/den/messages", credential, "body=on the socket");
+      assertEquals(201, answered.status(), answered.body().toString());
     }
+    assertRefusedOnSocket(
+        socket("POST", "/v1/specs/den/messages", roomRun, "body=hi"),
+        "forbidden_not_assignee",
+        NOT_ADAS_ROOM);
     var access = new HostAccess(db, TestAuth.roles(db, MAIN));
-    var terminal =
-        assertThrows(
-            IOException.class, () -> access.admit("den", "acme", access.identity(session, null)));
-    assertTrue(terminal.getMessage().startsWith(NOT_ADAS_ROOM), terminal.getMessage());
+    access.admit("den", "acme", access.identity(session, null));
 
     try (var node = new SyncBox("ada")) {
       pull(node);
-      Acting.as("ada", () -> new MessageStore(node.db).append("den", "ada", "hi", null));
+      var posted =
+          Acting.as(
+              "ada", () -> new MessageStore(node.db).append("den", "ada", "from a node", null));
 
-      assertEquals(List.of(NOT_ADAS_ROOM), reasons(push(node, "message")), "main's commit");
+      assertEquals(List.of(), reasons(push(node, "message")), "main's commit");
+      assertTrue(new MessageStore(db).findById(posted.id()).isPresent(), "main holds it");
     }
-    assertEquals(List.of(), new MessageStore(db).list("den", null, 10));
   }
 
   private static SpecUpdateRequest retitle() {

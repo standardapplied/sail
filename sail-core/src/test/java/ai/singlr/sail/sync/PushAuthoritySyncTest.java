@@ -160,7 +160,7 @@ class PushAuthoritySyncTest {
   }
 
   @Test
-  void takingAnotherMembersSpecOrClaimingOneBornWhereYouMayNotPostIsDeniedAndNothingIsErased()
+  void takingAnotherMembersSpecIsDeniedButClaimingAnUnassignedOneBornInTheirRoomIsNot()
       throws IOException {
     ownSpec(main, "bob", "theirs", "bob");
     Acting.as("bob", () -> new MessageStore(main.db).append("theirs", "bob", "mine", null));
@@ -172,16 +172,16 @@ class PushAuthoritySyncTest {
 
     assign(ada, "ada", "theirs", "ada");
     assign(ada, "ada", "child", "ada");
-    assertEquals(List.of("theirs", "child"), denied(push(ada, ADA, "spec")));
+    assertEquals(List.of("theirs"), denied(push(ada, ADA, "spec")));
     assertEquals("bob", main.specs.findById("theirs").orElseThrow().assignee());
-    assertNull(main.specs.findById("child").orElseThrow().assignee());
+    assertEquals(
+        "ada",
+        main.specs.findById("child").orElseThrow().assignee(),
+        "claiming gives no voice a writer of the project lacks, so the claim stands");
 
-    var requests = new EraseRequests(ada.db);
-    for (var id : List.of("theirs", "child")) {
-      requests.request(Erasure.SPEC, id, "ada");
-      var refused = assertThrows(SyncTransportException.class, () -> push(ada, ADA, "spec"));
-      assertTrue(refused.getMessage().contains("bob"), refused.getMessage());
-    }
+    new EraseRequests(ada.db).request(Erasure.SPEC, "theirs", "ada");
+    var refused = assertThrows(SyncTransportException.class, () -> push(ada, ADA, "spec"));
+    assertTrue(refused.getMessage().contains("bob"), refused.getMessage());
     sync(ada, ADA);
     sync(bob, BOB);
 
@@ -407,7 +407,7 @@ class PushAuthoritySyncTest {
   }
 
   @Test
-  void anAgentPostsInAnotherSpecsRoomOnlyWhereItsFdeMayPost() throws IOException {
+  void anAgentPostsInAnotherSpecsRoomOfItsFdesProject() throws IOException {
     ownSpec(main, "ada", "mine", "ada");
     ownSpec(main, "ada", "also-mine", "ada");
     ownSpec(main, "bob", "theirs", "bob");
@@ -419,14 +419,20 @@ class PushAuthoritySyncTest {
         Acting.by(
             Actor.agentPrincipal(agent, "ada"),
             () -> messages.append("also-mine", agent, "here", null));
-    var refused = Acting.unchecked(agent, () -> messages.append("theirs", agent, "there", null));
+    var elsewhere =
+        Acting.by(
+            Actor.agentPrincipal(agent, "ada"),
+            () -> messages.append("theirs", agent, "there", null));
 
     push(ada, ADA, "run");
     var report = push(ada, ADA, "message");
 
-    assertEquals(List.of(refused.id()), denied(report));
+    assertEquals(List.of(), denied(report));
     assertEquals(agent, new MessageStore(main.db).findById(allowed.id()).orElseThrow().author());
-    assertTrue(new MessageStore(main.db).findById(refused.id()).isEmpty());
+    assertEquals(
+        agent,
+        new MessageStore(main.db).findById(elsewhere.id()).orElseThrow().author(),
+        "bob's spec's room is in ada's project, so ada's agent speaks there too");
     assertCleanRound(ada, ADA, "message");
     assertEveryBoxConverged(ADA);
   }
@@ -506,7 +512,7 @@ class PushAuthoritySyncTest {
   }
 
   @Test
-  void afterAForceReassignTheOldBoxsSpecReviewAndPostWritesAreDeniedButItsRunIsItsOwn()
+  void afterAForceReassignTheOldBoxsSpecAndReviewWritesAreDeniedButItsRunAndNarrationAreItsOwn()
       throws IOException {
     ownSpec(main, "ada", "mine", "ada");
     sync(ada, ADA);
@@ -537,7 +543,7 @@ class PushAuthoritySyncTest {
     assertEquals(List.of("mine"), denied(push(ada, ADA, "spec")));
     assertEquals(1, push(ada, ADA, "run").report().pushed(), "the run is still the box's");
     assertEquals(List.of(review), denied(push(ada, ADA, "review")));
-    assertEquals(List.of(narration.id()), denied(push(ada, ADA, "message")));
+    assertEquals(List.of(), denied(push(ada, ADA, "message")), "ada may still speak in it");
 
     assertEquals(SpecStatus.IN_PROGRESS, main.specs.findById("mine").orElseThrow().status());
     assertEquals("bob", ada.specs.findById("mine").orElseThrow().assignee());
@@ -546,7 +552,7 @@ class PushAuthoritySyncTest {
         List.of(), reviews.findingsForReview(review), "the old box holds main's review exactly");
     assertTrue(
         findingKeptInChangeLog(ada, review, finding.id()), "its findings stay in its change log");
-    assertTrue(new MessageStore(main.db).findById(narration.id()).isEmpty());
+    assertTrue(new MessageStore(main.db).findById(narration.id()).isPresent());
     assertEveryBoxConverged(ADA);
   }
 

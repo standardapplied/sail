@@ -312,7 +312,7 @@ class EventDoorTest {
   }
 
   @Test
-  void aMemberWithNoVoiceInAConversationCannotAnnounceAMessageInIt() throws Exception {
+  void aMemberAnnouncesAMessageInAConversationSheDoesNotOwn() throws Exception {
     var message = Acting.as("bob", () -> new MessageStore(db).append("den", "bob", "hi", null));
     var announcement =
         Map.<String, Object>of(
@@ -323,8 +323,7 @@ class EventDoorTest {
 
     var response = publish(adaToken, event("mine", "spec_message_posted", announcement));
 
-    assertRefused(
-        response, "forbidden_not_assignee", "spec_message_posted", "'den' (owned by 'bob')");
+    assertEquals(200, response.statusCode(), response.body());
   }
 
   @Test
@@ -336,8 +335,10 @@ class EventDoorTest {
 
     var response = publish(adaToken, event("mine", "spec_message_posted", announcement));
 
-    assertRefused(
-        response, "forbidden_not_assignee", "spec_message_posted", "'den' (owned by 'bob')");
+    assertEquals(200, response.statusCode(), response.body());
+    assertTrue(
+        response.body().contains("\"spec\": \"den\""),
+        "filed under the message's conversation, not the run's spec: " + response.body());
   }
 
   @Test

@@ -95,18 +95,19 @@ class MessageAuthorityTest {
         new Case("the owner's room principal posts as itself", ROOM, "lobby", ROOM_HANDLE, null),
         new Case("main's post is decided", MAIN, "den", OWNER, null),
         new Case("the pipeline narrates", SYSTEM, "den", "sail", null),
+        new Case("another member posts in the owner's room", OTHER_API, "lobby", OTHER, null),
         new Case(
-            "another member posts not in the owner's room",
-            OTHER_API,
-            "lobby",
-            OTHER,
-            Kind.NOT_OWNER),
-        new Case(
-            "another FDE's agent posts not there",
+            "another FDE's agent posts there as itself",
             OTHERS_AGENT,
             "lobby",
             "claude/" + OTHER_RUN,
-            Kind.NOT_OWNER),
+            null),
+        new Case(
+            "a member posts in no conversation this box does not hold",
+            OTHER_API,
+            "nowhere",
+            OTHER,
+            Kind.NO_CONVERSATION),
         new Case(
             "a room principal posts only for its FDE", ROOM, "den", ROOM_HANDLE, Kind.NOT_OWNER),
         new Case("a viewer posts nowhere", VIEWER, "lobby", OWNER, Kind.READ_ONLY),
@@ -131,7 +132,7 @@ class MessageAuthorityTest {
             "sail",
             Kind.NOT_AUTHOR),
         new Case(
-            "a push where its pusher may not post", OTHER_SYNC, "lobby", OTHER, Kind.NOT_OWNER),
+            "another member's push posts in the owner's room", OTHER_SYNC, "lobby", OTHER, null),
         new Case("an admin's push posts anywhere", ADMIN_SYNC, "lobby", OTHER, null),
         new Case("an admin's push as another FDE", ADMIN_SYNC, "lobby", OWNER, Kind.NOT_AUTHOR),
         new Case("a viewer's push posts nowhere", VIEWER_SYNC, "lobby", OWNER, Kind.READ_ONLY));
@@ -172,9 +173,9 @@ class MessageAuthorityTest {
         rule.decide(OWNER_SYNC, MESSAGE, null, post("lobby", OTHER)).orElseThrow());
     assertEquals(
         new Refusal(
-            Kind.NOT_OWNER,
-            "'lobby' belongs to ada: only ada or an admin may post there, not you.",
-            "Ask ada to post it, or have an admin do it."),
-        rule.decide(OTHER_API, MESSAGE, null, post("lobby", OTHER)).orElseThrow());
+            Kind.NO_CONVERSATION,
+            "No conversation 'nowhere' is on this box: it was deleted, or never here.",
+            "Check the spec or room id."),
+        rule.decide(OTHER_API, MESSAGE, null, post("nowhere", OTHER)).orElseThrow());
   }
 }
