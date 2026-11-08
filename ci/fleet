@@ -18,7 +18,9 @@ Usage:
                                 with --upgrade-to, the fleet is then upgraded to TARGET, main first:
                                 a release version, or a native binary file (sail upgrade --binary)
   ci/fleet up RUN               create the run's four VMs and wait until each answers ssh
-  ci/fleet install RUN VERSION  install release VERSION on every box from the README's install line
+  ci/fleet install RUN VERSION  install release VERSION on every box from the README's install line;
+                                VERSION may be a candidate binary, put in place by sail upgrade --binary
+                                over the release it names
   ci/fleet join RUN             init main, join the three nodes with their roles, sync
   ci/fleet projects RUN         create acme, beta, gamma on main, grant them, check each node holds its own
   ci/fleet doors RUN            each role's spec writes at the node CLI, and where each spec syncs to
@@ -94,8 +96,15 @@ up() {
 }
 
 install_box() {
-  local run=$1 box=$2 version=$3
-  on "$run" "$box" "curl -fsSL https://raw.githubusercontent.com/standardapplied/sail/main/install.sh | bash -s $version && sail -V"
+  local run=$1 box=$2 version=$3 release
+  if [[ -f $version ]]; then
+    release=$("$version" -V | awk '{print $2}')
+    on "$run" "$box" "curl -fsSL https://raw.githubusercontent.com/standardapplied/sail/main/install.sh | bash -s $release"
+    gc compute scp "$version" "$(vm "$run" "$box"):/tmp/sail-candidate" --zone "$ZONE"
+    on "$run" "$box" "sudo sail upgrade --binary /tmp/sail-candidate && sudo sha256sum \"\$(command -v sail)\""
+  else
+    on "$run" "$box" "curl -fsSL https://raw.githubusercontent.com/standardapplied/sail/main/install.sh | bash -s $version && sail -V"
+  fi
 }
 
 install() {
@@ -214,9 +223,25 @@ sync_all() {
   done
 }
 
+reaches_main_unasked() {
+  local run=$1 spec=$2 attempt
+  for attempt in $(seq 1 10); do
+    if on "$run" main "sudo sail spec show $spec --no-sync" > /dev/null 2>&1; then
+      echo "on main after about $((attempt * 3)) s"
+      return 0
+    fi
+    sleep 3
+  done
+  echo "not on main after 30 s"
+  return 1
+}
+
 doors() {
   local run=${1:-}
   [[ -n $run ]] || usage
+  check "$run" "client creates a spec with no sync" \
+    allowed "$run" client "sudo sail spec create -p acme --id unasked --title 'reaches main by itself'"
+  check "$run" "it reaches main within 30 s, no sail sync asked" reaches_main_unasked "$run" unasked
   check "$run" "observer (viewer) cannot create a spec" \
     refused "$run" observer "credential is read-only" "sudo sail spec create -p acme --id obs-try --title 'viewer writes'"
   check "$run" "client creates a spec in acme" \
@@ -229,10 +254,10 @@ doors() {
   check "$run" "observer reads client's spec" allowed "$run" observer "sudo sail spec show client-acme"
   check "$run" "observer cannot comment on it" \
     refused "$run" observer "credential is read-only" "sudo sail spec comment client-acme --body 'a viewer speaks'"
-  check "$run" "main holds both specs" specs_on "$run" main "acme/client-acme gamma/eng-gamma"
-  check "$run" "eng holds both specs" specs_on "$run" eng "acme/client-acme gamma/eng-gamma"
-  check "$run" "client holds the acme spec alone" specs_on "$run" client "acme/client-acme"
-  check "$run" "observer holds the acme spec alone" specs_on "$run" observer "acme/client-acme"
+  check "$run" "main holds the three specs" specs_on "$run" main "acme/client-acme acme/unasked gamma/eng-gamma"
+  check "$run" "eng holds the three specs" specs_on "$run" eng "acme/client-acme acme/unasked gamma/eng-gamma"
+  check "$run" "client holds the acme specs alone" specs_on "$run" client "acme/client-acme acme/unasked"
+  check "$run" "observer holds the acme specs alone" specs_on "$run" observer "acme/client-acme acme/unasked"
 }
 
 projects() {
@@ -433,8 +458,8 @@ upgrade() {
   check "$run" "eng still holds every project" holds "$run" eng "acme beta demo gamma"
   check "$run" "client still holds acme alone" holds "$run" client "acme"
   check "$run" "observer still holds acme and beta" holds "$run" observer "acme beta"
-  check "$run" "main still holds both specs" specs_on "$run" main "acme/client-acme gamma/eng-gamma"
-  check "$run" "client still holds the acme spec alone" specs_on "$run" client "acme/client-acme"
+  check "$run" "main still holds the three specs" specs_on "$run" main "acme/client-acme acme/unasked gamma/eng-gamma"
+  check "$run" "client still holds the acme specs alone" specs_on "$run" client "acme/client-acme acme/unasked"
   check "$run" "observer still cannot create a spec" \
     refused "$run" observer "credential is read-only" "sudo sail spec create -p acme --id obs-after --title 'viewer writes'"
   check "$run" "client still creates a spec in acme" \
