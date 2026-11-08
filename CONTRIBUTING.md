@@ -36,6 +36,7 @@ scoped to `acme` and `beta`), driven only by the README's commands and the ones 
 
 ```bash
 ci/fleet run 0.59.0          # create, install, init, join, check, delete; non-zero on any failure
+ci/fleet run 0.59.0 --upgrade-to ./sail   # then upgrade main and each node to a candidate binary, and check again
 FLEET_KEEP=1 ci/fleet run 0.59.0   # leave a failed fleet up to look at it
 ci/fleet ssh <run> client 'sudo sail sync status --json'
 ci/fleet down                # delete every fleet VM
