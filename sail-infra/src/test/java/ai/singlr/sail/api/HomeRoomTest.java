@@ -252,6 +252,23 @@ class HomeRoomTest {
   }
 
   @Test
+  void aViewerHasNoHomeRoom() {
+    var ops = operations();
+
+    var outcome =
+        Actor.call(
+            new Actor("ada", Role.VIEWER, Actor.Lane.CLI),
+            () -> HomeRoom.ensure(ops, definition(CLAUDE_ONLY), "ada"));
+
+    assertEquals(
+        HomeRoom.Outcome.skipped(
+            "this box's FDE holds a read-only credential and posts in no room, so it has no home"
+                + " room"),
+        outcome);
+    assertTrue(roomStore.listAll().isEmpty());
+  }
+
+  @Test
   void aDefinitionWithoutAnAgentHasNoHomeRoom() {
     var outcome = apply("ada", "name: acme\n");
 
