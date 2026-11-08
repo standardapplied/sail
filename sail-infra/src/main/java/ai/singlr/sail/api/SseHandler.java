@@ -183,7 +183,7 @@ public final class SseHandler implements HttpHandler {
             Thread.currentThread().interrupt();
             break;
           }
-          if (streamSubscriber.missed) {
+          if (streamSubscriber.missed || streamSubscriber.closed) {
             break;
           }
           if (event != null) {
@@ -305,12 +305,18 @@ public final class SseHandler implements HttpHandler {
   }
 
   private static final class StreamSubscriber implements EventSubscriber {
+    private static final Event WAKE =
+        Event.of("sail", null, "stream_closed", Event.SAIL_AGENT, "local");
+
     private final Predicate<Event> filter;
     final ArrayBlockingQueue<Event> queue =
         new ArrayBlockingQueue<>(DEFAULT_PER_CONNECTION_CAPACITY);
 
     /** An event was dropped for this stream: what follows would mislead, so the stream ends. */
     volatile boolean missed;
+
+    /** The subscription closed, as every one does when the server stops: the stream ends now. */
+    volatile boolean closed;
 
     StreamSubscriber(Predicate<Event> filter) {
       this.filter = filter;
@@ -336,6 +342,12 @@ public final class SseHandler implements HttpHandler {
     @Override
     public void missed() {
       missed = true;
+    }
+
+    @Override
+    public void closed() {
+      closed = true;
+      queue.offer(WAKE);
     }
   }
 }

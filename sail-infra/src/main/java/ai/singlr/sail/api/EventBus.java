@@ -203,6 +203,7 @@ public final class EventBus implements AutoCloseable {
     /**
      * Stops delivery and wakes the drain thread, which exits at once: the events still queued are
      * dropped, and one already taken is delivered, as it was before the close could wake a thread.
+     * The subscriber is told, so one that waits for its events stops waiting.
      */
     @Override
     public void close() {
@@ -210,6 +211,7 @@ public final class EventBus implements AutoCloseable {
       subscriptions.remove(this);
       queue.clear();
       queue.offer(CLOSED);
+      subscriber.closed();
     }
   }
 }

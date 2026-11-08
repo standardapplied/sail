@@ -176,9 +176,7 @@ class LoopStepsTest {
   }
 
   private String holder() {
-    var holder = loop.run("billing", "build");
-    loop.container.started(holder);
-    return holder;
+    return loop.liveRun("billing", "build");
   }
 
   @Test

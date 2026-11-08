@@ -33,6 +33,12 @@ public interface EventSubscriber {
    */
   default void missed() {}
 
+  /**
+   * Called on the closing thread when this subscriber's subscription closes, by its own close or
+   * the bus's. Must not block. A subscriber that waits for its events stops waiting here.
+   */
+  default void closed() {}
+
   /** Convenience filter that accepts every event. */
   static Predicate<Event> all() {
     return e -> true;

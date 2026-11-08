@@ -2623,26 +2623,50 @@ no pairing is removed through the gateway as before, and no key file is touched.
 ## Continuous integration
 
 One workflow, `.github/workflows/ci.yml`, runs on a pull request, on a push to main and on
-`workflow_dispatch`. Its five jobs start together and none waits on another, so a check resolves
-when its own work does:
+`workflow_dispatch`. Every job starts at once except the two native suites, which wait only for
+the one native build:
 
 | Check | What it runs | What it needs |
 |---|---|---|
-| `Unit tests and quality gates` | the wildcard-import check, then `mvn clean verify`: every unit test, the JaCoCo gates, spotless | nothing else; it is the unit verdict |
+| `Unit tests (<module>, <os>)` | the wildcard-import check, then `ci/check unit <module>`: the module's unit tests, its JaCoCo gates and spotless, on Linux; the same tests without gates on macOS | its upstream modules, installed first |
 | `Dependency scan` | OWASP dependency-check, offline against a cached NVD database refreshed best-effort | the NVD cache |
-| `Native fleet sync tests` | `NativeFleetIT`: sync end to end on native binaries in Podman boxes | the candidate binary |
+| `Native binaries` | the candidate (`-Ob` quick build) and the release `.github/released-tag` pins, each smoke-tested, uploaded as `native-binaries` | nothing else |
+| `Native fleet sync tests (part i of 3)` | `ci/check methods NativeFleetIT i 3`: every third test of `NativeFleetIT`, sync end to end on native binaries in Podman boxes | `native-binaries` |
 | `Multi-node control-plane integration tests` | every `*IT` that runs without incus | the runner's systemd user manager |
-| `Incus-backed integration tests` | every `*IT` but `NativeFleetIT`, on a real incus | incus and the candidate binary |
+| `Native upgrade tests` | `UpgradeE2EIT`: the pinned release upgraded to this commit's binary on a real incus | incus and `native-binaries` |
+| `Incus-backed integration tests (shard i of 4)` | `ci/check its i 4 NativeFleetIT UpgradeE2EIT`: that shard's `*IT` classes on a real incus | incus |
+| `CI passed` | nothing: it fails unless every job above succeeded | every job |
 
-- **Surefire runs in one job.** Every failsafe job passes `-Dtest=NoUnitTests
-  -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true`: the unit suite and the coverage
-  gates are the unit job's, and a job that ran them again would only delay its own verdict.
-  `sail-infra`, the module with half the suite, runs its tests on two forks
-  (`forkCount=2`, `reuseForks=true` in its pom): measured on one commit, 10.0 → 8.1 minutes for
-  the job, green ten of ten. A test that cannot share a runner with another class belongs to a
-  fork of its own, not to a slower suite.
-- **The native image is built only where a test needs it.** The `native-binaries` action is
-  used by the native fleet job and the incus job, and by no other.
+- **One entry point.** `ci/check` is what CI runs and what a contributor runs, so the two cannot
+  drift; see CONTRIBUTING.
+- **The unit verdict is one job per module.** The reactor's modules ran in series; as a matrix,
+  the slowest module bounds the verdict, not their sum. Surefire runs one fork per core
+  (`forkCount=1C` in the root pom), so a test that cannot share a runner with another class
+  belongs to a fork of its own, not to a slower suite. Every failsafe job passes
+  `-Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true`: the unit
+  suite and the gates are the unit jobs'.
+- **macOS runs the unit suite on every pull request.** A release ships a macOS binary, and only
+  its own tests see Apple's libraries; a test of Linux-only behaviour says so with
+  `@EnabledOnOs(OS.LINUX)`.
+- **One native build per commit.** The `Native binaries` job builds the candidate once and every
+  native suite downloads it. CI tests the quick build (`-Ob`, about half the build time);
+  `release.yml` builds the optimized one (`-O2`), which only its smoke test (`-V`,
+  `_pty-selftest`) runs. The two compile the same program; what only `-O2` could expose — a race
+  faster code opens, a miscompile — is the accepted gap.
+- **The incus suites run in balanced shards.** `ci/check shard` places every concrete `*IT`
+  class, one with no recorded time included, in exactly one shard, longest first onto the
+  lightest, from the per-class seconds in `ci/it-seconds`. A class's line there is only a weight:
+  refresh it from a run's failsafe times when the shards drift apart.
+- **Incus is set up by one action.** `.github/actions/incus` installs it, opens its containers'
+  egress, fetches the base image and restores the suites' prepared image (the base plus every
+  package they install, `AbstractIncusIT`'s bake) from a cache kept per week and per source that
+  defines it; a shard that baked it on a miss keeps it with `ci/check prepared-image export`.
+- **Dependencies come from a cache.** Every job restores `~/.m2` through the `maven-cache`
+  action, one cache per kind of job keyed on the poms, so each kind keeps what it alone resolves;
+  this repository's own modules are never cached.
+- **One check proves a commit.** `CI passed` fails unless every other job succeeded: a job that
+  needs a failed one reads as skipped, and a skipped check reads as passing, so a branch rule
+  requires this check, not the jobs one by one. `release.yml` waits for the whole run.
 - **Every fleet runs one build.** The fleet suites run boxes of the candidate only: a box of
   another release is refused at the sync hello, so there is no hop to rehearse.
 - **A job leaves its evidence.** Each job that runs tests tees its maven log and ends with the
@@ -2650,8 +2674,9 @@ when its own work does:
   totals of each module and every `<<< FAILURE!` and `<<< ERROR!` line, also for a maven that was
   killed before it printed a summary; the same lines are the last of the job's log, since a job
   summary has no API. A job that did not pass, cancelled at its time limit included, uploads its
-  surefire and failsafe reports as the artifact `<job>-test-reports` (`verify`, `native-fleet`,
-  `fleet-integration`, `incus-integration`): `gh run download <runId> -n <job>-test-reports`.
+  surefire and failsafe reports as the artifact `<job>[-<label>]-test-reports`, the label naming a
+  matrix leg (`unit-sail-infra-macos-latest-test-reports`, `incus-integration-shard-2-test-reports`):
+  `gh run download <runId> -n <name>`.
 - **`gh run view --log` truncates.** It shows about the last 5,000 lines of a job, which for
   these jobs can leave out the failure. The complete log is `gh api
   repos/<owner>/<repo>/actions/jobs/<jobId>/logs`, with the job ids from `gh run view <runId>

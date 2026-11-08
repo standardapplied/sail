@@ -244,6 +244,44 @@ class SseHandlerTest {
   }
 
   @Test
+  void anOpenStreamEndsWhenItsBusClosesSoAStoppingServerWaitsForNoKeepalive(@TempDir Path tmp)
+      throws Exception {
+    var bus = new EventBus();
+    var persister = new AuditPersister(tmp.resolve("events.jsonl"), 32);
+    try (var server =
+        new SailApiServer(
+            "127.0.0.1",
+            0,
+            new SailOperations(),
+            new FixedTokenTestAuth("tok"),
+            bus,
+            persister,
+            tmp.resolve("api.sock"))) {
+      server.start();
+      var request =
+          HttpRequest.newBuilder(
+                  URI.create("http://127.0.0.1:" + server.port() + "/v1/events/stream"))
+              .header("Authorization", "Bearer tok")
+              .header("Accept", "text/event-stream")
+              .GET()
+              .build();
+      var response =
+          HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofInputStream());
+      var reader =
+          new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8));
+      assertEquals(": subscribed", reader.readLine());
+
+      bus.close();
+
+      assertTimeoutPreemptively(
+          Duration.ofSeconds(BusTesting.DELIVERY_TIMEOUT_SECONDS),
+          () -> {
+            while (reader.readLine() != null) {}
+          });
+    }
+  }
+
+  @Test
   void streamDeliversPublishedEventsAndClosesOnClient(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
       var persister = new AuditPersister(tmp.resolve("events.jsonl"), 32);

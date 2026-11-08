@@ -17,12 +17,19 @@ defaults:
     shell: bash
 
 jobs:
-  # The unit verdict: this job runs surefire and the coverage gates and nothing else, so its
-  # check resolves when the suite does. No other job runs a unit test.
-  verify:
-    name: Unit tests and quality gates
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+  # The unit verdict, one module per job so the slowest module bounds it, not their sum. `ci/check
+  # unit` runs the module's wildcard-import check, its tests and spotless, with its coverage gates
+  # on Linux. macOS runs the same tests, since a release ships a macOS binary and only its own
+  # tests see Apple's libraries. No other job runs a unit test.
+  unit:
+    name: Unit tests (${{ matrix.module }}, ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [sail-core, sail-harness, sail-infra]
+        os: [ubuntu-24.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -32,30 +39,30 @@ jobs:
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Forbid wildcard imports
-        run: |
-          if grep -rEn 'import +(static +)?[a-zA-Z0-9_.]+\.\*;' --include='*.java' sail-core sail-infra sail-harness; then
-            echo "::error::Wildcard imports are forbidden. Import each symbol explicitly."
-            exit 1
-          fi
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: unit-${{ matrix.module }}
 
-      - name: Verify quality gates
-        run: mvn clean verify 2>&1 | tee "$RUNNER_TEMP/maven.log"
+      - name: Unit tests and quality gates
+        run: >
+          ci/check unit ${{ matrix.module }} ${{ matrix.os != 'ubuntu-24.04' && '--no-coverage' || '' }}
+          2>&1 | tee "$RUNNER_TEMP/maven.log"
 
       - name: Upload coverage reports
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
+        if: always() && matrix.os == 'ubuntu-24.04'
         with:
-          name: jacoco-reports
+          name: jacoco-reports-${{ matrix.module }}
           path: |
-            **/target/site/jacoco
-            **/target/site/jacoco.xml
+            ${{ matrix.module }}/target/site/jacoco
+            ${{ matrix.module }}/target/site/jacoco.xml
 
       - name: Leave the test evidence
         if: always()
         uses: ./.github/actions/test-evidence
         with:
           job-status: ${{ job.status }}
+          label: ${{ matrix.module }}-${{ matrix.os }}
 
   # A job of its own, so an NVD refresh that retries for minutes never holds the unit verdict.
   dependency-scan:
@@ -70,6 +77,10 @@ jobs:
           java-version: '25'
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: scan
 
       # The NVD database is project-independent, so the cache key is keyed only on the OS,
       # never on pom.xml — a version bump must not cold-start the cache. github.run_id makes the
@@ -116,8 +127,54 @@ jobs:
           name: dependency-check-reports
           path: '**/target/dependency-check-report.html'
 
+  # The one native build of this commit. Every suite that upgrades a fleet's release to this build
+  # takes its two inputs from here: the quick-build (-Ob) candidate and the release
+  # .github/released-tag pins. A release builds its own optimized binaries.
+  native:
+    name: Native binaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: native
+
+      - name: Build and fetch the native binaries
+        id: binaries
+        uses: ./.github/actions/native-binaries
+        with:
+          optimization: '-Ob'
+
+      # One flat folder, so the artifact holds `sail` and `sail-linux-amd64` at its root.
+      - name: Gather the native binaries
+        run: |
+          mkdir -p "$RUNNER_TEMP/native"
+          cp "${{ steps.binaries.outputs.candidate }}" "${{ steps.binaries.outputs.released }}" "$RUNNER_TEMP/native/"
+
+      - name: Upload the native binaries
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: native-binaries
+          if-no-files-found: error
+          retention-days: 14
+          path: ${{ runner.temp }}/native
+
+  # Each fleet test opens a fleet of its own, so the suite splits by test into three parts.
   native-fleet:
-    name: Native fleet sync tests
+    name: Native fleet sync tests (part ${{ matrix.part }} of 3)
+    needs: native
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -129,36 +186,42 @@ jobs:
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # The fleet tests upgrade from the release a fleet runs to the binary built here, so the
-      # released binary is a test input: the release .github/released-tag pins, checked against
-      # the checksum published beside it.
-      - name: Build and fetch the native binaries
-        id: binaries
-        uses: ./.github/actions/native-binaries
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: native-fleet
+
+      - name: Take this commit's native binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-binaries
+          path: ${{ runner.temp }}/native
 
       # Sync end to end on the native binaries: Podman boxes, a real sshd and the gateway's forced
       # command. Only this suite runs here; requireNative turns a missing binary or an unreachable
       # Podman into a failure instead of a skip.
       - name: Native fleet sync tests
-        run: >
-          mvn -B -Pintegration verify
-          -Dit.test=NativeFleetIT
-          -Dtest=NoUnitTests
-          -Dsurefire.failIfNoSpecifiedTests=false
-          -Dfailsafe.failIfNoSpecifiedTests=false
-          -Djacoco.skip=true
-          -Dsail.it.requireIncus=false
-          -Dsail.it.requireSystemd=false
-          -Dsail.it.requireNative=true
-          -Dsail.it.nativeBinary=${{ steps.binaries.outputs.candidate }}
-          -Dsail.it.releasedBinary=${{ steps.binaries.outputs.released }}
-          2>&1 | tee "$RUNNER_TEMP/maven.log"
+        run: |
+          chmod +x "$RUNNER_TEMP/native/sail" "$RUNNER_TEMP/native/sail-linux-amd64"
+          tests=$(ci/check methods NativeFleetIT ${{ matrix.part }} 3)
+          mvn -B -Pintegration verify \
+            -Dit.test="$tests" \
+            -Dtest=NoUnitTests \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dfailsafe.failIfNoSpecifiedTests=false \
+            -Djacoco.skip=true \
+            -Dsail.it.requireIncus=false \
+            -Dsail.it.requireSystemd=false \
+            -Dsail.it.requireNative=true \
+            -Dsail.it.nativeBinary="$RUNNER_TEMP/native/sail" \
+            -Dsail.it.releasedBinary="$RUNNER_TEMP/native/sail-linux-amd64" \
+            2>&1 | tee "$RUNNER_TEMP/maven.log"
 
       - name: Leave the test evidence
         if: always()
         uses: ./.github/actions/test-evidence
         with:
           job-status: ${{ job.status }}
+          label: part-${{ matrix.part }}
 
   fleet-integration:
     name: Multi-node control-plane integration tests
@@ -173,10 +236,14 @@ jobs:
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: multi-node
+
       - name: Enable the runner's systemd user manager
         uses: ./.github/actions/systemd-user
 
-      # The unit suite and its coverage gates are the verify job's; only failsafe runs here.
+      # The unit suite and its coverage gates are the unit jobs'; only failsafe runs here.
       - name: Run multi-node integration tests without incus
         run: >
           mvn -B -Pintegration verify
@@ -192,10 +259,17 @@ jobs:
         with:
           job-status: ${{ job.status }}
 
+  # The incus suites in shards balanced on ci/it-seconds. `ci/check shard` places every IT class,
+  # one with no recorded time included, in exactly one shard. The two suites that take the native
+  # binaries run in their own jobs, so no shard waits for the native build.
   incus-integration:
-    name: Incus-backed integration tests
+    name: Incus-backed integration tests (shard ${{ matrix.shard }} of 4)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -205,55 +279,104 @@ jobs:
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: incus
+
       - name: Enable the runner's systemd user manager
         uses: ./.github/actions/systemd-user
 
-      - name: Install and initialize incus
-        # incus ships in Ubuntu 24.04 itself. The runner image also carries third-party apt
-        # sources (Chrome, Microsoft, ...) whose index fetches fail on their own schedule, and a
-        # plain update refreshes them all — so only Ubuntu's own sources are refreshed here.
-        run: |
-          sudo find /etc/apt/sources.list.d -type f ! -name ubuntu.sources -delete
-          sudo apt-get update
-          sudo apt-get install -y incus
-          sudo incus admin init --minimal
-          sudo chmod o+rw /var/lib/incus/unix.socket
-
-      - name: Give launched containers outbound internet
-        # The runner's Docker install sets the iptables FORWARD policy to DROP, which silently
-        # drops the incus NAT bridge's egress, so containers can resolve DNS but cannot connect
-        # out (apt/image pulls time out). Allow forwarding so provisioned containers reach the net.
-        run: |
-          sudo sysctl -w net.ipv4.ip_forward=1
-          sudo iptables -P FORWARD ACCEPT
-
-      - name: Verify incus is reachable by the runner
-        run: |
-          which incus
-          incus version
-          incus list
-
-      # The native suites take the pinned release and the binary built here. The native fleet
-      # suite runs in a job of its own, so it is left out here to keep this job inside its timeout.
-      - name: Build and fetch the native binaries
-        id: binaries
-        uses: ./.github/actions/native-binaries
+      - name: Set up incus
+        id: incus
+        uses: ./.github/actions/incus
 
       - name: Run incus integration tests
         run: >
-          mvn -B -Pintegration verify
-          -Dit.test='*IT,!NativeFleetIT'
-          -Dfailsafe.failIfNoSpecifiedTests=false
-          -Dtest=NoUnitTests
-          -Dsurefire.failIfNoSpecifiedTests=false
-          -Djacoco.skip=true
-          -Dsail.it.requireNative=true
-          -Dsail.it.nativeBinary=${{ steps.binaries.outputs.candidate }}
-          -Dsail.it.releasedBinary=${{ steps.binaries.outputs.released }}
+          ci/check its ${{ matrix.shard }} 4 NativeFleetIT UpgradeE2EIT -- -Dsail.it.requireNative=true
           2>&1 | tee "$RUNNER_TEMP/maven.log"
+
+      - name: Keep the prepared image for the next run
+        if: success() && steps.incus.outputs.prepared-hit != 'true'
+        run: ci/check prepared-image export "$RUNNER_TEMP/prepared-image"
 
       - name: Leave the test evidence
         if: always()
         uses: ./.github/actions/test-evidence
         with:
           job-status: ${{ job.status }}
+          label: shard-${{ matrix.shard }}
+
+  # The upgrade end to end on incus: the release .github/released-tag pins, upgraded to this
+  # commit's native binary.
+  native-upgrade:
+    name: Native upgrade tests
+    needs: native
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./.github/actions/maven-cache
+        with:
+          kind: incus
+
+      - name: Enable the runner's systemd user manager
+        uses: ./.github/actions/systemd-user
+
+      - name: Set up incus
+        id: incus
+        uses: ./.github/actions/incus
+
+      - name: Take this commit's native binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: native-binaries
+          path: ${{ runner.temp }}/native
+
+      - name: Run the native upgrade tests
+        run: |
+          chmod +x "$RUNNER_TEMP/native/sail" "$RUNNER_TEMP/native/sail-linux-amd64"
+          mvn -B -Pintegration verify \
+            -Dit.test=UpgradeE2EIT \
+            -Dtest=NoUnitTests \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dfailsafe.failIfNoSpecifiedTests=false \
+            -Djacoco.skip=true \
+            -Dsail.it.requireNative=true \
+            -Dsail.it.nativeBinary="$RUNNER_TEMP/native/sail" \
+            -Dsail.it.releasedBinary="$RUNNER_TEMP/native/sail-linux-amd64" \
+            2>&1 | tee "$RUNNER_TEMP/maven.log"
+
+      - name: Leave the test evidence
+        if: always()
+        uses: ./.github/actions/test-evidence
+        with:
+          job-status: ${{ job.status }}
+
+  # The one check a branch rule requires. A job that needs another reads as skipped when that one
+  # fails, and a skipped check reads as passing, so this fails unless every job succeeded.
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs:
+      [unit, dependency-scan, native, native-fleet, native-upgrade, fleet-integration, incus-integration]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Every job succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != success ]; then
+              echo "::error::A job ended $result, so this commit is not proven."
+              exit 1
+            fi
+          done

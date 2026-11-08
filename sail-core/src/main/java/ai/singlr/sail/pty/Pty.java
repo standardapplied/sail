@@ -123,6 +123,13 @@ public final class Pty implements AutoCloseable {
   private final int masterFd;
   private final String slavePath;
   private volatile boolean closed;
+  private volatile boolean childGone;
+
+  private enum Poll {
+    READY,
+    QUIET,
+    INTERRUPTED
+  }
 
   private Pty(int masterFd, String slavePath) {
     this.masterFd = masterFd;
@@ -225,7 +232,11 @@ public final class Pty implements AutoCloseable {
       if (closed) {
         return -1;
       }
-      if (!readable()) {
+      var poll = poll();
+      if (poll == Poll.QUIET && childGone) {
+        return -1;
+      }
+      if (poll != Poll.READY) {
         continue;
       }
       long n;
@@ -260,10 +271,10 @@ public final class Pty implements AutoCloseable {
 
   /**
    * Waits up to a poll interval for the master to have something to say — output, a hangup, or an
-   * error; the read that follows tells which. A timeout or a signal is {@code false}: look at
-   * {@link #closed} and come back.
+   * error; the read that follows tells which. A timeout is {@link Poll#QUIET} and a signal {@link
+   * Poll#INTERRUPTED}: look at {@link #closed} and come back.
    */
-  private boolean readable() throws IOException {
+  private Poll poll() throws IOException {
     int rc;
     int err;
     try (var arena = Arena.ofConfined()) {
@@ -279,10 +290,13 @@ public final class Pty implements AutoCloseable {
       err = Native.errno(errno);
     }
     if (rc > 0) {
-      return true;
+      return Poll.READY;
     }
-    if (rc == 0 || err == EINTR) {
-      return false;
+    if (rc == 0) {
+      return Poll.QUIET;
+    }
+    if (err == EINTR) {
+      return Poll.INTERRUPTED;
     }
     throw new IOException("pty poll failed with errno " + err + ".");
   }
@@ -352,6 +366,15 @@ public final class Pty implements AutoCloseable {
     closed = true;
   }
 
+  /**
+   * Its child is gone: once the master has said nothing for a poll interval, a read reports end of
+   * stream. What the child left in the terminal is still read; a terminal it never opened, or one a
+   * job of it still holds in silence, ends the read all the same.
+   */
+  public void endOnceDrained() {
+    childGone = true;
+  }
+
   private void requireOpen() throws IOException {
     if (closed) {
       throw new IOException("This pty is closed.");
@@ -365,7 +388,7 @@ public final class Pty implements AutoCloseable {
    * end of stream (a closed fd reports {@code EBADF}).
    */
   @Override
-  public void close() {
+  public synchronized void close() {
     if (closed) {
       return;
     }

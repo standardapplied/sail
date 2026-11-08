@@ -1,0 +1,73 @@
+name: Incus
+description: >
+  Installs and initializes incus on the runner, gives its containers outbound internet, fetches
+  the base image and restores the incus suites' prepared image from the cache into
+  $RUNNER_TEMP/prepared-image. On a miss the first suite bakes it, and the job keeps it for the
+  next run with `ci/check prepared-image export "$RUNNER_TEMP/prepared-image"` as its last step.
+
+outputs:
+  prepared-hit:
+    description: Whether the prepared image came from the cache.
+    value: ${{ steps.prepared.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    # incus ships in Ubuntu 24.04 itself. The runner image also carries third-party apt sources
+    # (Chrome, Microsoft, ...) whose index fetches fail on their own schedule, and a plain update
+    # refreshes them all — so only Ubuntu's own sources are refreshed here.
+    - name: Install and initialize incus
+      shell: bash
+      run: |
+        sudo find /etc/apt/sources.list.d -type f ! -name ubuntu.sources -delete
+        sudo apt-get update
+        sudo apt-get install -y incus
+        sudo incus admin init --minimal
+        sudo chmod o+rw /var/lib/incus/unix.socket
+
+    # The runner's Docker install sets the iptables FORWARD policy to DROP, which silently drops
+    # the incus NAT bridge's egress, so containers can resolve DNS but cannot connect out (apt and
+    # image pulls time out). Allow forwarding so provisioned containers reach the net.
+    - name: Give launched containers outbound internet
+      shell: bash
+      run: |
+        sudo sysctl -w net.ipv4.ip_forward=1
+        sudo iptables -P FORWARD ACCEPT
+
+    - name: Verify incus is reachable by the runner
+      shell: bash
+      run: |
+        which incus
+        incus version
+        incus list
+
+    # Every suite launches this image; fetched once here, its download is no test class's time.
+    - name: Fetch the base image
+      shell: bash
+      run: |
+        for attempt in 1 2 3; do
+          incus image copy images:ubuntu/24.04 local: --quiet && exit 0
+          echo "Fetching the base image failed (attempt $attempt of 3)."
+          sleep 10
+        done
+        exit 1
+
+    # The prepared image is the base plus every package the suites install; baking it costs a
+    # shard over a minute. It is kept per week and per source that defines it, so it is never
+    # staler than a week nor older than its package list.
+    - name: Name this week
+      id: week
+      shell: bash
+      run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the prepared image
+      id: prepared
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ runner.temp }}/prepared-image
+        key: incus-prepared-${{ hashFiles('sail-infra/src/test/java/ai/singlr/sail/engine/AbstractIncusIT.java', 'sail-infra/src/main/java/ai/singlr/sail/engine/ProjectProvisioner.java') }}-${{ steps.week.outputs.week }}
+
+    - name: Import the prepared image
+      if: steps.prepared.outputs.cache-hit == 'true'
+      shell: bash
+      run: ci/check prepared-image import "$RUNNER_TEMP/prepared-image"

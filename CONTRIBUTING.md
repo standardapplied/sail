@@ -8,21 +8,25 @@ Conventions for code and tests are in [AGENTS.md](AGENTS.md); the design and its
 JDK 25 or newer and Maven 3.9 or newer.
 
 ```bash
-mvn clean verify                                                   # what CI's unit job runs
+ci/check                                    # format, then the tests of the classes changed against origin/main
+ci/check full                               # every unit test and gate, as CI's unit jobs run them together
+ci/check unit sail-infra                    # one module, exactly as its CI job runs it
 mvn -o -Pintegration -Dsail.it.requireIncus=false clean verify     # plus the multi-node ITs; run before pushing
 JAVA_HOME=/path/to/graalvm-jdk-25 mvn clean package -Pnative -DskipTests   # the native binary
 ```
+
+`ci/check` is the loop while working: it names the tests it picked (`Foo*Test` for a changed
+`Foo`, a changed test itself) and runs offline. `ci/check full` before a pull request.
 
 The incus-backed integration tests need a real incus daemon and run in CI only.
 
 ## Continuous integration
 
-One workflow, `.github/workflows/ci.yml`, with five checks that start together: the unit suite
-and its gates, the dependency scan, the native fleet sync tests, the multi-node integration
-tests and the incus-backed integration tests. Each test runs once per pull request; the unit
-verdict lands in about eight minutes and the last check in about fifteen. A failed job uploads
-its surefire and failsafe reports as `<job>-test-reports` and summarises the failed tests.
-Details in ARCHITECTURE's "Continuous integration".
+One workflow, `.github/workflows/ci.yml`: the unit suite per module on Linux (with its gates)
+and macOS, the dependency scan, one native build, the native fleet sync tests, the multi-node
+integration tests and the incus-backed integration tests in four shards. Each test runs once
+per pull request. A failed job uploads its surefire and failsafe reports and summarises the
+failed tests. Details in ARCHITECTURE's "Continuous integration".
 
 ## Coverage policy
 
@@ -49,7 +53,9 @@ first post-v1 migration exists, a box carries no database across it: it is reins
 1. Main is green, including the integration checks.
 2. Bump the version in the four poms (`pom.xml`, `sail-core`, `sail-harness`, `sail-infra`)
    in one commit, `chore: bump version to X.Y.Z`, and tag it `vX.Y.Z`.
-3. Push main and the tag. The tag triggers `release.yml`: the test suite on Linux and macOS,
-   native images for both, and a GitHub Release with checksums and keyless cosign bundles.
+3. Push main and the tag. The tag triggers `release.yml`, which tests nothing again: it waits
+   for the commit's own CI run on main and refuses to publish unless it passed, while it builds
+   the optimized native images for Linux and macOS, then publishes a GitHub Release with
+   checksums and keyless cosign bundles.
 Upgrade main first, then nodes. Sync refuses a peer on another protocol before any data moves
 and names the remedy.

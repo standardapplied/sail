@@ -3,6 +3,12 @@ description: >
   Fetches the released binary .github/released-tag pins and builds the native image under test,
   each smoke-tested: the two inputs of every test that upgrades a fleet's release to this build.
 
+inputs:
+  optimization:
+    description: The native-image optimization level; CI tests a quick `-Ob` build, a release ships `-O2`.
+    required: false
+    default: '-O2'
+
 outputs:
   candidate:
     description: The native binary built from this commit.
@@ -39,7 +45,7 @@ runs:
 
     - name: Build native image
       shell: bash
-      run: mvn -B package -Pnative -DskipTests
+      run: mvn -B package -Pnative -DskipTests -Dsail.native.optimization=${{ inputs.optimization }}
 
     - name: Smoke test
       shell: bash

@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+readonly MODULES="sail-core sail-harness sail-infra"
+readonly DEFAULT_IT_SECONDS=10
+readonly PREPARED_SOURCE=sail-infra/src/test/java/ai/singlr/sail/engine/AbstractIncusIT.java
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  ci/check                      format, then run the tests of classes changed against origin/main
+  ci/check full                 every module's tests and gates, as CI's unit jobs run them together
+  ci/check unit MODULE [--no-coverage]
+                                one module's import check, tests and gates, its upstream installed first
+  ci/check shard INDEX COUNT [EXCLUDED_IT...]
+                                print the IT classes of shard INDEX (1-based) of COUNT
+  ci/check its INDEX COUNT [EXCLUDED_IT...] -- [MAVEN_ARG...]
+                                run the IT classes of that shard under -Pintegration
+  ci/check methods CLASS INDEX COUNT
+                                print CLASS#a+b+... : every COUNT-th of its @Test methods from INDEX
+  ci/check prepared-image import|export DIR
+                                load the incus suites' prepared image from DIR, or keep it there
+EOF
+  exit 2
+}
+
+upstream_of() {
+  local module=$1 upstream="" candidate
+  for candidate in $MODULES; do
+    [[ $candidate == "$module" ]] && break
+    upstream="${upstream:+$upstream,}$candidate"
+  done
+  echo "$upstream"
+}
+
+require_module() {
+  local module=$1 candidate
+  for candidate in $MODULES; do
+    [[ $candidate == "$module" ]] && return
+  done
+  echo "ci/check: '$module' is not one of $MODULES." >&2
+  exit 2
+}
+
+forbid_wildcard_imports() {
+  if grep -rEn 'import +(static +)?[a-zA-Z0-9_.]+\.\*;' --include='*.java' "$@"; then
+    echo "ci/check: wildcard imports are forbidden. Import each symbol explicitly." >&2
+    exit 1
+  fi
+}
+
+unit() {
+  local module=${1:-} coverage=true
+  [[ -n $module ]] || usage
+  require_module "$module"
+  case ${2:-} in
+    "") ;;
+    --no-coverage) coverage=false ;;
+    *) usage ;;
+  esac
+  forbid_wildcard_imports "$module"
+  local upstream
+  upstream=$(upstream_of "$module")
+  if [[ -n $upstream ]]; then
+    mvn -B -q install -pl "$upstream" -am -DskipTests -Djacoco.skip=true
+  fi
+  if $coverage; then
+    mvn -B verify -pl "$module"
+  else
+    mvn -B verify -pl "$module" -Djacoco.skip=true
+  fi
+}
+
+full() {
+  forbid_wildcard_imports $MODULES
+  mvn -B clean verify
+}
+
+it_classes() {
+  local excluded=" $* "
+  grep -rLE --include='*IT.java' '^(public )?abstract class [A-Za-z0-9_]+IT\b' sail-*/src/test/java \
+    | sed -E 's#.*/([^/]+)\.java$#\1#' \
+    | while read -r name; do
+        [[ $excluded == *" $name "* ]] || echo "$name"
+      done \
+    | sort
+}
+
+shard() {
+  local index=${1:-} count=${2:-}
+  [[ $index =~ ^[1-9][0-9]*$ && $count =~ ^[1-9][0-9]*$ && $index -le $count ]] || usage
+  shift 2
+  it_classes "$@" \
+    | awk -v fallback="$DEFAULT_IT_SECONDS" '
+        NR == FNR { seconds[$2] = $1; next }
+        { cost = ($1 in seconds) ? seconds[$1] : fallback; print cost, $1 }
+      ' ci/it-seconds - \
+    | sort -k1,1nr -k2,2 \
+    | awk -v index_="$index" -v count="$count" '
+        {
+          best = 1
+          for (i = 2; i <= count; i++) if (load[i] < load[best]) best = i
+          load[best] += $1
+          if (best == index_) members = members (members ? "," : "") $2
+        }
+        END { print members }
+      '
+}
+
+its() {
+  [[ $# -ge 2 ]] || usage
+  local index=$1 count=$2 excluded=""
+  shift 2
+  while [[ $# -gt 0 && $1 != -- ]]; do
+    excluded="$excluded $1"
+    shift
+  done
+  [[ $# -gt 0 ]] && shift
+  local members
+  members=$(shard "$index" "$count" $excluded)
+  if [[ -z $members ]]; then
+    echo "ci/check: shard $index of $count holds no IT class." >&2
+    exit 1
+  fi
+  echo "Shard $index of $count: $members"
+  mvn -B -Pintegration verify \
+    -Dit.test="$members" \
+    -Dfailsafe.failIfNoSpecifiedTests=false \
+    -Dtest=NoUnitTests \
+    -Dsurefire.failIfNoSpecifiedTests=false \
+    -Djacoco.skip=true \
+    "$@"
+}
+
+methods() {
+  local class=${1:-} index=${2:-} count=${3:-}
+  [[ -n $class && $index =~ ^[1-9][0-9]*$ && $count =~ ^[1-9][0-9]*$ && $index -le $count ]] || usage
+  local file
+  file=$(find sail-*/src/test/java -name "$class.java" | head -1)
+  if [[ -z $file ]]; then
+    echo "ci/check: no test class $class." >&2
+    exit 2
+  fi
+  local annotated all picked
+  annotated=$(grep -cE '^[[:space:]]*@(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\b' "$file" || true)
+  all=$(awk '/^[[:space:]]*@(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)([^A-Za-z]|$)/ { test = 1 }
+             test {
+               line = $0
+               gsub(/@[A-Za-z0-9_.]+(\([^)]*\))?/, "", line)
+               if (match(line, /[A-Za-z0-9_]+[[:space:]]*\(/)) {
+                 name = substr(line, RSTART, RLENGTH)
+                 sub(/[[:space:]]*\($/, "", name)
+                 print name
+                 test = 0
+               }
+             }' "$file")
+  if [[ $(printf '%s\n' "$all" | grep -c .) != "$annotated" ]]; then
+    echo "ci/check: $class has $annotated tests but $(printf '%s\n' "$all" | grep -c .) were read; split it by hand." >&2
+    exit 1
+  fi
+  picked=$(printf '%s\n' "$all" \
+    | awk -v index_="$index" -v count="$count" '(NR - index_) % count == 0' \
+    | paste -sd+ -)
+  if [[ -z $picked ]]; then
+    echo "ci/check: $class has no test at $index of $count." >&2
+    exit 1
+  fi
+  echo "$class#$picked"
+}
+
+prepared_alias() {
+  local alias
+  alias=$(sed -n 's/.*PREPARED_ALIAS = "\([^"]*\)";.*/\1/p' "$PREPARED_SOURCE")
+  if [[ -z $alias ]]; then
+    echo "ci/check: $PREPARED_SOURCE names no PREPARED_ALIAS." >&2
+    exit 1
+  fi
+  echo "$alias"
+}
+
+prepared_image() {
+  local verb=${1:-} dir=${2:-}
+  [[ -n $dir ]] || usage
+  local alias
+  alias=$(prepared_alias)
+  case $verb in
+    import)
+      if [[ -f $dir/prepared.tar.gz ]]; then
+        incus image import "$dir/prepared.tar.gz" --alias "$alias"
+        echo "Imported $alias from $dir."
+      else
+        echo "No prepared image in $dir; the first suite bakes $alias."
+      fi
+      ;;
+    export)
+      if incus image show "$alias" > /dev/null 2>&1; then
+        mkdir -p "$dir"
+        incus image export "$alias" "$dir/prepared"
+        echo "Kept $alias in $dir."
+      else
+        echo "No $alias on this host; nothing to keep."
+      fi
+      ;;
+    *) usage ;;
+  esac
+}
+
+changed_tests() {
+  local base
+  base=$(git merge-base origin/main HEAD)
+  { git diff --name-only "$base"; git ls-files --others --exclude-standard; } \
+    | { grep -E '^sail-[a-z]+/src/(main|test)/java/.+\.java$' || true; } \
+    | sort -u \
+    | while read -r path; do
+        [[ -f $path ]] || continue
+        local name
+        name=$(basename "$path" .java)
+        if [[ $path == */src/test/* ]]; then
+          [[ $name == *Test ]] && echo "$name"
+        else
+          echo "${name}*Test"
+        fi
+      done \
+    | sort -u \
+    | paste -sd, -
+}
+
+changed() {
+  mvn -B -q spotless:apply
+  local tests
+  tests=$(changed_tests)
+  if [[ -z $tests ]]; then
+    echo "ci/check: no Java class changed against origin/main; nothing to test."
+    return
+  fi
+  echo "Testing: $tests"
+  mvn -B test -Dtest="$tests" -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true
+}
+
+case ${1:-} in
+  "") changed ;;
+  full) full ;;
+  unit) shift; unit "$@" ;;
+  shard) shift; shard "$@" ;;
+  its) shift; its "$@" ;;
+  methods) shift; methods "$@" ;;
+  prepared-image) shift; prepared_image "$@" ;;
+  *) usage ;;
+esac

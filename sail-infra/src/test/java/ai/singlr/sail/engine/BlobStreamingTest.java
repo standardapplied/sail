@@ -132,10 +132,12 @@ class BlobStreamingTest {
         new Random(1615).nextBytes(chunk);
         var chunkHash = BlobStore.hash(chunk);
         new BlobStore(main.db).putChunk(chunkHash, chunk);
+        var content = MessageDigest.getInstance("SHA-256");
+        for (var c = 0; c < CHUNKS_PER_FILE; c++) content.update(chunk);
         for (var i = 0; i < FILES; i++) {
           var count = CHUNKS_PER_FILE + i;
-          var digest = MessageDigest.getInstance("SHA-256");
-          for (var c = 0; c < count; c++) digest.update(chunk);
+          var digest = (MessageDigest) content.clone();
+          content.update(chunk);
           var manifest =
               new BlobStore.Manifest(
                   HexFormat.of().formatHex(digest.digest()),

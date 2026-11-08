@@ -9,6 +9,10 @@ inputs:
   job-status:
     description: The calling job's status, `job.status`. A composite action cannot read it itself.
     required: true
+  label:
+    description: Names this job's evidence apart from its matrix siblings, e.g. `sail-core-macos`.
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -21,7 +25,7 @@ runs:
       run: |
         log="$RUNNER_TEMP/maven.log"
         {
-          echo "### Tests of $GITHUB_JOB"
+          echo "### Tests of $GITHUB_JOB ${{ inputs.label }}"
           if [ -f "$log" ]; then
             echo "Test classes finished: $(grep -c 'Tests run: .* -- in ' "$log" || true)"
             echo '```'
@@ -36,7 +40,7 @@ runs:
       if: inputs.job-status != 'success'
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
-        name: ${{ github.job }}-test-reports
+        name: ${{ github.job }}${{ inputs.label && format('-{0}', inputs.label) || '' }}-test-reports
         if-no-files-found: ignore
         path: |
           **/target/surefire-reports

@@ -16,6 +16,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Semaphore;
@@ -86,6 +87,9 @@ public final class PtySession implements AutoCloseable {
 
     void destroyForcibly();
 
+    /** Completes once the child is gone. */
+    CompletableFuture<?> exited();
+
     /** Waits for the child to be gone and names how it ended. */
     String exitReason();
   }
@@ -108,6 +112,11 @@ public final class PtySession implements AutoCloseable {
     }
 
     @Override
+    public CompletableFuture<?> exited() {
+      return process.onExit();
+    }
+
+    @Override
     public String exitReason() {
       return "exited(" + process.onExit().join().exitValue() + ")";
     }
@@ -126,6 +135,13 @@ public final class PtySession implements AutoCloseable {
             h.descendants().forEach(ProcessHandle::destroyForcibly);
             h.destroyForcibly();
           });
+    }
+
+    @Override
+    public CompletableFuture<?> exited() {
+      return handle
+          .<CompletableFuture<?>>map(ProcessHandle::onExit)
+          .orElseGet(() -> CompletableFuture.completedFuture(null));
     }
 
     @Override
@@ -940,11 +956,15 @@ public final class PtySession implements AutoCloseable {
    * the subscribers are dropped rather than poisoned: their sender threads end on delivering the
    * ending, and a detach's queue-clearing poison would race that delivery and lose it. Those
    * senders are given a moment to deliver it before the caller moves on — a host stopping for good
-   * exits right after, and the ending must be on the wire by then, not in a queue.
+   * exits right after, and the ending must be on the wire by then, not in a queue. A child gone
+   * before it opened the terminal, or whose silent job still holds it, leaves the master no end of
+   * stream to read, so once the child goes the gather ends as soon as the terminal has drained, not
+   * at the escalation.
    */
   @Override
   public void close() {
     child.destroy();
+    child.exited().thenRun(pty::endOnceDrained);
     try {
       if (!gatherDone.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
         child.destroyForcibly();

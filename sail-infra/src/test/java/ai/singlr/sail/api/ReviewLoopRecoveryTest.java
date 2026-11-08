@@ -176,9 +176,7 @@ class ReviewLoopRecoveryTest {
 
   /** A run in lane {@code role} of {@code specId}, at work over the whole container. */
   private String holderOf(String specId, String role) {
-    var holder = loop.run(specId, role);
-    loop.container.started(holder);
-    return holder;
+    return loop.liveRun(specId, role);
   }
 
   /** The run ended and its row was completed in place: no stop of it ever reaches the bus. */
@@ -615,8 +613,7 @@ class ReviewLoopRecoveryTest {
     assertEquals(1, reconciler.sweep(), "the review nothing serves is rescued, once");
     loop.settle();
     var first = loop.onlyLive();
-    var chat = loop.run("auth", Lane.ROOM_FULL.wire());
-    loop.container.started(chat);
+    var chat = loop.liveRun("auth", Lane.ROOM_FULL.wire());
 
     loop.finish(first.id(), CLEAN_REVIEW);
 
@@ -645,8 +642,7 @@ class ReviewLoopRecoveryTest {
     assertEquals(1, reconciler.sweep(), "the first stage is rescued");
     loop.settle();
     var first = loop.onlyLive();
-    var chat = loop.run("auth", Lane.ROOM_FULL.wire());
-    loop.container.started(chat);
+    var chat = loop.liveRun("auth", Lane.ROOM_FULL.wire());
     loop.finish(first.id(), CLEAN_REVIEW);
     loop.container.exited(chat, "replied", 0);
     Acting.system(() -> loop.runs.complete(chat, "completed", 0));
@@ -908,8 +904,7 @@ class ReviewLoopRecoveryTest {
     loop = ReviewLoop.staged(tempDir, "codex");
     var said = loop.narrating();
     loop.spec("auth", SpecStatus.REVIEW, "claude-code", null, null, List.of("api"));
-    var build = loop.run("auth", "build");
-    loop.container.started(build);
+    var build = loop.liveRun("auth", "build");
     loop.container.exited(build, "done", 0);
 
     sweeps(loop.reconciler(LATER), 3);
@@ -1453,7 +1448,7 @@ class ReviewLoopRecoveryTest {
                     List.of(Map.<String, Object>of("name", "approve", "type", "human")))));
     strandedReviewOf("auth");
     loop.spec("billing", "api");
-    loop.container.started(loop.run("billing", "build"));
+    loop.liveRun("billing", "build");
     var reconciler = loop.reconciler(LATER);
 
     assertEquals(
@@ -1501,7 +1496,7 @@ class ReviewLoopRecoveryTest {
     loop.restart();
     assertEquals("pending", loop.reviews.stagesForReview(reviewer.reviewId()).getLast().status());
     loop.spec("billing", "api");
-    loop.container.started(loop.run("billing", "build"));
+    loop.liveRun("billing", "build");
 
     assertEquals(
         1,
@@ -1521,15 +1516,13 @@ class ReviewLoopRecoveryTest {
   void aReviewWaitingToLaunchIsNeverReplayedWhileARunHoldsItsClaim() {
     loop = ReviewLoop.staged(tempDir, "codex");
     loop.spec("billing", "api");
-    var holder = loop.run("billing", "build");
-    loop.container.started(holder);
+    var holder = loop.liveRun("billing", "build");
     var build = loop.built("auth");
     assertEquals(List.of(holder), loop.container.live(), "auth's reviewer waits for the repo");
     var reconciler = loop.reconciler(LATER);
 
     for (var turn = 1; turn <= 3; turn++) {
-      var chat = loop.run("billing", "room");
-      loop.container.started(chat);
+      var chat = loop.liveRun("billing", "room");
       reconciler.sweep();
       loop.settle();
       loop.container.exited(chat, "replied", 0);
@@ -1571,7 +1564,7 @@ class ReviewLoopRecoveryTest {
         });
     loop.restart();
     loop.spec("billing", "api");
-    loop.container.started(loop.run("billing", "build"));
+    loop.liveRun("billing", "build");
 
     assertEquals(1, loop.reconciler(LATER).sweep());
     loop.settle();
@@ -1590,8 +1583,7 @@ class ReviewLoopRecoveryTest {
     loop.spec("auth", "api");
     var replaced = loop.run("auth", "build");
     Acting.system(() -> loop.runs.complete(replaced, "stopped", 0));
-    var fresh = loop.run("auth", "build");
-    loop.container.started(fresh);
+    var fresh = loop.liveRun("auth", "build");
 
     loop.onEvent(ReviewLoop.buildStop("auth", replaced));
 
