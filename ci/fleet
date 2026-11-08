@@ -70,7 +70,7 @@ up() {
     gc compute instances create "$(vm "$run" "$box")" --zone "$ZONE" --machine-type "$MACHINE" \
       --image-family ubuntu-2404-lts-amd64 --image-project ubuntu-os-cloud \
       --boot-disk-size 50GB --boot-disk-type pd-balanced \
-      --provisioning-model SPOT --instance-termination-action DELETE --max-run-duration "$MAX_RUN" \
+      --provisioning-model STANDARD --instance-termination-action DELETE --max-run-duration "$MAX_RUN" \
       --labels "purpose=sail-fleet,run=$run,box=$box" > /dev/null &
   done
   wait
