@@ -13,15 +13,16 @@ readonly MAX_RUN=6h
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  ci/fleet run VERSION [--from OLD]
+  ci/fleet run VERSION [--upgrade-to TARGET]
                                 a fresh fleet on release VERSION (e.g. 0.59.0), every scenario, then down;
-                                with --from, the fleet starts on OLD and is upgraded to VERSION, main first
+                                with --upgrade-to, the fleet is then upgraded to TARGET, main first:
+                                a release version, or a native binary file (sail upgrade --binary)
   ci/fleet up RUN               create the run's four VMs and wait until each answers ssh
   ci/fleet install RUN VERSION  install release VERSION on every box from the README's install line
   ci/fleet join RUN             init main, join the three nodes with their roles, sync
   ci/fleet projects RUN         create acme, beta, gamma on main, grant them, check each node holds its own
   ci/fleet doors RUN            each role's spec writes at the node CLI, and where each spec syncs to
-  ci/fleet upgrade RUN VERSION  upgrade main, then every node, to VERSION, and check the fleet held
+  ci/fleet upgrade RUN TARGET   upgrade main, then every node, to TARGET, and check the fleet held
   ci/fleet ssh RUN BOX COMMAND  run COMMAND on BOX as the operator account
   ci/fleet down [RUN]           delete the run's VMs, or every fleet VM when RUN is left out
 
@@ -244,22 +245,41 @@ projects() {
 }
 
 runs_version() {
-  local run=$1 box=$2 version=$3 printed
+  local run=$1 box=$2 expected=$3 printed
   printed=$(on "$run" "$box" "sail -V")
-  echo "$box runs: $printed"
-  [[ $printed == "sail $version" ]]
+  echo "$box runs: $printed, expected: $expected"
+  [[ $printed == "$expected" ]]
+}
+
+runs_binary() {
+  local run=$1 box=$2 expected=$3 installed
+  installed=$(on "$run" "$box" 'sha256sum "$(command -v sail)"' | awk '{print $1}')
+  echo "$box runs sha256 $installed, expected $expected"
+  [[ $installed == "$expected" ]]
 }
 
 upgrade_box() {
-  on "$1" "$2" "sudo sail upgrade --target $3"
+  local run=$1 box=$2 target=$3
+  if [[ -f $target ]]; then
+    gc compute scp "$target" "$(vm "$run" "$box"):/tmp/sail-candidate" --zone "$ZONE"
+    on "$run" "$box" "sudo sail upgrade --binary /tmp/sail-candidate"
+  else
+    on "$run" "$box" "sudo sail upgrade --target $target"
+  fi
 }
 
 upgrade() {
-  local run=${1:-} version=${2:-} box
-  [[ -n $run && -n $version ]] || usage
+  local run=${1:-} target=${2:-} box expected
+  [[ -n $run && -n $target ]] || usage
   for box in main eng client observer; do
-    check "$run" "$box upgrades to $version" upgrade_box "$run" "$box" "$version"
-    check "$run" "$box runs $version" runs_version "$run" "$box" "$version"
+    check "$run" "$box upgrades to $target" upgrade_box "$run" "$box" "$target"
+    if [[ -f $target ]]; then
+      expected=$(sha256sum "$target" | awk '{print $1}')
+      check "$run" "$box runs the candidate ${expected:0:12}" runs_binary "$run" "$box" "$expected"
+    else
+      expected="sail $target"
+      check "$run" "$box runs $expected" runs_version "$run" "$box" "$expected"
+    fi
   done
   check "$run" "every node syncs twice after the upgrade" sync_all "$run"
   check "$run" "eng still holds every project" holds "$run" eng "acme beta demo gamma"
@@ -283,23 +303,33 @@ down() {
   echo "Deleted: $names"
 }
 
+status=0
+
+step() {
+  [[ $status == 0 ]] || return 0
+  "$@" || status=1
+  if grep -q '^FAIL' "$RUNS/$2/report.txt" 2>/dev/null; then
+    status=1
+  fi
+}
+
 run() {
-  local version=${1:-} from=""
+  local version=${1:-} target=""
   [[ -n $version ]] || usage
-  if [[ ${2:-} == --from ]]; then
-    from=${3:-}
-    [[ -n $from ]] || usage
+  if [[ ${2:-} == --upgrade-to ]]; then
+    target=${3:-}
+    [[ -n $target ]] || usage
   fi
   local id
   id="r$(date -u +%Y%m%d-%H%M)"
-  echo "Fleet run $id on $version${from:+ from $from}; logs in $RUNS/$id"
-  local status=0
-  if [[ -n $from ]]; then
-    { up "$id" && install "$id" "$from" && join "$id" && projects "$id" && doors "$id" \
-      && upgrade "$id" "$version"; } || status=1
-  else
-    { up "$id" && install "$id" "$version" && join "$id" && projects "$id" && doors "$id"; } || status=1
-  fi
+  echo "Fleet run $id on $version${target:+, upgraded to $target}; logs in $RUNS/$id"
+  status=0
+  step up "$id"
+  step install "$id" "$version"
+  step join "$id"
+  step projects "$id"
+  step doors "$id"
+  [[ -z $target ]] || step upgrade "$id" "$target"
   if [[ $status == 0 || ${FLEET_KEEP:-0} != 1 ]]; then
     down "$id"
   else
