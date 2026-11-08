@@ -175,6 +175,100 @@ class SpecCliHelperTest {
     }
   }
 
+  @Test
+  void aRefusalReadsAsSailsWithNoLineOfCurlsOwn() throws Exception {
+    var home = Files.createTempDirectory("spec-shim");
+    try {
+      var socket = home.resolve("api.sock");
+      writeExecutable(
+          home.resolve("spec"),
+          SpecCliHelper.scriptContent()
+              .replace(SailPaths.apiSocketContainerPath().toString(), socket.toString()));
+      Files.writeString(home.resolve("box.credential"), "sailbox_test\n");
+      var refusal =
+          "{\"error\": {\"code\": \"read_only_credential\", \"message\": \"Your credential is"
+              + " read-only and cannot change specs.\"}}";
+      try (var answering = answering(socket, "403 Forbidden", refusal)) {
+        var refused = shim(home, home, Map.of(), "create", "--id", "a", "--title", "A");
+
+        assertEquals(1, refused.exit(), refused.output());
+        assertEquals(refusal + "\n", refused.output());
+      }
+    } finally {
+      try (var walk = Files.walk(home)) {
+        walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> path.toFile().delete());
+      }
+    }
+  }
+
+  @Test
+  void anApiThatDoesNotAnswerIsNamedAsSuch() throws Exception {
+    var home = Files.createTempDirectory("spec-shim");
+    try {
+      var socket = home.resolve("api.sock");
+      writeExecutable(
+          home.resolve("spec"),
+          SpecCliHelper.scriptContent()
+              .replace(SailPaths.apiSocketContainerPath().toString(), socket.toString()));
+      Files.writeString(home.resolve("box.credential"), "sailbox_test\n");
+      try (var closed = bind(socket)) {}
+
+      var unanswered = shim(home, home, Map.of(), "board");
+
+      assertEquals(1, unanswered.exit(), unanswered.output());
+      assertTrue(
+          unanswered.output().contains("spec: the sail API at " + socket + " did not answer"),
+          unanswered.output());
+      assertFalse(unanswered.output().contains("curl:"), unanswered.output());
+    } finally {
+      try (var walk = Files.walk(home)) {
+        walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> path.toFile().delete());
+      }
+    }
+  }
+
+  /** A socket that answers one request with {@code status} and {@code body}, as sail-api would. */
+  private static java.io.Closeable answering(Path socket, String status, String body)
+      throws IOException {
+    var channel = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
+    channel.bind(UnixDomainSocketAddress.of(socket));
+    var server =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try (var client = channel.accept()) {
+                    var request = java.nio.ByteBuffer.allocate(8192);
+                    while (!new String(
+                            request.array(), 0, request.position(), StandardCharsets.UTF_8)
+                        .contains("\r\n\r\n")) {
+                      if (client.read(request) < 0) {
+                        return;
+                      }
+                    }
+                    var bytes = body.getBytes(StandardCharsets.UTF_8);
+                    var response =
+                        "HTTP/1.1 "
+                            + status
+                            + "\r\nContent-Type: application/json\r\nContent-Length: "
+                            + bytes.length
+                            + "\r\nConnection: close\r\n\r\n"
+                            + body;
+                    client.write(
+                        java.nio.ByteBuffer.wrap(response.getBytes(StandardCharsets.UTF_8)));
+                  } catch (IOException ignored) {
+                    var unused = ignored;
+                  }
+                });
+    return () -> {
+      channel.close();
+      try {
+        server.join();
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+    };
+  }
+
   private record Shim(int exit, String output) {}
 
   private static void runShim(Path home, Path bin, Map<String, String> extra, String... args)
