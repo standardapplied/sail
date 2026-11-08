@@ -2631,7 +2631,7 @@ the one native build:
 | `Unit tests (<module>, <os>)` | the wildcard-import check, then `ci/check unit <module>`: the module's unit tests, its JaCoCo gates and spotless, on Linux; the same tests without gates on macOS | its upstream modules, installed first |
 | `Dependency scan` | OWASP dependency-check, offline against a cached NVD database refreshed best-effort | the NVD cache |
 | `Native binaries` | the candidate (`-Ob` quick build) and the release `.github/released-tag` pins, each smoke-tested, uploaded as `native-binaries` | nothing else |
-| `Native fleet sync tests` | `NativeFleetIT`: sync end to end on native binaries in Podman boxes | `native-binaries` |
+| `Native fleet sync tests (half i of 2)` | `ci/check methods NativeFleetIT i 2`: every other test of `NativeFleetIT`, sync end to end on native binaries in Podman boxes | `native-binaries` |
 | `Multi-node control-plane integration tests` | every `*IT` that runs without incus | the runner's systemd user manager |
 | `Native upgrade tests` | `UpgradeE2EIT`: the pinned release upgraded to this commit's binary on a real incus | incus and `native-binaries` |
 | `Incus-backed integration tests (shard i of 4)` | `ci/check its i 4 NativeFleetIT UpgradeE2EIT`: that shard's `*IT` classes on a real incus | incus |

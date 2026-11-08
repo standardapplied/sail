@@ -18,6 +18,8 @@ Usage:
                                 print the IT classes of shard INDEX (1-based) of COUNT
   ci/check its INDEX COUNT [EXCLUDED_IT...] -- [MAVEN_ARG...]
                                 run the IT classes of that shard under -Pintegration
+  ci/check methods CLASS INDEX COUNT
+                                print CLASS#a+b+... : every COUNT-th of its @Test methods from INDEX
   ci/check prepared-image import|export DIR
                                 load the incus suites' prepared image from DIR, or keep it there
 EOF
@@ -132,6 +134,28 @@ its() {
     "$@"
 }
 
+methods() {
+  local class=${1:-} index=${2:-} count=${3:-}
+  [[ -n $class && $index =~ ^[1-9][0-9]*$ && $count =~ ^[1-9][0-9]*$ && $index -le $count ]] || usage
+  local file
+  file=$(find sail-*/src/test/java -name "$class.java" | head -1)
+  if [[ -z $file ]]; then
+    echo "ci/check: no test class $class." >&2
+    exit 2
+  fi
+  local picked
+  picked=$(awk '/@Test/ { test = 1; next }
+                test && match($0, /void [A-Za-z0-9_]+\(/) {
+                  print substr($0, RSTART + 5, RLENGTH - 6); test = 0 }' "$file" \
+    | awk -v index_="$index" -v count="$count" '(NR - index_) % count == 0' \
+    | paste -sd+ -)
+  if [[ -z $picked ]]; then
+    echo "ci/check: $class has no test at $index of $count." >&2
+    exit 1
+  fi
+  echo "$class#$picked"
+}
+
 prepared_alias() {
   local alias
   alias=$(sed -n 's/.*PREPARED_ALIAS = "\([^"]*\)";.*/\1/p' "$PREPARED_SOURCE")
@@ -207,6 +231,7 @@ case ${1:-} in
   unit) shift; unit "$@" ;;
   shard) shift; shard "$@" ;;
   its) shift; its "$@" ;;
+  methods) shift; methods "$@" ;;
   prepared-image) shift; prepared_image "$@" ;;
   *) usage ;;
 esac
