@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.time.Duration;
 import java.util.Map;
+import java.util.function.Supplier;
 import picocli.CommandLine.Help.Ansi;
 
 /**
@@ -45,6 +46,24 @@ final class NodeSync {
       scheduler.useHealth(operations::syncStatus, operations);
     }
     return scheduler;
+  }
+
+  /**
+   * The scheduler sail-api runs for as long as it runs, live on every box: each round reconciles
+   * only while the box is a node, read afresh from {@code sync} as the round starts, so a box that
+   * joins a main after sail-api started, or stops being a node, is followed with no restart. On
+   * main and standalone a round reads the config and returns.
+   */
+  static SyncScheduler serverScheduler(
+      Supplier<SyncConfig> sync, Map<String, String> env, SyncScheduler.Reconcile reconcile) {
+    return new SyncScheduler(
+        () -> {
+          if (HostSync.isNode(sync.get())) {
+            reconcile.run();
+          }
+        },
+        millis(env, DEBOUNCE_ENV, SyncScheduler.DEFAULT_DEBOUNCE),
+        millis(env, FRESHEN_TTL_ENV, SyncScheduler.DEFAULT_FRESHEN_TTL));
   }
 
   static SyncScheduler scheduler(

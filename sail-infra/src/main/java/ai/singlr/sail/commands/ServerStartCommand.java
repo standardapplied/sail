@@ -9,6 +9,7 @@ import ai.singlr.sail.api.CatalogNotificationsResolver;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.EventRetentionSweeper;
+import ai.singlr.sail.api.EventSubscriber;
 import ai.singlr.sail.api.MissedStopReconciler;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectReader;
@@ -78,6 +79,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -182,9 +185,8 @@ public final class ServerStartCommand implements Runnable {
             SyncScheduler.disabled(),
             new PtyHostYield());
     var syncScheduler =
-        NodeSync.scheduler(
-            HostSync.config(),
-            false,
+        NodeSync.serverScheduler(
+            HostSync::config,
             System.getenv(),
             () -> {
               var round = operations.sync(new SyncRequest(null));
@@ -220,9 +222,11 @@ public final class ServerStartCommand implements Runnable {
     bus.subscribe(roomWake);
     roomWake.startSweep(Duration.ofSeconds(60));
     shutdown.register(roomWake).register(operations.liveMembers());
-    if (narratesSlack(HostSync.config())) {
-      bus.subscribe(SlackReactor.withDefaults(notifications, new SlackThreadStore(db), specStore));
-    } else {
+    bus.subscribe(
+        whileNarrating(
+            SlackReactor.withDefaults(notifications, new SlackThreadStore(db), specStore),
+            HostSync::config));
+    if (!narratesSlack(HostSync.config())) {
       System.out.println(
           Ansi.AUTO.string(
               "  @|faint Slack narration is main's job — this node's work is announced there once"
@@ -437,6 +441,42 @@ public final class ServerStartCommand implements Runnable {
    */
   public static boolean narratesSlack(SyncConfig sync) {
     return !HostSync.isNode(sync);
+  }
+
+  /**
+   * {@code reactor}, acting only while this box narrates ({@link #narratesSlack}), read afresh for
+   * each event it would act on: a box that joins a main after sail-api started stops posting at
+   * once, and one that becomes main starts.
+   */
+  static EventSubscriber whileNarrating(EventSubscriber reactor, Supplier<SyncConfig> sync) {
+    return new EventSubscriber() {
+      @Override
+      public String name() {
+        return reactor.name();
+      }
+
+      @Override
+      public Predicate<Event> filter() {
+        return reactor.filter();
+      }
+
+      @Override
+      public void onEvent(Event event) throws Exception {
+        if (narratesSlack(sync.get())) {
+          reactor.onEvent(event);
+        }
+      }
+
+      @Override
+      public void missed() {
+        reactor.missed();
+      }
+
+      @Override
+      public void closed() {
+        reactor.closed();
+      }
+    };
   }
 
   /**
