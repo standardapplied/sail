@@ -323,7 +323,20 @@ final class ReviewLoop implements AutoCloseable {
    * Records a run of {@code specId} (null for none) in lane {@code role}, with no agent started.
    */
   String run(String specId, String role) {
+    return run(DateTimeUtils.newId().toString(), specId, role);
+  }
+
+  /**
+   * A run whose agent is already live when its row appears, as a real launch is: a sweep that reads
+   * the row mid-launch finds its process, never a run gone before it started.
+   */
+  String liveRun(String specId, String role) {
     var id = DateTimeUtils.newId().toString();
+    container.started(id);
+    return run(id, specId, role);
+  }
+
+  private String run(String id, String specId, String role) {
     Acting.system(
         () ->
             runs.create(
