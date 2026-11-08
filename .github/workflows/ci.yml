@@ -167,14 +167,14 @@ jobs:
           retention-days: 14
           path: ${{ runner.temp }}/native
 
-  # Each fleet test opens a fleet of its own, so the suite splits by test into two halves.
+  # Each fleet test opens a fleet of its own, so the suite splits by test into three parts.
   native-fleet:
-    name: Native fleet sync tests (half ${{ matrix.half }} of 2)
+    name: Native fleet sync tests (part ${{ matrix.part }} of 3)
     needs: native
     strategy:
       fail-fast: false
       matrix:
-        half: [1, 2]
+        part: [1, 2, 3]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -202,7 +202,7 @@ jobs:
       - name: Native fleet sync tests
         run: |
           chmod +x "$RUNNER_TEMP/native/sail" "$RUNNER_TEMP/native/sail-linux-amd64"
-          tests=$(ci/check methods NativeFleetIT ${{ matrix.half }} 2)
+          tests=$(ci/check methods NativeFleetIT ${{ matrix.part }} 3)
           mvn -B -Pintegration verify \
             -Dit.test="$tests" \
             -Dtest=NoUnitTests \
@@ -221,7 +221,7 @@ jobs:
         uses: ./.github/actions/test-evidence
         with:
           job-status: ${{ job.status }}
-          label: half-${{ matrix.half }}
+          label: part-${{ matrix.part }}
 
   fleet-integration:
     name: Multi-node control-plane integration tests
