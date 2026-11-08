@@ -253,7 +253,7 @@ runs_version() {
 
 runs_binary() {
   local run=$1 box=$2 expected=$3 installed
-  installed=$(on "$run" "$box" 'sha256sum "$(command -v sail)"' | awk '{print $1}')
+  installed=$(on "$run" "$box" 'sudo sha256sum "$(command -v sail)"' | awk '{print $1}')
   echo "$box runs sha256 $installed, expected $expected"
   [[ $installed == "$expected" ]]
 }
