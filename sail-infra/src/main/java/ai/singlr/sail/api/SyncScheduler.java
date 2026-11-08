@@ -14,6 +14,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
@@ -31,9 +32,11 @@ import java.util.function.Supplier;
  * wait for a debounce. All of it is best-effort: a failed round records health and backs off and
  * the write or read proceeds on the local replica — local-first is never blocked by sync.
  *
- * <p>On main and on a standalone box there is no peer to reconcile with, so the wiring installs
- * {@link #disabled()} and every method is a no-op. Time is injected ({@code nanoTime} for elapsed,
- * a {@link Sleeper} for the debounce wait) so tests drive the schedule deterministically.
+ * <p>On main and on a standalone box there is no peer to reconcile with: a short-lived command gets
+ * {@link #disabled()}, and sail-api, which outlives a box joining a main, gets a live scheduler
+ * {@link #onlyWhile active} while the box is a node. Either way every method is then a no-op that
+ * takes no lock and reads no health. Time is injected ({@code nanoTime} for elapsed, a {@link
+ * Sleeper} for the debounce wait) so tests drive the schedule deterministically.
  */
 public final class SyncScheduler implements AutoCloseable {
 
@@ -60,6 +63,7 @@ public final class SyncScheduler implements AutoCloseable {
   public static final Duration IDLE_POLL = Duration.ofMinutes(1);
 
   private final boolean enabled;
+  private volatile BooleanSupplier active = () -> true;
   private final Reconcile reconcile;
   private final Duration debounce;
   private final Duration freshenTtl;
@@ -143,6 +147,20 @@ public final class SyncScheduler implements AutoCloseable {
     this.backoff = new Backoff(now, () -> ThreadLocalRandom.current().nextDouble());
   }
 
+  /**
+   * Makes every method a no-op while {@code active} answers no, asked before any lock or health
+   * read; returns {@code this}. sail-api passes whether the box is a node now, so a box that joins
+   * a main after it started is followed, and main pays one question per call.
+   */
+  public SyncScheduler onlyWhile(BooleanSupplier active) {
+    this.active = Objects.requireNonNull(active, "active");
+    return this;
+  }
+
+  private boolean active() {
+    return enabled && active.getAsBoolean();
+  }
+
   public void useHealth(Supplier<SyncStatus> health) {
     synchronized (freshenLock) {
       this.health = health;
@@ -157,9 +175,9 @@ public final class SyncScheduler implements AutoCloseable {
     }
   }
 
-  /** The timer's beat: a due half-open probe, else an idle node's once-a-minute check-in. */
+  /** The timer's beat on a node: a due half-open probe, else the once-a-minute idle check-in. */
   void tick() {
-    if (!enabled) return;
+    if (!active()) return;
     synchronized (freshenLock) {
       refreshBackoff();
       if (backoff.probeDue()) {
@@ -187,7 +205,7 @@ public final class SyncScheduler implements AutoCloseable {
    * the caller: the round runs on this scheduler's executor after the burst goes quiet.
    */
   public void afterWrite() {
-    if (!enabled) {
+    if (!active()) {
       return;
     }
     synchronized (state) {
@@ -211,7 +229,7 @@ public final class SyncScheduler implements AutoCloseable {
    * one per read.
    */
   public void freshenRead() {
-    if (!enabled) {
+    if (!active()) {
       return;
     }
     synchronized (freshenLock) {
@@ -225,7 +243,7 @@ public final class SyncScheduler implements AutoCloseable {
 
   /** Runs one round synchronously; for short-lived processes that cannot await a debounce. */
   public void syncNow() {
-    if (!enabled) {
+    if (!active()) {
       return;
     }
     synchronized (freshenLock) {

@@ -17,10 +17,11 @@ import java.util.function.Supplier;
 import picocli.CommandLine.Help.Ansi;
 
 /**
- * Wires the {@link SyncScheduler} for this box. Only a node (a box pointed at a main) gets a live
- * scheduler, backed by the same {@code sail sync} round an FDE runs by hand; main and standalone
- * boxes get {@link SyncScheduler#disabled()}, so the seam is a guaranteed no-op there. The debounce
- * and the read-freshen TTL are overridable through environment variables for scripts and tests.
+ * Wires the {@link SyncScheduler} for this box. A command gets a live scheduler only on a node (a
+ * box pointed at a main), backed by the same {@code sail sync} round an FDE runs by hand, and
+ * {@link SyncScheduler#disabled()} on main and standalone; sail-api's ({@link #serverScheduler})
+ * follows the box's role as it changes. The debounce and the read-freshen TTL are overridable
+ * through environment variables for scripts and tests.
  */
 final class NodeSync {
 
@@ -49,21 +50,26 @@ final class NodeSync {
   }
 
   /**
-   * The scheduler sail-api runs for as long as it runs, live on every box: each round reconciles
-   * only while the box is a node, read afresh from {@code sync} as the round starts, so a box that
-   * joins a main after sail-api started, or stops being a node, is followed with no restart. On
-   * main and standalone a round reads the config and returns.
+   * The scheduler sail-api runs for as long as it runs: live on every box, and active only while
+   * {@code sync}, read afresh on each call, says the box is a node, so a box that joins a main
+   * after sail-api started, or stops being a node, is followed with no restart. On main and
+   * standalone each call asks once and returns. A config caught mid-write answers not now: that
+   * round is skipped and the next one, or the idle check-in, catches up.
    */
   static SyncScheduler serverScheduler(
       Supplier<SyncConfig> sync, Map<String, String> env, SyncScheduler.Reconcile reconcile) {
     return new SyncScheduler(
-        () -> {
-          if (HostSync.isNode(sync.get())) {
-            reconcile.run();
-          }
-        },
-        millis(env, DEBOUNCE_ENV, SyncScheduler.DEFAULT_DEBOUNCE),
-        millis(env, FRESHEN_TTL_ENV, SyncScheduler.DEFAULT_FRESHEN_TTL));
+            reconcile,
+            millis(env, DEBOUNCE_ENV, SyncScheduler.DEFAULT_DEBOUNCE),
+            millis(env, FRESHEN_TTL_ENV, SyncScheduler.DEFAULT_FRESHEN_TTL))
+        .onlyWhile(
+            () -> {
+              try {
+                return HostSync.isNode(sync.get());
+              } catch (RuntimeException midWrite) {
+                return false;
+              }
+            });
   }
 
   static SyncScheduler scheduler(

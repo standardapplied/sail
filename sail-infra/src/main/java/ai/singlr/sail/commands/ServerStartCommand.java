@@ -79,8 +79,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
+import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -225,7 +225,7 @@ public final class ServerStartCommand implements Runnable {
     bus.subscribe(
         whileNarrating(
             SlackReactor.withDefaults(notifications, new SlackThreadStore(db), specStore),
-            HostSync::config));
+            NodeIdentity::declaresNotNode));
     if (!narratesSlack(HostSync.config())) {
       System.out.println(
           Ansi.AUTO.string(
@@ -444,11 +444,12 @@ public final class ServerStartCommand implements Runnable {
   }
 
   /**
-   * {@code reactor}, acting only while this box narrates ({@link #narratesSlack}), read afresh for
-   * each event it would act on: a box that joins a main after sail-api started stops posting at
-   * once, and one that becomes main starts.
+   * {@code reactor}, acting only while {@code narrates} answers yes for the event at hand: sail-api
+   * passes whether {@code host.yaml}, read whole, declares the box main or standalone ({@link
+   * NodeIdentity#declaresNotNode}), so a box that joins a main after sail-api started stops posting
+   * at once, one that becomes main starts, and a file caught mid-write posts nothing.
    */
-  static EventSubscriber whileNarrating(EventSubscriber reactor, Supplier<SyncConfig> sync) {
+  static EventSubscriber whileNarrating(EventSubscriber reactor, BooleanSupplier narrates) {
     return new EventSubscriber() {
       @Override
       public String name() {
@@ -462,7 +463,7 @@ public final class ServerStartCommand implements Runnable {
 
       @Override
       public void onEvent(Event event) throws Exception {
-        if (narratesSlack(sync.get())) {
+        if (narrates.getAsBoolean()) {
           reactor.onEvent(event);
         }
       }

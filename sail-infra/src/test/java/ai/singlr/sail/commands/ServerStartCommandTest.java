@@ -14,7 +14,7 @@ import ai.singlr.sail.api.EventSubscriber;
 import ai.singlr.sail.config.SyncConfig;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 
@@ -40,8 +40,8 @@ class ServerStartCommandTest {
   }
 
   @Test
-  void slackIsNarratedOnlyWhileTheBoxIsNotANodeReadForEachEvent() throws Exception {
-    var sync = new AtomicReference<SyncConfig>(SyncConfig.unset());
+  void slackIsNarratedOnlyWhileTheBoxSaysItNarratesAskedForEachEvent() throws Exception {
+    var narrates = new AtomicBoolean(true);
     var narrated = new ArrayList<Event>();
     var reactor =
         new EventSubscriber() {
@@ -59,20 +59,37 @@ class ServerStartCommandTest {
           public void onEvent(Event event) {
             narrated.add(event);
           }
+
+          @Override
+          public void missed() {
+            narrated.add(Event.of("acme", null, "missed", "uday", "box"));
+          }
+
+          @Override
+          public void closed() {
+            narrated.add(Event.of("acme", null, "closed", "uday", "box"));
+          }
         };
-    var gated = ServerStartCommand.whileNarrating(reactor, sync::get);
+    var gated = ServerStartCommand.whileNarrating(reactor, narrates::get);
     var first = Event.of("acme", "a", "spec_done", "uday", "box");
     var second = Event.of("acme", "b", "spec_done", "uday", "box");
     var third = Event.of("acme", "c", "spec_done", "uday", "box");
 
     gated.onEvent(first);
-    sync.set(new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "eng"));
+    narrates.set(false);
     gated.onEvent(second);
-    sync.set(new SyncConfig(SyncConfig.ROLE_MAIN, null, "eng"));
+    narrates.set(true);
     gated.onEvent(third);
 
     assertEquals(
         List.of(first, third), narrated, "a node's work is announced by main, never by it");
     assertEquals("slack", gated.name());
+    assertTrue(gated.filter().test(first), "the reactor's own filter decides what it is offered");
+    gated.missed();
+    gated.closed();
+    assertEquals(
+        List.of("missed", "closed"),
+        narrated.subList(2, 4).stream().map(Event::type).toList(),
+        "a dropped event and the end reach the reactor whatever the role");
   }
 }
