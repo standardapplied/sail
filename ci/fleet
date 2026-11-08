@@ -376,7 +376,7 @@ merges_without_conflict() {
 conversation_matches() {
   local run=$1 room=$2 box first="" digest
   for box in main eng client observer; do
-    digest=$(on "$run" "$box" "sudo sail spec comments $room --no-sync" | md5sum | cut -c1-12)
+    digest=$(on "$run" "$box" "sudo sail spec comments $room --no-sync" | md5sum | cut -c1-12) || return 1
     echo "$box: $digest"
     [[ -z $first ]] && first=$digest
     [[ $digest == "$first" ]] || return 1
@@ -437,6 +437,14 @@ inside() {
     http_door "$run" client client 404 POST /v1/specs '{"project":"beta","id":"http-beta","title":"over http"}'
 }
 
+says_in_order() {
+  local run=$1 box=$2 room=$3 expected=$4 said
+  said=$(on "$run" "$box" "sudo sail spec comments $room --no-sync" \
+    | grep -oE '[a-z]+: [a-z]+ word' | paste -sd '|' -) || return 1
+  echo "$box: $said"
+  [[ $said == "$expected" ]]
+}
+
 rooms() {
   local run=${1:-}
   [[ -n $run ]] || usage
@@ -459,6 +467,8 @@ rooms() {
   check "$run" "client answers after hearing uday" \
     allowed "$run" client "sudo sail sync && sudo sail spec comment acme-chat --body 'client: third word'"
   check "$run" "every node syncs twice" sync_all "$run"
+  check "$run" "observer reads the three words in order" \
+    says_in_order "$run" observer acme-chat "client: first word|uday: second word|client: third word"
   check "$run" "the room reads the same on every box" conversation_matches "$run" acme-chat
   check "$run" "client's database has no trace of beta-chat or obs-chat" holds_no_trace_of "$run" client beta-chat obs-chat
 }
@@ -483,7 +493,7 @@ file_gone() {
   local run=$1 project=$2 name=$3 listed box
   shift 3
   for box in "$@"; do
-    listed=$(on "$run" "$box" "sudo sail project files ls -p $project")
+    listed=$(on "$run" "$box" "sudo sail project files ls -p $project") || return 1
     echo "$box: $listed"
     ! grep -qF "$name" <<< "$listed" || return 1
   done
