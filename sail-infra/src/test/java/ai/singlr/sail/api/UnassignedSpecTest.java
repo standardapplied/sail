@@ -150,8 +150,7 @@ class UnassignedSpecTest {
   }
 
   @Test
-  void aSpecBornInSomeoneElsesRoomIsClaimedByAnyMemberWhileUnassignedAndThenOnlyAnAdminMovesIt()
-      throws Exception {
+  void aSpecBornInSomeoneElsesRoomIsClaimedOnlyByOneWhoMayStartWorkThere() throws Exception {
     var uday = token("uday", "member");
     var carol = token("carol", "member");
     var room = "{\"id\": \"design\", \"project\": \"acme\", \"title\": \"D\"}";
@@ -160,17 +159,21 @@ class UnassignedSpecTest {
         "{\"id\": \"auth\", \"project\": \"acme\", \"title\": \"A\", \"room_id\": \"design\"}";
     assertEquals(201, send("POST", "/v1/specs", uday, born).statusCode());
 
-    assertEquals(
-        201, send("POST", "/v1/rooms/design/messages", carol, "{\"body\": \"hi\"}").statusCode());
     var claim = send("PUT", "/v1/specs/auth", carol, "{\"assignee\": \"carol\"}");
 
-    assertEquals(200, claim.statusCode(), claim.body());
-    var taken = send("PUT", "/v1/specs/auth", uday, "{\"assignee\": \"uday\"}");
-    assertEquals(403, taken.statusCode(), "moving claimed work is an admin's act");
-    assertTrue(taken.body().contains("Ask an admin"), taken.body());
+    assertEquals(403, claim.statusCode(), claim.body());
+    assertTrue(claim.body().contains("Ask an admin"), claim.body());
+    assertEquals(
+        201,
+        send("POST", "/v1/rooms/design/messages", carol, "{\"body\": \"hi\"}").statusCode(),
+        "carol speaks there, though she may not take the work");
+    var given = send("PUT", "/v1/specs/auth", uday, "{\"assignee\": \"carol\"}");
+    assertEquals(403, given.statusCode(), "handing it on is an admin's act");
     var admin = token("ops", "admin");
     assertEquals(
-        200, send("PUT", "/v1/specs/auth", admin, "{\"assignee\": \"uday\"}").statusCode());
+        200, send("PUT", "/v1/specs/auth", admin, "{\"assignee\": \"carol\"}").statusCode());
+    var delegated = send("POST", "/v1/rooms/design/messages", carol, "{\"body\": \"on it\"}");
+    assertEquals(201, delegated.statusCode(), delegated.body());
   }
 
   @Test

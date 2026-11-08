@@ -2423,8 +2423,9 @@ no pairing is removed through the gateway as before, and no key file is touched.
     spec born in it. Only the room lane reads it: a room principal posts exactly where it acts for
     one of them. Every writer who acts for an FDE posts in every conversation of the projects its
     scope admits that this box holds (`PostingRule`, `RoomStore.holds`), at the terminal door and
-    at main's decision on a synced message alike. Owning a spec born in a room is never its
-    settings.
+    at main's decision on a synced message alike. Seating work in a room, a spec born there or a
+    claim of one born there, stays its owners' and an admin's (`SeatingRule`), since the work's
+    owner becomes one of the room's owners. Owning a spec born in a room is never its settings.
   - **Who owns a run** (`RunAuthority.owners`): the FDE the run acts for, and its spec's owner
     (for a spec-less run, the box that ran it). Its owners or an admin read its log, stop it and
     change it; a run's own FDE keeps it after its spec is reassigned. A run is born only for

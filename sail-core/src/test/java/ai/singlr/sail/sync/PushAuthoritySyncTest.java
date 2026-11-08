@@ -160,7 +160,7 @@ class PushAuthoritySyncTest {
   }
 
   @Test
-  void takingAnotherMembersSpecIsDeniedButClaimingAnUnassignedOneBornInTheirRoomIsNot()
+  void takingAnotherMembersSpecOrClaimingOneBornWhereYouMayNotPostIsDeniedAndNothingIsErased()
       throws IOException {
     ownSpec(main, "bob", "theirs", "bob");
     Acting.as("bob", () -> new MessageStore(main.db).append("theirs", "bob", "mine", null));
@@ -172,16 +172,16 @@ class PushAuthoritySyncTest {
 
     assign(ada, "ada", "theirs", "ada");
     assign(ada, "ada", "child", "ada");
-    assertEquals(List.of("theirs"), denied(push(ada, ADA, "spec")));
+    assertEquals(List.of("theirs", "child"), denied(push(ada, ADA, "spec")));
     assertEquals("bob", main.specs.findById("theirs").orElseThrow().assignee());
-    assertEquals(
-        "ada",
-        main.specs.findById("child").orElseThrow().assignee(),
-        "claiming gives no voice a writer of the project lacks, so the claim stands");
+    assertNull(main.specs.findById("child").orElseThrow().assignee());
 
-    new EraseRequests(ada.db).request(Erasure.SPEC, "theirs", "ada");
-    var refused = assertThrows(SyncTransportException.class, () -> push(ada, ADA, "spec"));
-    assertTrue(refused.getMessage().contains("bob"), refused.getMessage());
+    var requests = new EraseRequests(ada.db);
+    for (var id : List.of("theirs", "child")) {
+      requests.request(Erasure.SPEC, id, "ada");
+      var refused = assertThrows(SyncTransportException.class, () -> push(ada, ADA, "spec"));
+      assertTrue(refused.getMessage().contains("bob"), refused.getMessage());
+    }
     sync(ada, ADA);
     sync(bob, BOB);
 

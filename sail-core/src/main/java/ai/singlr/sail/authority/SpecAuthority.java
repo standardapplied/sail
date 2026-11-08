@@ -83,7 +83,7 @@ public final class SpecAuthority implements WriteAuthority {
         return refused;
       }
     }
-    return claim(actor, id, held, assigneeOf(next));
+    return claim(actor, id, held, assigneeOf(next), bornIn(id, held));
   }
 
   /**
@@ -113,13 +113,13 @@ public final class SpecAuthority implements WriteAuthority {
     if (bornIn == null) {
       return Optional.empty();
     }
-    var posting =
-        PostingRule.decide(actor, bornIn, rooms.holds(bornIn, id), rooms.owners(bornIn, id, null));
-    if (posting.isPresent()) {
-      return posting;
+    var seating =
+        SeatingRule.decide(actor, bornIn, rooms.holds(bornIn, id), rooms.owners(bornIn, id, null));
+    if (seating.isPresent()) {
+      return seating;
     }
     var assignee = assigneeOf(next);
-    return assignee == null ? Optional.empty() : claim(actor, id, null, assignee);
+    return assignee == null ? Optional.empty() : claim(actor, id, null, assignee, bornIn);
   }
 
   /**
@@ -153,11 +153,12 @@ public final class SpecAuthority implements WriteAuthority {
 
   /**
    * The claim rule: an admin assigns anyone; anyone else may only claim a spec that is unassigned,
-   * for the FDE they act as ({@link Actor#actingFde}). Claiming gives no voice in a room: every
-   * writer of the project has one already ({@link PostingRule}).
+   * for the FDE they act as ({@link Actor#actingFde}), and one born in {@code bornIn} only where
+   * they may already start work ({@link SeatingRule}), since its owner owns that room's
+   * conversation — the spec itself counted as {@code held}, never as the claim would leave it.
    */
   private Optional<Refusal> claim(
-      Actor actor, String id, Map<String, Object> held, String requested) {
+      Actor actor, String id, Map<String, Object> held, String requested, String bornIn) {
     if (actor.isAdmin()) {
       return Optional.empty();
     }
@@ -172,6 +173,17 @@ public final class SpecAuthority implements WriteAuthority {
               + (current != null ? " (currently '" + current + "')" : "")
               + ".",
           "Ask an admin to reassign it. You may grab a spec only while it is unassigned.");
+    }
+    if (bornIn != null
+        && SeatingRule.decide(actor, bornIn, true, rooms.owners(bornIn, id, held)).isPresent()) {
+      return Refusal.of(
+          Refusal.Kind.ADMIN_ONLY,
+          "Spec '"
+              + id
+              + "' lives in '"
+              + bornIn
+              + "', whose owners alone start work there, and claiming it would make you one.",
+          "Ask an admin to assign it to you.");
     }
     return Optional.empty();
   }
