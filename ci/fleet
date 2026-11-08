@@ -15,8 +15,9 @@ usage() {
 Usage:
   ci/fleet run VERSION [--upgrade-to TARGET]
                                 a fresh fleet on release VERSION (e.g. 0.59.0), every scenario, then down;
-                                with --upgrade-to, the fleet is then upgraded to TARGET, main first:
-                                a release version, or a native binary file (sail upgrade --binary)
+                                with --upgrade-to, projects and conflicts run on VERSION, the fleet is
+                                upgraded to TARGET, main first (a release version, or a native binary
+                                file for sail upgrade --binary), and every other scenario runs on TARGET
   ci/fleet up RUN               create the run's four VMs and wait until each answers ssh
   ci/fleet install RUN VERSION  install release VERSION on every box from the README's install line;
                                 VERSION may be a candidate binary, put in place by sail upgrade --binary
@@ -29,7 +30,12 @@ Usage:
                                 reads the same on every box
   ci/fleet inside RUN           apply acme on client and observer; each role at the in-container spec
                                 CLI and at the HTTP API Mast calls
-  ci/fleet upgrade RUN TARGET   upgrade main, then every node, to TARGET, and check the fleet held
+  ci/fleet rooms RUN            client opens a room over HTTP; who may post in it at each door, and the
+                                conversation reads the same on every box; no other project's room leaks
+  ci/fleet files RUN            files shared on main and on client reach exactly the nodes granted their
+                                project, updates and removals follow, and a viewer cannot share
+  ci/fleet upgrade RUN TARGET   upgrade main, then every node, to TARGET, and check that the projects
+                                and the conflicts scenario's spec and conversation held
   ci/fleet ssh RUN BOX COMMAND  run COMMAND on BOX as the operator account
   ci/fleet down [RUN]           delete the run's VMs, or every fleet VM when RUN is left out
 
@@ -206,12 +212,24 @@ refused() {
   grep -qF "$because" <<< "$out"
 }
 
+spec_ids() {
+  on "$1" "$2" "sudo sail spec list --all-projects --all --json --no-sync 2>/dev/null" \
+    | python3 -I -c 'import json,sys; print(" ".join(sorted(s["project"] + "/" + s["id"] for s in json.load(sys.stdin)["specs"])))'
+}
+
 specs_on() {
   local run=$1 box=$2 expected=$3 listed
-  listed=$(on "$run" "$box" "sudo sail spec list --all-projects --all --json --no-sync 2>/dev/null" \
-    | python3 -I -c 'import json,sys; print(" ".join(sorted(s["project"] + "/" + s["id"] for s in json.load(sys.stdin)["specs"])))')
+  listed=$(spec_ids "$run" "$box")
   echo "$box holds: $listed"
   [[ $listed == "$expected" ]]
+}
+
+union() {
+  printf '%s\n' $* | sort -u | paste -sd ' ' -
+}
+
+in_acme() {
+  printf '%s\n' $* | grep '^acme/' | sort -u | paste -sd ' ' -
 }
 
 sync_all() {
@@ -237,8 +255,9 @@ reaches_main_unasked() {
 }
 
 doors() {
-  local run=${1:-}
+  local run=${1:-} before
   [[ -n $run ]] || usage
+  before=$(spec_ids "$run" main)
   check "$run" "client creates a spec with no sync" \
     allowed "$run" client "sudo sail spec create -p acme --id unasked --title 'reaches main by itself'"
   check "$run" "it reaches main within 30 s, no sail sync asked" reaches_main_unasked "$run" unasked
@@ -254,10 +273,11 @@ doors() {
   check "$run" "observer reads client's spec" allowed "$run" observer "sudo sail spec show client-acme"
   check "$run" "observer cannot comment on it" \
     refused "$run" observer "credential is read-only" "sudo sail spec comment client-acme --body 'a viewer speaks'"
-  check "$run" "main holds the three specs" specs_on "$run" main "acme/client-acme acme/unasked gamma/eng-gamma"
-  check "$run" "eng holds the three specs" specs_on "$run" eng "acme/client-acme acme/unasked gamma/eng-gamma"
-  check "$run" "client holds the acme specs alone" specs_on "$run" client "acme/client-acme acme/unasked"
-  check "$run" "observer holds the acme specs alone" specs_on "$run" observer "acme/client-acme acme/unasked"
+  local added="acme/client-acme acme/unasked gamma/eng-gamma"
+  check "$run" "main holds the three new specs" specs_on "$run" main "$(union $before $added)"
+  check "$run" "eng holds the three new specs" specs_on "$run" eng "$(union $before $added)"
+  check "$run" "client holds the acme specs alone" specs_on "$run" client "$(in_acme $before $added)"
+  check "$run" "observer holds the acme specs alone" specs_on "$run" observer "$(in_acme $before $added)"
 }
 
 projects() {
@@ -354,9 +374,9 @@ merges_without_conflict() {
 }
 
 conversation_matches() {
-  local run=$1 box first="" digest
+  local run=$1 room=$2 box first="" digest
   for box in main eng client observer; do
-    digest=$(on "$run" "$box" "sudo sail spec comments shared --no-sync" | md5sum | cut -c1-12)
+    digest=$(on "$run" "$box" "sudo sail spec comments $room --no-sync" | md5sum | cut -c1-12)
     echo "$box: $digest"
     [[ -z $first ]] && first=$digest
     [[ $digest == "$first" ]] || return 1
@@ -390,7 +410,7 @@ conflicts() {
   check "$run" "eng, its assignee, comments" \
     allowed "$run" eng "sudo sail sync && sudo sail spec comment shared --body 'eng: second word'"
   check "$run" "every node syncs twice to hear it" sync_all "$run"
-  check "$run" "the conversation reads the same on every box" conversation_matches "$run"
+  check "$run" "the conversation reads the same on every box" conversation_matches "$run" shared
 }
 
 inside() {
@@ -415,6 +435,87 @@ inside() {
     http_door "$run" client client 201 POST /v1/specs '{"project":"acme","id":"http-client","title":"over http"}'
   check "$run" "over HTTP, client cannot create a spec in beta" \
     http_door "$run" client client 404 POST /v1/specs '{"project":"beta","id":"http-beta","title":"over http"}'
+}
+
+rooms() {
+  local run=${1:-}
+  [[ -n $run ]] || usage
+  check "$run" "over HTTP, client opens room acme-chat in acme" \
+    http_door "$run" client client 201 POST /v1/rooms '{"id":"acme-chat","project":"acme","title":"acme chat"}'
+  check "$run" "over HTTP, client cannot open a room in beta" \
+    http_door "$run" client client 404 POST /v1/rooms '{"id":"beta-chat","project":"beta","title":"beta chat"}'
+  check "$run" "over HTTP, the viewer cannot open a room" \
+    http_door "$run" observer obs 403 POST /v1/rooms '{"id":"obs-chat","project":"acme","title":"obs chat"}'
+  check "$run" "client opens the conversation" \
+    allowed "$run" client "sudo sail spec comment acme-chat --body 'client: first word' && sudo sail sync"
+  check "$run" "uday, an admin, answers on main" \
+    allowed "$run" main "sudo sail spec comment acme-chat --body 'uday: second word'"
+  check "$run" "eng, a member who does not own the room, cannot post" \
+    refused "$run" eng "only client or an admin may post there" "sudo sail sync && sudo sail spec comment acme-chat --body 'eng: a word'"
+  check "$run" "observer cannot post at the CLI" \
+    refused "$run" observer "credential is read-only" "sudo sail sync && sudo sail spec comment acme-chat --body 'obs: a word'"
+  check "$run" "over HTTP, the viewer cannot post" \
+    http_door "$run" observer obs 403 POST /v1/rooms/acme-chat/messages '{"body":"obs over http"}'
+  check "$run" "client answers after hearing uday" \
+    allowed "$run" client "sudo sail sync && sudo sail spec comment acme-chat --body 'client: third word'"
+  check "$run" "every node syncs twice" sync_all "$run"
+  check "$run" "the room reads the same on every box" conversation_matches "$run" acme-chat
+  check "$run" "client's database has no trace of beta-chat or obs-chat" holds_no_trace_of "$run" client beta-chat obs-chat
+}
+
+file_on() {
+  local run=$1 box=$2 project=$3 name=$4 expected=$5 content
+  content=$(on "$run" "$box" "sudo sail project files cat $name -p $project")
+  echo "$box: $content"
+  [[ $content == "$expected" ]]
+}
+
+file_everywhere() {
+  local run=$1 project=$2 name=$3 expected=$4
+  shift 4
+  local box
+  for box in "$@"; do
+    file_on "$run" "$box" "$project" "$name" "$expected" || return 1
+  done
+}
+
+file_gone() {
+  local run=$1 project=$2 name=$3 listed box
+  shift 3
+  for box in "$@"; do
+    listed=$(on "$run" "$box" "sudo sail project files ls -p $project")
+    echo "$box: $listed"
+    ! grep -qF "$name" <<< "$listed" || return 1
+  done
+}
+
+share() {
+  on "$1" "$2" "printf '%s' '$5' > /tmp/$4 && sudo sail project files add /tmp/$4 -p $3"
+}
+
+files() {
+  local run=${1:-}
+  [[ -n $run ]] || usage
+  check "$run" "main shares notes.md in acme" share "$run" main acme notes.md "acme notes v1"
+  check "$run" "main shares betaonly.md in beta" share "$run" main beta betaonly.md "beta notes"
+  check "$run" "every node syncs twice" sync_all "$run"
+  check "$run" "eng, client and observer read notes.md" file_everywhere "$run" acme notes.md "acme notes v1" eng client observer
+  check "$run" "eng and observer read betaonly.md" file_everywhere "$run" beta betaonly.md "beta notes" eng observer
+  check "$run" "client cannot read beta's file" \
+    refused "$run" client "betaonly.md" "sudo sail project files cat betaonly.md -p beta"
+  check "$run" "client's database has no trace of betaonly" holds_no_trace_of "$run" client betaonly
+  check "$run" "client's synced copy of notes.md is on its disk" \
+    allowed "$run" client "sudo grep -qx 'acme notes v1' /root/.sail/projects/acme/files/notes.md"
+  check "$run" "observer cannot share a file" \
+    refused "$run" observer "credential is read-only" "printf x > /tmp/obs.md && sudo sail project files add /tmp/obs.md -p acme"
+  check "$run" "client shares plan.md in acme" share "$run" client acme plan.md "the client plan"
+  check "$run" "client updates notes.md" share "$run" client acme notes.md "acme notes v2"
+  check "$run" "every node syncs twice more" sync_all "$run"
+  check "$run" "main, eng and observer read client's plan.md" file_everywhere "$run" acme plan.md "the client plan" main eng observer
+  check "$run" "every box reads client's notes.md" file_everywhere "$run" acme notes.md "acme notes v2" main eng client observer
+  check "$run" "client stops sharing plan.md" allowed "$run" client "sudo sail project files rm plan.md -p acme"
+  check "$run" "every node syncs to hear it" sync_all "$run"
+  check "$run" "plan.md is gone from every box" file_gone "$run" acme plan.md main eng client observer
 }
 
 runs_version() {
@@ -458,12 +559,9 @@ upgrade() {
   check "$run" "eng still holds every project" holds "$run" eng "acme beta demo gamma"
   check "$run" "client still holds acme alone" holds "$run" client "acme"
   check "$run" "observer still holds acme and beta" holds "$run" observer "acme beta"
-  check "$run" "main still holds the three specs" specs_on "$run" main "acme/client-acme acme/unasked gamma/eng-gamma"
-  check "$run" "client still holds the acme specs alone" specs_on "$run" client "acme/client-acme acme/unasked"
-  check "$run" "observer still cannot create a spec" \
-    refused "$run" observer "credential is read-only" "sudo sail spec create -p acme --id obs-after --title 'viewer writes'"
-  check "$run" "client still creates a spec in acme" \
-    allowed "$run" client "sudo sail spec create -p acme --id client-after --title 'client after the upgrade'"
+  check "$run" "every box still holds shared with eng's title" everywhere "$run" shared title "eng renamed it"
+  check "$run" "every box still holds its priority" everywhere "$run" shared priority 7
+  check "$run" "its conversation still reads the same on every box" conversation_matches "$run" shared
 }
 
 down() {
@@ -494,17 +592,22 @@ run() {
     [[ -n $target ]] || usage
   fi
   local id
-  id="r$(date -u +%Y%m%d-%H%M)"
+  id="r$(date -u +%Y%m%d-%H%M%S)"
   echo "Fleet run $id on $version${target:+, upgraded to $target}; logs in $RUNS/$id"
   status=0
   step up "$id"
   step install "$id" "$version"
   step join "$id"
   step projects "$id"
+  if [[ -n $target ]]; then
+    step conflicts "$id"
+    step upgrade "$id" "$target"
+  fi
   step doors "$id"
   step inside "$id"
-  step conflicts "$id"
-  [[ -z $target ]] || step upgrade "$id" "$target"
+  [[ -n $target ]] || step conflicts "$id"
+  step rooms "$id"
+  step files "$id"
   if [[ ${FLEET_KEEP:-0} != always && ( $status == 0 || ${FLEET_KEEP:-0} != 1 ) ]]; then
     down "$id"
   else
@@ -525,6 +628,8 @@ case ${1:-} in
   upgrade) shift; upgrade "$@" ;;
   inside) shift; inside "$@" ;;
   conflicts) shift; conflicts "$@" ;;
+  rooms) shift; rooms "$@" ;;
+  files) shift; files "$@" ;;
   ssh) shift; [[ $# -ge 3 ]] || usage; r=$1 b=$2; shift 2; on "$r" "$b" "$@" ;;
   down) shift; down "$@" ;;
   *) usage ;;
