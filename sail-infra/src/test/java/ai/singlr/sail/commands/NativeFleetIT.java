@@ -428,6 +428,7 @@ class NativeFleetIT {
             main.createSpecs("doomed", 1, BODY_BYTES);
             main.createSpecs("kept", 1, BODY_BYTES);
             main.shOk("dd if=/dev/urandom of=/tmp/scratch.bin bs=1M count=2 status=none");
+            main.catalog("scratch");
             main.sailOk(
                 "project", "files", "add", "-p", "scratch", "/tmp/scratch.bin", "--as", "s.bin");
             main.shOk("dd if=/dev/urandom of=/tmp/kept.bin bs=1M count=1 status=none");
