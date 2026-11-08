@@ -225,8 +225,8 @@ public final class ServerStartCommand implements Runnable {
     bus.subscribe(
         whileNarrating(
             SlackReactor.withDefaults(notifications, new SlackThreadStore(db), specStore),
-            NodeIdentity::declaresNotNode));
-    if (!narratesSlack(HostSync.config())) {
+            NodeIdentity::narrates));
+    if (!NodeIdentity.narrates()) {
       System.out.println(
           Ansi.AUTO.string(
               "  @|faint Slack narration is main's job — this node's work is announced there once"
@@ -445,9 +445,8 @@ public final class ServerStartCommand implements Runnable {
 
   /**
    * {@code reactor}, acting only while {@code narrates} answers yes for the event at hand: sail-api
-   * passes whether {@code host.yaml}, read whole, declares the box main or standalone ({@link
-   * NodeIdentity#declaresNotNode}), so a box that joins a main after sail-api started stops posting
-   * at once, one that becomes main starts, and a file caught mid-write posts nothing.
+   * passes {@link NodeIdentity#narrates}, so a box that joins a main after sail-api started stops
+   * posting at once, one that becomes main starts, and a file caught mid-write posts nothing.
    */
   static EventSubscriber whileNarrating(EventSubscriber reactor, BooleanSupplier narrates) {
     return new EventSubscriber() {

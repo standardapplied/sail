@@ -53,8 +53,9 @@ final class NodeSync {
    * The scheduler sail-api runs for as long as it runs: live on every box, and active only while
    * {@code sync}, read afresh on each call, says the box is a node, so a box that joins a main
    * after sail-api started, or stops being a node, is followed with no restart. On main and
-   * standalone each call asks once and returns. A config caught mid-write answers not now: that
-   * round is skipped and the next one, or the idle check-in, catches up.
+   * standalone each call asks once and returns. A config that cannot be read answers not now, said
+   * in the log: a file caught mid-write costs one skipped round, and the next one or the idle
+   * check-in catches up.
    */
   static SyncScheduler serverScheduler(
       Supplier<SyncConfig> sync, Map<String, String> env, SyncScheduler.Reconcile reconcile) {
@@ -66,7 +67,13 @@ final class NodeSync {
             () -> {
               try {
                 return HostSync.isNode(sync.get());
-              } catch (RuntimeException midWrite) {
+              } catch (RuntimeException unreadable) {
+                System.getLogger(NodeSync.class.getName())
+                    .log(
+                        System.Logger.Level.WARNING,
+                        "host.yaml could not be read ("
+                            + unreadable.getMessage()
+                            + "); sync waits until it reads whole");
                 return false;
               }
             });

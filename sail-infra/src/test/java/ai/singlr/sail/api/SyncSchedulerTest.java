@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
@@ -43,6 +44,41 @@ class SyncSchedulerTest {
 
   private void advanceBy(Duration duration) {
     nanos.addAndGet(duration.toNanos());
+  }
+
+  @Test
+  void aWritesRoundPendingWhenTheBoxStopsBeingANodeIsNotRun() {
+    var executor = new QueueExecutor();
+    var rounds = new AtomicInteger();
+    var active = new AtomicBoolean(true);
+    var scheduler = scheduler(executor, rounds::incrementAndGet).onlyWhile(active::get);
+
+    scheduler.afterWrite();
+    active.set(false);
+    executor.runAll();
+
+    assertEquals(0, rounds.get(), "the round asks again as it starts");
+  }
+
+  @Test
+  void anInactiveSchedulersBeatReadsNoHealthAndRunsNoRoundUntilItIsActive() {
+    var rounds = new AtomicInteger();
+    var healthReads = new AtomicInteger();
+    var active = new AtomicBoolean(false);
+    var scheduler = scheduler(new QueueExecutor(), rounds::incrementAndGet).onlyWhile(active::get);
+    scheduler.useHealth(
+        () -> {
+          healthReads.incrementAndGet();
+          return SyncStatus.unattempted("node", "sail@main");
+        });
+
+    scheduler.tick();
+    assertEquals(0, healthReads.get(), "an inactive beat asks nothing");
+    assertEquals(0, rounds.get());
+
+    active.set(true);
+    scheduler.tick();
+    assertEquals(1, rounds.get(), "once active, the idle beat checks in");
   }
 
   @Test

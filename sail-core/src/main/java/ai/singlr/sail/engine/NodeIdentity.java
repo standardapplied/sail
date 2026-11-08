@@ -10,6 +10,7 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 
 /**
  * This box's identity in the db-sync star, read from {@code host.yaml}: its sync role and, above
@@ -60,12 +61,29 @@ public final class NodeIdentity {
    * a node would lose its grant until its next round.
    */
   public static boolean declaresNotNode() {
+    return declaresNotNode(SailPaths.hostConfigPath());
+  }
+
+  static boolean declaresNotNode(Path hostYaml) {
     try {
-      var declared = YamlUtil.parseFile(SailPaths.hostConfigPath());
+      var declared = YamlUtil.parseFile(hostYaml);
       return !declared.isEmpty() && !HostYaml.fromMap(declared).sync().isNode();
     } catch (IOException | RuntimeException e) {
       return false;
     }
+  }
+
+  /**
+   * Whether this box narrates its own work to Slack: main or standalone. A box with no {@code
+   * host.yaml} was never made a node, so it narrates; one whose file is empty or unreadable —
+   * caught mid-write — posts nothing until the file reads whole ({@link #declaresNotNode}).
+   */
+  public static boolean narrates() {
+    return narrates(SailPaths.hostConfigPath());
+  }
+
+  static boolean narrates(Path hostYaml) {
+    return !Files.exists(hostYaml) || declaresNotNode(hostYaml);
   }
 
   /** This box's FDE handle — the assignee dispatch matches a spec against — or null when unset. */

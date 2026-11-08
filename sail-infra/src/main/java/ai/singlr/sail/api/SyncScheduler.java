@@ -346,6 +346,9 @@ public final class SyncScheduler implements AutoCloseable {
   }
 
   private void runRound() {
+    if (!active()) {
+      return;
+    }
     Exception failure = null;
     try {
       Actor.call(
