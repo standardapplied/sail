@@ -957,13 +957,14 @@ public final class PtySession implements AutoCloseable {
    * ending, and a detach's queue-clearing poison would race that delivery and lose it. Those
    * senders are given a moment to deliver it before the caller moves on — a host stopping for good
    * exits right after, and the ending must be on the wire by then, not in a queue. A child gone
-   * before it opened the terminal leaves the master no end of stream to read, so the pty is closed
-   * as the child goes and the gather ends then, not at the escalation.
+   * before it opened the terminal, or whose silent job still holds it, leaves the master no end of
+   * stream to read, so once the child goes the gather ends as soon as the terminal has drained, not
+   * at the escalation.
    */
   @Override
   public void close() {
     child.destroy();
-    child.exited().thenRun(pty::close);
+    child.exited().thenRun(pty::endOnceDrained);
     try {
       if (!gatherDone.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
         child.destroyForcibly();

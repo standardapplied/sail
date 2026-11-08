@@ -45,7 +45,12 @@ runs:
     - name: Fetch the base image
       shell: bash
       run: |
-        incus image copy images:ubuntu/24.04 local: --alias ubuntu-24.04-base --quiet
+        for attempt in 1 2 3; do
+          incus image copy images:ubuntu/24.04 local: --quiet && exit 0
+          echo "Fetching the base image failed (attempt $attempt of 3)."
+          sleep 10
+        done
+        exit 1
 
     # The prepared image is the base plus every package the suites install; baking it costs a
     # shard over a minute. It is kept per week and per source that defines it, so it is never

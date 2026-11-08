@@ -376,6 +376,20 @@ class PtySessionTest {
   }
 
   @Test
+  void whatAChildSaysAsItIsEndedReachesItsClientBeforeTheEnding() throws Exception {
+    var session =
+        session("trap 'echo farewell; exit 0' TERM; echo ready; while :; do read x; done");
+    var client = new Collector();
+    session.attach(client, true, "uday");
+    client.awaitOutput("ready");
+
+    session.close();
+
+    assertTrue(client.outputText().contains("farewell"), client.outputText());
+    assertEquals("exited(0)", session.endedReason());
+  }
+
+  @Test
   void aSessionWhoseShellIsGoneWhileAJobHoldsItsTerminalEndsAtItsCloseNotAtTheEscalation()
       throws Exception {
     var session = session("trap '' HUP; sleep 60 & echo job:$!:started");

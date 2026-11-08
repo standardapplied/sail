@@ -202,8 +202,9 @@ jobs:
       - name: Native fleet sync tests
         run: |
           chmod +x "$RUNNER_TEMP/native/sail" "$RUNNER_TEMP/native/sail-linux-amd64"
+          tests=$(ci/check methods NativeFleetIT ${{ matrix.half }} 2)
           mvn -B -Pintegration verify \
-            -Dit.test="$(ci/check methods NativeFleetIT ${{ matrix.half }} 2)" \
+            -Dit.test="$tests" \
             -Dtest=NoUnitTests \
             -Dsurefire.failIfNoSpecifiedTests=false \
             -Dfailsafe.failIfNoSpecifiedTests=false \
@@ -291,7 +292,7 @@ jobs:
 
       - name: Run incus integration tests
         run: >
-          ci/check its ${{ matrix.shard }} 4 NativeFleetIT UpgradeE2EIT
+          ci/check its ${{ matrix.shard }} 4 NativeFleetIT UpgradeE2EIT -- -Dsail.it.requireNative=true
           2>&1 | tee "$RUNNER_TEMP/maven.log"
 
       - name: Keep the prepared image for the next run

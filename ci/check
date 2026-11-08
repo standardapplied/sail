@@ -143,10 +143,16 @@ methods() {
     echo "ci/check: no test class $class." >&2
     exit 2
   fi
-  local picked
-  picked=$(awk '/@Test/ { test = 1; next }
-                test && match($0, /void [A-Za-z0-9_]+\(/) {
-                  print substr($0, RSTART + 5, RLENGTH - 6); test = 0 }' "$file" \
+  local annotated all picked
+  annotated=$(grep -cE '^[[:space:]]*@(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)\b' "$file" || true)
+  all=$(awk '/^[[:space:]]*@(Test|ParameterizedTest|RepeatedTest|TestFactory|TestTemplate)([^A-Za-z]|$)/ { test = 1 }
+             test && match($0, /void [A-Za-z0-9_]+\(/) {
+               print substr($0, RSTART + 5, RLENGTH - 6); test = 0 }' "$file")
+  if [[ $(printf '%s\n' "$all" | grep -c .) != "$annotated" ]]; then
+    echo "ci/check: $class has $annotated tests but $(printf '%s\n' "$all" | grep -c .) were read; split it by hand." >&2
+    exit 1
+  fi
+  picked=$(printf '%s\n' "$all" \
     | awk -v index_="$index" -v count="$count" '(NR - index_) % count == 0' \
     | paste -sd+ -)
   if [[ -z $picked ]]; then
