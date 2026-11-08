@@ -71,7 +71,7 @@ jobs:
           kind: release
 
       - name: Build native image
-        run: mvn -B package -Pnative -Dmaven.test.skip=true
+        run: mvn package -Pnative -DskipTests
 
       - name: Smoke test
         run: |

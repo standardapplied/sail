@@ -45,7 +45,7 @@ runs:
 
     - name: Build native image
       shell: bash
-      run: mvn -B package -Pnative -Dmaven.test.skip=true -Dsail.native.optimization=${{ inputs.optimization }}
+      run: mvn -B package -Pnative -DskipTests -Dsail.native.optimization=${{ inputs.optimization }}
 
     - name: Smoke test
       shell: bash
