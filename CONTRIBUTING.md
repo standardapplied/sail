@@ -28,6 +28,23 @@ integration tests and the incus-backed integration tests in four shards. Each te
 per pull request. A failed job uploads its surefire and failsafe reports and summarises the
 failed tests. Details in ARCHITECTURE's "Continuous integration".
 
+## The GCP fleet
+
+`ci/fleet` proves a release on real boxes: four Ubuntu 24.04 VMs in GCP, a main and three FDE
+nodes (eng, a member of every project; client, a member scoped to `acme`; observer, a viewer
+scoped to `acme` and `beta`), driven only by the README's commands and the ones sail prints.
+
+```bash
+ci/fleet run 0.59.0          # create, install, init, join, check, delete; non-zero on any failure
+FLEET_KEEP=1 ci/fleet run 0.59.0   # leave a failed fleet up to look at it
+ci/fleet ssh <run> client 'sudo sail sync status --json'
+ci/fleet down                # delete every fleet VM
+```
+
+It needs `gcloud` signed in to a project (`FLEET_PROJECT`, default `sail-mast-511621`). Every
+VM is labelled `purpose=sail-fleet` and deletes itself after six hours whatever happens to the
+run. Each check is a line in `~/.sail-fleet/<run>/report.txt`, beside the log of what it ran.
+
 ## Coverage policy
 
 Gates are ratchets: each protects the current baseline and only moves up.
