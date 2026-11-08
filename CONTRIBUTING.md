@@ -36,7 +36,7 @@ scoped to `acme` and `beta`), driven only by the README's commands and the ones 
 
 ```bash
 ci/fleet run 0.59.0          # create, install, init, join, check, delete; non-zero on any failure
-ci/fleet run 0.59.0 --upgrade-to ./sail   # then upgrade main and each node to a candidate binary, and check again
+ci/fleet run 0.59.0 --upgrade-to ./sail   # seed projects and a conflict on 0.59.0, upgrade to a candidate binary, check the rest on it
 FLEET_KEEP=1 ci/fleet run 0.59.0   # leave a failed fleet up to look at it
 ci/fleet ssh <run> client 'sudo sail sync status --json'
 ci/fleet down                # delete every fleet VM
@@ -45,6 +45,11 @@ ci/fleet down                # delete every fleet VM
 It needs `gcloud` signed in to a project (`FLEET_PROJECT`, default `sail-mast-511621`). Every
 VM is labelled `purpose=sail-fleet` and deletes itself after six hours whatever happens to the
 run. Each check is a line in `~/.sail-fleet/<run>/report.txt`, beside the log of what it ran.
+
+The scenarios: the roster and each node's projects, each role's spec writes at the node CLI, the
+in-container `spec` CLI and the HTTP API Mast calls, a conflict parked and resolved the same
+everywhere, a room's conversation and who may post in it, shared files reaching exactly the nodes
+granted their project, and a project's app served and reached at every door, never by a viewer.
 
 ## Coverage policy
 
