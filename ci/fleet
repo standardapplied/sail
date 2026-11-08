@@ -96,13 +96,14 @@ install_box() {
 }
 
 install() {
-  local run=${1:-} version=${2:-} box failed=0
+  local run=${1:-} version=${2:-} box pid failed=0 pids=""
   [[ -n $run && -n $version ]] || usage
   for box in $BOXES; do
     check "$run" "install $version on $box" install_box "$run" "$box" "$version" &
+    pids="$pids $!"
   done
-  for box in $BOXES; do
-    wait -n || failed=1
+  for pid in $pids; do
+    wait "$pid" || failed=1
   done
   return $failed
 }
