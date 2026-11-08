@@ -1303,6 +1303,7 @@ public final class SailOperations implements HostOperations {
    * same, so a caller cannot tell a project it was not granted from one that does not exist.
    */
   private String readable(String project) {
+    NameValidator.requireValidProjectName(project);
     if (!Actor.reader().scope().admits(project)
         || (projectStore != null && projectStore.findByName(project).isEmpty())) {
       throw ProjectReader.absent(project);

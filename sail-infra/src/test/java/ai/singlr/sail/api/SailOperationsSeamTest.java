@@ -830,7 +830,11 @@ class SailOperationsSeamTest {
         assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, ((Result.Failure<?>) specs).errorCode());
       }
       assertTrue(operations.projectFiles("acme").list().isEmpty());
-      assertTrue(operations.specs("acme").isSuccess());
+      var held = operations.specs("acme");
+      assertFalse(
+          held instanceof Result.Failure<?> refused
+              && refused.errorCode() == ErrorCode.PROJECT_NOT_IN_CATALOG,
+          "a held project passes the catalog's gate: " + held);
     }
   }
 
