@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.61.0
+
+- **A viewer can apply a project that names an agent.** The GCP fleet found that `sudo sail project apply beta` on a viewer's node provisioned the whole container and then failed on its last step with "Your credential is read-only and cannot create rooms.": apply makes the box's FDE a home room with the project's agent seated, and a viewer may create no room. A viewer posts in no room, so it now has no home room: its apply says "No home room: this box's FDE holds a read-only credential and posts in no room, so it has no home room." and succeeds, and `GET /v1/projects/{p}` names no `home_room` for a viewer, so Mast never opens one that cannot exist.
+
 ## 0.60.0
 
 - **A node syncs its writes as it makes them.** The GCP fleet found that a node joined by the README never synced on its own: `sail spec create` on a node reached main only at the next `sudo sail sync`, and an idle node never pulled. sail-api decided once, when it started, whether the box was a node, and `sudo sail init --main` starts sail-api before the join makes it one. sail-api now asks on every round: a write on a node reaches main within the debounce (2 s) and an idle node pulls every minute, from the moment it joins, with no restart. A box that stops being a node stops syncing the same way. When the box's role cannot be read, the round is skipped and logged once, and its recovery is logged once. Slack narration follows the same live answer, so a box narrates exactly while it is not a node.

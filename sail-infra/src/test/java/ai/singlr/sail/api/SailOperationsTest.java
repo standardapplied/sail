@@ -149,6 +149,18 @@ class SailOperationsTest {
   }
 
   @Test
+  void aViewerReadsTheProjectWithoutAHomeRoom() throws Exception {
+    var operations = operations(shell().on("incus list ^acme$", RUNNING_JSON));
+
+    var result =
+        Actor.call(new Actor("obs", Role.VIEWER, Actor.Lane.CLI), () -> operations.project("acme"));
+
+    assertTrue(result.isSuccess(), result.toString());
+    assertEquals(Map.of("agent", "claude-code", "mode", "full"), get(result, "member"));
+    assertFalse(containsKey(result, "home_room"));
+  }
+
+  @Test
   void aMachineTokenReadsTheProjectWithoutAHomeRoom() throws Exception {
     var operations = operations(shell().on("incus list ^acme$", RUNNING_JSON));
 
