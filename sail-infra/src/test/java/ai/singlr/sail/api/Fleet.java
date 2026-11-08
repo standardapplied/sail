@@ -336,11 +336,14 @@ public final class Fleet implements AutoCloseable {
               ? new SyncConfig("main", null, handle, handle + "-box")
               : new SyncConfig("node", "sail@mainbox", handle, handle + "-box");
       TestControlPlane.on(operations, db, home, syncConfig);
-      if (ServerStartCommand.narratesSlack(syncConfig)) {
-        bus.subscribe(
-            new SlackReactor(
-                project -> SLACK, new SlackThreadStore(db), SlackReactor.specLookup(specs), slack));
-      }
+      bus.subscribe(
+          ServerStartCommand.whileNarrating(
+              new SlackReactor(
+                  project -> SLACK,
+                  new SlackThreadStore(db),
+                  SlackReactor.specLookup(specs),
+                  slack),
+              () -> !syncConfig.isNode()));
       var tokens = new TokenStore(db);
       var apiToken = tokens.create("fleet-admin", "admin").token();
       server =

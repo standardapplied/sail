@@ -11,10 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.SyncScheduler;
+import ai.singlr.sail.api.SyncStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class NodeSyncTest {
@@ -98,6 +101,62 @@ class NodeSyncTest {
         NodeSync.scheduler(
             NODE, false, Map.of(NodeSync.DEBOUNCE_ENV, "50"), OperatorCommand.PLAIN)) {
       assertNotNull(scheduler);
+    }
+  }
+
+  @Test
+  void sailApisSchedulerFollowsTheBoxIntoAndOutOfTheNodeRoleWithNoRestart() {
+    var sync = new AtomicReference<SyncConfig>(SyncConfig.unset());
+    var rounds = new AtomicInteger();
+    try (var scheduler = NodeSync.serverScheduler(sync::get, Map.of(), rounds::incrementAndGet)) {
+      scheduler.syncNow();
+      assertEquals(0, rounds.get(), "a standalone box has no main to reconcile with");
+
+      sync.set(new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "eng"));
+      scheduler.syncNow();
+      assertEquals(1, rounds.get(), "joined after sail-api started, the box reconciles");
+
+      sync.set(new SyncConfig(SyncConfig.ROLE_MAIN, null, "eng"));
+      scheduler.syncNow();
+      assertEquals(1, rounds.get(), "become main, it reconciles with nobody");
+    }
+  }
+
+  @Test
+  void onMainSailApisSchedulerTakesNoLockAndReadsNoHealthForAReadAWriteOrARound() {
+    var sync = new AtomicReference<SyncConfig>(new SyncConfig(SyncConfig.ROLE_MAIN, null, "uday"));
+    var rounds = new AtomicInteger();
+    var healthReads = new AtomicInteger();
+    try (var scheduler = NodeSync.serverScheduler(sync::get, Map.of(), rounds::incrementAndGet)) {
+      scheduler.useHealth(
+          () -> {
+            healthReads.incrementAndGet();
+            return SyncStatus.unattempted("main", null);
+          });
+
+      scheduler.freshenRead();
+      scheduler.afterWrite();
+      scheduler.syncNow();
+
+      assertEquals(0, healthReads.get(), "main never asks its health on the read path");
+      assertEquals(0, rounds.get());
+    }
+  }
+
+  @Test
+  void aConfigCaughtMidWriteSkipsTheRoundInsteadOfFailingTheCaller() {
+    var rounds = new AtomicInteger();
+    try (var scheduler =
+        NodeSync.serverScheduler(
+            () -> {
+              throw new IllegalStateException("host.yaml is half written");
+            },
+            Map.of(),
+            rounds::incrementAndGet)) {
+      scheduler.freshenRead();
+      scheduler.syncNow();
+
+      assertEquals(0, rounds.get());
     }
   }
 }
