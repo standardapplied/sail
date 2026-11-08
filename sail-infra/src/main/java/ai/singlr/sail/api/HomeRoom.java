@@ -18,11 +18,11 @@ import java.util.Map;
 
 /**
  * An FDE's standing conversation with a project's agent: one room per FDE per project, created by
- * the box that applies the project with the member the definition names already seated. A viewer
- * posts in no room, so it has none, and its apply makes none. After that it is a room like any
- * other. The definition is read once: a room that exists is its owner's, and a later apply leaves
- * it alone. The room is born seated, in one write, so a refused member leaves no room behind and an
- * empty roster is only ever its owner's choice.
+ * the box that applies the project with the member the definition names already seated. After that
+ * it is a room like any other. The definition is read once: a room that exists is its owner's, and
+ * a later apply leaves it alone. The room is born seated, in one write, so a refused member leaves
+ * no room behind and an empty roster is only ever its owner's choice. A viewer posts in no room, so
+ * it has no home room, and its apply makes none.
  */
 public final class HomeRoom {
 
