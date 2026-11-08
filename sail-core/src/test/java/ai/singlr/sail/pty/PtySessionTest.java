@@ -91,6 +91,11 @@ class PtySessionTest {
       await(() -> saw(type), () -> "never saw " + type.getSimpleName() + "; got: " + messages);
     }
 
+    void awaitMessage(PtyMessage expected) throws InterruptedException {
+      await(
+          () -> messages.contains(expected), () -> "never saw " + expected + "; got: " + messages);
+    }
+
     /** Blocks on this collector's monitor until {@code condition} holds; each delivery wakes it. */
     private synchronized void await(BooleanSupplier condition, Supplier<String> failure)
         throws InterruptedException {
@@ -880,7 +885,7 @@ class PtySessionTest {
           });
       var observer = new Collector();
       session.attach(observer, false, "mady");
-      observer.awaitFrame(PtyMessage.WriterChanged.class);
+      observer.awaitMessage(new PtyMessage.Resized(100, 30));
 
       var frames = List.copyOf(observer.messages);
       assertEquals(
