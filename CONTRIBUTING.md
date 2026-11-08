@@ -49,7 +49,16 @@ run. Each check is a line in `~/.sail-fleet/<run>/report.txt`, beside the log of
 The scenarios: the roster and each node's projects, each role's spec writes at the node CLI, the
 in-container `spec` CLI and the HTTP API Mast calls, a conflict parked and resolved the same
 everywhere, a room's conversation and who may post in it, shared files reaching exactly the nodes
-granted their project, and a project's app served and reached at every door, never by a viewer.
+granted their project, a project's app served and reached at every door, never by a viewer,
+sail-api, the pty host and incus restarted under a live session, and the agent loop: on eng, a
+spec in acme on `standardapplied/nocaptcha` built and reviewed to `awaiting_merge`, its pull
+request closed after.
+
+The agent loop reads `fleet-anthropic-key`, `fleet-openai-key` and `fleet-github-token` from
+Secret Manager at run time, places them only through each harness's own login (a `~/.profile`
+export for Claude Code, `codex login --with-api-key` for Codex) over the container's ssh door, and
+fails the run, deleting its logs, if any secret appears in them. `FLEET_LOOP=0` skips it;
+`FLEET_LOOP_AGENTS` names the agents to install, builder first.
 
 ## Coverage policy
 

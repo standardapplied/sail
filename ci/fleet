@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+readonly CALLER_DIR=$PWD
 cd "$(dirname "$0")/.."
 
 readonly PROJECT=${FLEET_PROJECT:-sail-mast-511621}
@@ -9,6 +10,9 @@ readonly MACHINE=${FLEET_MACHINE:-e2-standard-4}
 readonly RUNS=${FLEET_RUNS:-$HOME/.sail-fleet}
 readonly BOXES="main eng client observer"
 readonly MAX_RUN=6h
+readonly SECRETS="fleet-anthropic-key fleet-openai-key fleet-github-token"
+readonly LOOP_REPO=standardapplied/nocaptcha
+readonly LOOP_AGENTS=${FLEET_LOOP_AGENTS:-claude-code codex}
 
 usage() {
   cat >&2 <<'EOF'
@@ -36,6 +40,11 @@ Usage:
                                 project, updates and removals follow, and a viewer cannot share
   ci/fleet portal RUN           main declares beta's app; eng serves it, it answers in the container, at
                                 the portal skill and over HTTP; the viewer cannot bring it up at any door
+  ci/fleet resilience RUN       incus is held everywhere; on client, sail-api, the pty host and incus restart
+                                under a live session: sync, the session and the container door hold or say why
+  ci/fleet loop RUN             on eng, Claude Code builds and Codex reviews a spec in acme on nocaptcha to
+                                awaiting_merge; the pull request, the room and every box's status are checked,
+                                no secret reaches a log, and the pull request is closed
   ci/fleet upgrade RUN TARGET   upgrade main, then every node, to TARGET, and check that the projects
                                 and the conflicts scenario's spec and conversation held
   ci/fleet ssh RUN BOX COMMAND  run COMMAND on BOX as the operator account
@@ -43,11 +52,21 @@ Usage:
 
 Each step logs to $FLEET_RUNS/RUN/ (default ~/.sail-fleet); report.txt holds one line per check.
 FLEET_KEEP=1 leaves a failed run's VMs up for diagnosis; FLEET_KEEP=always leaves any run's up.
+FLEET_LOOP=0 skips the agent loop, which needs the fleet-* secrets and spends model tokens;
+FLEET_LOOP_AGENTS names the agents it installs, builder first (default: claude-code codex).
 EOF
   exit 2
 }
 
 vm() { echo "sail-fleet-$1-$2"; }
+
+from_caller() {
+  if [[ $1 != /* && -f $CALLER_DIR/$1 ]]; then
+    echo "$CALLER_DIR/$1"
+  else
+    echo "$1"
+  fi
+}
 
 gc() { gcloud --project "$PROJECT" --quiet "$@"; }
 
@@ -116,7 +135,8 @@ install_box() {
 }
 
 install() {
-  local run=${1:-} version=${2:-} box pid failed=0 pids=""
+  local run=${1:-} version box pid failed=0 pids=""
+  version=$(from_caller "${2:-}")
   [[ -n $run && -n $version ]] || usage
   for box in $BOXES; do
     check "$run" "install $version on $box" install_box "$run" "$box" "$version" &
@@ -564,6 +584,206 @@ portal() {
     container_refuses "$run" eng beta "" "curl -sf localhost:8080/ > /dev/null"
 }
 
+session_is() {
+  local run=$1 box=$2 name=$3 expected=$4 attempt state
+  for attempt in $(seq 1 10); do
+    state=$(on "$run" "$box" "sudo sail session ls" | awk -v n="$name" '$1 == n {print $2}')
+    echo "$name: ${state:-absent}"
+    [[ $state == "$expected" ]] && return 0
+    sleep 3
+  done
+  return 1
+}
+
+opens_session() {
+  local run=$1 box=$2 name=$3
+  on "$run" "$box" "sudo sail session new $name --project acme --command bash -c 'while :; do date; sleep 1; done'" || return 1
+  on "$run" "$box" "{ sleep 3; printf '\\035'; } | sudo script -qec 'sail session attach $name' /dev/null | tr -d '\\r' | grep -q 'the session lives on'"
+}
+
+held_everywhere() {
+  local run=$1 box
+  for box in $BOXES; do
+    echo "$box: $(on "$run" "$box" "apt-mark showhold | paste -sd ' ' -")"
+    on "$run" "$box" "apt-mark showhold | grep -qx incus" || return 1
+    on "$run" "$box" "grep -rqs incus /etc/needrestart/conf.d/" || { echo "$box: no needrestart policy names incus"; return 1; }
+  done
+}
+
+resilience() {
+  local run=${1:-}
+  [[ -n $run ]] || usage
+  check "$run" "every box holds incus, and needrestart may not restart it" held_everywhere "$run"
+  check "$run" "client opens a ticking session in acme, attaches and detaches" opens_session "$run" client ticker
+  check "$run" "the session is live" session_is "$run" client ticker live
+  check "$run" "incus upgrade's dry run changes nothing" allowed "$run" client "sudo sail host incus upgrade --dry-run"
+  check "$run" "the session is still live after the dry run" session_is "$run" client ticker live
+  check "$run" "sail-api restarts on client" on "$run" client "sudo systemctl restart sail-api"
+  check "$run" "client writes a spec with no sync after the restart" \
+    allowed "$run" client "sudo sail spec create -p acme --id after-api --title 'after sail-api restarted'"
+  check "$run" "it reaches main within 30 s, no sail sync asked" reaches_main_unasked "$run" after-api
+  check "$run" "the pty host restarts on client" on "$run" client "sudo systemctl restart sail-pty-host"
+  check "$run" "the session outlives the pty host's restart" session_is "$run" client ticker live
+  check "$run" "incus restarts on client" on "$run" client "sudo systemctl restart incus"
+  check "$run" "the session incus ended reads as ended" session_is "$run" client ticker ended
+  check "$run" "client opens a new session in acme, attaches and detaches" opens_session "$run" client ticker2
+  check "$run" "the new session is live" session_is "$run" client ticker2 live
+  check "$run" "inside client's acme, spec whoami still answers" \
+    container_allows "$run" client acme "spec whoami | grep -q '\"handle\": \"client\"'"
+  check "$run" "client writes a spec with no sync after incus restarted" \
+    allowed "$run" client "sudo sail spec create -p acme --id after-incus --title 'after incus restarted'"
+  check "$run" "that one reaches main within 30 s too" reaches_main_unasked "$run" after-incus
+}
+
+secret() { gc secrets versions access latest --secret "$1"; }
+
+place_secret() {
+  secret "$3" | on "$1" "$2" "sudo sh -c 'umask 077; mkdir -p /root/.fleet; cat > /root/.fleet/$4; test -s /root/.fleet/$4'"
+}
+
+no_secret_in_logs() {
+  local run=$1 dir name leaked=0
+  dir=$(log_dir "$run")
+  for name in $SECRETS; do
+    if grep -rqF -f <(secret "$name") "$dir"; then
+      echo "$name appears in $dir: its logs are deleted"
+      leaked=1
+    fi
+  done
+  if [[ $leaked == 1 ]]; then
+    rm -f "$dir"/*.log "$dir"/report.txt
+    return 1
+  fi
+  echo "no secret appears in $dir"
+}
+
+registers_container_key() {
+  on "$1" "$2" 'test -f ~/.ssh/fleet_container || ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/fleet_container; sudo sail host config set ssh-public-key "$(cat ~/.ssh/fleet_container.pub)"'
+}
+
+applies_with_forge_token() {
+  on "$1" "$2" "sudo sh -c 'GITHUB_TOKEN=\$(cat /root/.fleet/gh) sail project apply $3 --yes'"
+}
+
+container_ip() {
+  on "$1" "$2" "sudo sail project connect $3 2>/dev/null" | awk -v h="$3" '$1 == "Host" {in_host = ($2 == h)} in_host && $1 == "HostName" {print $2; exit}'
+}
+
+in_container_ssh() {
+  local run=$1 box=$2 project=$3 ip
+  shift 3
+  ip=$(container_ip "$run" "$box" "$project" < /dev/null)
+  [[ -n $ip ]] || { echo "no container address for $project"; return 1; }
+  on "$run" "$box" "ssh -i ~/.ssh/fleet_container -o BatchMode=yes -o StrictHostKeyChecking=accept-new dev@$ip '$*'"
+}
+
+gives_agents_their_keys() {
+  local run=$1 box=$2 project=$3
+  {
+    printf 'export ANTHROPIC_API_KEY=%s\n' "$(secret fleet-anthropic-key)"
+    printf 'export OPENAI_API_KEY=%s\n' "$(secret fleet-openai-key)"
+  } | in_container_ssh "$run" "$box" "$project" \
+    'umask 077; cat > ~/.agent-keys; grep -q agent-keys ~/.profile || printf "\n[ -f ~/.agent-keys ] && . ~/.agent-keys\n" >> ~/.profile; test -s ~/.agent-keys || { echo no keys arrived; exit 1; }; . ~/.profile; printf %s "$OPENAI_API_KEY" | codex login --with-api-key >/dev/null && echo keys placed'
+}
+
+agent_answers() {
+  local asks out
+  case $4 in
+    claude-code) asks='claude -p \"Reply with the single word ready\"' ;;
+    codex) asks='codex exec --skip-git-repo-check \"Reply with the single word ready\"' ;;
+    *) echo "no way to ask $4"; return 1 ;;
+  esac
+  out=$(in_container_ssh "$1" "$2" "$3" "bash -lc \"$asks 2>&1 | tail -6\"" < /dev/null)
+  echo "$4: $out"
+  grep -qi '^ready' <<< "$out"
+}
+
+agents_answer() {
+  local agent
+  for agent in $LOOP_AGENTS; do
+    agent_answers "$1" "$2" "$3" "$agent" || return 1
+  done
+}
+
+install_list() {
+  local agent json=""
+  for agent in $LOOP_AGENTS; do
+    json+="${json:+,}\"$agent\""
+  done
+  echo "$json"
+}
+
+reaches_status() {
+  local run=$1 box=$2 spec=$3 wanted=$4 minutes=$5 status last="" i
+  for i in $(seq 1 $((minutes * 2))); do
+    status=$(spec_field "$run" "$box" "$spec" status)
+    [[ $status != "$last" ]] && echo "$(date -u +%H:%M:%S) $status" && last=$status
+    [[ $status == "$wanted" ]] && return 0
+    [[ $status == cancelled || $status == archived ]] && return 1
+    sleep 30
+  done
+  echo "not $wanted after $minutes min"
+  return 1
+}
+
+opened_a_pull_request() {
+  local listed
+  listed=$(GH_TOKEN=$(secret fleet-github-token) gh pr list --repo "$LOOP_REPO" --head "agent/$1" --json number,title,url --jq '.[] | "#\(.number) \(.title) \(.url)"')
+  echo "$listed"
+  [[ -n $listed ]]
+}
+
+the_room_shows_the_review() {
+  local said
+  said=$(on "$1" "$2" "sudo sail spec comments $3 --no-sync")
+  echo "$said" | tail -20
+  grep -qi review <<< "$said"
+}
+
+closes_the_pull_request() {
+  local number
+  number=$(GH_TOKEN=$(secret fleet-github-token) gh pr list --repo "$LOOP_REPO" --head "agent/$1" --json number --jq '.[0].number')
+  [[ -z $number ]] && { echo "no pull request to close"; return 0; }
+  GH_TOKEN=$(secret fleet-github-token) gh pr close "$number" --repo "$LOOP_REPO" --delete-branch --comment "Closed by ci/fleet run $2: the fleet proves the loop, nothing here merges."
+}
+
+readonly LOOP_BODY='# The build passes on JDK 21, and the README says how to run it
+
+`mvn -q verify` fails on JDK 21: the SpotBugs Maven plugin in pom.xml bundles an ASM that cannot
+read Java 21 class files. Move it to a release that can, so `mvn -q verify` from the repository
+root passes on JDK 21. Then add a "Building" section to README.md, after its introduction, saying
+that `mvn -q verify` builds and tests every module and that the build needs JDK 21. Run
+`mvn -q verify` yourself and say in the pull request that it passed. Change only pom.xml and
+README.md.'
+
+loop() {
+  local run=${1:-} spec
+  [[ -n $run ]] || usage
+  spec="loop-$(date -u +%H%M%S)"
+  check "$run" "main gives acme the nocaptcha repo, JDK 21 and Maven" \
+    on "$run" main "echo '[{\"url\":\"https://github.com/$LOOP_REPO.git\",\"path\":\"nocaptcha\"}]' | sudo sail project config set acme repos - && echo '{\"jdk\":21,\"maven\":\"3.9.9\"}' | sudo sail project config set acme runtimes -"
+  check "$run" "main installs $LOOP_AGENTS, the first to build and the next to review" \
+    on "$run" main "echo '{\"type\":\"${LOOP_AGENTS%% *}\",\"auto_branch\":true,\"branch_prefix\":\"agent/\",\"install\":[$(install_list)]}' | sudo sail project config set acme agent -"
+  check "$run" "every node syncs twice" sync_all "$run"
+  check "$run" "eng holds the forge token where only root reads it" place_secret "$run" eng fleet-github-token gh
+  check "$run" "eng registers its workstation key" registers_container_key "$run" eng
+  check "$run" "eng applies acme with the forge token" applies_with_forge_token "$run" eng acme
+  check "$run" "acme's agents get their keys through their own login" gives_agents_their_keys "$run" eng acme
+  check "$run" "each installed agent answers" agents_answer "$run" eng acme
+  check "$run" "no secret appears in the run's logs" no_secret_in_logs "$run"
+  check "$run" "eng writes a spec for the loop" \
+    on "$run" eng "cat > /tmp/loop.md && sudo sail spec create -p acme --id $spec --title 'The build passes on JDK 21 and the README says how to run it' --body-file /tmp/loop.md --assignee eng" <<< "$LOOP_BODY"
+  check "$run" "eng makes it ready" on "$run" eng "sudo sail spec update $spec --status pending"
+  check "$run" "eng dispatches it in the background" on "$run" eng "sudo sail spec dispatch -p acme --spec $spec --background"
+  check "$run" "the build and the review take it to awaiting_merge" reaches_status "$run" eng "$spec" awaiting_merge 45
+  check "$run" "the agent opened a pull request on $LOOP_REPO" opened_a_pull_request "$spec"
+  check "$run" "the room shows the review" the_room_shows_the_review "$run" eng "$spec"
+  check "$run" "every node syncs twice" sync_all "$run"
+  check "$run" "every box sees it awaiting merge" everywhere "$run" "$spec" status awaiting_merge
+  check "$run" "the fleet closes its pull request and deletes the branch" closes_the_pull_request "$spec" "$run"
+  check "$run" "still no secret appears in the run's logs" no_secret_in_logs "$run"
+}
+
 runs_version() {
   local run=$1 box=$2 expected=$3 printed
   printed=$(on "$run" "$box" "sail -V")
@@ -589,7 +809,8 @@ upgrade_box() {
 }
 
 upgrade() {
-  local run=${1:-} target=${2:-} box expected
+  local run=${1:-} target box expected
+  target=$(from_caller "${2:-}")
   [[ -n $run && -n $target ]] || usage
   for box in main eng client observer; do
     check "$run" "$box upgrades to $target" upgrade_box "$run" "$box" "$target"
@@ -655,6 +876,8 @@ run() {
   step rooms "$id"
   step files "$id"
   step portal "$id"
+  step resilience "$id"
+  [[ ${FLEET_LOOP:-1} == 0 ]] || step loop "$id"
   if [[ ${FLEET_KEEP:-0} != always && ( $status == 0 || ${FLEET_KEEP:-0} != 1 ) ]]; then
     down "$id"
   else
@@ -678,6 +901,8 @@ case ${1:-} in
   rooms) shift; rooms "$@" ;;
   files) shift; files "$@" ;;
   portal) shift; portal "$@" ;;
+  resilience) shift; resilience "$@" ;;
+  loop) shift; loop "$@" ;;
   ssh) shift; [[ $# -ge 3 ]] || usage; r=$1 b=$2; shift 2; on "$r" "$b" "$@" ;;
   down) shift; down "$@" ;;
   *) usage ;;
