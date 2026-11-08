@@ -567,10 +567,9 @@ public final class ProjectProvisioner {
 
   /**
    * Points Testcontainers at the rootless Podman socket and disables Ryuk. Ryuk stays disabled by
-   * measurement, not assumption: {@code RyukReapsContainersIT} shows that even a privileged Ryuk on
-   * this rootless Podman reaps only if its request timeout is raised well past the Testcontainers
-   * default — the rootless force-remove routinely exceeds 10s, so the default Ryuk times out and
-   * leaks anyway. The hourly→15-minute {@code cleanup-containers.sh} cron (a plain {@code podman rm
+   * measurement, not assumption: even a privileged Ryuk on this rootless Podman reaps only if its
+   * request timeout is raised well past the Testcontainers default — the rootless force-remove
+   * routinely exceeds 10s, so the default Ryuk times out and leaks anyway. The hourly→15-minute {@code cleanup-containers.sh} cron (a plain {@code podman rm
    * -f}, no client-side timeout to lose) is the reliable sweep instead.
    */
   private void configureTestcontainers(ProjectDefinition config) throws Exception {
