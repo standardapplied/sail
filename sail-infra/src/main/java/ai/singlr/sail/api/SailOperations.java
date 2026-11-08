@@ -1298,11 +1298,14 @@ public final class SailOperations implements HostOperations {
   }
 
   /**
-   * {@code project} as a route addresses it, to read or to act on: one outside the caller's scope
-   * is answered as one the catalog does not hold.
+   * {@code project} as a route addresses it, to read or to act on: one this box's catalog does not
+   * hold is refused, never answered as empty, and one outside the caller's scope is answered the
+   * same, so a caller cannot tell a project it was not granted from one that does not exist.
    */
   private String readable(String project) {
-    if (!Actor.reader().scope().admits(project)) {
+    NameValidator.requireValidProjectName(project);
+    if (!Actor.reader().scope().admits(project)
+        || (projectStore != null && projectStore.findByName(project).isEmpty())) {
       throw ProjectReader.absent(project);
     }
     return project;

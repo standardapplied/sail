@@ -38,6 +38,7 @@ import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewRuns;
@@ -815,10 +816,34 @@ class SailOperationsSeamTest {
   }
 
   @Test
+  void aProjectThisBoxDoesNotHoldIsRefusedAtEveryReadNeverAnsweredAsEmpty() throws Exception {
+    try (var db = Sqlite.openMemory();
+        var operations = operations(db)) {
+      new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
+
+      for (var absent : List.of("beta", "nosuch")) {
+        var files = assertThrows(ApiException.class, () -> operations.projectFiles(absent));
+        assertEquals("Project '" + absent + "' is not in the catalog.", files.getMessage());
+        var specs = operations.specs(absent);
+        assertFalse(specs.isSuccess(), specs.toString());
+        assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, ((Result.Failure<?>) specs).errorCode());
+      }
+      assertTrue(operations.projectFiles("acme").list().isEmpty());
+      var held = operations.specs("acme");
+      assertFalse(
+          held instanceof Result.Failure<?> refused
+              && refused.errorCode() == ErrorCode.PROJECT_NOT_IN_CATALOG,
+          "a held project passes the catalog's gate: " + held);
+    }
+  }
+
+  @Test
   void filesAreSharedReadRemovedAndMaterializedThroughOperations() throws Exception {
     try (var db = Sqlite.openMemory();
         var operations = operations(db)) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       var files = operations.projectFiles("acme");
       assertTrue(files.list().isEmpty());
       assertTrue(files.get("missing").isEmpty());
@@ -1384,7 +1409,11 @@ class SailOperationsSeamTest {
           "the purge is rehearsed first; the rename's history still holds the file's content");
       assertEquals("config", operations.projectFiles("old").list().getFirst().path());
       assertTrue(operations.catalog().destroy("old", true).purged());
-      assertTrue(operations.projectFiles("old").list().isEmpty(), "its files go with it");
+      assertTrue(new FileStore(db).list("old").isEmpty(), "its files go with it");
+      assertThrows(
+          ApiException.class,
+          () -> operations.projectFiles("old"),
+          "a purged project's files are refused, never answered as none");
       assertEquals(
           List.of("erasure"),
           db.query(

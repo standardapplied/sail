@@ -2,6 +2,7 @@
 
 ## 0.61.0
 
+- **A project this box does not hold is refused, never answered as empty.** The GCP fleet found that on a node granted only `acme`, `sail project files ls -p beta` printed "No shared files on beta." and `sail spec list -p beta` "No specs found for project 'beta'", both exiting 0, though beta has files and specs; a misspelt name read the same way, and `sail project files add` wrote into a project the catalog did not hold. Every read and act that names a project, at the CLI and over the API, now refuses one this box's catalog does not hold with "Project 'beta' is not in the catalog.", exactly as one outside the caller's scope is refused, so a node cannot tell a project it was not granted from one that does not exist.
 - **A viewer can apply a project that names an agent.** The GCP fleet found that `sudo sail project apply beta` on a viewer's node provisioned the whole container and then failed on its last step with "Your credential is read-only and cannot create rooms.": apply makes the box's FDE a home room with the project's agent seated, and a viewer may create no room. A viewer posts in no room, so it now has no home room: its apply says "No home room: this box's FDE holds a read-only credential and posts in no room, so it has no home room." and succeeds, and `GET /v1/projects/{p}` names no `home_room` for a viewer, so Mast never opens one that cannot exist.
 
 ## 0.60.0

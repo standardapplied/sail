@@ -25,6 +25,7 @@ import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MaterializedFiles;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -135,6 +136,7 @@ class ProjectFilesCommandTest {
     var link = Files.createSymbolicLink(source.resolveSibling("linked.txt"), source);
     try (var database = Sqlite.open(SailPaths.controlPlaneDb())) {
       new SchemaManager(database).migrate();
+      HeldProjects.hold(database, "acme");
       assertEquals(
           0, new CommandLine(new ProjectFilesCommand.Add()).execute("-p", "acme", link.toString()));
       assertEquals(0600, new FileStore(database).find("acme", "linked.txt").orElseThrow().mode());
