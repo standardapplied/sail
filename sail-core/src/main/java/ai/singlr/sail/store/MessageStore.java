@@ -209,16 +209,17 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
             + COLUMNS
             + " FROM room_messages WHERE room_id = ?1 AND "
             + readable("room_messages.id", 2)
-            + " AND (?4 IS NULL OR id "
-            + side
-            + " ?4)"
+            + (cursor == null ? "" : " AND id " + side + " ?4")
             + (agent ? " AND " + RoomStore.steering("room_messages.author", "?1", "?5") : "")
             + " ORDER BY id "
             + order
             + " LIMIT ?3";
-    return agent
-        ? db.query(
-            sql, MessageStore::map, roomId, reader(), limit, cursor, Actor.reader().actingFde())
+    if (agent) {
+      return db.query(
+          sql, MessageStore::map, roomId, reader(), limit, cursor, Actor.reader().actingFde());
+    }
+    return cursor == null
+        ? db.query(sql, MessageStore::map, roomId, reader(), limit)
         : db.query(sql, MessageStore::map, roomId, reader(), limit, cursor);
   }
 

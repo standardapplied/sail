@@ -2434,7 +2434,9 @@ no pairing is removed through the gateway as before, and no key file is touched.
     every build, review, fix and room prompt is shown (`MessageStore.steering`), and an agent's
     own read of the room (`MessageStore.list` on the agent and room lanes) carry nothing else. So
     another member's comment never instructs an agent that runs on someone else's box with their
-    credentials, and never answers its question (`MessageStore.openQuestions`).
+    credentials, and never answers its question (`MessageStore.openQuestions`). Main admits sail's
+    words pushed from a node only from one that steers the conversation too (`MessageAuthority`),
+    so a box whose work was reassigned narrates there no more.
   - **Who owns a run** (`RunAuthority.owners`): the FDE the run acts for, and its spec's owner
     (for a spec-less run, the box that ran it). Its owners or an admin read its log, stop it and
     change it; a run's own FDE keeps it after its spec is reassigned. A run is born only for

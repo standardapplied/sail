@@ -512,7 +512,7 @@ class PushAuthoritySyncTest {
   }
 
   @Test
-  void afterAForceReassignTheOldBoxsSpecAndReviewWritesAreDeniedButItsRunAndNarrationAreItsOwn()
+  void afterAForceReassignTheOldBoxsSpecReviewAndNarrationAreDeniedButItsRunAndWordsAreItsOwn()
       throws IOException {
     ownSpec(main, "ada", "mine", "ada");
     sync(ada, ADA);
@@ -538,12 +538,19 @@ class PushAuthoritySyncTest {
     var narration =
         Acting.system(
             () -> new MessageStore(ada.db).append("mine", MessageStore.SAIL_AUTHOR, "done", null));
+    var said =
+        Acting.as(
+            "ada", () -> new MessageStore(ada.db).append("mine", "ada", "handing over", null));
     Acting.system(() -> new RunStore(ada.db).complete(agentRun, "stopped", null));
 
     assertEquals(List.of("mine"), denied(push(ada, ADA, "spec")));
     assertEquals(1, push(ada, ADA, "run").report().pushed(), "the run is still the box's");
     assertEquals(List.of(review), denied(push(ada, ADA, "review")));
-    assertEquals(List.of(), denied(push(ada, ADA, "message")), "ada may still speak in it");
+    assertEquals(
+        List.of(narration.id()),
+        denied(push(ada, ADA, "message")),
+        "sail's words steer bob's agents now, so ada's box narrates there no more");
+    assertTrue(new MessageStore(main.db).findById(said.id()).isPresent(), "ada may still speak");
 
     assertEquals(SpecStatus.IN_PROGRESS, main.specs.findById("mine").orElseThrow().status());
     assertEquals("bob", ada.specs.findById("mine").orElseThrow().assignee());
@@ -552,7 +559,7 @@ class PushAuthoritySyncTest {
         List.of(), reviews.findingsForReview(review), "the old box holds main's review exactly");
     assertTrue(
         findingKeptInChangeLog(ada, review, finding.id()), "its findings stay in its change log");
-    assertTrue(new MessageStore(main.db).findById(narration.id()).isPresent());
+    assertTrue(new MessageStore(main.db).findById(narration.id()).isEmpty());
     assertEveryBoxConverged(ADA);
   }
 
