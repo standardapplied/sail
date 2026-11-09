@@ -678,12 +678,13 @@ in_container_ssh() {
 }
 
 gives_agents_their_keys() {
-  local run=$1 box=$2 project=$3
+  local run=$1 box=$2 project=$3 login=''
+  [[ " $LOOP_AGENTS " == *" codex "* ]] && login='printf %s "$OPENAI_API_KEY" | codex login --with-api-key >/dev/null && '
   {
     printf 'export ANTHROPIC_API_KEY=%s\n' "$(secret fleet-anthropic-key)"
     printf 'export OPENAI_API_KEY=%s\n' "$(secret fleet-openai-key)"
   } | in_container_ssh "$run" "$box" "$project" \
-    'umask 077; cat > ~/.agent-keys; grep -q agent-keys ~/.profile || printf "\n[ -f ~/.agent-keys ] && . ~/.agent-keys\n" >> ~/.profile; test -s ~/.agent-keys || { echo no keys arrived; exit 1; }; . ~/.profile; printf %s "$OPENAI_API_KEY" | codex login --with-api-key >/dev/null && echo keys placed'
+    'umask 077; cat > ~/.agent-keys; grep -q agent-keys ~/.profile || printf "\n[ -f ~/.agent-keys ] && . ~/.agent-keys\n" >> ~/.profile; test -s ~/.agent-keys || { echo no keys arrived; exit 1; }; . ~/.profile; '"$login"'echo keys placed'
 }
 
 agent_answers() {
