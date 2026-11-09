@@ -74,12 +74,6 @@ final class LoopNarrator {
   }
 
   /**
-   * Posts the pipeline's narration to the spec's room: the findings themselves, which events cannot
-   * carry, and the loop's cross-iteration memory, since the reviewer's prompt includes the room's
-   * recent messages. Best-effort: a line telling of work under way must never fail that work. The
-   * lines that end a review, or record its wait, are written with it ({@link #appendRoom}).
-   */
-  /**
    * {@link #postRoom}, unless sail said exactly {@code body} among the room's recent messages: a
    * replayed stop never says a wait twice.
    */
@@ -96,6 +90,12 @@ final class LoopNarrator {
     }
   }
 
+  /**
+   * Posts the pipeline's narration to the spec's room: the findings themselves, which events cannot
+   * carry, and the loop's cross-iteration memory, since the reviewer's prompt includes the room's
+   * recent messages. Best-effort: a line telling of work under way must never fail that work. The
+   * lines that end a review, or record its wait, are written with it ({@link #appendRoom}).
+   */
   void postRoom(String specId, String body) {
     try {
       appendRoom(specId, body);
