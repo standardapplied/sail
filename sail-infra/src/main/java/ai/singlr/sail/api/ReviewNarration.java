@@ -120,6 +120,13 @@ final class ReviewNarration {
         + " holds it now re-dispatches it with --restart.";
   }
 
+  /** The build goes on with the answer once the run that holds its claim ends. */
+  static String resumeDeferred(String holder) {
+    return "The build goes on with your answer once run `"
+        + holder
+        + "` ends. If it has not by then, post here again.";
+  }
+
   /** Why the build did not go on with the answer, and how a person moves it from here. */
   static String resumeFailed(String why) {
     return "The build could not go on with your answer: "

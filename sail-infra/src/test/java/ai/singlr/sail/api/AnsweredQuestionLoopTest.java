@@ -214,6 +214,9 @@ class AnsweredQuestionLoopTest {
 
     assertEquals(List.of(), builds, "the build waits for the run that holds its claim");
     assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus(SPEC));
+    assertEquals(
+        List.of(ReviewNarration.resumeDeferred(holder)),
+        loop.roomLines(SPEC, "The build goes on with your answer once"));
 
     loop.onEvent(
         RunStops.of(
@@ -242,11 +245,29 @@ class AnsweredQuestionLoopTest {
     says(ReviewLoop.HANDLE, "Use 21.");
 
     assertEquals(List.of(), builds);
-    assertEquals(SpecStatus.REVIEW, loop.specStatus(SPEC), "a person's, until re-dispatched");
+    assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus(SPEC));
     assertEquals(1, loop.roomLines(SPEC, "The build could not go on with your answer").size());
 
+    loop.onEvent(
+        RunStops.of(
+            Event.WellKnownData.SOURCE_WATCHER,
+            ReviewLoop.PROJECT,
+            null,
+            "claude-code",
+            loop.run(null, "adhoc"),
+            "adhoc",
+            0,
+            null));
+    assertEquals(
+        1,
+        loop.roomLines(SPEC, "The build could not go on with your answer").size(),
+        "a stop elsewhere retries it quietly");
+
     says(ReviewLoop.HANDLE, "Still 21.");
-    assertEquals(1, loop.roomLines(SPEC, "The build could not go on with your answer").size());
+    assertEquals(
+        2,
+        loop.roomLines(SPEC, "The build could not go on with your answer").size(),
+        "each answer is told how it went");
   }
 
   @Test

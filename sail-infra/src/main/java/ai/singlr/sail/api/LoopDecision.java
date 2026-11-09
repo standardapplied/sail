@@ -51,7 +51,7 @@ final class LoopDecision {
       case LoopTrigger.ReviewerEnded reviewer -> reviewerEnded(facts, reviewer);
       case LoopTrigger.FixEnded fix -> fixEnded(facts, fix);
       case LoopTrigger.OperatorStopped stopped -> operatorStopped(facts, stopped.run());
-      case LoopTrigger.Answered answered -> answered(facts);
+      case LoopTrigger.Answered answered -> answered(facts, true);
       case LoopTrigger.Freed freed -> freed(facts);
       case LoopTrigger.GoOn goOn -> goOn(facts);
       case LoopTrigger.ReviewRunning running -> on(rows.review(), review -> inItsStages(facts));
@@ -113,7 +113,7 @@ final class LoopDecision {
     }
     if (asked.filter(question -> !question.heard()).isPresent()) {
       return facts.resumableHere()
-          ? new LoopStep.ResumeBuild()
+          ? new LoopStep.ResumeBuild(true)
           : new LoopStep.CannotResume(Lane.BUILD);
     }
     return switch (facts.pipeline()) {
@@ -167,28 +167,32 @@ final class LoopDecision {
 
   /**
    * An answer resumes the build or fix agent that ended on its question, once someone who steers it
-   * has answered: the build while the spec has no review yet, the fix agent while its review still
-   * waits on it. No other run is resumed: a live one hears the answer itself, another box's is that
-   * box's to resume, a failed one is a person's, a spec reassigned since is its new owner's to
-   * dispatch, and a reviewer's stage is judged on what it said.
+   * has answered and the run was never told: the build while the spec has no review yet, the fix
+   * agent while its review still waits on it. No other run is resumed: a live one hears the answer
+   * itself, another box's is that box's to resume, a failed one is a person's, a spec reassigned
+   * since is its new owner's to dispatch, and a reviewer's stage is judged on what it said.
    */
-  private static LoopStep answered(LoopFacts facts) {
+  private static LoopStep answered(LoopFacts facts, boolean told) {
     var rows = facts.rows();
     var held =
         rows.newestLoopRun()
             .filter(run -> facts.resumableHere() && rows.drivenHere() && endedWell(run))
-            .filter(run -> facts.asked().filter(MessageStore.Asked::answered).isPresent());
+            .filter(run -> facts.asked().filter(LoopDecision::answeredUnheard).isPresent());
     if (held.isEmpty()) {
       return new LoopStep.Nothing();
     }
     var run = held.get();
     if (Lane.BUILD.matches(run.role())) {
-      return rows.review().isEmpty() ? new LoopStep.ResumeBuild() : new LoopStep.Nothing();
+      return rows.review().isEmpty() ? new LoopStep.ResumeBuild(told) : new LoopStep.Nothing();
     }
     return rows.awaited(run, "failed")
         .filter(review -> Lane.FIX.matches(run.role()) && !review.errored())
         .<LoopStep>map(review -> fit(facts, () -> new LoopStep.ResumeFix(review)))
         .orElseGet(LoopStep.Nothing::new);
+  }
+
+  private static boolean answeredUnheard(MessageStore.Asked question) {
+    return question.answered() && !question.heard();
   }
 
   private static boolean endedWell(RunRow run) {
@@ -226,7 +230,7 @@ final class LoopDecision {
     if (!rows.drivenHere()) {
       return new LoopStep.Nothing();
     }
-    return rows.owed() instanceof Owed.Waiting ? goOn(facts) : answered(facts);
+    return rows.owed() instanceof Owed.Waiting ? goOn(facts) : answered(facts, false);
   }
 
   /**

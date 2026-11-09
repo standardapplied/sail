@@ -193,7 +193,7 @@ class LoopDecisionTest {
             "A4c an answer that came after the build stopped hearing the room resumes it",
             facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).answeredUnheard("Which?"),
             buildEnded("build-1", 0),
-            new LoopStep.ResumeBuild()),
+            new LoopStep.ResumeBuild(true)),
         row(
             "A4c an unheard answer to a build of a spec reassigned since is its new holder's",
             facts()
@@ -954,9 +954,14 @@ class LoopDecisionTest {
             NOTHING),
         row(
             "Q3 the build that waits on its answer goes on with it",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).answeredUnheard("Which?"),
+            ANSWERED,
+            new LoopStep.ResumeBuild(true)),
+        row(
+            "Q2 an answer the run already heard resumes nothing: its own stop goes on",
             facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).asked("Which?", true),
             ANSWERED,
-            new LoopStep.ResumeBuild()),
+            NOTHING),
         row(
             "Q3 a build whose spec is in review already is past its question",
             facts().review(RUNNING, List.of()).newestLoopRun(BUILD).asked("Which?", true),
@@ -964,7 +969,7 @@ class LoopDecisionTest {
             NOTHING),
         row(
             "Q4 the fix agent that waits on its answer goes on with it",
-            fixed().spec(SpecStatus.IN_PROGRESS).asked("Keep it?", true),
+            fixed().spec(SpecStatus.IN_PROGRESS).answeredUnheard("Keep it?"),
             ANSWERED,
             new LoopStep.ResumeFix(GATE_FAILED)),
         row(
@@ -976,7 +981,7 @@ class LoopDecisionTest {
             "Q4 a fix agent whose review its pipeline can no longer judge",
             fixed()
                 .spec(SpecStatus.IN_PROGRESS)
-                .asked("Keep it?", true)
+                .answeredUnheard("Keep it?")
                 .pipeline(new LoopFacts.Pipeline.Unreadable("bad yaml")),
             ANSWERED,
             escalate(GATE_FAILED, ReviewNarration.pipelineUnreadable("bad yaml"))),
@@ -986,10 +991,10 @@ class LoopDecisionTest {
             ANSWERED,
             NOTHING),
         row(
-            "W2 a stop that frees the claim an answered build waited on resumes it",
-            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).asked("Which?", true),
+            "W2 a stop that frees the claim an answered build waited on resumes it quietly",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).answeredUnheard("Which?"),
             FREED,
-            new LoopStep.ResumeBuild()));
+            new LoopStep.ResumeBuild(false)));
   }
 
   private static Stream<Row> rows() {

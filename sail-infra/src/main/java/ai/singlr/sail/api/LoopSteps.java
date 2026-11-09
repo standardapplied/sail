@@ -65,7 +65,7 @@ final class LoopSteps {
       case LoopStep.ParkForAPerson park -> parkForAPerson(facts);
       case LoopStep.AwaitAnswer await -> awaitAnswer(facts, await);
       case LoopStep.CannotResume cannot -> cannotResume(facts, cannot);
-      case LoopStep.ResumeBuild resume -> resumeBuild(facts);
+      case LoopStep.ResumeBuild resume -> resumeBuild(facts, resume);
       case LoopStep.ResumeFix resume -> resumeFix(facts, resume);
       case LoopStep.StartReview start -> startReview(facts, start);
       case LoopStep.EscalateNew escalated -> escalateNew(facts, escalated);
@@ -116,24 +116,39 @@ final class LoopSteps {
   /**
    * The build goes on where it ended, with the answer in its prompt. A claim another run holds
    * defers it, and the stop that frees that claim resumes it ({@link LoopTrigger.Freed}). A resume
-   * that fails is said in the room, where the answer was given, and its spec is a person's: it is
-   * parked in {@code review}, so nothing retries it until someone re-dispatches it.
+   * deferred or failed is said in the room when someone is there to be told, and marks the stop
+   * acted on; a quiet retry only logs. A failure after the run was written leaves that run {@code
+   * failed}, which nothing retries: the spec waits, in progress, for a person to re-dispatch it.
    */
-  private Optional<LoopTrigger> resumeBuild(LoopFacts facts) {
+  private Optional<LoopTrigger> resumeBuild(LoopFacts facts, LoopStep.ResumeBuild step) {
     var specId = facts.specId();
     try {
       switch (lanes.resumeBuild(facts.project(), specId, localHandle.get())) {
         case ReviewLanes.Launch.Started started ->
             narrator.postRoom(specId, ReviewNarration.resumed(Lane.BUILD));
-        case ReviewLanes.Launch.Deferred deferred -> held(facts, deferred.holder().runId());
+        case ReviewLanes.Launch.Deferred deferred ->
+            tell(
+                facts,
+                step,
+                ReviewNarration.resumeDeferred(deferred.holder().runId()),
+                deferred.holder().runId());
       }
     } catch (RuntimeException e) {
-      narrator.postRoom(specId, ReviewNarration.resumeFailed(reasonOf(e)));
-      narrator.publishPipelineError(facts.project(), specId, e);
-      held(facts, reasonOf(e));
-      advanceSpec(specId, SpecStatus.REVIEW);
+      tell(facts, step, ReviewNarration.resumeFailed(reasonOf(e)), reasonOf(e));
+      if (step.told()) {
+        narrator.publishPipelineError(facts.project(), specId, e);
+      }
     }
     return Optional.empty();
+  }
+
+  private void tell(LoopFacts facts, LoopStep.ResumeBuild step, String line, String detail) {
+    if (!step.told()) {
+      System.err.println("review-pipeline: spec " + facts.specId() + ": " + line);
+      return;
+    }
+    narrator.postRoom(facts.specId(), line);
+    held(facts, detail);
   }
 
   /** The stop of the run the loop holds is acted on: the reconciler never replays it. */

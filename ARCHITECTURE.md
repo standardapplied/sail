@@ -1994,7 +1994,8 @@ review:
 | `SayBuildFailed(exitCode)` | publishes `agent_failed` with `exit <code>` | none |
 | `ParkForAPerson` | moves the spec to `review` | none |
 | `AwaitAnswer(lane, question)` | says in the room that nothing is reviewed until the question is answered, and publishes `agent_awaiting_answer`, which the missed-stop reconciler counts as the stop acted on; the spec stays `in_progress` | none |
-| `ResumeBuild` | `ReviewLanes.resumeBuild`: for the roster-trusted box of the spec's assignee, a build run on the spec's branch, checked out without `-f` over the tree its last build left, with nothing claimed, snapshotted or superseded and no `spec_restarted`, its prompt a dispatch's, so the room's question and answer are in it; says so in the room. A refused claim is logged, and the stop that frees it resumes the build (W2); a resume that throws is said in the room with `--restart` as the way on, and published as a pipeline error | none |
+| `ResumeBuild(told)` | `ReviewLanes.resumeBuild`: for the roster-trusted box of the spec's assignee, a build run on the spec's branch (a repo still on it keeps the tree its last build left; one another run moved is checked out with `checkout <branch> --` only when clean, else the resume fails), with nothing claimed, snapshotted or superseded and no `spec_restarted`, its prompt a dispatch's, so the room's question and answer are in it; says so in the room. A refused claim defers it, and the stop that frees it retries (W2). A deferral or failure is said in the room and publishes `agent_held_on_question` when `told` (an answer or the run's own stop), and only logs on a quiet retry; a failure after the run was written leaves that run `failed`, which nothing retries | none |
+| `CannotResume(lane)` | says in the room that the run ended before it heard the answer and this box no longer holds the spec; publishes `agent_held_on_question` | none |
 | `ResumeFix(review)` | `LaunchFix` with the review's open findings; once the run serves, also says so in the room | as `LaunchFix` |
 | `StartReview(iteration)` | writes the review `running`, then moves the spec to `review` | `ReviewRunning` |
 | `EscalateNew(iteration, reason)` | writes the review and escalates it in the next write | none |
@@ -2031,12 +2032,12 @@ review and go on with the latest.
 | A3 | | exit code present and non-zero | `SayBuildFailed` |
 | A4 | | the spec has a review | as `GoOn` |
 | A4b | | the stop names a run this box holds, and that run's newest question is one no one who steers it has answered | `AwaitAnswer(build, question)` |
-| A4c | | that question was answered, the run never heard the answer, and the spec is `resumableHere` | `ResumeBuild` |
+| A4c | | that question was answered and the run was not told every answer: `ResumeBuild(told)` when the spec is `resumableHere`, else `CannotResume(build)` | as said |
 | A5 | | pipeline `Staged` | `StartReview(1)` |
 | A6 | | pipeline `None` | `ParkForAPerson` |
 | A7 | | pipeline `Unreadable` | `EscalateNew(1, pipelineUnreadable)` |
 | W1 | `Freed` | this box did not execute the spec's newest loop run | `Nothing` |
-| W2 | | the rows owe anything but a recorded wait | as `Answered`: a run resumed whose answer came while its resume was deferred or lost to a restart, else `Nothing` |
+| W2 | | the rows owe anything but a recorded wait | as `Answered`, untold: a deferred resume retried quietly, else `Nothing` |
 | W3 | | otherwise | as `GoOn` |
 | G0 | `GoOn` | the spec is not the loop's | `Nothing` |
 | G1 | | due `Nothing` or `Stop` | `Nothing` |
@@ -2066,15 +2067,15 @@ review and go on with the latest.
 | F1 | `FixEnded` | not awaited in `failed`, or the review failed by error | as `GoOn` |
 | F2 | | `failure` present | `FailFix("fix agent " + failure)` |
 | F2b | | the run's newest question is one no one who steers it has answered | `AwaitAnswer(fix, question)` |
-| F2c | | that question was answered, the run never heard the answer, and the spec is `resumableHere` (**P**) | `ResumeFix(review)` |
+| F2c | | that question was answered and the run was not told every answer: `ResumeFix(review)` (**P**) when the spec is `resumableHere`, else `CannotResume(fix)` | as said |
 | F3 | | otherwise | `CommitFixLeftovers` |
 | F4 | `FixCommitted(run)` | `run` no longer awaited in `failed`, whether or not anything was committed | `Nothing` |
 | F5 | | (**P**) otherwise | `StartReview(iteration + 1)` |
 | F6 | `FixNotCommitted(run, why)` | `run` no longer awaited in `failed` | `Nothing` |
 | F7 | | otherwise | `FailFix("fix agent's work could not be committed: " + why)` |
 | Q1 | `Answered` | the spec is not `resumableHere`, or this box did not execute its newest loop run | `Nothing` |
-| Q2 | | that run is live, failed, exited non-zero or was stopped by an operator, or its newest question is not one someone who steers it has answered | `Nothing` |
-| Q3 | | that run is a build: the spec has no review | `ResumeBuild` |
+| Q2 | | that run is live, failed, exited non-zero or was stopped by an operator, or its newest question is not answered, or the run was told every answer | `Nothing` |
+| Q3 | | that run is a build: the spec has no review | `ResumeBuild(told)` |
 | Q3 | | that run is a build: the spec has a review | `Nothing` |
 | Q4 | | that run is a fix agent awaited in `failed`, its review not failed by error (**P**) | `ResumeFix(review)` |
 | Q5 | | otherwise (a reviewer's stage is judged on what it said) | `Nothing` |

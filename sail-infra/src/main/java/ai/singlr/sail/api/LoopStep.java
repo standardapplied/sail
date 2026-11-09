@@ -37,8 +37,12 @@ sealed interface LoopStep {
    */
   record CannotResume(Lane lane) implements LoopStep {}
 
-  /** Launch the spec's build again, where its last build ended on a question now answered. */
-  record ResumeBuild() implements LoopStep {}
+  /**
+   * Launch the spec's build again, where its last build ended on a question now answered. {@code
+   * told} is whether someone is there to be told how it went: an answer or the build's own stop
+   * was, a stop elsewhere that freed a claim retries it quietly.
+   */
+  record ResumeBuild(boolean told) implements LoopStep {}
 
   /**
    * Launch the fix of {@code review} again, where its fix agent ended on a question now answered.
