@@ -12,7 +12,7 @@ readonly BOXES="main eng client observer"
 readonly MAX_RUN=6h
 readonly SECRETS="fleet-anthropic-key fleet-openai-key fleet-github-token"
 readonly LOOP_REPO=standardapplied/nocaptcha
-readonly LOOP_AGENTS=${FLEET_LOOP_AGENTS:-claude-code codex}
+readonly LOOP_AGENTS=${FLEET_LOOP_AGENTS:-claude-code}
 
 usage() {
   cat >&2 <<'EOF'
@@ -53,7 +53,7 @@ Usage:
 Each step logs to $FLEET_RUNS/RUN/ (default ~/.sail-fleet); report.txt holds one line per check.
 FLEET_KEEP=1 leaves a failed run's VMs up for diagnosis; FLEET_KEEP=always leaves any run's up.
 FLEET_LOOP=0 skips the agent loop, which needs the fleet-* secrets and spends model tokens;
-FLEET_LOOP_AGENTS names the agents it installs, builder first (default: claude-code codex).
+FLEET_LOOP_AGENTS names the agents it installs, builder first (default: claude-code; add codex to have it review).
 EOF
   exit 2
 }
