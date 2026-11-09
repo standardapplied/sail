@@ -259,10 +259,12 @@ public final class BuildDispatch {
 
   /**
    * Launches {@code specId}'s build again for the FDE whose handle is {@code localHandle}, where
-   * its last build ended on a question someone has answered since: on the branch and the tree that
-   * build left, with nothing claimed, snapshotted, checked out or superseded, and no restart
-   * recorded. Its prompt is a dispatch's, so the room's question and its answer are in it. A claim
-   * another run holds is {@link ReviewLanes.Launch.Deferred}, and nothing was written for it.
+   * its last build ended on a question someone has answered since: on its branch, checked out over
+   * the tree that build left without discarding it, with nothing claimed, snapshotted or
+   * superseded, and no restart recorded. Only the box of the spec's assignee, trusted by the
+   * roster, resumes it. Its prompt is a dispatch's, so the room's question and its answer are in
+   * it. A claim another run holds is {@link ReviewLanes.Launch.Deferred}, and nothing was written
+   * for it.
    */
   ReviewLanes.Launch resume(String project, String specId, String localHandle) {
     var loaded = projects.loadRunning(project);
@@ -278,6 +280,12 @@ public final class BuildDispatch {
     if (loaded.config().agent() == null) {
       throw new ApiException(
           ErrorCode.AGENT_NOT_CONFIGURED, "The project's definition sets no agent.");
+    }
+    admission.requireTrustedRoster(localHandle);
+    if (!localHandle.equals(row.assignee())) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Spec '" + specId + "' is assigned to " + row.assignee() + ", not " + localHandle + ".");
     }
     var spec = row.toSpec();
     var targetRepos = DispatchRepos.resolve(loaded.config(), spec, List.of());
@@ -306,6 +314,7 @@ public final class BuildDispatch {
     var credential = ((RunReservation.Claim.Claimed) claim).credential();
     try {
       seedRoomDelivery(runId, built.renderedMessages());
+      workBranch.resume(project, targetRepos, row.branch());
       var launch =
           runLauncher.launchAgent(
               project,

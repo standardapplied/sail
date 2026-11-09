@@ -250,21 +250,22 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * A question a run left as its last word in a room, and whether it has been answered since.
+   * The newest question a run asked in a room, and what has come of it since.
    *
    * @param id the question's message id
    * @param body what it asked
    * @param answered whether someone who steers the room's agents ({@link RoomStore#steering}) has
-   *     replied since, so the answer reaches the run's lane when it goes on
+   *     replied since, as {@link #openQuestions} reads it
+   * @param heard whether such a reply is on the run's delivery ledger: the run was told it
    */
-  public record Asked(String id, String body, boolean answered) {}
+  public record Asked(String id, String body, boolean answered, boolean heard) {}
 
   /**
-   * The question {@code principals}, the identities of one run, left as their last word in {@code
-   * roomId}: their newest message there, when it is a question. Empty when they said nothing there,
-   * or their last word asked nothing, as when a run answers its own question by going on.
+   * The newest question {@code principals}, the identities of run {@code runId}, asked in {@code
+   * roomId}, whatever the run said after it: a summary posted after a question answers nothing, so
+   * the run waits on it exactly while the board says it needs a reply. Empty when it asked none.
    */
-  public Optional<Asked> lastQuestion(String roomId, List<String> principals) {
+  public Optional<Asked> lastQuestion(String roomId, String runId, List<String> principals) {
     if (principals.isEmpty()) {
       return Optional.empty();
     }
@@ -276,30 +277,40 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     return db.queryOne(
             "SELECT "
                 + COLUMNS
-                + " FROM room_messages WHERE room_id = ?1 AND "
+                + " FROM room_messages WHERE room_id = ?1 AND question != 0 AND "
                 + readable("room_messages.id", 2)
                 + " AND author IN ("
                 + authors
                 + ") ORDER BY id DESC LIMIT 1",
             MessageStore::map,
             arguments.toArray())
-        .filter(MessageRow::question)
-        .map(question -> new Asked(question.id(), question.body(), answered(question)));
+        .map(
+            question ->
+                new Asked(
+                    question.id(),
+                    question.body(),
+                    !replies(question, null).isEmpty(),
+                    !replies(question, runId).isEmpty()));
   }
 
-  private boolean answered(MessageRow question) {
-    return !db.query(
-            "SELECT 1 FROM room_messages h WHERE h.room_id = ?1 AND h.id > ?2"
-                + " AND h.author NOT LIKE '%/%' AND h.author != 'sail' AND "
-                + RoomStore.steering("h.author", "h.room_id", "NULL")
-                + " AND "
-                + readable("h.id", 3)
-                + " LIMIT 1",
-            row -> 1,
-            question.roomId(),
-            question.id(),
-            reader())
-        .isEmpty();
+  /**
+   * Replies to {@code question} that reach its run's lane; with {@code runId}, only those it got.
+   */
+  private List<Integer> replies(MessageRow question, String runId) {
+    return db.query(
+        "SELECT 1 FROM room_messages h WHERE h.room_id = ?1 AND h.id > ?2"
+            + " AND h.author NOT LIKE '%/%' AND h.author != 'sail' AND "
+            + RoomStore.steering("h.author", "h.room_id", "NULL")
+            + " AND "
+            + readable("h.id", 3)
+            + " AND (?4 IS NULL OR h.id IN"
+            + " (SELECT message_id FROM run_delivered_messages WHERE run_id = ?4))"
+            + " LIMIT 1",
+        row -> 1,
+        question.roomId(),
+        question.id(),
+        reader(),
+        runId);
   }
 
   /**

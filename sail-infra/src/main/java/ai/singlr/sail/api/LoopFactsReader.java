@@ -68,8 +68,8 @@ final class LoopFactsReader {
   }
 
   /**
-   * The question the spec's newest loop run left as its last word in the spec's room, once that
-   * run, this box's, has ended: under any of the identities it posted as.
+   * The newest question the spec's newest loop run asked in the spec's room, once that run, this
+   * box's, has ended: under any of the identities it posted as.
    */
   private Optional<MessageStore.Asked> asked(LoopFacts.Rows rows) {
     var ended =
@@ -81,7 +81,8 @@ final class LoopFactsReader {
     var run = ended.get();
     var principals = new LinkedHashSet<>(runs.principals(run.id()));
     Optional.ofNullable(run.principal()).ifPresent(principals::add);
-    return messages.lastQuestion(rows.spec().get().roomIdOrIdentity(), List.copyOf(principals));
+    return messages.lastQuestion(
+        rows.spec().get().roomIdOrIdentity(), run.id(), List.copyOf(principals));
   }
 
   /** What the rows say of {@code specId}'s loop, as they stand now. */

@@ -16,6 +16,9 @@ import java.util.Objects;
 /** Says what the review loop did, on the bus and in the room; {@link ReviewNarration} words it. */
 final class LoopNarrator {
 
+  /** Published when a build or fix agent ended on a question the loop now waits on. */
+  static final String AWAITING_ANSWER = "agent_awaiting_answer";
+
   private final SpecStore specStore;
   private final EventBus eventBus;
   private final Runnable syncTrigger;

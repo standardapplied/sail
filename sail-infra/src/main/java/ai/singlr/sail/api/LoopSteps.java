@@ -97,25 +97,34 @@ final class LoopSteps {
 
   /**
    * The spec stays in progress, so only the answer moves it, and the room says what it waits on.
+   * The event is the stop's acted-on evidence: the missed-stop reconciler never replays it.
    */
   private Optional<LoopTrigger> awaitAnswer(LoopFacts facts, LoopStep.AwaitAnswer step) {
     narrator.postRoom(facts.specId(), ReviewNarration.waitsOnAnswer(step.lane(), step.question()));
+    narrator.publishEvent(
+        facts.project(), facts.specId(), LoopNarrator.AWAITING_ANSWER, step.question());
     return Optional.empty();
   }
 
   /**
    * The build goes on where it ended, with the answer in its prompt. A claim another run holds
-   * defers it, and the stop that frees that claim resumes it ({@link LoopTrigger.Freed}).
+   * defers it, and the stop that frees that claim resumes it ({@link LoopTrigger.Freed}). A resume
+   * that fails is said in the room, where the answer was given.
    */
   private Optional<LoopTrigger> resumeBuild(LoopFacts facts) {
     var specId = facts.specId();
-    switch (lanes.resumeBuild(facts.project(), specId, localHandle.get())) {
-      case ReviewLanes.Launch.Started started ->
-          narrator.postRoom(specId, ReviewNarration.resumed(Lane.BUILD));
-      case ReviewLanes.Launch.Deferred deferred ->
-          System.err.println(
-              "review-pipeline: the build of spec %s goes on with its answer once run %s ends"
-                  .formatted(specId, deferred.holder().runId()));
+    try {
+      switch (lanes.resumeBuild(facts.project(), specId, localHandle.get())) {
+        case ReviewLanes.Launch.Started started ->
+            narrator.postRoom(specId, ReviewNarration.resumed(Lane.BUILD));
+        case ReviewLanes.Launch.Deferred deferred ->
+            System.err.println(
+                "review-pipeline: the build of spec %s goes on with its answer once run %s ends"
+                    .formatted(specId, deferred.holder().runId()));
+      }
+    } catch (RuntimeException e) {
+      narrator.postRoom(specId, ReviewNarration.resumeFailed(reasonOf(e)));
+      narrator.publishPipelineError(facts.project(), specId, e);
     }
     return Optional.empty();
   }

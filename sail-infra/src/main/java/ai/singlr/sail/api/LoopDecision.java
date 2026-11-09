@@ -107,8 +107,12 @@ final class LoopDecision {
     if (rows.review().isPresent()) {
       return goOn(facts);
     }
-    if (build.runId() != null && facts.waitsOnAnswer()) {
-      return new LoopStep.AwaitAnswer(Lane.BUILD, facts.asked().orElseThrow().body());
+    var asked = facts.asked().filter(question -> build.runId() != null);
+    if (asked.filter(question -> !question.answered()).isPresent()) {
+      return new LoopStep.AwaitAnswer(Lane.BUILD, asked.get().body());
+    }
+    if (asked.filter(question -> !question.heard()).isPresent() && facts.resumableHere()) {
+      return new LoopStep.ResumeBuild();
     }
     return switch (facts.pipeline()) {
       case Pipeline.Staged staged -> new LoopStep.StartReview(1);
@@ -144,8 +148,12 @@ final class LoopDecision {
     if (review.isEmpty()) {
       return goOn(facts);
     }
-    if (ended.failure().isEmpty() && facts.waitsOnAnswer()) {
-      return new LoopStep.AwaitAnswer(Lane.FIX, facts.asked().orElseThrow().body());
+    var asked = facts.asked().filter(question -> ended.failure().isEmpty());
+    if (asked.filter(question -> !question.answered()).isPresent()) {
+      return new LoopStep.AwaitAnswer(Lane.FIX, asked.get().body());
+    }
+    if (asked.filter(question -> !question.heard()).isPresent() && facts.resumableHere()) {
+      return fit(facts, () -> new LoopStep.ResumeFix(review.get()));
     }
     return ended
         .failure()
@@ -162,10 +170,9 @@ final class LoopDecision {
    */
   private static LoopStep answered(LoopFacts facts) {
     var rows = facts.rows();
-    var ours = rows.spec().filter(spec -> spec.ownedBy(rows.node())).isPresent();
     var held =
         rows.newestLoopRun()
-            .filter(run -> ours && rows.loops() && rows.drivenHere() && endedWell(run))
+            .filter(run -> facts.resumableHere() && rows.drivenHere() && endedWell(run))
             .filter(run -> facts.asked().filter(MessageStore.Asked::answered).isPresent());
     if (held.isEmpty()) {
       return new LoopStep.Nothing();
@@ -182,6 +189,7 @@ final class LoopDecision {
 
   private static boolean endedWell(RunRow run) {
     return RunStatus.isTerminal(run.status())
+        && !RunStatus.FAILED.wire().equals(run.status())
         && (run.exitCode() == null || run.exitCode() == 0)
         && !run.stoppedByOperator();
   }

@@ -439,6 +439,78 @@ class BuildDispatchCoverageTest {
         runs.listForSpec("auth").toString());
   }
 
+  @Test
+  void aResumedBuildChecksOutItsBranchWithoutDiscardingTheTree() throws IOException {
+    var db = onBranch(inProgress(seedDb()));
+    var shell = happyPath().on(REPO + " checkout sail/auth", "");
+    var ops = ops(shell, YAML, db);
+
+    assertInstanceOf(ReviewLanes.Launch.Started.class, resume(ops));
+
+    assertTrue(ranContaining(shell, REPO + " checkout sail/auth"));
+    assertFalse(ranContaining(shell, "checkout -f"));
+  }
+
+  @Test
+  void aResumeOverATreeAnotherRunLeftInTheWayFailsLoud() throws IOException {
+    var db = onBranch(inProgress(seedDb()));
+    var shell =
+        happyPath()
+            .on("tr -d '[:space:]'", "gone\n")
+            .refuse(REPO + " checkout sail/auth", "error: Your local changes would be overwritten");
+    var runs = new RunStore(db);
+    var ops = ops(shell, YAML, db, runs);
+
+    var thrown = assertThrows(ApiException.class, () -> resume(ops));
+
+    assertEquals(ErrorCode.BRANCH_CREATE_FAILED, thrown.failure().errorCode());
+    assertTrue(thrown.getMessage().contains("to resume its build"), thrown.getMessage());
+    assertTrue(runs.listForSpec("auth").stream().noneMatch(run -> "running".equals(run.status())));
+  }
+
+  @Test
+  void onlyTheBoxOfTheSpecsAssigneeResumesItsBuild() throws IOException {
+    var db = inProgress(seedDb());
+    Acting.system(
+        () -> {
+          var row = new SpecStore(db).findById("auth").orElseThrow();
+          new SpecStore(db)
+              .update(
+                  new SpecStore.SpecRow(
+                      row.id(),
+                      row.project(),
+                      row.title(),
+                      row.status(),
+                      "bo",
+                      row.agent(),
+                      row.model(),
+                      row.reasoningEffort(),
+                      row.branch(),
+                      row.priority(),
+                      row.createdBy(),
+                      row.createdAt(),
+                      row.updatedAt(),
+                      row.updatedBy(),
+                      row.dependsOn(),
+                      row.repos(),
+                      row.roomId()));
+        });
+    var ops = ops(happyPath(), YAML, db);
+
+    var thrown = assertThrows(ApiException.class, () -> resume(ops));
+
+    assertEquals(ErrorCode.CONFLICT, thrown.failure().errorCode());
+    assertEquals("Spec 'auth' is assigned to bo, not me.", thrown.getMessage());
+  }
+
+  private static Sqlite onBranch(Sqlite db) {
+    Acting.system(
+        () ->
+            new SpecStore(db)
+                .updateReposAndStatus("auth", List.of("app"), SpecStatus.IN_PROGRESS, "sail/auth"));
+    return db;
+  }
+
   private static Sqlite inProgress(Sqlite db) {
     Acting.system(() -> new SpecStore(db).updateStatus("auth", SpecStatus.IN_PROGRESS));
     return db;

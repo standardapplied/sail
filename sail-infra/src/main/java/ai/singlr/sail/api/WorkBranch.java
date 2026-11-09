@@ -135,6 +135,36 @@ public final class WorkBranch {
   }
 
   /**
+   * Checks out {@code branch}, which a build already made, in every target repo that exists in the
+   * container, as a build that goes on after its question needs: no {@code -f}, so what that build
+   * left uncommitted is carried over, and a tree another run left in the way fails loud rather than
+   * being discarded.
+   */
+  public void resume(String project, List<ProjectDefinition.Repo> targetRepos, String branch) {
+    if (Strings.isBlank(branch)) {
+      return;
+    }
+    for (var repo : targetRepos) {
+      var repoDir = "/home/" + ProjectDefinition.USER + "/workspace/" + repo.path();
+      if (!insideWorkTree(project, repoDir)) {
+        continue;
+      }
+      var result =
+          exec(ContainerExec.asDevUser(project, List.of("git", "-C", repoDir, "checkout", branch)));
+      if (!result.ok()) {
+        throw new ApiException(
+            ErrorCode.BRANCH_CREATE_FAILED,
+            "Failed to check out branch '"
+                + branch
+                + "' in repo '"
+                + repo.path()
+                + "' to resume its build: "
+                + result.reason());
+      }
+    }
+  }
+
+  /**
    * Whether {@code repoDir} lies in a git work tree. Git answers rather than a {@code .git}
    * directory, which a linked worktree or a submodule holds as a file.
    */

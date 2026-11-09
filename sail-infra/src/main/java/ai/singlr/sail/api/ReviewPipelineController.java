@@ -154,8 +154,7 @@ public final class ReviewPipelineController implements EventSubscriber {
   /**
    * A post in a conversation may be the answer a build or fix agent of one of its specs ended its
    * run waiting for, so every spec of the conversation in {@code in_progress} is told ({@link
-   * LoopTrigger.Answered}), and its loop decides whether it was. A failure for one never costs
-   * another its turn.
+   * LoopTrigger.Answered}), and its loop decides whether it was.
    */
   private void answered(Event event) {
     var conversation = event.spec();
@@ -164,18 +163,12 @@ public final class ReviewPipelineController implements EventSubscriber {
     }
     var read = reader.forOneEvent(pipelines);
     var inProgress =
-        new SpecStore.SpecFilter(event.project(), SpecStatus.IN_PROGRESS.wire(), null, null, null);
+        new SpecStore.SpecFilter(null, SpecStatus.IN_PROGRESS.wire(), null, null, null);
     for (var spec : specStore.list(inProgress)) {
       if (!conversation.equals(spec.roomIdOrIdentity())) {
         continue;
       }
-      try {
-        drive(new Routed(event.project(), spec.id(), new LoopTrigger.Answered()), read);
-      } catch (RuntimeException e) {
-        System.err.println(
-            "review-pipeline: could not hear the answer in spec %s's room: %s"
-                .formatted(spec.id(), e.getMessage()));
-      }
+      drive(new Routed(spec.project(), spec.id(), new LoopTrigger.Answered()), read);
     }
   }
 

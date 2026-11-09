@@ -533,6 +533,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private static final List<String> ACTED_ON_EVIDENCE =
       List.of(
           Event.WellKnownTypes.AGENT_FAILED,
+          LoopNarrator.AWAITING_ANSWER,
           "review_stage_started",
           "review_stage_passed",
           "review_stage_failed",

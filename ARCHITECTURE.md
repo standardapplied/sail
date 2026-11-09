@@ -1960,10 +1960,12 @@ reviewer, `None`, or `Unreadable(why)`), the count of errored attempts of the re
 iteration, and, only when a fix is due, the review's open findings and the findings its first
 failed stage holds, with their ages: no decision on any other review weighs a finding, and
 none is read for one. And once the spec's newest loop run, this box's, has ended, `asked` is
-the question that run left as its last word in the spec's room (`MessageStore.lastQuestion`,
-under every identity the run posted as), with whether someone who steers the room's agents
-(`RoomStore.steering`) has answered it since: a run that said something after its question no
-longer waits on it. The pipeline is resolved once per event, at the first read of
+the newest question that run asked in the spec's room (`MessageStore.lastQuestion`, under every
+identity the run posted as, whatever it said after), with whether someone who steers the room's
+agents (`RoomStore.steering`) has answered it since, as the board's "needs reply" reads it, and
+whether such an answer is on the run's delivery ledger: whether the run heard it.
+`resumableHere()` says the spec is `in_progress` and assigned to this box's FDE, as a dispatch
+from here requires. The pipeline is resolved once per event, at the first read of
 one of the project's specs, and serves every decision and step of that event.
 
 A trigger is what happened; it carries no decision:
@@ -1991,8 +1993,8 @@ review:
 | `Nothing` | nothing | none |
 | `SayBuildFailed(exitCode)` | publishes `agent_failed` with `exit <code>` | none |
 | `ParkForAPerson` | moves the spec to `review` | none |
-| `AwaitAnswer(lane, question)` | says in the room that nothing is reviewed until the question is answered; the spec stays `in_progress` | none |
-| `ResumeBuild` | `ReviewLanes.resumeBuild`: a build run on the spec's branch and tree, with nothing claimed, snapshotted, checked out or superseded and no `spec_restarted`, its prompt a dispatch's, so the room's question and answer are in it; says so in the room. A refused claim is logged, and the stop that frees it resumes the build (W2) | none |
+| `AwaitAnswer(lane, question)` | says in the room that nothing is reviewed until the question is answered, and publishes `agent_awaiting_answer`, which the missed-stop reconciler counts as the stop acted on; the spec stays `in_progress` | none |
+| `ResumeBuild` | `ReviewLanes.resumeBuild`: for the roster-trusted box of the spec's assignee, a build run on the spec's branch, checked out without `-f` over the tree its last build left, with nothing claimed, snapshotted or superseded and no `spec_restarted`, its prompt a dispatch's, so the room's question and answer are in it; says so in the room. A refused claim is logged, and the stop that frees it resumes the build (W2); a resume that throws is said in the room with `--restart` as the way on, and published as a pipeline error | none |
 | `ResumeFix(review)` | `LaunchFix` with the review's open findings; once the run serves, also says so in the room | as `LaunchFix` |
 | `StartReview(iteration)` | writes the review `running`, then moves the spec to `review` | `ReviewRunning` |
 | `EscalateNew(iteration, reason)` | writes the review and escalates it in the next write | none |
@@ -2028,7 +2030,8 @@ review and go on with the latest.
 | A2 | | the stop names a run this box holds, and that run is not the newest build, review or fix run of its spec | as `GoOn` |
 | A3 | | exit code present and non-zero | `SayBuildFailed` |
 | A4 | | the spec has a review | as `GoOn` |
-| A4b | | the stop names a run this box holds, and that run's last word is a question no one who steers it has answered | `AwaitAnswer(build, question)` |
+| A4b | | the stop names a run this box holds, and that run's newest question is one no one who steers it has answered | `AwaitAnswer(build, question)` |
+| A4c | | that question was answered, the run never heard the answer, and the spec is `resumableHere` | `ResumeBuild` |
 | A5 | | pipeline `Staged` | `StartReview(1)` |
 | A6 | | pipeline `None` | `ParkForAPerson` |
 | A7 | | pipeline `Unreadable` | `EscalateNew(1, pipelineUnreadable)` |
@@ -2062,14 +2065,15 @@ review and go on with the latest.
 | J3 | | `Errored(why)` | `ErrorReview(stage, why)`, its stage already closed |
 | F1 | `FixEnded` | not awaited in `failed`, or the review failed by error | as `GoOn` |
 | F2 | | `failure` present | `FailFix("fix agent " + failure)` |
-| F2b | | the run's last word is a question no one who steers it has answered | `AwaitAnswer(fix, question)` |
+| F2b | | the run's newest question is one no one who steers it has answered | `AwaitAnswer(fix, question)` |
+| F2c | | that question was answered, the run never heard the answer, and the spec is `resumableHere` (**P**) | `ResumeFix(review)` |
 | F3 | | otherwise | `CommitFixLeftovers` |
 | F4 | `FixCommitted(run)` | `run` no longer awaited in `failed`, whether or not anything was committed | `Nothing` |
 | F5 | | (**P**) otherwise | `StartReview(iteration + 1)` |
 | F6 | `FixNotCommitted(run, why)` | `run` no longer awaited in `failed` | `Nothing` |
 | F7 | | otherwise | `FailFix("fix agent's work could not be committed: " + why)` |
-| Q1 | `Answered` | the spec is not the loop's, or this box did not execute its newest loop run | `Nothing` |
-| Q2 | | that run is live, exited non-zero or was stopped by an operator, or its last word is no question someone who steers it has answered | `Nothing` |
+| Q1 | `Answered` | the spec is not `resumableHere`, or this box did not execute its newest loop run | `Nothing` |
+| Q2 | | that run is live, failed, exited non-zero or was stopped by an operator, or its newest question is not one someone who steers it has answered | `Nothing` |
 | Q3 | | that run is a build: the spec has no review | `ResumeBuild` |
 | Q3 | | that run is a build: the spec has a review | `Nothing` |
 | Q4 | | that run is a fix agent awaited in `failed`, its review not failed by error (**P**) | `ResumeFix(review)` |

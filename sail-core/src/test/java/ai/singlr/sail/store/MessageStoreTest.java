@@ -509,32 +509,34 @@ class MessageStoreTest {
   }
 
   @Test
-  void aRunsLastWordIsTheQuestionItLeftUntilItsOwnerAnswersOrItSpeaksAgain() {
+  void aRunsNewestQuestionWaitsUntilItsOwnerAnswersAndItHearsTheAnswer() {
     new FdeStore(db).add("mo", "Mo", null);
+    var runs = new RunStore(db);
+    var runId = runs.create("r1", "acme", "room", "ada", "build", "a", "b", "t", 1, 1, "l", "u");
     var run = List.of("claude/r1", "claude/fix-r1");
     messages.append("room", "claude/r1", "Reading the build first.", null);
-    assertEquals(Optional.empty(), messages.lastQuestion("room", run), "it asked nothing");
+    assertEquals(Optional.empty(), messages.lastQuestion("room", runId, run), "it asked nothing");
 
     var asked =
         messages.append("room", "claude/fix-r1", "Which JDK?", null, MessageStore.Mark.QUESTION);
     messages.append("room", "claude/r2", "Another run's", null, MessageStore.Mark.QUESTION);
+    messages.append("room", "claude/r1", "Blocked until you choose.", null);
     messages.append("room", "mo", "21", null);
     assertEquals(
-        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", false)),
-        messages.lastQuestion("room", run),
-        "a member's reply never reaches the agent, so it answers nothing");
+        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", false, false)),
+        messages.lastQuestion("room", runId, run),
+        "a summary after the question answers nothing, and a member's reply never reaches it");
 
-    messages.append("room", "ada", "25", null);
+    var answer = messages.append("room", "ada", "25", null);
     assertEquals(
-        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", true)),
-        messages.lastQuestion("room", run));
+        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", true, false)),
+        messages.lastQuestion("room", runId, run));
 
-    messages.append("room", "claude/r1", "Going with 25.", null);
+    runs.markDelivered(runId, List.of(answer.id()));
     assertEquals(
-        Optional.empty(),
-        messages.lastQuestion("room", run),
-        "a run that spoke after its question no longer waits on it");
-    assertEquals(Optional.empty(), messages.lastQuestion("room", List.of()));
+        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", true, true)),
+        messages.lastQuestion("room", runId, run));
+    assertEquals(Optional.empty(), messages.lastQuestion("room", runId, List.of()));
   }
 
   @Test

@@ -190,6 +190,20 @@ class LoopDecisionTest {
             buildEnded("build-1", 0),
             start(1)),
         row(
+            "A4c an answer that came after the build stopped hearing the room resumes it",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).answeredUnheard("Which?"),
+            buildEnded("build-1", 0),
+            new LoopStep.ResumeBuild()),
+        row(
+            "A4c an unheard answer to a build of a spec reassigned since is reviewed as it is",
+            facts()
+                .spec(SpecStatus.IN_PROGRESS)
+                .reassigned("someone-else")
+                .newestLoopRun(BUILD)
+                .answeredUnheard("Which?"),
+            buildEnded("build-1", 0),
+            start(1)),
+        row(
             "A4b a failed build that asked is said to have failed",
             facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).asked("Which JDK?", false),
             buildEnded("build-1", 3),
@@ -716,6 +730,11 @@ class LoopDecisionTest {
             fixEnded(FIXER),
             new LoopStep.AwaitAnswer(Lane.FIX, "Keep the old API?")),
         row(
+            "F2c an answer that came after the fix agent stopped hearing the room resumes it",
+            fixed().spec(SpecStatus.IN_PROGRESS).answeredUnheard("Keep the old API?"),
+            fixEnded(FIXER),
+            new LoopStep.ResumeFix(GATE_FAILED)),
+        row(
             "F2b a question answered while the fix agent ran holds nothing",
             fixed().asked("Keep the old API?", true),
             fixEnded(FIXER),
@@ -913,6 +932,19 @@ class LoopDecisionTest {
             ANSWERED,
             NOTHING),
         row(
+            "Q2 a build whose resume failed to launch is not resumed again",
+            facts()
+                .spec(SpecStatus.IN_PROGRESS)
+                .newestLoopRun(run("build-2", NODE, "build", null, "failed", ENDED))
+                .asked("Which?", true),
+            ANSWERED,
+            NOTHING),
+        row(
+            "Q2 a spec parked in review with no review is past its question",
+            facts().newestLoopRun(BUILD).asked("Which?", true),
+            ANSWERED,
+            NOTHING),
+        row(
             "Q3 the build that waits on its answer goes on with it",
             facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).asked("Which?", true),
             ANSWERED,
@@ -924,7 +956,7 @@ class LoopDecisionTest {
             NOTHING),
         row(
             "Q4 the fix agent that waits on its answer goes on with it",
-            fixed().asked("Keep it?", true),
+            fixed().spec(SpecStatus.IN_PROGRESS).asked("Keep it?", true),
             ANSWERED,
             new LoopStep.ResumeFix(GATE_FAILED)),
         row(
@@ -934,7 +966,10 @@ class LoopDecisionTest {
             NOTHING),
         row(
             "Q4 a fix agent whose review its pipeline can no longer judge",
-            fixed().asked("Keep it?", true).pipeline(new LoopFacts.Pipeline.Unreadable("bad yaml")),
+            fixed()
+                .spec(SpecStatus.IN_PROGRESS)
+                .asked("Keep it?", true)
+                .pipeline(new LoopFacts.Pipeline.Unreadable("bad yaml")),
             ANSWERED,
             escalate(GATE_FAILED, ReviewNarration.pipelineUnreadable("bad yaml"))),
         row(

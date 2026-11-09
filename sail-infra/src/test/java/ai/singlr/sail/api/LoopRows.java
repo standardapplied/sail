@@ -267,9 +267,18 @@ final class LoopRows {
       return this;
     }
 
-    /** The newest loop run's last word in the room: a question, answered or not. */
+    /**
+     * The newest loop run's newest question: answered or not, and an answer the run heard, as one
+     * that came while it ran is.
+     */
     Facts asked(String question, boolean answered) {
-      this.asked = new MessageStore.Asked("question-1", question, answered);
+      this.asked = new MessageStore.Asked("question-1", question, answered, answered);
+      return this;
+    }
+
+    /** The newest loop run's newest question, answered after it stopped hearing the room. */
+    Facts answeredUnheard(String question) {
+      this.asked = new MessageStore.Asked("question-1", question, true, false);
       return this;
     }
 

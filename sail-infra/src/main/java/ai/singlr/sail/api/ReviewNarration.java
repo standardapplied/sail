@@ -109,6 +109,13 @@ final class ReviewNarration {
     return "The " + (lane == Lane.FIX ? "fix agent" : "build") + " goes on with your answer.";
   }
 
+  /** Why the build did not go on with the answer, and how a person moves it from here. */
+  static String resumeFailed(String why) {
+    return "The build could not go on with your answer: "
+        + why
+        + ". Re-dispatch it with --restart once that is fixed.";
+  }
+
   private static String firstLine(String text) {
     var line = Objects.requireNonNullElse(text, "").strip().lines().findFirst().orElse("");
     return line.length() > 200 ? line.substring(0, 199) + "…" : line;

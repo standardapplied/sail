@@ -125,7 +125,22 @@ class AnsweredQuestionLoopTest {
   }
 
   @Test
-  void aQuestionAnsweredWhileTheBuildRanHoldsNothing() {
+  void aQuestionAnsweredWhileTheBuildRanAndHeardHoldsNothing() {
+    start(List.of());
+    var build = loop.run(SPEC, "build");
+    asks(build, QUESTION);
+    var answer = loop.messages.append(SPEC, ReviewLoop.HANDLE, "Use 21.", null);
+    loop.runs.markDelivered(build, List.of(answer.id()));
+
+    loop.onEvent(ReviewLoop.buildStop(SPEC, build));
+
+    assertEquals(SpecStatus.AWAITING_MERGE, loop.specStatus(SPEC));
+    assertEquals(List.of(), builds, "no build ran again");
+    assertEquals(List.of(), loop.roomLines(SPEC, "The build ended"));
+  }
+
+  @Test
+  void anAnswerTheBuildNeverHeardBeforeItStoppedResumesIt() {
     start(List.of());
     var build = loop.run(SPEC, "build");
     asks(build, QUESTION);
@@ -133,9 +148,23 @@ class AnsweredQuestionLoopTest {
 
     loop.onEvent(ReviewLoop.buildStop(SPEC, build));
 
+    assertEquals(1, builds.size());
+    assertTrue(builds.getFirst().contains("Use 21."));
     assertEquals(SpecStatus.AWAITING_MERGE, loop.specStatus(SPEC));
-    assertEquals(List.of(), builds, "no build ran again");
-    assertEquals(List.of(), loop.roomLines(SPEC, "The build ended"));
+  }
+
+  @Test
+  void aBuildWaitingOnItsAnswerIsNeverReplayed() {
+    start(List.of());
+    var build = loop.run(SPEC, "build");
+    asks(build, QUESTION);
+    loop.onEvent(ReviewLoop.buildStop(SPEC, build));
+
+    assertEquals(0, loop.reconciler(ReviewLoop.LATER).sweep(), "its stop was acted on");
+    loop.settle();
+
+    assertEquals(1, loop.roomLines(SPEC, "The build ended").size(), "the wait is said once");
+    assertTrue(loop.reviews.latestReviewForSpec(SPEC).isEmpty());
   }
 
   @Test
@@ -214,6 +243,7 @@ class AnsweredQuestionLoopTest {
 
     assertEquals(List.of(), builds);
     assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus(SPEC));
+    assertEquals(1, loop.roomLines(SPEC, "The build could not go on with your answer").size());
   }
 
   @Test
