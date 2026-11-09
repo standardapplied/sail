@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -444,6 +445,22 @@ class LiveMemberTest {
     process.exits(0);
     room.awaitStopped(process);
     assertEquals(Map.of("open", false), state(), "a member that ended is no member");
+  }
+
+  @Test
+  void aMemberLeavingItsRoomNoLongerAnswersForIt() {
+    var process = room.prompted(SPEC, "read-only", "first");
+    room.says(process, Lines.init("sess-1"), Lines.delta("One"));
+    var asLeaving = new AtomicReference<Map<String, Object>>();
+    room.container.beforeGit(() -> asLeaving.set(state()));
+
+    process.exits(0);
+    room.awaitStopped(process);
+
+    assertEquals(
+        Map.of("open", false),
+        asLeaving.get(),
+        "a member's last look happens as it leaves, and the room tells no turn of its own then");
   }
 
   private Map<String, Object> state() {

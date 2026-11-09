@@ -230,8 +230,9 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         Actor.system(),
         () -> {
           var member = members.get(roomId);
-          if (member != null) {
-            return Optional.of(member.state());
+          var told = member == null ? Optional.<Event>empty() : member.state();
+          if (told.isPresent()) {
+            return told;
           }
           return seat(roomId)
               .map(
@@ -771,6 +772,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     private boolean flushing;
     private boolean ending;
     private String endReason;
+    private boolean leaving;
     private boolean over;
 
     private Member(
@@ -1087,14 +1089,20 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       events.publish(told(type, more));
     }
 
-    /** Its turn as a room's stream is first told it: open, or closed as its end said. */
-    private synchronized Event state() {
+    /**
+     * Its turn as a room's stream is first told it: open, or closed as its end said; empty once it
+     * is leaving its room, so no one told its run stopped still finds it there.
+     */
+    private synchronized Optional<Event> state() {
+      if (leaving) {
+        return Optional.empty();
+      }
       var data = new LinkedHashMap<String, Object>();
       data.put(OPEN, turnOpen);
       if (!turnOpen) {
         data.putAll(lastEnd);
       }
-      return told(Event.WellKnownTypes.AGENT_TURN_STATE, data);
+      return Optional.of(told(Event.WellKnownTypes.AGENT_TURN_STATE, data));
     }
 
     private Event told(String type, Map<String, Object> more) {
@@ -1117,6 +1125,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
      * behind a member that takes no prompt.
      */
     private synchronized void finished() {
+      leaving = true;
       try {
         flush();
         if (prompted && !turnOpen) {
