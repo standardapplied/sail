@@ -254,12 +254,18 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
    *
    * @param id the question's message id
    * @param body what it asked
-   * @param answered whether someone who steers the room's agents ({@link RoomStore#steering}) has
-   *     replied since, as {@link #openQuestions} reads it
+   * @param answer the newest reply since from someone who steers the room's agents ({@link
+   *     RoomStore#steering}), or null while none has answered, as {@link #openQuestions} reads it
    * @param heard whether it was answered and every such reply is on the run's delivery ledger: the
    *     run was told all of them
    */
-  public record Asked(String id, String body, boolean answered, boolean heard) {}
+  public record Asked(String id, String body, String answer, boolean heard) {
+
+    /** Whether someone the run hears has answered it. */
+    public boolean answered() {
+      return answer != null;
+    }
+  }
 
   /**
    * The newest question {@code principals}, the identities of run {@code runId}, asked in {@code
@@ -286,29 +292,28 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
             MessageStore::map,
             arguments.toArray())
         .map(
-            question ->
-                new Asked(
-                    question.id(),
-                    question.body(),
-                    !replies(question, null).isEmpty(),
-                    !replies(question, null).isEmpty() && replies(question, runId).isEmpty()));
+            question -> {
+              var answer = replies(question, null).stream().findFirst().orElse(null);
+              var heard = answer != null && replies(question, runId).isEmpty();
+              return new Asked(question.id(), question.body(), answer, heard);
+            });
   }
 
   /**
-   * Replies to {@code question} that reach its run's lane; with {@code runId}, only those missing
-   * from that run's delivery ledger: the ones it was never told.
+   * The newest reply to {@code question} that reaches its run's lane; with {@code runId}, the
+   * newest of those missing from that run's delivery ledger: one it was never told.
    */
-  private List<Integer> replies(MessageRow question, String runId) {
+  private List<String> replies(MessageRow question, String runId) {
     return db.query(
-        "SELECT 1 FROM room_messages h WHERE h.room_id = ?1 AND h.id > ?2"
+        "SELECT h.id FROM room_messages h WHERE h.room_id = ?1 AND h.id > ?2"
             + " AND h.author NOT LIKE '%/%' AND h.author != 'sail' AND "
             + RoomStore.steering("h.author", "h.room_id", "NULL")
             + " AND "
             + readable("h.id", 3)
             + " AND (?4 IS NULL OR h.id NOT IN"
             + " (SELECT message_id FROM run_delivered_messages WHERE run_id = ?4))"
-            + " LIMIT 1",
-        row -> 1,
+            + " ORDER BY h.id DESC LIMIT 1",
+        row -> row.text(0),
         question.roomId(),
         question.id(),
         reader(),

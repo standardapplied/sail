@@ -16,6 +16,7 @@ import ai.singlr.sail.store.MessageStore.MessageRow;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.ReviewStore.ReviewRow;
 import ai.singlr.sail.store.ReviewStore.StageRow;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 import java.util.Optional;
@@ -101,7 +102,8 @@ final class LoopSteps {
    * The event is the stop's acted-on evidence: the missed-stop reconciler never replays it.
    */
   private Optional<LoopTrigger> awaitAnswer(LoopFacts facts, LoopStep.AwaitAnswer step) {
-    narrator.postRoom(facts.specId(), ReviewNarration.waitsOnAnswer(step.lane(), step.question()));
+    narrator.postRoomOnce(
+        facts.specId(), ReviewNarration.waitsOnAnswer(step.lane(), step.question()));
     held(facts, step.question());
     return Optional.empty();
   }
@@ -129,21 +131,31 @@ final class LoopSteps {
         case ReviewLanes.Launch.Deferred deferred ->
             tell(
                 facts,
-                step,
+                step.told(),
                 ReviewNarration.resumeDeferred(deferred.holder().runId()),
                 deferred.holder().runId());
       }
     } catch (RuntimeException e) {
-      tell(facts, step, ReviewNarration.resumeFailed(reasonOf(e)), reasonOf(e));
-      if (step.told()) {
+      var told = step.told() || wroteARun(facts);
+      tell(facts, told, ReviewNarration.resumeFailed(reasonOf(e)), reasonOf(e));
+      if (told) {
         narrator.publishPipelineError(facts.project(), specId, e);
       }
     }
     return Optional.empty();
   }
 
-  private void tell(LoopFacts facts, LoopStep.ResumeBuild step, String line, String detail) {
-    if (!step.told()) {
+  /**
+   * Whether the resume that just failed wrote its run: that run is {@code failed}, nothing retries
+   * it, and the failure is final, so it is always said.
+   */
+  private boolean wroteARun(LoopFacts facts) {
+    var newest = reader.rows(facts.specId()).newestLoopRun().map(RunStore.RunRow::id);
+    return !newest.equals(facts.rows().newestLoopRun().map(RunStore.RunRow::id));
+  }
+
+  private void tell(LoopFacts facts, boolean told, String line, String detail) {
+    if (!told) {
       System.err.println("review-pipeline: spec " + facts.specId() + ": " + line);
       return;
     }

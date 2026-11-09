@@ -79,6 +79,23 @@ final class LoopNarrator {
    * recent messages. Best-effort: a line telling of work under way must never fail that work. The
    * lines that end a review, or record its wait, are written with it ({@link #appendRoom}).
    */
+  /**
+   * {@link #postRoom}, unless sail said exactly {@code body} among the room's recent messages: a
+   * replayed stop never says a wait twice.
+   */
+  void postRoomOnce(String specId, String body) {
+    var said =
+        messageStore != null
+            && messageStore.list(roomOf(specId), null, 20).stream()
+                .anyMatch(
+                    row ->
+                        MessageStore.SAIL_AUTHOR.equals(row.author())
+                            && MessageStore.fitted(body).equals(row.body()));
+    if (!said) {
+      postRoom(specId, body);
+    }
+  }
+
   void postRoom(String specId, String body) {
     try {
       appendRoom(specId, body);

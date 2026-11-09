@@ -161,6 +161,7 @@ public final class ReviewPipelineController implements EventSubscriber {
     if (Strings.isBlank(conversation)) {
       return;
     }
+    var posted = Objects.toString(event.data().get(Event.WellKnownData.MESSAGE_ID), null);
     var read = reader.forOneEvent(pipelines);
     var inProgress =
         new SpecStore.SpecFilter(null, SpecStatus.IN_PROGRESS.wire(), null, null, null);
@@ -168,7 +169,7 @@ public final class ReviewPipelineController implements EventSubscriber {
       if (!conversation.equals(spec.roomIdOrIdentity())) {
         continue;
       }
-      drive(new Routed(spec.project(), spec.id(), new LoopTrigger.Answered()), read);
+      drive(new Routed(spec.project(), spec.id(), new LoopTrigger.Answered(posted)), read);
     }
   }
 

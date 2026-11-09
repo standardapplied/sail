@@ -523,23 +523,23 @@ class MessageStoreTest {
     messages.append("room", "claude/r1", "Blocked until you choose.", null);
     messages.append("room", "mo", "21", null);
     assertEquals(
-        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", false, false)),
+        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", null, false)),
         messages.lastQuestion("room", runId, run),
         "a summary after the question answers nothing, and a member's reply never reaches it");
 
     var answer = messages.append("room", "ada", "25", null);
     assertEquals(
-        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", true, false)),
+        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", answer.id(), false)),
         messages.lastQuestion("room", runId, run));
 
     runs.markDelivered(runId, List.of(answer.id()));
     assertEquals(
-        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", true, true)),
+        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", answer.id(), true)),
         messages.lastQuestion("room", runId, run));
 
     var correction = messages.append("room", "ada", "No, 21 after all.", null);
     assertEquals(
-        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", true, false)),
+        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", correction.id(), false)),
         messages.lastQuestion("room", runId, run),
         "a run that heard the first reply but not the last has not heard its answer");
     runs.markDelivered(runId, List.of(correction.id()));

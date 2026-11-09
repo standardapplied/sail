@@ -51,7 +51,7 @@ final class LoopDecision {
       case LoopTrigger.ReviewerEnded reviewer -> reviewerEnded(facts, reviewer);
       case LoopTrigger.FixEnded fix -> fixEnded(facts, fix);
       case LoopTrigger.OperatorStopped stopped -> operatorStopped(facts, stopped.run());
-      case LoopTrigger.Answered answered -> answered(facts, true);
+      case LoopTrigger.Answered answered -> answered(facts, isTheAnswer(facts, answered));
       case LoopTrigger.Freed freed -> freed(facts);
       case LoopTrigger.GoOn goOn -> goOn(facts);
       case LoopTrigger.ReviewRunning running -> on(rows.review(), review -> inItsStages(facts));
@@ -189,6 +189,18 @@ final class LoopDecision {
         .filter(review -> Lane.FIX.matches(run.role()) && !review.errored())
         .<LoopStep>map(review -> fit(facts, () -> new LoopStep.ResumeFix(review)))
         .orElseGet(LoopStep.Nothing::new);
+  }
+
+  /**
+   * Whether the post is the newest answer to the run's question: the one someone waits to hear
+   * about. Any other post, an agent's or a member's, only retries a resume quietly.
+   */
+  private static boolean isTheAnswer(LoopFacts facts, LoopTrigger.Answered post) {
+    return facts
+        .asked()
+        .map(MessageStore.Asked::answer)
+        .filter(answer -> answer.equals(post.messageId()))
+        .isPresent();
   }
 
   private static boolean answeredUnheard(MessageStore.Asked question) {

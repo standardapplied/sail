@@ -72,7 +72,7 @@ class LoopDecisionTest {
   private static final LoopStep NOTHING = new LoopStep.Nothing();
   private static final LoopTrigger GO_ON = new LoopTrigger.GoOn();
   private static final LoopTrigger FREED = new LoopTrigger.Freed();
-  private static final LoopTrigger ANSWERED = new LoopTrigger.Answered();
+  private static final LoopTrigger ANSWERED = new LoopTrigger.Answered("answer-1");
   private static final LoopTrigger REVIEW_RUNNING = new LoopTrigger.ReviewRunning();
 
   private record Row(String name, LoopRows.Facts facts, LoopTrigger trigger, LoopStep step) {
@@ -957,6 +957,16 @@ class LoopDecisionTest {
             facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).answeredUnheard("Which?"),
             ANSWERED,
             new LoopStep.ResumeBuild(true)),
+        row(
+            "Q3 a post that is not the newest answer resumes the build quietly",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).answeredUnheard("Which?"),
+            new LoopTrigger.Answered("an-agents-post"),
+            new LoopStep.ResumeBuild(false)),
+        row(
+            "Q3 a post with no message id resumes the build quietly",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).answeredUnheard("Which?"),
+            new LoopTrigger.Answered(null),
+            new LoopStep.ResumeBuild(false)),
         row(
             "Q2 an answer the run already heard resumes nothing: its own stop goes on",
             facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).asked("Which?", true),

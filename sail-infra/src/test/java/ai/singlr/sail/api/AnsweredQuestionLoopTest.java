@@ -263,6 +263,12 @@ class AnsweredQuestionLoopTest {
         loop.roomLines(SPEC, "The build could not go on with your answer").size(),
         "a stop elsewhere retries it quietly");
 
+    says("mo", "Any news?");
+    assertEquals(
+        1,
+        loop.roomLines(SPEC, "The build could not go on with your answer").size(),
+        "a post that answers nothing retries it quietly");
+
     says(ReviewLoop.HANDLE, "Still 21.");
     assertEquals(
         2,
@@ -306,5 +312,31 @@ class AnsweredQuestionLoopTest {
         List.of(ReviewNarration.notResumable(Lane.BUILD)),
         loop.roomLines(SPEC, "The build ended before it heard"));
     assertEquals(0, loop.reconciler(ReviewLoop.LATER).sweep(), "its stop was acted on");
+  }
+
+  @Test
+  void aQuietRetryThatFailsOnceItsRunIsWrittenIsSaidInTheRoom() {
+    start(List.of());
+    var build = loop.run(SPEC, "build");
+    asks(build, QUESTION);
+    loop.onEvent(ReviewLoop.buildStop(SPEC, build));
+    var holder = loop.run(null, "adhoc");
+    says(ReviewLoop.HANDLE, "Use 21.");
+    loop.refuseLaunches();
+
+    loop.onEvent(
+        RunStops.of(
+            Event.WellKnownData.SOURCE_WATCHER,
+            ReviewLoop.PROJECT,
+            null,
+            "claude-code",
+            holder,
+            "adhoc",
+            0,
+            null));
+
+    assertEquals(List.of(), builds);
+    assertEquals(1, loop.roomLines(SPEC, "The build could not go on with your answer").size());
+    assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus(SPEC));
   }
 }
