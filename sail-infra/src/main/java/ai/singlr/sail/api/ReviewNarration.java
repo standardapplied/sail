@@ -109,6 +109,17 @@ final class ReviewNarration {
     return "The " + (lane == Lane.FIX ? "fix agent" : "build") + " goes on with your answer.";
   }
 
+  /**
+   * The build or fix agent of {@code lane} ended before it heard its answer, and the spec is no
+   * longer this box's to go on with.
+   */
+  static String notResumable(Lane lane) {
+    return "The "
+        + (lane == Lane.FIX ? "fix agent" : "build")
+        + " ended before it heard your answer, and this box no longer holds the spec: whoever"
+        + " holds it now re-dispatches it with --restart.";
+  }
+
   /** Why the build did not go on with the answer, and how a person moves it from here. */
   static String resumeFailed(String why) {
     return "The build could not go on with your answer: "

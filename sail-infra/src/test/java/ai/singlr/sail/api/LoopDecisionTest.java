@@ -195,14 +195,14 @@ class LoopDecisionTest {
             buildEnded("build-1", 0),
             new LoopStep.ResumeBuild()),
         row(
-            "A4c an unheard answer to a build of a spec reassigned since is reviewed as it is",
+            "A4c an unheard answer to a build of a spec reassigned since is its new holder's",
             facts()
                 .spec(SpecStatus.IN_PROGRESS)
                 .reassigned("someone-else")
                 .newestLoopRun(BUILD)
                 .answeredUnheard("Which?"),
             buildEnded("build-1", 0),
-            start(1)),
+            new LoopStep.CannotResume(Lane.BUILD)),
         row(
             "A4b a failed build that asked is said to have failed",
             facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).asked("Which JDK?", false),
@@ -734,6 +734,14 @@ class LoopDecisionTest {
             fixed().spec(SpecStatus.IN_PROGRESS).answeredUnheard("Keep the old API?"),
             fixEnded(FIXER),
             new LoopStep.ResumeFix(GATE_FAILED)),
+        row(
+            "F2c an unheard answer to a fix agent of a spec reassigned since is its new holder's",
+            fixed()
+                .spec(SpecStatus.IN_PROGRESS)
+                .reassigned("someone-else")
+                .answeredUnheard("Keep?"),
+            fixEnded(FIXER),
+            new LoopStep.CannotResume(Lane.FIX)),
         row(
             "F2b a question answered while the fix agent ran holds nothing",
             fixed().asked("Keep the old API?", true),

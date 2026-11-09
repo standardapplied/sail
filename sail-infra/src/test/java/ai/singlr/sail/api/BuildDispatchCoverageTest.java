@@ -440,32 +440,71 @@ class BuildDispatchCoverageTest {
   }
 
   @Test
-  void aResumedBuildChecksOutItsBranchWithoutDiscardingTheTree() throws IOException {
+  void aResumedBuildWhoseRepoIsStillOnItsBranchKeepsTheTreeItLeft() throws IOException {
     var db = onBranch(inProgress(seedDb()));
-    var shell = happyPath().on(REPO + " checkout sail/auth", "");
+    var shell = happyPath().on(REPO + " rev-parse --abbrev-ref HEAD", "sail/auth\n");
     var ops = ops(shell, YAML, db);
 
     assertInstanceOf(ReviewLanes.Launch.Started.class, resume(ops));
 
-    assertTrue(ranContaining(shell, REPO + " checkout sail/auth"));
-    assertFalse(ranContaining(shell, "checkout -f"));
+    assertFalse(ranContaining(shell, REPO + " checkout"));
+    assertFalse(ranContaining(shell, REPO + " status --porcelain"));
   }
 
   @Test
-  void aResumeOverATreeAnotherRunLeftInTheWayFailsLoud() throws IOException {
+  void aResumedBuildChecksOutItsBranchOverACleanTreeAnotherRunMoved() throws IOException {
+    var db = onBranch(inProgress(seedDb()));
+    var shell =
+        happyPath()
+            .on(REPO + " rev-parse --abbrev-ref HEAD", "sail/other\n")
+            .on(REPO + " status --porcelain", "")
+            .on(REPO + " checkout sail/auth --", "");
+    var ops = ops(shell, YAML, db);
+
+    assertInstanceOf(ReviewLanes.Launch.Started.class, resume(ops));
+
+    assertTrue(ranContaining(shell, REPO + " checkout sail/auth --"));
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "' M README.md',0,it holds uncommitted work of sail/other",
+    "'',1,error: pathspec",
+  })
+  void aResumeOverATreeItCannotTakeFailsLoudAndLeavesNoRun(
+      String status, int checkoutExit, String why) throws IOException {
     var db = onBranch(inProgress(seedDb()));
     var shell =
         happyPath()
             .on("tr -d '[:space:]'", "gone\n")
-            .refuse(REPO + " checkout sail/auth", "error: Your local changes would be overwritten");
+            .on(REPO + " rev-parse --abbrev-ref HEAD", "sail/other\n")
+            .on(REPO + " status --porcelain", status + "\n");
+    if (checkoutExit != 0) {
+      shell.refuse(REPO + " checkout sail/auth --", "error: pathspec 'sail/auth' did not match");
+    }
     var runs = new RunStore(db);
     var ops = ops(shell, YAML, db, runs);
 
     var thrown = assertThrows(ApiException.class, () -> resume(ops));
 
     assertEquals(ErrorCode.BRANCH_CREATE_FAILED, thrown.failure().errorCode());
-    assertTrue(thrown.getMessage().contains("to resume its build"), thrown.getMessage());
+    assertTrue(thrown.getMessage().contains(why), thrown.getMessage());
     assertTrue(runs.listForSpec("auth").stream().noneMatch(run -> "running".equals(run.status())));
+  }
+
+  @Test
+  void aResumeWhoseRepoCannotSayItsStateFailsLoud() throws IOException {
+    var db = onBranch(inProgress(seedDb()));
+    var shell =
+        happyPath()
+            .on("tr -d '[:space:]'", "gone\n")
+            .refuse(REPO + " rev-parse --abbrev-ref HEAD", "fatal: bad HEAD")
+            .refuse(REPO + " status --porcelain", "fatal: index file corrupt");
+    var ops = ops(shell, YAML, db);
+
+    var thrown = assertThrows(ApiException.class, () -> resume(ops));
+
+    assertTrue(thrown.getMessage().contains("index file corrupt"), thrown.getMessage());
   }
 
   @Test

@@ -64,6 +64,7 @@ final class LoopSteps {
       case LoopStep.SayBuildFailed failed -> sayBuildFailed(facts, failed);
       case LoopStep.ParkForAPerson park -> parkForAPerson(facts);
       case LoopStep.AwaitAnswer await -> awaitAnswer(facts, await);
+      case LoopStep.CannotResume cannot -> cannotResume(facts, cannot);
       case LoopStep.ResumeBuild resume -> resumeBuild(facts);
       case LoopStep.ResumeFix resume -> resumeFix(facts, resume);
       case LoopStep.StartReview start -> startReview(facts, start);
@@ -101,15 +102,22 @@ final class LoopSteps {
    */
   private Optional<LoopTrigger> awaitAnswer(LoopFacts facts, LoopStep.AwaitAnswer step) {
     narrator.postRoom(facts.specId(), ReviewNarration.waitsOnAnswer(step.lane(), step.question()));
-    narrator.publishEvent(
-        facts.project(), facts.specId(), LoopNarrator.AWAITING_ANSWER, step.question());
+    held(facts, step.question());
+    return Optional.empty();
+  }
+
+  /** The answer went unheard, and the spec is another box's now: the room says whose move it is. */
+  private Optional<LoopTrigger> cannotResume(LoopFacts facts, LoopStep.CannotResume step) {
+    narrator.postRoom(facts.specId(), ReviewNarration.notResumable(step.lane()));
+    held(facts, step.lane().wire());
     return Optional.empty();
   }
 
   /**
    * The build goes on where it ended, with the answer in its prompt. A claim another run holds
    * defers it, and the stop that frees that claim resumes it ({@link LoopTrigger.Freed}). A resume
-   * that fails is said in the room, where the answer was given.
+   * that fails is said in the room, where the answer was given, and its spec is a person's: it is
+   * parked in {@code review}, so nothing retries it until someone re-dispatches it.
    */
   private Optional<LoopTrigger> resumeBuild(LoopFacts facts) {
     var specId = facts.specId();
@@ -117,16 +125,20 @@ final class LoopSteps {
       switch (lanes.resumeBuild(facts.project(), specId, localHandle.get())) {
         case ReviewLanes.Launch.Started started ->
             narrator.postRoom(specId, ReviewNarration.resumed(Lane.BUILD));
-        case ReviewLanes.Launch.Deferred deferred ->
-            System.err.println(
-                "review-pipeline: the build of spec %s goes on with its answer once run %s ends"
-                    .formatted(specId, deferred.holder().runId()));
+        case ReviewLanes.Launch.Deferred deferred -> held(facts, deferred.holder().runId());
       }
     } catch (RuntimeException e) {
       narrator.postRoom(specId, ReviewNarration.resumeFailed(reasonOf(e)));
       narrator.publishPipelineError(facts.project(), specId, e);
+      held(facts, reasonOf(e));
+      advanceSpec(specId, SpecStatus.REVIEW);
     }
     return Optional.empty();
+  }
+
+  /** The stop of the run the loop holds is acted on: the reconciler never replays it. */
+  private void held(LoopFacts facts, String detail) {
+    narrator.publishEvent(facts.project(), facts.specId(), LoopNarrator.HELD_ON_QUESTION, detail);
   }
 
   /** The fix agent goes on with the review's open findings, and the answer in its prompt. */

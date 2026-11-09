@@ -242,7 +242,10 @@ class AnsweredQuestionLoopTest {
     says(ReviewLoop.HANDLE, "Use 21.");
 
     assertEquals(List.of(), builds);
-    assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus(SPEC));
+    assertEquals(SpecStatus.REVIEW, loop.specStatus(SPEC), "a person's, until re-dispatched");
+    assertEquals(1, loop.roomLines(SPEC, "The build could not go on with your answer").size());
+
+    says(ReviewLoop.HANDLE, "Still 21.");
     assertEquals(1, loop.roomLines(SPEC, "The build could not go on with your answer").size());
   }
 
@@ -264,5 +267,23 @@ class AnsweredQuestionLoopTest {
             Map.of()));
 
     assertEquals(List.of(), builds);
+  }
+
+  @Test
+  void anUnheardAnswerToASpecReassignedSinceIsLeftToItsHolder() {
+    start(List.of());
+    var build = loop.run(SPEC, "build");
+    asks(build, QUESTION);
+    loop.messages.append(SPEC, ReviewLoop.HANDLE, "Use 21.", null);
+    loop.assign(SPEC, "mo");
+
+    loop.onEvent(ReviewLoop.buildStop(SPEC, build));
+
+    assertEquals(List.of(), builds);
+    assertTrue(loop.reviews.latestReviewForSpec(SPEC).isEmpty(), "nothing is reviewed");
+    assertEquals(
+        List.of(ReviewNarration.notResumable(Lane.BUILD)),
+        loop.roomLines(SPEC, "The build ended before it heard"));
+    assertEquals(0, loop.reconciler(ReviewLoop.LATER).sweep(), "its stop was acted on");
   }
 }

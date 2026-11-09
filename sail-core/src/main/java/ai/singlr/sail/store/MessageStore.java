@@ -256,7 +256,8 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
    * @param body what it asked
    * @param answered whether someone who steers the room's agents ({@link RoomStore#steering}) has
    *     replied since, as {@link #openQuestions} reads it
-   * @param heard whether such a reply is on the run's delivery ledger: the run was told it
+   * @param heard whether it was answered and every such reply is on the run's delivery ledger: the
+   *     run was told all of them
    */
   public record Asked(String id, String body, boolean answered, boolean heard) {}
 
@@ -290,11 +291,12 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
                     question.id(),
                     question.body(),
                     !replies(question, null).isEmpty(),
-                    !replies(question, runId).isEmpty()));
+                    !replies(question, null).isEmpty() && replies(question, runId).isEmpty()));
   }
 
   /**
-   * Replies to {@code question} that reach its run's lane; with {@code runId}, only those it got.
+   * Replies to {@code question} that reach its run's lane; with {@code runId}, only those missing
+   * from that run's delivery ledger: the ones it was never told.
    */
   private List<Integer> replies(MessageRow question, String runId) {
     return db.query(
@@ -303,7 +305,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
             + RoomStore.steering("h.author", "h.room_id", "NULL")
             + " AND "
             + readable("h.id", 3)
-            + " AND (?4 IS NULL OR h.id IN"
+            + " AND (?4 IS NULL OR h.id NOT IN"
             + " (SELECT message_id FROM run_delivered_messages WHERE run_id = ?4))"
             + " LIMIT 1",
         row -> 1,

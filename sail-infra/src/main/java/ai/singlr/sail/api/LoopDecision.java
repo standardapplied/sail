@@ -111,8 +111,10 @@ final class LoopDecision {
     if (asked.filter(question -> !question.answered()).isPresent()) {
       return new LoopStep.AwaitAnswer(Lane.BUILD, asked.get().body());
     }
-    if (asked.filter(question -> !question.heard()).isPresent() && facts.resumableHere()) {
-      return new LoopStep.ResumeBuild();
+    if (asked.filter(question -> !question.heard()).isPresent()) {
+      return facts.resumableHere()
+          ? new LoopStep.ResumeBuild()
+          : new LoopStep.CannotResume(Lane.BUILD);
     }
     return switch (facts.pipeline()) {
       case Pipeline.Staged staged -> new LoopStep.StartReview(1);
@@ -152,8 +154,10 @@ final class LoopDecision {
     if (asked.filter(question -> !question.answered()).isPresent()) {
       return new LoopStep.AwaitAnswer(Lane.FIX, asked.get().body());
     }
-    if (asked.filter(question -> !question.heard()).isPresent() && facts.resumableHere()) {
-      return fit(facts, () -> new LoopStep.ResumeFix(review.get()));
+    if (asked.filter(question -> !question.heard()).isPresent()) {
+      return facts.resumableHere()
+          ? fit(facts, () -> new LoopStep.ResumeFix(review.get()))
+          : new LoopStep.CannotResume(Lane.FIX);
     }
     return ended
         .failure()

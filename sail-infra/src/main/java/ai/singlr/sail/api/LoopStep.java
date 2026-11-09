@@ -31,6 +31,12 @@ sealed interface LoopStep {
    */
   record AwaitAnswer(Lane lane, String question) implements LoopStep {}
 
+  /**
+   * The build or fix agent of {@code lane} ended before it heard the answer to its question, and
+   * this box no longer holds the spec: whoever does goes on with it.
+   */
+  record CannotResume(Lane lane) implements LoopStep {}
+
   /** Launch the spec's build again, where its last build ended on a question now answered. */
   record ResumeBuild() implements LoopStep {}
 

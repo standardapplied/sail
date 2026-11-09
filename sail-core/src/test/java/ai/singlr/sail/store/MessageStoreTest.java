@@ -536,6 +536,14 @@ class MessageStoreTest {
     assertEquals(
         Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", true, true)),
         messages.lastQuestion("room", runId, run));
+
+    var correction = messages.append("room", "ada", "No, 21 after all.", null);
+    assertEquals(
+        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", true, false)),
+        messages.lastQuestion("room", runId, run),
+        "a run that heard the first reply but not the last has not heard its answer");
+    runs.markDelivered(runId, List.of(correction.id()));
+    assertTrue(messages.lastQuestion("room", runId, run).orElseThrow().heard());
     assertEquals(Optional.empty(), messages.lastQuestion("room", runId, List.of()));
   }
 

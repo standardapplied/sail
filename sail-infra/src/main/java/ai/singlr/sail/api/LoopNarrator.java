@@ -16,8 +16,12 @@ import java.util.Objects;
 /** Says what the review loop did, on the bus and in the room; {@link ReviewNarration} words it. */
 final class LoopNarrator {
 
-  /** Published when a build or fix agent ended on a question the loop now waits on. */
-  static final String AWAITING_ANSWER = "agent_awaiting_answer";
+  /**
+   * Published when the loop holds a build or fix agent that ended on its question: waiting for the
+   * answer, for the claim its resume was refused, or for a person. The missed-stop reconciler
+   * counts it as the run's stop acted on.
+   */
+  static final String HELD_ON_QUESTION = "agent_held_on_question";
 
   private final SpecStore specStore;
   private final EventBus eventBus;
