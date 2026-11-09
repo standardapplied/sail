@@ -5,10 +5,13 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.Map;
 import org.snakeyaml.engine.v2.api.Dump;
@@ -130,9 +133,21 @@ public final class YamlUtil {
     return dump.dumpToString(map);
   }
 
-  /** Write a Map as YAML to a file. */
+  /**
+   * Write a Map as YAML to a file, replacing it whole: a reader sees the old file or the new one,
+   * never a part of either, and a rewrite keeps the file's permissions.
+   */
   public static void dumpToFile(Map<String, Object> map, Path path) throws IOException {
-    Files.writeString(path, dumpToString(map));
+    var temp = path.resolveSibling("." + path.getFileName() + "." + Ids.newId() + ".tmp");
+    try {
+      Files.writeString(temp, dumpToString(map), StandardOpenOption.CREATE_NEW);
+      if (Files.exists(path)) {
+        Files.setPosixFilePermissions(temp, Files.getPosixFilePermissions(path));
+      }
+      Files.move(temp, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    } finally {
+      Files.deleteIfExists(temp);
+    }
   }
 
   /** Dump any value a parsed document holds (a map, a list, text, a number, a flag or null). */
