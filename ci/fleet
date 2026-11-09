@@ -725,6 +725,7 @@ rebuilt() {
   version=$(from_caller "${2:-}")
   [[ -n $run && -n $version ]] || usage
   copy="$(log_dir "$run")/main.db.copy"
+  trap "rm -f $(printf %q "$copy")" EXIT
   check "$run" "every node syncs twice before main is copied" sync_all "$run"
   check "$run" "main is copied by the README's backup line, and the copy is kept off the box" copies_main "$run" "$copy"
   check "$run" "main takes a spec after its copy" \
