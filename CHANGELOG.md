@@ -2,6 +2,7 @@
 
 ## 0.63.0
 
+- **A definition that leaves out the agent's flags means what `project create` writes.** The GCP fleet set a project's `agent` section as the README shows it, `{"type": "claude-code", "install": [...]}`, and dispatch made no work branch: the agent chose its own and opened a pull request sail never learned of. A definition read an absent `auto_branch` or `auto_snapshot` as false and an absent `branch_prefix` as none, where `sail project create` writes `true`, `agent/` and `true`. An absent flag now means those values, and an explicit one, `false` included, is kept. A stored definition is not rewritten: a project whose `agent` section names none of the flags begins branching under `agent/` and snapshotting before a run at this upgrade. Set `"auto_branch": false` (or `"auto_snapshot": false`) to keep the old behavior. A project that turns branching on but names no prefix branches under `agent/`, where it used `sail/`.
 - **A room's live member is gone from its room once its run is told stopped.** When a live member's process ended, sail announced its run stopped and only then let go of it, so a room stream opened in between (as Mast's is, on hearing the stop) was told the dead member's last turn, such as a failed `error_max_turns`, rather than that the room has no member. A member now stops answering for its room the moment it begins to leave. Found by CI, as a test that read the room right after the stop.
 
 ## 0.62.0

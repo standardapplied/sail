@@ -38,17 +38,17 @@ class BranchPolicyTest {
   }
 
   @Test
-  void fallsBackToSailPrefixWhenPrefixIsNull() {
+  void fallsBackToTheAgentPrefixWhenPrefixIsNull() {
     var config = configWithAgent(agent(true, null));
 
-    assertEquals("sail/oauth-flow", BranchPolicy.branchName(config, spec("oauth-flow", null)));
+    assertEquals("agent/oauth-flow", BranchPolicy.branchName(config, spec("oauth-flow", null)));
   }
 
   @Test
-  void fallsBackToSailPrefixWhenPrefixIsBlank() {
+  void fallsBackToTheAgentPrefixWhenPrefixIsBlank() {
     var config = configWithAgent(agent(true, "  "));
 
-    assertEquals("sail/oauth-flow", BranchPolicy.branchName(config, spec("oauth-flow", null)));
+    assertEquals("agent/oauth-flow", BranchPolicy.branchName(config, spec("oauth-flow", null)));
   }
 
   @Test

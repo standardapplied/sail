@@ -78,6 +78,7 @@ class DispatchLaneParityTest {
         type: claude-code
         auto_branch: true
         branch_prefix: sail/
+        auto_snapshot: false
       """;
 
   @TempDir Path tempDir;

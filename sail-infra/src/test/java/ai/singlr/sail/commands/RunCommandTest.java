@@ -292,7 +292,7 @@ class RunCommandTest {
             "--no-snapshot");
 
     assertEquals(0, ran.exit(), ran.err());
-    assertTrue(onlyBranchCutIn(shell, "/home/dev/workspace/nocaptcha").startsWith("sail/snap-"));
+    assertTrue(onlyBranchCutIn(shell, "/home/dev/workspace/nocaptcha").startsWith("agent/snap-"));
   }
 
   @Test
@@ -313,7 +313,7 @@ class RunCommandTest {
     assertEquals(0, ran.exit(), ran.err());
     assertEquals(List.of(), checkouts(shell));
     assertTrue(
-        Pattern.compile("\n  Branch: sail/snap-\\S+ \\(create manually in repo\\)\n")
+        Pattern.compile("\n  Branch: agent/snap-\\S+ \\(create manually in repo\\)\n")
             .matcher(ran.out())
             .find(),
         ran.out());
@@ -382,7 +382,7 @@ class RunCommandTest {
             "--no-snapshot");
 
     assertEquals(0, ran.exit(), ran.err());
-    assertTrue(onlyBranchCutIn(shell, "/home/dev/workspace/nocaptcha").startsWith("sail/snap-"));
+    assertTrue(onlyBranchCutIn(shell, "/home/dev/workspace/nocaptcha").startsWith("agent/snap-"));
   }
 
   @Test
@@ -401,7 +401,7 @@ class RunCommandTest {
             "--no-snapshot");
 
     assertEquals(0, ran.exit(), ran.err());
-    assertTrue(onlyBranchCutIn(shell, "/home/dev/workspace/web").startsWith("sail/snap-"));
+    assertTrue(onlyBranchCutIn(shell, "/home/dev/workspace/web").startsWith("agent/snap-"));
   }
 
   @Test
@@ -420,7 +420,8 @@ class RunCommandTest {
             "--no-snapshot");
 
     assertEquals(0, ran.exit(), ran.err());
-    assertTrue(onlyBranchCutIn(shell, "/home/dev/workspace/nocaptcha/ui").startsWith("sail/snap-"));
+    assertTrue(
+        onlyBranchCutIn(shell, "/home/dev/workspace/nocaptcha/ui").startsWith("agent/snap-"));
   }
 
   @Test

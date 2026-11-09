@@ -764,6 +764,38 @@ class ProjectDefinitionTest {
   }
 
   @Test
+  void anAgentSectionLeavingOutItsFlagsMeansWhatProjectCreateWrites() {
+    var agent =
+        ProjectDefinition.fromMap(YamlUtil.parseMap("name: acme\nagent:\n  type: claude-code\n"))
+            .agent();
+
+    assertEquals(ProjectDefinition.Agent.created("claude-code", null), agent);
+    assertTrue(agent.autoBranch());
+    assertEquals("agent/", agent.branchPrefix());
+    assertTrue(agent.autoSnapshot());
+  }
+
+  @Test
+  void anAgentSectionsExplicitFlagsAreKept() {
+    var agent =
+        ProjectDefinition.fromMap(
+                YamlUtil.parseMap(
+                    """
+                    name: acme
+                    agent:
+                      type: claude-code
+                      auto_branch: false
+                      branch_prefix: "feat/"
+                      auto_snapshot: false
+                    """))
+            .agent();
+
+    assertFalse(agent.autoBranch());
+    assertEquals("feat/", agent.branchPrefix());
+    assertFalse(agent.autoSnapshot());
+  }
+
+  @Test
   void aDefinitionNamingNoAgentHasNoMember() {
     var config =
         ProjectDefinition.fromMap(YamlUtil.parseMap("name: acme\nagent:\n  auto_branch: true\n"));

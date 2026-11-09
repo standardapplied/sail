@@ -232,6 +232,7 @@ class SailOperationsSyncTest {
         name: acme
         agent:
           type: claude-code
+          auto_snapshot: false
         """);
     var db = Sqlite.open(tempDir.resolve("sync-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
