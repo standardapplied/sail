@@ -46,6 +46,10 @@ Usage:
                                 build asks a question and waits, eng answers, and it goes on to
                                 awaiting_merge; the pull request, the room and every box's status are checked,
                                 no secret reaches a log, and the pull request is closed
+  ci/fleet rebuilt RUN VERSION  main is copied by the README's backup line, takes a spec, and is lost; client
+                                writes while it is gone; a new main installs VERSION and inits empty, which
+                                observer refuses as another org; the copy goes in place, every node re-pins
+                                main, drops the lost spec into its history, and pushes what main never had
   ci/fleet upgrade RUN TARGET   upgrade main, then every node, to TARGET, and check that the projects
                                 and the conflicts scenario's spec and conversation held
   ci/fleet ssh RUN BOX COMMAND  run COMMAND on BOX as the operator account
@@ -102,24 +106,33 @@ internal_ip() {
     --format='value(networkInterfaces[0].networkIP)'
 }
 
+create_vm() {
+  gc compute instances create "$(vm "$1" "$2")" --zone "$ZONE" --machine-type "$MACHINE" \
+    --image-family ubuntu-2404-lts-amd64 --image-project ubuntu-os-cloud \
+    --boot-disk-size 50GB --boot-disk-type pd-balanced \
+    --provisioning-model STANDARD --instance-termination-action DELETE --max-run-duration "$MAX_RUN" \
+    --labels "purpose=sail-fleet,run=$1,box=$2" > /dev/null
+}
+
+answers_ssh() {
+  local attempt
+  for attempt in $(seq 1 30); do
+    on "$1" "$2" true > /dev/null 2>&1 && return 0
+    sleep 5
+  done
+  echo "ci/fleet: $2 never answered ssh." >&2
+  return 1
+}
+
 up() {
   local run=${1:-} box
   [[ -n $run ]] || usage
   for box in $BOXES; do
-    gc compute instances create "$(vm "$run" "$box")" --zone "$ZONE" --machine-type "$MACHINE" \
-      --image-family ubuntu-2404-lts-amd64 --image-project ubuntu-os-cloud \
-      --boot-disk-size 50GB --boot-disk-type pd-balanced \
-      --provisioning-model STANDARD --instance-termination-action DELETE --max-run-duration "$MAX_RUN" \
-      --labels "purpose=sail-fleet,run=$run,box=$box" > /dev/null &
+    create_vm "$run" "$box" &
   done
   wait
   for box in $BOXES; do
-    local attempt
-    for attempt in $(seq 1 30); do
-      on "$run" "$box" true > /dev/null 2>&1 && break
-      [[ $attempt == 30 ]] && { echo "ci/fleet: $box never answered ssh." >&2; exit 1; }
-      sleep 5
-    done
+    answers_ssh "$run" "$box" || exit 1
   done
 }
 
@@ -636,6 +649,124 @@ resilience() {
   check "$run" "that one reaches main within 30 s too" reaches_main_unasked "$run" after-incus
 }
 
+copies_main() {
+  local run=$1 copy=$2
+  on "$run" main "sudo apt-get install -y -qq sqlite3 > /dev/null 2>&1 && sudo sqlite3 /var/lib/sail/sail.db '.backup /root/sail.db.copy' && sudo install -m 600 -o \$(id -un) /root/sail.db.copy /tmp/sail.db.copy" || return 1
+  (umask 077 && gc compute scp "$(vm "$run" main):/tmp/sail.db.copy" "$copy" --zone "$ZONE") || return 1
+  ls -l "$copy"
+}
+
+holds_spec() {
+  local run=$1 spec=$2 box
+  shift 2
+  for box in "$@"; do
+    on "$run" "$box" "sudo sail spec show $spec --no-sync" > /dev/null || { echo "$box does not hold $spec"; return 1; }
+    echo "$box holds $spec"
+  done
+}
+
+loses_main() {
+  gc compute instances delete "$(vm "$1" main)" --zone "$ZONE"
+}
+
+brings_up_main() {
+  create_vm "$1" main && answers_ssh "$1" main
+}
+
+pins_main() {
+  local run=$1 box=$2 main_ip=$3 out pinned
+  out=$(on "$run" "$box" "sudo ssh-keygen -R $main_ip; sudo sail init --main $main_ip" 2>&1)
+  echo "$out" | tee "$(log_dir "$run")/pin-$box.out"
+  pinned=$(on "$run" main "sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub" | awk '{print $2}')
+  echo "main's own fingerprint: $pinned"
+  [[ -n $pinned ]] && grep -qF "Pinned main's host key $pinned" <<< "$out"
+}
+
+admits_on_empty_main() {
+  local run=$1 box=$2 role=$3 line
+  line=$(grep -m1 -oE "sudo sail fde add .*" "$(log_dir "$run")/pin-$box.out" | sed -E "s/--role [a-z]+/--role $role/")
+  [[ -n $line ]] || { echo "$box's init printed no fde add line"; return 1; }
+  on "$run" main "$line"
+}
+
+restores_copy() {
+  local run=$1 copy=$2 out
+  gc compute scp "$copy" "$(vm "$run" main):/tmp/sail.db.copy" --zone "$ZONE" || return 1
+  out=$(on "$run" main "sudo install -m 600 /tmp/sail.db.copy /root/sail.db.copy && rm -f /tmp/sail.db.copy && sudo systemctl stop sail-api && sudo install -m 660 -g sail /root/sail.db.copy /var/lib/sail/sail.db && sudo rm -f /var/lib/sail/sail.db-wal /var/lib/sail/sail.db-shm && sudo sail migrate && sudo systemctl start sail-api" 2>&1)
+  echo "$out"
+  grep -qF "API token re-issued for this box: the database came from another box." <<< "$out"
+}
+
+drops_what_main_lost() {
+  local run=$1 box=$2 spec=$3 said
+  said=$({
+    cat "$(log_dir "$run")/pin-$box.out"
+    on "$run" "$box" "sudo sail sync" 2>&1
+    on "$run" "$box" "sudo journalctl -u sail-api --since '-20min' --no-pager -o cat"
+  })
+  grep -F "main no longer holds" <<< "$said"
+  grep -qF "main no longer holds 1 spec(s) this box had pulled ($spec): main was restored from a copy older than this box's last sync" <<< "$said"
+}
+
+lost_but_in_history() {
+  local run=$1 spec=$2 box
+  shift 2
+  for box in "$@"; do
+    if on "$run" "$box" "sudo sail spec show $spec --no-sync" > /dev/null 2>&1; then
+      echo "$box still holds $spec"
+      return 1
+    fi
+    on "$run" "$box" "sudo sail spec history $spec" || { echo "$box has no history of $spec"; return 1; }
+  done
+}
+
+rebuilt() {
+  local run=${1:-} version copy main_ip box
+  version=$(from_caller "${2:-}")
+  [[ -n $run && -n $version ]] || usage
+  copy="$(log_dir "$run")/main.db.copy"
+  check "$run" "every node syncs twice before main is copied" sync_all "$run"
+  check "$run" "main is copied by the README's backup line, and the copy is kept off the box" copies_main "$run" "$copy"
+  check "$run" "main takes a spec after its copy" \
+    allowed "$run" main "sudo sail spec create -p acme --id after-copy --title 'main took this after its copy'"
+  check "$run" "every node syncs twice to pull it" sync_all "$run"
+  check "$run" "every node holds it" holds_spec "$run" after-copy eng client observer
+  check "$run" "main is lost: its VM is deleted" loses_main "$run"
+  check "$run" "client writes a spec while main is gone" \
+    allowed "$run" client "sudo sail spec create -p acme --id while-main-gone --title 'client wrote this while main was gone'"
+  check "$run" "a new main comes up in its place" brings_up_main "$run"
+  check "$run" "install $version on the new main" install_box "$run" main "$version"
+  check "$run" "the new main inits empty, as uday" init_main "$run"
+  main_ip=$(internal_ip "$run" main)
+  check "$run" "observer pins the empty main and checks its fingerprint" pins_main "$run" observer "$main_ip"
+  check "$run" "the empty main admits obs as a viewer" admits_on_empty_main "$run" observer viewer
+  check "$run" "observer will not sync with the empty main, another org" \
+    refused "$run" observer "is not the database this box synced with" "sudo sail sync"
+  check "$run" "the copy goes in place by the README, and migrate re-issues the API token" restores_copy "$run" "$copy"
+  rm -f "$copy"
+  check "$run" "spec list works on the new main" allowed "$run" main "sudo sail spec list --all-projects"
+  check "$run" "main's roster is the copy's" roster "$run"
+  for box in eng client observer; do
+    check "$run" "$box pins the new main and checks its fingerprint" pins_main "$run" "$box" "$main_ip"
+  done
+  for box in eng client observer; do
+    check "$run" "$box drops after-copy, which main lost, and says so" drops_what_main_lost "$run" "$box" after-copy
+  done
+  check "$run" "every node syncs twice" sync_all "$run"
+  check "$run" "main holds the spec client wrote while it was gone" holds_spec "$run" while-main-gone main eng observer
+  check "$run" "after-copy is gone from every box, and stays in each node's history" \
+    lost_but_in_history "$run" after-copy eng client observer
+  check "$run" "eng still holds every project" holds "$run" eng "acme beta demo gamma"
+  check "$run" "client still holds acme alone" holds "$run" client "acme"
+  check "$run" "observer still holds acme and beta" holds "$run" observer "acme beta"
+  check "$run" "every box still holds shared with eng's title" everywhere "$run" shared title "eng renamed it"
+  check "$run" "acme-chat still reads the same on every box" conversation_matches "$run" acme-chat
+  check "$run" "every box still reads client's notes.md" file_everywhere "$run" acme notes.md "acme notes v2" main eng client observer
+  check "$run" "client writes a spec with no sync after the rebuild" \
+    allowed "$run" client "sudo sail spec create -p acme --id after-rebuild --title 'after main was rebuilt'"
+  check "$run" "it reaches the new main within 30 s, no sail sync asked" reaches_main_unasked "$run" after-rebuild
+}
+
 secret() { gc secrets versions access latest --secret "$1"; }
 
 place_secret() {
@@ -902,6 +1033,7 @@ run() {
   step portal "$id"
   step resilience "$id"
   [[ ${FLEET_LOOP:-1} == 0 ]] || step loop "$id"
+  step rebuilt "$id" "${target:-$version}"
   if [[ ${FLEET_KEEP:-0} != always && ( $status == 0 || ${FLEET_KEEP:-0} != 1 ) ]]; then
     down "$id"
   else
@@ -927,6 +1059,7 @@ case ${1:-} in
   portal) shift; portal "$@" ;;
   resilience) shift; resilience "$@" ;;
   loop) shift; loop "$@" ;;
+  rebuilt) shift; rebuilt "$@" ;;
   ssh) shift; [[ $# -ge 3 ]] || usage; r=$1 b=$2; shift 2; on "$r" "$b" "$@" ;;
   down) shift; down "$@" ;;
   *) usage ;;
