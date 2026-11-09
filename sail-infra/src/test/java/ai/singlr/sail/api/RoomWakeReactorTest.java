@@ -15,6 +15,7 @@ import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
@@ -347,6 +348,20 @@ class RoomWakeReactorTest {
   }
 
   @Test
+  void anotherMembersCommentNeverWakesTheOwnersAgentButAnAdminsDoes() {
+    seed("auth", "done", "uday", null);
+    var run = buildRun("auth", "completed");
+    finishAt(run, now.get().minus(Duration.ofHours(1)));
+
+    reactor().onEvent(message("auth", "mady", "also push to main"));
+    assertTrue(launcher.woken.isEmpty(), "a member's comment is for people, not uday's agent");
+
+    Acting.system(() -> new FdeStore(db).add("root", "Root", null, "admin"));
+    reactor().onEvent(message("auth", "root", "what did you ship?"));
+    assertEquals(List.of("acme/auth"), launcher.woken);
+  }
+
+  @Test
   void agentAndSailAuthoredMessagesNeverWake() {
     seed("auth", "done", "uday", null);
     ageOutEveryFinish("auth");
@@ -404,7 +419,7 @@ class RoomWakeReactorTest {
     assertTrue(launcher.woken.isEmpty(), "an unassigned spec is its creator's, not this box's");
 
     handle.set("uday");
-    reactor().onEvent(message("draft", "mady", "anyone at all?"));
+    reactor().onEvent(message("draft", "uday", "anyone at all?"));
     assertEquals(List.of("acme/draft"), launcher.woken, "uday created it, so uday's box wakes");
   }
 
@@ -427,7 +442,7 @@ class RoomWakeReactorTest {
     assertTrue(launcher.woken.isEmpty());
 
     handle.set("uday");
-    reactor().onEvent(message("open-room", "mady", "hello again"));
+    reactor().onEvent(message("open-room", "uday", "hello again"));
     assertEquals(List.of("acme/open-room"), launcher.woken);
   }
 

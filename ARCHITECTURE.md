@@ -2426,6 +2426,12 @@ no pairing is removed through the gateway as before, and no key file is touched.
     at main's decision on a synced message alike. Seating work in a room, a spec born there or a
     claim of one born there, stays its owners' and an admin's (`SeatingRule`), since the work's
     owner becomes one of the room's owners. Owning a spec born in a room is never its settings.
+    Speaking is not steering: only the owners and an active admin reach the agents at work in a
+    conversation (`RoomStore.steering`), a run's words weighed as its FDE's, and sail's own. A
+    running build's inbox (`MessageStore.listUndelivered`), a wake (`RoomWakeReactor`), a live
+    member's prompt and the room every build, review, fix and room prompt is shown
+    (`MessageStore.steering`) carry nothing else, so another member's comment never instructs an
+    agent that runs on someone else's box with their credentials.
   - **Who owns a run** (`RunAuthority.owners`): the FDE the run acts for, and its spec's owner
     (for a spec-less run, the box that ran it). Its owners or an admin read its log, stop it and
     change it; a run's own FDE keeps it after its spec is reassigned. A run is born only for

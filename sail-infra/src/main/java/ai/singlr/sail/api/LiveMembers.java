@@ -334,7 +334,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   }
 
   private List<MessageStore.MessageRow> tail(String roomId) {
-    return messages.get().list(roomId, null, ROOM_TAIL);
+    return messages.get().steering(roomId, ROOM_TAIL);
   }
 
   /** The human messages of {@code tail} that the run {@code runId} was never handed. */

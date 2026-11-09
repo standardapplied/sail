@@ -95,7 +95,7 @@ class ReviewPipelineControllerTest {
       String model,
       String reasoningEffort) {
     Acting.as(
-        null,
+        ReviewLoop.HANDLE,
         () ->
             specStore.create(
                 new SpecStore.SpecRow(
@@ -1490,10 +1490,15 @@ class ReviewPipelineControllerTest {
         Acting.system(
             () ->
                 messages.append(
-                    "auth", "uday", "x".repeat(PromptConversation.MAX_CODE_POINTS + 1_000), null));
+                    "auth",
+                    ReviewLoop.HANDLE,
+                    "x".repeat(PromptConversation.MAX_CODE_POINTS + 1_000),
+                    null));
     var guidance =
         Acting.system(
-            () -> messages.append("auth", "uday", "the retry finding is intentional", null));
+            () ->
+                messages.append(
+                    "auth", ReviewLoop.HANDLE, "the retry finding is intentional", null));
     var fixPrompt = new AtomicReference<String>();
     var calls = new AtomicInteger();
     var runner =
@@ -1526,7 +1531,7 @@ class ReviewPipelineControllerTest {
         fixPrompt.get().contains("Conversation on this spec"),
         "the fix task renders the room: " + fixPrompt.get());
     assertTrue(
-        fixPrompt.get().contains("uday (")
+        fixPrompt.get().contains("node-a (")
             && fixPrompt.get().contains("the retry finding is intentional"),
         "human guidance on disputed findings reaches the fix turn");
     var seeded = runStore.deliveredMessageIds(loop.runsIn("auth", "fix").getFirst().id());
@@ -1547,17 +1552,22 @@ class ReviewPipelineControllerTest {
         Acting.system(
             () ->
                 loop.messages.append(
-                    "auth", "uday", "x".repeat(PromptConversation.MAX_CODE_POINTS + 1_000), null));
+                    "auth",
+                    ReviewLoop.HANDLE,
+                    "x".repeat(PromptConversation.MAX_CODE_POINTS + 1_000),
+                    null));
     var guidance =
         Acting.system(
-            () -> loop.messages.append("auth", "uday", "the retry finding is intentional", null));
+            () ->
+                loop.messages.append(
+                    "auth", ReviewLoop.HANDLE, "the retry finding is intentional", null));
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
     var reviewer = loop.runsIn("auth", "review").getFirst();
     assertTrue(
-        reviewer.task().contains("uday: the retry finding is intentional"),
+        reviewer.task().contains("node-a: the retry finding is intentional"),
         "the review prompt renders the room");
     var seeded = runStore.deliveredMessageIds(reviewer.id());
     assertTrue(
@@ -2379,7 +2389,13 @@ class ReviewPipelineControllerTest {
               List<String> repos,
               String model,
               String effort) {
-            Acting.system(() -> messages.append("auth", "codex/fix", argument, null));
+            Acting.system(
+                () ->
+                    messages.append(
+                        "auth",
+                        runStore.findByCredential(cred).orElseThrow().principal(),
+                        argument,
+                        null));
             return "fixed the race, disputed the cap";
           }
         };

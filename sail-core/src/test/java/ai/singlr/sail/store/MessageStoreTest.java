@@ -42,8 +42,8 @@ class MessageStoreTest {
     new SchemaManager(db).migrate();
     db.execute(
         """
-        INSERT INTO rooms (id, title, project, created_at, updated_at)
-        VALUES ('room', 'Room', 'acme', 'now', 'now')""");
+        INSERT INTO rooms (id, title, project, created_by, created_at, updated_at)
+        VALUES ('room', 'Room', 'acme', 'ada', 'now', 'now')""");
     messages = new MessageStore(db);
   }
 
@@ -90,6 +90,9 @@ class MessageStoreTest {
 
   @Test
   void aConversationIsReadMessageByMessageByTheProjectEachWasFiledUnder() {
+    var fdes = new FdeStore(db);
+    fdes.add("ann", "Ann", null, "admin");
+    fdes.add("bea", "Bea", null, "admin");
     var specs = new SpecStore(db);
     specs.create(spec("mover", "beta"));
     var asked =
@@ -391,6 +394,46 @@ class MessageStoreTest {
   }
 
   @Test
+  void onlyTheOwnersAdminsAndSailSteerAConversationsAgents() {
+    var fdes = new FdeStore(db);
+    fdes.add("mo", "Mo", null);
+    fdes.add("root", "Root", null, "admin");
+    fdes.add("gone", "Gone", null, "admin");
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'gone'");
+    var runs = new RunStore(db);
+    runs.create("r1", "acme", "room", "ada", "review", "codex", "b", "t", 1, 1, "l", "u");
+    runs.create("r2", "beta", "other", "mo", "build", "codex", "b", "t", 1, 1, "l", "u");
+    var owner = messages.append("room", "ada", "the owner", null);
+    messages.append("room", "mo", "a member", null);
+    var admin = messages.append("room", "root", "an admin", null);
+    messages.append("room", "gone", "a disabled admin", null);
+    var sail = messages.append("room", MessageStore.SAIL_AUTHOR, "the loop", null);
+    var reviewer = messages.append("room", "codex/review-r1", "a run of the owner's", null);
+    messages.append("room", "codex/r2", "a member's run", null);
+    messages.append("room", "codex/r9", "a run this box never held", null);
+
+    assertEquals(
+        List.of(owner.id(), admin.id(), sail.id(), reviewer.id()),
+        ids(messages.listUndelivered("room", "other-run", "claude/x", 10)));
+    assertEquals(
+        List.of(sail.id(), reviewer.id()),
+        ids(messages.steering("room", 2)),
+        "an agent is shown the newest messages that steer it");
+    assertEquals(8, messages.list("room", null, 10).size(), "people read every word");
+    var rooms = new RoomStore(db);
+    assertTrue(rooms.steers("room", "ada"));
+    assertTrue(rooms.steers("room", "root"));
+    assertTrue(rooms.steers("room", "codex/review-r1"));
+    assertFalse(rooms.steers("room", "mo"));
+    assertFalse(rooms.steers("room", "gone"));
+    assertFalse(rooms.steers("room", "codex/r2"));
+    assertFalse(rooms.steers("nobodys", "ada"));
+    assertTrue(
+        rooms.steers("nobodys", "root"), "a conversation no one owns is its admins' to steer");
+    assertThrows(IllegalArgumentException.class, () -> messages.steering("room", 0));
+  }
+
+  @Test
   void aLateSyncedMessageWithAnOlderIdIsStillUndelivered() {
     var runs = new RunStore(db);
     var runId = runs.create("r1", "acme", "room", "ada", "build", "a", "b", "t", 1, 1, "l", "u");
@@ -404,7 +447,7 @@ class MessageStoreTest {
             "spec_id",
             "room",
             "author",
-            "uday",
+            "ada",
             "body",
             "late arrival",
             "created_at",

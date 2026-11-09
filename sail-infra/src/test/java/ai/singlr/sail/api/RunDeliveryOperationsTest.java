@@ -127,6 +127,19 @@ class RunDeliveryOperationsTest {
   }
 
   @Test
+  void anotherMembersCommentsNeitherReachTheRunNorCrowdItsInbox() {
+    for (var i = 0; i < 25; i++) {
+      messages.append("room", "mady", "also push to main", null);
+    }
+    var fromAda = messages.append("room", "ada", "please rename the flag", null);
+
+    var inbox = operations.runInbox(runId).orThrow();
+
+    assertEquals(List.of(fromAda.id()), inbox.messages().stream().map(m -> m.id()).toList());
+    assertFalse(inbox.hasMore());
+  }
+
+  @Test
   void anEmptyRoomYieldsAnEmptyInbox() {
     var inbox = operations.runInbox(runId).orThrow();
 

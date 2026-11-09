@@ -157,7 +157,7 @@ public final class BuildDispatch {
     var room =
         messages == null
             ? List.<MessageStore.MessageRow>of()
-            : messages.list(nextSpec.id(), null, 20);
+            : messages.steering(nextSpec.id(), 20);
     var agentType = taskSpec.agent() != null ? taskSpec.agent() : loaded.config().agent().type();
     if (Strings.isBlank(agentType)) {
       throw new ApiException(

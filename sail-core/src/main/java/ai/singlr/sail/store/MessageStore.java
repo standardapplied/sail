@@ -217,10 +217,42 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Messages of {@code roomId} its reader may see, absent from {@code runId}'s delivery ledger and
-   * not authored by {@code excludeAuthor} (a run is never told its own story), oldest first, capped
-   * at {@code limit}. Delivery is by exact identity, so a message that synchronized in with an
-   * older id after newer messages were already delivered still appears here.
+   * The newest {@code limit} messages of {@code roomId} its reader may see whose authors steer its
+   * agents ({@link RoomStore#steering}), oldest first: what an agent is shown of the room.
+   */
+  public List<MessageRow> steering(String roomId, int limit) {
+    if (limit <= 0) {
+      throw new IllegalArgumentException("limit must be positive");
+    }
+    var newest =
+        new ArrayList<>(
+            db.query(
+                "SELECT "
+                    + COLUMNS
+                    + " FROM room_messages WHERE room_id = ?1 AND "
+                    + readable("room_messages.id", 2)
+                    + " AND "
+                    + RoomStore.steering("room_messages.author", 4)
+                    + " ORDER BY id DESC LIMIT ?3",
+                MessageStore::map,
+                roomId,
+                reader(),
+                limit,
+                owners(roomId)));
+    Collections.reverse(newest);
+    return List.copyOf(newest);
+  }
+
+  private String owners(String roomId) {
+    return YamlUtil.dumpJson(new RoomStore(db).owners(roomId));
+  }
+
+  /**
+   * Messages of {@code roomId} its reader may see whose authors steer its agents ({@link
+   * RoomStore#steering}), absent from {@code runId}'s delivery ledger and not authored by {@code
+   * excludeAuthor} (a run is never told its own story), oldest first, capped at {@code limit}.
+   * Delivery is by exact identity, so a message that synchronized in with an older id after newer
+   * messages were already delivered still appears here.
    */
   public List<MessageRow> listUndelivered(
       String roomId, String runId, String excludeAuthor, int limit) {
@@ -234,13 +266,16 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
             + " AND NOT EXISTS (SELECT 1 FROM run_delivered_messages"
             + " WHERE run_id = ?3 AND message_id = room_messages.id) AND "
             + readable("room_messages.id", 4)
+            + " AND "
+            + RoomStore.steering("room_messages.author", 6)
             + " ORDER BY id ASC LIMIT ?5",
         MessageStore::map,
         roomId,
         excludeAuthor,
         runId,
         reader(),
-        limit);
+        limit,
+        owners(roomId));
   }
 
   /** The id of the room's newest message, or empty for a silent room. */

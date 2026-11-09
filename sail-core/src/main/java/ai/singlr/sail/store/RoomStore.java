@@ -314,6 +314,49 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   }
 
   /**
+   * Whether words by {@code author} steer the agents at work in conversation {@code roomId} ({@link
+   * #steering}).
+   */
+  public boolean steers(String roomId, String author) {
+    return !db.query(
+            "SELECT 1 FROM (SELECT ?1 AS author) room_messages WHERE "
+                + steering("room_messages.author", 2),
+            row -> 1,
+            author,
+            YamlUtil.dumpJson(owners(roomId)))
+        .isEmpty();
+  }
+
+  /**
+   * Whose words steer the agents at work in a conversation, as SQL over the column {@code author},
+   * the conversation's {@link #owners} being the JSON array at {@code ?ownersArg}: this box's
+   * machinery, an owner, or an active admin, a run's principal weighed as the FDE its run acts for.
+   * Every FDE who may write in a project speaks in its conversations, but a member's comment is for
+   * people: only the owners, on whose boxes and credentials the work runs, and admins reach it.
+   */
+  static String steering(String author, int ownersArg) {
+    var fde =
+        "coalesce((SELECT owner FROM runs WHERE principal = "
+            + author
+            + " LIMIT 1), "
+            + author
+            + ")";
+    return "("
+        + author
+        + " = '"
+        + MessageStore.SAIL_AUTHOR
+        + "' OR "
+        + fde
+        + " IN (SELECT value FROM json_each(?"
+        + ownersArg
+        + ")) OR "
+        + fde
+        + " IN (SELECT handle FROM fdes WHERE role = '"
+        + FdeStore.ADMIN
+        + "' AND status = 'active'))";
+  }
+
+  /**
    * Who owns room {@code roomId} — its roster, wake, title and assignee — the one rule every door
    * that changes a room, every waker and main's check of a synced room decide by. A spec's identity
    * room is its spec's, as this box last knew the spec, live or deleted ({@link

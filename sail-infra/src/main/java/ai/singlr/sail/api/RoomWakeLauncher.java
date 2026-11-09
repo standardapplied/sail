@@ -115,7 +115,7 @@ public final class RoomWakeLauncher {
     var room =
         messages == null
             ? List.<MessageStore.MessageRow>of()
-            : messages.list(spec.roomIdOrIdentity(), null, 20);
+            : messages.steering(spec.roomIdOrIdentity(), 20);
     var resumeSessionId =
         engagement != null
             ? engagedSessionId(specId, agentType, localHandle)
@@ -237,7 +237,7 @@ public final class RoomWakeLauncher {
     }
     var messages = messageStore.get();
     var conversation =
-        messages == null ? List.<MessageStore.MessageRow>of() : messages.list(roomId, null, 20);
+        messages == null ? List.<MessageStore.MessageRow>of() : messages.steering(roomId, 20);
     var built = RoomWakePrompt.buildForRoom(roomId, room.title(), conversation, member);
     var task = built.prompt();
     var runId = DateTimeUtils.newId().toString();
