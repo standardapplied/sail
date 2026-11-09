@@ -7,12 +7,18 @@ package ai.singlr.sail.config;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class YamlUtilTest {
   @org.junit.jupiter.api.Test
@@ -220,5 +226,36 @@ class YamlUtilTest {
     var value = "x".repeat(1018) + "😀tail";
     var result = YamlUtil.parseList("[{\"body\": \"" + value + "\"}]");
     assertEquals(value, result.getFirst().get("body"));
+  }
+
+  @Test
+  void aReaderOfTheFileBeforeItIsRewrittenReadsTheOldFileWhole(@TempDir Path dir)
+      throws IOException {
+    var file = dir.resolve("host.yaml");
+    YamlUtil.dumpToFile(Map.of("sync", Map.of("role", "node", "main", "10.0.0.1")), file);
+    var old = Files.readString(file);
+
+    try (var reader = Files.newInputStream(file)) {
+      YamlUtil.dumpToFile(Map.of("storage_backend", "dir"), file);
+
+      assertEquals(old, new String(reader.readAllBytes()));
+    }
+    assertEquals("storage_backend: dir\n", Files.readString(file));
+    assertNotEquals(old, Files.readString(file));
+  }
+
+  @Test
+  void aRewriteKeepsTheFilesPermissionsAndLeavesNothingBeside(@TempDir Path dir)
+      throws IOException {
+    var file = dir.resolve("connection.yaml");
+    YamlUtil.dumpToFile(Map.of("token", "a"), file);
+    Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"));
+
+    YamlUtil.dumpToFile(Map.of("token", "b"), file);
+
+    assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(file)));
+    try (var listed = Files.list(dir)) {
+      assertEquals(List.of(file), listed.toList());
+    }
   }
 }
