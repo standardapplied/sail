@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore.ReviewRow;
 import ai.singlr.sail.store.RunStore;
@@ -23,6 +24,30 @@ sealed interface LoopStep {
   record SayBuildFailed(int exitCode) implements LoopStep {}
 
   record ParkForAPerson() implements LoopStep {}
+
+  /**
+   * The build or fix agent of {@code lane} ended on {@code question}, unanswered: nothing is judged
+   * until it is answered, and the room says so.
+   */
+  record AwaitAnswer(Lane lane, String question) implements LoopStep {}
+
+  /**
+   * The build or fix agent of {@code lane} ended before it heard the answer to its question, and
+   * this box no longer holds the spec: whoever does goes on with it.
+   */
+  record CannotResume(Lane lane) implements LoopStep {}
+
+  /**
+   * Launch the spec's build again, where its last build ended on a question now answered. {@code
+   * told} is whether someone is there to be told how it went: an answer or the build's own stop
+   * was, a stop elsewhere that freed a claim retries it quietly.
+   */
+  record ResumeBuild(boolean told) implements LoopStep {}
+
+  /**
+   * Launch the fix of {@code review} again, where its fix agent ended on a question now answered.
+   */
+  record ResumeFix(ReviewRow review) implements LoopStep {}
 
   record StartReview(int iteration) implements LoopStep {}
 

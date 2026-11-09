@@ -261,8 +261,6 @@ public final class DispatchOperations {
             shell,
             this.events,
             sessionYield);
-    this.reviewLanes =
-        new ReviewLaneLauncher(projects, runStore, runReservation, runLauncher, shell);
     this.buildDispatch =
         new BuildDispatch(
             projects,
@@ -277,6 +275,9 @@ public final class DispatchOperations {
             listener,
             this.events,
             shell);
+    this.reviewLanes =
+        new ReviewLaneLauncher(
+            projects, runStore, runReservation, runLauncher, shell, buildDispatch::resume);
   }
 
   /**

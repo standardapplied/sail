@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.Finding;
 import java.util.LinkedHashMap;
@@ -75,12 +76,67 @@ final class ReviewNarration {
     return "Review escalated: " + reason + ".";
   }
 
-  /** Why a review whose attempts keep failing by infrastructure error is a person's. */
-  static String erroredOut(int attempts, int iteration) {
+  /**
+   * Why a review whose attempts keep failing by infrastructure error is a person's, in the words of
+   * the last error: only what the loop saw fail is named.
+   */
+  static String erroredOut(int attempts, int iteration, String lastError) {
     return attempts
         + " review attempts errored in a row at iteration "
         + iteration
-        + "; fix the reviewer, then re-dispatch with --restart";
+        + ", the last: "
+        + Objects.requireNonNullElse(lastError, "no error recorded")
+        + ". Re-dispatch with --restart once that is fixed";
+  }
+
+  /**
+   * Why nothing is reviewed yet: the build or fix agent of {@code lane} ended on its own question,
+   * which waits for an answer from someone it hears.
+   */
+  static String waitsOnAnswer(Lane lane, String question) {
+    var agent = lane == Lane.FIX ? "fix agent" : "build";
+    return "The "
+        + agent
+        + " ended on its question, so nothing is reviewed until it is answered: \""
+        + firstLine(question)
+        + "\" Reply here, and the "
+        + agent
+        + " goes on with your answer.";
+  }
+
+  /** The answer is in, and the build or fix agent of {@code lane} goes on with it. */
+  static String resumed(Lane lane) {
+    return "The " + (lane == Lane.FIX ? "fix agent" : "build") + " goes on with your answer.";
+  }
+
+  /**
+   * The build or fix agent of {@code lane} ended before it heard its answer, and the spec is no
+   * longer this box's to go on with.
+   */
+  static String notResumable(Lane lane) {
+    return "The "
+        + (lane == Lane.FIX ? "fix agent" : "build")
+        + " ended before it heard your answer, and this box no longer holds the spec: whoever"
+        + " holds it now re-dispatches it with --restart.";
+  }
+
+  /** The build goes on with the answer once the run that holds its claim ends. */
+  static String resumeDeferred(String holder) {
+    return "The build goes on with your answer once run `"
+        + holder
+        + "` ends. If it has not by then, post here again.";
+  }
+
+  /** Why the build did not go on with the answer, and how a person moves it from here. */
+  static String resumeFailed(String why) {
+    return "The build could not go on with your answer: "
+        + why
+        + ". Re-dispatch it with --restart once that is fixed.";
+  }
+
+  private static String firstLine(String text) {
+    var line = Objects.requireNonNullElse(text, "").strip().lines().findFirst().orElse("");
+    return line.length() > 200 ? line.substring(0, 199) + "…" : line;
   }
 
   /** Why a review a blocking finding has outlived {@code age} fix iterations of is a person's. */

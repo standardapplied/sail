@@ -79,6 +79,11 @@ class LoopStepsTest {
               }
 
               @Override
+              public Launch resumeBuild(String project, String specId, String boxHandle) {
+                return lanes.get().resumeBuild(project, specId, boxHandle);
+              }
+
+              @Override
               public String output(RunStore.RunRow run) throws Exception {
                 return lanes.get().output(run);
               }
@@ -121,6 +126,11 @@ class LoopStepsTest {
           @Override
           public Launch launch(Invocation invocation, String boxHandle, Runnable claimed) {
             return launch.apply(() -> real.launch(invocation, boxHandle, claimed));
+          }
+
+          @Override
+          public Launch resumeBuild(String project, String specId, String boxHandle) {
+            return real.resumeBuild(project, specId, boxHandle);
           }
 
           @Override
@@ -503,6 +513,11 @@ class LoopStepsTest {
           }
 
           @Override
+          public Launch resumeBuild(String project, String specId, String boxHandle) {
+            return real.resumeBuild(project, specId, boxHandle);
+          }
+
+          @Override
           public String output(RunStore.RunRow run) throws Exception {
             throw new IllegalStateException("log unreadable");
           }
@@ -682,6 +697,11 @@ class LoopStepsTest {
           @Override
           public Launch launch(Invocation invocation, String boxHandle, Runnable claimed) {
             return real.launch(invocation, boxHandle, claimed);
+          }
+
+          @Override
+          public Launch resumeBuild(String project, String specId, String boxHandle) {
+            return real.resumeBuild(project, specId, boxHandle);
           }
 
           @Override

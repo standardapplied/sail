@@ -16,6 +16,7 @@ import ai.singlr.sail.store.MessageStore.MessageRow;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.ReviewStore.ReviewRow;
 import ai.singlr.sail.store.ReviewStore.StageRow;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 import java.util.Optional;
@@ -63,6 +64,10 @@ final class LoopSteps {
       case LoopStep.Nothing nothing -> Optional.empty();
       case LoopStep.SayBuildFailed failed -> sayBuildFailed(facts, failed);
       case LoopStep.ParkForAPerson park -> parkForAPerson(facts);
+      case LoopStep.AwaitAnswer await -> awaitAnswer(facts, await);
+      case LoopStep.CannotResume cannot -> cannotResume(facts, cannot);
+      case LoopStep.ResumeBuild resume -> resumeBuild(facts, resume);
+      case LoopStep.ResumeFix resume -> resumeFix(facts, resume);
       case LoopStep.StartReview start -> startReview(facts, start);
       case LoopStep.EscalateNew escalated -> escalateNew(facts, escalated);
       case LoopStep.Resume resumed -> resume(facts, resumed);
@@ -90,6 +95,86 @@ final class LoopSteps {
   private Optional<LoopTrigger> parkForAPerson(LoopFacts facts) {
     advanceSpec(facts.specId(), SpecStatus.REVIEW);
     return Optional.empty();
+  }
+
+  /**
+   * The spec stays in progress, so only the answer moves it, and the room says what it waits on.
+   * The event is the stop's acted-on evidence: the missed-stop reconciler never replays it.
+   */
+  private Optional<LoopTrigger> awaitAnswer(LoopFacts facts, LoopStep.AwaitAnswer step) {
+    narrator.postRoomOnce(
+        facts.specId(), ReviewNarration.waitsOnAnswer(step.lane(), step.question()));
+    held(facts, step.question());
+    return Optional.empty();
+  }
+
+  /** The answer went unheard, and the spec is another box's now: the room says whose move it is. */
+  private Optional<LoopTrigger> cannotResume(LoopFacts facts, LoopStep.CannotResume step) {
+    narrator.postRoom(facts.specId(), ReviewNarration.notResumable(step.lane()));
+    held(facts, step.lane().wire());
+    return Optional.empty();
+  }
+
+  /**
+   * The build goes on where it ended, with the answer in its prompt. A claim another run holds
+   * defers it, and the stop that frees that claim resumes it ({@link LoopTrigger.Freed}). A resume
+   * deferred or failed is said in the room when someone is there to be told, and marks the stop
+   * acted on; a quiet retry only logs. A failure after the run was written leaves that run {@code
+   * failed}, which nothing retries: the spec waits, in progress, for a person to re-dispatch it.
+   */
+  private Optional<LoopTrigger> resumeBuild(LoopFacts facts, LoopStep.ResumeBuild step) {
+    var specId = facts.specId();
+    try {
+      switch (lanes.resumeBuild(facts.project(), specId, localHandle.get())) {
+        case ReviewLanes.Launch.Started started ->
+            narrator.postRoom(specId, ReviewNarration.resumed(Lane.BUILD));
+        case ReviewLanes.Launch.Deferred deferred ->
+            tell(
+                facts,
+                step.told(),
+                ReviewNarration.resumeDeferred(deferred.holder().runId()),
+                deferred.holder().runId());
+      }
+    } catch (RuntimeException e) {
+      var told = step.told() || wroteARun(facts);
+      tell(facts, told, ReviewNarration.resumeFailed(reasonOf(e)), reasonOf(e));
+      if (told) {
+        narrator.publishPipelineError(facts.project(), specId, e);
+      }
+    }
+    return Optional.empty();
+  }
+
+  /**
+   * Whether the resume that just failed wrote its run: that run is {@code failed}, nothing retries
+   * it, and the failure is final, so it is always said.
+   */
+  private boolean wroteARun(LoopFacts facts) {
+    var newest = reader.rows(facts.specId()).newestLoopRun().map(RunStore.RunRow::id);
+    return !newest.equals(facts.rows().newestLoopRun().map(RunStore.RunRow::id));
+  }
+
+  private void tell(LoopFacts facts, boolean told, String line, String detail) {
+    if (!told) {
+      System.err.println("review-pipeline: spec " + facts.specId() + ": " + line);
+      return;
+    }
+    narrator.postRoom(facts.specId(), line);
+    held(facts, detail);
+  }
+
+  /** The stop of the run the loop holds is acted on: the reconciler never replays it. */
+  private void held(LoopFacts facts, String detail) {
+    narrator.publishEvent(facts.project(), facts.specId(), LoopNarrator.HELD_ON_QUESTION, detail);
+  }
+
+  /** The fix agent goes on with the review's open findings, and the answer in its prompt. */
+  private Optional<LoopTrigger> resumeFix(LoopFacts facts, LoopStep.ResumeFix step) {
+    var findings = reviewStore.openFindingsForReview(step.review().id());
+    return launchFix(
+        facts,
+        new LoopStep.LaunchFix(step.review(), findings),
+        () -> narrator.postRoom(facts.specId(), ReviewNarration.resumed(Lane.FIX)));
   }
 
   /** The row is written before the spec moves: no crash leaves a spec in review, owed nothing. */
@@ -343,6 +428,11 @@ final class LoopSteps {
    * nothing but the run the review waits on: the fix is still owed.
    */
   private Optional<LoopTrigger> launchFix(LoopFacts facts, LoopStep.LaunchFix step) {
+    return launchFix(facts, step, () -> {});
+  }
+
+  private Optional<LoopTrigger> launchFix(
+      LoopFacts facts, LoopStep.LaunchFix step, Runnable alsoStarted) {
     var spec = facts.rows().spec().orElseThrow();
     var specId = facts.specId();
     Supplier<ReviewLanes.Invocation> invocation =
@@ -372,6 +462,7 @@ final class LoopSteps {
         () -> {
           advanceSpec(specId, SpecStatus.IN_PROGRESS);
           narrator.publishEvent(facts.project(), specId, "review_iteration_started", null);
+          alsoStarted.run();
         };
     return launch(
         invocation,

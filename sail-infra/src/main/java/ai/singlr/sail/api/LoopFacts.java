@@ -11,6 +11,7 @@ import ai.singlr.sail.config.ReviewPipelineConfig.StageConfig;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -27,6 +28,8 @@ import java.util.Optional;
  * @param openFindings the review's open findings, read only when a fix is due ({@link Rows#fixDue})
  * @param failedStageFindings the findings its first failed stage holds, each with its age
  * @param erroredAttempts how many attempts of the review's iteration failed by infrastructure error
+ * @param asked the newest question the spec's newest loop run asked in the spec's room, read once
+ *     that run, this box's, has ended
  */
 record LoopFacts(
     String project,
@@ -35,7 +38,19 @@ record LoopFacts(
     Pipeline pipeline,
     List<Finding> openFindings,
     List<Aged> failedStageFindings,
-    long erroredAttempts) {
+    long erroredAttempts,
+    Optional<MessageStore.Asked> asked) {
+
+  /**
+   * Whether the spec is its box's to go on with unasked: {@code in_progress}, and assigned to the
+   * FDE of this box, as a dispatch from here requires.
+   */
+  boolean resumableHere() {
+    return rows.spec()
+        .filter(spec -> spec.status() == SpecStatus.IN_PROGRESS)
+        .filter(spec -> rows.node().equals(spec.assignee()))
+        .isPresent();
+  }
 
   /** What a project's review pipeline is, as far as it can be read. */
   sealed interface Pipeline {

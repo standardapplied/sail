@@ -731,6 +731,11 @@ class MissedStopReconcilerTest {
               }
 
               @Override
+              public Launch resumeBuild(String project, String specId, String boxHandle) {
+                throw new AssertionError("this test resumes no build");
+              }
+
+              @Override
               public String output(RunStore.RunRow run) {
                 return "";
               }

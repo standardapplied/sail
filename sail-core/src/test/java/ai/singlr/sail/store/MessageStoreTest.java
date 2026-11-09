@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -505,6 +506,45 @@ class MessageStoreTest {
 
     messages.append("room", "ada", "the first", null);
     assertEquals(Map.of(), messages.openQuestions());
+  }
+
+  @Test
+  void aRunsNewestQuestionWaitsUntilItsOwnerAnswersAndItHearsTheAnswer() {
+    new FdeStore(db).add("mo", "Mo", null);
+    var runs = new RunStore(db);
+    var runId = runs.create("r1", "acme", "room", "ada", "build", "a", "b", "t", 1, 1, "l", "u");
+    var run = List.of("claude/r1", "claude/fix-r1");
+    messages.append("room", "claude/r1", "Reading the build first.", null);
+    assertEquals(Optional.empty(), messages.lastQuestion("room", runId, run), "it asked nothing");
+
+    var asked =
+        messages.append("room", "claude/fix-r1", "Which JDK?", null, MessageStore.Mark.QUESTION);
+    messages.append("room", "claude/r2", "Another run's", null, MessageStore.Mark.QUESTION);
+    messages.append("room", "claude/r1", "Blocked until you choose.", null);
+    messages.append("room", "mo", "21", null);
+    assertEquals(
+        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", null, false)),
+        messages.lastQuestion("room", runId, run),
+        "a summary after the question answers nothing, and a member's reply never reaches it");
+
+    var answer = messages.append("room", "ada", "25", null);
+    assertEquals(
+        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", answer.id(), false)),
+        messages.lastQuestion("room", runId, run));
+
+    runs.markDelivered(runId, List.of(answer.id()));
+    assertEquals(
+        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", answer.id(), true)),
+        messages.lastQuestion("room", runId, run));
+
+    var correction = messages.append("room", "ada", "No, 21 after all.", null);
+    assertEquals(
+        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", correction.id(), false)),
+        messages.lastQuestion("room", runId, run),
+        "a run that heard the first reply but not the last has not heard its answer");
+    runs.markDelivered(runId, List.of(correction.id()));
+    assertTrue(messages.lastQuestion("room", runId, run).orElseThrow().heard());
+    assertEquals(Optional.empty(), messages.lastQuestion("room", runId, List.of()));
   }
 
   @Test

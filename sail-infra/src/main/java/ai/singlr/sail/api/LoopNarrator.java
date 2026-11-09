@@ -16,6 +16,13 @@ import java.util.Objects;
 /** Says what the review loop did, on the bus and in the room; {@link ReviewNarration} words it. */
 final class LoopNarrator {
 
+  /**
+   * Published when the loop holds a build or fix agent that ended on its question: waiting for the
+   * answer, for the claim its resume was refused, or for a person. The missed-stop reconciler
+   * counts it as the run's stop acted on.
+   */
+  static final String HELD_ON_QUESTION = "agent_held_on_question";
+
   private final SpecStore specStore;
   private final EventBus eventBus;
   private final Runnable syncTrigger;
@@ -63,6 +70,23 @@ final class LoopNarrator {
       System.err.println(
           "review-pipeline: could not read the room of spec " + specId + ": " + e.getMessage());
       return List.of();
+    }
+  }
+
+  /**
+   * {@link #postRoom}, unless sail said exactly {@code body} among the room's recent messages: a
+   * replayed stop never says a wait twice.
+   */
+  void postRoomOnce(String specId, String body) {
+    var said =
+        messageStore != null
+            && messageStore.list(roomOf(specId), null, 20).stream()
+                .anyMatch(
+                    row ->
+                        MessageStore.SAIL_AUTHOR.equals(row.author())
+                            && MessageStore.fitted(body).equals(row.body()));
+    if (!said) {
+      postRoom(specId, body);
     }
   }
 

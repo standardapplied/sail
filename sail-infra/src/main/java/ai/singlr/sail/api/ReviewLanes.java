@@ -11,10 +11,11 @@ import ai.singlr.sail.store.RunStore;
 import java.util.List;
 
 /**
- * What the review pipeline asks of the project container: start a reviewer or a fix agent, read
- * what a finished run said, and rescue work a fix agent left uncommitted. Nothing here waits on an
- * agent — {@link #launch} returns once the run is started, and the pipeline hears how it ended from
- * the run's authoritative stop on the bus, as it does for a build.
+ * What the review pipeline asks of the project container: start a reviewer or a fix agent, resume a
+ * build that waited on its answer, read what a finished run said, and rescue work a fix agent left
+ * uncommitted. Nothing here waits on an agent — {@link #launch} returns once the run is started,
+ * and the pipeline hears how it ended from the run's authoritative stop on the bus, as it does for
+ * a build.
  */
 public interface ReviewLanes {
 
@@ -79,6 +80,15 @@ public interface ReviewLanes {
    * pipeline.
    */
   Launch launch(Invocation invocation, String boxHandle, Runnable claimed);
+
+  /**
+   * Launches {@code specId}'s build again as a run this box executes for the FDE whose handle is
+   * {@code boxHandle}, where its last build ended on a question someone has answered since: on the
+   * branch and the tree that build left, with nothing reset and no restart recorded. A claim the
+   * dispatch gate refuses is {@link Launch.Deferred}, and nothing was written for it; a launch that
+   * fails throws.
+   */
+  Launch resumeBuild(String project, String specId, String boxHandle);
 
   /**
    * What {@code run}'s agent said last: the final answer of a streamed log, or the whole log of an

@@ -11,6 +11,7 @@ import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ShellExec;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
@@ -132,6 +133,64 @@ public final class WorkBranch {
       listener.branchUnavailable(branch);
     }
     return created;
+  }
+
+  /**
+   * Puts every target repo that exists in the container back on {@code branch}, which a build
+   * already made, as a build that goes on after its question needs. A repo still on the branch is
+   * left as that build left it, uncommitted work and all. A repo another run moved is checked out
+   * only when its tree is clean: what is uncommitted there is that run's, and is never carried onto
+   * this branch or discarded, so the resume fails loud instead.
+   */
+  public void resume(String project, List<ProjectDefinition.Repo> targetRepos, String branch) {
+    if (Strings.isBlank(branch)) {
+      return;
+    }
+    for (var repo : targetRepos) {
+      var repoDir = "/home/" + ProjectDefinition.USER + "/workspace/" + repo.path();
+      if (!insideWorkTree(project, repoDir)) {
+        continue;
+      }
+      var on = git(project, repoDir, "rev-parse", "--abbrev-ref", "HEAD");
+      if (on.ok() && branch.equals(on.stdout().strip())) {
+        continue;
+      }
+      var dirty = git(project, repoDir, "status", "--porcelain");
+      if (!dirty.ok()) {
+        throw resumeRefused(branch, repo, dirty.reason());
+      }
+      if (!dirty.stdout().isBlank()) {
+        throw resumeRefused(
+            branch,
+            repo,
+            "it holds uncommitted work of "
+                + on.stdout().strip()
+                + ", which is never carried onto "
+                + branch);
+      }
+      var checkedOut = git(project, repoDir, "checkout", branch, "--");
+      if (!checkedOut.ok()) {
+        throw resumeRefused(branch, repo, checkedOut.reason());
+      }
+    }
+  }
+
+  private static ApiException resumeRefused(
+      String branch, ProjectDefinition.Repo repo, String why) {
+    return new ApiException(
+        ErrorCode.BRANCH_CREATE_FAILED,
+        "Failed to check out branch '"
+            + branch
+            + "' in repo '"
+            + repo.path()
+            + "' to resume its build: "
+            + why);
+  }
+
+  private ShellExec.Result git(String project, String repoDir, String... args) {
+    var command = new ArrayList<>(List.of("git", "-C", repoDir));
+    command.addAll(List.of(args));
+    return exec(ContainerExec.asDevUser(project, command));
   }
 
   /**

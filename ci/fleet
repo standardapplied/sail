@@ -734,6 +734,21 @@ opened_a_pull_request() {
   [[ -n $listed ]]
 }
 
+waits_on_its_question() {
+  local run=$1 box=$2 spec=$3 minutes=$4 said i
+  for i in $(seq 1 $((minutes * 2))); do
+    said=$(on "$run" "$box" "sudo sail spec comments $spec --no-sync")
+    if grep -q "ended on its question" <<< "$said"; then
+      echo "$said" | tail -6
+      [[ $(spec_field "$run" "$box" "$spec" status) == in_progress ]]
+      return
+    fi
+    sleep 30
+  done
+  echo "no question held the build after $minutes min"
+  return 1
+}
+
 the_room_shows_the_review() {
   local said
   said=$(on "$1" "$2" "sudo sail spec comments $3 --no-sync")
@@ -750,9 +765,14 @@ closes_the_pull_request() {
 
 readonly LOOP_BODY='# The build passes on JDK 21, and the README says how to run it
 
+Before you change anything, ask in this spec'"'"'s conversation, as a question
+(`spec comment <this spec'"'"'s id> --question --body -`), whether the new README section should be
+titled "Building" or "Build", and end your turn there without changing anything. Go on only once
+the answer is in the conversation.
+
 `mvn -q verify` fails on JDK 21: the SpotBugs Maven plugin in pom.xml bundles an ASM that cannot
 read Java 21 class files. Move it to a release that can, so `mvn -q verify` from the repository
-root passes on JDK 21. Then add a "Building" section to README.md, after its introduction, saying
+root passes on JDK 21. Then add the section to README.md, titled as the answer says, after its introduction, saying
 that `mvn -q verify` builds and tests every module and that the build needs JDK 21. Run
 `mvn -q verify` yourself and say in the pull request that it passed. Change only pom.xml and
 README.md.'
@@ -776,7 +796,9 @@ loop() {
     on "$run" eng "cat > /tmp/loop.md && sudo sail spec create -p acme --id $spec --title 'The build passes on JDK 21 and the README says how to run it' --body-file /tmp/loop.md --assignee eng" <<< "$LOOP_BODY"
   check "$run" "eng makes it ready" on "$run" eng "sudo sail spec update $spec --status pending"
   check "$run" "eng dispatches it in the background" on "$run" eng "sudo sail spec dispatch -p acme --spec $spec --background"
-  check "$run" "the build and the review take it to awaiting_merge" reaches_status "$run" eng "$spec" awaiting_merge 45
+  check "$run" "the build asks its question and waits, unreviewed" waits_on_its_question "$run" eng "$spec" 20
+  check "$run" "eng answers in the room" on "$run" eng "sudo sail spec comment $spec --body 'Call it Building.'"
+  check "$run" "the answer resumes the build, and the review takes it to awaiting_merge" reaches_status "$run" eng "$spec" awaiting_merge 45
   check "$run" "the agent opened a pull request on $LOOP_REPO" opened_a_pull_request "$spec"
   check "$run" "the room shows the review" the_room_shows_the_review "$run" eng "$spec"
   check "$run" "every node syncs twice" sync_all "$run"

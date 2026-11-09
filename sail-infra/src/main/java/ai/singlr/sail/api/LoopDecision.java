@@ -11,6 +11,7 @@ import ai.singlr.sail.api.StageVerdicts.StageOutcome;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ReviewPipelineConfig.StageType;
 import ai.singlr.sail.config.RunStatus;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore.ReviewRow;
 import ai.singlr.sail.store.RunStore.RunRow;
 import java.util.Optional;
@@ -50,6 +51,7 @@ final class LoopDecision {
       case LoopTrigger.ReviewerEnded reviewer -> reviewerEnded(facts, reviewer);
       case LoopTrigger.FixEnded fix -> fixEnded(facts, fix);
       case LoopTrigger.OperatorStopped stopped -> operatorStopped(facts, stopped.run());
+      case LoopTrigger.Answered answered -> answered(facts, isTheAnswer(facts, answered));
       case LoopTrigger.Freed freed -> freed(facts);
       case LoopTrigger.GoOn goOn -> goOn(facts);
       case LoopTrigger.ReviewRunning running -> on(rows.review(), review -> inItsStages(facts));
@@ -105,6 +107,15 @@ final class LoopDecision {
     if (rows.review().isPresent()) {
       return goOn(facts);
     }
+    var asked = facts.asked().filter(question -> build.runId() != null);
+    if (asked.filter(question -> !question.answered()).isPresent()) {
+      return new LoopStep.AwaitAnswer(Lane.BUILD, asked.get().body());
+    }
+    if (asked.filter(question -> !question.heard()).isPresent()) {
+      return facts.resumableHere()
+          ? new LoopStep.ResumeBuild(true)
+          : new LoopStep.CannotResume(Lane.BUILD);
+    }
     return switch (facts.pipeline()) {
       case Pipeline.Staged staged -> new LoopStep.StartReview(1);
       case Pipeline.None none -> new LoopStep.ParkForAPerson();
@@ -139,10 +150,68 @@ final class LoopDecision {
     if (review.isEmpty()) {
       return goOn(facts);
     }
+    var asked = facts.asked().filter(question -> ended.failure().isEmpty());
+    if (asked.filter(question -> !question.answered()).isPresent()) {
+      return new LoopStep.AwaitAnswer(Lane.FIX, asked.get().body());
+    }
+    if (asked.filter(question -> !question.heard()).isPresent()) {
+      return facts.resumableHere()
+          ? fit(facts, () -> new LoopStep.ResumeFix(review.get()))
+          : new LoopStep.CannotResume(Lane.FIX);
+    }
     return ended
         .failure()
         .<LoopStep>map(how -> new LoopStep.FailFix(review.get(), noun(Lane.FIX) + " " + how))
         .orElseGet(() -> new LoopStep.CommitFixLeftovers(review.get(), ended.run()));
+  }
+
+  /**
+   * An answer resumes the build or fix agent that ended on its question, once someone who steers it
+   * has answered and the run was never told: the build while the spec has no review yet, the fix
+   * agent while its review still waits on it. No other run is resumed: a live one hears the answer
+   * itself, another box's is that box's to resume, a failed one is a person's, a spec reassigned
+   * since is its new owner's to dispatch, and a reviewer's stage is judged on what it said.
+   */
+  private static LoopStep answered(LoopFacts facts, boolean told) {
+    var rows = facts.rows();
+    var held =
+        rows.newestLoopRun()
+            .filter(run -> facts.resumableHere() && rows.drivenHere() && endedWell(run))
+            .filter(run -> facts.asked().filter(LoopDecision::answeredUnheard).isPresent());
+    if (held.isEmpty()) {
+      return new LoopStep.Nothing();
+    }
+    var run = held.get();
+    if (Lane.BUILD.matches(run.role())) {
+      return rows.review().isEmpty() ? new LoopStep.ResumeBuild(told) : new LoopStep.Nothing();
+    }
+    return rows.awaited(run, "failed")
+        .filter(review -> Lane.FIX.matches(run.role()) && !review.errored())
+        .<LoopStep>map(review -> fit(facts, () -> new LoopStep.ResumeFix(review)))
+        .orElseGet(LoopStep.Nothing::new);
+  }
+
+  /**
+   * Whether the post is the newest answer to the run's question: the one someone waits to hear
+   * about. Any other post, an agent's or a member's, only retries a resume quietly.
+   */
+  private static boolean isTheAnswer(LoopFacts facts, LoopTrigger.Answered post) {
+    return facts
+        .asked()
+        .map(MessageStore.Asked::answer)
+        .filter(answer -> answer.equals(post.messageId()))
+        .isPresent();
+  }
+
+  private static boolean answeredUnheard(MessageStore.Asked question) {
+    return question.answered() && !question.heard();
+  }
+
+  private static boolean endedWell(RunRow run) {
+    return RunStatus.isTerminal(run.status())
+        && !RunStatus.FAILED.wire().equals(run.status())
+        && (run.exitCode() == null || run.exitCode() == 0)
+        && !run.stoppedByOperator();
   }
 
   /**
@@ -162,15 +231,18 @@ final class LoopDecision {
   }
 
   /**
-   * Only a recorded wait is acted on when a stop frees a claim, and only by the box that drives the
-   * spec's loop: an errored review keeps to the reconciler's pace, one whose launch was cut short
-   * is the reconciler's to rescue, and one whose run has ended waits for that run's own stop.
+   * Only a recorded wait, or a run whose question has been answered, is acted on when a stop frees
+   * a claim, and only by the box that drives the spec's loop: an errored review keeps to the
+   * reconciler's pace, one whose launch was cut short is the reconciler's to rescue, and one whose
+   * run has ended waits for that run's own stop. An answered run is resumed here when its own
+   * resume was deferred behind a claim, or lost to a restart.
    */
   private static LoopStep freed(LoopFacts facts) {
     var rows = facts.rows();
-    return rows.drivenHere() && rows.owed() instanceof Owed.Waiting
-        ? goOn(facts)
-        : new LoopStep.Nothing();
+    if (!rows.drivenHere()) {
+      return new LoopStep.Nothing();
+    }
+    return rows.owed() instanceof Owed.Waiting ? goOn(facts) : answered(facts, false);
   }
 
   /**
@@ -185,7 +257,8 @@ final class LoopDecision {
     var retries = MAX_ERRORED_RETRIES;
     return switch (facts.rows().due()) {
       case Owed.Retry(var review) when facts.erroredAttempts() >= retries ->
-          new LoopStep.Escalate(review, ReviewNarration.erroredOut(retries, review.iteration()));
+          new LoopStep.Escalate(
+              review, ReviewNarration.erroredOut(retries, review.iteration(), review.error()));
       case Owed.Retry(var review) -> fit(facts, () -> new LoopStep.StartReview(review.iteration()));
       case Owed.Advance(var review) -> fit(facts, () -> new LoopStep.Resume(review));
       case Owed.Fix(var review) -> fit(facts, () -> fix(facts, review));

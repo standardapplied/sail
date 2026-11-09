@@ -11,6 +11,7 @@ import static ai.singlr.sail.api.LoopRows.NODE;
 import static ai.singlr.sail.api.LoopRows.RECORDED;
 import static ai.singlr.sail.api.LoopRows.REVIEW;
 import static ai.singlr.sail.api.LoopRows.ended;
+import static ai.singlr.sail.api.LoopRows.exited;
 import static ai.singlr.sail.api.LoopRows.facts;
 import static ai.singlr.sail.api.LoopRows.finding;
 import static ai.singlr.sail.api.LoopRows.review;
@@ -20,6 +21,7 @@ import static ai.singlr.sail.api.LoopRows.staged;
 import static ai.singlr.sail.api.LoopRows.stages;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.TestDefinitions;
@@ -70,6 +72,7 @@ class LoopDecisionTest {
   private static final LoopStep NOTHING = new LoopStep.Nothing();
   private static final LoopTrigger GO_ON = new LoopTrigger.GoOn();
   private static final LoopTrigger FREED = new LoopTrigger.Freed();
+  private static final LoopTrigger ANSWERED = new LoopTrigger.Answered("answer-1");
   private static final LoopTrigger REVIEW_RUNNING = new LoopTrigger.ReviewRunning();
 
   private record Row(String name, LoopRows.Facts facts, LoopTrigger trigger, LoopStep step) {
@@ -176,6 +179,35 @@ class LoopDecisionTest {
             facts().review(ERRORED, List.of()),
             buildEnded(null, 0),
             new LoopStep.StartReview(2)),
+        row(
+            "A4b a build whose last word is a question no one has answered waits for it",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).asked("Which JDK?", false),
+            buildEnded("build-1", 0),
+            new LoopStep.AwaitAnswer(Lane.BUILD, "Which JDK?")),
+        row(
+            "A4b a question answered while the build ran holds nothing",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).asked("Which JDK?", true),
+            buildEnded("build-1", 0),
+            start(1)),
+        row(
+            "A4c an answer that came after the build stopped hearing the room resumes it",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).answeredUnheard("Which?"),
+            buildEnded("build-1", 0),
+            new LoopStep.ResumeBuild(true)),
+        row(
+            "A4c an unheard answer to a build of a spec reassigned since is its new holder's",
+            facts()
+                .spec(SpecStatus.IN_PROGRESS)
+                .reassigned("someone-else")
+                .newestLoopRun(BUILD)
+                .answeredUnheard("Which?"),
+            buildEnded("build-1", 0),
+            new LoopStep.CannotResume(Lane.BUILD)),
+        row(
+            "A4b a failed build that asked is said to have failed",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).asked("Which JDK?", false),
+            buildEnded("build-1", 3),
+            new LoopStep.SayBuildFailed(3)),
         row("A5 a pipeline with stages", facts(), buildEnded(null, 0), start(1)),
         row(
             "A6 no pipeline",
@@ -317,7 +349,7 @@ class LoopDecisionTest {
             "G4 an errored review out of retries",
             facts().review(ERRORED, List.of()).erroredAttempts(3),
             GO_ON,
-            escalate(ERRORED, ReviewNarration.erroredOut(3, 2))),
+            escalate(ERRORED, ReviewNarration.erroredOut(3, 2, "reviewer died"))),
         row(
             "G4 out of retries is said before the pipeline is looked at",
             facts()
@@ -325,7 +357,7 @@ class LoopDecisionTest {
                 .erroredAttempts(3)
                 .pipeline(new LoopFacts.Pipeline.None()),
             GO_ON,
-            escalate(ERRORED, ReviewNarration.erroredOut(3, 2))),
+            escalate(ERRORED, ReviewNarration.erroredOut(3, 2, "reviewer died"))),
         row(
             "G5 an errored review within its retries runs its iteration again",
             facts().review(ERRORED, List.of()).erroredAttempts(2),
@@ -693,6 +725,29 @@ class LoopDecisionTest {
     var answeredAnother = ended("fix-1", "fix", "review-0");
     return Stream.of(
         row(
+            "F2b a fix agent whose last word is a question no one has answered waits for it",
+            fixed().asked("Keep the old API?", false),
+            fixEnded(FIXER),
+            new LoopStep.AwaitAnswer(Lane.FIX, "Keep the old API?")),
+        row(
+            "F2c an answer that came after the fix agent stopped hearing the room resumes it",
+            fixed().spec(SpecStatus.IN_PROGRESS).answeredUnheard("Keep the old API?"),
+            fixEnded(FIXER),
+            new LoopStep.ResumeFix(GATE_FAILED)),
+        row(
+            "F2c an unheard answer to a fix agent of a spec reassigned since is its new holder's",
+            fixed()
+                .spec(SpecStatus.IN_PROGRESS)
+                .reassigned("someone-else")
+                .answeredUnheard("Keep?"),
+            fixEnded(FIXER),
+            new LoopStep.CannotResume(Lane.FIX)),
+        row(
+            "F2b a question answered while the fix agent ran holds nothing",
+            fixed().asked("Keep the old API?", true),
+            fixEnded(FIXER),
+            new LoopStep.CommitFixLeftovers(GATE_FAILED, FIXER)),
+        row(
             "F3 the fix agent its review waits on",
             fixed(),
             fixEnded(FIXER),
@@ -836,9 +891,126 @@ class LoopDecisionTest {
             NOTHING));
   }
 
+  private static Stream<Row> answered() {
+    var anotherBoxs = run("build-1", "node-b", "build", null, "stopped", ENDED);
+    return Stream.of(
+        row(
+            "Q1 a spec that is not the loop's",
+            facts().spec(SpecStatus.CANCELLED).newestLoopRun(BUILD).asked("Which?", true),
+            ANSWERED,
+            NOTHING),
+        row(
+            "Q1 a build another box ran is that box's to resume",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(anotherBoxs).asked("Which?", true),
+            ANSWERED,
+            NOTHING),
+        row(
+            "Q1 a spec reassigned since its build ran is its new owner's to dispatch",
+            facts()
+                .spec(SpecStatus.IN_PROGRESS)
+                .reassigned("someone-else")
+                .newestLoopRun(BUILD)
+                .asked("Which?", true),
+            ANSWERED,
+            NOTHING),
+        row(
+            "Q2 a build still running hears the answer itself",
+            facts()
+                .spec(SpecStatus.IN_PROGRESS)
+                .newestLoopRun(run("build-1", "build", null))
+                .asked("Which?", true),
+            ANSWERED,
+            NOTHING),
+        row(
+            "Q2 a reply that answers nothing the run waits on",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).asked("Which?", false),
+            ANSWERED,
+            NOTHING),
+        row(
+            "Q2 a run whose last word asked nothing",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD),
+            ANSWERED,
+            NOTHING),
+        row(
+            "Q2 a build that failed is not resumed by an answer",
+            facts()
+                .spec(SpecStatus.IN_PROGRESS)
+                .newestLoopRun(exited("build-1", "build", null, 1))
+                .asked("Which?", true),
+            ANSWERED,
+            NOTHING),
+        row(
+            "Q2 a build whose resume failed to launch is not resumed again",
+            facts()
+                .spec(SpecStatus.IN_PROGRESS)
+                .newestLoopRun(run("build-2", NODE, "build", null, "failed", ENDED))
+                .asked("Which?", true),
+            ANSWERED,
+            NOTHING),
+        row(
+            "Q2 a spec parked in review with no review is past its question",
+            facts().newestLoopRun(BUILD).asked("Which?", true),
+            ANSWERED,
+            NOTHING),
+        row(
+            "Q3 the build that waits on its answer goes on with it",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).answeredUnheard("Which?"),
+            ANSWERED,
+            new LoopStep.ResumeBuild(true)),
+        row(
+            "Q3 a post that is not the newest answer resumes the build quietly",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).answeredUnheard("Which?"),
+            new LoopTrigger.Answered("an-agents-post"),
+            new LoopStep.ResumeBuild(false)),
+        row(
+            "Q3 a post with no message id resumes the build quietly",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).answeredUnheard("Which?"),
+            new LoopTrigger.Answered(null),
+            new LoopStep.ResumeBuild(false)),
+        row(
+            "Q2 an answer the run already heard resumes nothing: its own stop goes on",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).asked("Which?", true),
+            ANSWERED,
+            NOTHING),
+        row(
+            "Q3 a build whose spec is in review already is past its question",
+            facts().review(RUNNING, List.of()).newestLoopRun(BUILD).asked("Which?", true),
+            ANSWERED,
+            NOTHING),
+        row(
+            "Q4 the fix agent that waits on its answer goes on with it",
+            fixed().spec(SpecStatus.IN_PROGRESS).answeredUnheard("Keep it?"),
+            ANSWERED,
+            new LoopStep.ResumeFix(GATE_FAILED)),
+        row(
+            "Q4 a fix agent whose review failed by error is not resumed",
+            facts().review(ERRORED, List.of()).serving(FIXER).asked("Keep it?", true),
+            ANSWERED,
+            NOTHING),
+        row(
+            "Q4 a fix agent whose review its pipeline can no longer judge",
+            fixed()
+                .spec(SpecStatus.IN_PROGRESS)
+                .answeredUnheard("Keep it?")
+                .pipeline(new LoopFacts.Pipeline.Unreadable("bad yaml")),
+            ANSWERED,
+            escalate(GATE_FAILED, ReviewNarration.pipelineUnreadable("bad yaml"))),
+        row(
+            "Q5 a reviewer that asked is not resumed: its stage is judged on what it said",
+            reviewed().asked("Is this in scope?", true),
+            ANSWERED,
+            NOTHING),
+        row(
+            "W2 a stop that frees the claim an answered build waited on resumes it quietly",
+            facts().spec(SpecStatus.IN_PROGRESS).newestLoopRun(BUILD).answeredUnheard("Which?"),
+            FREED,
+            new LoopStep.ResumeBuild(false)));
+  }
+
   private static Stream<Row> rows() {
     return Stream.of(
             buildEnded(),
+            answered(),
             freed(),
             goOn(),
             reviewRunning(),

@@ -361,6 +361,204 @@ class BuildDispatchCoverageTest {
     assertEquals(List.of(here.id()), List.copyOf(runStore.deliveredMessageIds(dispatched.runId())));
   }
 
+  @Test
+  void aBuildIsResumedOnlyWhileItsSpecIsInProgress() throws IOException {
+    var ops = ops(happyPath(), YAML, seedDb());
+
+    var thrown = assertThrows(ApiException.class, () -> resume(ops));
+
+    assertEquals(ErrorCode.SPEC_NOT_READY, thrown.failure().errorCode());
+    assertEquals(
+        "Spec 'auth' is not in progress, so it has no build to resume.", thrown.getMessage());
+  }
+
+  @Test
+  void aResumeWithNoAgentConfiguredFailsLoud() throws IOException {
+    var db = inProgress(seedDb());
+    var ops = ops(happyPath(), YAML_NO_AGENT, db);
+
+    var thrown = assertThrows(ApiException.class, () -> resume(ops));
+
+    assertEquals(ErrorCode.AGENT_NOT_CONFIGURED, thrown.failure().errorCode());
+  }
+
+  @Test
+  void aResumedBuildRunsOnTheTreeItsBuildLeftAndRecordsNoRestart() throws IOException {
+    var db = inProgress(seedDb());
+    Acting.system(() -> new SpecStore(db).setContent("auth", "", ""));
+    var shell = happyPath();
+    var events = new CopyOnWriteArrayList<Event>();
+    var ops = ops(shell, YAML, db, new RunStore(db), events);
+
+    assertInstanceOf(ReviewLanes.Launch.Started.class, resume(ops));
+
+    var run = new RunStore(db).latestLoopRun("auth").orElseThrow();
+    assertEquals("build", run.role());
+    assertEquals("claude-code", run.agent());
+    assertTrue(run.task().contains("Add auth"), "a spec with no body is told its title");
+    assertFalse(ranContaining(shell, "checkout"), "the tree its build left is kept");
+    assertEquals(
+        List.of(),
+        events.stream().map(Event::type).filter(type -> type.startsWith("spec_")).toList());
+    assertEquals(SpecStatus.IN_PROGRESS, new SpecStore(db).findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void aResumeAnotherRunHoldsTheClaimOfIsDeferredAndWritesNothing() throws IOException {
+    var db = inProgress(seedDb());
+    var ops = ops(happyPath(), YAML, db);
+    resume(ops);
+    var runs = new RunStore(db);
+    var holder = runs.latestLoopRun("auth").orElseThrow();
+
+    var deferred = assertInstanceOf(ReviewLanes.Launch.Deferred.class, resume(ops));
+
+    assertEquals(holder.id(), deferred.holder().runId());
+    assertEquals(holder.id(), runs.latestLoopRun("auth").orElseThrow().id());
+  }
+
+  @Test
+  void aResumeWhoseLaunchFailsLeavesNoRunRunning() throws IOException {
+    var db = inProgress(seedDb());
+    var runs = new RunStore(db);
+    var ops =
+        ops(
+            happyPath().on("tr -d '[:space:]'", "gone\n"),
+            YAML,
+            db,
+            runs,
+            new CopyOnWriteArrayList<>(),
+            command -> {
+              throw new IllegalStateException("the unit would not start");
+            });
+
+    assertThrows(RuntimeException.class, () -> resume(ops));
+
+    assertTrue(
+        runs.listForSpec("auth").stream().noneMatch(run -> "running".equals(run.status())),
+        runs.listForSpec("auth").toString());
+  }
+
+  @Test
+  void aResumedBuildWhoseRepoIsStillOnItsBranchKeepsTheTreeItLeft() throws IOException {
+    var db = onBranch(inProgress(seedDb()));
+    var shell = happyPath().on(REPO + " rev-parse --abbrev-ref HEAD", "sail/auth\n");
+    var ops = ops(shell, YAML, db);
+
+    assertInstanceOf(ReviewLanes.Launch.Started.class, resume(ops));
+
+    assertFalse(ranContaining(shell, REPO + " checkout"));
+    assertFalse(ranContaining(shell, REPO + " status --porcelain"));
+  }
+
+  @Test
+  void aResumedBuildChecksOutItsBranchOverACleanTreeAnotherRunMoved() throws IOException {
+    var db = onBranch(inProgress(seedDb()));
+    var shell =
+        happyPath()
+            .on(REPO + " rev-parse --abbrev-ref HEAD", "sail/other\n")
+            .on(REPO + " status --porcelain", "")
+            .on(REPO + " checkout sail/auth --", "");
+    var ops = ops(shell, YAML, db);
+
+    assertInstanceOf(ReviewLanes.Launch.Started.class, resume(ops));
+
+    assertTrue(ranContaining(shell, REPO + " checkout sail/auth --"));
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "' M README.md',0,it holds uncommitted work of sail/other",
+    "'',1,error: pathspec",
+  })
+  void aResumeOverATreeItCannotTakeFailsLoudAndLeavesNoRun(
+      String status, int checkoutExit, String why) throws IOException {
+    var db = onBranch(inProgress(seedDb()));
+    var shell =
+        happyPath()
+            .on("tr -d '[:space:]'", "gone\n")
+            .on(REPO + " rev-parse --abbrev-ref HEAD", "sail/other\n")
+            .on(REPO + " status --porcelain", status + "\n");
+    if (checkoutExit != 0) {
+      shell.refuse(REPO + " checkout sail/auth --", "error: pathspec 'sail/auth' did not match");
+    }
+    var runs = new RunStore(db);
+    var ops = ops(shell, YAML, db, runs);
+
+    var thrown = assertThrows(ApiException.class, () -> resume(ops));
+
+    assertEquals(ErrorCode.BRANCH_CREATE_FAILED, thrown.failure().errorCode());
+    assertTrue(thrown.getMessage().contains(why), thrown.getMessage());
+    assertTrue(runs.listForSpec("auth").stream().noneMatch(run -> "running".equals(run.status())));
+  }
+
+  @Test
+  void aResumeWhoseRepoCannotSayItsStateFailsLoud() throws IOException {
+    var db = onBranch(inProgress(seedDb()));
+    var shell =
+        happyPath()
+            .on("tr -d '[:space:]'", "gone\n")
+            .refuse(REPO + " rev-parse --abbrev-ref HEAD", "fatal: bad HEAD")
+            .refuse(REPO + " status --porcelain", "fatal: index file corrupt");
+    var ops = ops(shell, YAML, db);
+
+    var thrown = assertThrows(ApiException.class, () -> resume(ops));
+
+    assertTrue(thrown.getMessage().contains("index file corrupt"), thrown.getMessage());
+  }
+
+  @Test
+  void onlyTheBoxOfTheSpecsAssigneeResumesItsBuild() throws IOException {
+    var db = inProgress(seedDb());
+    Acting.system(
+        () -> {
+          var row = new SpecStore(db).findById("auth").orElseThrow();
+          new SpecStore(db)
+              .update(
+                  new SpecStore.SpecRow(
+                      row.id(),
+                      row.project(),
+                      row.title(),
+                      row.status(),
+                      "bo",
+                      row.agent(),
+                      row.model(),
+                      row.reasoningEffort(),
+                      row.branch(),
+                      row.priority(),
+                      row.createdBy(),
+                      row.createdAt(),
+                      row.updatedAt(),
+                      row.updatedBy(),
+                      row.dependsOn(),
+                      row.repos(),
+                      row.roomId()));
+        });
+    var ops = ops(happyPath(), YAML, db);
+
+    var thrown = assertThrows(ApiException.class, () -> resume(ops));
+
+    assertEquals(ErrorCode.CONFLICT, thrown.failure().errorCode());
+    assertEquals("Spec 'auth' is assigned to bo, not me.", thrown.getMessage());
+  }
+
+  private static Sqlite onBranch(Sqlite db) {
+    Acting.system(
+        () ->
+            new SpecStore(db)
+                .updateReposAndStatus("auth", List.of("app"), SpecStatus.IN_PROGRESS, "sail/auth"));
+    return db;
+  }
+
+  private static Sqlite inProgress(Sqlite db) {
+    Acting.system(() -> new SpecStore(db).updateStatus("auth", SpecStatus.IN_PROGRESS));
+    return db;
+  }
+
+  private static ReviewLanes.Launch resume(DispatchOperations ops) {
+    return Actor.call(Actor.system(), () -> ops.reviewLanes().resumeBuild("acme", "auth", HANDLE));
+  }
+
   private Sqlite seedDb() {
     return seedDb(null);
   }
@@ -432,6 +630,23 @@ class BuildDispatchCoverageTest {
 
   private DispatchOperations ops(
       RecordingShell shell, String yamlBody, Sqlite db, RunStore runStore) throws IOException {
+    return ops(shell, yamlBody, db, runStore, new CopyOnWriteArrayList<>());
+  }
+
+  private DispatchOperations ops(
+      RecordingShell shell, String yamlBody, Sqlite db, RunStore runStore, List<Event> events)
+      throws IOException {
+    return ops(shell, yamlBody, db, runStore, events, command -> 0);
+  }
+
+  private DispatchOperations ops(
+      RecordingShell shell,
+      String yamlBody,
+      Sqlite db,
+      RunStore runStore,
+      List<Event> events,
+      DispatchOperations.AgentLauncher launcher)
+      throws IOException {
     var yaml = tempDir.resolve("sail.yaml");
     Files.writeString(yaml, yamlBody);
     return new DispatchOperations(
@@ -441,10 +656,10 @@ class BuildDispatchCoverageTest {
         new ReviewStore(db),
         runStore,
         new FdeStore(db),
-        new CopyOnWriteArrayList<Event>()::add,
+        events::add,
         new WatcherSpawner(happyPath(), (command, logPath) -> 4242L),
         (project, config) -> "",
-        command -> 0,
+        launcher,
         DispatchOperations.Listener.NONE,
         SessionYield.NONE);
   }

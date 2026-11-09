@@ -153,16 +153,7 @@ public final class BuildDispatch {
     var taskSpec = DispatchRepos.withTargetRepos(nextSpec, targetRepos);
     var branch = BranchPolicy.branchName(loaded.config(), nextSpec);
     var specBody = specStore.getContent(nextSpec.id()).map(SpecStore.SpecContent::body).orElse("");
-    var messages = messageStore.get();
-    var room =
-        messages == null
-            ? List.<MessageStore.MessageRow>of()
-            : messages.steering(
-                specStore
-                    .findById(nextSpec.id())
-                    .map(SpecStore.SpecRow::roomIdOrIdentity)
-                    .orElse(nextSpec.id()),
-                20);
+    var room = room(nextSpec.id());
     var agentType = taskSpec.agent() != null ? taskSpec.agent() : loaded.config().agent().type();
     if (Strings.isBlank(agentType)) {
       throw new ApiException(
@@ -264,6 +255,97 @@ public final class BuildDispatch {
       runReservation.releaseIfAbsent(runId, project, unit);
       throw e;
     }
+  }
+
+  /**
+   * Launches {@code specId}'s build again for the FDE whose handle is {@code localHandle}, where
+   * its last build ended on a question someone has answered since: on its branch, checked out over
+   * the tree that build left without discarding it, with nothing claimed, snapshotted or
+   * superseded, and no restart recorded. Only the box of the spec's assignee, trusted by the
+   * roster, resumes it. Its prompt is a dispatch's, so the room's question and its answer are in
+   * it. A claim another run holds is {@link ReviewLanes.Launch.Deferred}, and nothing was written
+   * for it.
+   */
+  ReviewLanes.Launch resume(String project, String specId, String localHandle) {
+    var loaded = projects.loadRunning(project);
+    var row =
+        specStore
+            .findById(specId)
+            .filter(spec -> spec.status() == SpecStatus.IN_PROGRESS)
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.SPEC_NOT_READY,
+                        "Spec '" + specId + "' is not in progress, so it has no build to resume."));
+    if (loaded.config().agent() == null) {
+      throw new ApiException(
+          ErrorCode.AGENT_NOT_CONFIGURED, "The project's definition sets no agent.");
+    }
+    admission.requireTrustedRoster(localHandle);
+    if (!localHandle.equals(row.assignee())) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Spec '" + specId + "' is assigned to " + row.assignee() + ", not " + localHandle + ".");
+    }
+    var spec = row.toSpec();
+    var targetRepos = DispatchRepos.resolve(loaded.config(), spec, List.of());
+    var agentType = spec.agent() != null ? spec.agent() : loaded.config().agent().type();
+    LaunchAdmission.resolveAgent(agentType);
+    var body = specStore.getContent(specId).map(SpecStore.SpecContent::body).orElse("");
+    var built =
+        WorkPrompt.build(spec, body.isBlank() ? spec.title() : body, room(specId), List.of());
+    var runId = DateTimeUtils.newId().toString();
+    var unit = AgentUnit.forRun(runId);
+    var claim =
+        runReservation.reserveBuild(
+            runId,
+            project,
+            specId,
+            localHandle,
+            spec.repos(),
+            agentType,
+            row.branch(),
+            built.prompt(),
+            unit,
+            loaded.config());
+    if (claim instanceof RunReservation.Claim.Held held) {
+      return new ReviewLanes.Launch.Deferred(held.conflict().run());
+    }
+    var credential = ((RunReservation.Claim.Claimed) claim).credential();
+    try {
+      seedRoomDelivery(runId, built.renderedMessages());
+      workBranch.resume(project, targetRepos, row.branch());
+      var launch =
+          runLauncher.launchAgent(
+              project,
+              loaded.config(),
+              targetRepos,
+              built.prompt(),
+              row.branch(),
+              true,
+              spec,
+              agentType,
+              runId,
+              credential);
+      runLauncher.finishLaunch(
+          new RunLauncher.RunContext(
+              project, unit, runId, specId, agentType, Lane.BUILD.wire(), true),
+          launch);
+      return new ReviewLanes.Launch.Started();
+    } catch (RuntimeException e) {
+      runReservation.releaseIfAbsent(runId, project, unit);
+      throw e;
+    }
+  }
+
+  /** The newest messages of {@code specId}'s room that steer its agent: what its prompt shows. */
+  private List<MessageStore.MessageRow> room(String specId) {
+    var messages = messageStore.get();
+    if (messages == null) {
+      return List.of();
+    }
+    var room = specStore.findById(specId).map(SpecStore.SpecRow::roomIdOrIdentity).orElse(specId);
+    return messages.steering(room, 20);
   }
 
   /**

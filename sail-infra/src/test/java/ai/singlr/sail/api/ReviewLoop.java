@@ -314,6 +314,32 @@ final class ReviewLoop implements AutoCloseable {
                     repos)));
   }
 
+  /** Spec {@code id} is held by {@code handle} from now on. */
+  void assign(String id, String handle) {
+    var row = specs.findById(id).orElseThrow();
+    Acting.system(
+        () ->
+            specs.update(
+                new SpecStore.SpecRow(
+                    row.id(),
+                    row.project(),
+                    row.title(),
+                    row.status(),
+                    handle,
+                    row.agent(),
+                    row.model(),
+                    row.reasoningEffort(),
+                    row.branch(),
+                    row.priority(),
+                    row.createdBy(),
+                    row.createdAt(),
+                    row.updatedAt(),
+                    row.updatedBy(),
+                    row.dependsOn(),
+                    row.repos(),
+                    row.roomId())));
+  }
+
   /** Spec {@code id}, in progress under {@code claude-code}, working {@code repo}. */
   void spec(String id, String repo) {
     spec(id, SpecStatus.IN_PROGRESS, "claude-code", null, null, List.of(repo));

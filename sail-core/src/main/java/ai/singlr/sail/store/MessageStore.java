@@ -250,6 +250,77 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   }
 
   /**
+   * The newest question a run asked in a room, and what has come of it since.
+   *
+   * @param id the question's message id
+   * @param body what it asked
+   * @param answer the newest reply since from someone who steers the room's agents ({@link
+   *     RoomStore#steering}), or null while none has answered, as {@link #openQuestions} reads it
+   * @param heard whether it was answered and every such reply is on the run's delivery ledger: the
+   *     run was told all of them
+   */
+  public record Asked(String id, String body, String answer, boolean heard) {
+
+    /** Whether someone the run hears has answered it. */
+    public boolean answered() {
+      return answer != null;
+    }
+  }
+
+  /**
+   * The newest question {@code principals}, the identities of run {@code runId}, asked in {@code
+   * roomId}, whatever the run said after it: a summary posted after a question answers nothing, so
+   * the run waits on it exactly while the board says it needs a reply. Empty when it asked none.
+   */
+  public Optional<Asked> lastQuestion(String roomId, String runId, List<String> principals) {
+    if (principals.isEmpty()) {
+      return Optional.empty();
+    }
+    var authors = String.join(", ", Collections.nCopies(principals.size(), "?"));
+    var arguments = new ArrayList<Object>();
+    arguments.add(roomId);
+    arguments.add(reader());
+    arguments.addAll(principals);
+    return db.queryOne(
+            "SELECT "
+                + COLUMNS
+                + " FROM room_messages WHERE room_id = ?1 AND question != 0 AND "
+                + readable("room_messages.id", 2)
+                + " AND author IN ("
+                + authors
+                + ") ORDER BY id DESC LIMIT 1",
+            MessageStore::map,
+            arguments.toArray())
+        .map(
+            question -> {
+              var answer = replies(question, null).stream().findFirst().orElse(null);
+              var heard = answer != null && replies(question, runId).isEmpty();
+              return new Asked(question.id(), question.body(), answer, heard);
+            });
+  }
+
+  /**
+   * The newest reply to {@code question} that reaches its run's lane; with {@code runId}, the
+   * newest of those missing from that run's delivery ledger: one it was never told.
+   */
+  private List<String> replies(MessageRow question, String runId) {
+    return db.query(
+        "SELECT h.id FROM room_messages h WHERE h.room_id = ?1 AND h.id > ?2"
+            + " AND h.author NOT LIKE '%/%' AND h.author != 'sail' AND "
+            + RoomStore.steering("h.author", "h.room_id", "NULL")
+            + " AND "
+            + readable("h.id", 3)
+            + " AND (?4 IS NULL OR h.id NOT IN"
+            + " (SELECT message_id FROM run_delivered_messages WHERE run_id = ?4))"
+            + " ORDER BY h.id DESC LIMIT 1",
+        row -> row.text(0),
+        question.roomId(),
+        question.id(),
+        reader(),
+        runId);
+  }
+
+  /**
    * Messages of {@code roomId} its reader may see whose authors steer its agents ({@link
    * RoomStore#steering}), the run's own FDE among them, absent from {@code runId}'s delivery ledger
    * and not authored by {@code excludeAuthor} (a run is never told its own story), oldest first,
