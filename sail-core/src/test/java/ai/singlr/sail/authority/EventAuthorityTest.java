@@ -307,12 +307,12 @@ class EventAuthorityTest {
             null,
             null),
         retold(
-            "a member with no voice in a spec's room cannot announce a message in it",
+            "a member retells a message in a spec's room it does not own",
             OWNER_API,
             POSTED,
             "billing",
             null,
-            Kind.NOT_OWNER),
+            null),
         retold(
             "an announcement in no conversation is no member's",
             OWNER_API,
@@ -328,12 +328,7 @@ class EventAuthorityTest {
             null,
             Kind.NOT_OWNER),
         retold(
-            "a member with no voice there cannot announce it",
-            OWNER_API,
-            POSTED,
-            "den",
-            null,
-            Kind.NOT_OWNER),
+            "a member retells a message in another's room", OWNER_API, POSTED, "den", null, null),
         retold(
             "a principal cannot announce a message",
             AGENT,
@@ -510,13 +505,13 @@ class EventAuthorityTest {
     boxFde = OWNER;
 
     assertEquals(
-        new Subject("acme", "auth", RUN, List.of(CAROL), List.of(CAROL), true),
+        new Subject("acme", "auth", RUN, List.of(CAROL), true),
         rule.subject("elsewhere", "billing", RUN));
     assertEquals(
-        new Subject("acme", "auth", OTHER_RUN, List.of(CAROL), List.of(CAROL), false),
+        new Subject("acme", "auth", OTHER_RUN, List.of(CAROL), false),
         rule.subject("elsewhere", "billing", OTHER_RUN));
     assertEquals(
-        new Subject("acme", null, ADHOC, List.of(OTHER), List.of(), false),
+        new Subject("acme", null, ADHOC, List.of(OTHER), false),
         rule.subject("elsewhere", "billing", ADHOC));
   }
 
@@ -537,27 +532,27 @@ class EventAuthorityTest {
     board.db.execute("DELETE FROM specs WHERE id = 'auth'");
 
     assertEquals(
-        new Subject("acme", "auth", OTHER_RUN, List.of(), List.of(), false),
+        new Subject("acme", "auth", OTHER_RUN, List.of(), false),
         rule.subject("elsewhere", null, OTHER_RUN));
   }
 
   @Test
   void aSpecOrRoomDecidesItsProjectItsOwnersAndWhoHasAVoiceInIt() {
     assertEquals(
-        new Subject("acme", "billing", null, List.of(OTHER), List.of(OTHER, CAROL), false),
+        new Subject("acme", "billing", null, List.of(OTHER), false),
         rule.subject("elsewhere", "billing", null));
     assertEquals(
-        new Subject("acme", "den", null, List.of(CAROL, OTHER), List.of(CAROL, OTHER), false),
+        new Subject("acme", "den", null, List.of(CAROL, OTHER), false),
         rule.subject("elsewhere", "den", "no-such-run"));
   }
 
   @Test
   void workThisBoxDoesNotHoldIsAsItsSenderNamedItAndNoOnes() {
     assertEquals(
-        new Subject("elsewhere", "gone", null, List.of(), List.of(), false),
+        new Subject("elsewhere", "gone", null, List.of(), false),
         rule.subject("elsewhere", "gone", null));
     assertEquals(
-        new Subject("elsewhere", null, null, List.of(), List.of(), false),
+        new Subject("elsewhere", null, null, List.of(), false),
         rule.subject("elsewhere", " ", " "));
   }
 
@@ -568,7 +563,7 @@ class EventAuthorityTest {
     var none = rule.decide(OWNER_API, STOP, rule.subject("acme", null, null), true);
     var observed = rule.decide(OTHER_API, STOP, rule.subject("acme", "billing", null), false);
     var box = rule.decide(OWNER_API, BOARD, rule.subject("acme", null, null), false);
-    var posted = rule.decide(OWNER_API, POSTED, rule.subject("acme", "billing", null), true);
+    var posted = rule.decide(OWNER_API, POSTED, rule.subject("acme", null, null), true);
     var agent = rule.decide(AGENT, TOOL, rule.subject("acme", "auth", OTHER_RUN), false);
 
     assertEquals(
@@ -589,8 +584,8 @@ class EventAuthorityTest {
             + " 'bob'), which you may not drive: only this box's FDE or an admin reports that.",
         observed.orElseThrow().message());
     assertEquals(
-        "Event type 'spec_message_posted' makes this box act on 'billing' (owned by 'bob' and"
-            + " 'carol'), which you may not drive.",
+        "Event type 'spec_message_posted' makes this box act on work it does not name, which you"
+            + " may not drive.",
         posted.orElseThrow().message());
     assertTrue(
         box.orElseThrow().message().startsWith("Event type 'board_updated' speaks for this"));

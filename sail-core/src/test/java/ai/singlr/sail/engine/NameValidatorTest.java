@@ -257,6 +257,15 @@ class NameValidatorTest {
   }
 
   @Test
+  void sailsOwnNameIsNoFdesHandle() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class, () -> NameValidator.requireValidFdeHandle("sail"));
+    assertTrue(refused.getMessage().contains("sail's own name"));
+    assertDoesNotThrow(() -> NameValidator.requireValidFdeHandle("sailor"));
+  }
+
+  @Test
   void nullFdeHandleIsInvalid() {
     assertThrows(IllegalArgumentException.class, () -> NameValidator.requireValidFdeHandle(null));
   }

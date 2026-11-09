@@ -164,7 +164,8 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   /**
    * The newest {@code limit} messages of {@code roomId} its reader may see, older than {@code
-   * before} when one is named, oldest first.
+   * before} when one is named, oldest first. An agent reads only the messages that steer it ({@link
+   * RoomStore#steering}), its own FDE's among them.
    */
   public List<MessageRow> list(String roomId, String before, int limit) {
     if (before != null) {
@@ -184,7 +185,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
    * or null for all), oldest first, capped at {@code limit}. Ids are UUIDv7 strings, so {@code id >
    * ?} is mint-time order — a forward paging cursor for room reads. Not a delivery primitive: mint
    * order is not arrival order across synced boxes, so delivery goes through {@link
-   * #listUndelivered}.
+   * #listUndelivered}. An agent reads only the messages that steer it, as {@link #list}.
    */
   public List<MessageRow> listAfter(String roomId, String after, int limit) {
     if (after != null) {
@@ -202,25 +203,58 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
    */
   private List<MessageRow> page(
       String roomId, String side, String cursor, String order, int limit) {
+    var agent = Actor.reader().agentLane();
     var sql =
         "SELECT "
             + COLUMNS
             + " FROM room_messages WHERE room_id = ?1 AND "
             + readable("room_messages.id", 2)
             + (cursor == null ? "" : " AND id " + side + " ?4")
+            + (agent ? " AND " + RoomStore.steering("room_messages.author", "?1", "?5") : "")
             + " ORDER BY id "
             + order
             + " LIMIT ?3";
+    if (agent) {
+      return db.query(
+          sql, MessageStore::map, roomId, reader(), limit, cursor, Actor.reader().actingFde());
+    }
     return cursor == null
         ? db.query(sql, MessageStore::map, roomId, reader(), limit)
         : db.query(sql, MessageStore::map, roomId, reader(), limit, cursor);
   }
 
   /**
-   * Messages of {@code roomId} its reader may see, absent from {@code runId}'s delivery ledger and
-   * not authored by {@code excludeAuthor} (a run is never told its own story), oldest first, capped
-   * at {@code limit}. Delivery is by exact identity, so a message that synchronized in with an
-   * older id after newer messages were already delivered still appears here.
+   * The newest {@code limit} messages of {@code roomId} its reader may see whose authors steer its
+   * agents ({@link RoomStore#steering}), oldest first: what an agent is shown of the room.
+   */
+  public List<MessageRow> steering(String roomId, int limit) {
+    if (limit <= 0) {
+      throw new IllegalArgumentException("limit must be positive");
+    }
+    var newest =
+        new ArrayList<>(
+            db.query(
+                "SELECT "
+                    + COLUMNS
+                    + " FROM room_messages WHERE room_id = ?1 AND "
+                    + readable("room_messages.id", 2)
+                    + " AND "
+                    + RoomStore.steering("room_messages.author", "?1", "NULL")
+                    + " ORDER BY id DESC LIMIT ?3",
+                MessageStore::map,
+                roomId,
+                reader(),
+                limit));
+    Collections.reverse(newest);
+    return List.copyOf(newest);
+  }
+
+  /**
+   * Messages of {@code roomId} its reader may see whose authors steer its agents ({@link
+   * RoomStore#steering}), the run's own FDE among them, absent from {@code runId}'s delivery ledger
+   * and not authored by {@code excludeAuthor} (a run is never told its own story), oldest first,
+   * capped at {@code limit}. Delivery is by exact identity, so a message that synchronized in with
+   * an older id after newer messages were already delivered still appears here.
    */
   public List<MessageRow> listUndelivered(
       String roomId, String runId, String excludeAuthor, int limit) {
@@ -234,6 +268,9 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
             + " AND NOT EXISTS (SELECT 1 FROM run_delivered_messages"
             + " WHERE run_id = ?3 AND message_id = room_messages.id) AND "
             + readable("room_messages.id", 4)
+            + " AND "
+            + RoomStore.steering(
+                "room_messages.author", "?1", "(SELECT owner FROM runs WHERE id = ?3)")
             + " ORDER BY id ASC LIMIT ?5",
         MessageStore::map,
         roomId,
@@ -254,15 +291,16 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   /**
    * Each room whose latest agent-authored question is still unanswered, mapped to that question's
    * message id — one aggregate query, over the messages its reader may see ({@link #readable}). A
-   * question is answered by any later human message in the room; the author classes are structural,
-   * mirroring {@code RoomWakePolicy.humanAuthor}: an agent principal always carries a {@code /},
-   * the orchestrator posts as the literal {@code sail}, and FDE handles contain neither.
+   * question is answered by a later human message in the room from someone who steers its agents
+   * ({@link RoomStore#steering}), since only such a reply reaches the agent; the author classes are
+   * structural, mirroring {@code RoomWakePolicy.humanAuthor}: an agent principal always carries a
+   * {@code /}, the orchestrator posts as the literal {@code sail}, and FDE handles contain neither.
    *
    * <p>"Later" is message-id order, which is origin-mint order, so this is content-deterministic
    * and consistent across boxes at sync-freshness. Known edge: a human message posted in the room
    * during the sync lag <em>before</em> a question arrives has a higher id and reads as answering
    * it, so the chip and notification will not fire for that question. This never breaks the loop —
-   * {@code RoomWakeReactor} resumes the agent on any human reply regardless of this flag, and the
+   * {@code RoomWakeReactor} resumes the agent on any such reply regardless of this flag, and the
    * question stays visible in the room. A robust fix needs per-box arrival order (which breaks
    * cross-box determinism) or delivery receipts (a deliberate non-goal), so it stays a documented
    * edge.
@@ -282,6 +320,8 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
                 + " AND NOT EXISTS (SELECT 1 FROM room_messages h"
                 + " WHERE h.room_id = q.room_id AND h.id > q.id"
                 + " AND h.author NOT LIKE '%/%' AND h.author != 'sail' AND "
+                + RoomStore.steering("h.author", "h.room_id", "NULL")
+                + " AND "
                 + readable("h.id", 1)
                 + ") GROUP BY q.room_id",
             row -> Map.entry(row.text(0), row.text(1)),

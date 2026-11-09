@@ -184,18 +184,21 @@ class CreatorSyncTest {
   }
 
   @Test
-  void theCreatorOfAnUnassignedNodeBornSpecPostsInItsRoomAndMainAcceptsIt() throws IOException {
+  void everyMemberPostsInAnUnassignedNodeBornSpecsRoomAndMainAcceptsEach() throws IOException {
     Acting.as("alice", () -> alice.specs.create(unassigned("draft")));
     Acting.as("alice", () -> new MessageStore(alice.db).append("draft", "alice", "mine", null));
-    Acting.as("bob", () -> new MessageStore(bob.db).append("draft", "bob", "not bob's", null));
-
     round(alice);
+    round(bob);
+    Acting.as("bob", () -> new MessageStore(bob.db).append("draft", "bob", "bob's too", null));
+
     round(alice, "message");
     round(bob, "message");
 
     var posted = new MessageStore(main.db).list("draft", null, 10);
-    assertEquals(1, posted.size(), "only the creator's post stands");
-    assertEquals("alice", posted.getFirst().author());
+    assertEquals(
+        List.of("alice", "bob"),
+        posted.stream().map(m -> m.author()).sorted().toList(),
+        "the creator and another member of the project both speak");
 
     assertConverged();
   }

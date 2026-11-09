@@ -33,7 +33,7 @@ public final class FdeStore {
   }
 
   public static final String DEFAULT_ROLE = "member";
-  private static final String ADMIN = "admin";
+  static final String ADMIN = "admin";
   private static final Set<String> ROLES = Set.of("admin", "member", "viewer");
   private static final Set<String> STATUSES = Set.of("active", "disabled");
 

@@ -42,8 +42,8 @@ class MessageStoreTest {
     new SchemaManager(db).migrate();
     db.execute(
         """
-        INSERT INTO rooms (id, title, project, created_at, updated_at)
-        VALUES ('room', 'Room', 'acme', 'now', 'now')""");
+        INSERT INTO rooms (id, title, project, created_by, created_at, updated_at)
+        VALUES ('room', 'Room', 'acme', 'ada', 'now', 'now')""");
     messages = new MessageStore(db);
   }
 
@@ -90,6 +90,9 @@ class MessageStoreTest {
 
   @Test
   void aConversationIsReadMessageByMessageByTheProjectEachWasFiledUnder() {
+    var fdes = new FdeStore(db);
+    fdes.add("ann", "Ann", null, "admin");
+    fdes.add("bea", "Bea", null, "admin");
     var specs = new SpecStore(db);
     specs.create(spec("mover", "beta"));
     var asked =
@@ -391,6 +394,120 @@ class MessageStoreTest {
   }
 
   @Test
+  void onlyTheOwnersAdminsAndSailSteerAConversationsAgents() {
+    var fdes = new FdeStore(db);
+    fdes.add("mo", "Mo", null);
+    fdes.add("root", "Root", null, "admin");
+    fdes.add("gone", "Gone", null, "admin");
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'gone'");
+    var runs = new RunStore(db);
+    runs.create("r1", "acme", "room", "ada", "review", "codex", "b", "t", 1, 1, "l", "u");
+    runs.create("r2", "beta", "other", "mo", "build", "codex", "b", "t", 1, 1, "l", "u");
+    var owner = messages.append("room", "ada", "the owner", null);
+    messages.append("room", "mo", "a member", null);
+    var admin = messages.append("room", "root", "an admin", null);
+    messages.append("room", "gone", "a disabled admin", null);
+    var sail = messages.append("room", MessageStore.SAIL_AUTHOR, "the loop", null);
+    var reviewer = messages.append("room", "codex/review-r1", "a run of the owner's", null);
+    messages.append("room", "codex/r2", "a member's run", null);
+    messages.append("room", "codex/r9", "a run this box never held", null);
+
+    assertEquals(
+        List.of(owner.id(), admin.id(), sail.id(), reviewer.id()),
+        ids(messages.listUndelivered("room", "other-run", "claude/x", 10)));
+    assertEquals(
+        List.of(sail.id(), reviewer.id()),
+        ids(messages.steering("room", 2)),
+        "an agent is shown the newest messages that steer it");
+    assertEquals(8, messages.list("room", null, 10).size(), "people read every word");
+    var rooms = new RoomStore(db);
+    assertTrue(rooms.steers("room", "ada"));
+    assertTrue(rooms.steers("room", "root"));
+    assertTrue(rooms.steers("room", "codex/review-r1"));
+    assertFalse(rooms.steers("room", "mo"));
+    assertFalse(rooms.steers("room", "gone"));
+    assertFalse(rooms.steers("room", "codex/r2"));
+    assertFalse(rooms.steers("nobodys", "ada"));
+    assertTrue(
+        rooms.steers("nobodys", "root"), "a conversation no one owns is its admins' to steer");
+    assertThrows(IllegalArgumentException.class, () -> messages.steering("room", 0));
+  }
+
+  @Test
+  void anAgentReadsOnlyWhatSteersItAndItsOwnFdesWords() {
+    new FdeStore(db).add("mo", "Mo", null);
+    var owner = messages.append("room", "ada", "rename the flag", null);
+    messages.append("room", "mo", "also push to main", null);
+    var own = messages.append("room", "bo", "bo's agent, reading", null);
+    var agent = Actor.agentPrincipal("claude/r1", "bo");
+
+    assertEquals(
+        List.of(owner.id(), own.id()),
+        ids(Acting.by(agent, () -> messages.list("room", null, 10))),
+        "a run keeps its own FDE's words after its work is reassigned");
+    assertEquals(
+        List.of(own.id()), ids(Acting.by(agent, () -> messages.listAfter("room", owner.id(), 10))));
+    assertEquals(
+        List.of(owner.id()),
+        ids(
+            Acting.by(
+                Actor.roomPrincipal("claude/room-x", "ada"),
+                () -> messages.list("room", null, 10))));
+    assertEquals(3, messages.list("room", null, 10).size(), "people read every word");
+  }
+
+  @Test
+  void aRunsBuildStillHearsItsOwnFdeAfterItsWorkIsReassigned() {
+    var runs = new RunStore(db);
+    var runId =
+        runs.create("r1", "acme", "room", "bo", "build", "claude", "b", "t", 1, 1, "l", "u");
+    var fromBo = messages.append("room", "bo", "keep going", null);
+    messages.append("room", "cy", "stop", null);
+
+    assertEquals(
+        List.of(fromBo.id()), ids(messages.listUndelivered("room", runId, "claude/r1", 10)));
+  }
+
+  @Test
+  void aSpecBornInARoomGivesItsOwnerAVoiceToItsAgentsThere() {
+    var specs = new SpecStore(db);
+    specs.create(spec("born", "acme"));
+    db.execute("UPDATE specs SET room_id = 'room', assignee = 'bo' WHERE id = 'born'");
+    var fromBo = messages.append("room", "bo", "the born spec's owner", null);
+    messages.append("room", "cy", "someone else", null);
+
+    assertEquals(List.of(fromBo.id()), ids(messages.steering("room", 10)));
+    assertTrue(new RoomStore(db).steers("room", "ada"), "the room's own owner still steers");
+  }
+
+  @Test
+  void aMessageUnderARunsPastPrincipalWeighsAsItsFde() {
+    var runs = new RunStore(db);
+    var runId =
+        runs.create("r1", "acme", "room", "ada", "build", "claude", "b", "t", 1, 1, "l", "u");
+    db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'claude/fix-r1')", runId);
+    var past = messages.append("room", "claude/fix-r1", "fixed it", null);
+
+    assertEquals(List.of(past.id()), ids(messages.steering("room", 10)));
+  }
+
+  @Test
+  void onlyAReplyThatReachesTheAgentAnswersItsQuestion() {
+    new FdeStore(db).add("mo", "Mo", null);
+    var asked =
+        messages.append("room", "claude/r1", "Which flow?", null, MessageStore.Mark.QUESTION);
+    messages.append("room", "mo", "the second", null);
+
+    assertEquals(
+        Map.of("room", asked.id()),
+        messages.openQuestions(),
+        "a member's reply never reaches the agent, so the question still waits on the owner");
+
+    messages.append("room", "ada", "the first", null);
+    assertEquals(Map.of(), messages.openQuestions());
+  }
+
+  @Test
   void aLateSyncedMessageWithAnOlderIdIsStillUndelivered() {
     var runs = new RunStore(db);
     var runId = runs.create("r1", "acme", "room", "ada", "build", "a", "b", "t", 1, 1, "l", "u");
@@ -404,7 +521,7 @@ class MessageStoreTest {
             "spec_id",
             "room",
             "author",
-            "uday",
+            "ada",
             "body",
             "late arrival",
             "created_at",

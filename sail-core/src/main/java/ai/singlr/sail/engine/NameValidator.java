@@ -14,6 +14,7 @@ import java.util.regex.Pattern;
 public final class NameValidator {
 
   private static final int MAX_LENGTH = 63;
+  private static final String RESERVED_HANDLE = "sail";
   public static final int MAX_SPEC_ID_LENGTH = 80;
   public static final int MAX_SESSION_NAME_LENGTH = 80;
   private static final Pattern SESSION_NAME = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]*$");
@@ -114,6 +115,10 @@ public final class NameValidator {
               + "'. Must match [A-Za-z0-9][A-Za-z0-9._-]*, max "
               + MAX_LENGTH
               + " characters.");
+    }
+    if (RESERVED_HANDLE.equals(handle)) {
+      throw new IllegalArgumentException(
+          "Invalid FDE handle: '" + handle + "' is sail's own name. Choose another handle.");
     }
   }
 

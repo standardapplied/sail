@@ -104,12 +104,7 @@ final class EventDoor {
   /** The subject of an event about work this box does not hold, as its sender addressed it. */
   private static EventAuthority.Subject unheld(String project, String conversation) {
     return new EventAuthority.Subject(
-        project,
-        Strings.isBlank(conversation) ? null : conversation,
-        null,
-        List.of(),
-        List.of(),
-        false);
+        project, Strings.isBlank(conversation) ? null : conversation, null, List.of(), false);
   }
 
   private Event.Publisher publisher(Event offered, EventAuthority.Subject subject) {

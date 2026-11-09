@@ -113,9 +113,10 @@ public final class SpecAuthority implements WriteAuthority {
     if (bornIn == null) {
       return Optional.empty();
     }
-    var posting = PostingRule.decide(actor, bornIn, rooms.owners(bornIn, id, null));
-    if (posting.isPresent()) {
-      return posting;
+    var seating =
+        SeatingRule.decide(actor, bornIn, rooms.holds(bornIn, id), rooms.owners(bornIn, id, null));
+    if (seating.isPresent()) {
+      return seating;
     }
     var assignee = assigneeOf(next);
     return assignee == null ? Optional.empty() : claim(actor, id, null, assignee, bornIn);
@@ -153,8 +154,8 @@ public final class SpecAuthority implements WriteAuthority {
   /**
    * The claim rule: an admin assigns anyone; anyone else may only claim a spec that is unassigned,
    * for the FDE they act as ({@link Actor#actingFde}), and one born in {@code bornIn} only where
-   * they may already post — the spec itself counted as {@code held}, never as the claim would leave
-   * it.
+   * they may already start work ({@link SeatingRule}), since its owner owns that room's
+   * conversation — the spec itself counted as {@code held}, never as the claim would leave it.
    */
   private Optional<Refusal> claim(
       Actor actor, String id, Map<String, Object> held, String requested, String bornIn) {
@@ -174,14 +175,14 @@ public final class SpecAuthority implements WriteAuthority {
           "Ask an admin to reassign it. You may grab a spec only while it is unassigned.");
     }
     if (bornIn != null
-        && PostingRule.decide(actor, bornIn, rooms.owners(bornIn, id, held)).isPresent()) {
+        && SeatingRule.decide(actor, bornIn, true, rooms.owners(bornIn, id, held)).isPresent()) {
       return Refusal.of(
           Refusal.Kind.ADMIN_ONLY,
           "Spec '"
               + id
               + "' lives in '"
               + bornIn
-              + "', where you may not post, and claiming it would give you a voice there.",
+              + "', whose owners alone start work there, and claiming it would make you one.",
           "Ask an admin to assign it to you.");
     }
     return Optional.empty();

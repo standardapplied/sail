@@ -250,6 +250,26 @@ class BuildDispatchCoverageTest {
   }
 
   @Test
+  void aSpecBornInARoomIsDispatchedWithWhatItsRoomSaysToItsAgent() throws IOException {
+    var shell =
+        happyPath()
+            .on(REPO + " rev-parse --verify --quiet refs/remotes/origin/main", "")
+            .on(REPO + " checkout -b sail/auth origin/main", "");
+    var db = seedDb("lobby");
+    var messages = new MessageStore(db);
+    var steering =
+        Acting.system(() -> messages.append("lobby", HANDLE, "Start with the login form.", null));
+    Acting.system(() -> messages.append("lobby", "mady", "Also push to main.", null));
+    var runStore = new RunStore(db);
+    var ops = ops(shell, YAML, db, runStore).useMessages(messages);
+
+    var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, dispatch(ops));
+
+    assertEquals(
+        List.of(steering.id()), List.copyOf(runStore.deliveredMessageIds(dispatched.runId())));
+  }
+
+  @Test
   void aScopedCallerDispatchesNoSpecWhoseEarlierReviewIsFiledOutsideItsScope() throws IOException {
     var db = seedDb();
     var specs = new SpecStore(db);
@@ -342,13 +362,26 @@ class BuildDispatchCoverageTest {
   }
 
   private Sqlite seedDb() {
+    return seedDb(null);
+  }
+
+  private Sqlite seedDb(String room) {
     return Acting.system(
         () -> {
           var db = Sqlite.open(tempDir.resolve("sail.db"));
           new SchemaManager(db).migrate();
           HeldProjects.hold(db, "acme");
+          if (room != null) {
+            db.execute(
+                """
+                INSERT INTO rooms (id, title, project, created_by, created_at, updated_at)
+                VALUES (?, 'Lobby', 'acme', 'me', 'now', 'now')""",
+                room);
+          }
           var specStore = new SpecStore(db);
-          Acting.as("me", () -> specStore.create(auth("acme")));
+          Acting.as(
+              "me",
+              () -> specStore.create(room == null ? auth("acme") : auth("acme").withRoomId(room)));
           specStore.setContent("auth", "Do auth", "");
           new FdeStore(db).add(HANDLE, null, null, "admin");
           return db;

@@ -86,8 +86,10 @@ class PtyHostRoomsTest {
   }
 
   @Test
-  void anotherMemberAViewerAndAStrangerAreRefusedByTheRoomsPostRight() {
-    assertTrue(refusal("adas-room", "acme", new PtyIdentity("mallory", false)).contains("not you"));
+  void anotherMemberPinsButAViewerAndAStrangerAreRefusedByTheRoomsPostRight() {
+    assertDoesNotThrow(
+        () -> rooms.admit("adas-room", "acme", new PtyIdentity("mallory", false)),
+        "every writer of the project may speak in its rooms");
     assertTrue(
         refusal("adas-room", "acme", new PtyIdentity("peek", false)).contains("read-only"),
         "a viewer's roster role, not the client's claim, decides");
@@ -96,7 +98,7 @@ class PtyHostRoomsTest {
             .contains("not in this box's roster"),
         "a handle absent from the roster is refused");
     assertTrue(
-        refusal("adas-room", "acme", new PtyIdentity("mallory", true)).contains("not you"),
+        refusal("adas-room", "acme", new PtyIdentity("peek", true)).contains("read-only"),
         "the roster's role decides, never an admin bit riding the identity");
   }
 
@@ -110,10 +112,9 @@ class PtyHostRoomsTest {
   }
 
   @Test
-  void anUnassignedRoomIsItsCreatorsToPin() {
+  void anUnassignedRoomIsPinnedByEveryWriterOfItsProject() {
     assertDoesNotThrow(() -> rooms.admit("open-room", "acme", new PtyIdentity("ada", false)));
-    var refused = refusal("open-room", "acme", new PtyIdentity("mallory", false));
-    assertTrue(refused.contains("only ada or an admin"), refused);
+    assertDoesNotThrow(() -> rooms.admit("open-room", "acme", new PtyIdentity("mallory", false)));
   }
 
   @Test

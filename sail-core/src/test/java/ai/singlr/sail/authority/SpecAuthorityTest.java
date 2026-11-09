@@ -118,6 +118,12 @@ class SpecAuthorityTest {
         refuses("another FDE's agent is not born in", OTHERS_AGENT, null, inLobby, Kind.NOT_OWNER),
         refuses("a machine credential is not born in", MACHINE, null, inLobby, Kind.NOT_OWNER),
         refuses("another member's push is not born in", OTHER_SYNC, null, inLobby, Kind.NOT_OWNER),
+        refuses(
+            "a member is not born in a room this box does not hold",
+            OTHER_API,
+            null,
+            with(inLobby, "room_id", "nowhere"),
+            Kind.NO_CONVERSATION),
         allows("a birth claims for oneself", OWNER_API, null, with(inLobby, "assignee", OWNER)),
         refuses(
             "a birth naming another is admin-only",
@@ -438,8 +444,8 @@ class SpecAuthorityTest {
     assertEquals(
         new Refusal(
             Kind.ADMIN_ONLY,
-            "Spec 'auth' lives in 'lobby', where you may not post, and claiming it would give you"
-                + " a voice there.",
+            "Spec 'auth' lives in 'lobby', whose owners alone start work there, and claiming it"
+                + " would make you one.",
             "Ask an admin to assign it to you."),
         rule.decide(OTHER_API, SPEC, BORN_IN_LOBBY, with(BORN_IN_LOBBY, "assignee", OTHER))
             .orElseThrow());

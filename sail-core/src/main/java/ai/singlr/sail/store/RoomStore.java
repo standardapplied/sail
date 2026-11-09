@@ -254,6 +254,26 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   }
 
   /**
+   * Whether conversation {@code roomId} is on this box: a spec lives in it (its own room, or the
+   * room it was born in), or a room's row names it. {@code specId}, a spec whose revision is being
+   * decided (null for none), never counts, so a spec cannot make the room it asks to enter exist.
+   */
+  public boolean holds(String roomId, String specId) {
+    return !db.query(
+            """
+            SELECT 1 FROM specs
+            WHERE (room_id = ?1 OR (coalesce(room_id, '') = '' AND id = ?1))
+                AND (?2 IS NULL OR id <> ?2)
+            UNION ALL
+            SELECT 1 FROM rooms WHERE id = ?1
+            LIMIT 1""",
+            row -> 1,
+            roomId,
+            specId)
+        .isEmpty();
+  }
+
+  /**
    * Who owns conversation {@code roomId}: the one rule every door that admits a post, a terminal
    * pin or a birth into a room decides by, and main's check of a synced post too. A room belongs to
    * the owner of each spec that lives in it (the spec's own room, or the room it was born in) and,
@@ -274,16 +294,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   public List<String> owners(String roomId, String specId, Map<String, Object> held) {
     var rows =
         db.query(
-            """
-            SELECT assignee, created_by FROM specs
-            WHERE (room_id = ?1 OR (coalesce(room_id, '') = '' AND id = ?1))
-                AND (?2 IS NULL OR id <> ?2)
-            UNION ALL
-            SELECT assignee, created_by FROM rooms
-            WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM specs WHERE id = ?1)""",
-            row -> Ownership.ownerOf(row.text(0), row.text(1)),
-            roomId,
-            specId);
+            owning("?1", "?2"), row -> Ownership.ownerOf(row.text(0), row.text(1)), roomId, specId);
     var decided =
         held != null && roomId.equals(Snapshots.text(held, "room_id"))
             ? Stream.of(
@@ -291,6 +302,57 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
                     Snapshots.text(held, "assignee"), Snapshots.text(held, Snapshots.CREATOR)))
             : Stream.<String>empty();
     return Stream.concat(rows.stream(), decided).filter(Strings::isNotBlank).distinct().toList();
+  }
+
+  /**
+   * The {@code assignee, created_by} of each owner of conversation {@code room} ({@link #owners}),
+   * as SQL over the expression {@code room}, leaving out spec {@code excludedSpec} (an expression
+   * that may be null).
+   */
+  private static String owning(String room, String excludedSpec) {
+    return """
+        SELECT assignee, created_by FROM specs
+        WHERE (room_id = %1$s OR (coalesce(room_id, '') = '' AND id = %1$s))
+            AND (%2$s IS NULL OR id <> %2$s)
+        UNION ALL
+        SELECT assignee, created_by FROM rooms
+        WHERE id = %1$s AND NOT EXISTS (SELECT 1 FROM specs WHERE id = %1$s)"""
+        .formatted(room, excludedSpec);
+  }
+
+  /**
+   * Whether words by {@code author} steer the agents at work in conversation {@code roomId} ({@link
+   * #steering}).
+   */
+  public boolean steers(String roomId, String author) {
+    return !db.query(
+            "SELECT 1 FROM (SELECT ?1 AS author) m WHERE " + steering("m.author", "?2", "NULL"),
+            row -> 1,
+            author,
+            roomId)
+        .isEmpty();
+  }
+
+  /**
+   * Whose words steer the agents at work in conversation {@code room}, as SQL over the expressions
+   * {@code author} and {@code room}: this box's machinery, an owner ({@link #owners}), an active
+   * admin, or the FDE {@code alsoSteers} names (an expression that may be null), a run's principal
+   * weighed as the FDE its run acts for. Every FDE who may write in a project speaks in its
+   * conversations, but a member's comment is for people: only the owners, on whose boxes and
+   * credentials the work runs, and admins reach its agents.
+   */
+  static String steering(String author, String room, String alsoSteers) {
+    return """
+        (%1$s = '%2$s' OR CASE WHEN %1$s LIKE '%%/%%' THEN (SELECT owner FROM runs
+            WHERE principal = %1$s
+                OR id IN (SELECT run_id FROM run_principals WHERE principal = %1$s) LIMIT 1)
+            ELSE %1$s END IN (
+            SELECT CASE WHEN trim(coalesce(assignee, '')) <> '' THEN assignee ELSE created_by END
+            FROM (%3$s)
+            UNION SELECT handle FROM fdes WHERE role = '%4$s' AND status = 'active'
+            UNION SELECT %5$s))"""
+        .formatted(
+            author, MessageStore.SAIL_AUTHOR, owning(room, "NULL"), FdeStore.ADMIN, alsoSteers);
   }
 
   /**

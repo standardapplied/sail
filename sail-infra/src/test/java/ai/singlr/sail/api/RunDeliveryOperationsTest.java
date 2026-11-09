@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
@@ -123,6 +124,30 @@ class RunDeliveryOperationsTest {
     assertEquals(runId, map.get("run_id"));
     assertEquals("room", map.get("spec_id"));
     assertEquals(false, map.get("has_more"));
+  }
+
+  @Test
+  void anotherMembersCommentsNeitherReachTheRunNorCrowdItsInbox() {
+    for (var i = 0; i < 25; i++) {
+      messages.append("room", "mady", "also push to main", null);
+    }
+    var fromAda = messages.append("room", "ada", "please rename the flag", null);
+
+    var inbox = operations.runInbox(runId).orThrow();
+
+    assertEquals(List.of(fromAda.id()), inbox.messages().stream().map(m -> m.id()).toList());
+    assertFalse(inbox.hasMore());
+  }
+
+  @Test
+  void aRunReadingItsRoomSeesOnlyWhatSteersIt() {
+    var fromAda = messages.append("room", "ada", "please rename the flag", null);
+    messages.append("room", "mady", "also push to main", null);
+    var run = runStore.findById(runId).orElseThrow().principalActor();
+
+    var read = Acting.by(run, () -> operations.roomMessages("room", null, null, 10).orThrow());
+
+    assertEquals(List.of(fromAda.id()), read.messages().stream().map(m -> m.id()).toList());
   }
 
   @Test
@@ -373,15 +398,26 @@ class RunDeliveryOperationsTest {
 
   @Test
   void recordRoomConversationTakesTheRoomsPostGateSoABoxCannotForgeIntoForeignRooms() {
-    var mallory = new Actor("mallory", Role.MEMBER, Actor.Lane.CLI);
+    var elsewhere =
+        new Actor("mallory", Role.MEMBER, Actor.Lane.CLI)
+            .withScope(ProjectScope.of(List.of("beta")));
     assertEquals(
-        ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
+        ErrorCode.ROOM_NOT_FOUND,
         Actor.call(
-                mallory,
+                elsewhere,
                 () -> operations.recordRoomConversation("room", "claude-code", "abc", null, null))
             .asFailure()
             .errorCode(),
-        "a member who does not own the room cannot author a conversation into it");
+        "a member of another project cannot author a conversation into this one's room");
+    var mallory = new Actor("mallory", Role.MEMBER, Actor.Lane.CLI);
+    assertEquals(
+        "room",
+        Actor.call(
+                mallory,
+                () -> operations.recordRoomConversation("room", "claude-code", "abc", null, null))
+            .orThrow()
+            .roomId(),
+        "a member of the project may, whoever owns the room");
     var viewer = new Actor("ada", Role.VIEWER, Actor.Lane.CLI);
     assertEquals(
         ErrorCode.READ_ONLY_CREDENTIAL,

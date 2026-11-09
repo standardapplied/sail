@@ -58,7 +58,7 @@ final class LoopNarrator {
       return List.of();
     }
     try {
-      return messageStore.list(roomOf(specId), null, 20);
+      return messageStore.steering(roomOf(specId), 20);
     } catch (RuntimeException e) {
       System.err.println(
           "review-pipeline: could not read the room of spec " + specId + ": " + e.getMessage());

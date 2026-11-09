@@ -24,6 +24,7 @@ public final class Refusals {
     return switch (kind) {
       case READ_ONLY -> ErrorCode.READ_ONLY_CREDENTIAL;
       case NOT_OWNER -> ErrorCode.FORBIDDEN_NOT_ASSIGNEE;
+      case NO_CONVERSATION -> ErrorCode.ROOM_NOT_FOUND;
       case ADMIN_ONLY -> ErrorCode.FORBIDDEN_ADMIN_ONLY;
       case NOT_AUTHOR -> ErrorCode.FORBIDDEN_NOT_AUTHOR;
       case FIXED -> ErrorCode.INVALID_REQUEST;

@@ -25,6 +25,7 @@ class RefusalsTest {
         Map.ofEntries(
             Map.entry(Refusal.Kind.READ_ONLY, ErrorCode.READ_ONLY_CREDENTIAL),
             Map.entry(Refusal.Kind.NOT_OWNER, ErrorCode.FORBIDDEN_NOT_ASSIGNEE),
+            Map.entry(Refusal.Kind.NO_CONVERSATION, ErrorCode.ROOM_NOT_FOUND),
             Map.entry(Refusal.Kind.ADMIN_ONLY, ErrorCode.FORBIDDEN_ADMIN_ONLY),
             Map.entry(Refusal.Kind.NOT_AUTHOR, ErrorCode.FORBIDDEN_NOT_AUTHOR),
             Map.entry(Refusal.Kind.FIXED, ErrorCode.INVALID_REQUEST),

@@ -7,7 +7,6 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
@@ -127,7 +126,7 @@ class UnassignedSpecTest {
   }
 
   @Test
-  void onceClaimedItsRoomIsTheNewOwnersAtEveryDoor() throws Exception {
+  void onceClaimedItsRoomStillTakesItsCreatorsWordAtEveryDoor() throws Exception {
     var uday = token("uday", "member");
     var mady = token("mady", "member");
     send("POST", "/v1/specs", uday, "{\"id\": \"auth\", \"project\": \"acme\", \"title\": \"A\"}");
@@ -137,24 +136,21 @@ class UnassignedSpecTest {
     var byCreator = send("POST", "/v1/rooms/auth/messages", uday, "{\"body\": \"still?\"}");
 
     assertEquals(201, byOwner.statusCode(), byOwner.body());
-    assertEquals(403, byCreator.statusCode(), byCreator.body());
-    assertTrue(byCreator.body().contains("only mady"), byCreator.body());
+    assertEquals(
+        201, byCreator.statusCode(), "every writer of the project speaks: " + byCreator.body());
     var room = roomRunCredential("mady", "auth");
     var router = new LocalApiRouter(operations);
     var answered = router.handle(form("POST", "/v1/specs/auth/messages", room, "body=on it"));
     assertEquals(201, answered.status(), answered.body().toString());
     var terminal = new HostAccess(db, new RoleRule(SyncConfig::unset, new FdeStore(db)));
     terminal.admit("auth", "acme", new PtyIdentity("mady", false));
-    var refused =
-        assertThrows(
-            IOException.class,
-            () -> terminal.admit("auth", "acme", new PtyIdentity("uday", false)));
-    assertTrue(refused.getMessage().contains("only mady"), refused.getMessage());
-    assertEquals(List.of("mady"), new RoomStore(db).owners("auth"), "and main decides the same");
+    terminal.admit("auth", "acme", new PtyIdentity("uday", false));
+    assertEquals(
+        List.of("mady"), new RoomStore(db).owners("auth"), "the claim moved its ownership");
   }
 
   @Test
-  void aSpecBornInSomeoneElsesRoomIsClaimedOnlyByOneWhoMayPostThere() throws Exception {
+  void aSpecBornInSomeoneElsesRoomIsClaimedOnlyByOneWhoMayStartWorkThere() throws Exception {
     var uday = token("uday", "member");
     var carol = token("carol", "member");
     var room = "{\"id\": \"design\", \"project\": \"acme\", \"title\": \"D\"}";
@@ -168,7 +164,9 @@ class UnassignedSpecTest {
     assertEquals(403, claim.statusCode(), claim.body());
     assertTrue(claim.body().contains("Ask an admin"), claim.body());
     assertEquals(
-        403, send("POST", "/v1/rooms/design/messages", carol, "{\"body\": \"hi\"}").statusCode());
+        201,
+        send("POST", "/v1/rooms/design/messages", carol, "{\"body\": \"hi\"}").statusCode(),
+        "carol speaks there, though she may not take the work");
     var given = send("PUT", "/v1/specs/auth", uday, "{\"assignee\": \"carol\"}");
     assertEquals(403, given.statusCode(), "handing it on is an admin's act");
     var admin = token("ops", "admin");
@@ -203,9 +201,10 @@ class UnassignedSpecTest {
     assertTrue(specs.findById("auth").isEmpty(), "a refused birth leaves nothing behind");
     assertEquals(201, forHimself.statusCode(), forHimself.body());
     assertEquals(
-        403,
+        201,
         send("POST", "/v1/rooms/design/messages", token("carol", "member"), "{\"body\": \"x\"}")
-            .statusCode());
+            .statusCode(),
+        "carol speaks in uday's room though the birth for her was refused");
   }
 
   @Test

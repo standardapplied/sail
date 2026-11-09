@@ -288,7 +288,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     }
     var engaged = target.state().standing() != null;
     var message = messageOf(event);
-    if (!wakes(target, message)) {
+    if (!wakes(target, message) || !roomStore.steers(roomOf(event.spec()), message.author())) {
       return;
     }
     if (liveMember(target)) {
@@ -415,14 +415,17 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     schedule(specId, owed, true);
   }
 
+  private String roomOf(String id) {
+    return specStore.findById(id).map(SpecStore.SpecRow::roomIdOrIdentity).orElse(id);
+  }
+
   /** The newest human message no chat turn has started after, or {@code null} when none is owed. */
   private Message owedMessage(String id, Target target) {
     if (messageStore == null) {
       return null;
     }
-    var roomId = specStore.findById(id).map(SpecStore.SpecRow::roomIdOrIdentity).orElse(id);
     var newestHuman =
-        messageStore.list(roomId, null, 20).stream()
+        messageStore.steering(roomOf(id), 20).stream()
             .filter(row -> RoomWakePolicy.humanAuthor(row.author()))
             .reduce((first, second) -> second)
             .orElse(null);

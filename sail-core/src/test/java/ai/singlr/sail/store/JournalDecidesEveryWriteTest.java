@@ -373,8 +373,9 @@ class JournalDecidesEveryWriteTest {
             "ProjectStore.rename",
             Kind.ADMIN_ONLY,
             f -> f.projects.rename("acme", "acme2", TestDefinitions.named("acme2"))),
-        owned(
+        write(
             "MessageStore.append",
+            null,
             f -> f.messages.append("theirs", Actor.current().handle(), "hi", null)));
   }
 

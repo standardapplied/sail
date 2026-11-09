@@ -20,8 +20,10 @@ import java.util.Optional;
  * conversation's owners ({@link RoomStore#owners}). As whom: on this box's lanes the author is the
  * actor's own handle — a run's principal on the agent and room lanes. On {@link Actor.Lane#SYNC}
  * the pusher posts as itself, as a principal of any run it owns, or as the pipeline ({@link
- * MessageStore#SAIL_AUTHOR}) where a run it owns is in the conversation. Messages never change, so
- * there is only ever a create to decide.
+ * MessageStore#SAIL_AUTHOR}) where a run it owns is in the conversation and it steers the agents
+ * there itself ({@link RoomStore#steering}), since the pipeline's words steer them all: a box whose
+ * work was reassigned narrates there no more. Messages never change, so there is only ever a create
+ * to decide.
  */
 public final class MessageAuthority implements WriteAuthority {
 
@@ -43,7 +45,8 @@ public final class MessageAuthority implements WriteAuthority {
       return Optional.empty();
     }
     var roomId = MessageStore.roomIdOf(next);
-    var posting = PostingRule.decide(actor, roomId, rooms.owners(roomId));
+    var posting =
+        PostingRule.decide(actor, roomId, rooms.holds(roomId, null), rooms.owners(roomId));
     if (posting.isPresent()) {
       return posting;
     }
@@ -65,7 +68,7 @@ public final class MessageAuthority implements WriteAuthority {
       return false;
     }
     if (MessageStore.SAIL_AUTHOR.equals(author)) {
-      return runs.ranInConversation(actor.handle(), roomId);
+      return runs.ranInConversation(actor.handle(), roomId) && rooms.steers(roomId, actor.handle());
     }
     return RunStore.isPrincipalHandle(author)
         && attribution.principalOfOwnedRun(actor.handle(), author);

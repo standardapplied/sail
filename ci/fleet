@@ -427,8 +427,8 @@ conflicts() {
   check "$run" "every box holds eng's title" everywhere "$run" shared title "eng renamed it"
   check "$run" "every box holds main's priority" everywhere "$run" shared priority 7
   check "$run" "uday comments on shared" allowed "$run" main "sudo sail spec comment shared --body 'uday: first word'"
-  check "$run" "client, who is not its assignee, cannot comment on it" \
-    refused "$run" client "only eng or an admin may post there" "sudo sail sync && sudo sail spec comment shared --body 'client: a word'"
+  check "$run" "client, its creator, comments though eng holds it" \
+    allowed "$run" client "sudo sail sync && sudo sail spec comment shared --body 'client: a word'"
   check "$run" "eng, its assignee, comments" \
     allowed "$run" eng "sudo sail sync && sudo sail spec comment shared --body 'eng: second word'"
   check "$run" "every node syncs twice to hear it" sync_all "$run"
@@ -480,17 +480,17 @@ rooms() {
     allowed "$run" client "sudo sail spec comment acme-chat --body 'client: first word' && sudo sail sync"
   check "$run" "uday, an admin, answers on main" \
     allowed "$run" main "sudo sail spec comment acme-chat --body 'uday: second word'"
-  check "$run" "eng, a member who does not own the room, cannot post" \
-    refused "$run" eng "only client or an admin may post there" "sudo sail sync && sudo sail spec comment acme-chat --body 'eng: a word'"
+  check "$run" "eng, a member who does not own the room, posts in it" \
+    allowed "$run" eng "sudo sail sync && sudo sail spec comment acme-chat --body 'eng: third word'"
   check "$run" "observer cannot post at the CLI" \
     refused "$run" observer "credential is read-only" "sudo sail sync && sudo sail spec comment acme-chat --body 'obs: a word'"
   check "$run" "over HTTP, the viewer cannot post" \
     http_door "$run" observer obs 403 POST /v1/rooms/acme-chat/messages '{"body":"obs over http"}'
   check "$run" "client answers after hearing uday" \
-    allowed "$run" client "sudo sail sync && sudo sail spec comment acme-chat --body 'client: third word'"
+    allowed "$run" client "sudo sail sync && sudo sail spec comment acme-chat --body 'client: fourth word'"
   check "$run" "every node syncs twice" sync_all "$run"
-  check "$run" "observer reads the three words in order" \
-    says_in_order "$run" observer acme-chat "client: first word|uday: second word|client: third word"
+  check "$run" "observer reads the four words in order" \
+    says_in_order "$run" observer acme-chat "client: first word|uday: second word|eng: third word|client: fourth word"
   check "$run" "the room reads the same on every box" conversation_matches "$run" acme-chat
   check "$run" "client's database has no trace of beta-chat or obs-chat" holds_no_trace_of "$run" client beta-chat obs-chat
 }

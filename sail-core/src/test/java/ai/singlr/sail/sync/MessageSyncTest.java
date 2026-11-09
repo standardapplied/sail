@@ -15,7 +15,7 @@ import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.Ownership;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
@@ -112,6 +112,7 @@ class MessageSyncTest {
   void theQuestionFlagSurvivesSyncAndDerivesTheSameAnswerEverywhere() {
     var runId = "019fee00-0000-7000-8000-0000000000bb";
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
+    node.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var runs = new RunStore(main.db);
     ReviewRuns.reserve(runs, runId, runId, "acme", "room", "node", Lane.REVIEW, "codex", List.of());
     var principal = runs.findById(runId).orElseThrow().principal();
@@ -318,7 +319,7 @@ class MessageSyncTest {
   }
 
   @Test
-  void mainDecidesAPostByTheConversationsOwnerForEveryBlankAndSetAssigneeAndCreator() {
+  void mainAcceptsAMembersPostWhoeverOwnsTheConversationForEveryBlankAndSetAssigneeAndCreator() {
     new SpecStore(main.db)
         .create(
             new SpecStore.SpecRow(
@@ -357,9 +358,9 @@ class MessageSyncTest {
                       main.messages.commitRevision(
                           id, snapshot("mady", conversation), null, main.messages.authority()));
 
-          assertEquals(
-              Ownership.owns("mady", assignee, creator),
-              outcome instanceof PushOutcome.Accepted,
+          assertInstanceOf(
+              PushOutcome.Accepted.class,
+              outcome,
               table + " assignee=" + assignee + " creator=" + creator + ": " + outcome);
         }
       }
@@ -369,13 +370,24 @@ class MessageSyncTest {
   }
 
   @Test
-  void authenticatedPeerCannotPostToAForeignRoom() {
+  void aMemberPostsInAnotherFdesRoomButAPeerScopedElsewhereCannot() {
     main.db.execute("UPDATE rooms SET assignee = 'ada', created_by = 'ada' WHERE id = 'room'");
 
     assertInstanceOf(
+        PushOutcome.Accepted.class,
+        Actor.call(
+            Actor.sync("mady", Role.MEMBER),
+            () ->
+                main.messages.commitRevision(
+                    "00000000-0000-7000-8000-000000000001",
+                    snapshot("mady", "room"),
+                    null,
+                    main.messages.authority())),
+        "a member of the project posts in ada's room");
+    assertInstanceOf(
         PushOutcome.Denied.class,
         Actor.call(
-            Actor.sync("mallory", Role.MEMBER),
+            Actor.sync("mallory", Role.MEMBER).withScope(ProjectScope.of(List.of("beta"))),
             () ->
                 main.messages.commitRevision(
                     "00000000-0000-7000-8000-000000000002",
@@ -383,7 +395,10 @@ class MessageSyncTest {
                     null,
                     main.messages.authority())));
 
-    assertTrue(main.messages.list("room", null, 10).isEmpty());
+    assertEquals(
+        List.of("mady"),
+        main.messages.list("room", null, 10).stream().map(m -> m.author()).toList(),
+        "the scoped peer's post never landed");
 
     assertConverged();
   }
@@ -487,7 +502,7 @@ class MessageSyncTest {
                     main.messages.authority())),
         "a run's principal posts beyond its own conversation, where its FDE may");
     assertInstanceOf(
-        PushOutcome.Denied.class,
+        PushOutcome.Accepted.class,
         Actor.call(
             Actor.sync("node", Role.MEMBER),
             () ->
@@ -495,7 +510,8 @@ class MessageSyncTest {
                     "00000000-0000-7000-8000-000000000012",
                     snapshot("codex/00000000-0000-7000-8000-000000000010", "other-room"),
                     null,
-                    main.messages.authority())));
+                    main.messages.authority())),
+        "and in another FDE's room of the project, where its FDE may post too");
 
     assertConverged();
   }
