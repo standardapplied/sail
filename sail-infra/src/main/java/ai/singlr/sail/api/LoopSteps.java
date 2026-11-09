@@ -63,6 +63,9 @@ final class LoopSteps {
       case LoopStep.Nothing nothing -> Optional.empty();
       case LoopStep.SayBuildFailed failed -> sayBuildFailed(facts, failed);
       case LoopStep.ParkForAPerson park -> parkForAPerson(facts);
+      case LoopStep.AwaitAnswer await -> awaitAnswer(facts, await);
+      case LoopStep.ResumeBuild resume -> resumeBuild(facts);
+      case LoopStep.ResumeFix resume -> resumeFix(facts, resume);
       case LoopStep.StartReview start -> startReview(facts, start);
       case LoopStep.EscalateNew escalated -> escalateNew(facts, escalated);
       case LoopStep.Resume resumed -> resume(facts, resumed);
@@ -90,6 +93,40 @@ final class LoopSteps {
   private Optional<LoopTrigger> parkForAPerson(LoopFacts facts) {
     advanceSpec(facts.specId(), SpecStatus.REVIEW);
     return Optional.empty();
+  }
+
+  /**
+   * The spec stays in progress, so only the answer moves it, and the room says what it waits on.
+   */
+  private Optional<LoopTrigger> awaitAnswer(LoopFacts facts, LoopStep.AwaitAnswer step) {
+    narrator.postRoom(facts.specId(), ReviewNarration.waitsOnAnswer(step.lane(), step.question()));
+    return Optional.empty();
+  }
+
+  /**
+   * The build goes on where it ended, with the answer in its prompt. A claim another run holds
+   * defers it, and the stop that frees that claim resumes it ({@link LoopTrigger.Freed}).
+   */
+  private Optional<LoopTrigger> resumeBuild(LoopFacts facts) {
+    var specId = facts.specId();
+    switch (lanes.resumeBuild(facts.project(), specId, localHandle.get())) {
+      case ReviewLanes.Launch.Started started ->
+          narrator.postRoom(specId, ReviewNarration.resumed(Lane.BUILD));
+      case ReviewLanes.Launch.Deferred deferred ->
+          System.err.println(
+              "review-pipeline: the build of spec %s goes on with its answer once run %s ends"
+                  .formatted(specId, deferred.holder().runId()));
+    }
+    return Optional.empty();
+  }
+
+  /** The fix agent goes on with the review's open findings, and the answer in its prompt. */
+  private Optional<LoopTrigger> resumeFix(LoopFacts facts, LoopStep.ResumeFix step) {
+    var findings = reviewStore.openFindingsForReview(step.review().id());
+    return launchFix(
+        facts,
+        new LoopStep.LaunchFix(step.review(), findings),
+        () -> narrator.postRoom(facts.specId(), ReviewNarration.resumed(Lane.FIX)));
   }
 
   /** The row is written before the spec moves: no crash leaves a spec in review, owed nothing. */
@@ -343,6 +380,11 @@ final class LoopSteps {
    * nothing but the run the review waits on: the fix is still owed.
    */
   private Optional<LoopTrigger> launchFix(LoopFacts facts, LoopStep.LaunchFix step) {
+    return launchFix(facts, step, () -> {});
+  }
+
+  private Optional<LoopTrigger> launchFix(
+      LoopFacts facts, LoopStep.LaunchFix step, Runnable alsoStarted) {
     var spec = facts.rows().spec().orElseThrow();
     var specId = facts.specId();
     Supplier<ReviewLanes.Invocation> invocation =
@@ -372,6 +414,7 @@ final class LoopSteps {
         () -> {
           advanceSpec(specId, SpecStatus.IN_PROGRESS);
           narrator.publishEvent(facts.project(), specId, "review_iteration_started", null);
+          alsoStarted.run();
         };
     return launch(
         invocation,

@@ -33,18 +33,31 @@ final class ReviewLaneLauncher implements ReviewLanes {
   private final RunReservation runReservation;
   private final RunLauncher runLauncher;
   private final ShellExec shell;
+  private final Builds builds;
+
+  /** The dispatch machinery's resume of a build, which this lane hands its builds to. */
+  interface Builds {
+    Launch resume(String project, String specId, String boxHandle);
+  }
 
   ReviewLaneLauncher(
       ProjectLoader projects,
       RunStore runStore,
       RunReservation runReservation,
       RunLauncher runLauncher,
-      ShellExec shell) {
+      ShellExec shell,
+      Builds builds) {
     this.projects = projects;
     this.runStore = runStore;
     this.runReservation = runReservation;
     this.runLauncher = runLauncher;
     this.shell = shell;
+    this.builds = builds;
+  }
+
+  @Override
+  public Launch resumeBuild(String project, String specId, String boxHandle) {
+    return builds.resume(project, specId, boxHandle);
   }
 
   @Override

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.store.Finding;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -199,5 +200,17 @@ class ReviewNarrationTest {
           ReviewNarration.pipelineUnreadable(nothingSaid)
               .startsWith("the project's review pipeline could not be read; fix"));
     }
+  }
+
+  @Test
+  void aQuestionTheLoopWaitsOnIsQuotedByItsFirstLineCutShort() {
+    var question = "x".repeat(250) + "\nand more";
+
+    assertEquals(
+        "The build ended on its question, so nothing is reviewed until it is answered: \""
+            + "x".repeat(199)
+            + "…\" Reply here, and the build goes on with your answer.",
+        ReviewNarration.waitsOnAnswer(Lane.BUILD, question));
+    assertEquals("The fix agent goes on with your answer.", ReviewNarration.resumed(Lane.FIX));
   }
 }

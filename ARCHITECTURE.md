@@ -1941,7 +1941,7 @@ step of the loop and one class carries each step out. Each part has one job, all
 
 | Class | Its one job |
 |---|---|
-| `ReviewPipelineController` | routes: an authoritative stop becomes a trigger for one spec's loop |
+| `ReviewPipelineController` | routes: an authoritative stop, or a post in a spec's room, becomes a trigger for one spec's loop |
 | `LoopFactsReader` | reads the stores into `LoopFacts`, the only reader for a decision |
 | `LoopDecision.next(LoopFacts, LoopTrigger)` | decides the one `LoopStep`; no store, clock, bus or container |
 | `LoopSteps` | acts: one method a step, every write of a review, a spec's status or a wait, and every launch |
@@ -1959,7 +1959,11 @@ reads. Beside them `LoopFacts` holds the pipeline reading (`Staged` with the pro
 reviewer, `None`, or `Unreadable(why)`), the count of errored attempts of the review's
 iteration, and, only when a fix is due, the review's open findings and the findings its first
 failed stage holds, with their ages: no decision on any other review weighs a finding, and
-none is read for one. The pipeline is resolved once per event, at the first read of
+none is read for one. And once the spec's newest loop run, this box's, has ended, `asked` is
+the question that run left as its last word in the spec's room (`MessageStore.lastQuestion`,
+under every identity the run posted as), with whether someone who steers the room's agents
+(`RoomStore.steering`) has answered it since: a run that said something after its question no
+longer waits on it. The pipeline is resolved once per event, at the first read of
 one of the project's specs, and serves every decision and step of that event.
 
 A trigger is what happened; it carries no decision:
@@ -1971,13 +1975,14 @@ A trigger is what happened; it carries no decision:
 | `FixEnded(run, failure)` | the same, for a fix agent |
 | `OperatorStopped(run)` | `agent_cancelled`, or a stop of a run an operator's stop claimed |
 | `Freed` | a stop freed whatever its run held; raised, after the stop's own loop is driven, for every spec of the project in `review` or `in_progress` |
+| `Answered` | a post in a conversation (`spec_message_posted`, local or synced); raised for every spec of that conversation in `in_progress` |
 | `GoOn` | a gate just failed: the loop goes on from what the rows owe |
 | `ReviewRunning` | a step left the review `running` with its spec in `review` |
 | `StageJudged(reviewId, stage, outcome)` | a step judged a stage of that review: `Passed`, `GateFailed`, `Errored(why)` |
 | `ReviewerNotStarted(reviewId, stage, why)` / `FixNotStarted(reviewId, why)` | a launch for that review (building its prompt or task included) threw and no live run serves it |
 | `FixCommitted(run)` / `FixNotCommitted(run, why)` | a step tried to commit and push what fix agent `run` left |
 
-The first four and `Freed` are raised by the router, the rest only by `LoopSteps`. A step is
+The first four, `Freed` and `Answered` are raised by the router, the rest only by `LoopSteps`. A step is
 what to do, and a stage is named by its place in the pipeline, which is its row's place in the
 review:
 
@@ -1986,6 +1991,9 @@ review:
 | `Nothing` | nothing | none |
 | `SayBuildFailed(exitCode)` | publishes `agent_failed` with `exit <code>` | none |
 | `ParkForAPerson` | moves the spec to `review` | none |
+| `AwaitAnswer(lane, question)` | says in the room that nothing is reviewed until the question is answered; the spec stays `in_progress` | none |
+| `ResumeBuild` | `ReviewLanes.resumeBuild`: a build run on the spec's branch and tree, with nothing claimed, snapshotted, checked out or superseded and no `spec_restarted`, its prompt a dispatch's, so the room's question and answer are in it; says so in the room. A refused claim is logged, and the stop that frees it resumes the build (W2) | none |
+| `ResumeFix(review)` | `LaunchFix` with the review's open findings; once the run serves, also says so in the room | as `LaunchFix` |
 | `StartReview(iteration)` | writes the review `running`, then moves the spec to `review` | `ReviewRunning` |
 | `EscalateNew(iteration, reason)` | writes the review and escalates it in the next write | none |
 | `Resume(review)` | sets a legacy `pending` review `running`, then moves the spec to `review` (`SpecStore.moveFromLoop`, also when it is there already) | `ReviewRunning` |
@@ -2020,11 +2028,12 @@ review and go on with the latest.
 | A2 | | the stop names a run this box holds, and that run is not the newest build, review or fix run of its spec | as `GoOn` |
 | A3 | | exit code present and non-zero | `SayBuildFailed` |
 | A4 | | the spec has a review | as `GoOn` |
+| A4b | | the stop names a run this box holds, and that run's last word is a question no one who steers it has answered | `AwaitAnswer(build, question)` |
 | A5 | | pipeline `Staged` | `StartReview(1)` |
 | A6 | | pipeline `None` | `ParkForAPerson` |
 | A7 | | pipeline `Unreadable` | `EscalateNew(1, pipelineUnreadable)` |
 | W1 | `Freed` | this box did not execute the spec's newest loop run | `Nothing` |
-| W2 | | the rows owe anything but a recorded wait | `Nothing` |
+| W2 | | the rows owe anything but a recorded wait | as `Answered`: a run resumed whose answer came while its resume was deferred or lost to a restart, else `Nothing` |
 | W3 | | otherwise | as `GoOn` |
 | G0 | `GoOn` | the spec is not the loop's | `Nothing` |
 | G1 | | due `Nothing` or `Stop` | `Nothing` |
@@ -2053,11 +2062,18 @@ review and go on with the latest.
 | J3 | | `Errored(why)` | `ErrorReview(stage, why)`, its stage already closed |
 | F1 | `FixEnded` | not awaited in `failed`, or the review failed by error | as `GoOn` |
 | F2 | | `failure` present | `FailFix("fix agent " + failure)` |
+| F2b | | the run's last word is a question no one who steers it has answered | `AwaitAnswer(fix, question)` |
 | F3 | | otherwise | `CommitFixLeftovers` |
 | F4 | `FixCommitted(run)` | `run` no longer awaited in `failed`, whether or not anything was committed | `Nothing` |
 | F5 | | (**P**) otherwise | `StartReview(iteration + 1)` |
 | F6 | `FixNotCommitted(run, why)` | `run` no longer awaited in `failed` | `Nothing` |
 | F7 | | otherwise | `FailFix("fix agent's work could not be committed: " + why)` |
+| Q1 | `Answered` | the spec is not the loop's, or this box did not execute its newest loop run | `Nothing` |
+| Q2 | | that run is live, exited non-zero or was stopped by an operator, or its last word is no question someone who steers it has answered | `Nothing` |
+| Q3 | | that run is a build: the spec has no review | `ResumeBuild` |
+| Q3 | | that run is a build: the spec has a review | `Nothing` |
+| Q4 | | that run is a fix agent awaited in `failed`, its review not failed by error (**P**) | `ResumeFix(review)` |
+| Q5 | | otherwise (a reviewer's stage is judged on what it said) | `Nothing` |
 | L0 | `ReviewerNotStarted`, `FixNotStarted` | the review the launch was for is no longer the spec's latest | `Nothing` |
 | L1 | `ReviewerNotStarted` | otherwise | `ErrorReview(stage, "reviewer could not start: " + why)` |
 | L2 | `FixNotStarted` | otherwise | `FailFix("fix agent could not start: " + why)` |

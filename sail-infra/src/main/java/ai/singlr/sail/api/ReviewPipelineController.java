@@ -44,7 +44,10 @@ import java.util.stream.Stream;
 public final class ReviewPipelineController implements EventSubscriber {
 
   private static final Set<String> ROUTED_TYPES =
-      Set.of(Event.WellKnownTypes.AGENT_SESSION_STOPPED, Event.WellKnownTypes.AGENT_CANCELLED);
+      Set.of(
+          Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+          Event.WellKnownTypes.AGENT_CANCELLED,
+          Event.WellKnownTypes.SPEC_MESSAGE_POSTED);
 
   /** How many steps one event may take: the longest chain the loop's table allows is shorter. */
   static final int MAX_STEPS = 8;
@@ -99,6 +102,7 @@ public final class ReviewPipelineController implements EventSubscriber {
 
   public ReviewPipelineController useMessages(MessageStore messages) {
     narrator.useMessages(Objects.requireNonNull(messages, "messages"));
+    reader.useMessages(messages);
     return this;
   }
 
@@ -132,6 +136,10 @@ public final class ReviewPipelineController implements EventSubscriber {
    * review of the project the stop may have freed, all under one reading of the pipeline.
    */
   private void route(Event event) {
+    if (Event.WellKnownTypes.SPEC_MESSAGE_POSTED.equals(event.type())) {
+      answered(event);
+      return;
+    }
     if (!isAuthoritative(event)) {
       return;
     }
@@ -140,6 +148,34 @@ public final class ReviewPipelineController implements EventSubscriber {
       routed(event).ifPresent(stop -> drive(stop, read));
     } finally {
       resumeWaiting(event.project(), read);
+    }
+  }
+
+  /**
+   * A post in a conversation may be the answer a build or fix agent of one of its specs ended its
+   * run waiting for, so every spec of the conversation in {@code in_progress} is told ({@link
+   * LoopTrigger.Answered}), and its loop decides whether it was. A failure for one never costs
+   * another its turn.
+   */
+  private void answered(Event event) {
+    var conversation = event.spec();
+    if (Strings.isBlank(conversation)) {
+      return;
+    }
+    var read = reader.forOneEvent(pipelines);
+    var inProgress =
+        new SpecStore.SpecFilter(event.project(), SpecStatus.IN_PROGRESS.wire(), null, null, null);
+    for (var spec : specStore.list(inProgress)) {
+      if (!conversation.equals(spec.roomIdOrIdentity())) {
+        continue;
+      }
+      try {
+        drive(new Routed(event.project(), spec.id(), new LoopTrigger.Answered()), read);
+      } catch (RuntimeException e) {
+        System.err.println(
+            "review-pipeline: could not hear the answer in spec %s's room: %s"
+                .formatted(spec.id(), e.getMessage()));
+      }
     }
   }
 

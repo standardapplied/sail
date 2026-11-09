@@ -11,6 +11,7 @@ import ai.singlr.sail.api.StageVerdicts.StageOutcome;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ReviewPipelineConfig.StageType;
 import ai.singlr.sail.config.RunStatus;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore.ReviewRow;
 import ai.singlr.sail.store.RunStore.RunRow;
 import java.util.Optional;
@@ -50,6 +51,7 @@ final class LoopDecision {
       case LoopTrigger.ReviewerEnded reviewer -> reviewerEnded(facts, reviewer);
       case LoopTrigger.FixEnded fix -> fixEnded(facts, fix);
       case LoopTrigger.OperatorStopped stopped -> operatorStopped(facts, stopped.run());
+      case LoopTrigger.Answered answered -> answered(facts);
       case LoopTrigger.Freed freed -> freed(facts);
       case LoopTrigger.GoOn goOn -> goOn(facts);
       case LoopTrigger.ReviewRunning running -> on(rows.review(), review -> inItsStages(facts));
@@ -105,6 +107,9 @@ final class LoopDecision {
     if (rows.review().isPresent()) {
       return goOn(facts);
     }
+    if (build.runId() != null && facts.waitsOnAnswer()) {
+      return new LoopStep.AwaitAnswer(Lane.BUILD, facts.asked().orElseThrow().body());
+    }
     return switch (facts.pipeline()) {
       case Pipeline.Staged staged -> new LoopStep.StartReview(1);
       case Pipeline.None none -> new LoopStep.ParkForAPerson();
@@ -139,10 +144,46 @@ final class LoopDecision {
     if (review.isEmpty()) {
       return goOn(facts);
     }
+    if (ended.failure().isEmpty() && facts.waitsOnAnswer()) {
+      return new LoopStep.AwaitAnswer(Lane.FIX, facts.asked().orElseThrow().body());
+    }
     return ended
         .failure()
         .<LoopStep>map(how -> new LoopStep.FailFix(review.get(), noun(Lane.FIX) + " " + how))
         .orElseGet(() -> new LoopStep.CommitFixLeftovers(review.get(), ended.run()));
+  }
+
+  /**
+   * An answer resumes the build or fix agent that ended on its question, once someone who steers it
+   * has answered: the build while the spec has no review yet, the fix agent while its review still
+   * waits on it. No other run is resumed: a live one hears the answer itself, another box's is that
+   * box's to resume, a failed one is a person's, a spec reassigned since is its new owner's to
+   * dispatch, and a reviewer's stage is judged on what it said.
+   */
+  private static LoopStep answered(LoopFacts facts) {
+    var rows = facts.rows();
+    var ours = rows.spec().filter(spec -> spec.ownedBy(rows.node())).isPresent();
+    var held =
+        rows.newestLoopRun()
+            .filter(run -> ours && rows.loops() && rows.drivenHere() && endedWell(run))
+            .filter(run -> facts.asked().filter(MessageStore.Asked::answered).isPresent());
+    if (held.isEmpty()) {
+      return new LoopStep.Nothing();
+    }
+    var run = held.get();
+    if (Lane.BUILD.matches(run.role())) {
+      return rows.review().isEmpty() ? new LoopStep.ResumeBuild() : new LoopStep.Nothing();
+    }
+    return rows.awaited(run, "failed")
+        .filter(review -> Lane.FIX.matches(run.role()) && !review.errored())
+        .<LoopStep>map(review -> fit(facts, () -> new LoopStep.ResumeFix(review)))
+        .orElseGet(LoopStep.Nothing::new);
+  }
+
+  private static boolean endedWell(RunRow run) {
+    return RunStatus.isTerminal(run.status())
+        && (run.exitCode() == null || run.exitCode() == 0)
+        && !run.stoppedByOperator();
   }
 
   /**
@@ -162,15 +203,18 @@ final class LoopDecision {
   }
 
   /**
-   * Only a recorded wait is acted on when a stop frees a claim, and only by the box that drives the
-   * spec's loop: an errored review keeps to the reconciler's pace, one whose launch was cut short
-   * is the reconciler's to rescue, and one whose run has ended waits for that run's own stop.
+   * Only a recorded wait, or a run whose question has been answered, is acted on when a stop frees
+   * a claim, and only by the box that drives the spec's loop: an errored review keeps to the
+   * reconciler's pace, one whose launch was cut short is the reconciler's to rescue, and one whose
+   * run has ended waits for that run's own stop. An answered run is resumed here when its own
+   * resume was deferred behind a claim, or lost to a restart.
    */
   private static LoopStep freed(LoopFacts facts) {
     var rows = facts.rows();
-    return rows.drivenHere() && rows.owed() instanceof Owed.Waiting
-        ? goOn(facts)
-        : new LoopStep.Nothing();
+    if (!rows.drivenHere()) {
+      return new LoopStep.Nothing();
+    }
+    return rows.owed() instanceof Owed.Waiting ? goOn(facts) : answered(facts);
   }
 
   /**
@@ -185,7 +229,8 @@ final class LoopDecision {
     var retries = MAX_ERRORED_RETRIES;
     return switch (facts.rows().due()) {
       case Owed.Retry(var review) when facts.erroredAttempts() >= retries ->
-          new LoopStep.Escalate(review, ReviewNarration.erroredOut(retries, review.iteration()));
+          new LoopStep.Escalate(
+              review, ReviewNarration.erroredOut(retries, review.iteration(), review.error()));
       case Owed.Retry(var review) -> fit(facts, () -> new LoopStep.StartReview(review.iteration()));
       case Owed.Advance(var review) -> fit(facts, () -> new LoopStep.Resume(review));
       case Owed.Fix(var review) -> fit(facts, () -> fix(facts, review));

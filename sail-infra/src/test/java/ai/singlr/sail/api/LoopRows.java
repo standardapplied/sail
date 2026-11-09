@@ -9,6 +9,7 @@ import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -56,7 +57,7 @@ final class LoopRows {
         PROJECT,
         "Test spec",
         status,
-        null,
+        NODE,
         "claude-code",
         null,
         null,
@@ -108,8 +109,24 @@ final class LoopRows {
     return run(id, NODE, role, reviewId, "stopped", ENDED);
   }
 
+  /** A run this box executed that ended at {@link #ENDED} with {@code exitCode}. */
+  static RunStore.RunRow exited(String id, String role, String reviewId, int exitCode) {
+    return run(id, NODE, role, reviewId, "stopped", ENDED, exitCode);
+  }
+
   static RunStore.RunRow run(
       String id, String node, String role, String reviewId, String status, Instant completedAt) {
+    return run(id, node, role, reviewId, status, completedAt, completedAt == null ? null : 0);
+  }
+
+  private static RunStore.RunRow run(
+      String id,
+      String node,
+      String role,
+      String reviewId,
+      String status,
+      Instant completedAt,
+      Integer exitCode) {
     return new RunStore.RunRow(
         id,
         PROJECT,
@@ -122,7 +139,7 @@ final class LoopRows {
         null,
         null,
         status,
-        completedAt == null ? null : 0,
+        exitCode,
         null,
         null,
         RECORDED,
@@ -177,9 +194,33 @@ final class LoopRows {
     private List<LoopFacts.Aged> failedStage = List.of();
     private long erroredAttempts;
     private boolean holderEnded;
+    private MessageStore.Asked asked;
 
     Facts spec(SpecStatus status) {
       this.spec = status == null ? null : LoopRows.spec(status);
+      return this;
+    }
+
+    Facts reassigned(String assignee) {
+      this.spec =
+          new SpecStore.SpecRow(
+              spec.id(),
+              spec.project(),
+              spec.title(),
+              spec.status(),
+              assignee,
+              spec.agent(),
+              spec.model(),
+              spec.reasoningEffort(),
+              spec.branch(),
+              spec.priority(),
+              spec.createdBy(),
+              spec.createdAt(),
+              spec.updatedAt(),
+              spec.updatedBy(),
+              spec.dependsOn(),
+              spec.repos(),
+              spec.roomId());
       return this;
     }
 
@@ -226,6 +267,12 @@ final class LoopRows {
       return this;
     }
 
+    /** The newest loop run's last word in the room: a question, answered or not. */
+    Facts asked(String question, boolean answered) {
+      this.asked = new MessageStore.Asked("question-1", question, answered);
+      return this;
+    }
+
     LoopFacts build() {
       var rows =
           new LoopFacts.Rows(
@@ -236,7 +283,15 @@ final class LoopRows {
               serving,
               Optional.ofNullable(newest),
               holderEnded);
-      return new LoopFacts(PROJECT, SPEC, rows, pipeline, open, failedStage, erroredAttempts);
+      return new LoopFacts(
+          PROJECT,
+          SPEC,
+          rows,
+          pipeline,
+          open,
+          failedStage,
+          erroredAttempts,
+          Optional.ofNullable(asked));
     }
   }
 }

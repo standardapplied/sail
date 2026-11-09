@@ -9,11 +9,14 @@ import ai.singlr.sail.api.LoopFacts.Pipeline;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.ReviewPipelineConfig.StageType;
 import ai.singlr.sail.config.RunStatus;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -25,6 +28,7 @@ final class LoopFactsReader {
   private final ReviewStore reviews;
   private final RunStore runs;
   private final Supplier<String> localHandle;
+  private MessageStore messages;
 
   LoopFactsReader(
       SpecStore specs, ReviewStore reviews, RunStore runs, Supplier<String> localHandle) {
@@ -32,6 +36,11 @@ final class LoopFactsReader {
     this.reviews = reviews;
     this.runs = runs;
     this.localHandle = localHandle;
+  }
+
+  /** Reads what runs said in their rooms from {@code messages}: the questions they ended on. */
+  void useMessages(MessageStore messages) {
+    this.messages = messages;
   }
 
   /** A reader for one event: a project's pipeline is resolved at its first read, once. */
@@ -54,7 +63,25 @@ final class LoopFactsReader {
         pipeline,
         fixDue.map(review -> reviews.openFindingsForReview(review.id())).orElse(List.of()),
         fixDue.flatMap(due -> rows.failedStage()).map(this::withAges).orElse(List.of()),
-        rows.review().map(this::erroredAttempts).orElse(0L));
+        rows.review().map(this::erroredAttempts).orElse(0L),
+        asked(rows));
+  }
+
+  /**
+   * The question the spec's newest loop run left as its last word in the spec's room, once that
+   * run, this box's, has ended: under any of the identities it posted as.
+   */
+  private Optional<MessageStore.Asked> asked(LoopFacts.Rows rows) {
+    var ended =
+        rows.newestLoopRun()
+            .filter(run -> run.ownedBy(localHandle.get()) && RunStatus.isTerminal(run.status()));
+    if (messages == null || ended.isEmpty() || rows.spec().isEmpty()) {
+      return Optional.empty();
+    }
+    var run = ended.get();
+    var principals = new LinkedHashSet<>(runs.principals(run.id()));
+    Optional.ofNullable(run.principal()).ifPresent(principals::add);
+    return messages.lastQuestion(rows.spec().get().roomIdOrIdentity(), List.copyOf(principals));
   }
 
   /** What the rows say of {@code specId}'s loop, as they stand now. */

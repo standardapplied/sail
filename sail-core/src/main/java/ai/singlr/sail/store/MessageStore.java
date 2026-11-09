@@ -250,6 +250,59 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   }
 
   /**
+   * A question a run left as its last word in a room, and whether it has been answered since.
+   *
+   * @param id the question's message id
+   * @param body what it asked
+   * @param answered whether someone who steers the room's agents ({@link RoomStore#steering}) has
+   *     replied since, so the answer reaches the run's lane when it goes on
+   */
+  public record Asked(String id, String body, boolean answered) {}
+
+  /**
+   * The question {@code principals}, the identities of one run, left as their last word in {@code
+   * roomId}: their newest message there, when it is a question. Empty when they said nothing there,
+   * or their last word asked nothing, as when a run answers its own question by going on.
+   */
+  public Optional<Asked> lastQuestion(String roomId, List<String> principals) {
+    if (principals.isEmpty()) {
+      return Optional.empty();
+    }
+    var authors = String.join(", ", Collections.nCopies(principals.size(), "?"));
+    var arguments = new ArrayList<Object>();
+    arguments.add(roomId);
+    arguments.add(reader());
+    arguments.addAll(principals);
+    return db.queryOne(
+            "SELECT "
+                + COLUMNS
+                + " FROM room_messages WHERE room_id = ?1 AND "
+                + readable("room_messages.id", 2)
+                + " AND author IN ("
+                + authors
+                + ") ORDER BY id DESC LIMIT 1",
+            MessageStore::map,
+            arguments.toArray())
+        .filter(MessageRow::question)
+        .map(question -> new Asked(question.id(), question.body(), answered(question)));
+  }
+
+  private boolean answered(MessageRow question) {
+    return !db.query(
+            "SELECT 1 FROM room_messages h WHERE h.room_id = ?1 AND h.id > ?2"
+                + " AND h.author NOT LIKE '%/%' AND h.author != 'sail' AND "
+                + RoomStore.steering("h.author", "h.room_id", "NULL")
+                + " AND "
+                + readable("h.id", 3)
+                + " LIMIT 1",
+            row -> 1,
+            question.roomId(),
+            question.id(),
+            reader())
+        .isEmpty();
+  }
+
+  /**
    * Messages of {@code roomId} its reader may see whose authors steer its agents ({@link
    * RoomStore#steering}), the run's own FDE among them, absent from {@code runId}'s delivery ledger
    * and not authored by {@code excludeAuthor} (a run is never told its own story), oldest first,

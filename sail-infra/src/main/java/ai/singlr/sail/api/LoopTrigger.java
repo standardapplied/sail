@@ -49,6 +49,12 @@ sealed interface LoopTrigger {
   /** An operator stopped {@code run}: its cancel, or any stop of a run their stop claimed. */
   record OperatorStopped(RunStore.RunRow run) implements LoopTrigger {}
 
+  /**
+   * Someone posted in the spec's conversation: the answer, perhaps, that the build or fix agent
+   * which ended on its question waits for ({@link LoopFacts#asked}).
+   */
+  record Answered() implements LoopTrigger {}
+
   /** A stop freed whatever its run held, which a review this box drives may be waiting for. */
   record Freed() implements LoopTrigger {}
 

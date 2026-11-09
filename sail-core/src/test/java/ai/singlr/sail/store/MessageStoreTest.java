@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -505,6 +506,35 @@ class MessageStoreTest {
 
     messages.append("room", "ada", "the first", null);
     assertEquals(Map.of(), messages.openQuestions());
+  }
+
+  @Test
+  void aRunsLastWordIsTheQuestionItLeftUntilItsOwnerAnswersOrItSpeaksAgain() {
+    new FdeStore(db).add("mo", "Mo", null);
+    var run = List.of("claude/r1", "claude/fix-r1");
+    messages.append("room", "claude/r1", "Reading the build first.", null);
+    assertEquals(Optional.empty(), messages.lastQuestion("room", run), "it asked nothing");
+
+    var asked =
+        messages.append("room", "claude/fix-r1", "Which JDK?", null, MessageStore.Mark.QUESTION);
+    messages.append("room", "claude/r2", "Another run's", null, MessageStore.Mark.QUESTION);
+    messages.append("room", "mo", "21", null);
+    assertEquals(
+        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", false)),
+        messages.lastQuestion("room", run),
+        "a member's reply never reaches the agent, so it answers nothing");
+
+    messages.append("room", "ada", "25", null);
+    assertEquals(
+        Optional.of(new MessageStore.Asked(asked.id(), "Which JDK?", true)),
+        messages.lastQuestion("room", run));
+
+    messages.append("room", "claude/r1", "Going with 25.", null);
+    assertEquals(
+        Optional.empty(),
+        messages.lastQuestion("room", run),
+        "a run that spoke after its question no longer waits on it");
+    assertEquals(Optional.empty(), messages.lastQuestion("room", List.of()));
   }
 
   @Test

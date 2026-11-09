@@ -149,7 +149,60 @@ public final class RunReservation {
       AgentUnit unit,
       ProjectDefinition config,
       Runnable alongside) {
-    return switch (claim(
+    return switch (dispatchClaim(
+        runId, project, specId, roomId, boxHandle, role, repos, agentType, branch, task, unit,
+        config, alongside)) {
+      case Claim.Claimed claimed -> claimed.credential();
+      case Claim.Held held -> throw overlapRefusal(held.conflict());
+    };
+  }
+
+  /**
+   * Reserves a build's run through the gate a dispatch passes, as the loop does when it resumes a
+   * build: a claim another run holds is an answer, {@link Claim.Held}, and nothing is written.
+   */
+  public Claim reserveBuild(
+      String runId,
+      String project,
+      String specId,
+      String boxHandle,
+      List<String> repos,
+      String agentType,
+      String branch,
+      String task,
+      AgentUnit unit,
+      ProjectDefinition config) {
+    return dispatchClaim(
+        runId,
+        project,
+        specId,
+        null,
+        boxHandle,
+        Lane.BUILD.wire(),
+        repos,
+        agentType,
+        branch,
+        task,
+        unit,
+        config,
+        () -> {});
+  }
+
+  private Claim dispatchClaim(
+      String runId,
+      String project,
+      String specId,
+      String roomId,
+      String boxHandle,
+      String role,
+      List<String> repos,
+      String agentType,
+      String branch,
+      String task,
+      AgentUnit unit,
+      ProjectDefinition config,
+      Runnable alongside) {
+    return claim(
         runId,
         project,
         specId,
@@ -170,10 +223,7 @@ public final class RunReservation {
                 unit.logPath(),
                 unit.unitName(),
                 configuredMaxDuration(config, role),
-                alongside))) {
-      case Claim.Claimed claimed -> claimed.credential();
-      case Claim.Held held -> throw overlapRefusal(held.conflict());
-    };
+                alongside));
   }
 
   /** How a claim on a spec's repos was answered. */
