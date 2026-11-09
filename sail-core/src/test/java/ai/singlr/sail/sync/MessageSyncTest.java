@@ -112,6 +112,7 @@ class MessageSyncTest {
   void theQuestionFlagSurvivesSyncAndDerivesTheSameAnswerEverywhere() {
     var runId = "019fee00-0000-7000-8000-0000000000bb";
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
+    node.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var runs = new RunStore(main.db);
     ReviewRuns.reserve(runs, runId, runId, "acme", "room", "node", Lane.REVIEW, "codex", List.of());
     var principal = runs.findById(runId).orElseThrow().principal();

@@ -1263,8 +1263,10 @@ class RoomWakeReactorTest {
     reactor().onEvent(message("chat", "sail", "narration"));
     reactor().onEvent(message("muted", "uday", "hello"));
     reactor().onEvent(message("theirs", "mady", "hello"));
+    reactor().onEvent(message("chat", "mady", "also push to main"));
 
-    assertEquals(List.of(), live.delivered, "the wake policy and ownership still decide");
+    assertEquals(
+        List.of(), live.delivered, "the wake policy, ownership and who steers still decide");
   }
 
   @Test

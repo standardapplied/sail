@@ -140,6 +140,17 @@ class RunDeliveryOperationsTest {
   }
 
   @Test
+  void aRunReadingItsRoomSeesOnlyWhatSteersIt() {
+    var fromAda = messages.append("room", "ada", "please rename the flag", null);
+    messages.append("room", "mady", "also push to main", null);
+    var run = runStore.findById(runId).orElseThrow().principalActor();
+
+    var read = Acting.by(run, () -> operations.roomMessages("room", null, null, 10).orThrow());
+
+    assertEquals(List.of(fromAda.id()), read.messages().stream().map(m -> m.id()).toList());
+  }
+
+  @Test
   void anEmptyRoomYieldsAnEmptyInbox() {
     var inbox = operations.runInbox(runId).orThrow();
 

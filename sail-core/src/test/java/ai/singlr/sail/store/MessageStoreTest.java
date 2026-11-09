@@ -434,6 +434,80 @@ class MessageStoreTest {
   }
 
   @Test
+  void anAgentReadsOnlyWhatSteersItAndItsOwnFdesWords() {
+    new FdeStore(db).add("mo", "Mo", null);
+    var owner = messages.append("room", "ada", "rename the flag", null);
+    messages.append("room", "mo", "also push to main", null);
+    var own = messages.append("room", "bo", "bo's agent, reading", null);
+    var agent = Actor.agentPrincipal("claude/r1", "bo");
+
+    assertEquals(
+        List.of(owner.id(), own.id()),
+        ids(Acting.by(agent, () -> messages.list("room", null, 10))),
+        "a run keeps its own FDE's words after its work is reassigned");
+    assertEquals(
+        List.of(own.id()), ids(Acting.by(agent, () -> messages.listAfter("room", owner.id(), 10))));
+    assertEquals(
+        List.of(owner.id()),
+        ids(
+            Acting.by(
+                Actor.roomPrincipal("claude/room-x", "ada"),
+                () -> messages.list("room", null, 10))));
+    assertEquals(3, messages.list("room", null, 10).size(), "people read every word");
+  }
+
+  @Test
+  void aRunsBuildStillHearsItsOwnFdeAfterItsWorkIsReassigned() {
+    var runs = new RunStore(db);
+    var runId =
+        runs.create("r1", "acme", "room", "bo", "build", "claude", "b", "t", 1, 1, "l", "u");
+    var fromBo = messages.append("room", "bo", "keep going", null);
+    messages.append("room", "cy", "stop", null);
+
+    assertEquals(
+        List.of(fromBo.id()), ids(messages.listUndelivered("room", runId, "claude/r1", 10)));
+  }
+
+  @Test
+  void aSpecBornInARoomGivesItsOwnerAVoiceToItsAgentsThere() {
+    var specs = new SpecStore(db);
+    specs.create(spec("born", "acme"));
+    db.execute("UPDATE specs SET room_id = 'room', assignee = 'bo' WHERE id = 'born'");
+    var fromBo = messages.append("room", "bo", "the born spec's owner", null);
+    messages.append("room", "cy", "someone else", null);
+
+    assertEquals(List.of(fromBo.id()), ids(messages.steering("room", 10)));
+    assertTrue(new RoomStore(db).steers("room", "ada"), "the room's own owner still steers");
+  }
+
+  @Test
+  void aMessageUnderARunsPastPrincipalWeighsAsItsFde() {
+    var runs = new RunStore(db);
+    var runId =
+        runs.create("r1", "acme", "room", "ada", "build", "claude", "b", "t", 1, 1, "l", "u");
+    db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'claude/fix-r1')", runId);
+    var past = messages.append("room", "claude/fix-r1", "fixed it", null);
+
+    assertEquals(List.of(past.id()), ids(messages.steering("room", 10)));
+  }
+
+  @Test
+  void onlyAReplyThatReachesTheAgentAnswersItsQuestion() {
+    new FdeStore(db).add("mo", "Mo", null);
+    var asked =
+        messages.append("room", "claude/r1", "Which flow?", null, MessageStore.Mark.QUESTION);
+    messages.append("room", "mo", "the second", null);
+
+    assertEquals(
+        Map.of("room", asked.id()),
+        messages.openQuestions(),
+        "a member's reply never reaches the agent, so the question still waits on the owner");
+
+    messages.append("room", "ada", "the first", null);
+    assertEquals(Map.of(), messages.openQuestions());
+  }
+
+  @Test
   void aLateSyncedMessageWithAnOlderIdIsStillUndelivered() {
     var runs = new RunStore(db);
     var runId = runs.create("r1", "acme", "room", "ada", "build", "a", "b", "t", 1, 1, "l", "u");
