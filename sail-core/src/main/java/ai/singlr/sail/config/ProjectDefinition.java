@@ -14,6 +14,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -537,6 +538,31 @@ public record ProjectDefinition(
           null);
     }
 
+    /**
+     * The branch prefix a definition means when it names none: what {@code project create} writes.
+     */
+    public static final String DEFAULT_BRANCH_PREFIX = "agent/";
+
+    private static final boolean DEFAULT_AUTO_BRANCH = true;
+    private static final boolean DEFAULT_AUTO_SNAPSHOT = true;
+
+    /**
+     * The agent section {@code project create} writes for {@code type}: branches under {@link
+     * #DEFAULT_BRANCH_PREFIX} and a snapshot before a run, the values a definition that leaves out
+     * {@code auto_branch}, {@code branch_prefix} or {@code auto_snapshot} also means.
+     */
+    public static Agent created(String type, List<String> install) {
+      return new Agent(
+          type,
+          DEFAULT_AUTO_BRANCH,
+          DEFAULT_BRANCH_PREFIX,
+          DEFAULT_AUTO_SNAPSHOT,
+          install,
+          null,
+          null,
+          null);
+    }
+
     static Agent fromMap(Map<String, Object> map) {
       Fields.only(
           map,
@@ -556,9 +582,10 @@ public record ProjectDefinition(
       var agent =
           new Agent(
               Fields.text(map, "type", "agent.type"),
-              Fields.bool(map, "auto_branch", "agent.auto_branch"),
-              Fields.text(map, "branch_prefix", "agent.branch_prefix"),
-              Fields.bool(map, "auto_snapshot", "agent.auto_snapshot"),
+              Fields.bool(map, "auto_branch", "agent.auto_branch", DEFAULT_AUTO_BRANCH),
+              Objects.requireNonNullElse(
+                  Fields.text(map, "branch_prefix", "agent.branch_prefix"), DEFAULT_BRANCH_PREFIX),
+              Fields.bool(map, "auto_snapshot", "agent.auto_snapshot", DEFAULT_AUTO_SNAPSHOT),
               Fields.textList(map, "install", "agent.install"),
               Fields.textMap(map, "config", "agent.config"),
               Guardrails.fromBlock(map.get("guardrails"), Guardrails.BUILD_BLOCK).orElse(null),

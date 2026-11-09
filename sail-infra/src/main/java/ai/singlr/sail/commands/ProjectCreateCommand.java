@@ -261,7 +261,7 @@ public final class ProjectCreateCommand implements Runnable {
     if ("none".equalsIgnoreCase(type)) {
       return null;
     }
-    return new ProjectDefinition.Agent(type, true, "agent/", true, null, null, null, null);
+    return ProjectDefinition.Agent.created(type, null);
   }
 
   /**
@@ -285,7 +285,7 @@ public final class ProjectCreateCommand implements Runnable {
         }
       } while (ConsoleHelper.confirmNo("Add another?"));
     }
-    return new ProjectDefinition.Agent(agentType, true, "agent/", true, install, null, null, null);
+    return ProjectDefinition.Agent.created(agentType, install);
   }
 
   static String agentTypePrompt() {

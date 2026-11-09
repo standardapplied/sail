@@ -56,9 +56,9 @@ final class Fields {
     };
   }
 
-  static boolean bool(Map<String, Object> map, String key, String field) {
+  static boolean bool(Map<String, Object> map, String key, String field, boolean absent) {
     return switch (map.get(key)) {
-      case null -> false;
+      case null -> absent;
       case Boolean flag -> flag;
       default -> throw wrong(field, "true or false");
     };

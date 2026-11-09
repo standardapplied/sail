@@ -255,7 +255,9 @@ public final class RunCommand implements Runnable {
     if (config.agent() == null || !config.agent().autoBranch()) {
       return null;
     }
-    var prefix = Objects.requireNonNullElse(config.agent().branchPrefix(), "sail/");
+    var prefix =
+        Objects.requireNonNullElse(
+            config.agent().branchPrefix(), ProjectDefinition.Agent.DEFAULT_BRANCH_PREFIX);
     validateSafePath(prefix, "branch_prefix");
     return prefix + label;
   }

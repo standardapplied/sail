@@ -2212,6 +2212,7 @@ class SailOperationsTest {
             name: acme
             agent:
               type: claude-code
+              auto_snapshot: false
               guardrails:
                 max_duration: 6h
             pipeline:
@@ -3446,6 +3447,7 @@ class SailOperationsTest {
         name: acme
         agent:
           type: claude-code
+          auto_snapshot: false
         """;
   }
 
@@ -3459,6 +3461,7 @@ class SailOperationsTest {
             path: web
         agent:
           type: claude-code
+          auto_snapshot: false
         """;
   }
 
@@ -3476,6 +3479,7 @@ class SailOperationsTest {
             path: app
         agent:
           type: claude-code
+          auto_snapshot: false
           auto_branch: true
           branch_prefix: sail/
         """;
@@ -3495,6 +3499,7 @@ class SailOperationsTest {
         name: acme
         agent:
           type: claude-code
+          auto_snapshot: false
           guardrails:
             max_duration: 4h
             action: stop

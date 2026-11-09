@@ -16,8 +16,6 @@ import ai.singlr.sail.common.Strings;
  */
 public final class BranchPolicy {
 
-  private static final String DEFAULT_PREFIX = "sail/";
-
   private BranchPolicy() {}
 
   /**
@@ -27,8 +25,9 @@ public final class BranchPolicy {
    * <ol>
    *   <li>{@link Spec#branch()} when the spec explicitly pinned one — the engineer's choice always
    *       wins.
-   *   <li>{@code agent.branch_prefix} + {@link Spec#id()} — falling back to {@code "sail/"} when
-   *       the project hasn't customised the prefix.
+   *   <li>{@code agent.branch_prefix} + {@link Spec#id()} — falling back to {@link
+   *       ProjectDefinition.Agent#DEFAULT_BRANCH_PREFIX} when the project hasn't customised the
+   *       prefix.
    * </ol>
    *
    * The result is purely derived from configuration and the spec record; no git or container I/O
@@ -43,7 +42,7 @@ public final class BranchPolicy {
     }
     var prefix = config.agent().branchPrefix();
     if (Strings.isBlank(prefix)) {
-      prefix = DEFAULT_PREFIX;
+      prefix = ProjectDefinition.Agent.DEFAULT_BRANCH_PREFIX;
     }
     return prefix + spec.id();
   }

@@ -763,8 +763,8 @@ loop() {
   spec="loop-$(date -u +%H%M%S)"
   check "$run" "main gives acme the nocaptcha repo, JDK 21 and Maven" \
     on "$run" main "echo '[{\"url\":\"https://github.com/$LOOP_REPO.git\",\"path\":\"nocaptcha\"}]' | sudo sail project config set acme repos - && echo '{\"jdk\":21,\"maven\":\"3.9.9\"}' | sudo sail project config set acme runtimes -"
-  check "$run" "main installs $LOOP_AGENTS, the first to build and the next to review" \
-    on "$run" main "echo '{\"type\":\"${LOOP_AGENTS%% *}\",\"auto_branch\":true,\"branch_prefix\":\"agent/\",\"install\":[$(install_list)]}' | sudo sail project config set acme agent -"
+  check "$run" "main installs $LOOP_AGENTS, the first to build and the next to review, naming no flag" \
+    on "$run" main "echo '{\"type\":\"${LOOP_AGENTS%% *}\",\"install\":[$(install_list)]}' | sudo sail project config set acme agent -"
   check "$run" "every node syncs twice" sync_all "$run"
   check "$run" "eng holds the forge token where only root reads it" place_secret "$run" eng fleet-github-token gh
   check "$run" "eng registers its workstation key" registers_container_key "$run" eng
