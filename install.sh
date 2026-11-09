@@ -25,6 +25,7 @@ fi
 info()  { echo -e "${BOLD}$1${RESET}"; }
 ok()    { echo -e "${GREEN}$1${RESET}"; }
 fail()  { echo -e "${RED}$1${RESET}" >&2; exit 1; }
+fetch() { curl -fsSL --retry 4 --retry-delay 3 "$@"; }
 
 # --- Platform detection ---
 OS="$(uname -s)"
@@ -54,7 +55,7 @@ VERSION="${1:-latest}"
 
 if [ "$VERSION" = "latest" ]; then
   info "Fetching latest version..."
-  VERSION=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null \
+  VERSION=$(fetch "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null \
     | grep '"tag_name"' | head -1 | tr -d '", ' | sed 's/tag_name://' | sed 's/^v//')
   [ -n "$VERSION" ] || fail "Could not determine latest version from GitHub."
 fi
@@ -73,13 +74,13 @@ trap 'rm -f "$TMPFILE"' EXIT
 
 DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/${TAG}/${BINARY_NAME}"
 info "Downloading from GitHub Releases..."
-HTTP_CODE=$(curl -fsSL -w '%{http_code}' "$DOWNLOAD_URL" -o "$TMPFILE" 2>/dev/null || true)
+HTTP_CODE=$(fetch -w '%{http_code}' "$DOWNLOAD_URL" -o "$TMPFILE" 2>/dev/null || true)
 [ "$HTTP_CODE" = "200" ] || fail "Download failed (HTTP $HTTP_CODE). Check the version exists: $DOWNLOAD_URL"
 
 # --- Verify checksum ---
 info "Verifying checksum..."
 CHECKSUM_URL="https://github.com/${GITHUB_REPO}/releases/download/${TAG}/${BINARY_NAME}.sha256"
-EXPECTED=$(curl -fsSL "$CHECKSUM_URL" 2>/dev/null | awk '{print $1}' || true)
+EXPECTED=$(fetch "$CHECKSUM_URL" 2>/dev/null | awk '{print $1}' || true)
 if [ -z "$EXPECTED" ]; then
   fail "Checksum not available for $BINARY_NAME. Refusing to install unverifiable release asset."
 fi
