@@ -7,28 +7,17 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import ai.singlr.sail.api.AgentLogStreamer;
-import ai.singlr.sail.api.ApiRouter;
 import ai.singlr.sail.api.Event;
-import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.OperationHooks;
 import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.api.RateLimitGate;
-import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
-import ai.singlr.sail.api.SocketDoor;
-import ai.singlr.sail.api.SyncScheduler;
-import ai.singlr.sail.api.TestAuth;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostToken;
-import ai.singlr.sail.engine.ShellExec;
-import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
-import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
@@ -36,15 +25,11 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
-import com.sun.net.httpserver.HttpServer;
-import java.io.IOException;
-import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -74,15 +59,8 @@ class DoorParityTest {
   @TempDir Path tempDir;
   private Sqlite db;
   private String hostToken;
-  private final Map<String, Box> boxes = new HashMap<>();
+  private final Map<String, DoorBox> boxes = new HashMap<>();
   private final Map<String, String> tokens = new HashMap<>();
-
-  /** A person's box: its operations and its web door. */
-  private record Box(String person, SyncConfig config, SailOperations operations, HttpServer http) {
-    String url() {
-      return "http://127.0.0.1:" + http.getAddress().getPort();
-    }
-  }
 
   /**
    * A row's answer: allowed, or refused with {@code status} and {@code code}, in {@code message},
@@ -167,17 +145,18 @@ class DoorParityTest {
           specs.create(spec("in-r1", "acme", null).withRoomId("r1"));
         });
     Acting.as("uday", () -> specs.create(spec("a2", "acme", null)));
-    boxes.put("uday", box("uday", MAIN));
+    boxes.put("uday", DoorBox.open(db, tempDir, MAIN));
     for (var person : List.of("eng", "client", "obs")) {
       boxes.put(
-          person, box(person, new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", person, person)));
+          person,
+          DoorBox.open(
+              db, tempDir, new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", person, person)));
     }
   }
 
   @AfterEach
   void tearDown() {
-    boxes.values().forEach(box -> box.http().stop(0));
-    boxes.values().forEach(box -> box.operations().close());
+    boxes.values().forEach(DoorBox::close);
     db.close();
   }
 
@@ -372,18 +351,7 @@ class DoorParityTest {
                         hostToken,
                         "--no-sync")
                     .out())));
-    var box = boxes.get("client");
-    assertEquals(
-        acme,
-        ids(
-            SocketDoor.ask(
-                    box.operations(),
-                    box::person,
-                    "GET",
-                    "/v1/specs",
-                    new BoxCredentialStore(db).replace("client"),
-                    "")
-                .body()));
+    assertEquals(acme, ids(boxes.get("client").socket("GET", "/v1/specs", "").body()));
   }
 
   /** What each door said, by door. */
@@ -433,15 +401,7 @@ class DoorParityTest {
 
   /** The box credential at {@code person}'s own box's socket. */
   private Said socket(String person, String method, String path, String form) {
-    var box = boxes.get(person);
-    var response =
-        SocketDoor.ask(
-            box.operations(),
-            box::person,
-            method,
-            path,
-            new BoxCredentialStore(db).replace(person),
-            form);
+    var response = boxes.get(person).socket(method, path, form);
     return new Said(
         "socket",
         response.status() / 100 == 2
@@ -458,9 +418,9 @@ class DoorParityTest {
     var config = boxes.get(person).config();
     var command =
         new DispatchCommand(
-            dryRun -> new AcmeRuns(),
+            dryRun -> new DoorBox.AcmeRuns(),
             (shell, hooks) ->
-                operations(
+                DoorBox.wired(
                     OperationsFactory.create(
                         db,
                         shell,
@@ -472,6 +432,8 @@ class DoorParityTest {
                             hooks.dispatchListener(),
                             hooks.stopListener()),
                         SessionYield.NONE),
+                    db,
+                    tempDir,
                     config),
             () -> person);
     var ran =
@@ -506,42 +468,6 @@ class DoorParityTest {
         + error.get("action");
   }
 
-  private Box box(String person, SyncConfig config) throws IOException {
-    var operations =
-        operations(
-            OperationsFactory.create(
-                db,
-                new AcmeRuns(),
-                new EventBus(),
-                null,
-                SyncScheduler.disabled(),
-                SessionYield.NONE),
-            config);
-    var auth = TestAuth.sessions(db, config);
-    var http = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-    http.createContext(
-        "/",
-        new ApiRouter(
-            operations, auth, new RateLimitGate(), new AgentLogStreamer(auth), () -> person));
-    http.start();
-    return new Box(person, config, operations, http);
-  }
-
-  /** {@code operations} on the box {@code config} configures, over the one control plane. */
-  private SailOperations operations(SailOperations operations, SyncConfig config) {
-    return operations.useControlPlane(
-        db,
-        tempDir,
-        new SyncOperations(
-            db,
-            config.boxId(),
-            tempDir,
-            () -> config,
-            target -> {
-              throw new IOException("main is not asked here");
-            }));
-  }
-
   private static SpecStore.SpecRow spec(String id, String project, String assignee) {
     return new SpecStore.SpecRow(
         id,
@@ -560,25 +486,5 @@ class DoorParityTest {
         null,
         List.of(),
         List.of());
-  }
-
-  /** A host whose only container is acme's, running; every other command does nothing. */
-  private static final class AcmeRuns implements ShellExec {
-    @Override
-    public Result exec(List<String> command) {
-      return String.join(" ", command).startsWith("incus list")
-          ? new Result(0, "[{\"name\": \"acme\", \"status\": \"Running\", \"state\": {}}]", "")
-          : new Result(0, "", "");
-    }
-
-    @Override
-    public Result exec(List<String> command, Path workDir, Duration timeout) {
-      return exec(command);
-    }
-
-    @Override
-    public boolean isDryRun() {
-      return false;
-    }
   }
 }
