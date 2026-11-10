@@ -111,6 +111,7 @@ class SpecAuthorityTest {
         refuses("a room principal cannot create", ROOM, null, ownRoomCreate, Kind.READ_ONLY),
         refuses("a viewer's push cannot create", VIEWER_SYNC, null, ownRoomCreate, Kind.READ_ONLY),
         allows("a create in its own room may name anyone", OTHER_API, null, namingOther),
+        allows("a create in its own room may name another FDE", OWNER_API, null, namingOther),
         allows("the room's owner is born into it", OWNER_API, null, inLobby),
         allows("an agent of the room's owner is born into it", AGENT, null, inLobby),
         allows("an admin is born into any room", ADMIN, null, inLobby),
