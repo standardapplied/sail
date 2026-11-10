@@ -18,7 +18,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
@@ -240,7 +239,7 @@ class PushesBaselineTest {
 
   /** As {@link #answer(World, Actor, SyncWire.Push)}, once {@code first} has run in the session. */
   private static String answer(World world, Actor pusher, SyncWire.Push push, Runnable first) {
-    var box = Objects.requireNonNullElse(pusher.handle(), "anonymous") + "-box";
+    var box = pusher.handle() + "-box";
     var held = List.copyOf(world.store(push.type()).syncEntityIds());
     var request =
         String.join(

@@ -574,7 +574,7 @@ class SyncBlobTest {
         var node = new SyncBox(dir, "node")) {
       new FileStore(node.db)
           .put("proj", "binary", new java.io.ByteArrayInputStream(new byte[] {1, 2, 3}), 0644);
-      try (var link = SyncBox.connect(main.server(Actor.sync(null, Role.VIEWER)), node)) {
+      try (var link = SyncBox.connect(main.server(Actor.sync("node", Role.VIEWER)), node)) {
         var report =
             link.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
         assertNull(report.failure());

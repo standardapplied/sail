@@ -207,17 +207,6 @@ class ScopedSyncServerTest {
         round.roster().stream().map(fde -> fde.get("email")).toList());
   }
 
-  @Test
-  void aSessionWithNoTokenReceivesNoRowAndNoRoster() throws Exception {
-    for (var token : new String[] {null, "", "sess_never-issued"}) {
-      var round = roundAs(token);
-
-      assertEquals(ProjectScope.none(), round.scope());
-      assertEquals(0L, count("SELECT count(*) FROM change_log"));
-      assertEquals(List.of(), round.roster());
-    }
-  }
-
   private record Round(ProjectScope scope, List<Map<String, Object>> roster) {}
 
   /** One round of every type over a session main authenticates with {@code token}. */
@@ -230,7 +219,7 @@ class ScopedSyncServerTest {
         Thread.ofVirtual()
             .start(
                 () -> {
-                  try {
+                  try (toClient) {
                     SyncServerCommand.serve(main, "main", token, serverIn, toClient);
                   } catch (IOException e) {
                     throw new UncheckedIOException(e);

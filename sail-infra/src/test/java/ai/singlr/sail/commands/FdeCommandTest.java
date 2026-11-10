@@ -7,16 +7,20 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerAuthorizedKeys;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -684,6 +688,16 @@ class FdeCommandTest {
             + "' and pair again.",
         refusal);
     assertNothingWritten("ada");
+  }
+
+  /** {@code handle} on this box's copy of main's roster, with {@code role}. */
+  private FdeStore.Fde replicatedAs(String handle, String role) {
+    return inDb(
+        db -> {
+          new FdeStore(db)
+              .replicate(handle, null, null, role, "active", Instant.parse("2026-10-01T00:00:00Z"));
+          return new FdeStore(db).byHandle(handle).orElseThrow();
+        });
   }
 
   private FdeStore.Fde replicated(String handle, String email) {
@@ -1812,6 +1826,7 @@ class FdeCommandTest {
   @Test
   void aNodeRefusesToRemoveWithTheRosterSentence() {
     main = "sail@main";
+    replicatedAs("ada", "admin");
 
     assertEquals(1, fde("rm", "ada", "--force"));
     assertEquals(FdeCommand.rosterEditOnNodeMessage("Removing an FDE"), refusal);
@@ -1946,6 +1961,7 @@ class FdeCommandTest {
   @Test
   void aNodeRefusesToAddGrantOrRevokeWithTheRosterSentence() {
     main = "sail@main";
+    var ada = replicatedAs("ada", "admin");
 
     assertEquals(1, fde("add", "nia", "--scoped"));
     assertEquals(FdeCommand.rosterEditOnNodeMessage("Adding an FDE"), refusal);
@@ -1953,6 +1969,55 @@ class FdeCommandTest {
     assertEquals(FdeCommand.rosterEditOnNodeMessage("Granting a project"), refusal);
     assertEquals(1, fde("revoke", "nia", "alpha"));
     assertEquals(FdeCommand.rosterEditOnNodeMessage("Revoking a project"), refusal);
+    assertEquals(List.of(ada), inDb(db -> new FdeStore(db).list()));
+  }
+
+  @Test
+  void aMemberOnTheirNodeIsToldOnlyAnAdminManagesPeopleBeforeWhereTheRosterLives() {
+    main = "sail@main";
+    var eng = replicatedAs("ada", "member");
+
+    for (var edit :
+        List.of(
+            List.of("add", "zed", "--name", "Zed"),
+            List.of("update", "ada", "--name", "Eng"),
+            List.of("grant", "ada", "alpha"),
+            List.of("revoke", "ada", "alpha"),
+            List.of("rm", "ada", "--force"))) {
+      err.reset();
+      assertEquals(1, fde(edit.toArray(String[]::new)), edit.toString());
+
+      var refusal = assertInstanceOf(ApiException.class, refused, edit.toString());
+      assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, refusal.failure().errorCode());
+      assertEquals("Only an admin may manage people.", refusal.getMessage());
+      assertEquals("Ask an admin to do it.", refusal.remedy().plain());
+      assertEquals(
+          List.of("  ✗ Only an admin may manage people.", "  Ask an admin to do it."),
+          err.toString(StandardCharsets.UTF_8).lines().toList());
+    }
+    assertEquals(List.of(eng), inDb(db -> new FdeStore(db).list()));
+  }
+
+  @Test
+  void aViewerOnTheirNodeIsToldTheirCredentialIsReadOnly() {
+    main = "sail@main";
+    replicatedAs("ada", "viewer");
+
+    assertEquals(1, fde("add", "zed"));
+
+    var refusal = assertInstanceOf(ApiException.class, refused);
+    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, refusal.failure().errorCode());
+    assertEquals("Your credential is read-only and cannot manage people.", refusal.getMessage());
+    assertEquals("Ask an admin for a member or admin credential.", refusal.remedy().plain());
+  }
+
+  @Test
+  void aNodeThatCannotPlaceItsFdeSaysSoBeforeAnyRosterEdit() {
+    main = "sail@main";
+
+    assertEquals(1, fde("add", "zed"));
+
+    assertEquals(CliOperator.unplaced("ada").getMessage(), refusal);
     assertTrue(inDb(db -> new FdeStore(db).list()).isEmpty());
   }
 
@@ -2185,6 +2250,7 @@ class FdeCommandTest {
     assertEquals("Unknown FDE 'ghost'.", refusal);
 
     main = "sail@main";
+    replicatedAs("ada", "admin");
     assertEquals(1, fde("update", "client", "--scoped"));
     assertEquals(FdeCommand.rosterEditOnNodeMessage("Updating an FDE"), refusal);
   }

@@ -78,7 +78,11 @@ class PasskeyServiceTest {
     var ceremony = service.startRegistration(handle);
     var response = authenticator.register(challengeOf(ceremony), ORIGIN);
     return service.finishRegistration(
-        ceremony.challengeId(), response.clientDataJson(), response.attestationObject(), "laptop");
+        ceremony.challengeId(),
+        null,
+        response.clientDataJson(),
+        response.attestationObject(),
+        "laptop");
   }
 
   @Test
@@ -144,7 +148,7 @@ class PasskeyServiceTest {
     var ceremony = service.startRegistration("uday");
     var response = authenticator.register(challengeOf(ceremony), ORIGIN);
     service.finishRegistration(
-        ceremony.challengeId(), response.clientDataJson(), response.attestationObject(), " ");
+        ceremony.challengeId(), null, response.clientDataJson(), response.attestationObject(), " ");
     var stored = credentials.findByCredentialId(authenticator.credentialId()).orElseThrow();
     assertTrue(
         stored.label().matches("passkey · \\d{4}-\\d{2}-\\d{2}"),
@@ -231,7 +235,11 @@ class PasskeyServiceTest {
             PasskeyException.class,
             () ->
                 service.finishRegistration(
-                    "wac_missing", response.clientDataJson(), response.attestationObject(), null));
+                    "wac_missing",
+                    null,
+                    response.clientDataJson(),
+                    response.attestationObject(),
+                    null));
     assertEquals(PasskeyException.Kind.BAD_REQUEST, e.kind());
   }
 
@@ -245,6 +253,7 @@ class PasskeyServiceTest {
             () ->
                 service.finishRegistration(
                     ceremony.challengeId(),
+                    null,
                     response.clientDataJson(),
                     response.attestationObject(),
                     null));
@@ -262,6 +271,7 @@ class PasskeyServiceTest {
             () ->
                 service.finishRegistration(
                     ceremony.challengeId(),
+                    null,
                     response.clientDataJson(),
                     response.attestationObject(),
                     null));
@@ -364,5 +374,134 @@ class PasskeyServiceTest {
                     assertion.signature(),
                     "some-other-fde-id".getBytes(StandardCharsets.UTF_8)));
     assertEquals(PasskeyException.Kind.UNAUTHORIZED, e.kind());
+  }
+
+  @Test
+  void aDisabledPersonStartsNoRegistration() {
+    disable("uday");
+
+    var e = assertThrows(PasskeyException.class, () -> service.startRegistration("uday"));
+
+    assertDisabled("uday", e);
+  }
+
+  @Test
+  void aRegistrationStartedBeforeTheDisableDoesNotFinishByTicketOrByAnAdmin() {
+    var byTicket = service.startRegistration("uday");
+    var byAdmin = service.startRegistration("uday");
+    disable("uday");
+
+    assertDisabled("uday", assertThrows(PasskeyException.class, () -> finish(byTicket, "uday")));
+    assertDisabled("uday", assertThrows(PasskeyException.class, () -> finish(byAdmin, null)));
+    assertEquals(0L, count("SELECT count(*) FROM webauthn_credentials"));
+  }
+
+  @Test
+  void aTicketFinishesOnlyTheRegistrationOfTheFdeItEnrolls() {
+    fdes.add("ada", null, null);
+    var udays = service.startRegistration("uday");
+
+    var e = assertThrows(PasskeyException.class, () -> finish(udays, "ada"));
+
+    assertEquals(PasskeyException.Kind.BAD_REQUEST, e.kind());
+    assertEquals(
+        "Registration challenge is not for the FDE this enrollment ticket enrolls.",
+        e.getMessage());
+    assertEquals(0L, count("SELECT count(*) FROM webauthn_credentials"));
+    assertEquals("uday", finish(service.startRegistration("uday"), "uday").fdeHandle());
+  }
+
+  @Test
+  void aRegistrationWhoseFdeIsGoneIsAnUnknownChallenge() {
+    var orphaned = service.startRegistration("uday");
+    removeWithoutCascade("uday");
+
+    var e = assertThrows(PasskeyException.class, () -> finish(orphaned, null));
+
+    assertEquals(PasskeyException.Kind.BAD_REQUEST, e.kind());
+    assertEquals("Registration challenge is unknown or expired.", e.getMessage());
+  }
+
+  @Test
+  void aPasskeyWhoseFdeIsGoneMintsNoSession() {
+    enroll("uday");
+    removeWithoutCascade("uday");
+    var login = service.startLogin();
+    var assertion = authenticator.assertResponse(challengeOf(login), ORIGIN);
+
+    var e =
+        assertThrows(
+            PasskeyException.class,
+            () ->
+                service.finishLogin(
+                    login.challengeId(),
+                    assertion.credentialId(),
+                    assertion.clientDataJson(),
+                    assertion.authenticatorData(),
+                    assertion.signature(),
+                    null));
+
+    assertEquals(PasskeyException.Kind.UNAUTHORIZED, e.kind());
+    assertEquals("Passkey authentication failed.", e.getMessage());
+    assertEquals(0L, count("SELECT count(*) FROM sessions"));
+  }
+
+  private PasskeyCeremonies.Registration finish(
+      PasskeyCeremonies.Ceremony ceremony, String enrolling) {
+    var response = new TestAuthenticator(RP_ID).register(challengeOf(ceremony), ORIGIN);
+    return service.finishRegistration(
+        ceremony.challengeId(),
+        enrolling,
+        response.clientDataJson(),
+        response.attestationObject(),
+        "laptop");
+  }
+
+  /** Removes {@code handle}'s row as a race between a lookup and a delete would leave it. */
+  private void removeWithoutCascade(String handle) {
+    db.execute("PRAGMA foreign_keys = OFF");
+    db.execute("DELETE FROM fdes WHERE handle = ?", handle);
+    db.execute("PRAGMA foreign_keys = ON");
+  }
+
+  @Test
+  void aDisabledPersonsPasskeyMintsNoSessionAndIsNotUsed() {
+    enroll("uday");
+    var signCount =
+        credentials.findByCredentialId(authenticator.credentialId()).orElseThrow().signCount();
+    disable("uday");
+    var login = service.startLogin();
+    var assertion = authenticator.assertResponse(challengeOf(login), ORIGIN);
+
+    var e =
+        assertThrows(
+            PasskeyException.class,
+            () ->
+                service.finishLogin(
+                    login.challengeId(),
+                    assertion.credentialId(),
+                    assertion.clientDataJson(),
+                    assertion.authenticatorData(),
+                    assertion.signature(),
+                    null));
+
+    assertDisabled("uday", e);
+    assertEquals(0L, count("SELECT count(*) FROM sessions"));
+    assertEquals(
+        signCount,
+        credentials.findByCredentialId(authenticator.credentialId()).orElseThrow().signCount());
+  }
+
+  private void disable(String handle) {
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = ?", handle);
+  }
+
+  private static void assertDisabled(String handle, PasskeyException e) {
+    assertEquals(PasskeyException.Kind.UNAUTHORIZED, e.kind());
+    assertEquals("FDE '" + handle + "' is disabled. Ask an admin to re-enable it.", e.getMessage());
+  }
+
+  private long count(String sql) {
+    return db.queryOne(sql, row -> row.integer(0)).orElseThrow();
   }
 }

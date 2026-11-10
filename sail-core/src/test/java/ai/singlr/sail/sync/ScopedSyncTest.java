@@ -1246,7 +1246,7 @@ class ScopedSyncTest {
   }
 
   @Test
-  void aScopedFdeWithNoGrantAndASessionWithNoFdeReceiveNothing() throws Exception {
+  void aScopedFdeWithNoGrantReceivesNothingOfAnyType() throws Exception {
     seed(main, A, "nia");
     seed(main, B, "uma");
 
@@ -1259,8 +1259,8 @@ class ScopedSyncTest {
           assertInstanceOf(
               SyncWire.Page.class,
               serve(
-                      main.server(Actor.sync(null, Role.VIEWER).withScope(ProjectScope.none())),
-                      SyncWire.Hello.of("1.0.0", "anon"),
+                      main.server(Actor.sync("nia", Role.VIEWER).withScope(ProjectScope.none())),
+                      SyncWire.Hello.of("1.0.0", "nia"),
                       new SyncWire.Pull(entity.type(), 0, 100))
                   .getLast());
       assertEquals(List.of(), page.entries(), entity.type());

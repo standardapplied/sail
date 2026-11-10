@@ -80,6 +80,11 @@ class SyncRpcServerTest {
     return new SyncRpcServer(Map.of(type, main), principal, FdeRoster.EMPTY);
   }
 
+  /** A server of {@code main}'s specs to a member's session. */
+  private static SyncRpcServer writer(MainReplica main) {
+    return server(main, "spec", Actor.sync("node", Role.MEMBER));
+  }
+
   private static List<SyncWire.Response> serveLines(
       SyncRpcServer server, int frame, List<String> lines) throws Exception {
     var out = new ByteStreams.Output();
@@ -148,7 +153,7 @@ class SyncRpcServerTest {
   @Test
   void contentRequiresAHandshakeAStoreAndTheCorrectExchangePhase() throws Exception {
     var fetch = new SyncWire.Fetch(List.of());
-    var withoutStore = new SyncRpcServer(new FakeMain(), true);
+    var withoutStore = writer(new FakeMain());
     assertInstanceOf(SyncWire.Refuse.class, serve(withoutStore, fetch).getFirst());
     assertEquals(
         "protocol", assertInstanceOf(SyncWire.Failed.class, after(withoutStore, fetch)).kind());
@@ -245,9 +250,7 @@ class SyncRpcServerTest {
             push("spec", new MainReplica.Offer("a", Map.of(), null)),
             new SyncWire.FetchFdes())) {
       var refusal =
-          assertInstanceOf(
-              SyncWire.Refuse.class,
-              serve(new SyncRpcServer(new FakeMain(), true), first).getFirst());
+          assertInstanceOf(SyncWire.Refuse.class, serve(writer(new FakeMain()), first).getFirst());
       assertEquals(Remedy.of("hello required"), refusal.reason());
     }
   }
@@ -256,7 +259,7 @@ class SyncRpcServerTest {
   void anUnknownOpBeforeHelloIsRefusedNamingTheRemedy() throws Exception {
     var fetch = "{\"op\": \"fetch\", \"entityType\": \"spec\", \"upgradeFloor\": \"0.34.0\"}";
     var out = new ByteStreams.Output();
-    new SyncRpcServer(new FakeMain(), true).serve(new ByteStreams.Input(fetch + "\n"), out);
+    writer(new FakeMain()).serve(new ByteStreams.Input(fetch + "\n"), out);
     var line = out.toString().strip();
     var refusal = assertInstanceOf(SyncWire.Refuse.class, SyncWire.decodeResponse(line));
     assertEquals(Remedy.of("upgrade to dev: ", Remedy.sail("upgrade")), refusal.reason());
@@ -267,9 +270,7 @@ class SyncRpcServerTest {
     var refusal =
         assertInstanceOf(
             SyncWire.Refuse.class,
-            serve(
-                    new SyncRpcServer(new FakeMain(), true),
-                    new SyncWire.Hello(SyncWire.PROTOCOL - 1, "0.58.0", "b"))
+            serve(writer(new FakeMain()), new SyncWire.Hello(SyncWire.PROTOCOL - 1, "0.58.0", "b"))
                 .getFirst());
     assertEquals(
         Remedy.of(
@@ -305,14 +306,12 @@ class SyncRpcServerTest {
     var welcome =
         assertInstanceOf(
             SyncWire.Welcome.class,
-            serve(
-                    new SyncRpcServer(new FakeMain(), true),
-                    new SyncWire.Hello(SyncWire.PROTOCOL, "1.0.9", "b"))
+            serve(writer(new FakeMain()), new SyncWire.Hello(SyncWire.PROTOCOL, "1.0.9", "b"))
                 .getFirst());
     assertEquals(
-        new SyncWire.Welcome(SyncWire.PROTOCOL, "dev", "main", "", FileLimits.DEFAULT_MAX),
+        new SyncWire.Welcome(SyncWire.PROTOCOL, "dev", "main", "node", FileLimits.DEFAULT_MAX),
         welcome,
-        "a session naming no FDE is welcomed as no one");
+        "the welcome names the FDE the session acts for");
   }
 
   @Test
@@ -322,9 +321,7 @@ class SyncRpcServerTest {
             new SyncWire.Hello(SyncWire.PROTOCOL, "1.0.0", null),
             new SyncWire.Hello(SyncWire.PROTOCOL, "1.0.0", " "))) {
       var refusal =
-          assertInstanceOf(
-              SyncWire.Refuse.class,
-              serve(new SyncRpcServer(new FakeMain(), true), hello).getFirst());
+          assertInstanceOf(SyncWire.Refuse.class, serve(writer(new FakeMain()), hello).getFirst());
       assertEquals(
           Remedy.of("hello names no box id: upgrade to dev: ", Remedy.sail("upgrade")),
           refusal.reason(),
@@ -334,8 +331,7 @@ class SyncRpcServerTest {
 
   @Test
   void aSecondHelloIsAProtocolFailureAndTheSessionStaysWelcomed() throws Exception {
-    var replies =
-        serve(new SyncRpcServer(new FakeMain(), true), HELLO, HELLO, new SyncWire.Heads());
+    var replies = serve(writer(new FakeMain()), HELLO, HELLO, new SyncWire.Heads());
     assertInstanceOf(SyncWire.Welcome.class, replies.get(0));
     assertEquals("protocol", assertInstanceOf(SyncWire.Failed.class, replies.get(1)).kind());
     assertInstanceOf(SyncWire.Tips.class, replies.get(2));
@@ -366,7 +362,7 @@ class SyncRpcServerTest {
   void aServerWithNoDatabaseBehindItNamesNothingRewound() throws Exception {
     var replies =
         serve(
-            new SyncRpcServer(new FakeMain(), true),
+            writer(new FakeMain()),
             HELLO,
             new SyncWire.Heads(Map.of("spec", new SyncState.Mark(9, 9, "a", "1-a"))));
 
@@ -546,7 +542,7 @@ class SyncRpcServerTest {
         assertInstanceOf(
             SyncWire.Results.class,
             after(
-                new SyncRpcServer(new FakeMain(), true),
+                writer(new FakeMain()),
                 push(
                     "spec",
                     new MainReplica.Offer("a", Map.of(), null),
@@ -559,8 +555,7 @@ class SyncRpcServerTest {
         .forEach(
             result -> assertEquals("1-x", assertInstanceOf(SyncWire.Accepted.class, result).rev()));
     var empty =
-        assertInstanceOf(
-            SyncWire.Results.class, after(new SyncRpcServer(new FakeMain(), true), push("spec")));
+        assertInstanceOf(SyncWire.Results.class, after(writer(new FakeMain()), push("spec")));
     assertTrue(empty.results().isEmpty());
   }
 
@@ -568,7 +563,7 @@ class SyncRpcServerTest {
   void aReadOnlySessionMayPullAndEachOfItsOffersIsDeniedWithMainsVersion() throws Exception {
     try (var main = new SyncBox("main")) {
       main.specs.create(SyncBox.spec("auth", "Auth", "pending"));
-      var server = main.server(Actor.sync(null, Role.VIEWER));
+      var server = main.server(Actor.sync("viewer", Role.VIEWER));
       var mainsRev = main.specs.latestRev("auth");
       var edited = new LinkedHashMap<>(main.replica.current("auth"));
       edited.put("title", "Viewer edit");
@@ -670,16 +665,13 @@ class SyncRpcServerTest {
             new SyncWire.Pull("bogus", 0, 10),
             new SyncWire.Need("bogus", List.of("a")),
             push("bogus", new MainReplica.Offer("a", Map.of(), null)))) {
-      var failed =
-          assertInstanceOf(
-              SyncWire.Failed.class, after(new SyncRpcServer(new FakeMain(), true), request));
+      var failed = assertInstanceOf(SyncWire.Failed.class, after(writer(new FakeMain()), request));
       assertTrue(failed.message().startsWith("bogus:"), failed.message());
       assertTrue(failed.message().contains("Unknown entity type"));
     }
     var limit =
         assertInstanceOf(
-            SyncWire.Failed.class,
-            after(new SyncRpcServer(new FakeMain(), true), new SyncWire.Pull("spec", 0, 0)));
+            SyncWire.Failed.class, after(writer(new FakeMain()), new SyncWire.Pull("spec", 0, 0)));
     assertEquals("protocol", limit.kind());
   }
 
@@ -704,14 +696,8 @@ class SyncRpcServerTest {
 
   @Test
   void anEmptyStreamOrAByeEndsTheSessionCleanly() throws Exception {
-    new SyncRpcServer(new FakeMain(), true)
-        .serve(new ByteStreams.Input(""), new ByteStreams.Output());
-    var replies =
-        serve(
-            new SyncRpcServer(new FakeMain(), true),
-            HELLO,
-            new SyncWire.Bye(),
-            new SyncWire.Heads());
+    writer(new FakeMain()).serve(new ByteStreams.Input(""), new ByteStreams.Output());
+    var replies = serve(writer(new FakeMain()), HELLO, new SyncWire.Bye(), new SyncWire.Heads());
     assertEquals(1, replies.size());
   }
 
@@ -722,12 +708,13 @@ class SyncRpcServerTest {
         assertInstanceOf(
             SyncWire.Fdes.class,
             after(
-                new SyncRpcServer(new FakeMain(), false, () -> roster), new SyncWire.FetchFdes()));
+                new SyncRpcServer(
+                    Map.of("spec", new FakeMain()), Actor.sync("node", Role.VIEWER), () -> roster),
+                new SyncWire.FetchFdes()));
     assertEquals("ada", fdes.fdes().getFirst().get("handle"));
     assertTrue(
         assertInstanceOf(
-                SyncWire.Fdes.class,
-                after(new SyncRpcServer(new FakeMain(), true), new SyncWire.FetchFdes()))
+                SyncWire.Fdes.class, after(writer(new FakeMain()), new SyncWire.FetchFdes()))
             .fdes()
             .isEmpty());
   }
@@ -815,11 +802,6 @@ class SyncRpcServerTest {
         "sumesh", seenPeer.get(), "the change_log written during the commit must name the pusher");
   }
 
-  private static SyncWire.Result serveRun(String handle, MainReplica.Offer offer) throws Exception {
-    return only(
-        after(server(new FakeMain(), "run", Actor.sync(handle, Role.MEMBER)), push("run", offer)));
-  }
-
   @Test
   void aPageEntryIsOneAtomicReadOfSnapshotAndRev() throws Exception {
     var torn =
@@ -851,7 +833,7 @@ class SyncRpcServerTest {
         assertInstanceOf(
             SyncWire.Page.class,
             after(
-                server(torn, "spec", Actor.sync(null, Role.MEMBER)),
+                server(torn, "spec", Actor.sync("node", Role.MEMBER)),
                 new SyncWire.Need("spec", List.of("auth"))));
     var entry = page.entries().getFirst();
     assertEquals("1-x", entry.rev(), "the rev must belong to the snapshot beside it");
@@ -881,7 +863,7 @@ class SyncRpcServerTest {
         };
     var response =
         after(
-            server(moved, "spec", Actor.sync(null, Role.MEMBER)),
+            server(moved, "spec", Actor.sync("node", Role.MEMBER)),
             push(
                 "spec",
                 new MainReplica.Offer("a", null, "1-x"),
@@ -896,13 +878,17 @@ class SyncRpcServerTest {
   }
 
   @Test
-  void aPrincipalWithoutAHandleHasItsRunOfferRefusedInsideTheBatch() throws Exception {
-    var refused =
-        assertInstanceOf(
-            SyncWire.Refused.class,
-            serveRun(null, new MainReplica.Offer("r1", Map.of("node", "ada"), null)));
-    assertEquals("r1", refused.id());
-    assertTrue(refused.reason().plain().contains("handle"), refused.reason().plain());
+  void aSyncSessionActsForAnFdeAndNoSessionIsNoOnes() {
+    for (var handle : new String[] {null, "", " "}) {
+      var failure =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> server(new FakeMain(), "run", Actor.sync(handle, Role.MEMBER)));
+      assertEquals(
+          "A sync session acts for an FDE, to whom main attributes every commit; this one names"
+              + " none",
+          failure.getMessage());
+    }
   }
 
   private static FakeMain remembering() {
@@ -930,7 +916,7 @@ class SyncRpcServerTest {
         after(
             new SyncRpcServer(
                 Map.of("spec", remembering()),
-                Actor.sync(null, Role.MEMBER),
+                Actor.sync("node", Role.MEMBER),
                 FdeRoster.EMPTY,
                 seen::add),
             push("spec", new MainReplica.Offer("auth", Map.of("status", "in_progress"), null)));
@@ -951,7 +937,7 @@ class SyncRpcServerTest {
         after(
             new SyncRpcServer(
                 Map.of("spec", rejecting),
-                Actor.sync(null, Role.MEMBER),
+                Actor.sync("node", Role.MEMBER),
                 FdeRoster.EMPTY,
                 quiet::add),
             push("spec", new MainReplica.Offer("auth", Map.of("status", "in_progress"), "1-x")));
@@ -970,7 +956,7 @@ class SyncRpcServerTest {
           after(
               new SyncRpcServer(
                   Map.of("spec", remembering()),
-                  Actor.sync(null, Role.MEMBER),
+                  Actor.sync("node", Role.MEMBER),
                   FdeRoster.EMPTY,
                   transition -> {
                     throw new IllegalStateException("slack is down");

@@ -90,7 +90,6 @@ class OneDecisionSweepTest {
   private static final String RULES = "ai/singlr/sail/authority/";
   private static final String STORES = "ai/singlr/sail/store/";
   private static final String SYNC_SERVER = "ai/singlr/sail/sync/SyncRpcServer";
-  private static final String EVERY_DOOR = "sail-every-door-asks-access";
   private static final String OWN_WORK = "sail-agents-act-on-their-own-work";
 
   /** Every member that still reads a role, a lane or a capability, and why it may. */
@@ -98,10 +97,6 @@ class OneDecisionSweepTest {
 
   private static Map<String, String> allowed() {
     var allowed = new TreeMap<String, String>();
-    for (var resolves :
-        List.of("commands/SyncServerCommand#principal", "ssh/SshGateway#authorize")) {
-      allowed.put("ai/singlr/sail/" + resolves, EVERY_DOOR);
-    }
     allowed.put(RULES + "EventAuthority#decide", OWN_WORK);
     allowed.put(API + "LocalApiRouter#messages", OWN_WORK);
     allowed.put(API + "LocalApiRouter#project", OWN_WORK);
