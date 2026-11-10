@@ -8,7 +8,10 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.engine.SpecCliHelper;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
@@ -33,8 +36,10 @@ import org.junit.jupiter.api.Test;
 /**
  * A2 by construction: a write is decided at exactly one of two points, main's commit for a pushed
  * revision and the journal for every other. Read from the compiled classes of every module: only
- * the journal and the message store append a revision to the change log; only they, and a rule
- * delegating to another, ask a write rule; and only main's commit takes a store's rule to hand it
+ * the journal and the message store append a revision to the change log or ask the seam that
+ * decides a write of this box's own ({@code WriteAuthority.local}, {@code admit}); only they, and a
+ * rule delegating to another, ask a write rule; only a rule asks {@code Access} what a revision
+ * takes ({@code WriteAuthority.refused}); and only main's commit takes a store's rule to hand it
  * one. A door that decides a row write, or journals one on its own, fails here.
  */
 class OneDecisionPointTest {
@@ -45,6 +50,7 @@ class OneDecisionPointTest {
   private static final String MESSAGES = STORES + "MessageStore";
   private static final String CHANGE_LOG = STORES + "ChangeLog";
   private static final String MAINS_COMMIT = "ai/singlr/sail/sync/StoreReplica";
+  private static final String SEAM = RULES + "WriteAuthority";
   private static final String DECIDES =
       "(Lai/singlr/sail/identity/Actor;Ljava/lang/String;Ljava/util/Map;Ljava/util/Map;)"
           + "Ljava/util/Optional;";
@@ -70,6 +76,10 @@ class OneDecisionPointTest {
       assertEquals(
           List.of(
               "ai/singlr/sail/api/OneDecisionPointTest$Leaky asks a write rule: SpecAuthority.decide",
+              "ai/singlr/sail/api/OneDecisionPointTest$Leaky asks the journal's seam:"
+                  + " WriteAuthority.local",
+              "ai/singlr/sail/api/OneDecisionPointTest$Leaky asks what a revision takes:"
+                  + " WriteAuthority.refused",
               "ai/singlr/sail/api/OneDecisionPointTest$Leaky journals a revision: ChangeLog.append",
               "ai/singlr/sail/api/OneDecisionPointTest$Leaky takes a store's rule:"
                   + " SpecStore.authority"),
@@ -85,6 +95,15 @@ class OneDecisionPointTest {
 
     void journal(ChangeLog log) {
       log.append("spec", "auth", "1-a", "local", false, "{}");
+    }
+
+    Optional<Refusal> local(WriteAuthority rule) {
+      return WriteAuthority.local(rule, "auth", null, null);
+    }
+
+    Optional<Refusal> take() {
+      return WriteAuthority.refused(
+          Actor.current(), WriteAuthority.Taking.of(Resources.people(), Action.MANAGE_PEOPLE));
     }
   }
 
@@ -103,6 +122,14 @@ class OneDecisionPointTest {
           && Set.of("append", "appendSynced", "appendAuthored").contains(method)
           && !Set.of(JOURNAL, MESSAGES, CHANGE_LOG).contains(name)) {
         found.add(name + " journals a revision: " + called);
+      }
+      if (owner.equals(SEAM)
+          && Set.of("local", "admit").contains(method)
+          && !Set.of(JOURNAL, MESSAGES).contains(name)) {
+        found.add(name + " asks the journal's seam: " + called);
+      }
+      if (owner.equals(SEAM) && method.equals("refused") && !name.startsWith(RULES)) {
+        found.add(name + " asks what a revision takes: " + called);
       }
       if (method.equals("decide")
           && member.type().stringValue().equals(DECIDES)
