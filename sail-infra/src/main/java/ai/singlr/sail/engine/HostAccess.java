@@ -9,6 +9,7 @@ import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
@@ -73,7 +74,9 @@ public record HostAccess(Sqlite db, RoleRule roles) {
               Resources.conversation(room.id(), room.project(), rooms.owners(room.id()))),
           () -> Refusals.roomNotFound(roomId));
     } catch (ApiException refused) {
-      throw Remedied.io(refused.getMessage(), refused.remedy());
+      throw refused.failure().errorCode() == ErrorCode.ROOM_NOT_FOUND
+          ? new IOException(refused.getMessage())
+          : Remedied.io(refused.getMessage(), refused.remedy());
     }
     if (!Objects.equals(room.project(), project)) {
       throw new IOException(

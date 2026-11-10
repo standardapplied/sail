@@ -12,10 +12,10 @@ import ai.singlr.sail.access.baseline.Cast;
 import ai.singlr.sail.access.baseline.Corpus;
 import ai.singlr.sail.access.baseline.World;
 import ai.singlr.sail.common.Remedied;
-import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.identity.Acting;
@@ -25,6 +25,8 @@ import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.SyncConflicts;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -272,6 +274,25 @@ class AccessDoorsBaselineTest {
                   ops.resolveConflict(
                       "spec", spec, new Resolution(Resolution.Strategy.MINE, null))));
     }
+    for (var strategy : Resolution.Strategy.values()) {
+      if (strategy != Resolution.Strategy.MERGE) {
+        doors.add(
+            new Door(
+                "resolve an open conflict of spec s-ada as " + strategy,
+                ops -> {
+                  parkConflict(world, "spec", "s-ada");
+                  return ops.resolveConflict("spec", "s-ada", new Resolution(strategy, null));
+                }));
+      }
+    }
+    doors.add(
+        new Door(
+            "resolve an open conflict of file acme/notes.md as MINE",
+            ops -> {
+              parkConflict(world, "file", "acme/notes.md");
+              return ops.resolveConflict(
+                  "file", "acme/notes.md", new Resolution(Resolution.Strategy.MINE, null));
+            }));
     var review = world.id("review-ada");
     var finding = world.id("finding-ada");
     doors.add(new Door("approve review-ada", ops -> ops.approveReview(review)));
@@ -309,7 +330,7 @@ class AccessDoorsBaselineTest {
           new Door(
               "report a room session in " + room,
               ops -> ops.recordRoomConversation(room, "claude-code", "session-1", null, null),
-              AccessDoorsBaselineTest::boxCredential));
+              actor -> actor.lane() == Actor.Lane.CLI));
     }
     for (var project : List.of("acme", "beta")) {
       doors.add(
@@ -413,39 +434,63 @@ class AccessDoorsBaselineTest {
   }
 
   /**
-   * Pinning a terminal session to a room ({@link HostAccess#admit}), asked by each FDE the roster
-   * places, as the pty host binds one: its role is the roster's, whatever the credential.
+   * A conflict parked on {@code type} {@code id}, seeded inside the rehearsal: this box's version
+   * as it holds it, and a version of main's that differs, as a round would park it.
+   */
+  private static void parkConflict(World world, String type, String id) {
+    Acting.system(
+        () -> {
+          var local = world.store(type).comparableSnapshot(id);
+          var remote = new LinkedHashMap<>(local);
+          remote.put("_rev", "9-main");
+          new SyncConflicts(world.db)
+              .record(
+                  type,
+                  id,
+                  null,
+                  YamlUtil.dumpJson(local),
+                  YamlUtil.dumpJson(remote),
+                  "9-main",
+                  "main",
+                  List.of());
+        });
+  }
+
+  /**
+   * Pinning a terminal session to a room ({@link HostAccess#admit}) as each FDE of the roster, on
+   * main, where this box's own FDE is its operator, and on a node, where every FDE has the roster's
+   * role: the pty host binds the FDE a session names, whoever the credential, so the door is asked
+   * once for each, by the box's operator.
    */
   private static void terminals(World world, List<Door> doors) {
-    var host =
-        new HostAccess(
-            world.db,
-            new RoleRule(
-                () -> new SyncConfig(SyncConfig.ROLE_MAIN, null, Cast.OWNER),
-                new FdeStore(world.db)));
-    for (var room : List.of("lobby", "den", "hall", "s-ada", "b-room", "attic")) {
-      var project = "b-room".equals(room) ? "beta" : "acme";
-      doors.add(
-          new Door(
-              "pin a terminal to " + room,
-              ops -> {
-                host.admit(room, project, new PtyIdentity(Actor.current().handle(), false, false));
-                return "admitted";
-              },
-              AccessDoorsBaselineTest::rostered));
+    var configs =
+        Map.of(
+            "main",
+            new SyncConfig(SyncConfig.ROLE_MAIN, null, Cast.OWNER),
+            "a node",
+            new SyncConfig("node", "sail@main", Cast.OWNER, "ada-box"));
+    for (var box : configs.entrySet()) {
+      var host = new HostAccess(world.db, new RoleRule(box::getValue, new FdeStore(world.db)));
+      for (var fde :
+          List.of(Cast.OWNER, Cast.OTHER, Cast.ADMIN, World.VIEWER_FDE, World.SCOPED_FDE)) {
+        for (var room : List.of("lobby", "den", "hall", "s-ada", "b-room", "attic")) {
+          var project = "b-room".equals(room) ? "beta" : "acme";
+          doors.add(
+              new Door(
+                  "fde " + fde + " pins a terminal to " + room + " on " + box.getKey(),
+                  ops -> {
+                    host.admit(room, project, new PtyIdentity(fde, false, false));
+                    return "admitted";
+                  },
+                  AccessDoorsBaselineTest::operator));
+        }
+      }
     }
   }
 
-  /** Whether {@code actor} is an FDE the roster places, as the pty host binds one: once each. */
-  private static boolean rostered(Actor actor) {
-    return actor.lane() == Actor.Lane.CLI
-        && actor.role() != Role.VIEWER
-        && actor.scope().unrestricted();
-  }
-
-  /** Whether {@code actor} is this box's FDE as its box credential binds it. */
-  private static boolean boxCredential(Actor actor) {
-    return rostered(actor) && Cast.OWNER.equals(actor.handle());
+  /** Whether {@code actor} is the box's operator, who asks a door that binds its own FDE. */
+  private static boolean operator(Actor actor) {
+    return actor.lane() == Actor.Lane.CLI && actor.role() == Role.ADMIN;
   }
 
   private static void projects(List<Door> doors) {
@@ -568,14 +613,15 @@ class AccessDoorsBaselineTest {
     } catch (ApiException refused) {
       return Corpus.denied(
           code(refused.failure().errorCode()), refused.failure().fullError(), refused.remedy());
+    } catch (IOException refused) {
+      return Corpus.refused(refused);
     } catch (RuntimeException failed) {
-      return failed instanceof Remedied remedied
-          ? Corpus.denied(failed.getClass().getSimpleName(), remedied.reason(), remedied.remedy())
-          : Corpus.failed(failed);
-    } catch (Exception refused) {
-      return refused instanceof Remedied remedied
-          ? Corpus.denied(refused.getClass().getSimpleName(), remedied.reason(), remedied.remedy())
-          : Corpus.denied(refused.getClass().getSimpleName(), refused.getMessage(), Remedy.NONE);
+      if (failed instanceof Remedied) {
+        return Corpus.refused(failed);
+      }
+      throw failed;
+    } catch (Exception failed) {
+      throw new IllegalStateException(door.label() + " failed other than by a refusal", failed);
     }
   }
 

@@ -134,13 +134,18 @@ class BaselineTest {
   }
 
   @Test
-  void aCellWhoseAskFailedComparesNothingAndIsAFinding() {
-    var failed = "failed IllegalArgumentException author is required";
-    var baseline = answers("a", failed);
+  void anAskThatFailsOtherThanByARefusalFailsTheCorpus() {
+    var corpus = new Corpus();
 
-    assertEquals(
-        List.of("a\n  now:      " + failed + "\n  a cell records a decision, not a failure"),
-        Baseline.differences(baseline, List.of(), baseline));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            corpus.ask(
+                "cell",
+                () -> {
+                  throw new IllegalArgumentException("author is required");
+                }));
+    assertEquals(answers(), corpus.answers());
   }
 
   @Test

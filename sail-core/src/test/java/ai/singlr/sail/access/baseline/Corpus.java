@@ -7,6 +7,7 @@ package ai.singlr.sail.access.baseline;
 
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import java.util.Map;
 import java.util.Optional;
@@ -70,8 +71,7 @@ public final class Corpus {
 
   /**
    * Records what {@code ask} answers for {@code cell}: allowed, or the refusal it throws as {@link
-   * WriteRefused}. Any other failure is answered with its class and message, so a corpus never
-   * stops at the first surprise.
+   * WriteRefused}. Any other failure is no decision, so it fails the corpus.
    */
   public void ask(String cell, Supplier<String> ask) {
     String answer;
@@ -79,8 +79,6 @@ public final class Corpus {
       answer = ask.get();
     } catch (WriteRefused refused) {
       answer = denied(refused.refusal());
-    } catch (RuntimeException failed) {
-      answer = failed(failed);
     }
     put(cell, answer);
   }
@@ -110,9 +108,14 @@ public final class Corpus {
     return "denied " + code + " " + message + " | " + fix.plain();
   }
 
-  /** The answer of a cell whose ask failed other than by a refusal. */
-  public static String failed(RuntimeException failure) {
-    return "failed " + failure.getClass().getSimpleName() + " " + failure.getMessage();
+  /**
+   * The answer of a cell refused by {@code refusal}, an exception of a door's or a lane's own
+   * refusal type: its class, its reason and, when it carries one, its remedy.
+   */
+  public static String refused(Exception refusal) {
+    return refusal instanceof Remedied remedied
+        ? denied(refusal.getClass().getSimpleName(), remedied.reason(), remedied.remedy())
+        : denied(refusal.getClass().getSimpleName(), refusal.getMessage(), Remedy.NONE);
   }
 
   /** {@code answer} with every line break and tab spelled out, so it stays on its line. */

@@ -58,6 +58,13 @@ import java.util.function.Supplier;
  */
 public final class World implements AutoCloseable {
 
+  /**
+   * An FDE the roster makes a viewer, and one it scopes to beta: the doors that read the roster.
+   */
+  public static final String VIEWER_FDE = "vic";
+
+  public static final String SCOPED_FDE = "sam";
+
   public static final String ADHOC_RUN = "019fee00-0000-7000-8000-0000000ada03";
   private static final String BUSY_RUN = "019fee00-0000-7000-8000-0000000ada04";
   private static final String ARCHIVED_BUSY_RUN = "019fee00-0000-7000-8000-0000000ada07";
@@ -117,6 +124,10 @@ public final class World implements AutoCloseable {
     fdes.add(Cast.OWNER, "Ada", "ada@x", "member");
     fdes.add(Cast.OTHER, "Bob", "bob@x", "member");
     fdes.add(Cast.ADMIN, "Root", "root@x", "admin");
+    fdes.add(VIEWER_FDE, "Vic", "vic@x", "viewer");
+    fdes.add(SCOPED_FDE, "Sam", "sam@x", "member");
+    fdes.restrict(SCOPED_FDE);
+    fdes.grant(SCOPED_FDE, "beta");
   }
 
   private void projects() {

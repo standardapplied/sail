@@ -27,8 +27,10 @@ import java.util.stream.Collectors;
  * does not name. A baseline is a corpus's answers as main's rules gave them at {@code fd091a53},
  * recorded by a commit that changed no rule, at {@code access/baseline/<name>.tsv}: one cell per
  * line, its key, a tab, its answer, sorted by key. Its companion {@code <name>.moved.tsv} lists the
- * cells whose reason is agreed to move toward the decision's order, one per line: the key, the
- * answer now, and one line of why, tab-separated; a line starting with {@code #} is a note.
+ * cells whose answer is agreed to change, one per line: the key, the answer now, and one line of
+ * why, tab-separated, naming its cause; a line starting with {@code #} is a note. There are three
+ * causes: (a) a reason moved earlier in the decision's order; (b) a refusal that had several
+ * wordings now has the one it is worded in; (c) a refusal that named no fix now names one (A12).
  *
  * <p>The live corpus must answer every cell exactly as the baseline does, but for the moved cells,
  * which must answer what their line says. A moved cell is one the baseline denies and that is still
@@ -58,7 +60,6 @@ public final class Baseline {
   private static final String DIRECTORY = "access/baseline/";
   private static final Path SOURCES = Path.of("src", "test", "resources");
   private static final int SHOWN = 40;
-  private static final String FAILED = "failed ";
 
   /**
    * The kinds and door codes of a not-found answer: outside the asker's audience, a project or a
@@ -101,7 +102,7 @@ public final class Baseline {
   /**
    * Every way {@code now} departs from {@code baseline} once {@code moved} is applied, each as the
    * cell and its two answers ({@link #difference}), after every moved line that breaks the rules of
-   * a move and every cell whose ask failed rather than being decided, which would compare nothing.
+   * a move.
    */
   static List<String> differences(
       SortedMap<String, String> baseline, List<Moved> moved, SortedMap<String, String> now) {
@@ -116,13 +117,6 @@ public final class Baseline {
         expected.put(cell.cell(), cell.answer());
       }
     }
-    now.forEach(
-        (cell, answer) -> {
-          if (answer.startsWith(FAILED)) {
-            problems.add(
-                cell + "\n  now:      " + answer + "\n  a cell records a decision, not a failure");
-          }
-        });
     var cells = new TreeSet<>(expected.keySet());
     cells.addAll(now.keySet());
     for (var cell : cells) {
