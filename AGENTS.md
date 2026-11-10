@@ -76,8 +76,9 @@ tests bite, and the deletion count in the body.
   and reaches a shell only as an argument, never interpolated into script text.
 - One rule, one place: every permission is `Access.decide` over the `Policy` table
   (`ai.singlr.sail.access`), every read of a row `ReadFilter`, every resource and its owners
-  built by `Resources` from the facts its caller selects of the row, roles resolved by
-  `RoleRule`, one `Actor` bound at each door. A type rule (`ai.singlr.sail.authority`) names the
+  built by `Resources` from the facts its caller selects of the row, every door's credential
+  resolved to its principal by `RoleRule.principal`, one `Actor` bound at each door, and every
+  web and socket route declaring one `Gate` its router applies (`RouteGateSweepTest`). A type rule (`ai.singlr.sail.authority`) names the
   actions a revision takes and keeps only its own facts. Nothing else reads a role, a lane, a
   scope or a capability to decide (`OneDecisionSweepTest`); a second derivation is a bug, not a
   convenience. The journal decides every write as it records the revision; a door asks `Access`,

@@ -238,14 +238,15 @@ box-local on main like `fde_ssh_keys`; `sail fde grant` and `sail fde revoke`). 
 `ProjectScope`, the fifth component of every `Actor`, the value the audience is decided from: a
 row in hand is read through `ReadFilter` and a query filters by `Access.audience`, so every door
 asks one audience and none keeps a list of projects of its own. A row of no
-known project is admitted by an unrestricted scope only. The scope is resolved where an
-actor's FDE is resolved against main's roster, by the rule that resolves its role
-(`RoleRule.scopeOf`): the API's session and token authentication, and with them the SSH
-gateway's commands, and main's `_sync` server, where a session that names no FDE sees nothing.
-The CLI operator, main's own FDE (an admin, and so never scoped, whatever the roster says of
-it) and a box's machinery see every project, and so does every actor on a node: a node mirrors
-no scope and decides no visibility. It holds what main sent and drops what main stops sending.
-A run's principal and the box credential see what the FDE they act for sees.
+known project is admitted by an unrestricted scope only. The scope is resolved with the
+role, by the one rule every door asks (`RoleRule.principal`): the API's session and token
+authentication, and with them the SSH gateway's commands, the host CLI, the socket, the terminal
+and main's `_sync` server, which serves no session that no FDE stands behind. Main's own FDE (an
+admin, and so never scoped, whatever the roster says of it) and a box's machinery see every
+project, and so does every actor on a node: a node mirrors no scope and decides no visibility. It
+holds what main sent and drops what main stops sending. The host CLI's operator, the host token,
+a machine token, the box credential and a run acting for no FDE see what the box's person sees; a
+run's principal sees what the FDE it acts for sees.
 
 **Heads carry their project.** `change_heads.project` is written with every append from
 `ChangeLog.projectOf`, the one derivation: the `project` a spec, room or run names, the one a
@@ -391,9 +392,10 @@ agent's prompt. A run's credential outlives a revoked grant and its scope does n
 local socket resolves the run's actor on every request, and the run it addresses is looked up
 through the same filter, so a run whose FDE lost the project is answered as a run nobody holds. A
 read reads as the actor
-its door bound (`Actor.reader`); one no door bound an actor to is the box's own, its root CLI
+its door bound (`Actor.reader`); one no door bound an actor to is the box's own machinery
 describing what the box holds, and sees every project. The HTTP and local-socket routers bind
-their caller before they route, and a run's principal carries its owning FDE's scope.
+their caller before they route, the host CLI binds its operator, the box's person, to every read
+and preview, and a run's principal carries its owning FDE's scope.
 
 **A write over a row** is decided by where that row is filed (`ScopeRule`, reading the head
 as a push over it is decided), so a review or a message is no more a scoped actor's to
@@ -2322,6 +2324,14 @@ project, a conflict's resolution, or again once an erased spec has nothing left 
 role and lane alone (`Access.atAll`), answered as a refusal or none, never not found; a lane's
 grant on its own work alone is refused there, since no work is in hand.
 
+**Outside the table**, because they are not permissions:
+
+- A spec runs only on its assignee's box, and a room's agents only on its owner's box: placement
+  (`DispatchPolicy`, `LaunchAdmission`), asked after `Access`.
+- Opening a terminal needs only that its person holds the project on this box, whatever their
+  role, so a viewer opens one too (`HostAccess.admitProject`).
+- Admins are never scoped.
+
 **Whose a resource is.** `Resources` builds each resource from the row in hand, with the project
 it is filed under and its owners, each owner rule once:
 
@@ -2397,13 +2407,47 @@ it implies the room rule's Change), stop (Operate a run), posting into a room wi
 `MessageAuthority.post`, the one decision of a rule a door asks, since a post with no message to
 journal still answers to the rule's fact that a post is someone's), serving a stack, restoring a
 snapshot and reading a definition (`ProjectGate`, the one project gate), pruning, resolving a
-conflict. Every door reads the row it acts on in its caller's scope first, the host CLI's operator
-included, who sees the projects main's roster gives the box's FDE. The terminal opens a session
-only in a project its person holds on the box, whatever their role, as the catalog holds it and
-their scope admits it. The checks a door still makes by role, lane or scope (resolving a credential, a run credential's own
-routes), until `sail-every-door-asks-access` and `sail-agents-act-on-their-own-work`, and the facts
-that read a lane or role to know which applies, are the allowlist of `OneDecisionSweepTest`. It
-sees every such read compiled code makes: of a role, a lane, a scope or whom an actor acts for, a
+conflict, reading a run's log (Operate a run, then placement, as a stop), sync now, sync health,
+bus stats and pointing the box at another main (Operate the box), managing people (the passkey
+ticket and registration without a ticket, `fde` at the host CLI and at the SSH gateway, asked
+before whether the roster lives on this box). Every door reads the row it acts on in its caller's
+scope first, the host CLI's operator included, who sees the projects main's roster gives the box's
+FDE. The terminal opens a session only in a project its person holds on the box, whatever their
+role, as the catalog holds it and their scope admits it.
+
+**One way in.** Six doors reach Sail: the web API, the container socket, the host CLI, the SSH
+gateway, the terminal host and sync. Each door's credential code finds whom its credential names
+and the lane it came by, and asks `RoleRule.principal`, which answers the principal (its handle,
+role, lane and scope) or refuses it; no door names a role or resolves a scope. A token bound to an
+FDE, a passkey session and the gateway's session are that FDE. A credential that names no one is
+the box's own person, its role capped by what the credential was minted with: the host CLI's
+operator, the host token, a terminal's blank token, a run acting for no FDE, and the box
+credential, while the box is still the FDE it was minted for. A machine token acts for no one, with the box's person's role and scope, so it owns nothing
+and operates the box only when minted admin. A run is its own principal, for the FDE it acts for.
+Scope is always the person's the credential resolves to. A disabled or unknown FDE, a session
+whose FDE is gone and a node that cannot place its own FDE are refused, and sync serves no session
+that no FDE stands behind. A credential is resolved again at every request, command and sync
+session, and an open stream asks again each second, so a change to the roster takes effect at
+main's doors on the next request and on a node after its next round. The terminal host resolves a
+connection at its hello and again at each sweep (every 30 seconds): until the sweep, an open
+connection opens sessions and pins rooms as the principal it was admitted as; the sweep severs one
+whose credential is refused or now stands for another principal, its role or scope changed, and
+severs nothing when the store cannot answer (`RosterChangeTest`). The same person with the same
+kind of credential gets the same answer in the same words at every door that offers an action
+(`DoorParityTest`).
+
+**Route gates.** Every route of the web API and of the container socket declares one `Gate` in its
+router's table (`RouteTable`), and a route cannot be built without one: it decides an action
+through its operation's one seam; it reads in scope; the journal decides its write; it operates
+the box; it manages people; or it is served before any credential is asked, for a reason (the
+liveness probe, passkey login, and registration with an enrollment ticket). The router applies
+the gates no row decides, Operate the box and Manage people, before the route's handler runs; both
+routers decide the box gate on the FDE `host.yaml` names (`NodeIdentity.handle`), the box's person
+the role rule resolves. `RouteGateSweepTest` pins both tables whole.
+
+The facts that read a lane or role to know which applies, and the checks of an agent's own work
+until `sail-agents-act-on-their-own-work`, are the allowlist of `OneDecisionSweepTest`. It sees
+every such read compiled code makes: of a role, a lane, a scope or whom an actor acts for, a
 role constant, resolver or `switch`, a type check of the socket's run or box caller, and an
 audience asked of a project in Java (`Access.audience` with `ProjectScope.admits` or
 `unrestricted`); it cannot see one read as data, in SQL or from a map, which is why a filter
@@ -2581,8 +2625,8 @@ no pairing is removed through the gateway as before, and no key file is touched.
     it, however the handle or the roster changes after minting. Nothing binds it and nothing
     needs migrating.
   - **A machine token** (any other token that names no FDE) acts as no FDE, so it records no
-    author, with the role of the box's FDE capped by its minted role (`RoleRule.roleOfUnbound`):
-    on a node it never acts beyond the FDE whose box it lives on. On main or a standalone box
+    author, with the role and scope of the box's FDE, its role capped by its minted role
+    (`RoleRule.principal`): on a node it never acts beyond the FDE whose box it lives on. On main or a standalone box
     with no sync handle there is no FDE to be, and a machine token acts with its minted role.
   - **Before the roster arrives.** On a node whose roster does not know its own FDE yet, or
     that names no FDE, a token that acts for the box's FDE is answered `409` naming the fix
