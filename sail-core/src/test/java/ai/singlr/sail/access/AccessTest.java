@@ -491,15 +491,13 @@ class AccessTest {
             Refusal.Kind.NOT_OWNER,
             "Room 'lobby' belongs to 'bob', not you.",
             "Ask bob to change it, or have an admin do it."),
-        Access.decide(
-            Actors.OWNER_API, Action.CHANGE, Resources.room("lobby", "acme", null, "bob")));
+        Access.decide(Actors.OWNER_API, Action.CHANGE, Resources.room("lobby", "acme", "bob")));
     assertEquals(
         refused(
             Refusal.Kind.NOT_OWNER,
             "Room 'lobby' has no owner, so only an admin may change it.",
             "Have an admin change it."),
-        Access.decide(
-            Actors.OWNER_API, Action.CHANGE, Resources.room("lobby", "acme", null, null)));
+        Access.decide(Actors.OWNER_API, Action.CHANGE, Resources.room("lobby", "acme", null)));
     assertEquals(
         refused(
             Refusal.Kind.NOT_OWNER,

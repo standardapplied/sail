@@ -13,14 +13,14 @@ import java.util.Optional;
 
 /**
  * Every {@link Resource}, built from the row already in hand, so deciding a list costs no query per
- * row. Every owner a decision reads is derived here, by the one rule for it: whose a spec or room
- * is ({@link Ownership#ownerOf}), whose a run is ({@link RunAuthority#owners}), whose a project is
+ * row. Every owner a decision reads is derived here, by the one rule for it: whose a spec is
+ * ({@link Ownership#ownerOf}), whose a run is ({@link RunAuthority#owners}), whose a project is
  * (its creator). Where today's rules genuinely derive owners differently, each derivation is its
  * own factory, never a flag: a room's settings answer to its owner ({@link #room}) while its
  * conversation answers to every owner of the work in it ({@link #conversation}); a run answers to
  * the people it works for ({@link #run}) while a run being created answers to whoever's box runs
  * its work ({@link #launched}). What a caller looks up before it calls (the spec owner a door may
- * see, the conversation's owners) is its own, so a door that sees less passes less.
+ * see, a room's owner, the conversation's owners) is its own, so a door that sees less passes less.
  */
 public final class Resources {
 
@@ -41,12 +41,12 @@ public final class Resources {
 
   /**
    * Room {@code id} of {@code project} as its settings (roster, wake, title, assignee) are decided:
-   * the owner its row names, its assignee or else its creator. A spec's identity room answers to
-   * its spec, so its caller passes the spec's assignee and creator.
+   * {@code owner}'s, whom {@code RoomStore.ownerOf} names — a spec's identity room its spec's
+   * owner, as the box last knew the spec, any other room the owner its own row names — since only
+   * the box can tell which row a room answers to.
    */
-  public static Resource room(String id, String project, String assignee, String createdBy) {
-    return new Resource(
-        Resource.Kind.ROOM, id, project, one(Ownership.ownerOf(assignee, createdBy)), null, null);
+  public static Resource room(String id, String project, String owner) {
+    return new Resource(Resource.Kind.ROOM, id, project, one(owner), null, null);
   }
 
   /**
