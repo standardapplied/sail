@@ -21,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -47,7 +48,10 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
   private static final Base64.Encoder B64URL_ENC = Base64.getUrlEncoder().withoutPadding();
   private static final String TICKET_HEADER = "X-Enrollment-Ticket";
   private static final String POST = "POST";
-  private static final Supplier<String> NO_BOX = () -> null;
+
+  /** The people gate decides on no box, so it never reads one. */
+  private static final Supplier<String> NO_BOX = Optional.<String>empty()::orElseThrow;
+
   private static final Gate ENROLLMENT =
       Gate.unauthenticated("an enrollment ticket authorizes it; without one, the people gate does");
   private static final Gate SIGN_IN =

@@ -368,12 +368,9 @@ public final class ApiRouter implements HttpHandler, RouteTable {
 
   /** {@code uri}'s path as the table matches it: no empty segment, and no trailing slash. */
   private static String canonical(URI uri) {
-    var path = uri.getPath();
-    return Strings.isBlank(path)
-        ? "/"
-        : Arrays.stream(path.split("/"))
-            .filter(segment -> !segment.isBlank())
-            .collect(Collectors.joining("/", "/", ""));
+    return Arrays.stream(Objects.requireNonNullElse(uri.getPath(), "").split("/"))
+        .filter(segment -> !segment.isBlank())
+        .collect(Collectors.joining("/", "/", ""));
   }
 
   /**
