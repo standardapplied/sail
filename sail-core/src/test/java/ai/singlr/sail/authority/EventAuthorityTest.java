@@ -556,50 +556,33 @@ class EventAuthorityTest {
   }
 
   @Test
-  void whatTheSendersActionMayNotTouchIsRefusedInTheAccessDecisionsWords() {
+  void aRefusalNamesTheTypeAndWhatTheSenderMayNotDrive() {
     var run = rule.decide(OWNER_API, STOP, rule.subject("acme", "auth", OTHER_RUN), true);
     var spec = rule.decide(OWNER_API, STOP, rule.subject("acme", "billing", null), true);
     var none = rule.decide(OWNER_API, STOP, rule.subject("acme", null, null), true);
+    var observed = rule.decide(OTHER_API, STOP, rule.subject("acme", "billing", null), false);
     var box = rule.decide(OWNER_API, BOARD, rule.subject("acme", null, null), false);
+    var posted = rule.decide(OWNER_API, POSTED, rule.subject("acme", null, null), true);
+    var agent = rule.decide(AGENT, TOOL, rule.subject("acme", "auth", OTHER_RUN), false);
     var viewer = rule.decide(VIEWER, STOP, rule.subject("acme", "auth", OTHER_RUN), true);
 
     assertEquals(
         Optional.of(
             new Refusal(
                 Kind.NOT_OWNER,
-                "Run " + OTHER_RUN + " belongs to room 'auth', owned by 'carol', not you.",
-                "Only carol or an admin may access this run.")),
+                "Event type 'agent_session_stopped' makes this box act on run "
+                    + OTHER_RUN
+                    + " of 'auth' (owned by 'carol'), which you may not drive.",
+                "Only its owner or an admin may publish it.")),
         run);
     assertEquals(
-        Optional.of(
-            new Refusal(
-                Kind.NOT_OWNER,
-                "Room 'billing' belongs to 'bob', not you.",
-                "Ask bob to change it, or have an admin do it.")),
-        spec);
+        "Event type 'agent_session_stopped' makes this box act on 'billing' (owned by 'bob'), which"
+            + " you may not drive.",
+        spec.orElseThrow().message());
     assertEquals(
-        Optional.of(
-            new Refusal(
-                Kind.NOT_OWNER,
-                "Project 'acme' has no owner, so only an admin may change it.",
-                "Have an admin change it.")),
-        none);
-    assertEquals(
-        Optional.of(
-            new Refusal(
-                Kind.NOT_OWNER,
-                "Box 'main' belongs to 'main', not you.",
-                "Ask main to change it, or have an admin do it.")),
-        box);
-    assertEquals(Refusal.readOnly("operate runs"), viewer);
-  }
-
-  @Test
-  void whatTheRuleItselfKnowsIsRefusedInItsOwnWords() {
-    var observed = rule.decide(OTHER_API, STOP, rule.subject("acme", "billing", null), false);
-    var posted = rule.decide(OWNER_API, POSTED, rule.subject("acme", null, null), true);
-    var agent = rule.decide(AGENT, TOOL, rule.subject("acme", "auth", OTHER_RUN), false);
-
+        "Event type 'agent_session_stopped' makes this box act on work it does not name, which you"
+            + " may not drive.",
+        none.orElseThrow().message());
     assertEquals(
         Optional.of(
             new Refusal(
@@ -610,13 +593,17 @@ class EventAuthorityTest {
                 "What another box did reaches this one by sync.")),
         observed);
     assertEquals(
+        "Event type 'spec_message_posted' makes this box act on work it does not name, which you"
+            + " may not drive.",
+        posted.orElseThrow().message());
+    assertEquals(
         Optional.of(
             new Refusal(
                 Kind.NOT_OWNER,
-                "Event type 'spec_message_posted' makes this box act on work it does not name,"
-                    + " which you may not drive.",
-                "Only its owner or an admin may publish it.")),
-        posted);
+                "Event type 'board_updated' speaks for this box, and you may not drive what it"
+                    + " does: only this box's FDE or an admin publishes it.",
+                Remedy.NONE)),
+        box);
     assertEquals(
         Optional.of(
             new Refusal(
@@ -628,21 +615,22 @@ class EventAuthorityTest {
                     + "' may narrate only its own run.",
                 Remedy.NONE)),
         agent);
+    assertEquals(Refusal.readOnly("publish events"), viewer);
   }
 
   @Test
-  void anEventNamingUnownedWorkIsAnAdminsAlone() {
+  void anEventNamingUnownedWorkSaysSo() {
     board.db.execute("UPDATE specs SET assignee = NULL, created_by = NULL WHERE id = 'draft'");
-    var draft = rule.subject("acme", "draft", null);
 
-    assertEquals(Optional.empty(), rule.decide(ADMIN, STOP, draft, true));
+    var refusal =
+        rule.decide(OWNER_API, STOP, rule.subject("acme", "draft", null), true).orElseThrow();
+
     assertEquals(
-        Optional.of(
-            new Refusal(
-                Kind.NOT_OWNER,
-                "Room 'draft' has no owner, so only an admin may change it.",
-                "Have an admin change it.")),
-        rule.decide(OWNER_API, STOP, draft, true));
+        "Event type 'agent_session_stopped' makes this box act on 'draft' (no owner here), which you"
+            + " may not drive.",
+        refusal.message());
+    assertEquals(
+        Optional.empty(), rule.decide(ADMIN, STOP, rule.subject("acme", "draft", null), true));
   }
 
   @Test

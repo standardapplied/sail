@@ -474,27 +474,6 @@ class AccessTest {
   }
 
   @Test
-  void anEventsRunNamesTheConversationItWorksAndWhoDrivesIt() {
-    var conversation = Resources.conversation("lobby", "acme", List.of("bob"));
-    var inRoom = Resources.reported("r-1", "acme", List.of("bob", "cy"), conversation);
-    var adHoc = Resources.reported("r-1", "acme", List.of("bob"), null);
-
-    assertEquals(
-        refused(
-            Refusal.Kind.NOT_OWNER,
-            "Run r-1 belongs to room 'lobby', owned by 'bob' and 'cy', not you.",
-            "Only bob or cy or an admin may access this run."),
-        Access.decide(Actors.OWNER_API, Action.OPERATE_RUN, inRoom));
-    assertEquals(
-        refused(
-            Refusal.Kind.NOT_OWNER,
-            "Run r-1 is an ad-hoc session launched by 'bob', not you.",
-            "Only bob or an admin may access this run."),
-        Access.decide(Actors.OWNER_API, Action.OPERATE_RUN, adHoc));
-    assertEquals(new Decision.Allowed(), Access.decide(Actors.OTHER_API, Action.NARRATE, inRoom));
-  }
-
-  @Test
   void aRowReadByItsHeadAloneIsDecidedByItsAudience() {
     var head = Resources.filed(Resource.Kind.MESSAGE, "m-1", "beta");
 

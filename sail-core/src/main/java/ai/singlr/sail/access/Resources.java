@@ -106,16 +106,6 @@ public final class Resources {
   }
 
   /**
-   * Run {@code id} of {@code project} as an event about it is decided: it answers to {@code
-   * owners}, who the event rule finds drive it on this box, and does the work of {@code
-   * conversation}, null for an ad-hoc run.
-   */
-  public static Resource reported(
-      String id, String project, List<String> owners, Resource conversation) {
-    return new Resource(Resource.Kind.RUN, id, project, owners, null, conversation);
-  }
-
-  /**
    * A row of {@code kind} as a read that holds only its head decides it: {@code id}, filed under
    * {@code project}. Its owners are not read, since reading asks none.
    */

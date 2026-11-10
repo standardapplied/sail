@@ -247,19 +247,17 @@ public final class Access {
         owners.isEmpty()
             ? null
             : owners.stream().map(owner -> "'" + owner + "'").collect(Collectors.joining(" and "));
-    var work = run.parent();
+    var spec = specOf(run);
     var message =
-        work == null
+        spec == null
             ? "Run "
                 + run.id()
                 + " is an ad-hoc session"
                 + (owned != null ? " launched by " + owned + ", not you." : ".")
             : "Run "
                 + run.id()
-                + " belongs to "
-                + work.kind().noun()
-                + " '"
-                + work.id()
+                + " belongs to spec '"
+                + spec
                 + "'"
                 + (owned != null ? ", owned by " + owned + ", not you." : ", which has no owner.");
     var named = owners.isEmpty() ? "its owner" : String.join(" or ", owners);

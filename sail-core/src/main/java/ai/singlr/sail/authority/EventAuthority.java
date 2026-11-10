@@ -182,8 +182,12 @@ public final class EventAuthority {
       return principal(actor, type, action, subject);
     }
     return switch (Access.decide(actor, action, resource(action, subject))) {
-      case Decision.Allowed allowed -> believed(actor, type, action, subject, retold);
-      case Decision.Refused refused -> Optional.of(refused.refusal());
+      case Decision.Allowed allowed ->
+          believed(actor, action, subject, retold)
+              ? Optional.empty()
+              : refused(Refusal.Kind.NOT_OWNER, actor, type, action, subject);
+      case Decision.Refused refused ->
+          refused(refused.refusal().kind(), actor, type, action, subject);
       case Decision.NotFound notFound -> unseen(type, subject);
     };
   }
@@ -205,47 +209,61 @@ public final class EventAuthority {
   }
 
   /**
-   * {@code subject}'s work answering to {@code owners}: the run it names, the conversation the run
-   * works or the event names, or, naming neither, its project.
+   * {@code subject}'s work, filed under its project and answering to {@code owners}: the
+   * conversation the run works or the event names. The decision reads its project and owners alone,
+   * and the refusal is this rule's, so nothing a sender sees rests on whether that conversation is
+   * a spec's or a room's.
    */
   private static Resource work(Subject subject, List<String> owners) {
-    var conversation =
-        subject.conversation() == null
-            ? null
-            : Resources.conversation(subject.conversation(), subject.project(), owners);
-    if (subject.runId() != null) {
-      return Resources.reported(subject.runId(), subject.project(), owners, conversation);
-    }
-    return conversation != null ? conversation : Resources.project(subject.project(), null);
+    return Resources.conversation(subject.conversation(), subject.project(), owners);
   }
 
   /**
-   * Why a sender {@link Access} allows is still not taken at its word: what an event the machinery
-   * acts on reports, only whoever speaks for this box reports first-hand, and anyone else only
-   * retells, never what this box executed itself; an announcement is retold by a voice, about a
-   * conversation. An event about the box, and a narration, are decided by the action alone. The
-   * refusal says the sender may not report what this box observed when it is about work the sender
-   * owns or this box executed, and otherwise that it may not drive that work.
+   * Whether a sender {@link Access} allows is taken at its word: what an event the machinery acts
+   * on reports, only whoever speaks for this box reports first-hand, and anyone else only retells,
+   * never what this box executed itself; an announcement is retold by a voice, about a
+   * conversation. An event about the box, and a narration, are decided by the action alone.
    */
-  private Optional<Refusal> believed(
-      Actor actor, String type, Action action, Subject subject, boolean retold) {
+  private boolean believed(Actor actor, Action action, Subject subject, boolean retold) {
     var firstHand = speaksForBox(actor);
-    var admitted =
-        switch (action) {
-          case OPERATE_BOX, NARRATE -> true;
-          case POST ->
-              firstHand
-                  || (retold
-                      && Strings.isNotBlank(actor.actingFde())
-                      && subject.conversation() != null);
-          default -> firstHand || (retold && !subject.executedHere());
-        };
-    if (admitted) {
-      return Optional.empty();
+    return switch (action) {
+      case OPERATE_BOX, NARRATE -> true;
+      case POST ->
+          firstHand
+              || (retold
+                  && Strings.isNotBlank(actor.actingFde())
+                  && subject.conversation() != null);
+      default -> firstHand || (retold && !subject.executedHere());
+    };
+  }
+
+  /**
+   * The refusal, of the {@code kind} it was decided as, worded as an event's: only this rule knows
+   * the event's type and what it would make this box do, as only a door knows its answer for an
+   * absent id. A read-only sender may publish nothing. Otherwise the event speaks for this box,
+   * which only its FDE or an admin does; or it reports what this box observed of work the sender
+   * owns, that this box executed, or that a run narrates, which only they report first-hand; or it
+   * makes this box act on work the sender may not drive.
+   */
+  private static Optional<Refusal> refused(
+      Refusal.Kind kind, Actor actor, String type, Action action, Subject subject) {
+    if (kind == Refusal.Kind.READ_ONLY) {
+      return Refusal.readOnly("publish events");
     }
-    if (subject.executedHere() || subject.owners().stream().anyMatch(actor::actsFor)) {
+    if (action == Action.OPERATE_BOX) {
       return Refusal.of(
-          Refusal.Kind.NOT_OWNER,
+          kind,
+          "Event type '"
+              + type
+              + "' speaks for this box, and you may not drive what it does: only this box's FDE or"
+              + " an admin publishes it.",
+          Remedy.NONE);
+    }
+    if (action == Action.NARRATE
+        || subject.executedHere()
+        || subject.owners().stream().anyMatch(actor::actsFor)) {
+      return Refusal.of(
+          kind,
           "Event type '"
               + type
               + "' reports what this box observed of "
@@ -254,7 +272,7 @@ public final class EventAuthority {
           "What another box did reaches this one by sync.");
     }
     return Refusal.of(
-        Refusal.Kind.NOT_OWNER,
+        kind,
         "Event type '"
             + type
             + "' makes this box act on "
