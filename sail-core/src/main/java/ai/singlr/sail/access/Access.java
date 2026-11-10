@@ -32,10 +32,10 @@ import java.util.stream.Collectors;
  *   <li>Lane: an agent's lane says no: refused, naming the lane. An agent's own work is its lane's
  *       to grant, whatever its role: a room agent, read-only by construction, posts in its room and
  *       narrates its run.
- *   <li>Ownership: the cell says owner, and the actor neither is an admin nor acts for an owner; or
- *       it starts work in the room a spec was born in ({@link Resource#parent}) — creates or claims
- *       the spec there, or seats an agent there for it — and does not act for that room's owners:
- *       refused, naming the owners.
+ *   <li>Ownership: the cell says owner, and the actor neither overrules owners ({@link
+ *       #overrulesOwners}) nor acts for an owner; or it starts work in the room a spec was born in
+ *       ({@link Resource#parent}) — creates or claims the spec there — and does not act for that
+ *       room's owners: refused, naming the owners.
  *   <li>Otherwise allowed.
  * </ol>
  *
@@ -46,8 +46,7 @@ public final class Access {
 
   private static final Decision ALLOWED = new Decision.Allowed();
   private static final Decision NOT_FOUND = new Decision.NotFound();
-  private static final Set<Action> SEATED =
-      EnumSet.of(Action.CREATE, Action.CLAIM, Action.DISPATCH);
+  private static final Set<Action> SEATED = EnumSet.of(Action.CREATE, Action.CLAIM);
 
   private Access() {}
 
@@ -71,10 +70,10 @@ public final class Access {
       return refused(laneForbidden(action, resource.kind()));
     }
     if (EnumSet.of(role, lane).contains(Cell.OWNER) && !owns(actor, resource)) {
-      return refused(notOwner(resource));
+      return refused(notOwner(action, resource));
     }
     if (startsWorkIn(action, resource) && !owns(actor, resource.parent())) {
-      return refused(notSeated(action, resource.parent()));
+      return refused(notSeated(resource.parent()));
     }
     return ALLOWED;
   }
@@ -139,14 +138,23 @@ public final class Access {
         : resource.owners().stream().anyMatch(actor::actsFor);
   }
 
+  /**
+   * Whether no owner binds {@code actor}, so the ownership step passes it whoever owns what it acts
+   * on: Sail itself, and an admin. A rule's facts that stand where no owner can be asked — a
+   * conversation this box does not hold, a post that would be no one's, a room a spec's id would
+   * take from its owner — bind everyone else.
+   */
+  public static boolean overrulesOwners(Actor actor) {
+    return actor.isSail() || actor.isAdmin();
+  }
+
   private static boolean owns(Actor actor, Resource resource) {
-    return actor.isAdmin() || resource.owners().stream().anyMatch(actor::actsFor);
+    return overrulesOwners(actor) || resource.owners().stream().anyMatch(actor::actsFor);
   }
 
   /**
-   * Whether {@code action} starts work in the room {@code resource} was born in: a create there, a
-   * claim of a spec that lives there, which give the actor a voice in it, or a dispatch that seats
-   * an agent there, which changes its roster.
+   * Whether {@code action} starts work in the room {@code resource} was born in: a create there, or
+   * a claim of a spec that lives there, which give the actor a voice in it.
    */
   private static boolean startsWorkIn(Action action, Resource resource) {
     return resource.parent() != null && SEATED.contains(action);
@@ -263,15 +271,13 @@ public final class Access {
         "Ask " + named + " to post it, or have an admin do it.");
   }
 
-  private static Refusal notSeated(Action action, Resource room) {
+  private static Refusal notSeated(Resource room) {
     var id = room.id();
     if (room.owners().isEmpty()) {
       return new Refusal(
           Refusal.Kind.NOT_OWNER,
           "No one owns '" + id + "' yet, so only an admin may start work there.",
-          action == Action.DISPATCH
-              ? "Have an admin seat it."
-              : "Have an admin create or assign the spec.");
+          "Have an admin create or assign the spec.");
     }
     var named = String.join(" or ", room.owners());
     return new Refusal(
@@ -283,10 +289,7 @@ public final class Access {
             + ": only "
             + named
             + " or an admin may start work there, not you.",
-        "Ask "
-            + named
-            + (action == Action.DISPATCH ? " to seat it there" : " to create it there")
-            + ", or have an admin do it.");
+        "Ask " + named + " to create it there, or have an admin do it.");
   }
 
   /**
@@ -294,8 +297,12 @@ public final class Access {
    * ownership step's wording, for a door that still decides that step itself.
    */
   public static Refusal notOwner(Resource resource) {
+    return notOwner(Action.CHANGE, resource);
+  }
+
+  private static Refusal notOwner(Action action, Resource resource) {
     return switch (resource.kind()) {
-      case SPEC -> notSpecOwner(resource);
+      case SPEC -> action == Action.DISPATCH ? notDispatcher(resource) : notSpecOwner(resource);
       case RUN -> notRunOwner(resource);
       case REVIEW -> notReviewOwner(resource);
       default -> notTheOwner(resource);
@@ -315,6 +322,25 @@ public final class Access {
         Refusal.Kind.NOT_OWNER,
         "Spec '" + id + "' is unassigned; only " + creator + " or an admin may change it.",
         "Have an admin change it, or claim it first with --assignee <you>.");
+  }
+
+  /**
+   * The refusal of a dispatch of {@code spec} by someone it is not assigned to: an assigned spec is
+   * its assignee's to dispatch, and an unassigned one no one's until it is claimed.
+   */
+  private static Refusal notDispatcher(Resource spec) {
+    var id = spec.id();
+    return spec.assignee() != null
+        ? new Refusal(
+            Refusal.Kind.NOT_OWNER,
+            "Spec '" + id + "' is assigned to '" + spec.assignee() + "', not you.",
+            "Ask "
+                + spec.assignee()
+                + " to dispatch it, or have an admin reassign it before dispatching.")
+        : new Refusal(
+            Refusal.Kind.NOT_OWNER,
+            "Spec '" + id + "' is unassigned, so no one may dispatch it until it is claimed.",
+            "Claim it first with --assignee <you>, then dispatch it.");
   }
 
   private static Refusal notRunOwner(Resource run) {

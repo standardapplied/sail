@@ -31,8 +31,10 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import ai.singlr.sail.authority.Refusal.Kind;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.Standing;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -108,6 +110,17 @@ class SpecAuthorityTest {
         allows("main creates", MAIN, null, ownRoomCreate),
         allows("the machinery creates", SYSTEM, null, ownRoomCreate),
         refuses("a viewer cannot create", VIEWER, null, ownRoomCreate, Kind.READ_ONLY),
+        allows(
+            "a scoped member deletes an id this box holds no head of",
+            OWNER_API.withScope(ProjectScope.of(List.of("acme"))),
+            null,
+            null),
+        allows(
+            "a scoped member's marked deletion of an id this box holds no head of",
+            OWNER_API.withScope(ProjectScope.of(List.of("acme"))),
+            null,
+            Map.of("_actor", OWNER)),
+        refuses("a viewer deletes nothing, held or not", VIEWER, null, null, Kind.READ_ONLY),
         refuses("a room principal cannot create", ROOM, null, ownRoomCreate, Kind.READ_ONLY),
         refuses("a viewer's push cannot create", VIEWER_SYNC, null, ownRoomCreate, Kind.READ_ONLY),
         allows("a create in its own room may name anyone", OTHER_API, null, namingOther),
@@ -120,11 +133,17 @@ class SpecAuthorityTest {
         refuses("a machine credential is not born in", MACHINE, null, inLobby, Kind.NOT_OWNER),
         refuses("another member's push is not born in", OTHER_SYNC, null, inLobby, Kind.NOT_OWNER),
         refuses(
-            "a member is not born in a room this box does not hold, which no one owns here",
+            "a member is not born in a room this box does not hold",
             OTHER_API,
             null,
             with(inLobby, "room_id", "nowhere"),
-            Kind.NOT_OWNER),
+            Kind.NO_CONVERSATION),
+        refuses(
+            "a viewer hears first that a room this box does not hold is not here",
+            VIEWER,
+            null,
+            with(inLobby, "room_id", "nowhere"),
+            Kind.NO_CONVERSATION),
         allows(
             "an admin is born in a room this box does not hold",
             ADMIN,

@@ -171,7 +171,8 @@ public final class MembershipService {
     if (spec == null) {
       return engageSpecless(specId, agentYamlName, mode, model, localHandle);
     }
-    requireAllowedToSeat(spec, localHandle);
+    LaunchAdmission.requireAllowed(spec.toSpec(), localHandle);
+    authorizeRoster(spec.roomIdOrIdentity());
     var project = spec.project();
     var member = admit(project, agentYamlName, mode, model, localHandle);
     if (!member.full() || !takeSnapshot) {
@@ -283,7 +284,8 @@ public final class MembershipService {
     if (spec == null) {
       return disengageSpecless(specId, localHandle);
     }
-    requireAllowedToSeat(spec, localHandle);
+    LaunchAdmission.requireAllowed(spec.toSpec(), localHandle);
+    authorizeRoster(spec.roomIdOrIdentity());
     var standing = stateOf(rooms.get(), spec).standing();
     if (standing == null) {
       return null;
@@ -316,14 +318,14 @@ public final class MembershipService {
   }
 
   /**
-   * Refuses, before any snapshot or launch, a membership of {@code spec}'s room the bound actor may
-   * not change: a dispatch of the spec, in the room it lives in ({@link
-   * LaunchAdmission#requireAllowedToSeat}), whose owner is the room's as this box holds it.
+   * Asks the journal, before any snapshot or launch, whether it will take the actor's change to the
+   * roster of {@code roomId} — a spec's own room, the room it was born in, whoever's that is, or a
+   * room with no spec — so a membership the room rule refuses starts nothing.
    */
-  private void requireAllowedToSeat(SpecStore.SpecRow spec, String localHandle) {
-    var roomId = spec.roomIdOrIdentity();
-    LaunchAdmission.requireAllowedToSeat(
-        spec.toSpec(), roomId, requireRooms().ownerOf(roomId), localHandle);
+  private void authorizeRoster(String roomId) {
+    var store = requireRooms();
+    var held = store.comparableSnapshot(roomId);
+    Refusals.enforce(store.decide(roomId, held == null ? Map.of() : held));
   }
 
   private void persistMembership(String specId, Engagement member) {

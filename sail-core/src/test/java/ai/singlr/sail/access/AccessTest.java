@@ -68,6 +68,11 @@ class AccessTest {
           Refusal.Kind.NOT_OWNER,
           "Spec 'auth' is assigned to 'bob', not you.",
           "Ask bob to make this change, or have an admin do it.");
+  private static final Refusal SPEC_NOT_DISPATCHER =
+      refusal(
+          Refusal.Kind.NOT_OWNER,
+          "Spec 'auth' is assigned to 'bob', not you.",
+          "Ask bob to dispatch it, or have an admin reassign it before dispatching.");
   private static final Refusal RUN_NOT_OWNER =
       refusal(
           Refusal.Kind.NOT_OWNER,
@@ -195,7 +200,7 @@ class AccessTest {
               SPEC_BOB,
               "dispatch specs",
               List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY),
-              SPEC_NOT_OWNER,
+              SPEC_NOT_DISPATCHER,
               null),
           new Expected(
               Action.OPERATE_RUN,
@@ -412,37 +417,18 @@ class AccessTest {
   }
 
   @Test
-  void seatingAnAgentForASpecBornInARoomTakesThatRoomsOwner() {
-    var inDen = Resources.spec("brief", "acme", "ada", "ada");
+  void aSpecIsDispatchedByItsOwnerWhereverItWasBornAndAnUnassignedOneByNoOneYet() {
+    var inDen = Resources.spec("brief", "acme", "ada", "ada").withParent(DEN);
 
+    assertEquals(new Decision.Allowed(), Access.decide(Actors.OWNER_API, Action.DISPATCH, inDen));
     assertEquals(
         refused(
             Refusal.Kind.NOT_OWNER,
-            "'den' belongs to bob: only bob or an admin may start work there, not you.",
-            "Ask bob to seat it there, or have an admin do it."),
-        Access.decide(
-            Actors.OWNER_API,
-            Action.DISPATCH,
-            inDen.withParent(Resources.room("den", "acme", "bob"))));
+            "Spec 'auth' is unassigned, so no one may dispatch it until it is claimed.",
+            "Claim it first with --assignee <you>, then dispatch it."),
+        Access.decide(Actors.OTHER_API, Action.DISPATCH, UNASSIGNED_ADA));
     assertEquals(
-        refused(
-            Refusal.Kind.NOT_OWNER,
-            "No one owns 'den' yet, so only an admin may start work there.",
-            "Have an admin seat it."),
-        Access.decide(
-            Actors.OWNER_API,
-            Action.DISPATCH,
-            inDen.withParent(Resources.room("den", "acme", null))));
-    assertEquals(
-        new Decision.Allowed(),
-        Access.decide(
-            Actors.OWNER_API,
-            Action.DISPATCH,
-            inDen.withParent(Resources.room("den", "acme", "ada"))));
-    assertEquals(
-        new Decision.Allowed(),
-        Access.decide(
-            Actors.ADMIN, Action.DISPATCH, inDen.withParent(Resources.room("den", "acme", "bob"))));
+        new Decision.Allowed(), Access.decide(Actors.OWNER_API, Action.DISPATCH, UNASSIGNED_ADA));
   }
 
   @Test

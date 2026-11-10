@@ -10,6 +10,7 @@ import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Sqlite;
 import java.util.List;
 import java.util.Map;
@@ -109,6 +110,26 @@ public interface WriteAuthority {
       }
     }
     return Optional.empty();
+  }
+
+  /**
+   * Whether a revision from {@code held} to {@code next} names no row: a deletion ({@link
+   * Snapshots#isDeletion}) of an id this box holds no head of, which is filed nowhere, so no
+   * resource is there to decide it on ({@link #unnamed}).
+   */
+  static boolean namesNothing(Map<String, Object> held, Map<String, Object> next) {
+    return held == null && Snapshots.isDeletion(next);
+  }
+
+  /**
+   * Why {@code actor} may not write a revision of {@code kind} that names no row ({@link
+   * #namesNothing}): its role and lane alone decide, as a create of the kind ({@link
+   * Access#decide(Actor, Action, Resource.Kind)}).
+   */
+  static Optional<Refusal> unnamed(Actor actor, Resource.Kind kind) {
+    return Access.decide(actor, Action.CREATE, kind) instanceof Decision.Refused refused
+        ? Optional.of(refused.refusal())
+        : Optional.empty();
   }
 
   /**

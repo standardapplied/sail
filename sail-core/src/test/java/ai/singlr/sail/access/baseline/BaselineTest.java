@@ -87,6 +87,35 @@ class BaselineTest {
   }
 
   @Test
+  void aCellNotFoundIsNeverAnsweredByARefusal() {
+    var baseline =
+        answers(
+            "scope", NOT_FOUND,
+            "door", "denied SPEC_NOT_FOUND 404 Spec 's' was not found.",
+            "box", "denied UNHELD_PROJECT Project 'p' isn't on this box.");
+    var moved =
+        List.of(
+            new Baseline.Moved("scope", READ_ONLY, "a refusal before the audience"),
+            new Baseline.Moved("door", "denied ROOM_NOT_FOUND 404 Room 'r' was not found.", "x"),
+            new Baseline.Moved("box", NOT_FOUND, "the actor's audience before the box's"));
+    var now =
+        answers(
+            "scope", READ_ONLY,
+            "door", "denied ROOM_NOT_FOUND 404 Room 'r' was not found.",
+            "box", NOT_FOUND);
+
+    assertEquals(
+        List.of(
+            "scope\n  moved:    a cell not found stays not found, and this one goes from '"
+                + NOT_FOUND
+                + "' to '"
+                + READ_ONLY
+                + "'",
+            Baseline.difference("scope", NOT_FOUND, READ_ONLY)),
+        Baseline.differences(baseline, moved, now));
+  }
+
+  @Test
   void aMovedLineNamesACellOfTheBaselineOnceWithANewAnswerAndAWhy() {
     var moved =
         List.of(

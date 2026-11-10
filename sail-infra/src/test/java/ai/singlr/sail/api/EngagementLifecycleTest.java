@@ -632,15 +632,54 @@ class EngagementLifecycleTest {
                               ? ops.engage("child", "claude-code", null, null, false, HANDLE)
                               : ops.disengage("child", HANDLE)));
       assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.failure().errorCode());
-      assertEquals(
-          "'den' belongs to bob: only bob or an admin may start work there, not you.",
-          refused.getMessage());
-      assertEquals(
-          "Ask bob to seat it there, or have an admin do it.", refused.failure().remedy().plain());
+      assertEquals("Room 'den' belongs to 'bob', not you.", refused.getMessage());
     }
     assertEquals(List.of(), probed, "nothing is probed or launched");
     assertNull(roomMember("den"));
     assertTrue(ofType(Event.WellKnownTypes.SPEC_ENGAGED).isEmpty());
+  }
+
+  @Test
+  void aSpecBornInARoomThisBoxNeverHeldOrHasDeletedIsSeatedAndUnseatedByItsAssignee()
+      throws Exception {
+    var ops = operations(shell());
+    Acting.as(HANDLE, () -> roomStore.ensureFor("attic", "acme", "attic", HANDLE, null));
+    seedBornIn("in-attic", "attic");
+    Acting.system(() -> roomStore.delete("attic"));
+    seedBornIn("in-ghost", "ghost");
+    var uday = new Actor(HANDLE, Role.MEMBER, Actor.Lane.CLI);
+
+    for (var spec : List.of("in-attic", "in-ghost")) {
+      var launch =
+          Actor.call(uday, () -> ops.engage(spec, "claude-code", null, null, false, HANDLE));
+      assertEquals("full", launch.mode(), spec);
+      Actor.call(uday, () -> ops.disengage(spec, HANDLE));
+    }
+  }
+
+  private void seedBornIn(String id, String room) {
+    Acting.as(
+        HANDLE,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                        id,
+                        "acme",
+                        "Born elsewhere",
+                        SpecStatus.DRAFT,
+                        HANDLE,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0,
+                        HANDLE,
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of("app"))
+                    .withRoomId(room)));
   }
 
   @Test

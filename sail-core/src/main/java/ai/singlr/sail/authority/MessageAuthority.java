@@ -7,7 +7,6 @@ package ai.singlr.sail.authority;
 
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
-import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
@@ -69,25 +68,20 @@ public final class MessageAuthority implements WriteAuthority {
 
   /**
    * Why {@code actor} may not post in conversation {@code roomId}, filed under {@code project}:
-   * {@link Access} refuses the post, or one of two facts holds that only someone who may change the
-   * conversation itself passes (an admin, as it is ownerless to anyone else here). A conversation
-   * this box does not hold has no owner here, so it takes no post; and a post is someone's, so a
-   * credential acting for no FDE posts nothing. The journal asks it of every post, and the doors
-   * that admit a voice into a room ask it before anything is said there: the terminal's room pin
-   * and a room session's report.
+   * {@link Access} refuses the post, or one of two facts holds that bind whoever does not overrule
+   * owners ({@link Access#overrulesOwners}): a conversation this box does not hold has no owner
+   * here to ask, so it takes no post; and a post is someone's, so a credential acting for no FDE
+   * posts nothing. The journal asks it of every post, and the doors that admit a voice into a room
+   * ask it before anything is said there: the terminal's room pin and a room session's report.
    */
   public Optional<Refusal> posting(Actor actor, String roomId, String project) {
     var conversation = Resources.conversation(roomId, project, rooms.owners(roomId));
     var refused = WriteAuthority.refused(actor, Taking.of(conversation, Action.POST));
-    if (refused.isPresent()
-        || Access.decide(actor, Action.CHANGE, conversation) instanceof Decision.Allowed) {
+    if (refused.isPresent() || Access.overrulesOwners(actor)) {
       return refused;
     }
     if (!rooms.holds(roomId, null)) {
-      return Refusal.of(
-          Refusal.Kind.NO_CONVERSATION,
-          "No conversation '" + roomId + "' is on this box: it was deleted, or never here.",
-          "Check the spec or room id.");
+      return Refusal.noConversation(roomId);
     }
     return Strings.isBlank(actor.actingFde())
         ? Refusal.of(

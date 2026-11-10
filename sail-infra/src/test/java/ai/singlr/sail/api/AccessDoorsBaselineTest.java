@@ -12,10 +12,17 @@ import ai.singlr.sail.access.baseline.Cast;
 import ai.singlr.sail.access.baseline.Corpus;
 import ai.singlr.sail.access.baseline.World;
 import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.identity.RoleRule;
+import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SpecStore;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -294,6 +301,15 @@ class AccessDoorsBaselineTest {
       }
       doors.add(new Door("delete room " + room, ops -> ops.deleteRoom(room)));
     }
+    seatings(world, doors);
+    terminals(world, doors);
+    for (var room : List.of("lobby", "den", "hall", "s-ada", "b-room", "attic")) {
+      doors.add(
+          new Door(
+              "report a room session in " + room,
+              ops -> ops.recordRoomConversation(room, "claude-code", "session-1", null, null),
+              AccessDoorsBaselineTest::boxCredential));
+    }
     for (var project : List.of("acme", "beta")) {
       doors.add(
           new Door(
@@ -302,6 +318,22 @@ class AccessDoorsBaselineTest {
                   ops.createRoom(
                       RoomCreateRequest.fromMap(
                           Map.of("id", "r-new", "project", project, "title", "t")),
+                      Cast.OWNER)));
+      doors.add(
+          new Door(
+              "create room r-new in " + project + " with an agent seated",
+              ops ->
+                  ops.createRoom(
+                      RoomCreateRequest.fromMap(
+                          Map.of(
+                              "id",
+                              "r-new",
+                              "project",
+                              project,
+                              "title",
+                              "t",
+                              "member",
+                              Map.of("agent", "claude-code"))),
                       Cast.OWNER)));
       for (var handle : BOXES) {
         doors.add(
@@ -316,6 +348,103 @@ class AccessDoorsBaselineTest {
                 actor -> actor.scope().admits(project)));
       }
     }
+  }
+
+  /**
+   * Seating and unseating the agent of a spec born in another room, on each box: the world's own
+   * {@code s-lobby} and {@code s-den}, unassigned, and one assigned to the box's FDE born in a room
+   * of each standing — ada's {@code lobby}, bob's {@code den}, the deleted {@code attic}, and a
+   * {@code ghost} this box never held — seeded inside the rehearsal, so the box is left as it was.
+   */
+  private static void seatings(World world, List<Door> doors) {
+    for (var box : BOXES) {
+      for (var spec : List.of("s-lobby", "s-den")) {
+        seating(doors, spec, box, () -> {});
+      }
+      for (var room : List.of("lobby", "den", "attic", "ghost")) {
+        var spec = box + "-born-in-" + room;
+        seating(doors, spec, box, () -> bornIn(world, spec, room, box));
+      }
+    }
+  }
+
+  private static void seating(List<Door> doors, String spec, String box, Runnable seed) {
+    doors.add(
+        new Door(
+            "seat an agent in " + spec + " on " + box + "'s box",
+            ops -> {
+              seed.run();
+              return ops.addRoomMember(
+                  spec, EngageRequest.fromMap(Map.of("agent", "claude-code")), box);
+            }));
+    doors.add(
+        new Door(
+            "unseat the agent of " + spec + " on " + box + "'s box",
+            ops -> {
+              seed.run();
+              return ops.removeRoomMember(spec, box);
+            }));
+  }
+
+  /** Spec {@code id}, assigned to and created by {@code fde}, born in {@code room}. */
+  private static void bornIn(World world, String id, String room, String fde) {
+    Acting.system(
+        () ->
+            world.box.specs.create(
+                new SpecStore.SpecRow(
+                        id,
+                        "acme",
+                        "Born in " + room,
+                        SpecStatus.PENDING,
+                        fde,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0,
+                        fde,
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of())
+                    .withRoomId(room)));
+  }
+
+  /**
+   * Pinning a terminal session to a room ({@link HostAccess#admit}), asked by each FDE the roster
+   * places, as the pty host binds one: its role is the roster's, whatever the credential.
+   */
+  private static void terminals(World world, List<Door> doors) {
+    var host =
+        new HostAccess(
+            world.db,
+            new RoleRule(
+                () -> new SyncConfig(SyncConfig.ROLE_MAIN, null, Cast.OWNER),
+                new FdeStore(world.db)));
+    for (var room : List.of("lobby", "den", "hall", "s-ada", "b-room", "attic")) {
+      var project = "b-room".equals(room) ? "beta" : "acme";
+      doors.add(
+          new Door(
+              "pin a terminal to " + room,
+              ops -> {
+                host.admit(room, project, new PtyIdentity(Actor.current().handle(), false, false));
+                return "admitted";
+              },
+              AccessDoorsBaselineTest::rostered));
+    }
+  }
+
+  /** Whether {@code actor} is an FDE the roster places, as the pty host binds one: once each. */
+  private static boolean rostered(Actor actor) {
+    return actor.lane() == Actor.Lane.CLI
+        && actor.role() != Role.VIEWER
+        && actor.scope().unrestricted();
+  }
+
+  /** Whether {@code actor} is this box's FDE as its box credential binds it. */
+  private static boolean boxCredential(Actor actor) {
+    return rostered(actor) && Cast.OWNER.equals(actor.handle());
   }
 
   private static void projects(List<Door> doors) {

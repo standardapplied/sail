@@ -24,7 +24,7 @@ public record Refusal(Kind kind, String message, Remedy fix) {
     READ_ONLY,
     /** The actor neither owns the row nor acts for its owner. */
     NOT_OWNER,
-    /** The conversation a post names is not on this box. */
+    /** The conversation a post or a birth names is not on this box. */
     NO_CONVERSATION,
     /** Only an admin may make this change. */
     ADMIN_ONLY,
@@ -71,6 +71,17 @@ public record Refusal(Kind kind, String message, Remedy fix) {
         Kind.READ_ONLY,
         "Your credential is read-only and cannot " + act + ".",
         "Ask an admin for a member or admin credential.");
+  }
+
+  /**
+   * The refusal of a write into conversation {@code roomId}, which this box does not hold: it has
+   * no owner here to ask.
+   */
+  public static Optional<Refusal> noConversation(String roomId) {
+    return of(
+        Kind.NO_CONVERSATION,
+        "No conversation '" + roomId + "' is on this box: it was deleted, or never here.",
+        "Check the spec or room id.");
   }
 
   /** The refusal of a field that never changes after create. */

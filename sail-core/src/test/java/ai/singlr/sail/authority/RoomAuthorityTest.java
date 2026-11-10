@@ -99,6 +99,21 @@ class RoomAuthorityTest {
       rows.add(new Case("create by " + actor, actor, null, created, null));
     }
     rows.add(new Case("a viewer cannot create", VIEWER, null, created, Kind.READ_ONLY));
+    rows.add(
+        new Case(
+            "a scoped member deletes an id this box holds no head of",
+            OWNER_API.withScope(ProjectScope.of(List.of("acme"))),
+            null,
+            null,
+            null));
+    rows.add(
+        new Case(
+            "a scoped member's marked deletion of an id this box holds no head of",
+            OWNER_API.withScope(ProjectScope.of(List.of("acme"))),
+            null,
+            Map.of(),
+            null));
+    rows.add(new Case("a viewer deletes nothing, held or not", VIEWER, null, null, Kind.READ_ONLY));
     rows.add(new Case("a room principal cannot create", ROOM, null, created, Kind.READ_ONLY));
     for (var next : verbs) {
       var verb =

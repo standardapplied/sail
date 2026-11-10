@@ -6,6 +6,7 @@
 package ai.singlr.sail.authority;
 
 import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ProjectStore;
@@ -19,9 +20,10 @@ import java.util.Optional;
  * Who may write a room: a birth is a {@link Action#CREATE}, and every later revision and its
  * tombstone — roster, wake, title and assignee alike — a {@link Action#CHANGE} of the room as its
  * owner has it ({@link RoomStore#ownerOf}), each decided by {@link Access}. Owning a spec born in a
- * room gives a voice in its conversation, never its settings. The facts: a room lands only in a
- * project this box holds ({@link ProjectStore#refusesInto}), and a push names only its pusher
- * ({@link Attribution}).
+ * room gives a voice in its conversation, never its settings. A room lands only in a project this
+ * box holds ({@link ProjectStore#refusesInto}): a project it does not is not there, which is said
+ * before anything is decided. Then the one fact: a push names only its pusher ({@link
+ * Attribution}).
  */
 public final class RoomAuthority implements WriteAuthority {
 
@@ -41,19 +43,25 @@ public final class RoomAuthority implements WriteAuthority {
   @Override
   public Optional<Refusal> decide(
       Actor actor, String id, Map<String, Object> held, Map<String, Object> next) {
-    var room =
-        held == null
-            ? Resources.room(id, Snapshots.text(next, PROJECT), null)
-            : Resources.room(id, Snapshots.text(held, PROJECT), rooms.ownerOf(id, held));
-    var refused =
-        WriteAuthority.refused(
-            actor, Taking.of(room, held == null ? Action.CREATE : Action.CHANGE));
-    if (refused.isPresent()) {
-      return refused;
-    }
     var unheld =
         projects.refusesInto(
             actor, rooms.liveProject(id).orElse(null), Snapshots.text(next, PROJECT), false);
-    return unheld.isPresent() ? unheld : attribution.decide(actor, held, next, "created_by", null);
+    if (unheld.isPresent()) {
+      return unheld;
+    }
+    var refused =
+        WriteAuthority.namesNothing(held, next)
+            ? WriteAuthority.unnamed(actor, Resource.Kind.ROOM)
+            : WriteAuthority.refused(
+                actor,
+                held == null
+                    ? Taking.of(
+                        Resources.room(id, Snapshots.text(next, PROJECT), null), Action.CREATE)
+                    : Taking.of(
+                        Resources.room(id, Snapshots.text(held, PROJECT), rooms.ownerOf(id, held)),
+                        Action.CHANGE));
+    return refused.isPresent()
+        ? refused
+        : attribution.decide(actor, held, next, "created_by", null);
   }
 }

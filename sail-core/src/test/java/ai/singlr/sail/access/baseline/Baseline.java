@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -31,8 +32,9 @@ import java.util.stream.Collectors;
  *
  * <p>The live corpus must answer every cell exactly as the baseline does, but for the moved cells,
  * which must answer what their line says. A moved cell is one the baseline denies and that is still
- * denied, for a reason other than the baseline's: allowed never becomes denied, nor denied allowed.
- * A moved line the corpus does not answer, or answers as the baseline does, is stale and fails.
+ * denied, for a reason other than the baseline's: allowed never becomes denied, nor denied allowed,
+ * and a cell not found is never answered by a refusal ({@link #notFound}). A moved line the corpus
+ * does not answer, or answers as the baseline does, is stale and fails.
  *
  * <p>A baseline is regenerated only on purpose, from untouched rules: {@code
  * -Dsail.access.baseline=record} writes the live corpus over {@code
@@ -56,6 +58,24 @@ public final class Baseline {
   private static final String DIRECTORY = "access/baseline/";
   private static final Path SOURCES = Path.of("src", "test", "resources");
   private static final int SHOWN = 40;
+
+  /**
+   * The kinds and door codes of a not-found answer: outside the asker's audience, a project or a
+   * conversation this box does not hold, and the doors' 404s for an id that is not there. A project
+   * whose container this box has not created is there, and the dispatch admission's placement says
+   * so last ({@code PROJECT_NOT_CREATED}), so it is not one. A push's answer names no kind, so its
+   * corpus is held to this through the rules it shares with the writes'.
+   */
+  private static final Set<String> NOT_FOUND =
+      Set.of(
+          "OUT_OF_SCOPE",
+          "UNHELD_PROJECT",
+          "NO_CONVERSATION",
+          "NOT_FOUND",
+          "SPEC_NOT_FOUND",
+          "ROOM_NOT_FOUND",
+          "RUN_NOT_FOUND",
+          "PROJECT_NOT_IN_CATALOG");
 
   private Baseline() {}
 
@@ -134,11 +154,27 @@ public final class Baseline {
     if (before.equals(cell.answer())) {
       return "it answers what the baseline answers";
     }
+    if (notFound(before) && !notFound(cell.answer())) {
+      return "a cell not found stays not found, and this one goes from '"
+          + before
+          + "' to '"
+          + cell.answer()
+          + "'";
+    }
     return null;
   }
 
   private static boolean denied(String answer) {
     return answer.startsWith("denied ");
+  }
+
+  /**
+   * Whether {@code answer} says what was asked about is not there ({@link #NOT_FOUND}): an answer
+   * that may only move earlier, so no refusal ever takes its place and tells the asker it exists.
+   */
+  private static boolean notFound(String answer) {
+    var words = answer.split(" ", 3);
+    return words.length > 1 && NOT_FOUND.contains(words[1]);
   }
 
   private static String report(String name, List<String> problems) {
