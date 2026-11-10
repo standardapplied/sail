@@ -94,6 +94,25 @@ public record Refusal(Kind kind, String message, Remedy fix) {
     };
   }
 
+  /** The refusal of a post in conversation {@code id}, which is not on this box. */
+  static Optional<Refusal> noConversation(String id) {
+    return of(
+        Kind.NO_CONVERSATION,
+        "No conversation '" + id + "' is on this box: it was deleted, or never here.",
+        "Check the spec or room id.");
+  }
+
+  /**
+   * The refusal of a post in conversation {@code id} by a credential that acts for no FDE, whose
+   * words would be no one's.
+   */
+  static Optional<Refusal> postedByNoOne(String id) {
+    return of(
+        Kind.NOT_AUTHOR,
+        "This credential acts for no FDE, so a post in '" + id + "' would be no one's.",
+        "Post with an FDE's own credential.");
+  }
+
   /** The refusal of a field that never changes after create. */
   static Optional<Refusal> fixed(String type, String id, String field) {
     return of(

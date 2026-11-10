@@ -16,8 +16,9 @@ import java.util.Optional;
  * write in a project may speak in it; which projects those are is {@link ScopeRule}'s to decide,
  * ahead of this rule. A room principal is read-only everywhere else, so the lane's one write
  * carries its own rule: it may post exactly when it acts for an owner, the FDE whose box woke it.
- * The rule behind every post, a born-in spec's birth and claim, the terminal door's pin, and main's
- * decision on a synced message.
+ * The rule two doors still ask before a post reaches the journal, the terminal door's pin and a
+ * room session's report, until they ask {@code Access} as the journal does ({@link
+ * MessageAuthority}).
  */
 public final class PostingRule {
 
@@ -37,22 +38,12 @@ public final class PostingRule {
         return Optional.empty();
       }
       if (!holds) {
-        return Refusal.of(
-            Refusal.Kind.NO_CONVERSATION,
-            "No conversation '"
-                + conversationId
-                + "' is on this box: it was deleted, or never here.",
-            "Check the spec or room id.");
+        return Refusal.noConversation(conversationId);
       }
       if (Strings.isNotBlank(actor.actingFde())) {
         return Optional.empty();
       }
-      return Refusal.of(
-          Refusal.Kind.NOT_AUTHOR,
-          "This credential acts for no FDE, so a post in '"
-              + conversationId
-              + "' would be no one's.",
-          "Post with an FDE's own credential.");
+      return Refusal.postedByNoOne(conversationId);
     }
     if (owners.stream().anyMatch(actor::actsFor)) {
       return Optional.empty();

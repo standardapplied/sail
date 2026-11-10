@@ -9,6 +9,7 @@ import static ai.singlr.sail.authority.Actors.ADMIN;
 import static ai.singlr.sail.authority.Actors.ADMIN_SYNC;
 import static ai.singlr.sail.authority.Actors.AGENT;
 import static ai.singlr.sail.authority.Actors.AGENT_HANDLE;
+import static ai.singlr.sail.authority.Actors.MACHINE;
 import static ai.singlr.sail.authority.Actors.MAIN;
 import static ai.singlr.sail.authority.Actors.OTHER;
 import static ai.singlr.sail.authority.Actors.OTHERS_AGENT;
@@ -44,9 +45,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * The message rule's matrix: where is the posting rule's, and as whom is the actor's own handle on
- * this box's lanes; on the sync lane the pusher posts as itself, as its runs' principals in any
- * conversation, and as the pipeline where a run of its is in the conversation.
+ * The message rule's matrix: where is a post in its conversation, and one this box does not hold
+ * takes an admin's alone; as whom is the actor's own handle on this box's lanes; on the sync lane
+ * the pusher posts as itself, as its runs' principals in any conversation, and as the pipeline
+ * where a run of its is in the conversation.
  */
 class MessageAuthorityTest {
 
@@ -109,7 +111,26 @@ class MessageAuthorityTest {
             OTHER,
             Kind.NO_CONVERSATION),
         new Case(
+            "an agent posts in no conversation this box does not hold",
+            AGENT,
+            "nowhere",
+            AGENT_HANDLE,
+            Kind.NO_CONVERSATION),
+        new Case(
+            "an admin posts in a conversation this box does not hold",
+            ADMIN,
+            "nowhere",
+            "root",
+            null),
+        new Case(
             "a room principal posts only for its FDE", ROOM, "den", ROOM_HANDLE, Kind.NOT_OWNER),
+        new Case(
+            "a room principal posts nowhere this box does not hold",
+            ROOM,
+            "nowhere",
+            ROOM_HANDLE,
+            Kind.NOT_OWNER),
+        new Case("a machine credential posts as no one", MACHINE, "lobby", null, Kind.NOT_AUTHOR),
         new Case("a viewer posts nowhere", VIEWER, "lobby", OWNER, Kind.READ_ONLY),
         new Case("an agent posts as no FDE", AGENT, "lobby", OWNER, Kind.NOT_AUTHOR),
         new Case("a member posts as no one else", OWNER_API, "lobby", OTHER, Kind.NOT_AUTHOR),
@@ -177,5 +198,17 @@ class MessageAuthorityTest {
             "No conversation 'nowhere' is on this box: it was deleted, or never here.",
             "Check the spec or room id."),
         rule.decide(OTHER_API, MESSAGE, null, post("nowhere", OTHER)).orElseThrow());
+    assertEquals(
+        new Refusal(
+            Kind.NOT_AUTHOR,
+            "This credential acts for no FDE, so a post in 'lobby' would be no one's.",
+            "Post with an FDE's own credential."),
+        rule.decide(MACHINE, MESSAGE, null, post("lobby", null)).orElseThrow());
+    assertEquals(
+        new Refusal(
+            Kind.READ_ONLY,
+            "Your credential is read-only and cannot post in rooms.",
+            "Ask an admin for a member or admin credential."),
+        rule.decide(VIEWER, MESSAGE, null, post("lobby", OWNER)).orElseThrow());
   }
 }
