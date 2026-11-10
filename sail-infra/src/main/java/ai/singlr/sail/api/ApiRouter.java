@@ -89,7 +89,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
    * A router answering as the box whose FDE {@code nodeHandle} names: the box the box gate decides
    * on, and the box dispatch, the room seats and a run's provenance are local to.
    */
-  ApiRouter(
+  public ApiRouter(
       Operations operations,
       ApiAuth auth,
       RateLimitGate rateLimits,
