@@ -36,13 +36,18 @@ Usage:
                                 CLI and at the HTTP API Mast calls
   ci/fleet rooms RUN            client opens a room over HTTP; who may post in it at each door, and the
                                 conversation reads the same on every box; no other project's room leaks
-  ci/fleet access RUN           the access matrix's rows sail answers today, at each door that offers them:
-                                client comments on eng's e1 and claims an open spec, but cannot edit,
-                                reassign or retell a review of e1, claim a spec born in eng's room r1, read
-                                beta's ids, or keep one, or an offline edit main refuses, past a sync; row
-                                4, a push into a project client is not granted, is proven by the unit tests
-                                (AccessScenarioTest row 4), as client's box drops an ungranted
-                                project before it offers anything and only a forged sync client reaches main
+  ci/fleet access RUN           the access matrix's rows, at each door that offers them: client comments on
+                                eng's e1 and claims an open spec, but cannot edit, reassign or retell a review
+                                of e1, claim a spec born in eng's room r1, read beta's ids, or keep one, or an
+                                offline edit main refuses, past a sync; eng dispatches e1 on its own box as a
+                                dry run, and uday's dispatch of it on main is placement; eng cannot add a
+                                person at its node's CLI or at main's gateway; main refuses a sync session
+                                whose token is no session; eng reads sync health and bus stats on its own
+                                box but not on main, nor runs main's rounds; row 4, a push into a project
+                                client is not granted, is proven by the unit tests (AccessScenarioTest row
+                                4), as client's box drops an ungranted project before it offers anything and
+                                only a forged sync client reaches main; row 26, a disabled person's passkey
+                                enrollment, by the unit tests until sail-people-are-managed adds disable
   ci/fleet files RUN            files shared on main and on client reach exactly the nodes granted their
                                 project, updates and removals follow, and a viewer cannot share
   ci/fleet portal RUN           main declares beta's app; eng serves it, it answers in the container, at
@@ -318,6 +323,12 @@ readonly E1_ADMIN_ONLY="Reassigning spec 'e1' moves work between FDEs and is an 
 readonly ASK_AN_ADMIN='Ask an admin to reassign it. You may grab a spec only while it is unassigned.'
 readonly E1_NOT_CLIENTS="Event type 'review_completed' makes this box act on 'e1' (owned by 'eng'), which you may not drive."
 readonly ASK_E1S_OWNER='Only its owner or an admin may publish it.'
+readonly E1_RUNS_ON_ENG="Spec 'e1' is assigned to 'eng', which runs on that FDE's devbox, not this node ('uday')."
+readonly ADMIN_MANAGES_PEOPLE='Only an admin may manage people.'
+readonly ASK_AN_ADMIN_TO_DO_IT='Ask an admin to do it.'
+readonly MAIN_IS_UDAYS="Box 'uday' belongs to 'uday', not you."
+readonly ASK_UDAY_TO_OPERATE='Ask uday to operate it, or have an admin do it.'
+readonly NO_SYNC_SESSION='sync: main serves no session whose token is missing, invalid or expired'
 
 doors() {
   local run=${1:-} before
@@ -403,19 +414,33 @@ http_door() {
   grep -q "^HTTP $expected$" <<< "$out" && grep -qF "$says" <<< "$out"
 }
 
-readonly TOKEN_DOOR='set -u
-handle=$1 method=$2 path=$3
-token=$(sudo sail server token create "door-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " ")
+readonly HTTP_TOKEN_DOOR='set -u
+handle=$1 role=$2 method=$3 path=$4 body=$5
+token=$(sudo sail server token create "door-$handle" "$role" --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " ")
 [ -n "$token" ] || { echo "no token"; exit 1; }
-status=$(curl -s -o /tmp/door.json -w "%{http_code}" -X "$method" -H "Authorization: Bearer $token" "http://127.0.0.1:7070$path")
+if [ "$method" = GET ]; then
+  status=$(curl -s -o /tmp/door.json -w "%{http_code}" -H "Authorization: Bearer $token" "http://127.0.0.1:7070$path")
+else
+  status=$(curl -s -o /tmp/door.json -w "%{http_code}" -X "$method" -H "Authorization: Bearer $token" \
+    -H "Content-Type: application/json" -d "$body" "http://127.0.0.1:7070$path")
+fi
 sudo sail server token revoke "door-$handle" > /dev/null 2>&1
 echo "HTTP $status"; head -c 400 /tmp/door.json; echo'
 
-token_door() {
-  local run=$1 handle=$2 expected=$3 method=$4 path=$5 says=${6:-} out
-  out=$(on "$run" main "cat > /tmp/sail-token-door && bash /tmp/sail-token-door $handle $method '$path'" <<< "$TOKEN_DOOR")
+http_token_door() {
+  local run=$1 box=$2 handle=$3 role=$4 expected=$5 method=$6 path=$7 body=${8:-} says=${9:-} out
+  out=$(on "$run" "$box" "cat > /tmp/sail-token-door && bash /tmp/sail-token-door $handle $role $method '$path' '$body'" <<< "$HTTP_TOKEN_DOOR")
   echo "$out"
   grep -q "^HTTP $expected$" <<< "$out" && grep -qF "$says" <<< "$out"
+}
+
+gateway_door() {
+  local run=$1 box=$2 says=$3 main_ip
+  shift 3
+  main_ip=$(internal_ip "$run" main)
+  [[ -n $main_ip ]] || { echo "main has no address"; return 1; }
+  refused "$run" "$box" "$says" \
+    "sudo ssh -o BatchMode=yes -o IdentitiesOnly=yes -i /root/.sail/sync_ed25519 sail@$main_ip sail $*"
 }
 
 apply_project() {
@@ -598,9 +623,9 @@ access() {
   check "$run" "every node syncs twice" sync_all "$run"
   check "$run" "matrix 1: obs reads e1 inside its acme [socket]" container_allows "$run" observer acme "spec show e1 > /dev/null"
   check "$run" "matrix 3: client reads beta's b1 on main, which holds it, and it is not found [HTTP]" \
-    token_door "$run" client 404 GET /v1/specs/b1 "Spec 'b1' was not found."
+    http_token_door "$run" main client member 404 GET /v1/specs/b1 '' "Spec 'b1' was not found."
   check "$run" "client reads acme's e1 on main with the same token [HTTP]" \
-    token_door "$run" client 200 GET /v1/specs/e1 '"id": "e1"'
+    http_token_door "$run" main client member 200 GET /v1/specs/e1 '' '"id": "e1"'
   check "$run" "client's box holds nothing of beta's b1 [CLI]" refused "$run" client "Spec 'b1' was not found." "sudo sail spec show b1"
   check "$run" "client's box holds nothing of beta's b1 [HTTP]" \
     http_door "$run" client client 404 GET /v1/specs/b1 '' "Spec 'b1' was not found."
@@ -657,6 +682,30 @@ access() {
   for door in cli http socket; do
     check "$run" "every box holds open-$door claimed by client" everywhere "$run" "open-$door" assignee client
   done
+  check "$run" "main gives acme an agent, so dispatching it is decided" \
+    on "$run" main "echo '{\"type\":\"claude-code\"}' | sudo sail project config set acme agent -"
+  check "$run" "every node syncs twice" sync_all "$run"
+  check "$run" "matrix 10: uday's dispatch of e1 on main is placement: e1 runs on eng's box [CLI]" \
+    refused "$run" main "$E1_RUNS_ON_ENG" "sudo sail spec dispatch -p acme --spec e1 --dry-run --no-snapshot"
+  check "$run" "matrix 10: uday's dispatch of e1 on main is placement: e1 runs on eng's box [HTTP]" \
+    http_token_door "$run" main uday admin 403 POST /v1/projects/acme/dispatch '{"spec_id":"e1","dry_run":true}' "$E1_RUNS_ON_ENG"
+  check "$run" "eng applies acme" apply_project "$run" eng acme
+  check "$run" "matrix 10: eng dispatches e1 on its box, as a dry run [HTTP]" \
+    http_token_door "$run" eng eng member 200 POST /v1/projects/acme/dispatch '{"spec_id":"e1","dry_run":true}' '"dispatched": true'
+  check "$run" "matrix 25: eng adds a person at its node's CLI, refused admin-only [CLI]" \
+    naming "$ASK_AN_ADMIN_TO_DO_IT" refused "$run" eng "$ADMIN_MANAGES_PEOPLE" "sudo sail fde add zed --name Zed"
+  check "$run" "matrix 25: eng adds a person at main's gateway, refused admin-only [gateway]" \
+    naming "$ASK_AN_ADMIN_TO_DO_IT" gateway_door "$run" eng "$ADMIN_MANAGES_PEOPLE" fde add zed --name Zed
+  check "$run" "matrix 27: main refuses a sync session whose token is no session [sync]" \
+    refused "$run" main "$NO_SYNC_SESSION" "sudo SAIL_TOKEN=bogus sail _sync < /dev/null"
+  for path in /v1/sync /v1/events/stats; do
+    check "$run" "eng reads $path on main, uday's box: refused [HTTP]" \
+      naming "$ASK_UDAY_TO_OPERATE" http_token_door "$run" main eng member 403 GET "$path" '' "$MAIN_IS_UDAYS"
+    check "$run" "eng reads $path on its own box [HTTP]" http_token_door "$run" eng eng member 200 GET "$path"
+    check "$run" "uday, main's admin, reads $path on main [HTTP]" http_token_door "$run" main uday admin 200 GET "$path"
+  done
+  check "$run" "eng triggers a sync round on main, uday's box: refused [HTTP]" \
+    naming "$ASK_UDAY_TO_OPERATE" http_token_door "$run" main eng member 403 POST /v1/sync '{}' "$MAIN_IS_UDAYS"
 }
 
 file_on() {
