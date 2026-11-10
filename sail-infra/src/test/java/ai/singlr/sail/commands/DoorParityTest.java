@@ -11,6 +11,7 @@ import ai.singlr.sail.api.AgentLogStreamer;
 import ai.singlr.sail.api.ApiRouter;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.EventBus;
+import ai.singlr.sail.api.OperationHooks;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.RateLimitGate;
 import ai.singlr.sail.api.SailOperations;
@@ -25,6 +26,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
+import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
@@ -284,8 +286,8 @@ class DoorParityTest {
   }
 
   /**
-   * Row 10. A dry run claims the spec as a dispatch does and prints what it would run instead of
-   * running it, so e1 is pending again before the second door asks.
+   * Row 10, at the web door as a dry run, which claims the spec as a dispatch does, so e1 is
+   * pending again before the host CLI dispatches it.
    */
   @Test
   void row10EngDispatchesE1FromHisBoxAndUdaysBoxIsNotWhereItRuns() throws Exception {
@@ -448,8 +450,9 @@ class DoorParityTest {
   }
 
   /**
-   * {@code sail spec dispatch} of e1 as a dry run on {@code person}'s own box, its operator the
-   * box's person.
+   * {@code sail spec dispatch} of e1 in the background on {@code person}'s own box, its operator
+   * the box's person, its agent exiting at once. The host CLI's dry run asks no container whether
+   * it runs, so it can say only a refusal that comes first; a real dispatch says the whole answer.
    */
   private Said dispatch(String person) {
     var config = boxes.get(person).config();
@@ -457,11 +460,23 @@ class DoorParityTest {
         new DispatchCommand(
             dryRun -> new AcmeRuns(),
             (shell, hooks) ->
-                operations(OperationsFactory.create(db, shell, hooks, SessionYield.NONE), config),
+                operations(
+                    OperationsFactory.create(
+                        db,
+                        shell,
+                        new OperationHooks(
+                            event -> {},
+                            new WatcherSpawner(shell, (spawned, logPath) -> 4242L),
+                            hooks.snapshotter(),
+                            launched -> 0,
+                            hooks.dispatchListener(),
+                            hooks.stopListener()),
+                        SessionYield.NONE),
+                    config),
             () -> person);
     var ran =
         SailCli.run(
-            command, "-p", "acme", "--spec", "e1", "--dry-run", "--no-sync", "--no-snapshot");
+            command, "-p", "acme", "--spec", "e1", "--background", "--no-sync", "--no-snapshot");
     return new Said("host cli", ran.exit() == 0 ? "allowed" : ran.err().strip());
   }
 
