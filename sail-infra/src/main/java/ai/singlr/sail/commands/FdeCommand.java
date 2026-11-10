@@ -7,7 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
-import ai.singlr.sail.access.Resources;
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.auth.EnrollmentService;
 import ai.singlr.sail.auth.EnrollmentTickets;
@@ -373,8 +373,7 @@ public final class FdeCommand implements Runnable {
   private static void requireRosterEdit(Box box, String action) {
     try (var db = Sqlite.open(box.database())) {
       Refusals.enforce(
-          Access.withinAudience(
-              box.person(new FdeStore(db)), Action.MANAGE_PEOPLE, Resources.people()));
+          Access.atAll(box.person(new FdeStore(db)), Action.MANAGE_PEOPLE, Resource.Kind.PEOPLE));
     }
     if (box.node()) {
       throw new IllegalStateException(rosterEditOnNodeMessage(action));

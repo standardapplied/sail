@@ -8,7 +8,7 @@ package ai.singlr.sail.ssh;
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Refusal;
-import ai.singlr.sail.access.Resources;
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
@@ -118,8 +118,7 @@ public final class SshGateway {
     if (ADMIN_COMMANDS.contains(subcommand)
         && !isOwnPasskeyCommand(tokens, fdeHandle)
         && !isOwnEnrollCommand(tokens, fdeHandle)) {
-      var refused =
-          Access.withinAudience(principal.get(), Action.MANAGE_PEOPLE, Resources.people());
+      var refused = Access.atAll(principal.get(), Action.MANAGE_PEOPLE, Resource.Kind.PEOPLE);
       if (refused.isPresent()) {
         return new Rejected(refusedReason(tokens, fdeHandle, refused.get()));
       }
