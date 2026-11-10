@@ -416,9 +416,9 @@ class AccessTest {
   }
 
   @Test
-  void aSpecIsDispatchedByItsAssigneeAloneWhereverItWasBornAndAnUnassignedOneIsNoOnes() {
+  void anAssignedSpecIsDispatchedByItsAssigneeOrAnAdminWhereverItWasBorn() {
     var inDen = Resources.bornIn(Resources.spec("brief", "acme", "ada", "ada"), DEN);
-    var dispatched = Resources.dispatched("auth", "acme", "ada");
+    var dispatched = Resources.spec("auth", "acme", "ada", "bob");
 
     assertEquals(new Decision.Allowed(), Access.decide(Actors.OWNER_API, Action.DISPATCH, inDen));
     assertEquals(
@@ -430,11 +430,6 @@ class AccessTest {
             "Spec 'auth' is assigned to 'ada', not you.",
             "Ask ada to dispatch it, or have an admin reassign it before dispatching."),
         Access.decide(Actors.OTHER_API, Action.DISPATCH, dispatched));
-    assertEquals(
-        "The assignee of a dispatched spec must not be blank.",
-        assertThrows(
-                IllegalArgumentException.class, () -> Resources.dispatched("auth", "acme", " "))
-            .getMessage());
   }
 
   @Test
@@ -773,34 +768,34 @@ class AccessTest {
   void theOwnershipStepIsAnAdminsOrAnOwnersOrOneActingForAnOwnerReadOnlyIncluded() {
     assertEquals(
         Optional.empty(),
-        owned(
+        Access.notRunOwner(
             Actors.ADMIN,
             Resources.run("r1", "acme", null, "auth", null, spec -> Optional.empty())));
     assertEquals(
         Optional.empty(),
-        owned(
+        Access.notRunOwner(
             Actors.OWNER_API,
             Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
     assertEquals(
         Optional.empty(),
-        owned(
+        Access.notRunOwner(
             Actors.VIEWER,
             Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
     assertEquals(
         Optional.empty(),
-        owned(
+        Access.notRunOwner(
             Actors.ROOM,
             Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
     assertEquals(
         Optional.of(Refusal.Kind.NOT_OWNER),
-        owned(
+        Access.notRunOwner(
                 Actors.MACHINE,
                 Resources.run(
                     "r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol")))
             .map(Refusal::kind));
     assertEquals(
         Optional.of(Refusal.Kind.NOT_OWNER),
-        owned(
+        Access.notRunOwner(
                 Actors.OTHERS_AGENT,
                 Resources.run(
                     "r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol")))
@@ -815,7 +810,7 @@ class AccessTest {
                 Refusal.Kind.NOT_OWNER,
                 "Run r1 belongs to spec 'auth', owned by 'ada' and 'carol', not you.",
                 "Only ada or carol or an admin may access this run.")),
-        owned(
+        Access.notRunOwner(
             Actors.OTHER_API,
             Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
     assertEquals(
@@ -824,7 +819,7 @@ class AccessTest {
                 Refusal.Kind.NOT_OWNER,
                 "Run r1 is an ad-hoc session launched by 'ada', not you.",
                 "Only ada or an admin may access this run.")),
-        owned(
+        Access.notRunOwner(
             Actors.OTHER_API,
             Resources.run("r1", "acme", Actors.OWNER, null, null, spec -> Optional.empty())));
     assertEquals(
@@ -833,25 +828,21 @@ class AccessTest {
                 Refusal.Kind.NOT_OWNER,
                 "Run r1 belongs to spec 'auth', which has no owner.",
                 "Only its owner or an admin may access this run.")),
-        owned(
+        Access.notRunOwner(
             Actors.OTHER_API,
             Resources.run("r1", "acme", null, "auth", null, spec -> Optional.empty())));
     assertEquals(
         "Run r1 names no spec and no one it acts for.",
-        owned(
+        Access.notRunOwner(
                 Actors.OTHER_API,
                 Resources.run("r1", "acme", null, null, null, spec -> Optional.empty()))
             .orElseThrow()
             .message());
     assertEquals(
         Optional.empty(),
-        owned(
+        Access.notRunOwner(
             Actors.AGENT,
             Resources.run("r1", "acme", Actors.OWNER, null, null, spec -> Optional.empty())));
-  }
-
-  private static Optional<Refusal> owned(Actor actor, Resource run) {
-    return Access.ownsRun(actor, run);
   }
 
   private static void add(

@@ -42,9 +42,11 @@ import org.junit.jupiter.api.Test;
  * the journal and the message store append a revision to the change log or ask the seam that
  * decides a write of this box's own ({@code WriteAuthority.local}, {@code admit}); only they, and a
  * rule delegating to another, ask a write rule; only a rule asks {@code Access} what a revision
- * takes ({@code WriteAuthority.refused}) or asks {@code Access} past the audience the scope rule
- * decided ({@code Access.withinAudience}); and only main's commit takes a store's rule to hand it
- * one. A door that decides a row write, or journals one on its own, fails here.
+ * takes ({@code WriteAuthority.refused}); only that seam asks {@code Access} past the audience the
+ * scope rule decided ({@code Access.withinAudience}); only the terminal's room pin and a room
+ * session's report, two doors with no message to journal, ask the message rule's post ({@code
+ * MessageAuthority.post}), and both still do; and only main's commit takes a store's rule to hand
+ * it one. A door that decides a row write, or journals one on its own, fails here.
  */
 class OneDecisionPointTest {
 
@@ -71,6 +73,23 @@ class OneDecisionPointTest {
     }
 
     assertEquals(Set.of(), violations);
+  }
+
+  @Test
+  void exactlyThePostingDoorsAskTheMessageRulesPost() throws Exception {
+    var asking = new TreeSet<String>();
+    for (var bytes : everyMainClass()) {
+      var model = ClassFile.of().parse(bytes);
+      for (var entry : model.constantPool()) {
+        if (entry instanceof MemberRefEntry member
+            && member.owner().asInternalName().equals(POSTS)
+            && member.name().stringValue().equals("post")) {
+          asking.add(model.thisClass().asInternalName());
+        }
+      }
+    }
+
+    assertEquals(new TreeSet<>(POSTING_DOORS), asking);
   }
 
   @Test

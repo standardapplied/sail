@@ -41,7 +41,7 @@ Usage:
                                 reassign or retell a review of e1, claim a spec born in eng's room r1, read
                                 beta's ids, or keep one, or an offline edit main refuses, past a sync; row
                                 4, a push into a project client is not granted, is proven by the unit tests
-                                (PushesBaselineTest, AccessScenarioTest), as client's box drops an ungranted
+                                (AccessScenarioTest row 4), as client's box drops an ungranted
                                 project before it offers anything and only a forged sync client reaches main
   ci/fleet files RUN            files shared on main and on client reach exactly the nodes granted their
                                 project, updates and removals follow, and a viewer cannot share

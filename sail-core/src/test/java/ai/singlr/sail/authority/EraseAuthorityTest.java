@@ -79,6 +79,51 @@ class EraseAuthorityTest {
     return new SpecStore.LastKnown("auth", status, assignee, createdBy, "auth", live);
   }
 
+  /**
+   * {@code spec} held on the board as it names it, live or deleted, pruned by {@code actor}: the
+   * decision a prune by id asks.
+   */
+  private Decision pruned(Actor actor, SpecStore.LastKnown spec) {
+    var specs = new SpecStore(board.db);
+    if (spec.live()) {
+      board.db.execute(
+          """
+          INSERT OR REPLACE INTO specs (id, project, title, status, assignee, created_by,
+              created_at, updated_at, room_id)
+          VALUES (?, 'acme', ?, ?, ?, ?, 'now', 'now', ?)""",
+          spec.id(),
+          spec.id(),
+          spec.status().wire(),
+          spec.assignee(),
+          spec.createdBy(),
+          spec.roomId());
+    } else {
+      Acting.system(
+          () -> {
+            specs.create(
+                new SpecStore.SpecRow(
+                    spec.id(),
+                    "acme",
+                    spec.id(),
+                    spec.status(),
+                    spec.assignee(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    spec.createdBy(),
+                    null,
+                    null,
+                    spec.createdBy(),
+                    List.of(),
+                    List.of()));
+            specs.delete(spec.id());
+          });
+    }
+    return rule.prune(actor, spec.id());
+  }
+
   static Stream<Case> specs() {
     var archived = spec(SpecStatus.ARCHIVED, OWNER, OTHER, true);
     var unassigned = spec(SpecStatus.CANCELLED, null, OWNER, true);
@@ -118,7 +163,7 @@ class EraseAuthorityTest {
   void decidesASpec(Case row) {
     assertEquals(
         Optional.ofNullable(row.refused()),
-        refused(rule.spec(row.actor(), row.spec())).map(Refusal::kind));
+        refused(pruned(row.actor(), row.spec())).map(Refusal::kind));
   }
 
   @Test
@@ -141,7 +186,7 @@ class EraseAuthorityTest {
     var archived = spec(SpecStatus.ARCHIVED, OWNER, OWNER, true);
     var outsider = VIEWER.withScope(ProjectScope.of(List.of("beta")));
 
-    assertEquals(new Decision.NotFound(), rule.spec(outsider, archived));
+    assertEquals(new Decision.NotFound(), pruned(outsider, archived));
     assertEquals(
         Optional.of(
             new Refusal(
@@ -258,17 +303,17 @@ class EraseAuthorityTest {
         });
     var specs = new SpecStore(board.db);
 
-    assertEquals(new Decision.Allowed(), rule.spec(scoped, specs.lastKnown("whole").orElseThrow()));
+    assertEquals(new Decision.Allowed(), rule.prune(scoped, "whole"));
     assertEquals(
         Optional.of(
             new Refusal(
                 Kind.NOT_PRUNABLE,
                 "Pruning spec 'moved' would erase work outside your project scope.",
                 "Ask an admin to prune it.")),
-        refused(rule.spec(scoped, specs.lastKnown("moved").orElseThrow())));
+        refused(rule.prune(scoped, "moved")));
     assertEquals(
         new Decision.Allowed(),
-        rule.spec(OWNER_API, specs.lastKnown("moved").orElseThrow()),
+        rule.prune(OWNER_API, "moved"),
         "an owner main never scoped erases it whole");
     assertEquals(
         Optional.of(Kind.NOT_PRUNABLE),
@@ -313,7 +358,7 @@ class EraseAuthorityTest {
                 "Archive it first: ",
                 Remedy.sail("spec update", "auth", "--status", "archived"),
                 ".")),
-        refused(rule.spec(ADMIN, spec(SpecStatus.IN_PROGRESS, OWNER, OWNER, true))).orElseThrow());
+        refused(pruned(ADMIN, spec(SpecStatus.IN_PROGRESS, OWNER, OWNER, true))).orElseThrow());
     assertEquals(
         new Refusal(
             Kind.READ_ONLY,
@@ -334,7 +379,7 @@ class EraseAuthorityTest {
         rule.purge(OWNER_API).orElseThrow());
     assertEquals(
         "Spec 'auth' is assigned to 'ada', not you.",
-        refused(rule.spec(OTHER_API, spec(SpecStatus.ARCHIVED, OWNER, OWNER, true)))
+        refused(pruned(OTHER_API, spec(SpecStatus.ARCHIVED, OWNER, OWNER, true)))
             .orElseThrow()
             .message());
   }

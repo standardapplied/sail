@@ -68,11 +68,11 @@ public final class LaunchAdmission {
 
   /**
    * Refuses when the bound actor may not dispatch {@code spec} ({@link Action#DISPATCH}), its
-   * assignee's ({@link Resources#dispatched}), and then when it does not run on the box identified
-   * by {@code localHandle}: placement, not permission. The spec is one its caller read in the
-   * actor's scope, so one outside it is not found. An unassigned spec has no owner to ask, so only
-   * the role and lane are ({@link Access#atAll}), and placement says it runs on no box until it is
-   * claimed, whoever asks, as main said.
+   * assignee's, and then when it does not run on the box identified by {@code localHandle}:
+   * placement, not permission. The spec is one its caller read in the actor's scope, so one outside
+   * it is not found. An unassigned spec has no owner to ask, so only the role and lane are ({@link
+   * Access#atAll}), and placement says it runs on no box until it is claimed, whoever asks, as main
+   * said.
    *
    * <p>Placement enforces one invariant: <em>a spec executes only on the node whose handle equals
    * the spec's assignee</em>. Node identity is {@code SyncConfig.handle} — one FDE, one devbox — so
@@ -89,7 +89,7 @@ public final class LaunchAdmission {
           Access.decide(
               actor,
               Action.DISPATCH,
-              Resources.dispatched(spec.id(), spec.project(), spec.assignee())),
+              Resources.spec(spec.id(), spec.project(), spec.assignee(), spec.createdBy())),
           () -> Refusals.specNotFound(spec.id()));
     }
     if (Strings.isBlank(localHandle)) {

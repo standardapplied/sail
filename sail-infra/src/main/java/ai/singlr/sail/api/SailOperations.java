@@ -1422,12 +1422,7 @@ public final class SailOperations implements HostOperations {
       return storeUnavailable("Run store").failure().asFailure();
     }
     return switch (LogAdmission.of(
-        Actor.reader(),
-        Actor.current(),
-        runStore.findById(runId),
-        runId,
-        localHandle,
-        this::spec)) {
+        Actor.current(), runStore.findById(runId), runId, localHandle, this::spec)) {
       case Result.Success<RunStore.RunRow> readable -> served.apply(readable.value());
       case Result.Failure<RunStore.RunRow> refused -> refused.asFailure();
     };
@@ -1443,16 +1438,6 @@ public final class SailOperations implements HostOperations {
       throw storeUnavailable("Run store");
     }
     return runStore;
-  }
-
-  /**
-   * Whether a run did not execute on this box — the provenance test, the inverse of {@link
-   * RunStore.RunRow#ownedBy}. A box with a handle serves only runs stamped with it, so a blank
-   * {@code node} fails closed to foreign; a box with no handle serves only its own blank-node runs
-   * and never a synced run stamped by another box.
-   */
-  static boolean isForeign(RunStore.RunRow run, String localHandle) {
-    return !run.ownedBy(localHandle);
   }
 
   private ProjectResponse projectValue(String project) {

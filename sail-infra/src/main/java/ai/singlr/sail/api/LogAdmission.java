@@ -25,26 +25,25 @@ final class LogAdmission {
   private LogAdmission() {}
 
   /**
-   * Run {@code runId}, {@code found}, when {@code actor} may read its log on this box. A run {@code
-   * reader} may not read is not there, a run that executed elsewhere is that box's to serve ({@code
-   * run_on_other_node}), and the rest is the ownership step ({@link Access#ownsRun}), its spec's
-   * owner as the reader sees it.
+   * Run {@code runId}, {@code found}, when {@code actor} may read its log on this box. A run the
+   * actor may not read is not there, a run that executed elsewhere ({@link
+   * RunStore.RunRow#ownedBy}) is that box's to serve ({@code run_on_other_node}), and the rest is
+   * the ownership step ({@link Access#notRunOwner}), its spec's owner as the actor sees it.
    */
   static Result<RunStore.RunRow> of(
-      Actor reader,
       Actor actor,
       Optional<RunStore.RunRow> found,
       String runId,
       String localHandle,
       Function<String, Optional<SpecStore.SpecRow>> specs) {
-    var run = ReadFilter.readable(reader, found, RunStore.RunRow::project).orElse(null);
+    var run = ReadFilter.readable(actor, found, RunStore.RunRow::project).orElse(null);
     if (run == null) {
       return Refusals.noRun(runId);
     }
-    if (SailOperations.isForeign(run, localHandle)) {
+    if (!run.ownedBy(localHandle)) {
       return foreign(run);
     }
-    return Access.ownsRun(actor, run.resource(reader, specs))
+    return Access.notRunOwner(actor, run.resource(actor, specs))
         .map(Refusals::<RunStore.RunRow>failure)
         .orElseGet(() -> Result.success(run));
   }

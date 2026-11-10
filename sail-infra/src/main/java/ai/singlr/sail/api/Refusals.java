@@ -54,7 +54,7 @@ public final class Refusals {
   }
 
   /** The answer for a room the caller may not see: the same as for one that is not there. */
-  public static ApiException roomNotFound(String roomId) {
+  static ApiException roomNotFound(String roomId) {
     return new ApiException(ErrorCode.ROOM_NOT_FOUND, roomMissing(roomId));
   }
 
@@ -64,7 +64,7 @@ public final class Refusals {
   }
 
   /** The answer for a run the caller may not see: the same as for one that is not there. */
-  public static ApiException runNotFound(String runId) {
+  static ApiException runNotFound(String runId) {
     return ApiException.of((Result.Failure<?>) noRun(runId));
   }
 
@@ -86,7 +86,7 @@ public final class Refusals {
   /**
    * Throws unless {@code decision} allows: not found is {@code notFound}, a refusal its exception.
    */
-  public static void require(Decision decision, Supplier<? extends RuntimeException> notFound) {
+  static void require(Decision decision, Supplier<? extends RuntimeException> notFound) {
     switch (decision) {
       case Decision.Allowed allowed -> {}
       case Decision.NotFound absent -> throw notFound.get();

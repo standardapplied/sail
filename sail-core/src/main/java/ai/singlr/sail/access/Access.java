@@ -63,10 +63,9 @@ public final class Access {
   /**
    * Why {@code actor} may not take {@code action} on {@code resource}, whose audience was decided
    * already: every step of {@link #decide(Actor, Action, Resource)} but the audience, so the
-   * resource's project is not read and a write's rule builds its resource with none. A write's
-   * audience is the scope rule's ({@code ScopeRule}), asked first on every lane from the project
-   * the journal files the row under, so the write path decides it once, and a write is never not
-   * found here.
+   * resource's project is not read, and a write's rule need not name one. A write's audience is the
+   * scope rule's ({@code ScopeRule}), asked first on every lane from the project the journal files
+   * the row under, so the write path decides it once, and a write is never not found here.
    */
   public static Optional<Refusal> withinAudience(Actor actor, Action action, Resource resource) {
     return actor.isSail() ? Optional.empty() : steps(actor, action, resource.kind(), resource);
@@ -102,7 +101,7 @@ public final class Access {
    * step itself, a run's log, which the people the run works for read whatever their role, until
    * sail-every-door-asks-access asks {@link Action#OPERATE_RUN} of it.
    */
-  public static Optional<Refusal> ownsRun(Actor actor, Resource run) {
+  public static Optional<Refusal> notRunOwner(Actor actor, Resource run) {
     return owns(actor, run)
         ? Optional.empty()
         : Optional.of(Wording.notOwner(Action.OPERATE_RUN, run));

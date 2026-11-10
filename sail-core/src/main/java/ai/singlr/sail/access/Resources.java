@@ -42,16 +42,6 @@ public final class Resources {
   }
 
   /**
-   * Spec {@code id} of {@code project} as it is dispatched: its assignee's alone, since a spec runs
-   * only on its assignee's box. An unassigned spec has no owner to ask, and is not one: placement
-   * says it runs on no box.
-   */
-  public static Resource dispatched(String id, String project, String assignee) {
-    Strings.requireNonBlank(assignee, "The assignee of a dispatched spec");
-    return new Resource(Resource.Kind.SPEC, id, project, one(assignee), assignee, null, null);
-  }
-
-  /**
    * {@code spec} as born in the room whose conversation {@code room} is, when that is not its own:
    * a create or a claim of it there also takes that conversation's owners.
    */

@@ -147,7 +147,7 @@ public final class EraseAuthority {
    * project the spec moved from — lies outside the actor's audience, and the refusal names none of
    * it.
    */
-  Decision spec(Actor actor, SpecStore.LastKnown spec) {
+  private Decision spec(Actor actor, SpecStore.LastKnown spec) {
     var decision =
         Access.decide(
             actor,

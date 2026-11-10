@@ -393,10 +393,8 @@ class ScopeRuleTest {
     specs.updateStatus("alpha-work", SpecStatus.ARCHIVED);
     var admin = new Actor("nia", Role.ADMIN, Actor.Lane.API).withScope(ONLY_A);
 
-    assertEquals(
-        new Decision.NotFound(), erase.spec(admin, specs.lastKnown("beta-work").orElseThrow()));
-    assertEquals(
-        new Decision.Allowed(), erase.spec(admin, specs.lastKnown("alpha-work").orElseThrow()));
+    assertEquals(new Decision.NotFound(), erase.prune(admin, "beta-work"));
+    assertEquals(new Decision.Allowed(), erase.prune(admin, "alpha-work"));
     assertEquals(
         Refusal.of(
             Refusal.Kind.NOT_PRUNABLE,

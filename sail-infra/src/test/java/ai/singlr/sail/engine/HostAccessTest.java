@@ -27,9 +27,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The terminal door: who a PTY session acts as, and whether it may pin a room. A room the FDE may
- * not read is not found; then a session opened under another project is told the room's, whoever
- * asks; then the post is decided.
+ * The terminal door: who a PTY session acts as, and whether it may pin a room: a session opened
+ * under another project is told the room's, whoever asks, and then the post is decided. A room the
+ * FDE may not read is not found ({@code ScopedReadsTest}).
  */
 class HostAccessTest {
 
@@ -40,16 +40,13 @@ class HostAccessTest {
   void setUp() {
     db = Sqlite.openMemory();
     new SchemaManager(db).migrate();
-    HeldProjects.hold(db, "acme", "beta");
+    HeldProjects.hold(db, "acme");
     var fdes = new FdeStore(db);
     Acting.system(
         () -> {
           fdes.add("root", "Root", "root@x", "admin");
           fdes.add("ada", "Ada", "ada@x", "member");
           fdes.add("vic", "Vic", "vic@x", "viewer");
-          fdes.add("sam", "Sam", "sam@x", "member");
-          fdes.restrict("sam");
-          fdes.grant("sam", "beta");
           new RoomStore(db)
               .createJournaled(
                   new RoomStore.RoomRow(
@@ -94,22 +91,6 @@ class HostAccessTest {
 
     assertEquals(new PtyIdentity("root", true), access.identity(root.token(), "ada"));
     assertEquals(new PtyIdentity("ada", false), access.identity(ada.token(), "root"));
-  }
-
-  @Test
-  void aRoomTheFdeMayNotReadIsNotFoundBeforeAnythingNamesItsProject() {
-    assertEquals(
-        "Room 'lobby' was not found.",
-        assertThrows(
-                IOException.class,
-                () -> access.admit("lobby", "beta", new PtyIdentity("sam", false)))
-            .getMessage());
-    assertEquals(
-        "Room 'attic' was not found.",
-        assertThrows(
-                IOException.class,
-                () -> access.admit("attic", "acme", new PtyIdentity("ada", false)))
-            .getMessage());
   }
 
   @Test
