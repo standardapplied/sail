@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import java.util.Locale;
+
 public enum ErrorCode {
   BAD_REQUEST(400),
   INVALID_REQUEST(422),
@@ -68,7 +70,8 @@ public enum ErrorCode {
     return httpCode;
   }
 
+  /** The code as clients see it, the same whatever the box's default locale. */
   public String code() {
-    return name().toLowerCase();
+    return name().toLowerCase(Locale.ROOT);
   }
 }

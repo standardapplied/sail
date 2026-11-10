@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.authority.WriterAuthority;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
@@ -269,10 +268,7 @@ class FileStoreTest {
 
     var outcome =
         files.commitRevision(
-            id("a.txt"),
-            ContentFixtures.snapshot(files, "BBB"),
-            "1-base",
-            new WriterAuthority(db, "files"));
+            id("a.txt"), ContentFixtures.snapshot(files, "BBB"), "1-base", files.authority());
 
     assertInstanceOf(PushOutcome.Accepted.class, outcome);
     assertEquals("BBB", ContentFixtures.text(files, "acme", "a.txt"));
@@ -284,10 +280,7 @@ class FileStoreTest {
 
     var outcome =
         files.commitRevision(
-            id("a.txt"),
-            ContentFixtures.snapshot(files, "BBB"),
-            "9-stale",
-            new WriterAuthority(db, "files"));
+            id("a.txt"), ContentFixtures.snapshot(files, "BBB"), "9-stale", files.authority());
 
     var stale = assertInstanceOf(PushOutcome.Stale.class, outcome);
     assertEquals("1-base", stale.currentRev());

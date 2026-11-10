@@ -57,7 +57,10 @@ class UnheldProjectSyncTest {
 
     var denial =
         new SyncSession.Denial(
-            "spec", "forged", "Project 'zeta' isn't on main. Projects there: acme, proj.");
+            "spec",
+            "forged",
+            "Project 'zeta' isn't on main. Projects there: acme, proj."
+                + " Create it with 'sail project create zeta', or sync it from main with 'sail sync'.");
     assertEquals(List.of(denial), first.denials());
     assertEquals(List.of(denial), second.denials());
     assertEquals("zeta", node.specs.findById("forged").orElseThrow().project());
@@ -100,7 +103,10 @@ class UnheldProjectSyncTest {
     assertEquals(
         List.of(
             new SyncSession.Denial(
-                "spec", "old", "Project 'retired' isn't on main. Projects there: acme, proj.")),
+                "spec",
+                "old",
+                "Project 'retired' isn't on main. Projects there: acme, proj. Create it with 'sail"
+                    + " project create retired', or sync it from main with 'sail sync'.")),
         report.denials());
     assertTrue(main.specs.findById("old").isEmpty());
     assertEquals("retired", node.specs.findById("old").orElseThrow().project());

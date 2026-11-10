@@ -44,8 +44,8 @@ class ApiOperatorHintsTest {
     return List.of(
         operator.render(ProjectLoader.stopped("gamma").remedy()),
         operator.render(ProjectReader.absent("gamma").remedy()),
-        operator.render(DispatchPolicy.runsOnOtherNode(spec(null), "ada").fix()),
-        operator.render(DispatchPolicy.runsOnOtherNode(spec("bob"), "ada").fix()),
+        operator.render(LaunchAdmission.runsOnOtherNode(spec(null), "ada").remedy()),
+        operator.render(LaunchAdmission.runsOnOtherNode(spec("bob"), "ada").remedy()),
         operator.render(LaunchAdmission.HANDLE_HINT),
         operator.render(
             LaunchAdmission.notInstalled(Harnesses.of("claude-code"), "gamma").remedy()),

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.authority.ReviewAuthority;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -780,14 +781,14 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
    * spec or their follow-up passes over a review its actor could not read.
    */
   private void amend(Map<String, Map<String, Object>> changes) {
-    var scope = Actor.reader().scope();
+    var reader = Actor.reader();
     var reviews = new LinkedHashSet<String>();
     for (var findingId : changes.keySet()) {
       reviewOfFinding(findingId)
           .filter(
               review ->
-                  scope.unrestricted()
-                      || scope.admits(changeLog.headProject(ENTITY, review).orElse(null)))
+                  ReadFilter.reads(
+                      reader, () -> changeLog.headProject(ENTITY, review).orElse(null)))
           .ifPresent(reviews::add);
     }
     for (var reviewId : reviews) {

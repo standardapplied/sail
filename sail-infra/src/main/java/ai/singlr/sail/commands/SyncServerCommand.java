@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.SailVersion;
+import ai.singlr.sail.access.Access;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SyncTransitionEvents;
@@ -206,7 +207,7 @@ public final class SyncServerCommand implements Callable<Integer> {
   /** Main's roster as {@code principal}'s node mirrors it ({@link FdeStore#visibleTo}). */
   static List<Map<String, Object>> roster(Sqlite db, Actor principal) {
     return new FdeStore(db)
-        .visibleTo(principal.handle(), principal.scope()).stream()
+        .visibleTo(principal.handle(), Access.audience(principal)).stream()
             .map(SyncServerCommand::fdeToMap)
             .toList();
   }

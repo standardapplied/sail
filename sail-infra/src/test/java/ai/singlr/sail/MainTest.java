@@ -9,9 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
-import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import java.io.PrintWriter;
 import java.io.StringWriter;

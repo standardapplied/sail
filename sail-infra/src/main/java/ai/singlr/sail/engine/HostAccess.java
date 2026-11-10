@@ -5,8 +5,10 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.api.Scoped;
-import ai.singlr.sail.authority.PostingRule;
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Resources;
+import ai.singlr.sail.api.Refusals;
+import ai.singlr.sail.authority.MessageAuthority;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
@@ -51,14 +53,22 @@ public record HostAccess(Sqlite db, RoleRule roles) {
   }
 
   /**
-   * Admits {@code who} into {@code roomId}. A room of a project outside the FDE's scope is refused
-   * as one that does not exist, before anything names its project.
+   * Admits {@code who} into {@code roomId} when it may post in the room's conversation ({@link
+   * MessageAuthority#post}). A room of a project outside the FDE's scope is not found, as one this
+   * box does not hold, before anything names its project; then a session opened under another
+   * project is told the room's; then a refusal is said as the pty host says one.
    */
   public void admit(String roomId, String project, PtyIdentity who) throws IOException {
     var actor = actorOf(who.fde());
-    var room =
-        Scoped.row(actor, new RoomStore(db).findById(roomId), RoomStore.RoomRow::project)
-            .orElseThrow(() -> new IOException("Room '" + roomId + "' was not found."));
+    var rooms = new RoomStore(db);
+    var notFound = new IOException(Refusals.roomMissing(roomId));
+    var room = rooms.findById(roomId).orElseThrow(() -> notFound);
+    var decision =
+        MessageAuthority.post(
+            actor, Resources.conversation(room.id(), room.project(), rooms.owners(room.id())));
+    if (decision instanceof Decision.NotFound) {
+      throw notFound;
+    }
     if (!Objects.equals(room.project(), project)) {
       throw new IOException(
           "Room '"
@@ -69,9 +79,8 @@ public record HostAccess(Sqlite db, RoleRule roles) {
               + room.project()
               + ".");
     }
-    var refused = PostingRule.decide(actor, room.id(), true, new RoomStore(db).owners(room.id()));
-    if (refused.isPresent()) {
-      throw Remedied.io(refused.get().message(), refused.get().fix());
+    if (decision instanceof Decision.Refused(var refusal)) {
+      throw Remedied.io(refusal.message(), refusal.fix());
     }
   }
 

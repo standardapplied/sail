@@ -9,9 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
-import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -55,7 +54,7 @@ class UnheldProjectTest {
         new Refusal(
             Refusal.Kind.UNHELD_PROJECT,
             "Project 'nosuch' isn't on this box. Projects here: acme, beta.",
-            Remedy.NONE),
+            ProjectStore.uncatalogued("nosuch")),
         refused.refusal());
     assertEquals(0, count("SELECT count(*) FROM specs"));
     assertEquals(0, count("SELECT count(*) FROM change_log WHERE entity_type = 'spec'"));
@@ -129,7 +128,7 @@ class UnheldProjectTest {
         new Refusal(
             Refusal.Kind.UNHELD_PROJECT,
             "Project 'gamma' isn't on this box. Projects here: acme.",
-            Remedy.NONE),
+            ProjectStore.uncatalogued("gamma")),
         refused.refusal());
   }
 

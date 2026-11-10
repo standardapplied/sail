@@ -8,7 +8,13 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Refusal;
+import ai.singlr.sail.access.Resources;
+import ai.singlr.sail.authority.MessageAuthority;
+import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.engine.SpecCliHelper;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
@@ -33,9 +39,14 @@ import org.junit.jupiter.api.Test;
 /**
  * A2 by construction: a write is decided at exactly one of two points, main's commit for a pushed
  * revision and the journal for every other. Read from the compiled classes of every module: only
- * the journal and the message store append a revision to the change log; only they, and a rule
- * delegating to another, ask a write rule; and only main's commit takes a store's rule to hand it
- * one. A door that decides a row write, or journals one on its own, fails here.
+ * the journal and the message store append a revision to the change log or ask the seam that
+ * decides a write of this box's own ({@code WriteAuthority.local}, {@code admit}); only they, and a
+ * rule delegating to another, ask a write rule; only a rule asks {@code Access} what a revision
+ * takes ({@code WriteAuthority.refused}); only that seam asks {@code Access} past the audience the
+ * scope rule decided ({@code Access.withinAudience}); only the terminal's room pin and a room
+ * session's report, two doors with no message to journal, ask the message rule's post ({@code
+ * MessageAuthority.post}), and both still do; and only main's commit takes a store's rule to hand
+ * it one. A door that decides a row write, or journals one on its own, fails here.
  */
 class OneDecisionPointTest {
 
@@ -45,23 +56,40 @@ class OneDecisionPointTest {
   private static final String MESSAGES = STORES + "MessageStore";
   private static final String CHANGE_LOG = STORES + "ChangeLog";
   private static final String MAINS_COMMIT = "ai/singlr/sail/sync/StoreReplica";
+  private static final String SEAM = RULES + "WriteAuthority";
+  private static final String ACCESS = "ai/singlr/sail/access/Access";
+  private static final String POSTS = RULES + "MessageAuthority";
+  private static final Set<String> POSTING_DOORS =
+      Set.of("ai/singlr/sail/engine/HostAccess", "ai/singlr/sail/api/SailOperations");
   private static final String DECIDES =
       "(Lai/singlr/sail/identity/Actor;Ljava/lang/String;Ljava/util/Map;Ljava/util/Map;)"
           + "Ljava/util/Optional;";
 
   @Test
   void onlyTheJournalAndMainsCommitDecideOrJournalAWrite() throws Exception {
-    var scanned = 0;
     var violations = new TreeSet<String>();
-    for (var module : List.of(RevisionJournal.class, SpecCliHelper.class, SailOperations.class)) {
-      for (var bytes : classesOf(module)) {
-        violations.addAll(violations(bytes));
-        scanned++;
+    for (var bytes : everyMainClass()) {
+      violations.addAll(violations(bytes));
+    }
+
+    assertEquals(Set.of(), violations);
+  }
+
+  @Test
+  void exactlyThePostingDoorsAskTheMessageRulesPost() throws Exception {
+    var asking = new TreeSet<String>();
+    for (var bytes : everyMainClass()) {
+      var model = ClassFile.of().parse(bytes);
+      for (var entry : model.constantPool()) {
+        if (entry instanceof MemberRefEntry member
+            && member.owner().asInternalName().equals(POSTS)
+            && member.name().stringValue().equals("post")) {
+          asking.add(model.thisClass().asInternalName());
+        }
       }
     }
 
-    assertTrue(scanned > 500, "every module's classes were read: " + scanned);
-    assertEquals(Set.of(), violations);
+    assertEquals(new TreeSet<>(POSTING_DOORS), asking);
   }
 
   @Test
@@ -70,7 +98,15 @@ class OneDecisionPointTest {
       assertEquals(
           List.of(
               "ai/singlr/sail/api/OneDecisionPointTest$Leaky asks a write rule: SpecAuthority.decide",
+              "ai/singlr/sail/api/OneDecisionPointTest$Leaky asks the journal's seam:"
+                  + " WriteAuthority.local",
+              "ai/singlr/sail/api/OneDecisionPointTest$Leaky asks the message rule's post:"
+                  + " MessageAuthority.post",
+              "ai/singlr/sail/api/OneDecisionPointTest$Leaky asks what a revision takes:"
+                  + " WriteAuthority.refused",
               "ai/singlr/sail/api/OneDecisionPointTest$Leaky journals a revision: ChangeLog.append",
+              "ai/singlr/sail/api/OneDecisionPointTest$Leaky skips the audience a scope rule"
+                  + " decided: Access.withinAudience",
               "ai/singlr/sail/api/OneDecisionPointTest$Leaky takes a store's rule:"
                   + " SpecStore.authority"),
           violations(bytes.readAllBytes()));
@@ -85,6 +121,24 @@ class OneDecisionPointTest {
 
     void journal(ChangeLog log) {
       log.append("spec", "auth", "1-a", "local", false, "{}");
+    }
+
+    Optional<Refusal> local(WriteAuthority rule) {
+      return WriteAuthority.local(rule, "auth", null, null);
+    }
+
+    Decision posts() {
+      return MessageAuthority.post(
+          Actor.current(), Resources.conversation("lobby", "acme", List.of()));
+    }
+
+    Optional<Refusal> unscoped() {
+      return Access.withinAudience(Actor.current(), Action.READ, Resources.people());
+    }
+
+    Optional<Refusal> take() {
+      return WriteAuthority.refused(
+          Actor.current(), WriteAuthority.Taking.of(Resources.people(), Action.MANAGE_PEOPLE));
     }
   }
 
@@ -104,6 +158,20 @@ class OneDecisionPointTest {
           && !Set.of(JOURNAL, MESSAGES, CHANGE_LOG).contains(name)) {
         found.add(name + " journals a revision: " + called);
       }
+      if (owner.equals(SEAM)
+          && Set.of("local", "admit").contains(method)
+          && !Set.of(JOURNAL, MESSAGES).contains(name)) {
+        found.add(name + " asks the journal's seam: " + called);
+      }
+      if (owner.equals(SEAM) && method.equals("refused") && !name.startsWith(RULES)) {
+        found.add(name + " asks what a revision takes: " + called);
+      }
+      if (owner.equals(ACCESS) && method.equals("withinAudience") && !name.equals(SEAM)) {
+        found.add(name + " skips the audience a scope rule decided: " + called);
+      }
+      if (owner.equals(POSTS) && method.equals("post") && !POSTING_DOORS.contains(name)) {
+        found.add(name + " asks the message rule's post: " + called);
+      }
       if (method.equals("decide")
           && member.type().stringValue().equals(DECIDES)
           && !Set.of(JOURNAL, MESSAGES).contains(name)
@@ -120,10 +188,20 @@ class OneDecisionPointTest {
     return List.copyOf(found);
   }
 
+  /** The bytes of every main class of every module, each module read whole. */
+  static List<byte[]> everyMainClass() throws IOException, URISyntaxException {
+    var classes = new ArrayList<byte[]>();
+    for (var module : List.of(RevisionJournal.class, SpecCliHelper.class, SailOperations.class)) {
+      classes.addAll(classesOf(module));
+    }
+    assertTrue(classes.size() > 500, "every module's classes were read: " + classes.size());
+    return classes;
+  }
+
   /**
    * The bytes of every class in the module {@code anchor} was loaded from: a directory or a jar.
    */
-  private static List<byte[]> classesOf(Class<?> anchor) throws IOException, URISyntaxException {
+  static List<byte[]> classesOf(Class<?> anchor) throws IOException, URISyntaxException {
     var location = Path.of(anchor.getProtectionDomain().getCodeSource().getLocation().toURI());
     if (Files.isDirectory(location)) {
       return classesUnder(location);

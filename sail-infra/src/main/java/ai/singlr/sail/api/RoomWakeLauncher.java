@@ -212,7 +212,7 @@ public final class RoomWakeLauncher {
     var rooms = roomStore.get();
     var room = rooms == null ? null : rooms.findById(roomId).orElse(null);
     if (room == null) {
-      throw new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
+      throw Refusals.roomNotFound(roomId);
     }
     var owner = rooms.ownerOf(roomId);
     if (!Ownership.owns(localHandle, owner)) {

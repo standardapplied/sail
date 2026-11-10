@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.store;
 
-import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.ScopeRule;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.authority.WriteRefused;
@@ -229,10 +229,10 @@ public final class RevisionJournal implements ConflictResolver {
    * the journal asks it as it records the revision, and a door about to start a side effect asks
    * the same of the write it will then make. {@code held} is the projection at the journal's head
    * ({@link #held}), which the row being written has not reached yet, so a revision never admits
-   * itself. A revision main decided is not decided again: one pushed ({@link Actor.Lane#SYNC}) was
-   * decided at {@link #commitRevision}, and the rule passes main's own and this box's machinery
-   * ({@link WriteAuthority#decided}). Whether the write stays inside the projects the actor may see
-   * is asked first, of every type alike ({@link ScopeRule}).
+   * itself. A revision already decided is not decided again: one pushed ({@link Actor.Lane#SYNC})
+   * was decided at {@link #commitRevision}, and Sail itself's ({@link Actor#isSail}) needs no rule
+   * ({@link WriteAuthority#local}). Whether the write stays inside the projects the actor reads is
+   * asked first, of every type alike ({@link ScopeRule}).
    */
   public Optional<Refusal> decide(String id, Map<String, Object> next) {
     return WriteAuthority.local(scope.before(authority.get()), id, held(id), next);

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
@@ -13,6 +14,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -22,6 +24,7 @@ import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
@@ -99,7 +102,7 @@ final class GlobalSpecOperations {
 
   /** The specs matching {@code filter} that the reader may see. */
   List<SpecStore.SpecRow> readable(SpecStore.SpecFilter filter) {
-    return Scoped.rows(Actor.reader(), specStore.list(filter), SpecStore.SpecRow::project);
+    return ReadFilter.readable(Actor.reader(), specStore.list(filter), SpecStore.SpecRow::project);
   }
 
   GlobalSpecDetailResponse get(String specId) {
@@ -124,7 +127,8 @@ final class GlobalSpecOperations {
     if (runStore == null) {
       return null;
     }
-    return Scoped.rows(Actor.reader(), runStore.listForSpec(specId), RunStore.RunRow::project)
+    return ReadFilter.readable(
+            Actor.reader(), runStore.listForSpec(specId), RunStore.RunRow::project)
         .stream()
         .findFirst()
         .map(RunSummary::from)
@@ -220,7 +224,7 @@ final class GlobalSpecOperations {
           "This box keeps no rooms, so a spec cannot be born in room '" + roomId + "'.",
           Remedy.of("Start the server with '", Remedy.sail("server start"), "' or omit the room."));
     }
-    return Scoped.row(Actor.reader(), store.findById(roomId), RoomStore.RoomRow::project)
+    return ReadFilter.readable(Actor.reader(), store.findById(roomId), RoomStore.RoomRow::project)
         .orElseThrow(() -> Refusals.roomNotFound(roomId));
   }
 
@@ -317,7 +321,7 @@ final class GlobalSpecOperations {
     var room =
         store == null
             ? null
-            : Scoped.row(
+            : ReadFilter.readable(
                     Actor.reader(),
                     store.findById(row.roomIdOrIdentity()),
                     RoomStore.RoomRow::project)
@@ -333,7 +337,7 @@ final class GlobalSpecOperations {
   private RoomStore.RoomRow identityRoom(String specId) {
     var store = rooms.get();
     var held = store == null ? null : store.findById(specId).orElse(null);
-    if (held != null && !Actor.reader().scope().admits(held.project())) {
+    if (held != null && !ReadFilter.reads(Actor.reader(), held::project)) {
       throw new ApiException(
           ErrorCode.CONFLICT,
           "Room '" + specId + "' already exists, and a spec's id is reserved for its own room.",
@@ -384,7 +388,7 @@ final class GlobalSpecOperations {
     var held = store.findById(roomId);
     var room =
         held.isPresent()
-            ? Scoped.row(Actor.reader(), held, RoomStore.RoomRow::project)
+            ? ReadFilter.readable(Actor.reader(), held, RoomStore.RoomRow::project)
                 .orElseThrow(() -> Refusals.roomNotFound(roomId))
             : store.ensureFor(roomId, updated.project(), updated.title(), updated.assignee(), null);
     if (!Objects.equals(room.wake(), wake)) {
@@ -429,7 +433,8 @@ final class GlobalSpecOperations {
           specStore.delete(specId);
           if (store != null
               && mintedItsRoom
-              && Scoped.row(Actor.reader(), store.findById(specId), RoomStore.RoomRow::project)
+              && ReadFilter.readable(
+                      Actor.reader(), store.findById(specId), RoomStore.RoomRow::project)
                   .isPresent()) {
             store.delete(specId);
           }
@@ -462,7 +467,7 @@ final class GlobalSpecOperations {
   GlobalBoardResponse board(String project) {
     requireStore();
     return new GlobalBoardResponse(
-        specStore.board(project, Actor.reader().scope()), doneOpenFindings(project));
+        specStore.board(project, Actor.reader()), doneOpenFindings(project));
   }
 
   /**
@@ -488,7 +493,7 @@ final class GlobalSpecOperations {
     if (reviewStore == null) {
       return 0;
     }
-    return Scoped.row(
+    return ReadFilter.readable(
             Actor.reader(), reviewStore.latestReviewForSpec(specId), reviewStore::projectOf)
         .map(seen -> reviewStore.openFindingsAfterPass(specId).size())
         .orElse(0);
@@ -503,7 +508,8 @@ final class GlobalSpecOperations {
     requireStore();
     return GlobalSpecHistoryResponse.from(
         specId,
-        Scoped.rows(Actor.reader(), specStore.history(specId), GlobalSpecOperations::projectOf));
+        ReadFilter.readable(
+            Actor.reader(), specStore.history(specId), GlobalSpecOperations::projectOf));
   }
 
   private static String projectOf(ChangeLog.Entry revision) {
@@ -548,7 +554,7 @@ final class GlobalSpecOperations {
    */
   private SpecStore.LastKnown restorable(String specId) {
     var head =
-        Scoped.row(
+        ReadFilter.readable(
                 Actor.reader(),
                 specStore.head(specId),
                 found -> specStore.headProject(specId).orElse(null))
@@ -564,11 +570,12 @@ final class GlobalSpecOperations {
    * outside the caller's scope, which the history hides from it, is one its history does not hold.
    */
   private Map<String, Object> revision(String specId, String rev) {
-    var revision = specStore.comparableAtRev(specId, rev);
-    if (revision == null || !Actor.reader().scope().admits(Snapshots.text(revision, "project"))) {
-      throw ApiException.of(ErrorCode.INVALID_REQUEST, specStore.unrestorable(specId, rev));
-    }
-    return revision;
+    return ReadFilter.readable(
+            Actor.reader(),
+            Optional.ofNullable(specStore.comparableAtRev(specId, rev)),
+            revision -> Snapshots.text(revision, "project"))
+        .orElseThrow(
+            () -> ApiException.of(ErrorCode.INVALID_REQUEST, specStore.unrestorable(specId, rev)));
   }
 
   private void publishStatusChanged(
@@ -604,7 +611,8 @@ final class GlobalSpecOperations {
    * answered as one that is not there.
    */
   private SpecStore.SpecRow findOrThrow(String specId) {
-    return Scoped.row(Actor.reader(), specStore.findById(specId), SpecStore.SpecRow::project)
+    return ReadFilter.readable(
+            Actor.reader(), specStore.findById(specId), SpecStore.SpecRow::project)
         .orElseThrow(() -> Refusals.specNotFound(specId));
   }
 
@@ -628,11 +636,11 @@ final class GlobalSpecOperations {
 
   /**
    * An assignee is an FDE handle, or blank for anyone to claim — never a run's principal, whose
-   * shape ({@link RunStore#isPrincipalHandle}) no FDE handle has. A handle this box's roster does
-   * not know yet is accepted: a node may not have synced a new FDE.
+   * shape ({@link PrincipalHandle#matches}) no FDE handle has. A handle this box's roster does not
+   * know yet is accepted: a node may not have synced a new FDE.
    */
   private static String validAssignee(String assignee) {
-    if (RunStore.isPrincipalHandle(assignee)) {
+    if (PrincipalHandle.matches(assignee)) {
       throw new ApiException(
           ErrorCode.INVALID_REQUEST,
           "Assignee '" + assignee + "' names a run, not an FDE.",

@@ -31,12 +31,7 @@ public interface ProjectReader {
     return new ApiException(
         ErrorCode.PROJECT_NOT_IN_CATALOG,
         "Project '" + project + "' is not in the catalog.",
-        Remedy.of(
-            "Create it with '",
-            Remedy.sail("project create", project),
-            "', or sync it from main with '",
-            Remedy.sail("sync"),
-            "'."));
+        ProjectStore.uncatalogued(project));
   }
 
   /**

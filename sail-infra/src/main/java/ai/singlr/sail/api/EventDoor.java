@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.authority.EventAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
@@ -70,7 +71,8 @@ final class EventDoor {
 
   private Event announcement(Event offered) {
     var message =
-        Scoped.row(Actor.current(), messages.findById(announced(offered)), messages::projectOf);
+        ReadFilter.readable(
+            Actor.current(), messages.findById(announced(offered)), messages::projectOf);
     var about =
         seen(
             authority.subject(
@@ -98,7 +100,8 @@ final class EventDoor {
    * act for, so no refusal says whose it is.
    */
   private static Optional<EventAuthority.Subject> seen(EventAuthority.Subject subject) {
-    return Scoped.row(Actor.current(), Optional.of(subject), EventAuthority.Subject::project);
+    return ReadFilter.readable(
+        Actor.current(), Optional.of(subject), EventAuthority.Subject::project);
   }
 
   /** The subject of an event about work this box does not hold, as its sender addressed it. */

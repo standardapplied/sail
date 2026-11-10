@@ -16,6 +16,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.HeldProjects;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -44,6 +45,7 @@ class StackOperationsTest {
     var definition = TestDefinitions.yaml(ACME);
     return new StackOperations(
         shell,
+        HeldProjects.catalog("acme"),
         new ProjectLoader(
             shell, project -> "acme".equals(project) ? Optional.of(definition) : Optional.empty()),
         pause,
@@ -119,6 +121,7 @@ class StackOperationsTest {
     for (var call :
         List.<StackCall>of(
             stack -> stack.serve("acme", Duration.ofSeconds(60)),
+            stack -> stack.serve("acme", Duration.ZERO),
             stack -> stack.ports("acme"),
             stack -> stack.stop("acme"))) {
       var refused =

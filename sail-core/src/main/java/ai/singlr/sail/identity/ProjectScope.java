@@ -11,11 +11,12 @@ import java.util.Set;
 import java.util.TreeSet;
 
 /**
- * The projects an actor may see: every project, or exactly the ones main granted its FDE. {@link
- * #admits} is the one predicate every door asks, the sync server's pages, the journal's writes and
- * the API's reads alike, so no door keeps a list of projects of its own. Main decides it from its
- * roster ({@link #of(Sqlite, String)}); a node only ever holds what main sent. {@code projects} is
- * in name order, and empty for an unrestricted scope.
+ * The projects an actor may see: every project, or exactly the ones main granted its FDE. It is the
+ * value the audience is decided from, never asked by a door itself: a row in hand is read through
+ * {@code ReadFilter}, and a query filters by {@code Access.audience}, so the sync server's pages,
+ * the journal's writes and the API's reads ask one audience and no door keeps a list of projects of
+ * its own. Main decides it from its roster ({@link #of(Sqlite, String)}); a node only ever holds
+ * what main sent. {@code projects} is in name order, and empty for an unrestricted scope.
  */
 public record ProjectScope(boolean unrestricted, Set<String> projects) {
 

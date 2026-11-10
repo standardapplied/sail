@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.RetentionConfig;
@@ -370,6 +370,28 @@ class SpecPruneTest {
     assertEquals(List.of(), again.entries());
     assertFalse(again.dryRun());
     assertFalse(again.requested());
+  }
+
+  @Test
+  void aPrunedSpecIsNothingToDoForAnyMemberAndStillRefusedToAViewerOrAnAgent() {
+    archived("old", "uday");
+    Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("old"), false)));
+
+    var again = Acting.by(MADY, () -> pruner.prune(PruneRequest.ids(List.of("old"), false)));
+
+    assertEquals(List.of(), again.entries());
+    assertRefused(
+        ErrorCode.READ_ONLY_CREDENTIAL,
+        () ->
+            Acting.by(
+                new Actor("uday", Role.VIEWER, Actor.Lane.API),
+                () -> pruner.prune(PruneRequest.ids(List.of("old"), false))));
+    assertRefused(
+        ErrorCode.AGENT_LANE_FORBIDDEN,
+        () ->
+            Acting.by(
+                Actor.agentPrincipal("claude/r", "uday"),
+                () -> pruner.prune(PruneRequest.ids(List.of("old"), false))));
   }
 
   @Test

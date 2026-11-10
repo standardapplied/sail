@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.authority;
 
+import ai.singlr.sail.access.Refusal;
 import java.util.Objects;
 
 /**

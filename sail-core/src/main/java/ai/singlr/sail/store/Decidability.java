@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.identity.PrincipalHandle;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
@@ -111,7 +112,7 @@ public final class Decidability {
 
   private Standing actorRun(String type, String id, Map<String, Object> snapshot) {
     var actor = Snapshots.text(snapshot, Snapshots.ACTOR);
-    var run = RunStore.runOf(actor);
+    var run = PrincipalHandle.runOf(actor);
     if (run.isEmpty() || (Erasure.RUN.equals(type) && run.get().equals(id))) {
       return Standing.HELD;
     }
@@ -155,7 +156,7 @@ public final class Decidability {
     if (MessageStore.SAIL_AUTHOR.equals(author)) {
       return Strings.isBlank(handle) ? standing : standing.worse(holdings.ownerRun(handle, room));
     }
-    var run = RunStore.runOf(author);
+    var run = PrincipalHandle.runOf(author);
     return run.isEmpty() ? standing : standing.worse(holdings.authorRun(run.get(), author));
   }
 }

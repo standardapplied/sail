@@ -640,6 +640,49 @@ class EngagementLifecycleTest {
   }
 
   @Test
+  void aSpecBornInARoomThisBoxNeverHeldOrHasDeletedIsSeatedAndUnseatedByItsAssignee()
+      throws Exception {
+    var ops = operations(shell());
+    Acting.as(HANDLE, () -> roomStore.ensureFor("attic", "acme", "attic", HANDLE, null));
+    seedBornIn("in-attic", "attic");
+    Acting.system(() -> roomStore.delete("attic"));
+    seedBornIn("in-ghost", "ghost");
+    var uday = new Actor(HANDLE, Role.MEMBER, Actor.Lane.CLI);
+
+    for (var spec : List.of("in-attic", "in-ghost")) {
+      var launch =
+          Actor.call(uday, () -> ops.engage(spec, "claude-code", null, null, false, HANDLE));
+      assertEquals("full", launch.mode(), spec);
+      Actor.call(uday, () -> ops.disengage(spec, HANDLE));
+    }
+  }
+
+  private void seedBornIn(String id, String room) {
+    Acting.as(
+        HANDLE,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                        id,
+                        "acme",
+                        "Born elsewhere",
+                        SpecStatus.DRAFT,
+                        HANDLE,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0,
+                        HANDLE,
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of("app"))
+                    .withRoomId(room)));
+  }
+
+  @Test
   void aSpeclessRoomSeatsAndDismissesItsCollaborator() throws Exception {
     var ops = operations(shell());
     Acting.as(

@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SpecStatus;
@@ -72,7 +72,7 @@ class CatalogAuthorityAuditTest {
     var readOnly =
         new Refusal(
             Refusal.Kind.READ_ONLY,
-            "Your credential is read-only and cannot change projects.",
+            "Your credential is read-only and cannot configure projects.",
             "Ask an admin for a member or admin credential.");
 
     var upFront =
@@ -120,7 +120,7 @@ class CatalogAuthorityAuditTest {
     assertEquals(
         new Refusal(
             Refusal.Kind.READ_ONLY,
-            "Your credential is read-only and cannot change files.",
+            "Your credential is read-only and cannot share files and skills in projects.",
             "Ask an admin for a member or admin credential."),
         refused.refusal());
     assertTrue(new FileStore(db).find("acme", "notes.md").isEmpty(), "no file row written");
@@ -144,9 +144,9 @@ class CatalogAuthorityAuditTest {
     assertEquals(
         new Refusal(
             Refusal.Kind.ADMIN_ONLY,
-            "Renaming project 'acme' moves every spec and file in it, whoever's they are, and is"
-                + " an admin-only action.",
-            "Ask an admin to rename it."),
+            "Only an admin may erase the name of project 'acme' everywhere, as purging or renaming"
+                + " it does.",
+            "Ask an admin to do it."),
         refused.refusal());
     assertEquals("acme", new SpecStore(db).findById("theirs").orElseThrow().project());
     assertTrue(new ProjectStore(db).findByName("acme").isPresent(), "the old name stands");

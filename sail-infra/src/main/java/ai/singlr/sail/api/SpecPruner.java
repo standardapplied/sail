@@ -44,10 +44,10 @@ import java.util.function.Supplier;
  * unreferenced. A node never authors an erasure: it asks main for what main acknowledged, which
  * main decides on its own copy, and discards on the spot what it alone ever held.
  *
- * <p>Authority: never an agent, and otherwise the erase rule ({@link EraseAuthority}) main's own
- * decision on a node's request asks too: write capability; for a spec named by id, its owner or an
- * admin, and only once it is archived, cancelled or deleted with no run of it still going; a
- * policy, a project or retention, an admin only.
+ * <p>Authority: the erase rule ({@link EraseAuthority}), which main's own decision on a node's
+ * request asks too: a spec named by id is pruned by its owner or an admin, never an agent, and only
+ * once it is archived, cancelled or deleted with no run of it still going; a policy, a project or
+ * retention, by an admin only.
  */
 final class SpecPruner {
 
@@ -241,15 +241,15 @@ final class SpecPruner {
     }
   }
 
+  /**
+   * Refuses a prune that names no spec unless the bound actor may purge, which is an admin's alone
+   * ({@link EraseAuthority#purge}): a whole project, or a policy's sweep. A prune by id is decided
+   * spec by spec, as each is found ({@link #roots}).
+   */
   private void authorize(PruneRequest request) {
-    var actor = Actor.current();
-    if (actor.agentLane()) {
-      throw new ApiException(
-          ErrorCode.AGENT_LANE_FORBIDDEN,
-          "An agent cannot prune: erasing is irreversible and belongs to the FDE.",
-          Remedy.of("Ask the FDE who owns the work to run '", Remedy.sail("spec prune"), "'."));
+    if (request.ids().isEmpty()) {
+      Refusals.enforce(authority.purge(Actor.current()));
     }
-    Refusals.enforce(authority.request(actor, request.ids().isEmpty()));
   }
 
   /**
@@ -262,16 +262,11 @@ final class SpecPruner {
   private List<Erasure.Target> roots(PruneRequest request, int limit) {
     var roots = new ArrayList<Erasure.Target>();
     for (var id : request.ids()) {
+      Refusals.require(authority.prune(Actor.current(), id), () -> Refusals.specNotFound(id));
       var target = new Erasure.Target(Erasure.SPEC, id);
-      if (!Actor.current().scope().admits(specs.headProject(id).orElse(null))) {
-        throw Refusals.specNotFound(id);
+      if (!erasure.isErased(target)) {
+        roots.add(target);
       }
-      if (erasure.isErased(target)) {
-        continue;
-      }
-      var spec = specs.lastKnown(id).orElseThrow(() -> Refusals.specNotFound(id));
-      Refusals.enforce(authority.spec(Actor.current(), spec));
-      roots.add(target);
     }
     if (request.policy() != null) {
       var policy = request.policy();

@@ -3,18 +3,18 @@
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.sail.authority;
+package ai.singlr.sail.access;
 
 import ai.singlr.sail.common.Remedy;
 import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Why a rule refuses a write: its {@link Kind}, the message a client shows, and the action that
- * unblocks it ({@code fix}, {@link Remedy#NONE} when there is none to name), its commands kept as
- * data until a door renders them for its reader. Every door translates the kind to its own error
- * envelope, and main answers the message as its denial, so one refusal reads the same wherever the
- * rule decides.
+ * Why an action is refused, by {@link Access}, a write's rule or a door: its {@link Kind}, the
+ * message a client shows, and the action that unblocks it ({@code fix}, {@link Remedy#NONE} when
+ * there is none to name), its commands kept as data until a door renders them for its reader. Every
+ * door translates the kind to its own error envelope, and main answers the message as its denial,
+ * so one refusal reads the same wherever the rule decides.
  */
 public record Refusal(Kind kind, String message, Remedy fix) {
 
@@ -24,10 +24,12 @@ public record Refusal(Kind kind, String message, Remedy fix) {
     READ_ONLY,
     /** The actor neither owns the row nor acts for its owner. */
     NOT_OWNER,
-    /** The conversation a post or birth names is not on this box. */
+    /** The conversation a post or a birth names is not on this box. */
     NO_CONVERSATION,
     /** Only an admin may make this change. */
     ADMIN_ONLY,
+    /** The credential's lane may never take this action, whatever the role behind it. */
+    LANE_FORBIDDEN,
     /** The revision names an author or creator the actor may not write as. */
     NOT_AUTHOR,
     /** The revision changes a field that never changes after create. */
@@ -64,15 +66,26 @@ public record Refusal(Kind kind, String message, Remedy fix) {
   }
 
   /** The refusal of a read-only role, which cannot {@code act} ("change specs"). */
-  public static Optional<Refusal> readOnly(String act) {
-    return of(
+  public static Refusal readOnly(String act) {
+    return new Refusal(
         Kind.READ_ONLY,
         "Your credential is read-only and cannot " + act + ".",
         "Ask an admin for a member or admin credential.");
   }
 
+  /**
+   * The refusal of a write into conversation {@code roomId}, which this box does not hold: it has
+   * no owner here to ask.
+   */
+  public static Refusal noConversation(String roomId) {
+    return new Refusal(
+        Kind.NO_CONVERSATION,
+        "No conversation '" + roomId + "' is on this box: it was deleted, or never here.",
+        "Check the spec or room id.");
+  }
+
   /** The refusal of a field that never changes after create. */
-  static Optional<Refusal> fixed(String type, String id, String field) {
+  public static Optional<Refusal> fixed(String type, String id, String field) {
     return of(
         Kind.FIXED,
         "The "

@@ -5,35 +5,42 @@
 
 package ai.singlr.sail.authority;
 
-import static ai.singlr.sail.authority.Actors.ADMIN;
-import static ai.singlr.sail.authority.Actors.ADMIN_SYNC;
-import static ai.singlr.sail.authority.Actors.AGENT;
-import static ai.singlr.sail.authority.Actors.AGENT_HANDLE;
-import static ai.singlr.sail.authority.Actors.MAIN;
-import static ai.singlr.sail.authority.Actors.OTHER;
-import static ai.singlr.sail.authority.Actors.OTHERS_AGENT;
-import static ai.singlr.sail.authority.Actors.OTHER_API;
-import static ai.singlr.sail.authority.Actors.OTHER_RUN;
-import static ai.singlr.sail.authority.Actors.OTHER_SYNC;
-import static ai.singlr.sail.authority.Actors.OWNER;
-import static ai.singlr.sail.authority.Actors.OWNER_API;
-import static ai.singlr.sail.authority.Actors.OWNER_CLI;
-import static ai.singlr.sail.authority.Actors.OWNER_SYNC;
-import static ai.singlr.sail.authority.Actors.ROOM;
-import static ai.singlr.sail.authority.Actors.ROOM_HANDLE;
-import static ai.singlr.sail.authority.Actors.SYSTEM;
-import static ai.singlr.sail.authority.Actors.VIEWER;
-import static ai.singlr.sail.authority.Actors.VIEWER_SYNC;
-import static ai.singlr.sail.authority.Actors.projection;
+import static ai.singlr.sail.identity.Actors.ADMIN;
+import static ai.singlr.sail.identity.Actors.ADMIN_SYNC;
+import static ai.singlr.sail.identity.Actors.AGENT;
+import static ai.singlr.sail.identity.Actors.AGENT_HANDLE;
+import static ai.singlr.sail.identity.Actors.MACHINE;
+import static ai.singlr.sail.identity.Actors.OTHER;
+import static ai.singlr.sail.identity.Actors.OTHERS_AGENT;
+import static ai.singlr.sail.identity.Actors.OTHER_API;
+import static ai.singlr.sail.identity.Actors.OTHER_RUN;
+import static ai.singlr.sail.identity.Actors.OTHER_SYNC;
+import static ai.singlr.sail.identity.Actors.OWNER;
+import static ai.singlr.sail.identity.Actors.OWNER_API;
+import static ai.singlr.sail.identity.Actors.OWNER_CLI;
+import static ai.singlr.sail.identity.Actors.OWNER_SYNC;
+import static ai.singlr.sail.identity.Actors.ROOM;
+import static ai.singlr.sail.identity.Actors.ROOM_HANDLE;
+import static ai.singlr.sail.identity.Actors.SYSTEM;
+import static ai.singlr.sail.identity.Actors.VIEWER;
+import static ai.singlr.sail.identity.Actors.VIEWER_SYNC;
+import static ai.singlr.sail.identity.Actors.projection;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
-import ai.singlr.sail.authority.Refusal.Kind;
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Refusal;
+import ai.singlr.sail.access.Refusal.Kind;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Actors;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.Decidability;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Standing;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -44,9 +51,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * The message rule's matrix: where is the posting rule's, and as whom is the actor's own handle on
- * this box's lanes; on the sync lane the pusher posts as itself, as its runs' principals in any
- * conversation, and as the pipeline where a run of its is in the conversation.
+ * The message rule's matrix: where is a post in its conversation, and one this box does not hold
+ * takes an admin's alone; as whom is the actor's own handle on this box's lanes; on the sync lane
+ * the pusher posts as itself, as its runs' principals in any conversation, and as the pipeline
+ * where a run of its is in the conversation.
  */
 class MessageAuthorityTest {
 
@@ -74,6 +82,44 @@ class MessageAuthorityTest {
     }
   }
 
+  /**
+   * A run's principal whose run acts for no one, as a run credential with a blank owner binds: it
+   * has a handle but acts for no FDE, so its post would be no one's, on the journal and at a door.
+   */
+  @Test
+  void aRunPrincipalActingForNoOnePostsNothingOnTheJournalOrAtADoor() {
+    var ownerless = Actor.agentPrincipal("claude/" + Actors.RUN, null);
+    var noOnes =
+        new Refusal(
+            Kind.NOT_AUTHOR,
+            "This credential acts for no FDE, so a post in 'lobby' would be no one's.",
+            "Post with an FDE's own credential.");
+
+    assertEquals(
+        Optional.of(noOnes),
+        rule.decide(ownerless, MESSAGE, null, post("lobby", ownerless.handle())));
+    assertEquals(
+        new Decision.Refused(noOnes),
+        MessageAuthority.post(
+            ownerless, Resources.conversation("lobby", "acme", List.of(Actors.OWNER))));
+    assertEquals(
+        new Decision.Allowed(),
+        MessageAuthority.post(
+            Actors.AGENT, Resources.conversation("lobby", "acme", List.of(Actors.OWNER))));
+  }
+
+  /** Only a push speaks as the pipeline: a post on this box's own lanes is its actor's alone. */
+  @Test
+  void aLocalPostMayNotSpeakAsThePipeline() {
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_AUTHOR,
+                "'ada' may not post as 'sail' in this room.",
+                "Post as yourself.")),
+        rule.decide(OWNER_API, MESSAGE, null, post("lobby", MessageStore.SAIL_AUTHOR)));
+  }
+
   private static Map<String, Object> post(String room, String author) {
     return projection(
         "room_id",
@@ -93,7 +139,6 @@ class MessageAuthorityTest {
         new Case("an admin posts anywhere", ADMIN, "den", "root", null),
         new Case("the owner's agent posts as itself", AGENT, "lobby", AGENT_HANDLE, null),
         new Case("the owner's room principal posts as itself", ROOM, "lobby", ROOM_HANDLE, null),
-        new Case("main's post is decided", MAIN, "den", OWNER, null),
         new Case("the pipeline narrates", SYSTEM, "den", "sail", null),
         new Case("another member posts in the owner's room", OTHER_API, "lobby", OTHER, null),
         new Case(
@@ -109,7 +154,38 @@ class MessageAuthorityTest {
             OTHER,
             Kind.NO_CONVERSATION),
         new Case(
+            "an agent posts in no conversation this box does not hold",
+            AGENT,
+            "nowhere",
+            AGENT_HANDLE,
+            Kind.NO_CONVERSATION),
+        new Case(
+            "an admin posts in a conversation this box does not hold",
+            ADMIN,
+            "nowhere",
+            "root",
+            null),
+        new Case(
             "a room principal posts only for its FDE", ROOM, "den", ROOM_HANDLE, Kind.NOT_OWNER),
+        new Case(
+            "a room principal hears first that a conversation this box does not hold is not here",
+            ROOM,
+            "nowhere",
+            ROOM_HANDLE,
+            Kind.NO_CONVERSATION),
+        new Case(
+            "a viewer hears first that a conversation this box does not hold is not here",
+            VIEWER,
+            "nowhere",
+            OWNER,
+            Kind.NO_CONVERSATION),
+        new Case("a machine credential posts as no one", MACHINE, "lobby", null, Kind.NOT_AUTHOR),
+        new Case(
+            "an admin acting for no FDE posts all the same",
+            new Actor(null, Role.ADMIN, Actor.Lane.CLI),
+            "lobby",
+            null,
+            null),
         new Case("a viewer posts nowhere", VIEWER, "lobby", OWNER, Kind.READ_ONLY),
         new Case("an agent posts as no FDE", AGENT, "lobby", OWNER, Kind.NOT_AUTHOR),
         new Case("a member posts as no one else", OWNER_API, "lobby", OTHER, Kind.NOT_AUTHOR),
@@ -166,6 +242,11 @@ class MessageAuthorityTest {
   }
 
   @Test
+  void aMessageNeverChangesSoItsTombstoneIsNothingToDecide() {
+    assertEquals(Optional.empty(), rule.decide(Actors.VIEWER, "m-1", null, null));
+  }
+
+  @Test
   void refusalsSpeakTheTextsClientsSee() {
     assertEquals(
         new Refusal(
@@ -177,5 +258,17 @@ class MessageAuthorityTest {
             "No conversation 'nowhere' is on this box: it was deleted, or never here.",
             "Check the spec or room id."),
         rule.decide(OTHER_API, MESSAGE, null, post("nowhere", OTHER)).orElseThrow());
+    assertEquals(
+        new Refusal(
+            Kind.NOT_AUTHOR,
+            "This credential acts for no FDE, so a post in 'lobby' would be no one's.",
+            "Post with an FDE's own credential."),
+        rule.decide(MACHINE, MESSAGE, null, post("lobby", null)).orElseThrow());
+    assertEquals(
+        new Refusal(
+            Kind.READ_ONLY,
+            "Your credential is read-only and cannot post in rooms.",
+            "Ask an admin for a member or admin credential."),
+        rule.decide(VIEWER, MESSAGE, null, post("lobby", OWNER)).orElseThrow());
   }
 }

@@ -5,10 +5,14 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
+import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.api.Resolution;
-import ai.singlr.sail.api.Scoped;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
@@ -67,7 +71,7 @@ public final class ConflictOperations {
    */
   private List<SyncConflicts.Conflict> readable() {
     var changes = new ChangeLog(db);
-    return Scoped.rows(
+    return ReadFilter.readable(
         Actor.reader(), conflicts.pending(), conflict -> projectOf(changes, conflict));
   }
 
@@ -130,11 +134,18 @@ public final class ConflictOperations {
    * since then refuses the resolve untouched, whatever the strategy, until a round re-records it. A
    * merge is a full record, so it applies only to the version of the conflict its template was made
    * from: once a round re-records the conflict with main's news, it would revert that news.
+   *
+   * <p>Keeping this box's side or merging is an edit, decided by the type's rule as the journal
+   * records it. Adopting main's side decides no row, yet gives up what this box parked, so a found
+   * conflict is settled only by whoever may resolve conflicts at all ({@link Action#CHANGE} of the
+   * kind, by role and lane): whose the row is stays its rule's, as for every edit of it, and a
+   * conflict that is not there is not found first, as any id is.
    */
   public SyncConflicts.Conflict resolve(String entityType, String entityId, Resolution resolution) {
     return db.transaction(
         () -> {
           var conflict = requireOpen(readable(), entityType, entityId);
+          Refusals.enforce(Access.atAll(Actor.current(), Action.CHANGE, Resource.Kind.CONFLICT));
           requireMainsRevision(conflict);
           requireCurrent(
               conflict,

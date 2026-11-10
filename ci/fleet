@@ -36,6 +36,13 @@ Usage:
                                 CLI and at the HTTP API Mast calls
   ci/fleet rooms RUN            client opens a room over HTTP; who may post in it at each door, and the
                                 conversation reads the same on every box; no other project's room leaks
+  ci/fleet access RUN           the access matrix's rows sail answers today, at each door that offers them:
+                                client comments on eng's e1 and claims an open spec, but cannot edit,
+                                reassign or retell a review of e1, claim a spec born in eng's room r1, read
+                                beta's ids, or keep one, or an offline edit main refuses, past a sync; row
+                                4, a push into a project client is not granted, is proven by the unit tests
+                                (AccessScenarioTest row 4), as client's box drops an ungranted
+                                project before it offers anything and only a forged sync client reaches main
   ci/fleet files RUN            files shared on main and on client reach exactly the nodes granted their
                                 project, updates and removals follow, and a viewer cannot share
   ci/fleet portal RUN           main declares beta's app; eng serves it, it answers in the container, at
@@ -248,6 +255,17 @@ refused() {
   grep -qF "$because" <<< "$out"
 }
 
+naming() {
+  local text=$1 out
+  shift
+  if ! out=$("$@"); then
+    echo "$out"
+    return 1
+  fi
+  echo "$out"
+  grep -qF "$text" <<< "$out" || { echo "it does not name: $text"; return 1; }
+}
+
 spec_ids() {
   on "$1" "$2" "sudo sail spec list --all-projects --all --json --no-sync 2>/dev/null" \
     | python3 -I -c 'import json,sys; print(" ".join(sorted(s["project"] + "/" + s["id"] for s in json.load(sys.stdin)["specs"])))'
@@ -290,6 +308,17 @@ reaches_main_unasked() {
   return 1
 }
 
+readonly VIEWER_POSTS='Your credential is read-only and cannot post in rooms.'
+readonly VIEWER_FIX='Ask an admin for a member or admin credential.'
+readonly E1_IS_ENGS="Spec 'e1' is assigned to 'eng', not you."
+readonly ASK_ENG='Ask eng to make this change, or have an admin do it.'
+readonly R1_IS_ENGS="'r1' belongs to eng: only eng or an admin may start work there, not you."
+readonly ASK_ADMIN_TO_ASSIGN='Ask an admin to assign it to you.'
+readonly E1_ADMIN_ONLY="Reassigning spec 'e1' moves work between FDEs and is an admin-only action (currently 'eng')."
+readonly ASK_AN_ADMIN='Ask an admin to reassign it. You may grab a spec only while it is unassigned.'
+readonly E1_NOT_CLIENTS="Event type 'review_completed' makes this box act on 'e1' (owned by 'eng'), which you may not drive."
+readonly ASK_E1S_OWNER='Only its owner or an admin may publish it.'
+
 doors() {
   local run=${1:-} before
   [[ -n $run ]] || usage
@@ -306,9 +335,9 @@ doors() {
   check "$run" "eng creates a spec in gamma" \
     allowed "$run" eng "sudo sail spec create -p gamma --id eng-gamma --title 'eng in gamma'"
   check "$run" "every node syncs twice" sync_all "$run"
-  check "$run" "observer reads client's spec" allowed "$run" observer "sudo sail spec show client-acme"
-  check "$run" "observer cannot comment on it" \
-    refused "$run" observer "credential is read-only" "sudo sail spec comment client-acme --body 'a viewer speaks'"
+  check "$run" "matrix 1: obs reads acme's spec client-acme [CLI]" allowed "$run" observer "sudo sail spec show client-acme"
+  check "$run" "matrix 2: obs comments on client-acme, refused read-only, naming the fix [CLI]" \
+    naming "$VIEWER_FIX" refused "$run" observer "$VIEWER_POSTS" "sudo sail spec comment client-acme --body 'a viewer speaks'"
   local added="acme/client-acme acme/unasked gamma/eng-gamma"
   check "$run" "main holds the three new specs" specs_on "$run" main "$(union $before $added)"
   check "$run" "eng holds the three new specs" specs_on "$run" eng "$(union $before $added)"
@@ -327,7 +356,7 @@ projects() {
   check "$run" "eng holds every project" holds "$run" eng "acme beta demo gamma"
   check "$run" "client holds acme alone" holds "$run" client "acme"
   check "$run" "observer holds acme and beta" holds "$run" observer "acme beta"
-  check "$run" "client's database has no trace of beta, gamma or demo" holds_no_trace_of "$run" client beta gamma demo
+  check "$run" "matrix 3: main sends client nothing of beta, gamma or demo, and its database has no trace of them [sync]" holds_no_trace_of "$run" client beta gamma demo
   check "$run" "observer's database has no trace of gamma or demo" holds_no_trace_of "$run" observer gamma demo
 }
 
@@ -368,10 +397,10 @@ sudo sail fde unpair "$handle" > /dev/null 2>&1
 echo "HTTP $status"; head -c 400 /tmp/door.json; echo'
 
 http_door() {
-  local run=$1 box=$2 handle=$3 expected=$4 method=$5 path=$6 body=${7:-} out
+  local run=$1 box=$2 handle=$3 expected=$4 method=$5 path=$6 body=${7:-} says=${8:-} out
   out=$(on "$run" "$box" "cat > /tmp/sail-http-door && bash /tmp/sail-http-door $handle $method '$path' '$body'" <<< "$HTTP_DOOR")
   echo "$out"
-  grep -q "^HTTP $expected$" <<< "$out"
+  grep -q "^HTTP $expected$" <<< "$out" && grep -qF "$says" <<< "$out"
 }
 
 apply_project() {
@@ -460,9 +489,9 @@ inside() {
     container_allows "$run" observer acme "spec whoami | grep -q '\"handle\": \"obs\", \"role\": \"viewer\"'"
   check "$run" "inside observer's acme, the viewer cannot create a spec" \
     container_refuses "$run" observer acme "read_only_credential" "spec create --id viewer-inside --title 'a viewer inside'"
-  check "$run" "inside observer's acme, the viewer cannot comment" \
-    container_refuses "$run" observer acme "read_only_credential" "spec comment client-acme --body 'a viewer comments'"
-  check "$run" "over HTTP, the viewer reads acme's specs" http_door "$run" observer obs 200 GET "/v1/specs?project=acme"
+  check "$run" "matrix 2: obs comments on client-acme, refused read-only, naming the fix [socket]" \
+    naming "$VIEWER_FIX" container_refuses "$run" observer acme "$VIEWER_POSTS" "spec comment client-acme --body 'a viewer comments'"
+  check "$run" "matrix 1: obs reads acme's specs [HTTP]" http_door "$run" observer obs 200 GET "/v1/specs?project=acme"
   check "$run" "over HTTP, the viewer cannot create a spec" \
     http_door "$run" observer obs 403 POST /v1/specs '{"project":"acme","id":"http-viewer","title":"over http"}'
   check "$run" "over HTTP, client creates a spec in acme" \
@@ -496,8 +525,8 @@ rooms() {
     allowed "$run" eng "sudo sail sync && sudo sail spec comment acme-chat --body 'eng: third word'"
   check "$run" "observer cannot post at the CLI" \
     refused "$run" observer "credential is read-only" "sudo sail sync && sudo sail spec comment acme-chat --body 'obs: a word'"
-  check "$run" "over HTTP, the viewer cannot post" \
-    http_door "$run" observer obs 403 POST /v1/rooms/acme-chat/messages '{"body":"obs over http"}'
+  check "$run" "matrix 2: obs posts in acme-chat, refused read-only, naming the fix [HTTP]" \
+    naming "$VIEWER_FIX" http_door "$run" observer obs 403 POST /v1/rooms/acme-chat/messages '{"body":"obs over http"}' "$VIEWER_POSTS"
   check "$run" "client answers after hearing uday" \
     allowed "$run" client "sudo sail sync && sudo sail spec comment acme-chat --body 'client: fourth word'"
   check "$run" "client, shared's creator, comments though eng holds it" \
@@ -507,6 +536,110 @@ rooms() {
     says_in_order "$run" observer acme-chat "client: first word|uday: second word|eng: third word|client: fourth word"
   check "$run" "the room reads the same on every box" conversation_matches "$run" acme-chat
   check "$run" "client's database has no trace of beta-chat or obs-chat" holds_no_trace_of "$run" client beta-chat obs-chat
+}
+
+while_cut_off() {
+  local run=$1 box=$2 on_main=$3 on_box=$4 main_ip rule status=0
+  main_ip=$(internal_ip "$run" main)
+  [[ -n $main_ip ]] || { echo "main has no address"; return 1; }
+  rule="OUTPUT -d $main_ip -j REJECT"
+  on "$run" "$box" "command -v iptables > /dev/null || sudo apt-get install -y -qq iptables > /dev/null 2>&1; sudo iptables -I $rule" || return 1
+  trap "on $(printf %q "$run") $(printf %q "$box") $(printf %q "sudo iptables -D $rule")" EXIT INT TERM
+  echo "$box cannot reach main at $main_ip"
+  { on "$run" main "$on_main" && on "$run" "$box" "$on_box"; } || status=1
+  on "$run" "$box" "sudo iptables -D $rule" || status=1
+  trap - EXIT INT TERM
+  return $status
+}
+
+denied_at_sync() {
+  local run=$1 box=$2 spec=$3 reason=$4 said denial
+  for _ in $(seq 1 10); do
+    said=$({
+      on "$run" "$box" "sudo sail sync" 2>&1
+      on "$run" "$box" "sudo journalctl -u sail-api --since '-15min' --no-pager -o cat"
+    })
+    denial=$(grep -F "spec $spec: main denied this change" <<< "$said" | grep -F "$reason" | grep -F "Yours is in its history")
+    if [[ -n $denial ]]; then
+      echo "$denial"
+      return 0
+    fi
+    sleep 3
+  done
+  echo "$said" | tail -20
+  echo "no denial of $spec naming: $reason"
+  return 1
+}
+
+access() {
+  local run=${1:-} n door
+  [[ -n $run ]] || usage
+  check "$run" "over HTTP, eng opens room r1 in acme" \
+    http_door "$run" eng eng 201 POST /v1/rooms '{"id":"r1","project":"acme","title":"eng room"}'
+  check "$run" "eng writes e1 for itself, r1-task in r1, open-cli, open-http and open-socket unassigned, and b1 to b3 in beta" \
+    allowed "$run" eng "sudo sail spec create -p acme --id e1 --title 'eng owns e1' --assignee eng && sudo sail spec create -p acme --id r1-task --title 'born in r1' --room r1 && for door in cli http socket; do sudo sail spec create -p acme --id open-\$door --title 'open to claim' || exit 1; done && for n in 1 2 3; do sudo sail spec create -p beta --id b\$n --title 'held in beta' || exit 1; done"
+  check "$run" "client writes c7 in acme, unassigned, and syncs" \
+    allowed "$run" client "sudo sail spec create -p acme --id c7 --title 'client wrote c7' && sudo sail sync"
+  check "$run" "every node syncs twice" sync_all "$run"
+  check "$run" "matrix 1: obs reads e1 inside its acme [socket]" container_allows "$run" observer acme "spec show e1 > /dev/null"
+  check "$run" "matrix 3: client reads beta's b1 on main, which holds it, and it is not found [HTTP]" \
+    http_door "$run" main client 404 GET /v1/specs/b1 '' "Spec 'b1' was not found."
+  check "$run" "client's box holds nothing of beta's b1 [CLI]" refused "$run" client "Spec 'b1' was not found." "sudo sail spec show b1"
+  check "$run" "client's box holds nothing of beta's b1 [HTTP]" \
+    http_door "$run" client client 404 GET /v1/specs/b1 '' "Spec 'b1' was not found."
+  check "$run" "client's box holds nothing of beta's b1 [socket]" \
+    container_refuses "$run" client acme "Spec 'b1' was not found." "spec show b1"
+  check "$run" "matrix 6: client comments on e1 [CLI]" allowed "$run" client "sudo sail spec comment e1 --body 'client: a word on e1'"
+  check "$run" "matrix 6: client comments on e1 [HTTP]" \
+    http_door "$run" client client 201 POST /v1/rooms/e1/messages '{"body":"client over http on e1"}'
+  check "$run" "matrix 6: client comments on e1 [socket]" \
+    container_allows "$run" client acme "spec comment e1 --body 'client inside acme on e1'"
+  check "$run" "matrix 7: client edits e1's title, refused naming eng [CLI]" \
+    naming "$ASK_ENG" refused "$run" client "$E1_IS_ENGS" "sudo sail spec update e1 --title 'client retitles e1'"
+  check "$run" "matrix 7: client edits e1's title, refused naming eng [HTTP]" \
+    naming "$ASK_ENG" http_door "$run" client client 403 PUT /v1/specs/e1 '{"title":"client retitles e1"}' "$E1_IS_ENGS"
+  check "$run" "matrix 7: client edits e1's title, refused naming eng [socket]" \
+    naming "$ASK_ENG" container_refuses "$run" client acme "$E1_IS_ENGS" "spec update e1 --title 'client retitles e1'"
+  check "$run" "matrix 8: client claims open-cli, unassigned [CLI]" allowed "$run" client "sudo sail spec update open-cli --assignee client"
+  check "$run" "matrix 8: client claims open-http, unassigned [HTTP]" \
+    http_door "$run" client client 200 PUT /v1/specs/open-http '{"assignee":"client"}'
+  check "$run" "matrix 8: client claims open-socket, unassigned [socket]" \
+    container_allows "$run" client acme "spec update open-socket --assignee client"
+  check "$run" "matrix 8: client claims r1-task, born in r1, refused naming eng [CLI]" \
+    naming "$ASK_ADMIN_TO_ASSIGN" refused "$run" client "$R1_IS_ENGS" "sudo sail spec update r1-task --assignee client"
+  check "$run" "matrix 8: client claims r1-task, born in r1, refused naming eng [HTTP]" \
+    naming "$ASK_ADMIN_TO_ASSIGN" http_door "$run" client client 403 PUT /v1/specs/r1-task '{"assignee":"client"}' "$R1_IS_ENGS"
+  check "$run" "matrix 8: client claims r1-task, born in r1, refused naming eng [socket]" \
+    naming "$ASK_ADMIN_TO_ASSIGN" container_refuses "$run" client acme "$R1_IS_ENGS" "spec update r1-task --assignee client"
+  check "$run" "matrix 9: client reassigns e1 to itself, refused admin-only [CLI]" \
+    naming "$ASK_AN_ADMIN" refused "$run" client "$E1_ADMIN_ONLY" "sudo sail spec update e1 --assignee client"
+  check "$run" "matrix 9: client reassigns e1 to itself, refused admin-only [HTTP]" \
+    naming "$ASK_AN_ADMIN" http_door "$run" client client 403 PUT /v1/specs/e1 '{"assignee":"client"}' "$E1_ADMIN_ONLY"
+  check "$run" "matrix 9: client reassigns e1 to itself, refused admin-only [socket]" \
+    naming "$ASK_AN_ADMIN" container_refuses "$run" client acme "$E1_ADMIN_ONLY" "spec update e1 --assignee client"
+  check "$run" "matrix 22: client retells review_completed on e1, refused: not eng's or an admin's [HTTP]" \
+    naming "$ASK_E1S_OWNER" http_door "$run" client client 403 POST /v1/events \
+    '{"ts":"2026-11-10T00:00:00Z","project":"acme","spec":"e1","type":"review_completed","agent":"claude-code","host":"client","data":{"source":"sync"}}' \
+    "$E1_NOT_CLIENTS"
+  check "$run" "matrix 5: client's box takes acme spec b1 on an id beta holds [CLI]" \
+    allowed "$run" client "sudo sail spec create -p acme --id b1 --title 'client takes a taken id'"
+  check "$run" "matrix 5: client's box takes acme spec b2 on an id beta holds [HTTP]" \
+    http_door "$run" client client 201 POST /v1/specs '{"project":"acme","id":"b2","title":"client takes a taken id"}'
+  check "$run" "matrix 5: client's box takes acme spec b3 on an id beta holds [socket]" \
+    container_allows "$run" client acme "spec create --id b3 --title 'client takes a taken id'"
+  for n in 1 2 3; do
+    check "$run" "matrix 5: main refuses client's b$n, already exists [sync]" denied_at_sync "$run" client "b$n" "Spec 'b$n' already exists."
+    check "$run" "matrix 5: client's box withdraws b$n into its history" lost_but_in_history "$run" "b$n" client
+  done
+  check "$run" "while client cannot reach main, uday gives c7 to eng and client renames c7" \
+    while_cut_off "$run" client "sudo sail spec update c7 --assignee eng" "sudo sail spec update c7 --title 'client renamed c7' --no-sync"
+  check "$run" "matrix 7: main refuses client's edit of c7, which eng now holds, naming eng [sync]" \
+    denied_at_sync "$run" client c7 "Spec 'c7' is assigned to 'eng', not you."
+  check "$run" "every node syncs twice" sync_all "$run"
+  check "$run" "every box holds c7 with the title main kept" everywhere "$run" c7 title "client wrote c7"
+  for door in cli http socket; do
+    check "$run" "every box holds open-$door claimed by client" everywhere "$run" "open-$door" assignee client
+  done
 }
 
 file_on() {
@@ -1030,6 +1163,7 @@ run() {
   step inside "$id"
   [[ -n $target ]] || step conflicts "$id"
   step rooms "$id"
+  step access "$id"
   step files "$id"
   step portal "$id"
   step resilience "$id"
@@ -1056,6 +1190,7 @@ case ${1:-} in
   inside) shift; inside "$@" ;;
   conflicts) shift; conflicts "$@" ;;
   rooms) shift; rooms "$@" ;;
+  access) shift; access "$@" ;;
   files) shift; files "$@" ;;
   portal) shift; portal "$@" ;;
   resilience) shift; resilience "$@" ;;

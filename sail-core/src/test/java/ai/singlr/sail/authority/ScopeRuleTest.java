@@ -9,12 +9,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
@@ -217,6 +220,27 @@ class ScopeRuleTest {
     return Map.of("project", "alpha", field, value);
   }
 
+  /**
+   * An actor that reads every project is never asked where a write is filed: a scope rule over a
+   * closed database, which would fail any lookup, answers every write and push of it.
+   */
+  @Test
+  void anUnrestrictedWriteAsksNoProject() {
+    var closed = Sqlite.openMemory();
+    closed.close();
+    var everywhere = new Actor("uma", Role.MEMBER, Actor.Lane.API);
+
+    for (var type : List.of("spec", "room", "run", "message")) {
+      var blind = new ScopeRule(new ChangeLog(closed), type);
+      var next = Map.<String, Object>of("project", "alpha", "room_id", "lobby", "spec_id", "s");
+
+      assertEquals(Optional.empty(), blind.decide(everywhere, "x", null, next), type);
+      assertEquals(Optional.empty(), blind.decide(everywhere, "x", next, next), type);
+      assertEquals(Optional.empty(), blind.decide(everywhere, "x", null, Map.of()), type);
+      assertEquals(Optional.empty(), blind.pushed(everywhere, "x", next), type);
+    }
+  }
+
   @Test
   void aWriteOverARowInAHiddenProjectSaysOnlyThatTheIdIsTaken() {
     var taken =
@@ -369,10 +393,8 @@ class ScopeRuleTest {
     specs.updateStatus("alpha-work", SpecStatus.ARCHIVED);
     var admin = new Actor("nia", Role.ADMIN, Actor.Lane.API).withScope(ONLY_A);
 
-    assertEquals(
-        Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Spec 'beta-work' was not found.", Remedy.NONE),
-        erase.spec(admin, specs.lastKnown("beta-work").orElseThrow()));
-    assertEquals(Optional.empty(), erase.spec(admin, specs.lastKnown("alpha-work").orElseThrow()));
+    assertEquals(new Decision.NotFound(), erase.prune(admin, "beta-work"));
+    assertEquals(new Decision.Allowed(), erase.prune(admin, "alpha-work"));
     assertEquals(
         Refusal.of(
             Refusal.Kind.NOT_PRUNABLE,

@@ -74,11 +74,24 @@ tests bite, and the deletion count in the body.
   happened and what to do.
 - Untrusted input (names, paths, spec text, agent output) is validated once, at the edge,
   and reaches a shell only as an argument, never interpolated into script text.
-- One rule, one place: ownership (`Ownership.ownerOf`), roles (`RoleRule`), one write rule
-  per synced type (`ai.singlr.sail.authority`), one `Actor` bound at each door. A second
-  derivation of any of these is a bug, not a convenience. The journal decides every write as
-  it records the revision; a door never asks a write rule, and a rule never reads from the
-  database the row it is deciding (it has `held`).
+- One rule, one place: every permission is `Access.decide` over the `Policy` table
+  (`ai.singlr.sail.access`), every read of a row `ReadFilter`, every resource and its owners
+  built by `Resources` from the facts its caller selects of the row, roles resolved by
+  `RoleRule`, one `Actor` bound at each door. A type rule (`ai.singlr.sail.authority`) names the
+  actions a revision takes and keeps only its own facts. Nothing else reads a role, a lane, a
+  scope or a capability to decide (`OneDecisionSweepTest`); a second derivation is a bug, not a
+  convenience. The journal decides every write as it records the revision; a door asks `Access`,
+  or the journal of the write it is about to make, never a write rule, and a rule never reads
+  from the database the row it is deciding (it has `held`). The one exception is
+  `MessageAuthority.post`: a post with no message to journal (the terminal's room pin, a room
+  session's report) still answers to the message rule's own fact that a post is someone's, so
+  those two doors ask the rule's post decision (`OneDecisionPointTest` pins them).
+- The permission snapshot (`ai.singlr.sail.access.baseline`, the `*BaselineTest` corpora and
+  their `access/baseline/*.tsv`) records every answer a cast of principals gets at the journal,
+  main's commit, the event rule, the read paths and the doors, and each test fails on any cell that
+  answers otherwise. A change that alters an answer on purpose re-records it with
+  `-Dsail.access.baseline=record` (the command is in `Baseline`'s Javadoc), and the `.tsv` diff in
+  its pull request is the list of what changed, cell by cell.
 - Prefer deleting over adding. The smallest change in the right place; a duplicated seam is
   a finding to fix in the same change.
 

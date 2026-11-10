@@ -5,28 +5,35 @@
 
 package ai.singlr.sail.authority;
 
-import static ai.singlr.sail.authority.Actors.ADMIN;
-import static ai.singlr.sail.authority.Actors.ADMIN_SYNC;
-import static ai.singlr.sail.authority.Actors.AGENT;
-import static ai.singlr.sail.authority.Actors.MACHINE;
-import static ai.singlr.sail.authority.Actors.OTHER;
-import static ai.singlr.sail.authority.Actors.OTHERS_AGENT;
-import static ai.singlr.sail.authority.Actors.OTHER_API;
-import static ai.singlr.sail.authority.Actors.OTHER_SYNC;
-import static ai.singlr.sail.authority.Actors.OWNER;
-import static ai.singlr.sail.authority.Actors.OWNER_API;
-import static ai.singlr.sail.authority.Actors.OWNER_SYNC;
-import static ai.singlr.sail.authority.Actors.VIEWER;
-import static ai.singlr.sail.authority.Actors.VIEWER_SYNC;
+import static ai.singlr.sail.identity.Actors.ADMIN;
+import static ai.singlr.sail.identity.Actors.ADMIN_SYNC;
+import static ai.singlr.sail.identity.Actors.AGENT;
+import static ai.singlr.sail.identity.Actors.MACHINE;
+import static ai.singlr.sail.identity.Actors.OTHER;
+import static ai.singlr.sail.identity.Actors.OTHERS_AGENT;
+import static ai.singlr.sail.identity.Actors.OTHER_API;
+import static ai.singlr.sail.identity.Actors.OTHER_SYNC;
+import static ai.singlr.sail.identity.Actors.OWNER;
+import static ai.singlr.sail.identity.Actors.OWNER_API;
+import static ai.singlr.sail.identity.Actors.OWNER_SYNC;
+import static ai.singlr.sail.identity.Actors.VIEWER;
+import static ai.singlr.sail.identity.Actors.VIEWER_SYNC;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import ai.singlr.sail.authority.Refusal.Kind;
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Refusal;
+import ai.singlr.sail.access.Refusal.Kind;
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -72,6 +79,47 @@ class EraseAuthorityTest {
     return new SpecStore.LastKnown("auth", status, assignee, createdBy, "auth", live);
   }
 
+  /**
+   * {@code spec} held on the board as it names it, live or deleted, pruned by {@code actor}: the
+   * decision a prune by id asks.
+   */
+  private Decision pruned(Actor actor, SpecStore.LastKnown spec) {
+    var specs = new SpecStore(board.db);
+    Acting.system(
+        () -> {
+          if (specs.findById(spec.id()).isEmpty()) {
+            specs.create(
+                new SpecStore.SpecRow(
+                    spec.id(),
+                    "acme",
+                    spec.id(),
+                    spec.status(),
+                    spec.assignee(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    spec.createdBy(),
+                    null,
+                    null,
+                    spec.createdBy(),
+                    List.of(),
+                    List.of()));
+          }
+          board.db.execute(
+              "UPDATE specs SET status = ?, assignee = ?, created_by = ? WHERE id = ?",
+              spec.status().wire(),
+              spec.assignee(),
+              spec.createdBy(),
+              spec.id());
+          if (!spec.live()) {
+            specs.delete(spec.id());
+          }
+        });
+    return rule.prune(actor, spec.id());
+  }
+
   static Stream<Case> specs() {
     var archived = spec(SpecStatus.ARCHIVED, OWNER, OTHER, true);
     var unassigned = spec(SpecStatus.CANCELLED, null, OWNER, true);
@@ -81,7 +129,11 @@ class EraseAuthorityTest {
     return Stream.of(
         new Case("the owner erases their archived spec", OWNER_API, archived, null),
         new Case("the owner's push erases it", OWNER_SYNC, archived, null),
-        new Case("the owner's agent passes the rule", AGENT, archived, null),
+        new Case(
+            "the owner's agent may not: erasing is its FDE's",
+            AGENT,
+            archived,
+            Kind.LANE_FORBIDDEN),
         new Case("an admin erases anyone's", ADMIN, archived, null),
         new Case("an admin's push erases anyone's", ADMIN_SYNC, archived, null),
         new Case("the creator erases an unassigned one", OWNER_API, unassigned, null),
@@ -89,7 +141,11 @@ class EraseAuthorityTest {
         new Case("an admin erases an ownerless one", ADMIN, ownerless, null),
         new Case("another member may not", OTHER_API, archived, Kind.NOT_OWNER),
         new Case("another member's push may not", OTHER_SYNC, archived, Kind.NOT_OWNER),
-        new Case("another FDE's agent may not", OTHERS_AGENT, archived, Kind.NOT_OWNER),
+        new Case(
+            "another FDE's agent is told its lane first",
+            OTHERS_AGENT,
+            archived,
+            Kind.LANE_FORBIDDEN),
         new Case("a machine credential may not", MACHINE, archived, Kind.NOT_OWNER),
         new Case("a member may not erase an ownerless one", OWNER_API, ownerless, Kind.NOT_OWNER),
         new Case("a viewer may not", VIEWER, archived, Kind.READ_ONLY),
@@ -102,20 +158,116 @@ class EraseAuthorityTest {
   @MethodSource("specs")
   void decidesASpec(Case row) {
     assertEquals(
-        Optional.ofNullable(row.refused()), rule.spec(row.actor(), row.spec()).map(Refusal::kind));
+        Optional.ofNullable(row.refused()),
+        refused(pruned(row.actor(), row.spec())).map(Refusal::kind));
   }
 
   @Test
   void aWholeProjectOrASweepIsAnAdminsAndNoneAViewers() {
-    assertEquals(Optional.empty(), rule.request(ADMIN, true));
-    assertEquals(Optional.empty(), rule.request(ADMIN_SYNC, true));
-    assertEquals(Optional.empty(), rule.request(OWNER_API, false));
-    assertEquals(Optional.of(Kind.ADMIN_ONLY), rule.request(OWNER_API, true).map(Refusal::kind));
-    assertEquals(Optional.of(Kind.ADMIN_ONLY), rule.request(OWNER_SYNC, true).map(Refusal::kind));
-    assertEquals(Optional.of(Kind.READ_ONLY), rule.request(VIEWER, false).map(Refusal::kind));
+    assertEquals(Optional.empty(), rule.purge(ADMIN));
+    assertEquals(Optional.empty(), rule.purge(ADMIN_SYNC));
+    assertEquals(Optional.empty(), Access.atAll(OWNER_API, Action.PRUNE, Resource.Kind.SPEC));
+    assertEquals(Optional.of(Kind.ADMIN_ONLY), rule.purge(OWNER_API).map(Refusal::kind));
+    assertEquals(Optional.of(Kind.ADMIN_ONLY), rule.purge(OWNER_SYNC).map(Refusal::kind));
     assertEquals(
         Optional.of(Kind.READ_ONLY),
-        rule.request(new Actor(OWNER, Role.VIEWER, Actor.Lane.CLI), true).map(Refusal::kind));
+        Access.atAll(VIEWER, Action.PRUNE, Resource.Kind.SPEC).map(Refusal::kind));
+    assertEquals(
+        Optional.of(Kind.READ_ONLY),
+        rule.purge(new Actor(OWNER, Role.VIEWER, Actor.Lane.CLI)).map(Refusal::kind));
+  }
+
+  @Test
+  void whatLiesOutsideTheAudienceIsNotFoundBeforeAnyRoleIsAsked() {
+    var archived = spec(SpecStatus.ARCHIVED, OWNER, OWNER, true);
+    var outsider = VIEWER.withScope(ProjectScope.of(List.of("beta")));
+
+    assertEquals(new Decision.NotFound(), pruned(outsider, archived));
+    assertEquals(
+        Optional.of(Kind.READ_ONLY),
+        refused(rule.prune(VIEWER.withScope(ProjectScope.of(List.of("acme"))), "auth"))
+            .map(Refusal::kind),
+        "an actor who reads the spec's project is asked its role");
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_PRUNABLE,
+                "main holds no spec 'auth', so it cannot tell whose it is; sync it before pruning",
+                "Sync the spec before pruning it.")),
+        rule.requested(Actor.sync(OWNER, Role.VIEWER).withScope(outsider.scope()), "spec", "auth"));
+  }
+
+  @Test
+  void anErasureAskedAgainIsAnsweredToWhoeverMayEraseAtAll() {
+    Acting.system(
+        () -> {
+          new SpecStore(board.db).create(row("gone", "acme"));
+          var erasure = new Erasure(board.db);
+          erasure.erase(
+              erasure.closure(List.of(new Erasure.Target("spec", "gone"))), ChangeLog.Entry.LOCAL);
+        });
+
+    assertEquals(Optional.empty(), rule.requested(OTHER_SYNC, "spec", "gone"));
+    assertEquals(
+        Optional.of(Kind.READ_ONLY),
+        rule.requested(VIEWER_SYNC, "spec", "gone").map(Refusal::kind));
+    assertEquals(
+        new Decision.NotFound(),
+        rule.prune(OTHER_SYNC.withScope(ProjectScope.of(List.of("beta"))), "gone"),
+        "and one erased outside the asker's projects is not there");
+  }
+
+  @Test
+  void aProjectErasedAlreadyIsAnsweredToAnAdminAsNothingLeftToDo() {
+    Acting.system(
+        () -> {
+          var erasure = new Erasure(board.db);
+          erasure.erase(
+              erasure.closure(List.of(new Erasure.Target("project", "acme"))),
+              ChangeLog.Entry.LOCAL);
+        });
+
+    assertEquals(Optional.empty(), rule.requested(Actors.ADMIN_SYNC, "project", "acme"));
+  }
+
+  /**
+   * Only specs and projects are erased on request, but a credential that may not prune at all is
+   * told so first.
+   */
+  @Test
+  void aRequestToEraseAnotherTypeIsToldTheRoleBeforeTheType() {
+    for (var type : List.of("room", "run")) {
+      assertEquals(
+          Optional.of(Refusal.readOnly("prune specs")),
+          rule.requested(VIEWER_SYNC, type, "lobby"),
+          type);
+      assertEquals(
+          Optional.of(
+              new Refusal(
+                  Kind.NOT_PRUNABLE,
+                  "only specs and projects are pruned on request, not a " + type,
+                  "Prune the spec or project it belongs to.")),
+          rule.requested(OWNER_SYNC, type, "lobby"),
+          type);
+    }
+  }
+
+  @Test
+  void aProjectMainHoldsNoneOfIsSaidSoBeforeTheRoleAsWhatThisBoxDoesNotHoldIsEverywhere() {
+    var none =
+        Optional.of(
+            new Refusal(
+                Kind.NOT_PRUNABLE,
+                "main holds no project 'ghost'",
+                "Sync the project before pruning it."));
+
+    for (var actor : List.of(VIEWER_SYNC, OWNER_SYNC, Actors.ADMIN_SYNC)) {
+      assertEquals(none, rule.requested(actor, "project", "ghost"), actor.toString());
+    }
+    assertEquals(
+        Optional.of(Kind.ADMIN_ONLY),
+        rule.requested(OWNER_SYNC, "project", "acme").map(Refusal::kind),
+        "a project main holds is purged by an admin alone");
   }
 
   @Test
@@ -174,23 +326,35 @@ class EraseAuthorityTest {
         });
     var specs = new SpecStore(board.db);
 
-    assertEquals(Optional.empty(), rule.spec(scoped, specs.lastKnown("whole").orElseThrow()));
+    assertEquals(new Decision.Allowed(), rule.prune(scoped, "whole"));
     assertEquals(
         Optional.of(
             new Refusal(
                 Kind.NOT_PRUNABLE,
                 "Pruning spec 'moved' would erase work outside your project scope.",
                 "Ask an admin to prune it.")),
-        rule.spec(scoped, specs.lastKnown("moved").orElseThrow()));
+        refused(rule.prune(scoped, "moved")));
     assertEquals(
-        Optional.empty(),
-        rule.spec(OWNER_API, specs.lastKnown("moved").orElseThrow()),
+        new Decision.Allowed(),
+        rule.prune(OWNER_API, "moved"),
         "an owner main never scoped erases it whole");
     assertEquals(
         Optional.of(Kind.NOT_PRUNABLE),
         rule.requested(Actor.sync(OWNER, Role.MEMBER).withScope(scoped.scope()), "spec", "moved")
             .map(Refusal::kind),
         "and main answers a scoped node's request by the same rule");
+    Acting.system(() -> specs.updateStatus("moved", SpecStatus.IN_PROGRESS));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_PRUNABLE,
+                "Spec 'moved' is in_progress: only archived, cancelled or deleted specs are pruned.",
+                Remedy.of(
+                    "Archive it first: ",
+                    Remedy.sail("spec update", "moved", "--status", "archived"),
+                    "."))),
+        refused(rule.prune(scoped, "moved")),
+        "whether it may be pruned at all is said before what it would reach outside the scope");
   }
 
   private static SpecStore.SpecRow row(String id, String project) {
@@ -229,23 +393,35 @@ class EraseAuthorityTest {
                 "Archive it first: ",
                 Remedy.sail("spec update", "auth", "--status", "archived"),
                 ".")),
-        rule.spec(ADMIN, spec(SpecStatus.IN_PROGRESS, OWNER, OWNER, true)).orElseThrow());
+        refused(pruned(ADMIN, spec(SpecStatus.IN_PROGRESS, OWNER, OWNER, true))).orElseThrow());
     assertEquals(
         new Refusal(
             Kind.READ_ONLY,
-            "Your role is read-only: it cannot prune.",
-            "Ask an admin to prune, or for a member role."),
-        rule.request(VIEWER, false).orElseThrow());
+            "Your credential is read-only and cannot prune specs.",
+            "Ask an admin for a member or admin credential."),
+        Access.atAll(VIEWER, Action.PRUNE, Resource.Kind.SPEC).orElseThrow());
+    assertEquals(
+        new Refusal(
+            Kind.LANE_FORBIDDEN,
+            "Agent principals cannot prune specs.",
+            "Only an operator lane (CLI or API token) may do this."),
+        Access.atAll(AGENT, Action.PRUNE, Resource.Kind.SPEC).orElseThrow());
     assertEquals(
         new Refusal(
             Kind.ADMIN_ONLY,
             "Pruning by policy or a whole project is admin-only.",
             Remedy.of("Name the specs you own by id: ", Remedy.sail("spec prune", "<id...>"), ".")),
-        rule.request(OWNER_API, true).orElseThrow());
+        rule.purge(OWNER_API).orElseThrow());
     assertEquals(
         "Spec 'auth' is assigned to 'ada', not you.",
-        rule.spec(OTHER_API, spec(SpecStatus.ARCHIVED, OWNER, OWNER, true))
+        refused(pruned(OTHER_API, spec(SpecStatus.ARCHIVED, OWNER, OWNER, true)))
             .orElseThrow()
             .message());
+  }
+
+  private static Optional<Refusal> refused(Decision decision) {
+    return decision instanceof Decision.Refused refused
+        ? Optional.of(refused.refusal())
+        : Optional.empty();
   }
 }

@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
@@ -34,15 +33,14 @@ import java.util.function.Supplier;
 
 /**
  * SSE handler that streams a single run's log output. The address is {@code /v1/runs/{id}/stream}:
- * it resolves the run, which a caller whose scope does not admit its project is told does not
- * exist, applies the same provenance guard as the buffered log/stop endpoints — a run whose {@code
- * node} is not this box is refused with a structured {@code run_on_other_node} error rather than
- * tailing a foreign box's local file — then applies the same run-owner rule ({@link
- * RunAuthority#access}) the buffered log endpoint does (the run's spec assignee or an admin, else
- * {@code forbidden_not_assignee}), and finally tails the run's own {@code
- * ~/.sail/runs/<id>/agent.log} via {@code incus exec}, sending each line as an SSE {@code data:}
- * event. Because REST and SSE call the one pure policy, they return an identical verdict for an
- * identical caller. {@code ?since=N} replays from a line number for client reconnection.
+ * it admits the caller as every log door does ({@link LogAdmission#of}): a run whose project the
+ * caller's scope does not admit does not exist, a run whose {@code node} is not this box is refused
+ * with a structured {@code run_on_other_node} error rather than tailing a foreign box's local file,
+ * and the run's owners and an admin read it, else {@code forbidden_not_assignee}. It finally tails
+ * the run's own {@code ~/.sail/runs/<id>/agent.log} via {@code incus exec}, sending each line as an
+ * SSE {@code data:} event. Because REST and SSE call the one pure policy, they return an identical
+ * verdict for an identical caller. {@code ?since=N} replays from a line number for client
+ * reconnection.
  *
  * <p>Mounted by {@link ApiRouter}, which delegates the stream path straight to this handler so the
  * long-lived connection never runs through the buffered request/response path. It is not registered
@@ -187,36 +185,33 @@ public final class AgentLogStreamer implements HttpHandler {
   }
 
   /**
-   * The run {@code runId} when the authenticated caller may read its log, else why not: a run its
-   * scope does not admit does not exist for it, a run of another box is that box's to stream, and
-   * the run-owner rule ({@link RunAuthority#access}) decides the rest.
+   * The run {@code runId} when the authenticated caller may read its log, else why not, as every
+   * log door admits it ({@link LogAdmission#of}), said in this stream's own envelope.
    */
   private Admission admit(HttpExchange exchange, String runId) {
     var actor = ApiRouter.actorOf(exchange);
-    var run = Scoped.row(actor, runLookup.apply(runId), RunStore.RunRow::project).orElse(null);
-    if (run == null) {
-      return new Refused(404, "run_not_found", "No run '" + runId + "'.", null);
+    return switch (LogAdmission.of(
+        actor, runLookup.apply(runId), runId, localHandle.get(), specLookup)) {
+      case Result.Success<RunStore.RunRow> readable -> new Admitted(readable.value());
+      case Result.Failure<RunStore.RunRow> refused -> refused(refused);
+    };
+  }
+
+  /**
+   * {@code failure} in this stream's envelope: its code and message, each field it names as a key
+   * of its own, and its fix.
+   */
+  private static Refused refused(Result.Failure<?> failure) {
+    var extra = new StringBuilder();
+    for (var field : failure.fieldErrors()) {
+      extra.append(", \"").append(field.field()).append("\": \"");
+      extra.append(jsonEscape(field.message())).append('"');
     }
-    if (SailOperations.isForeign(run, localHandle.get())) {
-      return foreign(run);
+    if (!failure.remedy().isEmpty()) {
+      extra.append(", \"fix\": \"").append(jsonEscape(failure.remedy().described())).append('"');
     }
-    var refusal =
-        RunAuthority.access(
-            actor,
-            run.id(),
-            StopOperations.specIdOf(run),
-            RunAuthority.owners(
-                run, spec -> StopOperations.ownerSeen(actor, specLookup.apply(spec))));
-    if (refusal.isPresent()) {
-      var refused = refusal.get();
-      var code = Refusals.code(refused.kind());
-      var fix =
-          refused.fix().isEmpty()
-              ? null
-              : ", \"fix\": \"" + jsonEscape(refused.fix().described()) + "\"";
-      return new Refused(code.httpCode(), code.code(), refused.message(), fix);
-    }
-    return new Admitted(run);
+    var code = failure.errorCode();
+    return new Refused(code.httpCode(), code.code(), failure.errorMessage(), extra.toString());
   }
 
   /** What asks again whether {@code exchange}'s caller may still read {@code runId}'s log. */
@@ -393,23 +388,6 @@ public final class AgentLogStreamer implements HttpHandler {
   private static void writeComment(OutputStream out, String comment) throws IOException {
     out.write((": " + comment + "\n\n").getBytes(StandardCharsets.UTF_8));
     out.flush();
-  }
-
-  private static Refused foreign(RunStore.RunRow run) {
-    var node = Strings.isBlank(run.node()) ? "an unknown node" : run.node();
-    var extra =
-        ", \"node\": \""
-            + jsonEscape(Objects.toString(run.node(), ""))
-            + "\", \"spec\": \""
-            + jsonEscape(Objects.toString(run.specId(), ""))
-            + "\", \"project\": \""
-            + jsonEscape(Objects.toString(run.project(), ""))
-            + "\"";
-    return new Refused(
-        409,
-        "run_on_other_node",
-        "Run " + run.id() + " executed on " + node + "; its logs live there, not on this box.",
-        extra);
   }
 
   private static void sendError(

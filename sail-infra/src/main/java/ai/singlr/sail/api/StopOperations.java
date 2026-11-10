@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.authority.RunAuthority;
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentPresence;
@@ -184,11 +186,10 @@ public final class StopOperations {
 
   /**
    * Executes one clean stop. Refusals throw {@link ApiException} with a structured code before any
-   * mutation: an unknown run, or one of a project outside the caller's scope, is a 404, a run that
-   * executed elsewhere a {@code run_on_other_node}, and a caller who is neither the run's spec
-   * assignee nor an admin a {@code forbidden_not_assignee} (the same run-owner rule, {@link
-   * RunAuthority#access}, the log routes enforce). A dry run resolves and probes but writes and
-   * signals nothing, returning the outcome it would produce.
+   * mutation: an unknown run, or one of a project outside the caller's scope, is a 404, a caller
+   * who may not operate the run ({@link Action#OPERATE_RUN}) is refused, and a run that executed
+   * elsewhere is a {@code run_on_other_node}. A dry run resolves and probes but writes and signals
+   * nothing, returning the outcome it would produce.
    */
   public Outcome stop(Target target, String localHandle, boolean dryRun) {
     return switch (target) {
@@ -199,9 +200,9 @@ public final class StopOperations {
 
   private Outcome stopRun(String runId, String localHandle, boolean dryRun) {
     var run =
-        Scoped.row(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project)
-            .orElseThrow(
-                () -> new ApiException(ErrorCode.RUN_NOT_FOUND, "No run '" + runId + "'."));
+        ReadFilter.readable(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project)
+            .orElseThrow(() -> Refusals.runNotFound(runId));
+    authorize(run, dryRun);
     if (!run.ownedBy(localHandle)) {
       var node = Strings.isBlank(run.node()) ? "an unknown node" : run.node();
       throw new ApiException(
@@ -209,7 +210,6 @@ public final class StopOperations {
           "Run " + run.id() + " executed on " + node + "; only its executing box can stop it.",
           "Stop it from " + node + "'s box.");
     }
-    authorize(run, dryRun);
     projects.requireExists(run.project());
     return stopResolved(run, dryRun);
   }
@@ -534,7 +534,7 @@ public final class StopOperations {
   }
 
   /** The run's spec id with the blank ad-hoc form normalized to null: no spec means no spec. */
-  static String specIdOf(RunStore.RunRow run) {
+  private static String specIdOf(RunStore.RunRow run) {
     return Strings.isBlank(run.specId()) ? null : run.specId();
   }
 
@@ -566,36 +566,20 @@ public final class StopOperations {
   }
 
   /**
-   * Refuses a stop the bound actor may not make. A dry run writes and signals nothing, so it is
-   * described for whoever asks, with no one bound.
+   * Refuses a stop the bound actor may not make: operating a run is its owners' ({@link
+   * RunStore.RunRow#resource}), its spec's owner as the reader sees it. A stop by run id read the
+   * run in the caller's scope first; a stop of a whole project is the host CLI's, whose operator
+   * sees every project. A dry run writes and signals nothing, so it is described for whoever asks,
+   * with no one bound.
    */
   private void authorize(RunStore.RunRow run, boolean dryRun) {
     if (dryRun) {
       return;
     }
-    var actor = Actor.current();
-    if (actor.agentLane()) {
-      var refused = DispatchPolicy.agentLaneForbidden("stop runs");
-      throw new ApiException(refused.code(), refused.message(), refused.fix());
-    }
-    if (!actor.canWrite()) {
-      throw new ApiException(
-          ErrorCode.READ_ONLY_CREDENTIAL,
-          "Your credential is read-only and cannot stop runs.",
-          "Ask an admin for a member or admin credential.");
-    }
-    var owners =
-        RunAuthority.owners(run, specId -> ownerSeen(Actor.reader(), specStore.findById(specId)));
-    Refusals.enforce(RunAuthority.access(actor, run.id(), specIdOf(run), owners));
-  }
-
-  /**
-   * The owner of {@code spec} as the run-owner rule names it to {@code reader}: empty for a spec
-   * outside the reader's scope, so a run that stayed in a project its spec has left never says who
-   * owns that spec now.
-   */
-  static Optional<String> ownerSeen(Actor reader, Optional<SpecStore.SpecRow> spec) {
-    return Scoped.row(reader, spec, SpecStore.SpecRow::project).map(SpecStore.SpecRow::owner);
+    Refusals.require(
+        Access.decide(
+            Actor.current(), Action.OPERATE_RUN, run.resource(Actor.reader(), specStore::findById)),
+        () -> Refusals.runNotFound(run.id()));
   }
 
   /**

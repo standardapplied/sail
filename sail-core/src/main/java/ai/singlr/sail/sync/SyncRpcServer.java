@@ -5,8 +5,10 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.EraseAuthority;
-import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.ScopeRule;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
@@ -182,7 +184,7 @@ public final class SyncRpcServer {
 
   void serve(InputStream in, OutputStream out, int frame) throws IOException {
     if (blobs == null) {
-      if (!principal.scope().unrestricted()) {
+      if (!Access.audience(principal).unrestricted()) {
         throw new IllegalStateException(
             "A scoped session is decided from main's change heads: serve it over main's database"
                 + " (SyncRpcServer.over).");
@@ -284,7 +286,7 @@ public final class SyncRpcServer {
    * unscoped session fetches by hash as it always has.
    */
   private void requireServed(String what, List<String> hashes, Set<String> served) {
-    if (principal.scope().unrestricted()) {
+    if (Access.audience(principal).unrestricted()) {
       return;
     }
     for (var hash : hashes) {
@@ -301,7 +303,7 @@ public final class SyncRpcServer {
    * here.
    */
   private void serving(String type, List<Map<String, Object>> snapshots) {
-    if (principal.scope().unrestricted()) {
+    if (Access.audience(principal).unrestricted()) {
       return;
     }
     sharedBlobs.addAll(
@@ -316,24 +318,21 @@ public final class SyncRpcServer {
   }
 
   /**
-   * Whether the session may see what main holds of {@code id}: its head's project is in the
-   * session's scope. An unscoped session sees every id, as it always has.
+   * Whether the session may see what main holds of {@code id}: the session's FDE may read it as its
+   * head files it ({@link ReadFilter}), A5: a box receives a row only when its person may read it.
    */
   private boolean admits(String type, String id) {
-    var scope = principal.scope();
-    return scope.unrestricted() || scope.admits(headProject(type, id));
+    return ReadFilter.reads(principal, () -> headProject(type, id));
   }
 
   /**
    * Whether the session may see {@code version}, an earlier state main holds of {@code id}: the
-   * project that state names is in the session's scope, wherever the id's head has moved since. A
+   * session's FDE may read it as that state files it, wherever the id's head has moved since. A
    * version that kept no state names no project and says nothing of one.
    */
   private boolean admits(String type, String id, MainReplica.State version) {
-    var scope = principal.scope();
-    return scope.unrestricted()
-        || version.snapshot() == null
-        || scope.admits(changeLog.projectOf(type, id, version.snapshot()));
+    return version.snapshot() == null
+        || ReadFilter.reads(principal, () -> changeLog.projectOf(type, id, version.snapshot()));
   }
 
   /** The project main's head of {@code id} carries, null when unknown or main keeps no journal. */
@@ -350,7 +349,7 @@ public final class SyncRpcServer {
    */
   private void receiveContent(
       SyncWire.Announce announce, InputStream in, OutputStream out, int frame) throws IOException {
-    var scoped = !principal.scope().unrestricted();
+    var scoped = !Access.audience(principal).unrestricted();
     var missing =
         scoped ? without(announce.hashes(), sharedBlobs) : blobs.missing(announce.hashes());
     reply(out, new SyncWire.Lack(List.copyOf(missing)));
@@ -405,7 +404,7 @@ public final class SyncRpcServer {
    * offer main's own rule denies.
    */
   private Set<String> unshared(String type, MainReplica.Offer offer) {
-    if (principal.scope().unrestricted() || !principal.canWrite()) {
+    if (Access.audience(principal).unrestricted() || !principal.canWrite()) {
       return Set.of();
     }
     return without(
@@ -544,7 +543,7 @@ public final class SyncRpcServer {
         mainId(),
         Objects.toString(principal.handle(), ""),
         limits.fileMax(),
-        principal.scope(),
+        Access.audience(principal),
         db == null ? null : new DatabaseCatalog(db).id());
   }
 
@@ -596,8 +595,8 @@ public final class SyncRpcServer {
 
   /**
    * Every type's high-water, and each type whose mark main's log no longer holds ({@link
-   * ChangeLog#holds}), read for the session's scope. A server with no database behind it names
-   * none.
+   * ChangeLog#holds}), read for what the session's FDE may read ({@link Access#audience}). A server
+   * with no database behind it names none.
    */
   private SyncWire.Response tips(SyncWire.Heads heads) {
     var tips = new LinkedHashMap<String, Long>();
@@ -608,7 +607,7 @@ public final class SyncRpcServer {
           var mark = heads.marks().get(type);
           if (mark != null
               && changeLog != null
-              && !changeLog.holds(type, mark, principal.scope())) {
+              && !changeLog.holds(type, mark, Access.audience(principal))) {
             rewound.add(type);
           }
         });
@@ -618,11 +617,11 @@ public final class SyncRpcServer {
   /**
    * One page of {@code pull.type()}'s change log after {@code pull.since()}: the heads in seq
    * order, each read as its current row, until {@code limit} entries or the frame is full. {@code
-   * next} is the last seq included, so the node checkpoints exactly what it has seen. A head whose
-   * project the session's scope does not admit is passed over by its head alone, no row read, and
-   * {@code next} moves past it all the same: a scoped node's checkpoint reaches main's tip having
-   * seen only its own projects, and a page may be empty yet not the last. The whole page is read as
-   * one snapshot of main, so it is internally consistent and no writer waits on it.
+   * next} is the last seq included, so the node checkpoints exactly what it has seen. A head the
+   * session's FDE may not read ({@link ReadFilter}) is passed over by its head alone, no row read,
+   * and {@code next} moves past it all the same: a scoped node's checkpoint reaches main's tip
+   * having seen only its own projects, and a page may be empty yet not the last. The whole page is
+   * read as one snapshot of main, so it is internally consistent and no writer waits on it.
    */
   private SyncWire.Response page(SyncWire.Pull pull, int frame) {
     var main = replicas.get(pull.type());
@@ -641,7 +640,7 @@ public final class SyncRpcServer {
     var entries = new ArrayList<SyncWire.Entry>();
     var next = pull.since();
     for (var head : heads.after(pull.type(), pull.since(), pull.limit())) {
-      if (!principal.scope().admits(head.project())) {
+      if (!ReadFilter.reads(principal, head::project)) {
         next = head.seq();
         continue;
       }
@@ -806,11 +805,12 @@ public final class SyncRpcServer {
    * the erasure and staleness checks that would otherwise answer about a row it may not see, and
    * the denial carries nothing of main's: the node withdraws its row and learns only that the id is
    * not its to write. Every denial after it is therefore of an id main holds inside the pusher's
-   * scope, or not at all, so the version it carries is one the pusher may see.
+   * scope, or not at all, so the version it carries is one the pusher may see. A server over no
+   * database serves only an unscoped session ({@link #serve}), which no scope rule refuses.
    */
   private SyncWire.Result result(String type, MainReplica main, MainReplica.Offer offer) {
     var outside =
-        principal.scope().unrestricted()
+        changeLog == null
             ? Optional.<Refusal>empty()
             : new ScopeRule(changeLog, type).pushed(principal, offer.id(), offer.snapshot());
     if (outside.isPresent()) {

@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.store;
 
-import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.SpecAuthority;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -17,7 +19,6 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
-import ai.singlr.sail.identity.ProjectScope;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -1227,21 +1228,22 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   public BoardSummary board(String projectFilter) {
-    return board(projectFilter, ProjectScope.all());
+    return board(projectFilter, Actor.system());
   }
 
   /**
-   * The board of {@code projectFilter}, or of every project, counted from the specs {@code scope}
-   * admits alone, so a scoped reader never counts, or is named as next, a spec of another project.
+   * The board of {@code projectFilter}, or of every project, counted from the specs {@code reader}
+   * reads alone, so a scoped reader never counts, or is named as next, a spec of another project:
+   * the counts filtered inside their query by its audience, the next ready spec by the read filter.
    */
-  public BoardSummary board(String projectFilter, ProjectScope scope) {
+  public BoardSummary board(String projectFilter, Actor reader) {
     var conditions = new ArrayList<String>();
     var parameters = new ArrayList<Object>();
     if (projectFilter != null) {
       conditions.add("project = ?");
       parameters.add(projectFilter);
     }
-    var admitted = ChangeLog.scopeArgument(scope);
+    var admitted = ChangeLog.scopeArgument(Access.audience(reader));
     if (admitted != null) {
       conditions.add("project IN (SELECT value FROM json_each(?))");
       parameters.add(admitted);
@@ -1260,8 +1262,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     for (var row : counts) {
       byStatus.put(SpecStatus.fromWire((String) row[0]), (int) (long) row[1]);
     }
-    var ready =
-        readySpecs(projectFilter).stream().filter(spec -> scope.admits(spec.project())).toList();
+    var ready = ReadFilter.readable(reader, readySpecs(projectFilter), SpecRow::project);
     var nextReadyId = ready.isEmpty() ? null : ready.getFirst().id();
     return new BoardSummary(
         byStatus.get(SpecStatus.DRAFT),

@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ReviewRuns;
@@ -58,6 +59,7 @@ class StopOperationsTest {
 
   @TempDir Path tempDir;
 
+  private Sqlite db;
   private SpecStore specStore;
   private RunStore runStore;
   private final List<Event> events = new ArrayList<>();
@@ -440,6 +442,44 @@ class StopOperationsTest {
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
   }
 
+  /**
+   * Whether the actor may stop a run is asked before where it runs: a viewer, an agent and a member
+   * the run is not for are told so, not that another box executed it.
+   */
+  @Test
+  void aForeignRunTellsWhoMayNotStopItWhyBeforeWhereItRuns() throws Exception {
+    var ops = stopOps(shell(), failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    var asked =
+        List.of(
+            new Actor("raj", Role.VIEWER, Actor.Lane.API),
+            Actor.agentPrincipal("claude/" + R1, LOCAL_HANDLE),
+            new Actor("raj", Role.MEMBER, Actor.Lane.API));
+    var codes =
+        List.of(
+            ErrorCode.READ_ONLY_CREDENTIAL,
+            ErrorCode.AGENT_LANE_FORBIDDEN,
+            ErrorCode.FORBIDDEN_NOT_ASSIGNEE);
+    var messages =
+        List.of(
+            "Your credential is read-only and cannot stop runs.",
+            "Agent principals cannot stop runs.",
+            "Run " + R1 + " belongs to spec 'auth', owned by 'me', not you.");
+
+    for (var i = 0; i < asked.size(); i++) {
+      var actor = asked.get(i);
+      var refusal =
+          assertThrows(
+              ApiException.class,
+              () ->
+                  Actor.call(
+                      actor, () -> ops.stop(new StopOperations.RunTarget(R1), "sumesh", false)));
+      assertEquals(codes.get(i), refusal.failure().errorCode(), actor.toString());
+      assertEquals(messages.get(i), refusal.getMessage(), actor.toString());
+    }
+  }
+
   @Test
   void aBlankNodeRunFailsClosedToForeignForAHandledBox() throws Exception {
     var ops = stopOps(shell(), failingHalter(), StopOperations.Listener.NONE);
@@ -503,6 +543,87 @@ class StopOperationsTest {
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.failure().errorCode());
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
     assertEquals("running", runStore.findById(R1).orElseThrow().status());
+  }
+
+  /**
+   * An ad-hoc run this box ran for another FDE is the box's as well as that FDE's: this box's FDE
+   * stops it, and a third member is told whose it is.
+   */
+  @Test
+  void anAdHocRunThisBoxRanForAnotherFdeIsTheBoxsAndThatFdesToStop() throws Exception {
+    var shell = liveAgentShell();
+    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    Acting.system(
+        () ->
+            runStore.create(
+                R1,
+                "acme",
+                null,
+                LOCAL_HANDLE,
+                "build",
+                "codex",
+                "b",
+                "t",
+                123,
+                null,
+                RUN_LOG,
+                UNIT));
+    db.execute("UPDATE runs SET owner = 'ada' WHERE id = ?", R1);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    new Actor("raj", Role.MEMBER, Actor.Lane.API),
+                    () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.failure().errorCode());
+    assertEquals(
+        "Run " + R1 + " is an ad-hoc session launched by 'ada' and 'me', not you.",
+        refusal.getMessage());
+
+    var outcome =
+        Actor.call(
+            new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.API),
+            () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+
+    assertInstanceOf(StopOperations.Stopped.class, outcome);
+  }
+
+  /**
+   * A run that names no spec and acts for no one, on a box with no handle, is an admin's to stop.
+   */
+  @Test
+  void aRunNamingNoSpecAndNoOneIsAnAdminsToStop() throws Exception {
+    var shell = liveAgentShell();
+    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    Acting.system(
+        () ->
+            runStore.create(
+                R1,
+                "acme",
+                null,
+                LOCAL_HANDLE,
+                "build",
+                "codex",
+                "b",
+                "t",
+                123,
+                null,
+                RUN_LOG,
+                UNIT));
+    db.execute("UPDATE runs SET owner = NULL, node = NULL WHERE id = ?", R1);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    new Actor("raj", Role.MEMBER, Actor.Lane.API),
+                    () -> ops.stop(new StopOperations.RunTarget(R1), null, false)));
+
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.failure().errorCode());
+    assertEquals("Run " + R1 + " names no spec and no one it acts for.", refusal.getMessage());
   }
 
   @Test
@@ -637,6 +758,26 @@ class StopOperationsTest {
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertEquals(R1, stopped.runId());
     assertTrue(stopped.specCancelled());
+  }
+
+  @Test
+  void aProjectsRunIsNoRunToAnActorOutsideTheProject() throws Exception {
+    var ops = stopOps(liveAgentShell(), failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    var outside = ADMIN.withScope(ProjectScope.of(List.of("beta")));
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    outside,
+                    () -> ops.stop(new StopOperations.ProjectTarget("acme"), LOCAL_HANDLE, false)));
+
+    assertEquals(ErrorCode.RUN_NOT_FOUND, refusal.failure().errorCode());
+    assertEquals("No run '" + R1 + "'.", refusal.getMessage());
+    assertEquals("running", runStore.findById(R1).orElseThrow().status());
   }
 
   @Test
@@ -1499,7 +1640,7 @@ class StopOperationsTest {
         agent:
           type: claude-code
         """);
-    var db = Sqlite.open(tempDir.resolve("stop-" + System.nanoTime() + ".db"));
+    db = Sqlite.open(tempDir.resolve("stop-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     specStore = new SpecStore(db);

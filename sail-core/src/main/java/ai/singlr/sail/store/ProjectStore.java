@@ -5,8 +5,10 @@
 
 package ai.singlr.sail.store;
 
-import ai.singlr.sail.authority.ProjectAuthority;
-import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.access.Refusal;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
@@ -250,8 +252,8 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     }
     var visible =
         list().stream()
+            .filter(project -> ReadFilter.reads(actor, project::name))
             .map(ProjectRow::name)
-            .filter(actor.scope()::admits)
             .filter(granted::admits)
             .toList();
     var scoped = !granted.unrestricted();
@@ -265,7 +267,20 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
                 : "' isn't on this box. Projects here: ")
             + (visible.isEmpty() ? "none" : String.join(", ", visible))
             + ".",
-        scoped ? ungranted(handle, nextProject) : Remedy.NONE);
+        scoped ? ungranted(handle, nextProject) : uncatalogued(nextProject));
+  }
+
+  /**
+   * What a box does about {@code project}, which its catalog does not hold and its scope does not
+   * withhold: create it, or sync it from main.
+   */
+  public static Remedy uncatalogued(String project) {
+    return Remedy.of(
+        "Create it with '",
+        Remedy.sail("project create", project),
+        "', or sync it from main with '",
+        Remedy.sail("sync"),
+        "'.");
   }
 
   /**
@@ -350,10 +365,24 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     journal.eraseRow(id);
   }
 
-  /** Who may write projects on this box: any writer, and a rename an admin alone. */
+  /**
+   * Who may write projects on this box: whoever may configure the project ({@link
+   * Action#CONFIGURE}), its creator's as its revision names it. A rename — the deletion of the old
+   * name that blocks its resurrection ({@link #renames}) — moves every spec and file of the
+   * project, whoever's they are, so it purges the old name too ({@link Action#PURGE}), and is
+   * refused before any of them is written.
+   */
   @Override
-  public ProjectAuthority authority() {
-    return new ProjectAuthority(db);
+  public WriteAuthority authority() {
+    return WriteAuthority.table(
+        db,
+        (id, held, next) -> {
+          var project =
+              Resources.project(id, Snapshots.text(held != null ? held : next, Snapshots.CREATOR));
+          return renames(next)
+              ? WriteAuthority.Taking.of(project, Action.CONFIGURE, Action.PURGE)
+              : WriteAuthority.Taking.of(project, Action.CONFIGURE);
+        });
   }
 
   /** Whether {@code deletion}, a tombstone's marks, is a rename's: it blocks the old name. */

@@ -1,0 +1,1323 @@
+pull file acme/notes.md to sync admin root all	received REVISION
+pull file acme/notes.md to sync member ada acme	received REVISION
+pull file acme/notes.md to sync member ada all	received REVISION
+pull file acme/notes.md to sync member ada beta	withheld
+pull file acme/notes.md to sync member bob acme	received REVISION
+pull file acme/notes.md to sync member bob all	received REVISION
+pull file acme/notes.md to sync member bob beta	withheld
+pull file acme/notes.md to sync viewer ada acme	received REVISION
+pull file acme/notes.md to sync viewer ada all	received REVISION
+pull file acme/notes.md to sync viewer ada beta	withheld
+pull file acme/notes.md to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull file acme/notes.md to sync viewer bob acme	received REVISION
+pull file acme/notes.md to sync viewer bob all	received REVISION
+pull file acme/notes.md to sync viewer bob beta	withheld
+pull file beta/notes.md to sync admin root all	received REVISION
+pull file beta/notes.md to sync member ada acme	withheld
+pull file beta/notes.md to sync member ada all	received REVISION
+pull file beta/notes.md to sync member ada beta	received REVISION
+pull file beta/notes.md to sync member bob acme	withheld
+pull file beta/notes.md to sync member bob all	received REVISION
+pull file beta/notes.md to sync member bob beta	received REVISION
+pull file beta/notes.md to sync viewer ada acme	withheld
+pull file beta/notes.md to sync viewer ada all	received REVISION
+pull file beta/notes.md to sync viewer ada beta	received REVISION
+pull file beta/notes.md to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull file beta/notes.md to sync viewer bob acme	withheld
+pull file beta/notes.md to sync viewer bob all	received REVISION
+pull file beta/notes.md to sync viewer bob beta	received REVISION
+pull message msg(b-room by ada) to sync admin root all	received REVISION
+pull message msg(b-room by ada) to sync member ada acme	withheld
+pull message msg(b-room by ada) to sync member ada all	received REVISION
+pull message msg(b-room by ada) to sync member ada beta	received REVISION
+pull message msg(b-room by ada) to sync member bob acme	withheld
+pull message msg(b-room by ada) to sync member bob all	received REVISION
+pull message msg(b-room by ada) to sync member bob beta	received REVISION
+pull message msg(b-room by ada) to sync viewer ada acme	withheld
+pull message msg(b-room by ada) to sync viewer ada all	received REVISION
+pull message msg(b-room by ada) to sync viewer ada beta	received REVISION
+pull message msg(b-room by ada) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(b-room by ada) to sync viewer bob acme	withheld
+pull message msg(b-room by ada) to sync viewer bob all	received REVISION
+pull message msg(b-room by ada) to sync viewer bob beta	received REVISION
+pull message msg(b-room by bob) to sync admin root all	received REVISION
+pull message msg(b-room by bob) to sync member ada acme	withheld
+pull message msg(b-room by bob) to sync member ada all	received REVISION
+pull message msg(b-room by bob) to sync member ada beta	received REVISION
+pull message msg(b-room by bob) to sync member bob acme	withheld
+pull message msg(b-room by bob) to sync member bob all	received REVISION
+pull message msg(b-room by bob) to sync member bob beta	received REVISION
+pull message msg(b-room by bob) to sync viewer ada acme	withheld
+pull message msg(b-room by bob) to sync viewer ada all	received REVISION
+pull message msg(b-room by bob) to sync viewer ada beta	received REVISION
+pull message msg(b-room by bob) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(b-room by bob) to sync viewer bob acme	withheld
+pull message msg(b-room by bob) to sync viewer bob all	received REVISION
+pull message msg(b-room by bob) to sync viewer bob beta	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync admin root all	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync member ada acme	withheld
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync member ada all	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync member ada beta	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync member bob acme	withheld
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync member bob all	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync member bob beta	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada acme	withheld
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada all	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada beta	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob acme	withheld
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob all	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob beta	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync admin root all	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member ada acme	withheld
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member ada all	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member ada beta	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member bob acme	withheld
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member bob all	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member bob beta	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada acme	withheld
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada all	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada beta	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob acme	withheld
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob all	received REVISION
+pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob beta	received REVISION
+pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync admin root all	received REVISION
+pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member ada acme	withheld
+pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member ada all	received REVISION
+pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member ada beta	received REVISION
+pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member bob acme	withheld
+pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member bob all	received REVISION
+pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member bob beta	received REVISION
+pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada acme	withheld
+pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada all	received REVISION
+pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada beta	received REVISION
+pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob acme	withheld
+pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob all	received REVISION
+pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob beta	received REVISION
+pull message msg(b-room by root) to sync admin root all	received REVISION
+pull message msg(b-room by root) to sync member ada acme	withheld
+pull message msg(b-room by root) to sync member ada all	received REVISION
+pull message msg(b-room by root) to sync member ada beta	received REVISION
+pull message msg(b-room by root) to sync member bob acme	withheld
+pull message msg(b-room by root) to sync member bob all	received REVISION
+pull message msg(b-room by root) to sync member bob beta	received REVISION
+pull message msg(b-room by root) to sync viewer ada acme	withheld
+pull message msg(b-room by root) to sync viewer ada all	received REVISION
+pull message msg(b-room by root) to sync viewer ada beta	received REVISION
+pull message msg(b-room by root) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(b-room by root) to sync viewer bob acme	withheld
+pull message msg(b-room by root) to sync viewer bob all	received REVISION
+pull message msg(b-room by root) to sync viewer bob beta	received REVISION
+pull message msg(b-room by sail) to sync admin root all	received REVISION
+pull message msg(b-room by sail) to sync member ada acme	withheld
+pull message msg(b-room by sail) to sync member ada all	received REVISION
+pull message msg(b-room by sail) to sync member ada beta	received REVISION
+pull message msg(b-room by sail) to sync member bob acme	withheld
+pull message msg(b-room by sail) to sync member bob all	received REVISION
+pull message msg(b-room by sail) to sync member bob beta	received REVISION
+pull message msg(b-room by sail) to sync viewer ada acme	withheld
+pull message msg(b-room by sail) to sync viewer ada all	received REVISION
+pull message msg(b-room by sail) to sync viewer ada beta	received REVISION
+pull message msg(b-room by sail) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(b-room by sail) to sync viewer bob acme	withheld
+pull message msg(b-room by sail) to sync viewer bob all	received REVISION
+pull message msg(b-room by sail) to sync viewer bob beta	received REVISION
+pull message msg(den by ada) to sync admin root all	received REVISION
+pull message msg(den by ada) to sync member ada acme	received REVISION
+pull message msg(den by ada) to sync member ada all	received REVISION
+pull message msg(den by ada) to sync member ada beta	withheld
+pull message msg(den by ada) to sync member bob acme	received REVISION
+pull message msg(den by ada) to sync member bob all	received REVISION
+pull message msg(den by ada) to sync member bob beta	withheld
+pull message msg(den by ada) to sync viewer ada acme	received REVISION
+pull message msg(den by ada) to sync viewer ada all	received REVISION
+pull message msg(den by ada) to sync viewer ada beta	withheld
+pull message msg(den by ada) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(den by ada) to sync viewer bob acme	received REVISION
+pull message msg(den by ada) to sync viewer bob all	received REVISION
+pull message msg(den by ada) to sync viewer bob beta	withheld
+pull message msg(den by bob) to sync admin root all	received REVISION
+pull message msg(den by bob) to sync member ada acme	received REVISION
+pull message msg(den by bob) to sync member ada all	received REVISION
+pull message msg(den by bob) to sync member ada beta	withheld
+pull message msg(den by bob) to sync member bob acme	received REVISION
+pull message msg(den by bob) to sync member bob all	received REVISION
+pull message msg(den by bob) to sync member bob beta	withheld
+pull message msg(den by bob) to sync viewer ada acme	received REVISION
+pull message msg(den by bob) to sync viewer ada all	received REVISION
+pull message msg(den by bob) to sync viewer ada beta	withheld
+pull message msg(den by bob) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(den by bob) to sync viewer bob acme	received REVISION
+pull message msg(den by bob) to sync viewer bob all	received REVISION
+pull message msg(den by bob) to sync viewer bob beta	withheld
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync admin root all	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync member ada acme	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync member ada all	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync member ada beta	withheld
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync member bob acme	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync member bob all	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync member bob beta	withheld
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada acme	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada all	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada beta	withheld
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob acme	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob all	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob beta	withheld
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync admin root all	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member ada acme	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member ada all	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member ada beta	withheld
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member bob acme	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member bob all	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member bob beta	withheld
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada acme	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada all	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada beta	withheld
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob acme	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob all	received REVISION
+pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob beta	withheld
+pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync admin root all	received REVISION
+pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member ada acme	received REVISION
+pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member ada all	received REVISION
+pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member ada beta	withheld
+pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member bob acme	received REVISION
+pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member bob all	received REVISION
+pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member bob beta	withheld
+pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada acme	received REVISION
+pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada all	received REVISION
+pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada beta	withheld
+pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob acme	received REVISION
+pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob all	received REVISION
+pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob beta	withheld
+pull message msg(den by root) to sync admin root all	received REVISION
+pull message msg(den by root) to sync member ada acme	received REVISION
+pull message msg(den by root) to sync member ada all	received REVISION
+pull message msg(den by root) to sync member ada beta	withheld
+pull message msg(den by root) to sync member bob acme	received REVISION
+pull message msg(den by root) to sync member bob all	received REVISION
+pull message msg(den by root) to sync member bob beta	withheld
+pull message msg(den by root) to sync viewer ada acme	received REVISION
+pull message msg(den by root) to sync viewer ada all	received REVISION
+pull message msg(den by root) to sync viewer ada beta	withheld
+pull message msg(den by root) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(den by root) to sync viewer bob acme	received REVISION
+pull message msg(den by root) to sync viewer bob all	received REVISION
+pull message msg(den by root) to sync viewer bob beta	withheld
+pull message msg(den by sail) to sync admin root all	received REVISION
+pull message msg(den by sail) to sync member ada acme	received REVISION
+pull message msg(den by sail) to sync member ada all	received REVISION
+pull message msg(den by sail) to sync member ada beta	withheld
+pull message msg(den by sail) to sync member bob acme	received REVISION
+pull message msg(den by sail) to sync member bob all	received REVISION
+pull message msg(den by sail) to sync member bob beta	withheld
+pull message msg(den by sail) to sync viewer ada acme	received REVISION
+pull message msg(den by sail) to sync viewer ada all	received REVISION
+pull message msg(den by sail) to sync viewer ada beta	withheld
+pull message msg(den by sail) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(den by sail) to sync viewer bob acme	received REVISION
+pull message msg(den by sail) to sync viewer bob all	received REVISION
+pull message msg(den by sail) to sync viewer bob beta	withheld
+pull message msg(lobby by ada) to sync admin root all	received REVISION
+pull message msg(lobby by ada) to sync member ada acme	received REVISION
+pull message msg(lobby by ada) to sync member ada all	received REVISION
+pull message msg(lobby by ada) to sync member ada beta	withheld
+pull message msg(lobby by ada) to sync member bob acme	received REVISION
+pull message msg(lobby by ada) to sync member bob all	received REVISION
+pull message msg(lobby by ada) to sync member bob beta	withheld
+pull message msg(lobby by ada) to sync viewer ada acme	received REVISION
+pull message msg(lobby by ada) to sync viewer ada all	received REVISION
+pull message msg(lobby by ada) to sync viewer ada beta	withheld
+pull message msg(lobby by ada) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(lobby by ada) to sync viewer bob acme	received REVISION
+pull message msg(lobby by ada) to sync viewer bob all	received REVISION
+pull message msg(lobby by ada) to sync viewer bob beta	withheld
+pull message msg(lobby by bob) to sync admin root all	received REVISION
+pull message msg(lobby by bob) to sync member ada acme	received REVISION
+pull message msg(lobby by bob) to sync member ada all	received REVISION
+pull message msg(lobby by bob) to sync member ada beta	withheld
+pull message msg(lobby by bob) to sync member bob acme	received REVISION
+pull message msg(lobby by bob) to sync member bob all	received REVISION
+pull message msg(lobby by bob) to sync member bob beta	withheld
+pull message msg(lobby by bob) to sync viewer ada acme	received REVISION
+pull message msg(lobby by bob) to sync viewer ada all	received REVISION
+pull message msg(lobby by bob) to sync viewer ada beta	withheld
+pull message msg(lobby by bob) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(lobby by bob) to sync viewer bob acme	received REVISION
+pull message msg(lobby by bob) to sync viewer bob all	received REVISION
+pull message msg(lobby by bob) to sync viewer bob beta	withheld
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync admin root all	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync member ada acme	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync member ada all	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync member ada beta	withheld
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync member bob acme	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync member bob all	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync member bob beta	withheld
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada acme	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada all	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada beta	withheld
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob acme	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob all	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob beta	withheld
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync admin root all	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member ada acme	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member ada all	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member ada beta	withheld
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member bob acme	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member bob all	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member bob beta	withheld
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada acme	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada all	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada beta	withheld
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob acme	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob all	received REVISION
+pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob beta	withheld
+pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync admin root all	received REVISION
+pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member ada acme	received REVISION
+pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member ada all	received REVISION
+pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member ada beta	withheld
+pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member bob acme	received REVISION
+pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member bob all	received REVISION
+pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member bob beta	withheld
+pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada acme	received REVISION
+pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada all	received REVISION
+pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada beta	withheld
+pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob acme	received REVISION
+pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob all	received REVISION
+pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob beta	withheld
+pull message msg(lobby by root) to sync admin root all	received REVISION
+pull message msg(lobby by root) to sync member ada acme	received REVISION
+pull message msg(lobby by root) to sync member ada all	received REVISION
+pull message msg(lobby by root) to sync member ada beta	withheld
+pull message msg(lobby by root) to sync member bob acme	received REVISION
+pull message msg(lobby by root) to sync member bob all	received REVISION
+pull message msg(lobby by root) to sync member bob beta	withheld
+pull message msg(lobby by root) to sync viewer ada acme	received REVISION
+pull message msg(lobby by root) to sync viewer ada all	received REVISION
+pull message msg(lobby by root) to sync viewer ada beta	withheld
+pull message msg(lobby by root) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(lobby by root) to sync viewer bob acme	received REVISION
+pull message msg(lobby by root) to sync viewer bob all	received REVISION
+pull message msg(lobby by root) to sync viewer bob beta	withheld
+pull message msg(lobby by sail) to sync admin root all	received REVISION
+pull message msg(lobby by sail) to sync member ada acme	received REVISION
+pull message msg(lobby by sail) to sync member ada all	received REVISION
+pull message msg(lobby by sail) to sync member ada beta	withheld
+pull message msg(lobby by sail) to sync member bob acme	received REVISION
+pull message msg(lobby by sail) to sync member bob all	received REVISION
+pull message msg(lobby by sail) to sync member bob beta	withheld
+pull message msg(lobby by sail) to sync viewer ada acme	received REVISION
+pull message msg(lobby by sail) to sync viewer ada all	received REVISION
+pull message msg(lobby by sail) to sync viewer ada beta	withheld
+pull message msg(lobby by sail) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(lobby by sail) to sync viewer bob acme	received REVISION
+pull message msg(lobby by sail) to sync viewer bob all	received REVISION
+pull message msg(lobby by sail) to sync viewer bob beta	withheld
+pull message msg(s-ada by ada) to sync admin root all	received REVISION
+pull message msg(s-ada by ada) to sync member ada acme	received REVISION
+pull message msg(s-ada by ada) to sync member ada all	received REVISION
+pull message msg(s-ada by ada) to sync member ada beta	withheld
+pull message msg(s-ada by ada) to sync member bob acme	received REVISION
+pull message msg(s-ada by ada) to sync member bob all	received REVISION
+pull message msg(s-ada by ada) to sync member bob beta	withheld
+pull message msg(s-ada by ada) to sync viewer ada acme	received REVISION
+pull message msg(s-ada by ada) to sync viewer ada all	received REVISION
+pull message msg(s-ada by ada) to sync viewer ada beta	withheld
+pull message msg(s-ada by ada) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(s-ada by ada) to sync viewer bob acme	received REVISION
+pull message msg(s-ada by ada) to sync viewer bob all	received REVISION
+pull message msg(s-ada by ada) to sync viewer bob beta	withheld
+pull message msg(s-ada by bob) to sync admin root all	received REVISION
+pull message msg(s-ada by bob) to sync member ada acme	received REVISION
+pull message msg(s-ada by bob) to sync member ada all	received REVISION
+pull message msg(s-ada by bob) to sync member ada beta	withheld
+pull message msg(s-ada by bob) to sync member bob acme	received REVISION
+pull message msg(s-ada by bob) to sync member bob all	received REVISION
+pull message msg(s-ada by bob) to sync member bob beta	withheld
+pull message msg(s-ada by bob) to sync viewer ada acme	received REVISION
+pull message msg(s-ada by bob) to sync viewer ada all	received REVISION
+pull message msg(s-ada by bob) to sync viewer ada beta	withheld
+pull message msg(s-ada by bob) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(s-ada by bob) to sync viewer bob acme	received REVISION
+pull message msg(s-ada by bob) to sync viewer bob all	received REVISION
+pull message msg(s-ada by bob) to sync viewer bob beta	withheld
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync admin root all	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync member ada acme	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync member ada all	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync member ada beta	withheld
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync member bob acme	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync member bob all	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync member bob beta	withheld
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada acme	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada all	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada beta	withheld
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob acme	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob all	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob beta	withheld
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync admin root all	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member ada acme	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member ada all	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member ada beta	withheld
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member bob acme	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member bob all	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync member bob beta	withheld
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada acme	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada all	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada beta	withheld
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob acme	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob all	received REVISION
+pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob beta	withheld
+pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync admin root all	received REVISION
+pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member ada acme	received REVISION
+pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member ada all	received REVISION
+pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member ada beta	withheld
+pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member bob acme	received REVISION
+pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member bob all	received REVISION
+pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync member bob beta	withheld
+pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada acme	received REVISION
+pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada all	received REVISION
+pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada beta	withheld
+pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob acme	received REVISION
+pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob all	received REVISION
+pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob beta	withheld
+pull message msg(s-ada by root) to sync admin root all	received REVISION
+pull message msg(s-ada by root) to sync member ada acme	received REVISION
+pull message msg(s-ada by root) to sync member ada all	received REVISION
+pull message msg(s-ada by root) to sync member ada beta	withheld
+pull message msg(s-ada by root) to sync member bob acme	received REVISION
+pull message msg(s-ada by root) to sync member bob all	received REVISION
+pull message msg(s-ada by root) to sync member bob beta	withheld
+pull message msg(s-ada by root) to sync viewer ada acme	received REVISION
+pull message msg(s-ada by root) to sync viewer ada all	received REVISION
+pull message msg(s-ada by root) to sync viewer ada beta	withheld
+pull message msg(s-ada by root) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(s-ada by root) to sync viewer bob acme	received REVISION
+pull message msg(s-ada by root) to sync viewer bob all	received REVISION
+pull message msg(s-ada by root) to sync viewer bob beta	withheld
+pull message msg(s-ada by sail) to sync admin root all	received REVISION
+pull message msg(s-ada by sail) to sync member ada acme	received REVISION
+pull message msg(s-ada by sail) to sync member ada all	received REVISION
+pull message msg(s-ada by sail) to sync member ada beta	withheld
+pull message msg(s-ada by sail) to sync member bob acme	received REVISION
+pull message msg(s-ada by sail) to sync member bob all	received REVISION
+pull message msg(s-ada by sail) to sync member bob beta	withheld
+pull message msg(s-ada by sail) to sync viewer ada acme	received REVISION
+pull message msg(s-ada by sail) to sync viewer ada all	received REVISION
+pull message msg(s-ada by sail) to sync viewer ada beta	withheld
+pull message msg(s-ada by sail) to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull message msg(s-ada by sail) to sync viewer bob acme	received REVISION
+pull message msg(s-ada by sail) to sync viewer bob all	received REVISION
+pull message msg(s-ada by sail) to sync viewer bob beta	withheld
+pull project acme to sync admin root all	received REVISION
+pull project acme to sync member ada acme	received REVISION
+pull project acme to sync member ada all	received REVISION
+pull project acme to sync member ada beta	withheld
+pull project acme to sync member bob acme	received REVISION
+pull project acme to sync member bob all	received REVISION
+pull project acme to sync member bob beta	withheld
+pull project acme to sync viewer ada acme	received REVISION
+pull project acme to sync viewer ada all	received REVISION
+pull project acme to sync viewer ada beta	withheld
+pull project acme to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull project acme to sync viewer bob acme	received REVISION
+pull project acme to sync viewer bob all	received REVISION
+pull project acme to sync viewer bob beta	withheld
+pull project beta to sync admin root all	received REVISION
+pull project beta to sync member ada acme	withheld
+pull project beta to sync member ada all	received REVISION
+pull project beta to sync member ada beta	received REVISION
+pull project beta to sync member bob acme	withheld
+pull project beta to sync member bob all	received REVISION
+pull project beta to sync member bob beta	received REVISION
+pull project beta to sync viewer ada acme	withheld
+pull project beta to sync viewer ada all	received REVISION
+pull project beta to sync viewer ada beta	received REVISION
+pull project beta to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull project beta to sync viewer bob acme	withheld
+pull project beta to sync viewer bob all	received REVISION
+pull project beta to sync viewer bob beta	received REVISION
+pull project delta to sync admin root all	received REVISION
+pull project delta to sync member ada acme	withheld
+pull project delta to sync member ada all	received REVISION
+pull project delta to sync member ada beta	withheld
+pull project delta to sync member bob acme	withheld
+pull project delta to sync member bob all	received REVISION
+pull project delta to sync member bob beta	withheld
+pull project delta to sync viewer ada acme	withheld
+pull project delta to sync viewer ada all	received REVISION
+pull project delta to sync viewer ada beta	withheld
+pull project delta to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull project delta to sync viewer bob acme	withheld
+pull project delta to sync viewer bob all	received REVISION
+pull project delta to sync viewer bob beta	withheld
+pull review review-ada to sync admin root all	received REVISION
+pull review review-ada to sync member ada acme	received REVISION
+pull review review-ada to sync member ada all	received REVISION
+pull review review-ada to sync member ada beta	withheld
+pull review review-ada to sync member bob acme	received REVISION
+pull review review-ada to sync member bob all	received REVISION
+pull review review-ada to sync member bob beta	withheld
+pull review review-ada to sync viewer ada acme	received REVISION
+pull review review-ada to sync viewer ada all	received REVISION
+pull review review-ada to sync viewer ada beta	withheld
+pull review review-ada to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull review review-ada to sync viewer bob acme	received REVISION
+pull review review-ada to sync viewer bob all	received REVISION
+pull review review-ada to sync viewer bob beta	withheld
+pull review review-bob to sync admin root all	received REVISION
+pull review review-bob to sync member ada acme	received REVISION
+pull review review-bob to sync member ada all	received REVISION
+pull review review-bob to sync member ada beta	withheld
+pull review review-bob to sync member bob acme	received REVISION
+pull review review-bob to sync member bob all	received REVISION
+pull review review-bob to sync member bob beta	withheld
+pull review review-bob to sync viewer ada acme	received REVISION
+pull review review-bob to sync viewer ada all	received REVISION
+pull review review-bob to sync viewer ada beta	withheld
+pull review review-bob to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull review review-bob to sync viewer bob acme	received REVISION
+pull review review-bob to sync viewer bob all	received REVISION
+pull review review-bob to sync viewer bob beta	withheld
+pull room attic to sync admin root all	received TOMBSTONE
+pull room attic to sync member ada acme	received TOMBSTONE
+pull room attic to sync member ada all	received TOMBSTONE
+pull room attic to sync member ada beta	withheld
+pull room attic to sync member bob acme	received TOMBSTONE
+pull room attic to sync member bob all	received TOMBSTONE
+pull room attic to sync member bob beta	withheld
+pull room attic to sync viewer ada acme	received TOMBSTONE
+pull room attic to sync viewer ada all	received TOMBSTONE
+pull room attic to sync viewer ada beta	withheld
+pull room attic to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull room attic to sync viewer bob acme	received TOMBSTONE
+pull room attic to sync viewer bob all	received TOMBSTONE
+pull room attic to sync viewer bob beta	withheld
+pull room b-room to sync admin root all	received REVISION
+pull room b-room to sync member ada acme	withheld
+pull room b-room to sync member ada all	received REVISION
+pull room b-room to sync member ada beta	received REVISION
+pull room b-room to sync member bob acme	withheld
+pull room b-room to sync member bob all	received REVISION
+pull room b-room to sync member bob beta	received REVISION
+pull room b-room to sync viewer ada acme	withheld
+pull room b-room to sync viewer ada all	received REVISION
+pull room b-room to sync viewer ada beta	received REVISION
+pull room b-room to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull room b-room to sync viewer bob acme	withheld
+pull room b-room to sync viewer bob all	received REVISION
+pull room b-room to sync viewer bob beta	received REVISION
+pull room den to sync admin root all	received REVISION
+pull room den to sync member ada acme	received REVISION
+pull room den to sync member ada all	received REVISION
+pull room den to sync member ada beta	withheld
+pull room den to sync member bob acme	received REVISION
+pull room den to sync member bob all	received REVISION
+pull room den to sync member bob beta	withheld
+pull room den to sync viewer ada acme	received REVISION
+pull room den to sync viewer ada all	received REVISION
+pull room den to sync viewer ada beta	withheld
+pull room den to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull room den to sync viewer bob acme	received REVISION
+pull room den to sync viewer bob all	received REVISION
+pull room den to sync viewer bob beta	withheld
+pull room hall to sync admin root all	received REVISION
+pull room hall to sync member ada acme	received REVISION
+pull room hall to sync member ada all	received REVISION
+pull room hall to sync member ada beta	withheld
+pull room hall to sync member bob acme	received REVISION
+pull room hall to sync member bob all	received REVISION
+pull room hall to sync member bob beta	withheld
+pull room hall to sync viewer ada acme	received REVISION
+pull room hall to sync viewer ada all	received REVISION
+pull room hall to sync viewer ada beta	withheld
+pull room hall to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull room hall to sync viewer bob acme	received REVISION
+pull room hall to sync viewer bob all	received REVISION
+pull room hall to sync viewer bob beta	withheld
+pull room lobby to sync admin root all	received REVISION
+pull room lobby to sync member ada acme	received REVISION
+pull room lobby to sync member ada all	received REVISION
+pull room lobby to sync member ada beta	withheld
+pull room lobby to sync member bob acme	received REVISION
+pull room lobby to sync member bob all	received REVISION
+pull room lobby to sync member bob beta	withheld
+pull room lobby to sync viewer ada acme	received REVISION
+pull room lobby to sync viewer ada all	received REVISION
+pull room lobby to sync viewer ada beta	withheld
+pull room lobby to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull room lobby to sync viewer bob acme	received REVISION
+pull room lobby to sync viewer bob all	received REVISION
+pull room lobby to sync viewer bob beta	withheld
+pull room s-ada to sync admin root all	received REVISION
+pull room s-ada to sync member ada acme	received REVISION
+pull room s-ada to sync member ada all	received REVISION
+pull room s-ada to sync member ada beta	withheld
+pull room s-ada to sync member bob acme	received REVISION
+pull room s-ada to sync member bob all	received REVISION
+pull room s-ada to sync member bob beta	withheld
+pull room s-ada to sync viewer ada acme	received REVISION
+pull room s-ada to sync viewer ada all	received REVISION
+pull room s-ada to sync viewer ada beta	withheld
+pull room s-ada to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull room s-ada to sync viewer bob acme	received REVISION
+pull room s-ada to sync viewer bob all	received REVISION
+pull room s-ada to sync viewer bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada01 to sync admin root all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada01 to sync member ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada01 to sync member ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada01 to sync member ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada01 to sync member bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada01 to sync member bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada01 to sync member bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada01 to sync viewer ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada01 to sync viewer ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada01 to sync viewer ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada01 to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull run 019fee00-0000-7000-8000-0000000ada01 to sync viewer bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada01 to sync viewer bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada01 to sync viewer bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada02 to sync admin root all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada02 to sync member ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada02 to sync member ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada02 to sync member ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada02 to sync member bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada02 to sync member bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada02 to sync member bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada02 to sync viewer ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada02 to sync viewer ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada02 to sync viewer ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada02 to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull run 019fee00-0000-7000-8000-0000000ada02 to sync viewer bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada02 to sync viewer bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada02 to sync viewer bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada03 to sync admin root all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada03 to sync member ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada03 to sync member ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada03 to sync member ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada03 to sync member bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada03 to sync member bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada03 to sync member bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada03 to sync viewer ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada03 to sync viewer ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada03 to sync viewer ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada03 to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull run 019fee00-0000-7000-8000-0000000ada03 to sync viewer bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada03 to sync viewer bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada03 to sync viewer bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada04 to sync admin root all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada04 to sync member ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada04 to sync member ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada04 to sync member ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada04 to sync member bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada04 to sync member bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada04 to sync member bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada04 to sync viewer ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada04 to sync viewer ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada04 to sync viewer ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada04 to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull run 019fee00-0000-7000-8000-0000000ada04 to sync viewer bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada04 to sync viewer bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada04 to sync viewer bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada05 to sync admin root all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada05 to sync member ada acme	withheld
+pull run 019fee00-0000-7000-8000-0000000ada05 to sync member ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada05 to sync member ada beta	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada05 to sync member bob acme	withheld
+pull run 019fee00-0000-7000-8000-0000000ada05 to sync member bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada05 to sync member bob beta	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada05 to sync viewer ada acme	withheld
+pull run 019fee00-0000-7000-8000-0000000ada05 to sync viewer ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada05 to sync viewer ada beta	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada05 to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull run 019fee00-0000-7000-8000-0000000ada05 to sync viewer bob acme	withheld
+pull run 019fee00-0000-7000-8000-0000000ada05 to sync viewer bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada05 to sync viewer bob beta	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada06 to sync admin root all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada06 to sync member ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada06 to sync member ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada06 to sync member ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada06 to sync member bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada06 to sync member bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada06 to sync member bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada06 to sync viewer ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada06 to sync viewer ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada06 to sync viewer ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada06 to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull run 019fee00-0000-7000-8000-0000000ada06 to sync viewer bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada06 to sync viewer bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada06 to sync viewer bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada07 to sync admin root all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada07 to sync member ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada07 to sync member ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada07 to sync member ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada07 to sync member bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada07 to sync member bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada07 to sync member bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada07 to sync viewer ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada07 to sync viewer ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada07 to sync viewer ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000ada07 to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull run 019fee00-0000-7000-8000-0000000ada07 to sync viewer bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada07 to sync viewer bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000ada07 to sync viewer bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000b0b01 to sync admin root all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b01 to sync member ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b01 to sync member ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b01 to sync member ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000b0b01 to sync member bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b01 to sync member bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b01 to sync member bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000b0b01 to sync viewer ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b01 to sync viewer ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b01 to sync viewer ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000b0b01 to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull run 019fee00-0000-7000-8000-0000000b0b01 to sync viewer bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b01 to sync viewer bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b01 to sync viewer bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000b0b02 to sync admin root all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b02 to sync member ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b02 to sync member ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b02 to sync member ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000b0b02 to sync member bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b02 to sync member bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b02 to sync member bob beta	withheld
+pull run 019fee00-0000-7000-8000-0000000b0b02 to sync viewer ada acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b02 to sync viewer ada all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b02 to sync viewer ada beta	withheld
+pull run 019fee00-0000-7000-8000-0000000b0b02 to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull run 019fee00-0000-7000-8000-0000000b0b02 to sync viewer bob acme	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b02 to sync viewer bob all	received REVISION
+pull run 019fee00-0000-7000-8000-0000000b0b02 to sync viewer bob beta	withheld
+pull spec s-ada to sync admin root all	received REVISION
+pull spec s-ada to sync member ada acme	received REVISION
+pull spec s-ada to sync member ada all	received REVISION
+pull spec s-ada to sync member ada beta	withheld
+pull spec s-ada to sync member bob acme	received REVISION
+pull spec s-ada to sync member bob all	received REVISION
+pull spec s-ada to sync member bob beta	withheld
+pull spec s-ada to sync viewer ada acme	received REVISION
+pull spec s-ada to sync viewer ada all	received REVISION
+pull spec s-ada to sync viewer ada beta	withheld
+pull spec s-ada to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull spec s-ada to sync viewer bob acme	received REVISION
+pull spec s-ada to sync viewer bob all	received REVISION
+pull spec s-ada to sync viewer bob beta	withheld
+pull spec s-archived to sync admin root all	received REVISION
+pull spec s-archived to sync member ada acme	received REVISION
+pull spec s-archived to sync member ada all	received REVISION
+pull spec s-archived to sync member ada beta	withheld
+pull spec s-archived to sync member bob acme	received REVISION
+pull spec s-archived to sync member bob all	received REVISION
+pull spec s-archived to sync member bob beta	withheld
+pull spec s-archived to sync viewer ada acme	received REVISION
+pull spec s-archived to sync viewer ada all	received REVISION
+pull spec s-archived to sync viewer ada beta	withheld
+pull spec s-archived to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull spec s-archived to sync viewer bob acme	received REVISION
+pull spec s-archived to sync viewer bob all	received REVISION
+pull spec s-archived to sync viewer bob beta	withheld
+pull spec s-archived-bob to sync admin root all	received REVISION
+pull spec s-archived-bob to sync member ada acme	received REVISION
+pull spec s-archived-bob to sync member ada all	received REVISION
+pull spec s-archived-bob to sync member ada beta	withheld
+pull spec s-archived-bob to sync member bob acme	received REVISION
+pull spec s-archived-bob to sync member bob all	received REVISION
+pull spec s-archived-bob to sync member bob beta	withheld
+pull spec s-archived-bob to sync viewer ada acme	received REVISION
+pull spec s-archived-bob to sync viewer ada all	received REVISION
+pull spec s-archived-bob to sync viewer ada beta	withheld
+pull spec s-archived-bob to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull spec s-archived-bob to sync viewer bob acme	received REVISION
+pull spec s-archived-bob to sync viewer bob all	received REVISION
+pull spec s-archived-bob to sync viewer bob beta	withheld
+pull spec s-archived-busy to sync admin root all	received REVISION
+pull spec s-archived-busy to sync member ada acme	received REVISION
+pull spec s-archived-busy to sync member ada all	received REVISION
+pull spec s-archived-busy to sync member ada beta	withheld
+pull spec s-archived-busy to sync member bob acme	received REVISION
+pull spec s-archived-busy to sync member bob all	received REVISION
+pull spec s-archived-busy to sync member bob beta	withheld
+pull spec s-archived-busy to sync viewer ada acme	received REVISION
+pull spec s-archived-busy to sync viewer ada all	received REVISION
+pull spec s-archived-busy to sync viewer ada beta	withheld
+pull spec s-archived-busy to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull spec s-archived-busy to sync viewer bob acme	received REVISION
+pull spec s-archived-busy to sync viewer bob all	received REVISION
+pull spec s-archived-busy to sync viewer bob beta	withheld
+pull spec s-beta to sync admin root all	received REVISION
+pull spec s-beta to sync member ada acme	withheld
+pull spec s-beta to sync member ada all	received REVISION
+pull spec s-beta to sync member ada beta	received REVISION
+pull spec s-beta to sync member bob acme	withheld
+pull spec s-beta to sync member bob all	received REVISION
+pull spec s-beta to sync member bob beta	received REVISION
+pull spec s-beta to sync viewer ada acme	withheld
+pull spec s-beta to sync viewer ada all	received REVISION
+pull spec s-beta to sync viewer ada beta	received REVISION
+pull spec s-beta to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull spec s-beta to sync viewer bob acme	withheld
+pull spec s-beta to sync viewer bob all	received REVISION
+pull spec s-beta to sync viewer bob beta	received REVISION
+pull spec s-bob to sync admin root all	received REVISION
+pull spec s-bob to sync member ada acme	received REVISION
+pull spec s-bob to sync member ada all	received REVISION
+pull spec s-bob to sync member ada beta	withheld
+pull spec s-bob to sync member bob acme	received REVISION
+pull spec s-bob to sync member bob all	received REVISION
+pull spec s-bob to sync member bob beta	withheld
+pull spec s-bob to sync viewer ada acme	received REVISION
+pull spec s-bob to sync viewer ada all	received REVISION
+pull spec s-bob to sync viewer ada beta	withheld
+pull spec s-bob to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull spec s-bob to sync viewer bob acme	received REVISION
+pull spec s-bob to sync viewer bob all	received REVISION
+pull spec s-bob to sync viewer bob beta	withheld
+pull spec s-busy to sync admin root all	received REVISION
+pull spec s-busy to sync member ada acme	received REVISION
+pull spec s-busy to sync member ada all	received REVISION
+pull spec s-busy to sync member ada beta	withheld
+pull spec s-busy to sync member bob acme	received REVISION
+pull spec s-busy to sync member bob all	received REVISION
+pull spec s-busy to sync member bob beta	withheld
+pull spec s-busy to sync viewer ada acme	received REVISION
+pull spec s-busy to sync viewer ada all	received REVISION
+pull spec s-busy to sync viewer ada beta	withheld
+pull spec s-busy to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull spec s-busy to sync viewer bob acme	received REVISION
+pull spec s-busy to sync viewer bob all	received REVISION
+pull spec s-busy to sync viewer bob beta	withheld
+pull spec s-den to sync admin root all	received REVISION
+pull spec s-den to sync member ada acme	received REVISION
+pull spec s-den to sync member ada all	received REVISION
+pull spec s-den to sync member ada beta	withheld
+pull spec s-den to sync member bob acme	received REVISION
+pull spec s-den to sync member bob all	received REVISION
+pull spec s-den to sync member bob beta	withheld
+pull spec s-den to sync viewer ada acme	received REVISION
+pull spec s-den to sync viewer ada all	received REVISION
+pull spec s-den to sync viewer ada beta	withheld
+pull spec s-den to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull spec s-den to sync viewer bob acme	received REVISION
+pull spec s-den to sync viewer bob all	received REVISION
+pull spec s-den to sync viewer bob beta	withheld
+pull spec s-done to sync admin root all	received REVISION
+pull spec s-done to sync member ada acme	received REVISION
+pull spec s-done to sync member ada all	received REVISION
+pull spec s-done to sync member ada beta	withheld
+pull spec s-done to sync member bob acme	received REVISION
+pull spec s-done to sync member bob all	received REVISION
+pull spec s-done to sync member bob beta	withheld
+pull spec s-done to sync viewer ada acme	received REVISION
+pull spec s-done to sync viewer ada all	received REVISION
+pull spec s-done to sync viewer ada beta	withheld
+pull spec s-done to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull spec s-done to sync viewer bob acme	received REVISION
+pull spec s-done to sync viewer bob all	received REVISION
+pull spec s-done to sync viewer bob beta	withheld
+pull spec s-draft to sync admin root all	received REVISION
+pull spec s-draft to sync member ada acme	received REVISION
+pull spec s-draft to sync member ada all	received REVISION
+pull spec s-draft to sync member ada beta	withheld
+pull spec s-draft to sync member bob acme	received REVISION
+pull spec s-draft to sync member bob all	received REVISION
+pull spec s-draft to sync member bob beta	withheld
+pull spec s-draft to sync viewer ada acme	received REVISION
+pull spec s-draft to sync viewer ada all	received REVISION
+pull spec s-draft to sync viewer ada beta	withheld
+pull spec s-draft to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull spec s-draft to sync viewer bob acme	received REVISION
+pull spec s-draft to sync viewer bob all	received REVISION
+pull spec s-draft to sync viewer bob beta	withheld
+pull spec s-gone to sync admin root all	received TOMBSTONE
+pull spec s-gone to sync member ada acme	received TOMBSTONE
+pull spec s-gone to sync member ada all	received TOMBSTONE
+pull spec s-gone to sync member ada beta	withheld
+pull spec s-gone to sync member bob acme	received TOMBSTONE
+pull spec s-gone to sync member bob all	received TOMBSTONE
+pull spec s-gone to sync member bob beta	withheld
+pull spec s-gone to sync viewer ada acme	received TOMBSTONE
+pull spec s-gone to sync viewer ada all	received TOMBSTONE
+pull spec s-gone to sync viewer ada beta	withheld
+pull spec s-gone to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull spec s-gone to sync viewer bob acme	received TOMBSTONE
+pull spec s-gone to sync viewer bob all	received TOMBSTONE
+pull spec s-gone to sync viewer bob beta	withheld
+pull spec s-lobby to sync admin root all	received REVISION
+pull spec s-lobby to sync member ada acme	received REVISION
+pull spec s-lobby to sync member ada all	received REVISION
+pull spec s-lobby to sync member ada beta	withheld
+pull spec s-lobby to sync member bob acme	received REVISION
+pull spec s-lobby to sync member bob all	received REVISION
+pull spec s-lobby to sync member bob beta	withheld
+pull spec s-lobby to sync viewer ada acme	received REVISION
+pull spec s-lobby to sync viewer ada all	received REVISION
+pull spec s-lobby to sync viewer ada beta	withheld
+pull spec s-lobby to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull spec s-lobby to sync viewer bob acme	received REVISION
+pull spec s-lobby to sync viewer bob all	received REVISION
+pull spec s-lobby to sync viewer bob beta	withheld
+pull spec s-open-ada to sync admin root all	received REVISION
+pull spec s-open-ada to sync member ada acme	received REVISION
+pull spec s-open-ada to sync member ada all	received REVISION
+pull spec s-open-ada to sync member ada beta	withheld
+pull spec s-open-ada to sync member bob acme	received REVISION
+pull spec s-open-ada to sync member bob all	received REVISION
+pull spec s-open-ada to sync member bob beta	withheld
+pull spec s-open-ada to sync viewer ada acme	received REVISION
+pull spec s-open-ada to sync viewer ada all	received REVISION
+pull spec s-open-ada to sync viewer ada beta	withheld
+pull spec s-open-ada to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull spec s-open-ada to sync viewer bob acme	received REVISION
+pull spec s-open-ada to sync viewer bob all	received REVISION
+pull spec s-open-ada to sync viewer bob beta	withheld
+pull spec s-open-bob to sync admin root all	received REVISION
+pull spec s-open-bob to sync member ada acme	received REVISION
+pull spec s-open-bob to sync member ada all	received REVISION
+pull spec s-open-bob to sync member ada beta	withheld
+pull spec s-open-bob to sync member bob acme	received REVISION
+pull spec s-open-bob to sync member bob all	received REVISION
+pull spec s-open-bob to sync member bob beta	withheld
+pull spec s-open-bob to sync viewer ada acme	received REVISION
+pull spec s-open-bob to sync viewer ada all	received REVISION
+pull spec s-open-bob to sync viewer ada beta	withheld
+pull spec s-open-bob to sync viewer anonymous none	denied SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. | Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
+pull spec s-open-bob to sync viewer bob acme	received REVISION
+pull spec s-open-bob to sync viewer bob all	received REVISION
+pull spec s-open-bob to sync viewer bob beta	withheld
+read messages of b-room as agent member ada-agent acme	shown nothing
+read messages of b-room as agent member ada-agent all	shown msg(b-room by ada), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as agent member ada-agent beta	shown msg(b-room by ada), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as agent member bob-agent acme	shown nothing
+read messages of b-room as agent member bob-agent all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as agent member bob-agent beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as agent viewer ada-agent acme	shown nothing
+read messages of b-room as agent viewer ada-agent all	shown msg(b-room by ada), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as agent viewer ada-agent beta	shown msg(b-room by ada), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as agent viewer bob-agent acme	shown nothing
+read messages of b-room as agent viewer bob-agent all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as agent viewer bob-agent beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as api admin root all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as api member ada acme	shown nothing
+read messages of b-room as api member ada all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as api member ada beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as api member bob acme	shown nothing
+read messages of b-room as api member bob all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as api member bob beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as api member machine all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as api viewer ada acme	shown nothing
+read messages of b-room as api viewer ada all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as api viewer ada beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as api viewer bob acme	shown nothing
+read messages of b-room as api viewer bob all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as api viewer bob beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as cli admin root all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as cli member ada acme	shown nothing
+read messages of b-room as cli member ada all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as cli member ada beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as cli member bob acme	shown nothing
+read messages of b-room as cli member bob all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as cli member bob beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as cli viewer ada acme	shown nothing
+read messages of b-room as cli viewer ada all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as cli viewer ada beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as cli viewer bob acme	shown nothing
+read messages of b-room as cli viewer bob all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as cli viewer bob beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as main admin bob all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as room viewer ada-room acme	shown nothing
+read messages of b-room as room viewer ada-room all	shown msg(b-room by ada), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as room viewer ada-room beta	shown msg(b-room by ada), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as room viewer bob-room acme	shown nothing
+read messages of b-room as room viewer bob-room all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as room viewer bob-room beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as sync admin root all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as sync member ada acme	shown nothing
+read messages of b-room as sync member ada all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as sync member ada beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as sync member bob acme	shown nothing
+read messages of b-room as sync member bob all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as sync member bob beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as sync viewer ada acme	shown nothing
+read messages of b-room as sync viewer ada all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as sync viewer ada beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as sync viewer anonymous none	shown nothing
+read messages of b-room as sync viewer bob acme	shown nothing
+read messages of b-room as sync viewer bob all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as sync viewer bob beta	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of b-room as system admin sail all	shown msg(b-room by ada), msg(b-room by bob), msg(b-room by root), msg(b-room by sail), msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01), msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01), msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as agent member ada-agent acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as agent member ada-agent all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as agent member ada-agent beta	shown nothing
+read messages of den as agent member bob-agent acme	shown msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01)
+read messages of den as agent member bob-agent all	shown msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01)
+read messages of den as agent member bob-agent beta	shown nothing
+read messages of den as agent viewer ada-agent acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as agent viewer ada-agent all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as agent viewer ada-agent beta	shown nothing
+read messages of den as agent viewer bob-agent acme	shown msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01)
+read messages of den as agent viewer bob-agent all	shown msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01)
+read messages of den as agent viewer bob-agent beta	shown nothing
+read messages of den as api admin root all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as api member ada acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as api member ada all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as api member ada beta	shown nothing
+read messages of den as api member bob acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as api member bob all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as api member bob beta	shown nothing
+read messages of den as api member machine all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as api viewer ada acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as api viewer ada all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as api viewer ada beta	shown nothing
+read messages of den as api viewer bob acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as api viewer bob all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as api viewer bob beta	shown nothing
+read messages of den as cli admin root all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as cli member ada acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as cli member ada all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as cli member ada beta	shown nothing
+read messages of den as cli member bob acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as cli member bob all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as cli member bob beta	shown nothing
+read messages of den as cli viewer ada acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as cli viewer ada all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as cli viewer ada beta	shown nothing
+read messages of den as cli viewer bob acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as cli viewer bob all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as cli viewer bob beta	shown nothing
+read messages of den as main admin bob all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as room viewer ada-room acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as room viewer ada-room all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as room viewer ada-room beta	shown nothing
+read messages of den as room viewer bob-room acme	shown msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01)
+read messages of den as room viewer bob-room all	shown msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01)
+read messages of den as room viewer bob-room beta	shown nothing
+read messages of den as sync admin root all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as sync member ada acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as sync member ada all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as sync member ada beta	shown nothing
+read messages of den as sync member bob acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as sync member bob all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as sync member bob beta	shown nothing
+read messages of den as sync viewer ada acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as sync viewer ada all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as sync viewer ada beta	shown nothing
+read messages of den as sync viewer anonymous none	shown nothing
+read messages of den as sync viewer bob acme	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as sync viewer bob all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of den as sync viewer bob beta	shown nothing
+read messages of den as system admin sail all	shown msg(den by ada), msg(den by bob), msg(den by root), msg(den by sail), msg(den by claude/019fee00-0000-7000-8000-0000000ada01), msg(den by claude/019fee00-0000-7000-8000-0000000b0b01), msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of ghost as agent member ada-agent acme	shown nothing
+read messages of ghost as agent member ada-agent all	shown nothing
+read messages of ghost as agent member ada-agent beta	shown nothing
+read messages of ghost as agent member bob-agent acme	shown nothing
+read messages of ghost as agent member bob-agent all	shown nothing
+read messages of ghost as agent member bob-agent beta	shown nothing
+read messages of ghost as agent viewer ada-agent acme	shown nothing
+read messages of ghost as agent viewer ada-agent all	shown nothing
+read messages of ghost as agent viewer ada-agent beta	shown nothing
+read messages of ghost as agent viewer bob-agent acme	shown nothing
+read messages of ghost as agent viewer bob-agent all	shown nothing
+read messages of ghost as agent viewer bob-agent beta	shown nothing
+read messages of ghost as api admin root all	shown nothing
+read messages of ghost as api member ada acme	shown nothing
+read messages of ghost as api member ada all	shown nothing
+read messages of ghost as api member ada beta	shown nothing
+read messages of ghost as api member bob acme	shown nothing
+read messages of ghost as api member bob all	shown nothing
+read messages of ghost as api member bob beta	shown nothing
+read messages of ghost as api member machine all	shown nothing
+read messages of ghost as api viewer ada acme	shown nothing
+read messages of ghost as api viewer ada all	shown nothing
+read messages of ghost as api viewer ada beta	shown nothing
+read messages of ghost as api viewer bob acme	shown nothing
+read messages of ghost as api viewer bob all	shown nothing
+read messages of ghost as api viewer bob beta	shown nothing
+read messages of ghost as cli admin root all	shown nothing
+read messages of ghost as cli member ada acme	shown nothing
+read messages of ghost as cli member ada all	shown nothing
+read messages of ghost as cli member ada beta	shown nothing
+read messages of ghost as cli member bob acme	shown nothing
+read messages of ghost as cli member bob all	shown nothing
+read messages of ghost as cli member bob beta	shown nothing
+read messages of ghost as cli viewer ada acme	shown nothing
+read messages of ghost as cli viewer ada all	shown nothing
+read messages of ghost as cli viewer ada beta	shown nothing
+read messages of ghost as cli viewer bob acme	shown nothing
+read messages of ghost as cli viewer bob all	shown nothing
+read messages of ghost as cli viewer bob beta	shown nothing
+read messages of ghost as main admin bob all	shown nothing
+read messages of ghost as room viewer ada-room acme	shown nothing
+read messages of ghost as room viewer ada-room all	shown nothing
+read messages of ghost as room viewer ada-room beta	shown nothing
+read messages of ghost as room viewer bob-room acme	shown nothing
+read messages of ghost as room viewer bob-room all	shown nothing
+read messages of ghost as room viewer bob-room beta	shown nothing
+read messages of ghost as sync admin root all	shown nothing
+read messages of ghost as sync member ada acme	shown nothing
+read messages of ghost as sync member ada all	shown nothing
+read messages of ghost as sync member ada beta	shown nothing
+read messages of ghost as sync member bob acme	shown nothing
+read messages of ghost as sync member bob all	shown nothing
+read messages of ghost as sync member bob beta	shown nothing
+read messages of ghost as sync viewer ada acme	shown nothing
+read messages of ghost as sync viewer ada all	shown nothing
+read messages of ghost as sync viewer ada beta	shown nothing
+read messages of ghost as sync viewer anonymous none	shown nothing
+read messages of ghost as sync viewer bob acme	shown nothing
+read messages of ghost as sync viewer bob all	shown nothing
+read messages of ghost as sync viewer bob beta	shown nothing
+read messages of ghost as system admin sail all	shown nothing
+read messages of hall as agent member ada-agent acme	shown nothing
+read messages of hall as agent member ada-agent all	shown nothing
+read messages of hall as agent member ada-agent beta	shown nothing
+read messages of hall as agent member bob-agent acme	shown nothing
+read messages of hall as agent member bob-agent all	shown nothing
+read messages of hall as agent member bob-agent beta	shown nothing
+read messages of hall as agent viewer ada-agent acme	shown nothing
+read messages of hall as agent viewer ada-agent all	shown nothing
+read messages of hall as agent viewer ada-agent beta	shown nothing
+read messages of hall as agent viewer bob-agent acme	shown nothing
+read messages of hall as agent viewer bob-agent all	shown nothing
+read messages of hall as agent viewer bob-agent beta	shown nothing
+read messages of hall as api admin root all	shown nothing
+read messages of hall as api member ada acme	shown nothing
+read messages of hall as api member ada all	shown nothing
+read messages of hall as api member ada beta	shown nothing
+read messages of hall as api member bob acme	shown nothing
+read messages of hall as api member bob all	shown nothing
+read messages of hall as api member bob beta	shown nothing
+read messages of hall as api member machine all	shown nothing
+read messages of hall as api viewer ada acme	shown nothing
+read messages of hall as api viewer ada all	shown nothing
+read messages of hall as api viewer ada beta	shown nothing
+read messages of hall as api viewer bob acme	shown nothing
+read messages of hall as api viewer bob all	shown nothing
+read messages of hall as api viewer bob beta	shown nothing
+read messages of hall as cli admin root all	shown nothing
+read messages of hall as cli member ada acme	shown nothing
+read messages of hall as cli member ada all	shown nothing
+read messages of hall as cli member ada beta	shown nothing
+read messages of hall as cli member bob acme	shown nothing
+read messages of hall as cli member bob all	shown nothing
+read messages of hall as cli member bob beta	shown nothing
+read messages of hall as cli viewer ada acme	shown nothing
+read messages of hall as cli viewer ada all	shown nothing
+read messages of hall as cli viewer ada beta	shown nothing
+read messages of hall as cli viewer bob acme	shown nothing
+read messages of hall as cli viewer bob all	shown nothing
+read messages of hall as cli viewer bob beta	shown nothing
+read messages of hall as main admin bob all	shown nothing
+read messages of hall as room viewer ada-room acme	shown nothing
+read messages of hall as room viewer ada-room all	shown nothing
+read messages of hall as room viewer ada-room beta	shown nothing
+read messages of hall as room viewer bob-room acme	shown nothing
+read messages of hall as room viewer bob-room all	shown nothing
+read messages of hall as room viewer bob-room beta	shown nothing
+read messages of hall as sync admin root all	shown nothing
+read messages of hall as sync member ada acme	shown nothing
+read messages of hall as sync member ada all	shown nothing
+read messages of hall as sync member ada beta	shown nothing
+read messages of hall as sync member bob acme	shown nothing
+read messages of hall as sync member bob all	shown nothing
+read messages of hall as sync member bob beta	shown nothing
+read messages of hall as sync viewer ada acme	shown nothing
+read messages of hall as sync viewer ada all	shown nothing
+read messages of hall as sync viewer ada beta	shown nothing
+read messages of hall as sync viewer anonymous none	shown nothing
+read messages of hall as sync viewer bob acme	shown nothing
+read messages of hall as sync viewer bob all	shown nothing
+read messages of hall as sync viewer bob beta	shown nothing
+read messages of hall as system admin sail all	shown nothing
+read messages of lobby as agent member ada-agent acme	shown msg(lobby by ada), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as agent member ada-agent all	shown msg(lobby by ada), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as agent member ada-agent beta	shown nothing
+read messages of lobby as agent member bob-agent acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as agent member bob-agent all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as agent member bob-agent beta	shown nothing
+read messages of lobby as agent viewer ada-agent acme	shown msg(lobby by ada), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as agent viewer ada-agent all	shown msg(lobby by ada), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as agent viewer ada-agent beta	shown nothing
+read messages of lobby as agent viewer bob-agent acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as agent viewer bob-agent all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as agent viewer bob-agent beta	shown nothing
+read messages of lobby as api admin root all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as api member ada acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as api member ada all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as api member ada beta	shown nothing
+read messages of lobby as api member bob acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as api member bob all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as api member bob beta	shown nothing
+read messages of lobby as api member machine all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as api viewer ada acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as api viewer ada all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as api viewer ada beta	shown nothing
+read messages of lobby as api viewer bob acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as api viewer bob all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as api viewer bob beta	shown nothing
+read messages of lobby as cli admin root all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as cli member ada acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as cli member ada all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as cli member ada beta	shown nothing
+read messages of lobby as cli member bob acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as cli member bob all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as cli member bob beta	shown nothing
+read messages of lobby as cli viewer ada acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as cli viewer ada all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as cli viewer ada beta	shown nothing
+read messages of lobby as cli viewer bob acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as cli viewer bob all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as cli viewer bob beta	shown nothing
+read messages of lobby as main admin bob all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as room viewer ada-room acme	shown msg(lobby by ada), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as room viewer ada-room all	shown msg(lobby by ada), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as room viewer ada-room beta	shown nothing
+read messages of lobby as room viewer bob-room acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as room viewer bob-room all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as room viewer bob-room beta	shown nothing
+read messages of lobby as sync admin root all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as sync member ada acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as sync member ada all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as sync member ada beta	shown nothing
+read messages of lobby as sync member bob acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as sync member bob all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as sync member bob beta	shown nothing
+read messages of lobby as sync viewer ada acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as sync viewer ada all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as sync viewer ada beta	shown nothing
+read messages of lobby as sync viewer anonymous none	shown nothing
+read messages of lobby as sync viewer bob acme	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as sync viewer bob all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of lobby as sync viewer bob beta	shown nothing
+read messages of lobby as system admin sail all	shown msg(lobby by ada), msg(lobby by bob), msg(lobby by root), msg(lobby by sail), msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01), msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01), msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as agent member ada-agent acme	shown msg(s-ada by ada), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as agent member ada-agent all	shown msg(s-ada by ada), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as agent member ada-agent beta	shown nothing
+read messages of s-ada as agent member bob-agent acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as agent member bob-agent all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as agent member bob-agent beta	shown nothing
+read messages of s-ada as agent viewer ada-agent acme	shown msg(s-ada by ada), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as agent viewer ada-agent all	shown msg(s-ada by ada), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as agent viewer ada-agent beta	shown nothing
+read messages of s-ada as agent viewer bob-agent acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as agent viewer bob-agent all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as agent viewer bob-agent beta	shown nothing
+read messages of s-ada as api admin root all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as api member ada acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as api member ada all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as api member ada beta	shown nothing
+read messages of s-ada as api member bob acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as api member bob all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as api member bob beta	shown nothing
+read messages of s-ada as api member machine all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as api viewer ada acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as api viewer ada all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as api viewer ada beta	shown nothing
+read messages of s-ada as api viewer bob acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as api viewer bob all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as api viewer bob beta	shown nothing
+read messages of s-ada as cli admin root all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as cli member ada acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as cli member ada all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as cli member ada beta	shown nothing
+read messages of s-ada as cli member bob acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as cli member bob all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as cli member bob beta	shown nothing
+read messages of s-ada as cli viewer ada acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as cli viewer ada all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as cli viewer ada beta	shown nothing
+read messages of s-ada as cli viewer bob acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as cli viewer bob all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as cli viewer bob beta	shown nothing
+read messages of s-ada as main admin bob all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as room viewer ada-room acme	shown msg(s-ada by ada), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as room viewer ada-room all	shown msg(s-ada by ada), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as room viewer ada-room beta	shown nothing
+read messages of s-ada as room viewer bob-room acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as room viewer bob-room all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as room viewer bob-room beta	shown nothing
+read messages of s-ada as sync admin root all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as sync member ada acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as sync member ada all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as sync member ada beta	shown nothing
+read messages of s-ada as sync member bob acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as sync member bob all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as sync member bob beta	shown nothing
+read messages of s-ada as sync viewer ada acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as sync viewer ada all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as sync viewer ada beta	shown nothing
+read messages of s-ada as sync viewer anonymous none	shown nothing
+read messages of s-ada as sync viewer bob acme	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as sync viewer bob all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-ada as sync viewer bob beta	shown nothing
+read messages of s-ada as system admin sail all	shown msg(s-ada by ada), msg(s-ada by bob), msg(s-ada by root), msg(s-ada by sail), msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01), msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01), msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02)
+read messages of s-bob as agent member ada-agent acme	shown nothing
+read messages of s-bob as agent member ada-agent all	shown nothing
+read messages of s-bob as agent member ada-agent beta	shown nothing
+read messages of s-bob as agent member bob-agent acme	shown nothing
+read messages of s-bob as agent member bob-agent all	shown nothing
+read messages of s-bob as agent member bob-agent beta	shown nothing
+read messages of s-bob as agent viewer ada-agent acme	shown nothing
+read messages of s-bob as agent viewer ada-agent all	shown nothing
+read messages of s-bob as agent viewer ada-agent beta	shown nothing
+read messages of s-bob as agent viewer bob-agent acme	shown nothing
+read messages of s-bob as agent viewer bob-agent all	shown nothing
+read messages of s-bob as agent viewer bob-agent beta	shown nothing
+read messages of s-bob as api admin root all	shown nothing
+read messages of s-bob as api member ada acme	shown nothing
+read messages of s-bob as api member ada all	shown nothing
+read messages of s-bob as api member ada beta	shown nothing
+read messages of s-bob as api member bob acme	shown nothing
+read messages of s-bob as api member bob all	shown nothing
+read messages of s-bob as api member bob beta	shown nothing
+read messages of s-bob as api member machine all	shown nothing
+read messages of s-bob as api viewer ada acme	shown nothing
+read messages of s-bob as api viewer ada all	shown nothing
+read messages of s-bob as api viewer ada beta	shown nothing
+read messages of s-bob as api viewer bob acme	shown nothing
+read messages of s-bob as api viewer bob all	shown nothing
+read messages of s-bob as api viewer bob beta	shown nothing
+read messages of s-bob as cli admin root all	shown nothing
+read messages of s-bob as cli member ada acme	shown nothing
+read messages of s-bob as cli member ada all	shown nothing
+read messages of s-bob as cli member ada beta	shown nothing
+read messages of s-bob as cli member bob acme	shown nothing
+read messages of s-bob as cli member bob all	shown nothing
+read messages of s-bob as cli member bob beta	shown nothing
+read messages of s-bob as cli viewer ada acme	shown nothing
+read messages of s-bob as cli viewer ada all	shown nothing
+read messages of s-bob as cli viewer ada beta	shown nothing
+read messages of s-bob as cli viewer bob acme	shown nothing
+read messages of s-bob as cli viewer bob all	shown nothing
+read messages of s-bob as cli viewer bob beta	shown nothing
+read messages of s-bob as main admin bob all	shown nothing
+read messages of s-bob as room viewer ada-room acme	shown nothing
+read messages of s-bob as room viewer ada-room all	shown nothing
+read messages of s-bob as room viewer ada-room beta	shown nothing
+read messages of s-bob as room viewer bob-room acme	shown nothing
+read messages of s-bob as room viewer bob-room all	shown nothing
+read messages of s-bob as room viewer bob-room beta	shown nothing
+read messages of s-bob as sync admin root all	shown nothing
+read messages of s-bob as sync member ada acme	shown nothing
+read messages of s-bob as sync member ada all	shown nothing
+read messages of s-bob as sync member ada beta	shown nothing
+read messages of s-bob as sync member bob acme	shown nothing
+read messages of s-bob as sync member bob all	shown nothing
+read messages of s-bob as sync member bob beta	shown nothing
+read messages of s-bob as sync viewer ada acme	shown nothing
+read messages of s-bob as sync viewer ada all	shown nothing
+read messages of s-bob as sync viewer ada beta	shown nothing
+read messages of s-bob as sync viewer anonymous none	shown nothing
+read messages of s-bob as sync viewer bob acme	shown nothing
+read messages of s-bob as sync viewer bob all	shown nothing
+read messages of s-bob as sync viewer bob beta	shown nothing
+read messages of s-bob as system admin sail all	shown nothing

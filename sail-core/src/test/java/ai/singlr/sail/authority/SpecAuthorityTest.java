@@ -5,34 +5,40 @@
 
 package ai.singlr.sail.authority;
 
-import static ai.singlr.sail.authority.Actors.ADMIN;
-import static ai.singlr.sail.authority.Actors.ADMIN_SYNC;
-import static ai.singlr.sail.authority.Actors.AGENT;
-import static ai.singlr.sail.authority.Actors.AGENT_HANDLE;
-import static ai.singlr.sail.authority.Actors.MACHINE;
-import static ai.singlr.sail.authority.Actors.MAIN;
-import static ai.singlr.sail.authority.Actors.OTHER;
-import static ai.singlr.sail.authority.Actors.OTHERS_AGENT;
-import static ai.singlr.sail.authority.Actors.OTHER_API;
-import static ai.singlr.sail.authority.Actors.OTHER_RUN;
-import static ai.singlr.sail.authority.Actors.OTHER_SYNC;
-import static ai.singlr.sail.authority.Actors.OWNER;
-import static ai.singlr.sail.authority.Actors.OWNER_API;
-import static ai.singlr.sail.authority.Actors.OWNER_CLI;
-import static ai.singlr.sail.authority.Actors.OWNER_SYNC;
-import static ai.singlr.sail.authority.Actors.ROOM;
-import static ai.singlr.sail.authority.Actors.SYSTEM;
-import static ai.singlr.sail.authority.Actors.VIEWER;
-import static ai.singlr.sail.authority.Actors.VIEWER_SYNC;
-import static ai.singlr.sail.authority.Actors.projection;
-import static ai.singlr.sail.authority.Actors.with;
+import static ai.singlr.sail.identity.Actors.ADMIN;
+import static ai.singlr.sail.identity.Actors.ADMIN_SYNC;
+import static ai.singlr.sail.identity.Actors.AGENT;
+import static ai.singlr.sail.identity.Actors.AGENT_HANDLE;
+import static ai.singlr.sail.identity.Actors.MACHINE;
+import static ai.singlr.sail.identity.Actors.MAIN;
+import static ai.singlr.sail.identity.Actors.OTHER;
+import static ai.singlr.sail.identity.Actors.OTHERS_AGENT;
+import static ai.singlr.sail.identity.Actors.OTHER_API;
+import static ai.singlr.sail.identity.Actors.OTHER_RUN;
+import static ai.singlr.sail.identity.Actors.OTHER_SYNC;
+import static ai.singlr.sail.identity.Actors.OWNER;
+import static ai.singlr.sail.identity.Actors.OWNER_API;
+import static ai.singlr.sail.identity.Actors.OWNER_CLI;
+import static ai.singlr.sail.identity.Actors.OWNER_SYNC;
+import static ai.singlr.sail.identity.Actors.ROOM;
+import static ai.singlr.sail.identity.Actors.SYSTEM;
+import static ai.singlr.sail.identity.Actors.VIEWER;
+import static ai.singlr.sail.identity.Actors.VIEWER_SYNC;
+import static ai.singlr.sail.identity.Actors.projection;
+import static ai.singlr.sail.identity.Actors.with;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
-import ai.singlr.sail.authority.Refusal.Kind;
+import ai.singlr.sail.access.Refusal;
+import ai.singlr.sail.access.Refusal.Kind;
+import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.Decidability;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Standing;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -108,9 +114,21 @@ class SpecAuthorityTest {
         allows("main creates", MAIN, null, ownRoomCreate),
         allows("the machinery creates", SYSTEM, null, ownRoomCreate),
         refuses("a viewer cannot create", VIEWER, null, ownRoomCreate, Kind.READ_ONLY),
+        allows(
+            "a scoped member deletes an id this box holds no head of",
+            OWNER_API.withScope(ProjectScope.of(List.of("acme"))),
+            null,
+            null),
+        allows(
+            "a scoped member's marked deletion of an id this box holds no head of",
+            OWNER_API.withScope(ProjectScope.of(List.of("acme"))),
+            null,
+            Map.of("_actor", OWNER)),
+        refuses("a viewer deletes nothing, held or not", VIEWER, null, null, Kind.READ_ONLY),
         refuses("a room principal cannot create", ROOM, null, ownRoomCreate, Kind.READ_ONLY),
         refuses("a viewer's push cannot create", VIEWER_SYNC, null, ownRoomCreate, Kind.READ_ONLY),
         allows("a create in its own room may name anyone", OTHER_API, null, namingOther),
+        allows("a create in its own room may name another FDE", OWNER_API, null, namingOther),
         allows("the room's owner is born into it", OWNER_API, null, inLobby),
         allows("an agent of the room's owner is born into it", AGENT, null, inLobby),
         allows("an admin is born into any room", ADMIN, null, inLobby),
@@ -124,6 +142,17 @@ class SpecAuthorityTest {
             null,
             with(inLobby, "room_id", "nowhere"),
             Kind.NO_CONVERSATION),
+        refuses(
+            "a viewer hears first that a room this box does not hold is not here",
+            VIEWER,
+            null,
+            with(inLobby, "room_id", "nowhere"),
+            Kind.NO_CONVERSATION),
+        allows(
+            "an admin is born in a room this box does not hold",
+            ADMIN,
+            null,
+            with(inLobby, "room_id", "nowhere")),
         allows("a birth claims for oneself", OWNER_API, null, with(inLobby, "assignee", OWNER)),
         refuses(
             "a birth naming another is admin-only",
@@ -238,13 +267,13 @@ class SpecAuthorityTest {
             BORN_IN_LOBBY,
             with(BORN_IN_LOBBY, "assignee", OWNER)),
         refuses(
-            "a member claims no spec born where they may not post",
+            "a member claims no spec born where they may not start work",
             OTHER_API,
             BORN_IN_LOBBY,
             with(BORN_IN_LOBBY, "assignee", OTHER),
             Kind.ADMIN_ONLY),
         refuses(
-            "a push claims no spec born where it may not post",
+            "a push claims no spec born where it may not start work",
             OTHER_SYNC,
             BORN_IN_LOBBY,
             with(BORN_IN_LOBBY, "assignee", OTHER),
@@ -254,6 +283,18 @@ class SpecAuthorityTest {
             ADMIN,
             BORN_IN_DEN,
             with(BORN_IN_DEN, "assignee", OWNER)),
+        refuses(
+            "a viewer is told its role before a spec's fixed room",
+            VIEWER,
+            OWNED,
+            with(OWNED, "room_id", "lobby"),
+            Kind.READ_ONLY),
+        refuses(
+            "another member is told whose it is before a spec's fixed room",
+            OTHER_API,
+            OWNED,
+            with(OWNED, "room_id", "lobby"),
+            Kind.NOT_OWNER),
         refuses(
             "an admin cannot move a spec's room",
             ADMIN,
@@ -272,7 +313,6 @@ class SpecAuthorityTest {
             OWNED,
             with(OWNED, "room_id", "den"),
             Kind.FIXED),
-        allows("main moves nothing it did not decide", MAIN, OWNED, with(OWNED, "room_id", "den")),
         allows("a push authored by its pusher", OWNER_SYNC, OWNED, with(edited, "_actor", OWNER)),
         allows(
             "a push authored by the machinery", OWNER_SYNC, OWNED, with(edited, "_actor", "sail")),
@@ -387,6 +427,14 @@ class SpecAuthorityTest {
     assertEquals(Optional.empty(), rule.decide(ADMIN, "den", null, create));
     assertEquals(
         Optional.of(Kind.NOT_OWNER),
+        rule.decide(OTHER_API, "den", null, with(create, "assignee", OWNER)).map(Refusal::kind),
+        "the room's own owner may not hand it to another through a spec: that is an assignment");
+    assertEquals(
+        Optional.empty(),
+        rule.decide(ADMIN, "den", null, with(create, "assignee", OWNER)),
+        "an admin may assign the room");
+    assertEquals(
+        Optional.of(Kind.NOT_OWNER),
         rule.decide(OWNER_SYNC, "nook", null, with(create, "room_id", "nook")).map(Refusal::kind),
         "the creator of a room assigned away cannot take it back through a spec");
     assertEquals(
@@ -397,6 +445,103 @@ class SpecAuthorityTest {
         Optional.empty(),
         rule.decide(OWNER_SYNC, "mine", null, with(create, "room_id", "mine")),
         "a room the pusher minted reaches main before its spec");
+  }
+
+  /**
+   * A restore that moves the assignee is a change of the spec first, so who may not change it is
+   * told so before the move it makes.
+   */
+  @Test
+  void aRestoreThatReassignsIsAChangeBeforeTheMove() {
+    var specs = new SpecStore(board.db);
+    Acting.system(
+        () -> {
+          specs.create(
+              new SpecStore.SpecRow(
+                  "gone",
+                  "acme",
+                  "Gone",
+                  SpecStatus.PENDING,
+                  OWNER,
+                  null,
+                  null,
+                  null,
+                  null,
+                  0,
+                  OWNER,
+                  null,
+                  null,
+                  OWNER,
+                  List.of(),
+                  List.of()));
+          specs.delete("gone");
+        });
+    var last = projection("title", "Gone", "assignee", OWNER, "room_id", "gone");
+    var reassigned = with(last, "assignee", OTHER);
+
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Spec 'gone' is assigned to 'ada', not you.",
+                "Ask ada to make this change, or have an admin do it.")),
+        rule.decide(OTHER_API, "gone", last, reassigned));
+    assertEquals(
+        Optional.of(Refusal.readOnly("change specs")),
+        rule.decide(VIEWER, "gone", last, reassigned));
+  }
+
+  /**
+   * A create that names no creator, as the door pre-asks it, is its acting FDE's: an agent creating
+   * over its FDE's own room moves no ownership.
+   */
+  @Test
+  void aCreateWithNoCreatorIsTheActingFdesSoAnAgentMayTakeItsFdesRoom() {
+    assertEquals(
+        Optional.empty(),
+        rule.decide(
+            AGENT,
+            "lobby",
+            null,
+            projection("title", "Lobby", "assignee", null, "room_id", "lobby")));
+  }
+
+  /** Who a push writes as is asked before a spec's fixed room. */
+  @Test
+  void aPushIsToldWhoItMayNotWriteAsBeforeItsFixedRoom() {
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_AUTHOR,
+                "'ada' may not write as 'bob'.",
+                "A box writes as its FDE, its own machinery, or the runs acting for its FDE.")),
+        rule.decide(
+            OWNER_SYNC, SPEC, OWNED, with(with(OWNED, "room_id", "lobby"), "_actor", OTHER)));
+  }
+
+  /**
+   * A pushed create is told who it may not write as before for whom it may not create, and the
+   * creator alone when only the creator is another's.
+   */
+  @Test
+  void aPushedCreateIsToldItsAuthorBeforeItsCreator() {
+    var create = projection("title", "New", "assignee", null, "room_id", "fresh");
+
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_AUTHOR,
+                "'bob' may not write as 'ada'.",
+                "A box writes as its FDE, its own machinery, or the runs acting for its FDE.")),
+        rule.decide(
+            ADMIN_SYNC, "fresh", null, with(with(create, "_actor", OWNER), "_created_by", OWNER)));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_AUTHOR,
+                "'bob' may not create for 'ada'.",
+                "A box creates only as its own FDE.")),
+        rule.decide(ADMIN_SYNC, "fresh", null, with(create, "_created_by", OWNER)));
   }
 
   @Test
@@ -418,6 +563,31 @@ class SpecAuthorityTest {
         Optional.empty(),
         rule.decide(OTHER_API, "study", null, elsewhere),
         "an id no room holds shadows nothing");
+  }
+
+  @Test
+  void aReadOnlyCredentialHearsWhatTheRevisionWouldDo() {
+    assertEquals(
+        readOnly("create specs"),
+        rule.decide(VIEWER, SPEC, null, with(UNASSIGNED, "title", "New")));
+    assertEquals(
+        readOnly("claim specs"),
+        rule.decide(VIEWER, SPEC, UNASSIGNED, with(UNASSIGNED, "assignee", OWNER)));
+    assertEquals(
+        readOnly("assign specs"), rule.decide(VIEWER, SPEC, OWNED, with(OWNED, "assignee", OTHER)));
+    assertEquals(readOnly("change specs"), rule.decide(VIEWER, SPEC, OWNED, null));
+    assertEquals(
+        readOnly("create specs"),
+        rule.decide(VIEWER, "never-held", null, null),
+        "a deletion of an id this box holds no head of is decided as its birth");
+  }
+
+  private static Optional<Refusal> readOnly(String act) {
+    return Optional.of(
+        new Refusal(
+            Kind.READ_ONLY,
+            "Your credential is read-only and cannot " + act + ".",
+            "Ask an admin for a member or admin credential."));
   }
 
   @Test
@@ -444,8 +614,7 @@ class SpecAuthorityTest {
     assertEquals(
         new Refusal(
             Kind.ADMIN_ONLY,
-            "Spec 'auth' lives in 'lobby', whose owners alone start work there, and claiming it"
-                + " would make you one.",
+            "'lobby' belongs to ada: only ada or an admin may start work there, not you.",
             "Ask an admin to assign it to you."),
         rule.decide(OTHER_API, SPEC, BORN_IN_LOBBY, with(BORN_IN_LOBBY, "assignee", OTHER))
             .orElseThrow());

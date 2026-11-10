@@ -320,7 +320,7 @@ public final class DispatchOperations {
 
   /**
    * Executes one dispatch: resolve the spec (honoring {@code restart}), enforce {@link
-   * DispatchPolicy}, refuse while an ad-hoc agent is live, atomically reserve the run against the
+   * LaunchAdmission}, refuse while an ad-hoc agent is live, atomically reserve the run against the
    * target repo set ({@link #reserveRun} — the binding concurrency gate), then claim the spec
    * {@code in_progress} with its resolved repos and branch persisted, publish the lifecycle events,
    * snapshot and branch as configured, launch, and arm the guardrail watcher. Every refusal fires

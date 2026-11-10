@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -397,6 +398,20 @@ class RunDeliveryOperationsTest {
   }
 
   @Test
+  void aRunCredentialActingForNoOneReportsNoRoomSession() {
+    var failure =
+        Actor.call(
+                Actor.agentPrincipal("claude/run-x", null),
+                () -> operations.recordRoomConversation("room", "claude-code", "abc", null, null))
+            .asFailure();
+
+    assertEquals(ErrorCode.FORBIDDEN_NOT_AUTHOR, failure.errorCode());
+    assertEquals(
+        "This credential acts for no FDE, so a post in 'room' would be no one's.",
+        failure.errorMessage());
+  }
+
+  @Test
   void recordRoomConversationTakesTheRoomsPostGateSoABoxCannotForgeIntoForeignRooms() {
     var elsewhere =
         new Actor("mallory", Role.MEMBER, Actor.Lane.CLI)
@@ -409,6 +424,15 @@ class RunDeliveryOperationsTest {
             .asFailure()
             .errorCode(),
         "a member of another project cannot author a conversation into this one's room");
+    assertEquals(
+        "room",
+        Actor.call(
+                new Actor("mallory", Role.MEMBER, Actor.Lane.CLI)
+                    .withScope(ProjectScope.of(List.of("acme"))),
+                () -> operations.recordRoomConversation("room", "claude-code", "abc", null, null))
+            .orThrow()
+            .roomId(),
+        "a member granted the room's project reports a session in it");
     var mallory = new Actor("mallory", Role.MEMBER, Actor.Lane.CLI);
     assertEquals(
         "room",
@@ -419,14 +443,17 @@ class RunDeliveryOperationsTest {
             .roomId(),
         "a member of the project may, whoever owns the room");
     var viewer = new Actor("ada", Role.VIEWER, Actor.Lane.CLI);
+    var readOnly =
+        assertInstanceOf(
+            Result.Failure.class,
+            Actor.call(
+                viewer,
+                () -> operations.recordRoomConversation("room", "claude-code", "abc", null, null)));
     assertEquals(
         ErrorCode.READ_ONLY_CREDENTIAL,
-        Actor.call(
-                viewer,
-                () -> operations.recordRoomConversation("room", "claude-code", "abc", null, null))
-            .asFailure()
-            .errorCode(),
+        readOnly.errorCode(),
         "a read-only credential writes nothing, even into its own room");
+    assertEquals("Your credential is read-only and cannot post in rooms.", readOnly.errorMessage());
     var admin = new Actor("ops", Role.ADMIN, Actor.Lane.CLI);
     assertEquals(
         "room",

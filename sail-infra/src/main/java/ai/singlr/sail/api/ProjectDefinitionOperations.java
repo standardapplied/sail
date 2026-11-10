@@ -5,12 +5,12 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Action;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ProjectStore;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -30,20 +30,12 @@ final class ProjectDefinitionOperations {
   }
 
   /**
-   * Project {@code project}'s definition and each section's tag, or not found. Only a credential
-   * that may write the project reads it: a definition holds its services' passwords and its
-   * notification hooks, which a read-only credential is never handed.
+   * Project {@code project}'s definition and each section's tag, or not found. It is {@link
+   * Action#READ_DEFINITION}'s: a definition holds its services' passwords and its notification
+   * hooks.
    */
   ProjectDefinitionResponse definition(String project) {
-    var row = held(project);
-    if (!Actor.current().canWrite()) {
-      throw new ApiException(
-          ErrorCode.READ_ONLY_CREDENTIAL,
-          "Your credential is read-only and cannot read a project's definition, which holds its"
-              + " services' secrets.",
-          Remedy.of("Ask an admin for a member or admin credential."));
-    }
-    return response(row);
+    return response(ProjectGate.taking(projects, Action.READ_DEFINITION, project));
   }
 
   /** Creates the project {@code document}, a definition document, names; refused when it exists. */
@@ -61,11 +53,12 @@ final class ProjectDefinitionOperations {
 
   /**
    * Writes {@code value} as {@code section} of project {@code project} ({@code null} unsets it),
-   * only over the section {@code ifMatch}, its tag, names when one is given.
+   * only over the section {@code ifMatch}, its tag, names when one is given. The write is the
+   * journal's to decide, so the door asks only that the caller may read the project.
    */
   ProjectDefinitionResponse writeSection(
       String project, String section, Object value, String ifMatch) {
-    held(project);
+    ProjectGate.readable(projects, project);
     var named = Section.of(section);
     try {
       return response(
@@ -80,13 +73,6 @@ final class ProjectDefinitionOperations {
           "The " + named.key() + " section of '" + project + "' changed since you read it.",
           Remedy.of("Read the definition again, then write the section."));
     }
-  }
-
-  private ProjectStore.ProjectRow held(String project) {
-    if (!Actor.reader().scope().admits(project)) {
-      throw ProjectReader.absent(project);
-    }
-    return projects.findByName(project).orElseThrow(() -> ProjectReader.absent(project));
   }
 
   private static ProjectDefinitionResponse response(ProjectStore.ProjectRow row) {

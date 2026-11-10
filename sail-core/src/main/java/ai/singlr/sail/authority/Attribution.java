@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.authority;
 
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
@@ -66,7 +68,7 @@ final class Attribution {
     if (author.equals(pusher) || Actor.SYSTEM_HANDLE.equals(author)) {
       return true;
     }
-    if (ownRun != null && RunStore.namesRun(author, ownRun)) {
+    if (ownRun != null && PrincipalHandle.namesRun(author, ownRun)) {
       return true;
     }
     return principalOfOwnedRun(pusher, author);
@@ -80,7 +82,7 @@ final class Attribution {
    * ownership of a run main holds.
    */
   boolean principalOfOwnedRun(String pusher, String author) {
-    return RunStore.runOf(author)
+    return PrincipalHandle.runOf(author)
         .flatMap(runs::findById)
         .map(run -> Objects.equals(run.owner(), pusher))
         .orElse(false);

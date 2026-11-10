@@ -5,8 +5,10 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Policy;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.MessageAuthority;
-import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.ScopeRule;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -157,15 +159,19 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     return ChangeLog.filedInside(ENTITY, id, arg);
   }
 
-  /** The scope of whoever reads ({@link Actor#reader}), as {@link #readable} takes it. */
+  /**
+   * The projects whoever reads ({@link Actor#reader}) may read ({@link Access#audience}), as {@link
+   * #readable} takes them.
+   */
   private static String reader() {
-    return ChangeLog.scopeArgument(Actor.reader().scope());
+    return ChangeLog.scopeArgument(Access.audience(Actor.reader()));
   }
 
   /**
    * The newest {@code limit} messages of {@code roomId} its reader may see, older than {@code
-   * before} when one is named, oldest first. An agent reads only the messages that steer it ({@link
-   * RoomStore#steering}), its own FDE's among them.
+   * before} when one is named, oldest first. A reader the table hears only through its steering
+   * voices ({@link Policy#hearsOnlySteering}), an agent, reads only the messages that steer it
+   * ({@link RoomStore#steering}), its own FDE's among them.
    */
   public List<MessageRow> list(String roomId, String before, int limit) {
     if (before != null) {
@@ -203,7 +209,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
    */
   private List<MessageRow> page(
       String roomId, String side, String cursor, String order, int limit) {
-    var agent = Actor.reader().agentLane();
+    var agent = Policy.hearsOnlySteering(Actor.reader());
     var sql =
         "SELECT "
             + COLUMNS
@@ -377,7 +383,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
    * edge.
    */
   public Map<String, String> openQuestions() {
-    return openQuestions(Actor.reader().scope());
+    return openQuestions(Access.audience(Actor.reader()));
   }
 
   /** {@link #openQuestions()} as a reader of {@code scope} sees the questions and their answers. */

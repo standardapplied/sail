@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinitionJson;
@@ -117,9 +117,20 @@ class ProjectDefinitionOperationsTest {
         assertThrows(
             ApiException.class, () -> Acting.by(scoped, () -> operations.definition("acme")));
     var missing = assertThrows(ApiException.class, () -> operations.definition("ghost"));
+    var unheldToAViewer =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Acting.by(
+                    new Actor("vic", Role.VIEWER, Actor.Lane.API),
+                    () -> operations.definition("ghost")));
 
     assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, outside.failure().errorCode());
     assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, missing.failure().errorCode());
+    assertEquals(
+        ErrorCode.PROJECT_NOT_IN_CATALOG,
+        unheldToAViewer.failure().errorCode(),
+        "what the catalog does not hold is not there, said before the role");
   }
 
   @Test
@@ -147,8 +158,7 @@ class ProjectDefinitionOperationsTest {
 
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, refused.failure().errorCode());
     assertEquals(
-        "Your credential is read-only and cannot read a project's definition, which holds its"
-            + " services' secrets.",
+        "Your credential is read-only and cannot read a project's definition, which holds its services' secrets.",
         refused.getMessage());
   }
 

@@ -267,7 +267,9 @@ class SailOperationsTest {
 
   @Test
   void definitionsWithoutACatalogAreUnavailable() throws Exception {
-    var operations = operations(shell());
+    var yaml = tempDir.resolve("sail-uncataloged.yaml");
+    Files.writeString(yaml, baseYaml());
+    var operations = new SailOperations(shell(), TestProjects.reading(yaml));
 
     assertError(ErrorCode.INTERNAL, Acting.by(ADMIN, () -> operations.projectDefinition("acme")));
     assertError(
@@ -793,7 +795,8 @@ class SailOperationsTest {
             .on(
                 "incus snapshot list acme",
                 "[{\"name\": \"snap-1\", \"created_at\": \"2026-08-17T08:00:00Z\"}]");
-    var operations = new SailOperations(shell, TestProjects.reading(yaml));
+    var acme = HeldProjects.catalog("acme");
+    var operations = cataloged(shell, TestProjects.reading(yaml), acme);
 
     var list = operations.snapshots("acme");
     assertEquals("dispatch", list.orThrow().snapshots().getFirst().source());
@@ -803,7 +806,7 @@ class SailOperationsTest {
 
     assertEquals(
         "accepted", operations.restoreSnapshot("acme", "snap-1", "uday").orThrow().status());
-    var deleter = new SailOperations(shell, TestProjects.reading(yaml));
+    var deleter = cataloged(shell, TestProjects.reading(yaml), acme);
     assertEquals("accepted", deleter.deleteSnapshot("acme", "snap-1").orThrow().status());
   }
 
@@ -831,7 +834,9 @@ class SailOperationsTest {
               null,
               specStore,
               new ReviewStore(db),
-              brokenRuns);
+              brokenRuns,
+              new ProjectStore(db),
+              ConnectEnvironment.detector());
 
       var error = dispatch(operations, "acme", request("auth"));
 
@@ -928,7 +933,7 @@ class SailOperationsTest {
   }
 
   @Test
-  void anotherFdesSpecIsRefusedNotYourSpec() throws Exception {
+  void anotherFdesSpecIsRefusedAsNotTheirs() throws Exception {
     var operations =
         operationsWithStore(
             baseYaml(), idleShell(), store -> seedAssigned(store, "auth", "pending", LOCAL_HANDLE));
@@ -937,7 +942,9 @@ class SailOperationsTest {
     var error =
         Actor.call(otherFde, () -> operations.dispatch("acme", request("auth"), LOCAL_HANDLE));
 
-    assertError(ErrorCode.NOT_YOUR_SPEC, error);
+    assertError(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, error);
+    assertEquals(
+        "Spec 'auth' is assigned to '" + LOCAL_HANDLE + "', not you.", error.errorMessage());
   }
 
   @Test
@@ -2151,7 +2158,16 @@ class SailOperationsTest {
               latch));
       var operations =
           new SailOperations(
-              shell, TestProjects.reading(yaml), (cmd, log) -> 4242L, bus, null, store, null);
+              shell,
+              TestProjects.reading(yaml),
+              (cmd, log) -> 4242L,
+              bus,
+              null,
+              store,
+              null,
+              null,
+              new ProjectStore(db),
+              ConnectEnvironment.detector());
 
       dispatch(operations, "acme", request("auth"));
 
@@ -2622,9 +2638,10 @@ class SailOperationsTest {
   }
 
   @Test
-  void aProjectNotInTheCatalogMapsToNotFound() {
+  void aProjectNotInTheCatalogMapsToNotFound() throws Exception {
     var operations =
-        new SailOperations(shell(), TestProjects.reading(tempDir.resolve("missail.yaml")));
+        cataloged(
+            shell(), TestProjects.reading(tempDir.resolve("missail.yaml")), HeldProjects.catalog());
 
     var error = operations.project("acme");
 
@@ -3320,7 +3337,9 @@ class SailOperationsTest {
         null,
         specStore,
         reviewStore,
-        sessionStore);
+        sessionStore,
+        new ProjectStore(db),
+        ConnectEnvironment.detector());
   }
 
   /** Builds operations with a seeded project catalog and a fixed connect environment. */
@@ -3376,7 +3395,17 @@ class SailOperationsTest {
     seed.accept(store);
     WatcherSpawner.ProcessSpawner fallback =
         watcher != null ? watcher : (command, logPath) -> 4242L;
-    return new SailOperations(shell, TestProjects.reading(yaml), fallback, null, null, store, null);
+    return new SailOperations(
+        shell,
+        TestProjects.reading(yaml),
+        fallback,
+        null,
+        null,
+        store,
+        null,
+        null,
+        new ProjectStore(db),
+        ConnectEnvironment.detector());
   }
 
   /**
@@ -3504,6 +3533,22 @@ class SailOperationsTest {
             max_duration: 4h
             action: stop
         """;
+  }
+
+  /** Operations over {@code definitions} whose project doors read {@code catalog}. */
+  private static SailOperations cataloged(
+      ShellExec shell, ProjectReader definitions, ProjectStore catalog) {
+    return new SailOperations(
+        shell,
+        definitions,
+        (command, logPath) -> 4242L,
+        null,
+        null,
+        null,
+        null,
+        null,
+        catalog,
+        ConnectEnvironment.detector());
   }
 
   private SailOperations operations(FakeShell shell) throws Exception {

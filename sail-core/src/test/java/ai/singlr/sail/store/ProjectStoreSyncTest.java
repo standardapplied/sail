@@ -11,7 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.authority.WriterAuthority;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
@@ -160,10 +159,8 @@ class ProjectStoreSyncTest {
   void aPushNamingAnotherCreatorNeverMovesTheOneMainHolds() {
     store.applyRevision("acme", def("base"), "rev-base");
 
-    store.commitRevision(
-        "acme", def("pushed", "node", "mallory"), "rev-base", new WriterAuthority(db, "projects"));
-    store.commitRevision(
-        "fresh", def("new", "node", "mallory"), null, new WriterAuthority(db, "projects"));
+    store.commitRevision("acme", def("pushed", "node", "mallory"), "rev-base", store.authority());
+    store.commitRevision("fresh", def("new", "node", "mallory"), null, store.authority());
 
     assertEquals("node", store.findByName("acme").orElseThrow().createdBy());
     assertEquals("node", store.findByName("fresh").orElseThrow().createdBy());
@@ -186,9 +183,7 @@ class ProjectStoreSyncTest {
   void commitAcceptsWhenExpectedRevMatchesAndMintsANewOne() {
     store.applyRevision("acme", def("base"), "rev-base");
 
-    var outcome =
-        store.commitRevision(
-            "acme", def("pushed"), "rev-base", new WriterAuthority(db, "projects"));
+    var outcome = store.commitRevision("acme", def("pushed"), "rev-base", store.authority());
 
     var accepted = assertInstanceOf(PushOutcome.Accepted.class, outcome);
     assertNotEquals("rev-base", accepted.rev());
@@ -200,11 +195,9 @@ class ProjectStoreSyncTest {
   @ActingAs(value = Actor.Lane.SYNC, handle = "node")
   void commitRejectsAsStaleWhenMainMovedUnderUs() {
     store.applyRevision("acme", def("base"), "rev-base");
-    store.commitRevision("acme", def("moved"), "rev-base", new WriterAuthority(db, "projects"));
+    store.commitRevision("acme", def("moved"), "rev-base", store.authority());
 
-    var outcome =
-        store.commitRevision(
-            "acme", def("racing"), "rev-base", new WriterAuthority(db, "projects"));
+    var outcome = store.commitRevision("acme", def("racing"), "rev-base", store.authority());
 
     var stale = assertInstanceOf(PushOutcome.Stale.class, outcome);
     assertEquals(def("moved", "node", "node"), untimed(stale.currentSnapshot()));

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.store.HeldProjects;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +34,7 @@ class LocalApiStackTest {
             private final StackOperations stack =
                 new StackOperations(
                     shell,
+                    HeldProjects.catalog("acme"),
                     new ProjectLoader(
                         shell,
                         project ->

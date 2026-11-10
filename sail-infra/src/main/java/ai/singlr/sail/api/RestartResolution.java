@@ -16,7 +16,7 @@ import java.util.Optional;
  * The single domain home for dispatch restart resolution, shared by both lanes (the in-process
  * {@code sail spec dispatch --restart} CLI and the HTTP API's {@code restart} field). Pure and
  * I/O-free — it never touches stores, git, or shells — so the full decision matrix is exhaustively
- * table-testable, exactly like {@link DispatchPolicy}.
+ * table-testable.
  *
  * <p>{@link #decide} answers one question: given the requested spec (or its absence) and the {@code
  * restart} flag, how must dispatch treat the spec's lifecycle status? Either a {@link Refused} with
@@ -54,8 +54,7 @@ public sealed interface RestartResolution
           Remedy.of("Set the spec id of the non-pending spec to re-dispatch."));
     }
     if (spec == null) {
-      return new Refused(
-          ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.", Remedy.NONE);
+      return new Refused(ErrorCode.SPEC_NOT_FOUND, Refusals.specMissing(specId), Remedy.NONE);
     }
     if (spec.status() == SpecStatus.PENDING) {
       return new NotRestarted();

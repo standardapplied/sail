@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
@@ -172,17 +172,26 @@ class AuthorityAuditTest {
             "code",
             "read_only_credential",
             "message",
-            "Your credential is read-only and cannot change files.",
+            "Your credential is read-only and cannot share files and skills in projects.",
             "action",
             "Ask an admin for a member or admin credential.",
             "field_errors",
             List.of()),
         YamlUtil.parseMap(file.body()).get("error"));
     assertEquals(403, snapshot.statusCode(), snapshot.body());
-    assertTrue(snapshot.body().contains("read-only and cannot delete snapshots"), snapshot.body());
-    assertTrue(snapshot.body().contains("\"read_only_credential\""), snapshot.body());
+    var restoreRefused =
+        Map.of(
+            "code",
+            "read_only_credential",
+            "message",
+            "Your credential is read-only and cannot restore or delete snapshots.",
+            "action",
+            "Ask an admin for a member or admin credential.",
+            "field_errors",
+            List.of());
+    assertEquals(restoreRefused, YamlUtil.parseMap(snapshot.body()).get("error"));
     assertEquals(403, restore.statusCode(), restore.body());
-    assertTrue(restore.body().contains("read-only and cannot restore snapshots"), restore.body());
+    assertEquals(restoreRefused, YamlUtil.parseMap(restore.body()).get("error"));
   }
 
   /**

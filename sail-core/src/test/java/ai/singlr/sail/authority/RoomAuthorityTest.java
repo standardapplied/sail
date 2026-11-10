@@ -5,31 +5,33 @@
 
 package ai.singlr.sail.authority;
 
-import static ai.singlr.sail.authority.Actors.ADMIN;
-import static ai.singlr.sail.authority.Actors.ADMIN_SYNC;
-import static ai.singlr.sail.authority.Actors.AGENT;
-import static ai.singlr.sail.authority.Actors.MACHINE;
-import static ai.singlr.sail.authority.Actors.MAIN;
-import static ai.singlr.sail.authority.Actors.OTHER;
-import static ai.singlr.sail.authority.Actors.OTHERS_AGENT;
-import static ai.singlr.sail.authority.Actors.OTHER_API;
-import static ai.singlr.sail.authority.Actors.OTHER_SYNC;
-import static ai.singlr.sail.authority.Actors.OWNER;
-import static ai.singlr.sail.authority.Actors.OWNER_API;
-import static ai.singlr.sail.authority.Actors.OWNER_CLI;
-import static ai.singlr.sail.authority.Actors.OWNER_SYNC;
-import static ai.singlr.sail.authority.Actors.ROOM;
-import static ai.singlr.sail.authority.Actors.SYSTEM;
-import static ai.singlr.sail.authority.Actors.VIEWER;
-import static ai.singlr.sail.authority.Actors.VIEWER_SYNC;
-import static ai.singlr.sail.authority.Actors.projection;
-import static ai.singlr.sail.authority.Actors.with;
+import static ai.singlr.sail.identity.Actors.ADMIN;
+import static ai.singlr.sail.identity.Actors.ADMIN_SYNC;
+import static ai.singlr.sail.identity.Actors.AGENT;
+import static ai.singlr.sail.identity.Actors.MACHINE;
+import static ai.singlr.sail.identity.Actors.MAIN;
+import static ai.singlr.sail.identity.Actors.OTHER;
+import static ai.singlr.sail.identity.Actors.OTHERS_AGENT;
+import static ai.singlr.sail.identity.Actors.OTHER_API;
+import static ai.singlr.sail.identity.Actors.OTHER_SYNC;
+import static ai.singlr.sail.identity.Actors.OWNER;
+import static ai.singlr.sail.identity.Actors.OWNER_API;
+import static ai.singlr.sail.identity.Actors.OWNER_CLI;
+import static ai.singlr.sail.identity.Actors.OWNER_SYNC;
+import static ai.singlr.sail.identity.Actors.ROOM;
+import static ai.singlr.sail.identity.Actors.SYSTEM;
+import static ai.singlr.sail.identity.Actors.VIEWER;
+import static ai.singlr.sail.identity.Actors.VIEWER_SYNC;
+import static ai.singlr.sail.identity.Actors.projection;
+import static ai.singlr.sail.identity.Actors.with;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import ai.singlr.sail.authority.Refusal.Kind;
+import ai.singlr.sail.access.Refusal;
+import ai.singlr.sail.access.Refusal.Kind;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 import java.util.Map;
@@ -97,6 +99,21 @@ class RoomAuthorityTest {
       rows.add(new Case("create by " + actor, actor, null, created, null));
     }
     rows.add(new Case("a viewer cannot create", VIEWER, null, created, Kind.READ_ONLY));
+    rows.add(
+        new Case(
+            "a scoped member deletes an id this box holds no head of",
+            OWNER_API.withScope(ProjectScope.of(List.of("acme"))),
+            null,
+            null,
+            null));
+    rows.add(
+        new Case(
+            "a scoped member's marked deletion of an id this box holds no head of",
+            OWNER_API.withScope(ProjectScope.of(List.of("acme"))),
+            null,
+            Map.of(),
+            null));
+    rows.add(new Case("a viewer deletes nothing, held or not", VIEWER, null, null, Kind.READ_ONLY));
     rows.add(new Case("a room principal cannot create", ROOM, null, created, Kind.READ_ONLY));
     for (var next : verbs) {
       var verb =
@@ -229,6 +246,41 @@ class RoomAuthorityTest {
                 "Have an admin change it.")),
         rule.decide(OWNER_API, "lobby", ownerless, ownerless));
     assertEquals(Optional.empty(), rule.decide(ADMIN, "lobby", ownerless, ownerless));
+  }
+
+  @Test
+  void aDeletionOfARoomThisBoxNeverHeldIsDecidedAsItsBirthAsOnMain() {
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.READ_ONLY,
+                "Your credential is read-only and cannot create rooms.",
+                "Ask an admin for a member or admin credential.")),
+        rule.decide(VIEWER, "never-held", null, Map.of()));
+  }
+
+  /** A push over another's room is told whose it is before who it may not write as. */
+  @Test
+  void aPushIsToldWhoseTheRoomIsBeforeWhoItMayNotWriteAs() {
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Room 'lobby' belongs to 'ada', not you.",
+                "Ask ada to change it, or have an admin do it.")),
+        rule.decide(OTHER_SYNC, "lobby", LOBBY, with(with(LOBBY, "title", "x"), "_actor", OWNER)));
+  }
+
+  /**
+   * An edit that keeps a room's project is no move into one, so a room whose project this box's
+   * catalog no longer holds is still its owner's to edit.
+   */
+  @Test
+  void anEditThatKeepsTheProjectIsNoMoveIntoAnUnheldOne() {
+    board.db.execute("DELETE FROM projects WHERE name = 'acme'");
+
+    assertEquals(
+        Optional.empty(), rule.decide(OWNER_API, "lobby", LOBBY, with(LOBBY, "title", "x")));
   }
 
   @Test

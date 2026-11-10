@@ -5,6 +5,10 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
@@ -19,11 +23,11 @@ import java.util.List;
 
 /**
  * The pre-launch admission checks every run lane runs before it reserves a container or takes a
- * snapshot: is the actor allowed to act on this spec from this box, is the box's FDE in the synced
- * roster, is the chosen agent a known name actually installed in the container, and is the model a
- * shell-safe token. Each refusal is an {@link ApiException} thrown before any side effect, so a
- * rejected launch never leaves a half-provisioned run. Shared by the lanes an operator starts —
- * dispatch, build and membership — so admission is decided in exactly one place.
+ * snapshot: may the actor dispatch this spec, does it run on this box, is the box's FDE in the
+ * synced roster, is the chosen agent a known name actually installed in the container, and is the
+ * model a shell-safe token. Each refusal is an {@link ApiException} thrown before any side effect,
+ * so a rejected launch never leaves a half-provisioned run. Shared by the lanes an operator starts
+ * — dispatch, build and membership — so admission is decided in exactly one place.
  */
 public final class LaunchAdmission {
 
@@ -36,18 +40,18 @@ public final class LaunchAdmission {
   }
 
   /**
-   * Refuses when a spec-less room's agents are not this box's to manage: no agent lane, node handle
-   * set, and this box owns the room (assignee, else creator). Whether the actor may change the room
-   * is the room rule's, decided where its roster is written.
+   * Refuses when the bound actor may not seat or remove the agents of spec-less room {@code roomId}
+   * of {@code project}, which {@code owner} owns ({@link Action#DISPATCH}), or when they are not
+   * this box's to serve: the node handle must be set, and this box must own the room. A room its
+   * caller read was read in its scope; one being created is in a project the caller names, and one
+   * the caller may not read is answered as a project this box does not hold. Whether the roster may
+   * change is the room rule's too, decided where it is written.
    */
-  public static void requireAllowedForRoom(String roomId, String owner, String localHandle) {
-    var actor = Actor.current();
-    if (actor.agentLane()) {
-      throw new ApiException(
-          ErrorCode.FORBIDDEN,
-          "Agent credentials cannot manage room membership.",
-          "Ask the engineer in the room to do it.");
-    }
+  public static void requireAllowedForRoom(
+      String roomId, String project, String owner, String localHandle) {
+    Refusals.require(
+        Access.decide(Actor.current(), Action.DISPATCH, Resources.room(roomId, project, owner)),
+        () -> ProjectReader.absent(project));
     if (Strings.isBlank(localHandle)) {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED,
@@ -63,13 +67,70 @@ public final class LaunchAdmission {
   }
 
   /**
-   * Refuses when the actor may not act on {@code spec} from the box identified by {@code
-   * localHandle}.
+   * Refuses when the bound actor may not dispatch {@code spec} ({@link Action#DISPATCH}), its
+   * assignee's, and then when it does not run on the box identified by {@code localHandle}:
+   * placement, not permission. The spec is one its caller read in the actor's scope, so one outside
+   * it is not found. An unassigned spec has no owner to ask, so only the role and lane are ({@link
+   * Access#atAll}), and placement says it runs on no box until it is claimed, whoever asks, as main
+   * said.
+   *
+   * <p>Placement enforces one invariant: <em>a spec executes only on the node whose handle equals
+   * the spec's assignee</em>. Node identity is {@code SyncConfig.handle} — one FDE, one devbox — so
+   * an FDE dispatching on their own box always matches; anyone, admin included, asking a box to run
+   * another FDE's spec is refused with the owning node named. Moving work is explicit: reassign the
+   * spec, then dispatch. A box with no handle can run nothing.
    */
   public static void requireAllowed(Spec spec, String localHandle) {
-    if (DispatchPolicy.check(spec, localHandle) instanceof DispatchDecision.Refused refused) {
-      throw new ApiException(refused.code(), refused.message(), refused.fix());
+    var actor = Actor.current();
+    if (Strings.isBlank(spec.assignee())) {
+      Refusals.enforce(Access.atAll(actor, Action.DISPATCH, Resource.Kind.SPEC));
+    } else {
+      Refusals.require(
+          Access.decide(
+              actor,
+              Action.DISPATCH,
+              Resources.spec(spec.id(), spec.project(), spec.assignee(), spec.createdBy())),
+          () -> Refusals.specNotFound(spec.id()));
     }
+    if (Strings.isBlank(localHandle)) {
+      throw nodeHandleUnset();
+    }
+    if (!localHandle.equals(spec.assignee())) {
+      throw runsOnOtherNode(spec, localHandle);
+    }
+  }
+
+  /** The refusal of a box with no sync-handle, which can be no spec's execution node. */
+  public static ApiException nodeHandleUnset() {
+    return new ApiException(
+        ErrorCode.NODE_HANDLE_UNSET,
+        "This node has no sync-handle, so it cannot be any spec's execution node.",
+        Remedy.of(
+            "Set it once: ",
+            Remedy.sail("host config set sync-handle", "<handle>"),
+            " (a node gets it from '",
+            Remedy.sail("join"),
+            "')."));
+  }
+
+  static ApiException runsOnOtherNode(Spec spec, String localHandle) {
+    var claim = Remedy.sail("spec update", spec.id(), "--assignee", localHandle);
+    if (Strings.isBlank(spec.assignee())) {
+      return new ApiException(
+          ErrorCode.RUNS_ON_OTHER_NODE,
+          "Spec '" + spec.id() + "' is unassigned, so no node may dispatch it.",
+          Remedy.of("Claim it first: ", claim));
+    }
+    return new ApiException(
+        ErrorCode.RUNS_ON_OTHER_NODE,
+        "Spec '"
+            + spec.id()
+            + "' is assigned to '"
+            + spec.assignee()
+            + "', which runs on that FDE's devbox, not this node ('"
+            + localHandle
+            + "').",
+        Remedy.of("Reassign it to dispatch here: ", claim));
   }
 
   /**

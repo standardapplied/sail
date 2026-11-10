@@ -5,6 +5,10 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.NameValidator;
@@ -21,8 +25,9 @@ import java.util.Map;
  * the box that applies the project with the member the definition names already seated. After that
  * it is a room like any other. The definition is read once: a room that exists is its owner's, and
  * a later apply leaves it alone. The room is born seated, in one write, so a refused member leaves
- * no room behind and an empty roster is only ever its owner's choice. A viewer posts in no room, so
- * it has no home room, and its apply makes none.
+ * no room behind and an empty roster is only ever its owner's choice. One who may not create the
+ * room has no home room, and its apply makes none: a read-only credential, since every other
+ * principal that applies a project may create a room in one it reads.
  */
 public final class HomeRoom {
 
@@ -64,6 +69,21 @@ public final class HomeRoom {
   }
 
   /**
+   * Whether {@code actor}, acting as {@code handle}, has a home room in {@code project}: whether it
+   * may create the room an apply makes it there ({@link Action#CREATE}), its own. A read-only
+   * credential creates no room, so it has a home room in none; nor has anyone in a project it may
+   * not read, which {@link #ensure} says apart.
+   */
+  static boolean has(Actor actor, String project, String handle) {
+    return home(actor, project, handle) instanceof Decision.Allowed;
+  }
+
+  private static Decision home(Actor actor, String project, String handle) {
+    return Access.decide(
+        actor, Action.CREATE, Resources.room(idOf(project, handle), project, handle));
+  }
+
+  /**
    * Leaves {@code handle}'s home room for {@code definition} in the catalog, seating the project's
    * member, through the same door the API's room creation takes, so every admission check runs as
    * it does there. Runs as the bound actor, the box's FDE.
@@ -76,12 +96,19 @@ public final class HomeRoom {
     if (member == null) {
       return Outcome.skipped("the definition names no agent, so it has no home room");
     }
-    if (!Actor.current().canWrite()) {
-      return Outcome.skipped(
-          "this box's FDE holds a read-only credential and posts in no room, so it has no home"
-              + " room");
-    }
     var project = definition.name();
+    switch (home(Actor.current(), project, handle)) {
+      case Decision.Allowed allowed -> {}
+      case Decision.NotFound absent -> {
+        return Outcome.skipped(
+            "this box's FDE does not read project '" + project + "', so it has no home room there");
+      }
+      case Decision.Refused refused -> {
+        return Outcome.skipped(
+            "this box's FDE holds a read-only credential and posts in no room, so it has no home"
+                + " room");
+      }
+    }
     var id = idOf(project, handle);
     var held = operations.room(id);
     if (held instanceof Result.Success<RoomDetailResponse> found) {

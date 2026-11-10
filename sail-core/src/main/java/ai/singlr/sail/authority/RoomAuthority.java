@@ -5,7 +5,10 @@
 
 package ai.singlr.sail.authority;
 
-import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Refusal;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
@@ -15,13 +18,17 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Who may write a room. Any writer creates one, in a project this box holds ({@link
- * ProjectStore#refusesInto}), which is where a room moves too; every later revision and its
- * tombstone — roster, wake, title and assignee alike — is its owner's ({@link RoomStore#ownerOf})
- * or an admin's. Owning a spec born in a room gives a voice there ({@link PostingRule}), never its
- * settings.
+ * Who may write a room: a birth is a {@link Action#CREATE}, and every later revision and its
+ * tombstone — roster, wake, title and assignee alike — a {@link Action#CHANGE} of the room as its
+ * owner has it ({@link RoomStore#ownerOf}), each decided by {@link Access}. Owning a spec born in a
+ * room gives a voice in its conversation, never its settings. A room lands only in a project this
+ * box holds ({@link ProjectStore#refusesInto}): a project it does not is not there, which is said
+ * before anything is decided. Then the one fact: a push names only its pusher ({@link
+ * Attribution}).
  */
 public final class RoomAuthority implements WriteAuthority {
+
+  private static final String PROJECT = "project";
 
   private final RoomStore rooms;
   private final ProjectStore projects;
@@ -37,42 +44,20 @@ public final class RoomAuthority implements WriteAuthority {
   @Override
   public Optional<Refusal> decide(
       Actor actor, String id, Map<String, Object> held, Map<String, Object> next) {
-    if (WriteAuthority.decided(actor)) {
-      return Optional.empty();
-    }
-    if (!actor.canWrite()) {
-      return Refusal.readOnly(held == null ? "create rooms" : "change rooms");
-    }
     var unheld =
         projects.refusesInto(
-            actor, rooms.liveProject(id).orElse(null), Snapshots.text(next, "project"), false);
+            actor, rooms.liveProject(id).orElse(null), Snapshots.text(next, PROJECT), false);
     if (unheld.isPresent()) {
       return unheld;
     }
-    var attributed = attribution.decide(actor, held, next, "created_by", null);
-    if (attributed.isPresent() || held == null) {
-      return attributed;
-    }
-    return owned(actor, id, rooms.ownerOf(id, held));
-  }
-
-  /**
-   * Why {@code actor}, who may write, may not change room {@code id}, owned by {@code owner}: the
-   * room-owner rule every later revision of a room is decided by.
-   */
-  private static Optional<Refusal> owned(Actor actor, String id, String owner) {
-    if (actor.isAdmin() || actor.actsFor(owner)) {
-      return Optional.empty();
-    }
-    if (Strings.isBlank(owner)) {
-      return Refusal.of(
-          Refusal.Kind.NOT_OWNER,
-          "Room '" + id + "' has no owner, so only an admin may change it.",
-          "Have an admin change it.");
-    }
-    return Refusal.of(
-        Refusal.Kind.NOT_OWNER,
-        "Room '" + id + "' belongs to '" + owner + "', not you.",
-        "Ask " + owner + " to change it, or have an admin do it.");
+    var refused =
+        WriteAuthority.refused(
+            actor,
+            held == null
+                ? Taking.of(Resources.room(id, null, null), Action.CREATE)
+                : Taking.of(Resources.room(id, null, rooms.ownerOf(id, held)), Action.CHANGE));
+    return refused.isPresent()
+        ? refused
+        : attribution.decide(actor, held, next, "created_by", null);
   }
 }
