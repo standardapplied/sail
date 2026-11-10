@@ -6,11 +6,13 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.FdeStore;
@@ -20,15 +22,16 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-class PtyHostRoomsTest {
+class PtyHostAdmissionTest {
 
   @TempDir Path dir;
   private Path path;
-  private PtyHostRooms rooms;
+  private PtyHostAdmission admission;
 
   @BeforeEach
   void seed() {
@@ -73,87 +76,81 @@ class PtyHostRoomsTest {
                                 null,
                                 null)));
           }
-          rooms = new PtyHostRooms(path);
+          admission = new PtyHostAdmission(path);
         });
   }
 
   private String refusal(String room, String project, PtyIdentity who) {
-    return assertThrows(IOException.class, () -> rooms.admit(room, project, who)).getMessage();
+    return assertThrows(IOException.class, () -> admission.room(room, project, who)).getMessage();
   }
 
   @Test
   void theRoomsAssigneeAndAnAdminMayPinASessionThere() {
     assertDoesNotThrow(
         () ->
-            rooms.admit(
+            admission.room(
                 "adas-room",
                 "acme",
                 new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API))));
     assertDoesNotThrow(
         () ->
-            rooms.admit(
+            admission.room(
                 "adas-room",
                 "acme",
                 new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API))));
   }
 
   @Test
-  void anotherMemberPinsButAViewerAndAStrangerAreRefusedByTheRoomsPostRight() {
+  void anotherMemberPinsButAViewerIsRefusedByTheRoomsPostRight() {
     assertDoesNotThrow(
         () ->
-            rooms.admit(
+            admission.room(
                 "adas-room",
                 "acme",
                 new PtyIdentity.Person(new Actor("mallory", Role.MEMBER, Actor.Lane.API))),
         "every writer of the project may speak in its rooms");
-    assertTrue(
+    assertEquals(
+        "Your credential is read-only and cannot post in rooms. Ask an admin for a member or admin"
+            + " credential.",
         refusal(
-                "adas-room",
-                "acme",
-                new PtyIdentity.Person(new Actor("peek", Role.MEMBER, Actor.Lane.API)))
-            .contains("read-only"),
-        "a viewer's roster role, not the client's claim, decides");
-    assertTrue(
-        refusal(
-                "adas-room",
-                "acme",
-                new PtyIdentity.Person(new Actor("nobody", Role.MEMBER, Actor.Lane.API)))
-            .contains("not in this box's roster"),
-        "a handle absent from the roster is refused");
-    assertTrue(
-        refusal(
-                "adas-room",
-                "acme",
-                new PtyIdentity.Person(new Actor("peek", Role.ADMIN, Actor.Lane.API)))
-            .contains("read-only"),
-        "the roster's role decides, never an admin bit riding the identity");
+            "adas-room",
+            "acme",
+            new PtyIdentity.Person(new Actor("peek", Role.VIEWER, Actor.Lane.API))),
+        "the role the host resolved for the person decides");
   }
 
   @Test
-  void aDisabledFdeIsRefused() throws Exception {
-    try (var db = Sqlite.open(path)) {
-      db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'ada'");
-    }
-
-    assertTrue(
-        refusal(
-                "adas-room",
-                "acme",
-                new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API)))
-            .contains("disabled"));
+  void aTerminalOpensInAProjectItsPersonHoldsOnThisBoxAndNoOther() {
+    assertDoesNotThrow(
+        () ->
+            admission.project(
+                "acme", new PtyIdentity.Person(new Actor("peek", Role.VIEWER, Actor.Lane.API))),
+        "a viewer's terminal stays allowed");
+    assertEquals(
+        "Project 'acme' is not in the catalog. Create it with 'sail project create acme', or sync"
+            + " it from main with 'sail sync'.",
+        assertThrows(
+                IOException.class,
+                () ->
+                    admission.project(
+                        "acme",
+                        new PtyIdentity.Person(
+                            new Actor("mallory", Role.MEMBER, Actor.Lane.API)
+                                .withScope(ProjectScope.of(List.of("beta"))))))
+            .getMessage());
   }
 
   @Test
   void anUnassignedRoomIsPinnedByEveryWriterOfItsProject() {
     assertDoesNotThrow(
         () ->
-            rooms.admit(
+            admission.room(
                 "open-room",
                 "acme",
                 new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API))));
     assertDoesNotThrow(
         () ->
-            rooms.admit(
+            admission.room(
                 "open-room",
                 "acme",
                 new PtyIdentity.Person(new Actor("mallory", Role.MEMBER, Actor.Lane.API))));

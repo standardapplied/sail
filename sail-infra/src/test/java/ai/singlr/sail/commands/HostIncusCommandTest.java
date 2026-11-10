@@ -19,10 +19,10 @@ import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyMessage;
-import ai.singlr.sail.pty.PtyRooms;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.store.RunStore;
 import java.io.ByteArrayOutputStream;
@@ -298,7 +298,7 @@ class HostIncusCommandTest {
                 socket,
                 dir.resolve("sessions"),
                 token -> new PtyIdentity.Person(new Actor(token, Role.MEMBER, Actor.Lane.API)),
-                PtyRooms.NONE,
+                PtyAdmission.NONE,
                 PtyEvents.NONE);
         var alice = SessionClient.connect(socket, "alice");
         var bob = SessionClient.connect(socket, "bob")) {

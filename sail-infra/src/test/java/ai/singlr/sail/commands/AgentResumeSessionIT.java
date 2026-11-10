@@ -95,7 +95,7 @@ class AgentResumeSessionIT extends AbstractIncusIT {
               dir.resolve("s"),
               64 * 1024,
               token -> new PtyIdentity.Person(new Actor("it", Role.ADMIN, Actor.Lane.API)),
-              new PtyHostRooms(dbPath),
+              new PtyHostAdmission(dbPath),
               new PtyHostEvents(dbPath, dir.resolve("pty-events.drops")),
               "0.0.0-test")) {
         host.start();

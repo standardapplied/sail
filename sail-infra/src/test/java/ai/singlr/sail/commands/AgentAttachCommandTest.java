@@ -23,9 +23,9 @@ import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
-import ai.singlr.sail.pty.PtyRooms;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.HeldProjects;
@@ -142,7 +142,7 @@ class AgentAttachCommandTest {
             dir.resolve("h.sock"),
             dir.resolve("s"),
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-            PtyRooms.NONE,
+            PtyAdmission.NONE,
             PtyEvents.NONE)) {
       var plan =
           new AgentAttachCommand.ResumePlan("resume-1", List.of("sh", "-c", "read a"), "", "");
@@ -319,7 +319,7 @@ class AgentAttachCommandTest {
                 socket,
                 dir.resolve("s"),
                 token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-                PtyRooms.NONE,
+                PtyAdmission.NONE,
                 PtyEvents.NONE)) {
       new SchemaManager(db).migrate();
       HeldProjects.hold(db, "acme");

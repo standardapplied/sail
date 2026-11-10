@@ -251,7 +251,7 @@ class OneDecisionTest {
         "forbidden_not_assignee",
         NOT_ADAS_ROOM);
     var access = new HostAccess(db, TestAuth.roles(db, MAIN));
-    access.admit("den", "acme", access.identity(session, null));
+    access.admit("den", "acme", access.identity(session));
 
     try (var node = new SyncBox("ada")) {
       pull(node);

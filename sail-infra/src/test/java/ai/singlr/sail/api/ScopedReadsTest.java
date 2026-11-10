@@ -23,6 +23,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
@@ -1304,39 +1305,21 @@ class ScopedReadsTest {
   void theTerminalDoorRefusesARoomOutsideTheFdesScopeAsOneThatDoesNotExist() throws Exception {
     Acting.system(this::bravoArrives);
     var door = new HostAccess(db, TestAuth.roles(db));
+    var scoped =
+        door.identity(
+            new AuthSessionStore(db)
+                .create(new FdeStore(db).byHandle("sam").orElseThrow().id(), Duration.ofHours(1))
+                .token());
 
-    var outside =
-        assertThrows(
-            IOException.class,
-            () ->
-                door.admit(
-                    "bravo-room",
-                    "bravo",
-                    new PtyIdentity.Person(new Actor("sam", Role.MEMBER, Actor.Lane.API))));
+    var outside = assertThrows(IOException.class, () -> door.admit("bravo-room", "bravo", scoped));
     var misaddressed =
-        assertThrows(
-            IOException.class,
-            () ->
-                door.admit(
-                    "bravo-room",
-                    "alpha",
-                    new PtyIdentity.Person(new Actor("sam", Role.MEMBER, Actor.Lane.API))));
-    var missing =
-        assertThrows(
-            IOException.class,
-            () ->
-                door.admit(
-                    "ghost-room",
-                    "bravo",
-                    new PtyIdentity.Person(new Actor("sam", Role.MEMBER, Actor.Lane.API))));
+        assertThrows(IOException.class, () -> door.admit("bravo-room", "alpha", scoped));
+    var missing = assertThrows(IOException.class, () -> door.admit("ghost-room", "bravo", scoped));
 
     assertEquals("Room 'bravo-room' was not found.", outside.getMessage());
     assertEquals("Room 'bravo-room' was not found.", misaddressed.getMessage());
     assertEquals("Room 'ghost-room' was not found.", missing.getMessage());
-    door.admit(
-        "alpha-room",
-        "alpha",
-        new PtyIdentity.Person(new Actor("sam", Role.MEMBER, Actor.Lane.API)));
+    door.admit("alpha-room", "alpha", scoped);
     door.admit(
         "bravo-room",
         "bravo",

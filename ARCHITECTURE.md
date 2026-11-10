@@ -2857,8 +2857,8 @@ Three doors, three interfaces, each a strict superset of the one below it:
 `HostOperations` adds nothing flat; it hands out five facets, each a small role interface a
 command depends on by name: `dispatching()` (run and stop agents, the runs that gate them),
 `catalog()` (projects and spec rows, rename and purge), `identity()` (tokens, FDEs, SSH keys,
-the gateway decision), `pty()` (what the pty host asks: who a session is, which room it may
-join), and `schema()` (version, migration, readiness to sync). The routers never see a facet,
+the gateway decision), `pty()` (what the pty host asks: who a session is, which project it may
+open in and which room it may join), and `schema()` (version, migration, readiness to sync). The routers never see a facet,
 so a host-privileged verb cannot leak onto a door, and a new host verb goes into the facet
 it belongs to rather than widening a facade. Sync rounds, conflict resolution and shared
 files are web-lane verbs and stay on `Operations`. Incus provisioning and the container half

@@ -22,10 +22,17 @@ import picocli.CommandLine;
 @EnabledOnOs(OS.LINUX)
 class SessionVerbsTest {
 
-  private static final ai.singlr.sail.pty.PtyRooms ROOMS =
-      (room, project, who) -> {
-        if (!room.equals("design-talk")) {
-          throw new java.io.IOException("Room '" + room + "' was not found.");
+  private static final ai.singlr.sail.pty.PtyAdmission ROOMS =
+      new ai.singlr.sail.pty.PtyAdmission() {
+        @Override
+        public void project(String project, ai.singlr.sail.pty.PtyIdentity who) {}
+
+        @Override
+        public void room(String room, String project, ai.singlr.sail.pty.PtyIdentity who)
+            throws java.io.IOException {
+          if (!room.equals("design-talk")) {
+            throw new java.io.IOException("Room '" + room + "' was not found.");
+          }
         }
       };
 

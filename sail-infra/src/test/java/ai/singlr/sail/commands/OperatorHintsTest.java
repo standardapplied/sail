@@ -524,7 +524,7 @@ class OperatorHintsTest {
             Path.of("src/main/java/ai/singlr/sail/commands/PtyHostCommand.java"),
             Path.of("src/main/java/ai/singlr/sail/commands/PtyHostEvents.java"),
             Path.of("src/main/java/ai/singlr/sail/commands/PtyHostIdentity.java"),
-            Path.of("src/main/java/ai/singlr/sail/commands/PtyHostRooms.java"),
+            Path.of("src/main/java/ai/singlr/sail/commands/PtyHostAdmission.java"),
             Path.of("src/main/java/ai/singlr/sail/commands/SyncServerCommand.java"),
             Path.of("src/main/java/ai/singlr/sail/commands/GatewayCommand.java"),
             Path.of("src/main/java/ai/singlr/sail/engine/SyncOperations.java"),
