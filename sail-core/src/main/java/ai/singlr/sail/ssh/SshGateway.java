@@ -5,10 +5,15 @@
 
 package ai.singlr.sail.ssh;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Refusal;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
+import ai.singlr.sail.identity.RoleRule.Credential;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import java.time.Duration;
@@ -21,7 +26,7 @@ import java.util.Set;
  * {@code sail} user's forced command, this resolves their FDE (passed as {@code --fde} on the
  * authorized_keys line), classifies the requested command, mints a short-lived session for that
  * FDE, and returns the argument vector to exec with {@code SAIL_TOKEN} set — so the downstream
- * command authenticates to the loopback API as the FDE and {@code Authorizer} enforces its role.
+ * command authenticates to the loopback API as the FDE, where {@link Access} decides each request.
  *
  * <p>Commands are authorized by kind, default-deny:
  *
@@ -29,10 +34,10 @@ import java.util.Set;
  *   <li>{@link #API_COMMANDS} run for every active FDE — they talk to the loopback API, where the
  *       FDE's role decides what each request may do.
  *   <li>{@link #ADMIN_COMMANDS} are database-direct, so no downstream check exists; the gateway
- *       itself requires the {@code admin} role — except {@code fde passkey list|rm} and {@code fde
- *       enroll} on the caller's own pinned handle, which any active FDE may run. A bare {@code fde
- *       enroll} is pinned to the caller's handle first, so a thin client can self-enroll without
- *       knowing it.
+ *       itself asks {@link Access} whether the FDE may manage people — except for {@code fde
+ *       passkey list|rm} and {@code fde enroll} on the caller's own pinned handle, which any active
+ *       FDE may run. A bare {@code fde enroll} is pinned to the caller's handle first, so a thin
+ *       client can self-enroll without knowing it.
  *   <li>Everything else ({@code project}, {@code host}, {@code server}, {@code migrate}, …) runs
  *       with host privileges the {@code sail} user must never have, and is refused.
  * </ul>
@@ -44,7 +49,7 @@ public final class SshGateway {
   /** Commands the loopback API authorizes per-request by FDE role. */
   public static final Set<String> API_COMMANDS = Set.of("spec", "agent", "events");
 
-  /** Database-direct administration commands; the gateway admits only admin-role FDEs. */
+  /** Database-direct administration commands; the gateway admits those who may manage people. */
   public static final Set<String> ADMIN_COMMANDS = Set.of("fde");
 
   /**
@@ -66,10 +71,11 @@ public final class SshGateway {
   public record Rejected(String reason) implements Decision {}
 
   /**
-   * Whether the FDE pinned to the calling key may run {@code originalCommand}, with the role {@link
-   * RoleRule} gives it: an FDE that is disabled or unknown is refused every command, and an
-   * administration command needs admin. The gateway opens a session for the FDE's roster row, so
-   * even this box's operator must be in {@code roster} to use it.
+   * Whether the FDE pinned to the calling key may run {@code originalCommand}, as the principal
+   * {@link RoleRule} resolves for it: an FDE that is disabled or unknown is refused every command,
+   * and an administration command is Manage people, which {@link Access} decides. The gateway opens
+   * a session for the FDE's roster row, so even this box's operator must be in {@code roster} to
+   * use it.
    */
   public static Decision authorize(
       String originalCommand,
@@ -105,15 +111,18 @@ public final class SshGateway {
               + " SSH to the host directly to run it.");
     }
     var fde = roster.byHandle(fdeHandle);
-    var role = roles.roleOf(fdeHandle, Role.ADMIN);
-    if (fde.isEmpty() || role.isEmpty()) {
+    var principal = roles.principal(Credential.person(fdeHandle, Actor.Lane.API));
+    if (fde.isEmpty() || principal.isEmpty()) {
       return new Rejected("Unknown or disabled FDE.");
     }
     if (ADMIN_COMMANDS.contains(subcommand)
-        && role.get() != Role.ADMIN
         && !isOwnPasskeyCommand(tokens, fdeHandle)
         && !isOwnEnrollCommand(tokens, fdeHandle)) {
-      return new Rejected(adminRequiredReason(tokens, fdeHandle, subcommand));
+      var refused =
+          Access.withinAudience(principal.get(), Action.MANAGE_PEOPLE, Resources.people());
+      if (refused.isPresent()) {
+        return new Rejected(refusedReason(tokens, fdeHandle, refused.get()));
+      }
     }
     var session = sessions.create(fde.get().id(), SESSION_TTL);
     return new Authorized(List.copyOf(tokens), session.token());
@@ -165,8 +174,11 @@ public final class SshGateway {
     return tokens.size() >= 2 && tokens.get(0).equals("fde") && tokens.get(1).equals("enroll");
   }
 
-  private static String adminRequiredReason(
-      List<String> tokens, String fdeHandle, String subcommand) {
+  /**
+   * Why an administration command is refused: for another FDE's passkeys or enrollment ticket, the
+   * caller's own as the way forward; for anything else, the rule's refusal and its fix.
+   */
+  private static String refusedReason(List<String> tokens, String fdeHandle, Refusal refusal) {
     if (isPasskeyCommand(tokens)) {
       return Remedy.of(
               "Managing another FDE's passkeys requires the admin role. You may manage your own: ",
@@ -180,6 +192,6 @@ public final class SshGateway {
               Remedy.client("enroll"))
           .plain();
     }
-    return "'" + subcommand + "' requires the admin role.";
+    return refusal.message() + " " + refusal.fix().plain();
   }
 }

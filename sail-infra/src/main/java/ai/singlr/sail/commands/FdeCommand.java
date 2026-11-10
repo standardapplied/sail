@@ -5,15 +5,21 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Resources;
+import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.auth.EnrollmentService;
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerAuthorizedKeys;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorAuthorizedKeys;
@@ -25,6 +31,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SyncIdentity;
 import ai.singlr.sail.engine.WorkstationIdentity;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -128,6 +135,11 @@ public final class FdeCommand implements Runnable {
     /** Whether this box is a node, whose roster is a copy of main's. */
     boolean node() {
       return main != null;
+    }
+
+    /** Whom this box's root acts for, as {@code roster} places this box's FDE. */
+    Actor person(FdeStore roster) {
+      return CliOperator.of(new SyncConfig(null, main, handle), roster);
     }
 
     /**
@@ -351,12 +363,20 @@ public final class FdeCommand implements Runnable {
   }
 
   /**
-   * Refuses an FDE roster edit on a node. The roster is main-authoritative and replicates one-way,
-   * so an add/update/remove on a node is silently overwritten by the next sync — failing loud with
-   * the right place to run it is far better than losing the edit.
+   * Refuses an FDE roster edit unless whom this box's root acts for may manage people, as {@link
+   * Access} decides it at every door, then refuses it on a node. The roster is main-authoritative
+   * and replicates one-way, so an add/update/remove on a node is silently overwritten by the next
+   * sync — failing loud with the right place to run it is far better than losing the edit. The role
+   * is asked first, so one who may not manage people is told so wherever they ask, and only one who
+   * may is sent to main.
    */
-  private static void requireMainForRosterEdit(boolean node, String action) {
-    if (node) {
+  private static void requireRosterEdit(Box box, String action) {
+    try (var db = Sqlite.open(box.database())) {
+      Refusals.enforce(
+          Access.withinAudience(
+              box.person(new FdeStore(db)), Action.MANAGE_PEOPLE, Resources.people()));
+    }
+    if (box.node()) {
       throw new IllegalStateException(rosterEditOnNodeMessage(action));
     }
   }
@@ -462,7 +482,7 @@ public final class FdeCommand implements Runnable {
           () -> {
             var operator = operator();
             var box = command.box.get();
-            requireMainForRosterEdit(box.node(), "Adding an FDE");
+            requireRosterEdit(box, "Adding an FDE");
             if (scoped) {
               requireNotThisBoxsOwn(box, handle);
             }
@@ -596,7 +616,7 @@ public final class FdeCommand implements Runnable {
             var operator = operator();
             requireOneScopeChange(operator);
             var box = command.box.get();
-            requireMainForRosterEdit(box.node(), "Updating an FDE");
+            requireRosterEdit(box, "Updating an FDE");
             if (displayName == null && email == null && role == null && !scoped && !unscoped) {
               throw new IllegalArgumentException(
                   "Nothing to update. Pass --name, --email, --role, --scoped (with --grant) or"
@@ -777,7 +797,7 @@ public final class FdeCommand implements Runnable {
           () -> {
             var operator = operator();
             var box = command.box.get();
-            requireMainForRosterEdit(box.node(), "Granting a project");
+            requireRosterEdit(box, "Granting a project");
             requireNotThisBoxsOwn(box, handle);
             try (var db = Sqlite.open(box.database())) {
               System.out.println(scopeEdit(db, handle, project, true, dryRun, json, operator));
@@ -814,7 +834,7 @@ public final class FdeCommand implements Runnable {
           () -> {
             var operator = operator();
             var box = command.box.get();
-            requireMainForRosterEdit(box.node(), "Revoking a project");
+            requireRosterEdit(box, "Revoking a project");
             try (var db = Sqlite.open(box.database())) {
               System.out.println(scopeEdit(db, handle, project, false, dryRun, json, operator));
             }
@@ -963,7 +983,7 @@ public final class FdeCommand implements Runnable {
           () -> {
             var operator = operator();
             var box = command.box.get();
-            requireMainForRosterEdit(box.node(), "Removing an FDE");
+            requireRosterEdit(box, "Removing an FDE");
             if (!force) {
               ConsoleHelper.confirmDestructive(
                   "Remove FDE '" + handle + "' and revoke all its credentials?",
