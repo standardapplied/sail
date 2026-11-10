@@ -2496,10 +2496,11 @@ no pairing is removed through the gateway as before, and no key file is touched.
   - **Who owns a conversation** (`RoomStore.owners`): the room's owner, and the owner of every
     spec born in it. Only the room lane reads it: a room principal posts exactly where it acts for
     one of them. Every writer who acts for an FDE posts in every conversation of the projects its
-    scope admits that this box holds (`PostingRule`, `RoomStore.holds`), at the terminal door and
-    at main's decision on a synced message alike. Seating work in a room, a spec born there or a
-    claim of one born there, stays its owners' and an admin's (`SeatingRule`), since the work's
-    owner becomes one of the room's owners. Owning a spec born in a room is never its settings.
+    scope admits that this box holds (`Access`'s Post row, then `RoomStore.holds` in
+    `MessageAuthority`; the terminal door still asks `PostingRule`), at the terminal door and at
+    main's decision on a synced message alike. Seating work in a room, a spec born there or a
+    claim of one born there, stays its owners' and an admin's (`Access`, for a create or claim of
+    a spec born in a room), since the work's owner becomes one of the room's owners. Owning a spec born in a room is never its settings.
     Speaking is not steering: only the owners and an active admin of main's roster reach the
     agents at work in a conversation (`RoomStore.steering`), with sail's own words (`sail` is no
     FDE's handle) and a run's, weighed as its FDE's through every principal it has had. A running
@@ -2524,8 +2525,8 @@ no pairing is removed through the gateway as before, and no key file is touched.
   A spec left without an assignee stays unassigned, and so does its identity room; any member
   may claim it by assigning it to themselves, an agent for the FDE it acts for, and dispatch
   refuses it until then. Owning a spec gives a voice in its conversation, so a spec born in a
-  room is claimed, or created with an assignee, only by one who may already post there and only
-  for themselves (the claim rule, in `SpecAuthority`); giving it to anyone else is an admin's act. A claim
+  room is claimed, or created with an assignee, only by one who may already start work there and
+  only for themselves (a claim, in `SpecAuthority`); giving it to anyone else is an admin's act. A claim
   never opens someone else's room. An assignee is an FDE handle, never an agent type or a run's principal
   (`RunStore.isPrincipalHandle`). `created_by` is the acting FDE (`Actor.actingFde`: the
   handle, or the FDE a run acts for), written once at create. A spec's creator travels as

@@ -27,7 +27,7 @@ public record Refusal(Kind kind, String message, Remedy fix) {
     READ_ONLY,
     /** The actor neither owns the row nor acts for its owner. */
     NOT_OWNER,
-    /** The conversation a post or birth names is not on this box. */
+    /** The conversation a post names is not on this box. */
     NO_CONVERSATION,
     /** Only an admin may make this change. */
     ADMIN_ONLY,
