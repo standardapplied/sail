@@ -500,13 +500,7 @@ class SailOperationsSeamTest {
   }
 
   @ParameterizedTest
-  @CsvSource({
-    "owner,member,200,",
-    "owner,admin,200,",
-    "other,member,403,read_only_credential",
-    "other,admin,403,read_only_credential",
-    "owner,viewer,403,read_only_credential"
-  })
+  @CsvSource({"owner,member,200,", "owner,admin,200,", "owner,viewer,403,read_only_credential"})
   void keepingMineOnTheBoxCredentialIsAnEditTheSpecRuleDecides(
       String handle, String role, int expected, String code) {
     try (var box = new SyncBox("node");

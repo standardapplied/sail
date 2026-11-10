@@ -68,32 +68,60 @@ class LocalApiRouterTest {
         method, path, Map.of(), auth(), body.getBytes(StandardCharsets.UTF_8));
   }
 
-  @Test
-  void agentsCanReadSyncAndConflictsButCannotTriggerSync() {
-    var operations =
-        new TestOperations() {
-          @Override
-          public SyncStatus syncStatus() {
-            return new SyncStatus(
-                "node",
-                "main",
-                new SyncEngine.Report(1, 2, 3, 4),
-                "in_sync",
-                null,
-                null,
-                0,
-                null,
-                null,
-                null);
-          }
+  /** Operations whose box reports its sync health and holds no parked conflict. */
+  private static final class SyncingOperations extends TestOperations {
+    @Override
+    public SyncStatus syncStatus() {
+      return new SyncStatus(
+          "node",
+          "main",
+          new SyncEngine.Report(1, 2, 3, 4),
+          "in_sync",
+          null,
+          null,
+          0,
+          null,
+          null,
+          null);
+    }
 
-          @Override
-          public List<SyncConflicts.Conflict> conflicts() {
-            return List.of();
-          }
-        };
-    var local = new LocalApiRouter(operations);
-    assertEquals("main", local.handle(get("/v1/sync", Map.of())).body().get("main"));
+    @Override
+    public List<SyncConflicts.Conflict> conflicts() {
+      return List.of();
+    }
+  }
+
+  @Test
+  void theBoxsPersonReadsItsSyncHealthAndNoRunDoes() {
+    var local = new LocalApiRouter(new SyncingOperations(), () -> TestOperations.BOX_HANDLE);
+    var health = new LocalApiRequest("GET", "/v1/sync", Map.of(), boxAuth(), new byte[0]);
+
+    assertEquals("main", local.handle(health).body().get("main"));
+    assertEquals(
+        "403 {schema_version=1, error={code=agent_lane_forbidden, message=Agent principals cannot"
+            + " operate boxes., action=Only an operator lane (CLI or API token) may do this., field_errors=[]}}",
+        answer(local.handle(get("/v1/sync", Map.of()))));
+    assertEquals(
+        "403 {schema_version=1, error={code=agent_lane_forbidden, message=Agent principals cannot"
+            + " operate boxes., action=Only an operator lane (CLI or API token) may do this., field_errors=[]}}",
+        answer(
+            local.handle(
+                new LocalApiRequest("GET", "/v1/sync", Map.of(), roomAuth(), new byte[0]))));
+    assertEquals(
+        "403 {schema_version=1, error={code=forbidden_not_assignee, message=Box 'ada' belongs to"
+            + " 'ada', not you., action=Ask ada to operate it, or have an admin do it.,"
+            + " field_errors=[]}}",
+        answer(new LocalApiRouter(new SyncingOperations(), () -> "ada").handle(health)),
+        "the box gate decides on the box the router serves, not on the caller's own");
+  }
+
+  private static String answer(ApiResponse response) {
+    return response.status() + " " + response.body();
+  }
+
+  @Test
+  void agentsReadConflictsButCannotTriggerSync() {
+    var local = new LocalApiRouter(new SyncingOperations());
     assertEquals(List.of(), local.handle(get("/v1/conflicts", Map.of())).body().get("conflicts"));
     assertEquals(405, local.handle(form("POST", "/v1/sync", "")).status());
     assertEquals(405, local.handle(form("POST", "/v1/conflicts", "")).status());
@@ -854,6 +882,12 @@ class LocalApiRouterTest {
 
     assertEquals(403, response.status());
     assertTrue(response.body().get("error").toString().contains("run credential"));
+    assertEquals(
+        "405 {error=events accepts POST}",
+        answer(
+            router.handle(
+                new LocalApiRequest("GET", "/v1/events", Map.of(), boxAuth(), new byte[0]))),
+        "a method the route does not take is refused before who asks it");
   }
 
   @Test
