@@ -9,15 +9,23 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -111,6 +119,48 @@ class TokenAuthTest {
     var fde = new FdeStore(db).add("uday", null, null);
     var token = tokenStore.create("uday-laptop", "admin", fde.id(), null).token();
     assertEquals(200, get("/v1/specs/board", token).statusCode());
+  }
+
+  @Test
+  void aMachineTokenSeesOnlyTheProjectsOfTheBoxsPerson() throws Exception {
+    var roster = new FdeStore(db);
+    roster.add("client", null, null, "member");
+    roster.restrict("client");
+    roster.grant("client", "acme");
+    var node = new SyncConfig("node", "main", "client", "client-box");
+    var machine = tokenStore.create("ci-bot", "member").token();
+
+    var actor = resolved(new TokenAuth(tokenStore, TestAuth.roles(db, node)), machine);
+
+    assertEquals(new Actor(null, Role.MEMBER, Actor.Lane.API), actor.withScope(ProjectScope.all()));
+    assertEquals(
+        List.of(true, false), List.of(actor.scope().admits("acme"), actor.scope().admits("beta")));
+  }
+
+  /** The principal {@code auth} stamps for a request bearing {@code token}. */
+  private static Actor resolved(ApiAuth auth, String token) throws Exception {
+    var stamped = new AtomicReference<Actor>();
+    var http = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    http.createContext(
+        "/",
+        exchange -> {
+          auth.require(exchange);
+          stamped.set(ApiRouter.actorOf(exchange));
+          exchange.sendResponseHeaders(204, -1);
+          exchange.close();
+        });
+    http.start();
+    try (var client = HttpClient.newHttpClient()) {
+      var request =
+          HttpRequest.newBuilder(
+                  URI.create("http://127.0.0.1:" + http.getAddress().getPort() + "/"))
+              .header("Authorization", "Bearer " + token)
+              .build();
+      assertEquals(204, client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode());
+    } finally {
+      http.stop(0);
+    }
+    return stamped.get();
   }
 
   private HttpResponse<String> get(String path, String token) throws Exception {

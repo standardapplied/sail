@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.Capability;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.RunStore;
@@ -40,24 +39,22 @@ import org.junit.jupiter.api.Test;
  * of every module, a member at a time, a lambda counted as the member it is written in, it sees: a
  * call of {@link Actor#isAdmin}, {@link Actor#isSail}, {@link Actor#role}, {@link Actor#lane},
  * {@link Actor#agentLane}, {@link Actor#roomLane}, {@link Actor#scope} or {@link Actor#actsFor}; of
- * {@code RoleRule}'s resolvers, {@link Role#fromAttribute}, {@link Role#allows}, {@link
- * Role#cappedBy} or a role's order; a {@link Role} constant (so an {@code Actor} built with a role
- * literal), a {@code switch} over a role, a type check of one, and any call that returns one;
- * {@code RunRow#readOnlyLane}; a type check of the socket's run or box caller; and anything of
- * {@link Capability}, as a call, a field, a type check, a class constant, or what an {@code
- * invokedynamic} hands its bootstrap (a method reference, the types and constants a pattern {@code
- * switch} tests). It cannot see a role, a lane or a scope read as data: in SQL, from a map, or
- * through a type that hides it, so a filter inside a query takes its scope from {@code
- * Access.audience}. {@code Actor}, {@code Role}, {@code Capability} and the socket's callers define
- * what is read, so their own members are not swept. An entry that no longer matches a read fails
- * too, so the list shrinks as the later specs land.
+ * {@code RoleRule}'s resolvers, {@link Role#fromAttribute}, {@link Role#cappedBy} or a role's
+ * order; a {@link Role} constant (so an {@code Actor} built with a role literal), a {@code switch}
+ * over a role, a type check of one, and any call that returns one; {@code RunRow#readOnlyLane}; and
+ * a type check of the socket's run or box caller, each as a call, a field, a type check, a class
+ * constant, or what an {@code invokedynamic} hands its bootstrap (a method reference, the types and
+ * constants a pattern {@code switch} tests). It cannot see a role, a lane or a scope read as data:
+ * in SQL, from a map, or through a type that hides it, so a filter inside a query takes its scope
+ * from {@code Access.audience}. {@code Actor}, {@code Role} and the socket's callers define what is
+ * read, so their own members are not swept. An entry that no longer matches a read fails too, so
+ * the list shrinks as the later specs land.
  */
 class OneDecisionSweepTest {
 
   private static final String IDENTITY = "ai/singlr/sail/identity/";
   private static final String ACTOR = IDENTITY + "Actor";
   private static final String ROLE = IDENTITY + "Role";
-  private static final String CAPABILITY = IDENTITY + "Capability";
   private static final String ROLE_RULE = IDENTITY + "RoleRule";
   private static final String RUN_ROW = "ai/singlr/sail/store/RunStore$RunRow";
   private static final String CALLER = "ai/singlr/sail/api/LocalApiRouter$Caller$";
@@ -71,7 +68,7 @@ class OneDecisionSweepTest {
           ACTOR,
           Set.of("isAdmin", "isSail", "role", "lane", "agentLane", "roomLane", "scope", "actsFor"),
           ROLE,
-          Set.of("allows", "fromAttribute", "cappedBy", "ordinal", "compareTo"),
+          Set.of("fromAttribute", "cappedBy", "ordinal", "compareTo"),
           ROLE_RULE,
           Set.of("roleOf", "roleOfUnbound", "actorOf"),
           RUN_ROW,
@@ -84,7 +81,6 @@ class OneDecisionSweepTest {
           "ai/singlr/sail/store/FdeStore",
           ACTOR,
           ROLE,
-          CAPABILITY,
           CALLER);
 
   private static final String RETURNS_ROLE = "<returns a role>";
@@ -102,21 +98,13 @@ class OneDecisionSweepTest {
 
   private static Map<String, String> allowed() {
     var allowed = new TreeMap<String, String>();
-    for (var route : List.of("handleStream", "route", "routeSync", "whoami", "actorOf")) {
-      allowed.put(API + "ApiRouter#" + route, EVERY_DOOR);
-    }
     for (var resolves :
         List.of(
-            "Authorizer#require",
             "LocalApiRouter#whoami",
             "LocalApiRouter#requirePerson",
             "LocalApiRouter#runSession",
             "SailOperations#runActor",
-            "SailOperations#boxActorForCredential",
-            "SessionAwareAuth#authenticateSession",
-            "TokenAuth#require",
-            "TokenAuth#roleOf",
-            "WebauthnAuthHandler#requireAdmin")) {
+            "SailOperations#boxActorForCredential")) {
       allowed.put(API + resolves, EVERY_DOOR);
     }
     for (var resolves :
@@ -198,8 +186,6 @@ class OneDecisionSweepTest {
               leaky + "lane",
               leaky + "agent",
               leaky + "room",
-              leaky + "allows",
-              leaky + "capability",
               leaky + "inALambda",
               leaky + "sail",
               leaky + "scope",
@@ -242,14 +228,6 @@ class OneDecisionSweepTest {
 
     boolean room(Actor actor) {
       return actor.roomLane();
-    }
-
-    boolean allows(Role role) {
-      return role.allows(null);
-    }
-
-    Object capability() {
-      return Capability.values();
     }
 
     boolean inALambda(List<Actor> actors) {
@@ -346,9 +324,6 @@ class OneDecisionSweepTest {
   }
 
   private static boolean reads(MethodModel method) {
-    if (method.methodTypeSymbol().descriptorString().contains("L" + CAPABILITY + ";")) {
-      return true;
-    }
     var code = method.code();
     if (code.isEmpty()) {
       return false;
@@ -415,8 +390,7 @@ class OneDecisionSweepTest {
               var hash = reference.indexOf('#');
               var owner = reference.substring(0, hash);
               var member = reference.substring(hash + 1);
-              return owner.equals(CAPABILITY)
-                  || owner.startsWith(CALLER) && member.isEmpty()
+              return owner.startsWith(CALLER) && member.isEmpty()
                   || owner.equals(ROLE)
                       && (member.isEmpty() || Character.isUpperCase(member.charAt(0)))
                   || member.equals(ROLE_SWITCH)

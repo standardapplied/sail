@@ -33,13 +33,13 @@ class WebauthnPageHandlerTest {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
     var tokenStore = new TokenStore(db);
-    var passkeyHandler = new WebauthnAuthHandler(null, null, TestAuth.tokens(db), null);
+    var passkeyHandler = new WebauthnAuthHandler(null, null, TestAuth.sessions(db), null);
     server =
         new SailApiServer(
             "127.0.0.1",
             0,
             new TestOperations(),
-            TestAuth.tokens(db),
+            TestAuth.sessions(db),
             new EventBus(),
             null,
             null,

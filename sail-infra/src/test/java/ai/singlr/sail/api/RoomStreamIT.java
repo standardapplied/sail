@@ -11,7 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import ai.singlr.sail.api.LiveRoom.Lines;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ActingAs;
-import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import com.sun.net.httpserver.HttpServer;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -87,10 +88,8 @@ class RoomStreamIT {
 
   private void serve() throws Exception {
     ApiAuth auth =
-        exchange -> {
-          exchange.setAttribute("token.role", "member");
-          exchange.setAttribute(ApiAuth.SCOPE, ProjectScope.all());
-        };
+        exchange ->
+            exchange.setAttribute(ApiAuth.ACTOR, new Actor(null, Role.MEMBER, Actor.Lane.API));
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext("/v1/events/stream", new SseHandler(room.bus, auth, room.live::turnState));
     server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());

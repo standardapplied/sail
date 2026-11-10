@@ -60,11 +60,13 @@ import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncTransitionSink;
 import ai.singlr.sail.sync.SyncTransportException;
 import ai.singlr.sail.sync.SyncedEntities;
+import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -182,7 +184,7 @@ class SailOperationsSeamTest {
         var operations =
             OperationsFactory.create(
                 node.db, shell, bus, null, SyncScheduler.disabled(), SessionYield.NONE);
-        var server = server(operations, node.db)) {
+        var server = server(operations, node.db, "owner")) {
       var clock = new BackoffTest.TestClock();
       var nanos = new AtomicLong();
       var attempts = new AtomicInteger();
@@ -602,7 +604,7 @@ class SailOperationsSeamTest {
     for (var lane : List.of("token", "session")) {
       try (var box = new SyncBox("node");
           var operations = operations(box.db);
-          var server = server(operations, box.db)) {
+          var server = server(operations, box.db, "node")) {
         parkRetitle(box, "owner");
         var token = credential(box.db, handle, role, lane);
         var result =
@@ -626,11 +628,12 @@ class SailOperationsSeamTest {
 
   @ParameterizedTest
   @ValueSource(strings = {"token", "session"})
-  void onlyAdminsCanChooseTheSyncPeerThroughHttp(String lane) throws Exception {
+  void theBoxsOwnPersonOrAnAdminRunsItsRoundsAndChoosesItsPeerThroughHttp(String lane)
+      throws Exception {
     try (var main = new SyncBox("main");
         var node = new SyncBox("node");
         var operations = operations(node.db);
-        var server = server(operations, node.db)) {
+        var server = server(operations, node.db, "node")) {
       var targets = new ArrayList<String>();
       operations.useControlPlane(
           node.db,
@@ -645,19 +648,37 @@ class SailOperationsSeamTest {
                 return channel(main);
               }));
       knownToMain(main, "member", "member");
+      knownToMain(main, "node", "member");
       knownToMain(main, "admin", "admin");
       var member = credential(node.db, "member", "member", lane);
-      var denied = send(server, "POST", "/v1/sync", member, "{\"main\":\"untrusted-peer\"}");
-      assertEquals(403, denied.statusCode(), denied.body());
+      for (var body : List.of("{}", "{\"main\":\"untrusted-peer\"}")) {
+        var denied = send(server, "POST", "/v1/sync", member, body);
+        assertEquals(403, denied.statusCode(), denied.body());
+        assertEquals(
+            Map.of(
+                "code",
+                "forbidden_not_assignee",
+                "message",
+                "Box 'node' belongs to 'node', not you.",
+                "action",
+                "Ask node to operate it, or have an admin do it.",
+                "field_errors",
+                List.of()),
+            YamlUtil.parseMap(denied.body()).get("error"));
+      }
       assertTrue(targets.isEmpty());
       assertEquals("member", new FdeStore(node.db).byHandle("member").orElseThrow().role());
 
+      var owner = credential(node.db, "node", "member", lane);
       for (var body : List.of("{}", "{\"main\":null}", "{\"main\":\"\"}", "{\"main\":\" \"}")) {
-        var response = send(server, "POST", "/v1/sync", member, body);
+        var response = send(server, "POST", "/v1/sync", owner, body);
         assertEquals(200, response.statusCode(), response.body());
       }
+      var repointed = send(server, "POST", "/v1/sync", owner, "{\"main\":\"own-choice\"}");
+      assertEquals(200, repointed.statusCode(), repointed.body());
       assertEquals(
-          List.of("trusted-main", "trusted-main", "trusted-main", "trusted-main"), targets);
+          List.of("trusted-main", "trusted-main", "trusted-main", "trusted-main", "own-choice"),
+          targets);
 
       var admin = credential(node.db, "admin", "admin", lane);
       var allowed = send(server, "POST", "/v1/sync", admin, "{\"main\":\"alternate\"}");
@@ -672,7 +693,7 @@ class SailOperationsSeamTest {
       throws Exception {
     try (var box = new SyncBox("node");
         var operations = operations(box.db);
-        var server = server(operations, box.db)) {
+        var server = server(operations, box.db, "node")) {
       Acting.as("uday", () -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var local = box.specs.comparableSnapshot("auth");
       var remote = new LinkedHashMap<>(local);
@@ -724,7 +745,7 @@ class SailOperationsSeamTest {
   void httpUploadsMaterializeNewAndUpdatedFilesWhilePreservingLocalEdits() throws Exception {
     try (var box = new SyncBox("node");
         var operations = operations(box.db);
-        var server = server(operations, box.db)) {
+        var server = server(operations, box.db, "node")) {
       var member = credential(box.db, "member", "member", "token");
       var path = "/v1/projects/proj/files/dir/config";
       var local = tempDir.resolve("proj/files/dir/config");
@@ -745,7 +766,7 @@ class SailOperationsSeamTest {
       throws Exception {
     try (var box = new SyncBox("node");
         var operations = operations(box.db);
-        var server = server(operations, box.db)) {
+        var server = server(operations, box.db, "node")) {
       var files = new FileStore(box.db);
       for (var path : List.of("dir/ /config", "dir/config")) {
         ContentFixtures.put(files, "proj", path, "local");
@@ -781,12 +802,28 @@ class SailOperationsSeamTest {
     }
   }
 
-  private static SailApiServer server(SailOperations operations, Sqlite db) throws IOException {
+  /** The web API over {@code operations} and {@code db}'s roster, on the box FDE {@code box} is. */
+  private static Api server(SailOperations operations, Sqlite db, String box) throws IOException {
     var auth = TestAuth.sessions(db);
-    var server =
-        new SailApiServer("127.0.0.1", 0, operations, auth, new EventBus(), null, null, null);
-    server.start();
-    return server;
+    var http = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    PrivateAttributes.context(
+        http,
+        "/",
+        new ApiRouter(
+            operations, auth, new RateLimitGate(), new AgentLogStreamer(auth), () -> box));
+    http.start();
+    return new Api(http);
+  }
+
+  private record Api(HttpServer http) implements AutoCloseable {
+    int port() {
+      return http.getAddress().getPort();
+    }
+
+    @Override
+    public void close() {
+      http.stop(0);
+    }
   }
 
   /** A node's roster mirrors main's, so an FDE a node acts as must be on main's roster too. */
@@ -803,8 +840,7 @@ class SailOperationsSeamTest {
   }
 
   private static HttpResponse<String> send(
-      SailApiServer server, String method, String path, String token, String body)
-      throws Exception {
+      Api server, String method, String path, String token, String body) throws Exception {
     var request =
         HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
             .header("Authorization", "Bearer " + token)

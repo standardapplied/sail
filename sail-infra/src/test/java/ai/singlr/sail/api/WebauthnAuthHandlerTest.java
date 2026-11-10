@@ -87,11 +87,11 @@ class WebauthnAuthHandlerTest {
             "127.0.0.1",
             0,
             new TestOperations(),
-            TestAuth.tokens(db),
+            TestAuth.sessions(db),
             new EventBus(),
             null,
             null,
-            new WebauthnAuthHandler(ceremonies, enrollment, TestAuth.tokens(db), origins));
+            new WebauthnAuthHandler(ceremonies, enrollment, TestAuth.sessions(db), origins));
     server.start();
   }
 
@@ -304,6 +304,53 @@ class WebauthnAuthHandlerTest {
     assertEquals(401, post("/v1/auth/register/ticket", null, "{\"fde\":\"uday\"}").statusCode());
     assertEquals(
         403, post("/v1/auth/register/ticket", viewerToken, "{\"fde\":\"uday\"}").statusCode());
+  }
+
+  @Test
+  void anAdminsPasskeySessionMintsATicketAndAnyoneElseIsRefusedAsThePeopleGateSays()
+      throws Exception {
+    startWith(new FakeCeremonies());
+    var roster = new FdeStore(db);
+    var sessions = new AuthSessionStore(db);
+    var admin = sessions.create(roster.add("mady", null, null, "admin").id(), Duration.ofHours(1));
+    var member = sessions.create(roster.add("eng", null, null, "member").id(), Duration.ofHours(1));
+
+    var minted = post("/v1/auth/register/ticket", admin.token(), "{\"fde\":\"uday\"}");
+    var notAdmin = post("/v1/auth/register/ticket", member.token(), "{\"fde\":\"uday\"}");
+    var readOnly = post("/v1/auth/register/start", viewerToken, "{\"fde\":\"uday\"}");
+
+    assertEquals(200, minted.statusCode(), minted.body());
+    assertEquals("enr_fake", YamlUtil.parseMap(minted.body()).get("ticket"));
+    assertEquals(403, notAdmin.statusCode());
+    assertEquals(
+        Map.of(
+            "code",
+            "forbidden_admin_only",
+            "message",
+            "Only an admin may manage people.",
+            "action",
+            "Ask an admin to do it.",
+            "field_errors",
+            List.of()),
+        YamlUtil.parseMap(notAdmin.body()).get("error"));
+    var unticketed =
+        post(
+            "/v1/auth/register/finish",
+            viewerToken,
+            "{\"challenge_id\":\"wac_reg\",\"client_data_json\":\"AAAA\",\"attestation_object\":\"AAAA\"}");
+    assertEquals(readOnly.body(), unticketed.body());
+    assertEquals(403, readOnly.statusCode());
+    assertEquals(
+        Map.of(
+            "code",
+            "read_only_credential",
+            "message",
+            "Your credential is read-only and cannot manage people.",
+            "action",
+            "Ask an admin for a member or admin credential.",
+            "field_errors",
+            List.of()),
+        YamlUtil.parseMap(readOnly.body()).get("error"));
   }
 
   @Test

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.store.Sqlite;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpContext;
 import com.sun.net.httpserver.HttpExchange;
@@ -54,8 +55,13 @@ class RateLimitGateTest {
 
   @Test
   void ceremonyBurstIsThrottledWhileHealthStaysAvailable(@TempDir Path tmp) throws Exception {
-    var passkeys = new WebauthnAuthHandler(null, null, AUTH, null);
-    try (var server = server(tmp, passkeys, null, oneRequest())) {
+    try (var db = Sqlite.open(tmp.resolve("sail.db"));
+        var server =
+            server(
+                tmp,
+                new WebauthnAuthHandler(null, null, TestAuth.sessions(db), null),
+                null,
+                oneRequest())) {
       server.start();
 
       var first = post(server, "/v1/auth/login/start");

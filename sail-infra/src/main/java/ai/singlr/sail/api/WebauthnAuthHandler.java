@@ -12,7 +12,6 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.identity.Capability;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import java.io.IOException;
@@ -22,14 +21,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * Serves the passkey ceremony endpoints under {@code /v1/auth}. An admin mints an enrollment ticket
  * ({@code POST /register/ticket}); registration ({@code /register/start|finish}) then enrolls a
  * passkey for an FDE, authorized by either that ticket (so a browser, which cannot carry an
- * operator token, can enroll) or an authenticated {@link Capability#ADMIN} caller. Login ({@code
+ * operator token, can enroll) or a caller who may manage people. Login ({@code
  * /login/start|finish}) is unauthenticated by design (the caller has no credential yet) and, on
- * success, mints a session.
+ * success, mints a session. Each route declares its {@link Gate} (A3); the people gate is asked of
+ * the principal the server's own authentication resolves, a passkey session's included.
  *
  * <p>This handler is a thin adapter: it parses the JSON body, base64url-decodes the binary WebAuthn
  * fields, delegates to {@link PasskeyCeremonies}, and maps {@link PasskeyException} to an HTTP
@@ -40,28 +41,56 @@ import java.util.Objects;
  * public by nature (they are the URLs a browser signs in at), and a tunneled CLI preflights them to
  * fail with configuration guidance instead of a doomed browser ceremony.
  */
-public final class WebauthnAuthHandler implements HttpHandler {
+public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
 
   private static final Base64.Decoder B64URL = Base64.getUrlDecoder();
   private static final Base64.Encoder B64URL_ENC = Base64.getUrlEncoder().withoutPadding();
   private static final String TICKET_HEADER = "X-Enrollment-Ticket";
+  private static final String POST = "POST";
+  private static final Supplier<String> NO_BOX = () -> null;
+  private static final Gate ENROLLMENT =
+      Gate.unauthenticated("an enrollment ticket authorizes it; without one, the people gate does");
+  private static final Gate SIGN_IN =
+      Gate.unauthenticated("the caller signs in with a passkey: it holds no credential yet");
 
   private final PasskeyCeremonies ceremonies;
   private final EnrollmentTickets enrollment;
-  private final ApiAuth auth;
+  private final SessionAwareAuth auth;
   private final List<String> origins;
   private final String enrollOrigin;
+  private final List<Route<Ceremony>> routes =
+      List.of(
+          new Route<>(POST, "/v1/auth/register/ticket", Gate.PEOPLE, this::registerTicket),
+          new Route<>(POST, "/v1/auth/register/start", ENROLLMENT, this::registerStart),
+          new Route<>(POST, "/v1/auth/register/finish", ENROLLMENT, this::registerFinish),
+          new Route<>(POST, "/v1/auth/login/start", SIGN_IN, this::loginStart),
+          new Route<>(POST, "/v1/auth/login/finish", SIGN_IN, this::loginFinish));
 
+  /**
+   * The passkey endpoints, authenticating a caller by {@code auth}, the server's own: an admin
+   * reaches them with a passkey session as with an API token.
+   */
   public WebauthnAuthHandler(
       PasskeyCeremonies ceremonies,
       EnrollmentTickets enrollment,
-      ApiAuth auth,
+      SessionAwareAuth auth,
       List<String> origins) {
     this.ceremonies = ceremonies;
     this.enrollment = enrollment;
     this.auth = Objects.requireNonNull(auth, "auth");
     this.origins = origins == null ? List.of() : List.copyOf(origins);
     this.enrollOrigin = this.origins.isEmpty() ? null : this.origins.getFirst();
+  }
+
+  /** What answers one passkey route. */
+  @FunctionalInterface
+  private interface Ceremony {
+    ApiResponse answer(HttpExchange exchange) throws IOException;
+  }
+
+  @Override
+  public List<Route<?>> routes() {
+    return List.copyOf(routes);
   }
 
   @Override
@@ -104,22 +133,22 @@ public final class WebauthnAuthHandler implements HttpHandler {
               "'."));
     }
     var path = exchange.getRequestURI().getPath();
+    var route =
+        routes.stream()
+            .filter(candidate -> candidate.match(path).isPresent())
+            .findFirst()
+            .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "Unknown passkey endpoint."));
     try {
-      return switch (path) {
-        case "/v1/auth/register/ticket" -> registerTicket(exchange);
-        case "/v1/auth/register/start" -> registerStart(exchange);
-        case "/v1/auth/register/finish" -> registerFinish(exchange);
-        case "/v1/auth/login/start" -> loginStart(exchange);
-        case "/v1/auth/login/finish" -> loginFinish(exchange);
-        default -> throw new ApiException(ErrorCode.NOT_FOUND, "Unknown passkey endpoint.");
-      };
+      if (!(route.gate() instanceof Gate.Unauthenticated)) {
+        admit(exchange, route.gate());
+      }
+      return route.handler().answer(exchange);
     } catch (PasskeyException e) {
       throw new ApiException(mapped(e.kind()), e.getMessage());
     }
   }
 
   private ApiResponse registerTicket(HttpExchange exchange) throws IOException {
-    requireAdmin(exchange);
     var ticket = enrollment.issue(requireString(JsonBody.readMap(exchange), "fde"));
     var result = new LinkedHashMap<String, Object>();
     result.put("ticket", ticket.ticket());
@@ -145,7 +174,7 @@ public final class WebauthnAuthHandler implements HttpHandler {
         throw ticketDenied();
       }
     } else {
-      requireAdmin(exchange);
+      admit(exchange, Gate.PEOPLE);
     }
     var registration =
         ceremonies.finishRegistration(
@@ -162,15 +191,15 @@ public final class WebauthnAuthHandler implements HttpHandler {
 
   /**
    * Authorizes a registration start: a valid {@code X-Enrollment-Ticket} binds the ceremony to the
-   * ticket's FDE; otherwise an authenticated {@link Capability#ADMIN} caller registers the FDE
-   * named in the body.
+   * ticket's FDE; otherwise a caller who passes the people gate registers the FDE named in the
+   * body.
    */
   private String authorizeEnrollmentStart(HttpExchange exchange, Map<String, Object> body) {
     var ticket = enrollmentTicket(exchange);
     if (ticket != null) {
       return enrollment.authorize(ticket).orElseThrow(WebauthnAuthHandler::ticketDenied);
     }
-    requireAdmin(exchange);
+    admit(exchange, Gate.PEOPLE);
     return requireString(body, "fde");
   }
 
@@ -209,9 +238,10 @@ public final class WebauthnAuthHandler implements HttpHandler {
     return ApiResponse.ok(result);
   }
 
-  private void requireAdmin(HttpExchange exchange) {
+  /** Authenticates {@code exchange}'s caller and admits it past {@code gate}, or refuses it. */
+  private void admit(HttpExchange exchange, Gate gate) {
     auth.require(exchange);
-    Authorizer.require(exchange, Capability.ADMIN);
+    gate.admit(ApiRouter.actorOf(exchange), NO_BOX);
   }
 
   private static Map<String, Object> ceremonyBody(PasskeyCeremonies.Ceremony ceremony) {

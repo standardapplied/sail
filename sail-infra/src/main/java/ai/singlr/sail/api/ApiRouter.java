@@ -5,18 +5,18 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Principal;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.FilePicker;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.Capability;
-import ai.singlr.sail.identity.ProjectScope;
-import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.SpecStore;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -31,52 +31,35 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
-public final class ApiRouter implements HttpHandler {
+/**
+ * The web API's routes, each declaring its {@link Gate} (A3), dispatched through one table: the
+ * first route whose pattern matches a request's path answers it, by the route of that pattern that
+ * serves the request's method, or {@code 405} when none does; a path no pattern matches is {@code
+ * 404}. A route served before any credential is asked ({@link Gate.Unauthenticated}) answers first;
+ * every other request is authenticated and rate-limited, then answered as its caller, the actor
+ * {@link ApiAuth} stamped, once the router has applied the route's gate.
+ */
+public final class ApiRouter implements HttpHandler, RouteTable {
 
   private static final String GET = "GET";
   private static final String POST = "POST";
   private static final String PUT = "PUT";
   private static final String DELETE = "DELETE";
-  private static final String V1 = "v1";
-  private static final String HEALTH = "health";
-  private static final String WHOAMI = "whoami";
-  private static final String FDES = "fdes";
-  private static final String PROJECTS = "projects";
-  private static final String DEFINITION = "definition";
-  private static final String SPECS = "specs";
-  private static final String SPECS_PRUNE = "specs:prune";
-  private static final String DISPATCH = "dispatch";
-  private static final String AGENT = "agent";
-  private static final String CONNECT = "connect";
-  private static final String SERVE = "serve";
-  private static final String PORTS = "ports";
-  private static final String LOG = "log";
-  private static final String STOP = "stop";
-  private static final String REPORT = "report";
-  private static final String TAIL = "tail";
-  private static final String EVENTS = "events";
-  private static final String RECENT = "recent";
+
+  /** A route of this method serves every method. */
+  private static final String ANY = "*";
+
+  private static final String PROJECT = "/v1/projects/{project}";
   private static final String SPEC = "spec";
   private static final String SINCE = "since";
-  private static final String STATS = "stats";
   private static final String LIMIT = "limit";
-  private static final String BOARD = "board";
-  private static final String CONTENT = "content";
-  private static final String REVIEWS = "reviews";
-  private static final String RUNS = "runs";
-  private static final String HISTORY = "history";
-  private static final String RESTORE = "restore";
-  private static final String APPROVE = "approve";
-  private static final String DISMISS = "dismiss";
-  private static final String FOLLOWUP = "followup";
-  private static final String MESSAGES = "messages";
-  private static final String INVITE = "invite";
-  private static final String ROOMS = "rooms";
-  private static final String MEMBERS = "members";
-  private static final String AGENTS = "agents";
-  private static final String SNAPSHOTS = "snapshots";
+  private static final String TAIL = "tail";
+  private static final String CONFLICTS = "/v1/conflicts/";
+  private static final String RESOLVE = "/resolve";
   private static final int DEFAULT_MESSAGES = 50;
   private static final int MAX_MESSAGES = 100;
   private static final int DEFAULT_TAIL = 200;
@@ -90,10 +73,7 @@ public final class ApiRouter implements HttpHandler {
   private final RateLimitGate rateLimits;
   private final AgentLogStreamer agentStreamer;
   private final Supplier<String> nodeHandle;
-
-  public ApiRouter(Operations operations, ApiAuth auth, RateLimiter rateLimiter) {
-    this(operations, auth, new RateLimitGate(rateLimiter), null);
-  }
+  private final List<Route<Handler>> routes = table();
 
   public ApiRouter(
       Operations operations,
@@ -112,22 +92,204 @@ public final class ApiRouter implements HttpHandler {
     this.operations = operations;
     this.auth = auth;
     this.rateLimits = rateLimits;
-    this.agentStreamer = agentStreamer;
+    this.agentStreamer = Objects.requireNonNull(agentStreamer, "agentStreamer");
     this.nodeHandle = nodeHandle;
+  }
+
+  /** What answers a request a route serves, or null when it answered the exchange itself. */
+  @FunctionalInterface
+  private interface Handler {
+    ApiResponse handle(Call call) throws Exception;
+  }
+
+  /**
+   * A request a route serves: its exchange, its URI, and what its path fills of the route's
+   * placeholders.
+   */
+  private record Call(HttpExchange exchange, URI uri, Map<String, String> params) {
+
+    String param(String name) {
+      return params.get(name);
+    }
+
+    Map<String, String> query() {
+      return QueryParameters.from(uri).values();
+    }
+
+    Map<String, Object> body() throws IOException {
+      return JsonBody.readMap(exchange);
+    }
+
+    /** The project this request addresses, refused when it is not a valid project name. */
+    String project() {
+      var project = param("project");
+      NameValidator.requireValidProjectName(project);
+      return project;
+    }
+
+    /** The spec or room this request addresses as {@code name}, refused when it is not an id. */
+    String id(String name) {
+      var id = param(name);
+      NameValidator.requireValidSpecId(id);
+      return id;
+    }
+  }
+
+  /** The route that serves a request, and what its path fills of the route's placeholders. */
+  private record Match(Route<Handler> route, Map<String, String> params) {}
+
+  @Override
+  public List<Route<?>> routes() {
+    return List.copyOf(routes);
+  }
+
+  private List<Route<Handler>> table() {
+    var reads = Gate.READS_IN_SCOPE;
+    var journal = Gate.JOURNAL;
+    var serving = Gate.decides(Action.SERVE, ProjectGate.class);
+    var restoring = Gate.decides(Action.RESTORE, ProjectGate.class);
+    var seating = Gate.decides(Action.DISPATCH, MembershipService.class);
+    var runOperated = Gate.decides(Action.OPERATE_RUN, LogAdmission.class);
+    return List.of(
+        route(GET, "/v1/health", Gate.unauthenticated("the liveness probe"), this::health),
+        route(GET, "/v1/whoami", reads, this::whoami),
+        route(GET, "/v1/fdes", reads, call -> ApiResponse.from(operations.fdes())),
+        route(GET, "/v1/agents", reads, call -> ApiResponse.from(operations.agents())),
+        route(GET, "/v1/sync", Gate.BOX, this::syncStatus),
+        route(POST, "/v1/sync", Gate.BOX, this::sync),
+        route(GET, "/v1/conflicts", reads, this::conflicts),
+        route(GET, "/v1/conflicts/{id...}", reads, this::conflict),
+        route(
+            POST,
+            "/v1/conflicts/{id...}",
+            Gate.decides(Action.CHANGE, ConflictOperations.class),
+            this::resolveConflict),
+        route(GET, "/v1/events", reads, this::specEvents),
+        route(
+            POST,
+            "/v1/events",
+            Gate.decides(Action.NARRATE, EventDoor.class),
+            call -> ApiResponse.from(operations.publishEvent(JsonBody.readEvent(call.exchange())))),
+        route(GET, "/v1/events/recent", reads, this::recentEvents),
+        route(GET, "/v1/events/stats", Gate.BOX, this::eventBusStats),
+        route(POST, "/v1/specs:prune", Gate.decides(Action.PRUNE, SpecPruner.class), this::prune),
+        route(GET, "/v1/specs", reads, this::globalSpecs),
+        route(POST, "/v1/specs", journal, this::createGlobalSpec),
+        route(GET, "/v1/specs/board", reads, this::globalBoard),
+        route(GET, "/v1/specs/{spec}", reads, call -> globalSpecWithEtag(call.id(SPEC))),
+        route(PUT, "/v1/specs/{spec}", journal, this::updateGlobalSpec),
+        route(DELETE, "/v1/specs/{spec}", journal, this::deleteGlobalSpec),
+        route(GET, "/v1/specs/{spec}/content", reads, this::globalSpecContent),
+        route(PUT, "/v1/specs/{spec}/content", journal, this::setGlobalSpecContent),
+        route(GET, "/v1/specs/{spec}/reviews", reads, this::reviewsForSpec),
+        route(GET, "/v1/specs/{spec}/history", reads, this::globalSpecHistory),
+        route(POST, "/v1/specs/{spec}/restore", journal, this::restoreGlobalSpec),
+        route(POST, "/v1/specs/{spec}/followup", journal, this::createFollowupSpec),
+        route(GET, "/v1/rooms", reads, this::rooms),
+        route(POST, "/v1/rooms", journal, this::createRoom),
+        route(
+            GET,
+            "/v1/rooms/{room}",
+            reads,
+            call -> ApiResponse.from(operations.room(call.id("room")))),
+        route(
+            DELETE,
+            "/v1/rooms/{room}",
+            journal,
+            call -> ApiResponse.from(operations.deleteRoom(call.id("room")))),
+        route(
+            GET,
+            "/v1/rooms/{room}/members",
+            reads,
+            call -> ApiResponse.from(operations.roomMembers(call.id("room")))),
+        route(POST, "/v1/rooms/{room}/members", seating, this::addRoomMember),
+        route(DELETE, "/v1/rooms/{room}/members", seating, this::removeRoomMember),
+        route(ANY, "/v1/rooms/{room}/invite", reads, this::retiredInvite),
+        route(GET, "/v1/rooms/{room}/messages", reads, this::roomMessages),
+        route(POST, "/v1/rooms/{room}/messages", journal, this::postRoomMessage),
+        route(GET, "/v1/reviews/{review}", reads, this::reviewDetail),
+        route(POST, "/v1/reviews/{review}/approve", journal, this::approveReview),
+        route(POST, "/v1/reviews/{review}/dismiss/{finding}", journal, this::dismissFinding),
+        route(GET, "/v1/runs", reads, this::runs),
+        route(
+            GET,
+            "/v1/runs/{run}",
+            reads,
+            call -> ApiResponse.from(operations.run(call.param("run")))),
+        route(GET, "/v1/runs/{run}/log", runOperated, this::runLog),
+        route(
+            POST,
+            "/v1/runs/{run}/stop",
+            Gate.decides(Action.OPERATE_RUN, StopOperations.class),
+            this::stopRun),
+        route(ANY, "/v1/runs/{run}/stream", runOperated, this::streamRunLog),
+        route(GET, "/v1/projects", reads, call -> ApiResponse.from(operations.projects())),
+        route(POST, "/v1/projects", journal, this::createProject),
+        route(GET, PROJECT, reads, call -> ApiResponse.from(operations.project(call.project()))),
+        route(
+            GET,
+            PROJECT + "/specs",
+            reads,
+            call -> ApiResponse.from(operations.specs(call.project()))),
+        route(GET, PROJECT + "/specs/{spec}", reads, this::projectSpec),
+        route(ANY, PROJECT + "/specs/{spec}/{rest...}", reads, this::malformed),
+        route(
+            POST,
+            PROJECT + "/dispatch",
+            Gate.decides(Action.DISPATCH, LaunchAdmission.class),
+            this::dispatch),
+        route(ANY, PROJECT + "/dispatch/{rest...}", reads, this::malformed),
+        route(GET, PROJECT + "/agent", reads, this::agentStatus),
+        route(POST, PROJECT + "/agent/report", reads, this::agentReport),
+        route(ANY, PROJECT + "/agent/{sub}/{rest...}", reads, this::malformed),
+        route(
+            GET,
+            PROJECT + "/connect",
+            reads,
+            call -> ApiResponse.from(operations.connect(call.project()))),
+        route(
+            GET,
+            PROJECT + "/snapshots",
+            reads,
+            call -> ApiResponse.from(operations.snapshots(call.project()))),
+        route(DELETE, PROJECT + "/snapshots/{label}", restoring, this::deleteSnapshot),
+        route(POST, PROJECT + "/snapshots/{label}/restore", restoring, this::restoreSnapshot),
+        route(GET, PROJECT + "/files", reads, this::listFiles),
+        route(GET, PROJECT + "/files/{path...}", reads, this::readFile),
+        route(PUT, PROJECT + "/files/{path...}", journal, this::putFile),
+        route(DELETE, PROJECT + "/files/{path...}", journal, this::removeFile),
+        route(POST, PROJECT + "/serve", serving, this::serve),
+        route(
+            DELETE,
+            PROJECT + "/serve",
+            serving,
+            call -> ApiResponse.ok(operations.stack().stop(call.project()))),
+        route(
+            GET,
+            PROJECT + "/ports",
+            reads,
+            call -> ApiResponse.ok(operations.stack().ports(call.project()))),
+        route(
+            GET,
+            PROJECT + "/definition",
+            Gate.decides(Action.READ_DEFINITION, ProjectGate.class),
+            call -> ApiResponse.from(operations.projectDefinition(call.project()))),
+        route(PUT, PROJECT + "/definition/{section}", journal, this::writeProjectSection));
+  }
+
+  private static Route<Handler> route(String method, String pattern, Gate gate, Handler handler) {
+    return new Route<>(method, pattern, gate, handler);
   }
 
   @Override
   public void handle(HttpExchange exchange) throws IOException {
-    if (agentStreamer != null
-        && AgentLogStreamer.isStreamPath(exchange.getRequestURI().getPath())) {
-      handleStream(exchange);
-      return;
-    }
     try {
       var response =
           ScopedValue.where(SyncControl.NO_SYNC, noSyncRequested(exchange))
               .call(() -> route(exchange));
-      write(exchange, response);
+      if (response != null) {
+        write(exchange, response);
+      }
     } catch (ApiException e) {
       write(exchange, ApiResponse.error(e.failure()));
     } catch (WriteRefused e) {
@@ -153,157 +315,104 @@ public final class ApiRouter implements HttpHandler {
   }
 
   /**
-   * Gates the long-lived agent-log SSE stream through the same authenticate → rate-limit →
-   * authorize(READ) sequence as every buffered route before handing off to {@link
-   * AgentLogStreamer}, which owns the streaming loop and closes the exchange. Previously the stream
-   * short-circuited ahead of the {@link Authorizer} and rate-limit gates, so a caller with any
-   * valid token — including a read-only credential — reached the tail unchecked; this closes that
-   * bypass.
+   * Answers {@code exchange} by the route that serves it: one served before any credential at once;
+   * any other only once its caller is authenticated and within its rate, as that caller, past the
+   * route's gate. A request no route serves is refused once its caller is authenticated, so an
+   * unauthenticated caller learns nothing of the table.
    */
-  private void handleStream(HttpExchange exchange) throws IOException {
-    try {
-      auth.require(exchange);
-      rateLimits.require(exchange);
-      Authorizer.require(exchange, Capability.READ);
-    } catch (ApiException e) {
-      try {
-        write(exchange, ApiResponse.error(e.failure()));
-      } finally {
-        exchange.close();
-      }
-      return;
-    }
-    agentStreamer.handle(exchange);
-  }
-
   ApiResponse route(HttpExchange exchange) throws Exception {
-    var request = RouteRequest.from(exchange);
-    if (request.matches(GET, V1, HEALTH)) {
-      return ApiResponse.from(operations.health());
+    var uri = exchange.getRequestURI();
+    var path = canonical(uri);
+    var method = exchange.getRequestMethod();
+    var match = match(path, method);
+    if (match.isPresent() && match.get().route().gate() instanceof Gate.Unauthenticated) {
+      return match.get().route().handler().handle(new Call(exchange, uri, match.get().params()));
     }
-
     auth.require(exchange);
     rateLimits.require(exchange);
-    Authorizer.require(exchange, Capability.READ);
-    return Actor.call(actorOf(exchange), () -> routeAuthenticated(exchange, request));
+    var served = match.orElseThrow(() -> unserved(path));
+    var actor = actorOf(exchange);
+    return Actor.call(
+        actor,
+        () -> {
+          served.route().gate().admit(actor, nodeHandle);
+          return served.route().handler().handle(new Call(exchange, uri, served.params()));
+        });
   }
 
-  /** Routes an authenticated request, acting as its caller. */
-  private ApiResponse routeAuthenticated(HttpExchange exchange, RouteRequest request)
-      throws Exception {
-    if (request.matches(GET, V1, WHOAMI)) {
-      return whoami(exchange);
-    }
-
-    if (request.matches(GET, V1, FDES)) {
-      return ApiResponse.from(operations.fdes());
-    }
-
-    if (request.matches(GET, V1, AGENTS)) {
-      return ApiResponse.from(operations.agents());
-    }
-
-    if (request.segments().equals(List.of(V1, "sync"))) {
-      return routeSync(exchange, request);
-    }
-    if (request.size() >= 2 && request.segments().subList(0, 2).equals(List.of(V1, "conflicts"))) {
-      return routeConflicts(exchange, request);
-    }
-
-    if (request.hasEventsPrefix()) {
-      return routeEvents(exchange, request);
-    }
-
-    if (request.segments().equals(List.of(V1, SPECS_PRUNE))) {
-      requireMethod(request, POST);
-      return ApiResponse.from(
-          operations.pruneSpecs(PruneRequest.fromMap(JsonBody.readMap(exchange))));
-    }
-
-    if (request.hasGlobalSpecsPrefix()) {
-      return routeGlobalSpecs(exchange, request);
-    }
-
-    if (request.hasRoomsPrefix()) {
-      return routeRooms(exchange, request);
-    }
-
-    if (request.hasReviewsPrefix()) {
-      return routeReviews(exchange, request);
-    }
-
-    if (request.hasRunsPrefix()) {
-      return routeRuns(request, nodeHandle.get());
-    }
-
-    if (!request.hasProjectPrefix()) {
-      throw notFound();
-    }
-
-    if (request.isProjectCollection()) {
-      if (request.is(POST)) {
-        return ApiResponse.fromCreated(operations.createProject(JsonBody.readMap(exchange)));
-      }
-      requireMethod(request, GET);
-      return ApiResponse.from(operations.projects());
-    }
-
-    var project = request.project();
-    NameValidator.requireValidProjectName(project);
-    if (request.isProjectRoot()) {
-      return routeProject(request, project);
-    }
-
-    return switch (request.resource()) {
-      case SPECS -> routeSpecs(request, project);
-      case DISPATCH -> routeDispatch(exchange, request, project);
-      case AGENT -> routeAgent(request, project);
-      case CONNECT -> routeConnect(request, project);
-      case SNAPSHOTS -> routeSnapshots(request, project);
-      case "files" -> routeFiles(exchange, request, project);
-      case SERVE -> routeServe(request, project);
-      case PORTS -> routePorts(request, project);
-      case DEFINITION -> routeDefinition(exchange, request, project);
-      default -> throw notFound();
-    };
+  /**
+   * The route serving {@code method} on {@code path}: of the routes whose pattern is the first to
+   * match it, the one of that method.
+   */
+  private Optional<Match> match(String path, String method) {
+    return routes.stream()
+        .flatMap(route -> route.match(path).map(params -> new Match(route, params)).stream())
+        .findFirst()
+        .flatMap(
+            first ->
+                routes.stream()
+                    .filter(route -> route.pattern().equals(first.route().pattern()))
+                    .filter(route -> route.method().equals(ANY) || route.method().equals(method))
+                    .findFirst()
+                    .map(route -> new Match(route, first.params())));
   }
 
-  private ApiResponse routeSync(HttpExchange exchange, RouteRequest request) throws Exception {
-    if (request.is(GET)) {
-      return ApiResponse.ok(SyncViews.status(operations.syncStatus()));
+  /**
+   * Why no route serves {@code path}: its method is not one a matching route serves, or none does.
+   */
+  private ApiException unserved(String path) {
+    return routes.stream().anyMatch(route -> route.match(path).isPresent())
+        ? methodNotAllowed()
+        : notFound();
+  }
+
+  /** {@code uri}'s path as the table matches it: no empty segment, and no trailing slash. */
+  private static String canonical(URI uri) {
+    var path = uri.getPath();
+    return Strings.isBlank(path)
+        ? "/"
+        : Arrays.stream(path.split("/"))
+            .filter(segment -> !segment.isBlank())
+            .collect(Collectors.joining("/", "/", ""));
+  }
+
+  /**
+   * The actor {@link ApiAuth} stamped on {@code exchange} as its caller: the router binds it for
+   * the route, and the streams re-read it after each re-authentication. A request no credential
+   * resolved has none, which is a door that skipped its authentication, refused loudly.
+   */
+  static Actor actorOf(HttpExchange exchange) {
+    if (exchange.getAttribute(ApiAuth.ACTOR) instanceof Actor actor) {
+      return actor;
     }
-    requireMethod(request, POST);
-    var body = JsonBody.readMap(exchange);
-    var main = text(body, "main");
-    if (Strings.isNotBlank(main)) {
-      Authorizer.require(exchange, Capability.ADMIN);
-    }
+    throw new IllegalStateException("No credential was resolved for this request.");
+  }
+
+  private ApiResponse health(Call call) {
+    return ApiResponse.from(operations.health());
+  }
+
+  private ApiResponse syncStatus(Call call) {
+    return ApiResponse.ok(SyncViews.status(operations.syncStatus()));
+  }
+
+  private ApiResponse sync(Call call) throws Exception {
+    var main = text(call.body(), "main");
     return ApiResponse.ok(SyncViews.round(operations.sync(new SyncRequest(main))));
   }
 
-  private ApiResponse routeConflicts(HttpExchange exchange, RouteRequest request)
-      throws IOException {
-    if (request.size() == 2) {
-      requireMethod(request, GET);
-      return ApiResponse.ok(SyncViews.conflicts(operations.conflicts()));
-    }
-    var path = request.uri().getPath();
-    var query = QueryParameters.from(request.uri()).values();
+  private ApiResponse conflicts(Call call) {
+    return ApiResponse.ok(SyncViews.conflicts(operations.conflicts()));
+  }
+
+  /**
+   * A parked conflict, by the id its URL names as sent: a file conflict's id is the file's path,
+   * whitespace segments and all.
+   */
+  private ApiResponse conflict(Call call) {
+    var query = call.query();
     var type = query.get("type");
-    if (request.is(POST) && path.endsWith("/resolve") && request.size() > 3) {
-      var id = path.substring("/v1/conflicts/".length(), path.length() - "/resolve".length());
-      var body = JsonBody.readMap(exchange);
-      var strategy = text(body, "strategy");
-      if (strategy == null) {
-        throw new IllegalArgumentException("resolution strategy is required");
-      }
-      var resolution =
-          new Resolution(
-              Resolution.Strategy.valueOf(strategy.toUpperCase(Locale.ROOT)), text(body, "merged"));
-      return ApiResponse.ok(SyncViews.conflict(operations.resolveConflict(type, id, resolution)));
-    }
-    requireMethod(request, GET);
-    var id = path.substring("/v1/conflicts/".length());
+    var id = call.uri().getPath().substring(CONFLICTS.length());
     if (Boolean.parseBoolean(query.get("template"))) {
       return ApiResponse.ok(Map.of("template", operations.conflictMergeTemplate(type, id)));
     }
@@ -314,77 +423,116 @@ public final class ApiRouter implements HttpHandler {
     return ApiResponse.ok(SyncViews.conflict(conflict));
   }
 
-  private ApiResponse routeFiles(HttpExchange exchange, RouteRequest request, String project)
-      throws IOException {
+  /** {@code POST /v1/conflicts/{id}/resolve}; a POST to a conflict that names no resolve is 405. */
+  private ApiResponse resolveConflict(Call call) throws IOException {
+    var path = call.uri().getPath();
+    if (!path.endsWith(RESOLVE) || !call.param("id").contains("/")) {
+      throw methodNotAllowed();
+    }
+    var id = path.substring(CONFLICTS.length(), path.length() - RESOLVE.length());
+    var body = call.body();
+    var strategy = text(body, "strategy");
+    if (strategy == null) {
+      throw new IllegalArgumentException("resolution strategy is required");
+    }
+    var resolution =
+        new Resolution(
+            Resolution.Strategy.valueOf(strategy.toUpperCase(Locale.ROOT)), text(body, "merged"));
+    return ApiResponse.ok(
+        SyncViews.conflict(operations.resolveConflict(call.query().get("type"), id, resolution)));
+  }
+
+  private ApiResponse listFiles(Call call) {
+    var project = call.project();
     var files = operations.projectFiles(project);
+    sharedPath(call, project);
+    return ApiResponse.ok(
+        Map.of(
+            "files",
+            files.list().stream()
+                .map(
+                    row ->
+                        Map.of(
+                            "path",
+                            row.path(),
+                            "bytes",
+                            row.size(),
+                            "mode",
+                            row.mode(),
+                            "kind",
+                            row.kind(),
+                            "content_hash",
+                            row.contentHash()))
+                .toList()));
+  }
+
+  private ApiResponse readFile(Call call) {
+    var project = call.project();
+    var files = operations.projectFiles(project);
+    var row = files.find(sharedPath(call, project)).orElseThrow(ApiRouter::notFound);
+    var etag = "\"" + row.contentHash() + "\"";
+    var condition = call.exchange().getRequestHeaders().getFirst("If-None-Match");
+    if (condition != null
+        && Arrays.stream(condition.split(","))
+            .map(String::strip)
+            .anyMatch(
+                value -> value.equals("*") || value.equals(etag) || value.equals("W/" + etag))) {
+      return new ApiResponse(304, Map.of(), Map.of("ETag", etag));
+    }
+    return ApiResponse.file(files.open(row), row.size(), row.contentHash());
+  }
+
+  private ApiResponse putFile(Call call) throws IOException {
+    var project = call.project();
+    var files = operations.projectFiles(project);
+    var path = sharedPath(call, project);
+    var declared = call.exchange().getRequestHeaders().getFirst("Content-Length");
+    if (declared == null) {
+      throw new IllegalArgumentException("Content-Length is required for a shared file");
+    }
+    var size = Long.parseLong(declared);
+    files
+        .limits()
+        .problem(size)
+        .ifPresent(
+            problem -> {
+              throw new ApiException(ErrorCode.REQUEST_TOO_LARGE, problem);
+            });
+    var mode = files.find(path).map(row -> row.mode()).orElse(0644);
+    var storedPath = files.put(path, call.exchange().getRequestBody(), size, mode);
+    files.materialize();
+    return ApiResponse.ok(Map.of("path", storedPath));
+  }
+
+  private ApiResponse removeFile(Call call) throws IOException {
+    var project = call.project();
+    var files = operations.projectFiles(project);
+    var path = sharedPath(call, project);
+    if (!files.remove(path)) {
+      throw notFound();
+    }
+    return ApiResponse.ok(Map.of("path", path, "removed", true));
+  }
+
+  /**
+   * The shared file {@code call}'s URL names in {@code project}, empty for the list, read from the
+   * URL as sent and refused when it is not a path a project shares.
+   */
+  private static String sharedPath(Call call, String project) {
     var prefix = "/v1/projects/" + project + "/files";
-    var fullPath = request.uri().getPath();
+    var fullPath = call.uri().getPath();
     if (!fullPath.startsWith(prefix)) {
       throw new IllegalArgumentException("Invalid shared file URL.");
     }
     var suffix = fullPath.substring(prefix.length());
     if (suffix.isEmpty() || suffix.equals("/")) {
-      requireMethod(request, GET);
-      return ApiResponse.ok(
-          Map.of(
-              "files",
-              files.list().stream()
-                  .map(
-                      row ->
-                          Map.of(
-                              "path",
-                              row.path(),
-                              "bytes",
-                              row.size(),
-                              "mode",
-                              row.mode(),
-                              "kind",
-                              row.kind(),
-                              "content_hash",
-                              row.contentHash()))
-                  .toList()));
+      return "";
     }
     var path = suffix.substring(1);
     if (!FilePicker.isShareablePath(path)) {
       throw new IllegalArgumentException("Unsafe share path: '" + path + "'.");
     }
-    if (request.is(GET)) {
-      var row = files.find(path).orElseThrow(ApiRouter::notFound);
-      var etag = "\"" + row.contentHash() + "\"";
-      var condition = exchange.getRequestHeaders().getFirst("If-None-Match");
-      if (condition != null
-          && Arrays.stream(condition.split(","))
-              .map(String::strip)
-              .anyMatch(
-                  value -> value.equals("*") || value.equals(etag) || value.equals("W/" + etag))) {
-        return new ApiResponse(304, Map.of(), Map.of("ETag", etag));
-      }
-      return ApiResponse.file(files.open(row), row.size(), row.contentHash());
-    }
-    if (request.is(PUT)) {
-      var declared = exchange.getRequestHeaders().getFirst("Content-Length");
-      if (declared == null)
-        throw new IllegalArgumentException("Content-Length is required for a shared file");
-      var size = Long.parseLong(declared);
-      files
-          .limits()
-          .problem(size)
-          .ifPresent(
-              problem -> {
-                throw new ApiException(ErrorCode.REQUEST_TOO_LARGE, problem);
-              });
-      var mode = files.find(path).map(row -> row.mode()).orElse(0644);
-      var storedPath = files.put(path, exchange.getRequestBody(), size, mode);
-      files.materialize();
-      return ApiResponse.ok(Map.of("path", storedPath));
-    }
-    if (request.is(DELETE)) {
-      if (!files.remove(path)) {
-        throw notFound();
-      }
-      return ApiResponse.ok(Map.of("path", path, "removed", true));
-    }
-    throw methodNotAllowed();
+    return path;
   }
 
   private static String text(Map<String, Object> body, String field) {
@@ -396,45 +544,27 @@ public final class ApiRouter implements HttpHandler {
   }
 
   /**
-   * Routes the snapshot surface — {@code GET /v1/projects/{p}/snapshots}, {@code DELETE
-   * .../snapshots/{label}}, {@code POST .../snapshots/{label}/restore}. The mutations are accepted
-   * asynchronously (202); their completion arrives as {@code snapshot_restored} / {@code
-   * snapshot_deleted} events on the stream, so no client ever holds a request open for a mutation
-   * that can outlive its timeout.
+   * {@code DELETE /v1/projects/{p}/snapshots/{label}} and {@code POST
+   * .../snapshots/{label}/restore} are accepted asynchronously (202); their completion arrives as
+   * {@code snapshot_deleted} / {@code snapshot_restored} events on the stream, so no client ever
+   * holds a request open for a mutation that can outlive its timeout.
    */
-  private ApiResponse routeSnapshots(RouteRequest request, String project) {
-    if (request.size() == 4) {
-      requireMethod(request, GET);
-      return ApiResponse.from(operations.snapshots(project));
-    }
-    if (request.size() == 5) {
-      requireMethod(request, DELETE);
-      return ApiResponse.fromAccepted(operations.deleteSnapshot(project, request.subResource()));
-    }
-    if (request.size() == 6 && RESTORE.equals(request.segments().get(5))) {
-      requireMethod(request, POST);
-      return ApiResponse.fromAccepted(
-          operations.restoreSnapshot(project, request.subResource(), nodeHandle.get()));
-    }
-    throw notFound();
+  private ApiResponse deleteSnapshot(Call call) {
+    return ApiResponse.fromAccepted(operations.deleteSnapshot(call.project(), call.param("label")));
+  }
+
+  private ApiResponse restoreSnapshot(Call call) {
+    return ApiResponse.fromAccepted(
+        operations.restoreSnapshot(call.project(), call.param("label"), nodeHandle.get()));
   }
 
   /**
-   * {@code GET /v1/projects/{p}/definition} reads the definition and its sections' tags; {@code PUT
-   * /v1/projects/{p}/definition/{section}} with {@code {"value": ...}} writes one section, only
-   * over the one its {@code If-Match} tag names when it names one.
+   * {@code PUT /v1/projects/{p}/definition/{section}} with {@code {"value": ...}} writes one
+   * section, only over the one its {@code If-Match} tag names when it names one.
    */
-  private ApiResponse routeDefinition(HttpExchange exchange, RouteRequest request, String project)
-      throws IOException {
-    if (request.size() == 4) {
-      requireMethod(request, GET);
-      return ApiResponse.from(operations.projectDefinition(project));
-    }
-    if (request.size() != 5) {
-      throw notFound();
-    }
-    requireMethod(request, PUT);
-    var body = JsonBody.readMap(exchange);
+  private ApiResponse writeProjectSection(Call call) throws IOException {
+    var project = call.project();
+    var body = call.body();
     if (!body.containsKey("value")) {
       throw new IllegalArgumentException(
           "The body names the section's new value as {\"value\": ...}; null unsets it.");
@@ -442,41 +572,19 @@ public final class ApiRouter implements HttpHandler {
     return ApiResponse.from(
         operations.writeProjectSection(
             project,
-            request.subResource(),
+            call.param("section"),
             body.get("value"),
-            exchange.getRequestHeaders().getFirst("If-Match")));
-  }
-
-  private ApiResponse routeProject(RouteRequest request, String project) {
-    if (request.is(GET)) {
-      return ApiResponse.from(operations.project(project));
-    }
-    throw methodNotAllowed();
+            call.exchange().getRequestHeaders().getFirst("If-Match")));
   }
 
   /**
    * {@code POST} brings the project's stack up and answers when every declared port listens or its
-   * process exits, or {@code timeout} seconds (default 60) have passed; {@code DELETE} stops its
-   * processes.
+   * process exits, or {@code timeout} seconds (default 60) have passed.
    */
-  private ApiResponse routeServe(RouteRequest request, String project) throws Exception {
-    if (request.size() != 4) {
-      throw notFound();
-    }
-    if (request.is(DELETE)) {
-      return ApiResponse.ok(operations.stack().stop(project));
-    }
-    requireMethod(request, POST);
-    var timeout = QueryParameters.from(request.uri()).values().getOrDefault("timeout", "60");
+  private ApiResponse serve(Call call) throws Exception {
+    var project = call.project();
+    var timeout = call.query().getOrDefault("timeout", "60");
     return ApiResponse.ok(operations.stack().serve(project, Duration.ofSeconds(seconds(timeout))));
-  }
-
-  private ApiResponse routePorts(RouteRequest request, String project) throws Exception {
-    if (request.size() != 4) {
-      throw notFound();
-    }
-    requireMethod(request, GET);
-    return ApiResponse.ok(operations.stack().ports(project));
   }
 
   /** {@code value} as whole seconds, refused with the field named when it is not one. */
@@ -488,291 +596,178 @@ public final class ApiRouter implements HttpHandler {
     }
   }
 
-  private ApiResponse routeConnect(RouteRequest request, String project) {
-    if (request.size() != 4) {
-      throw notFound();
-    }
-    requireMethod(request, GET);
-    return ApiResponse.from(operations.connect(project));
+  private ApiResponse projectSpec(Call call) {
+    var project = call.project();
+    return ApiResponse.from(operations.spec(project, call.id(SPEC)));
   }
 
-  private ApiResponse routeSpecs(RouteRequest request, String project) {
-    if (request.size() == 4) {
-      requireMethod(request, GET);
-      return ApiResponse.from(operations.specs(project));
-    }
-    if (request.size() == 5) {
-      requireMethod(request, GET);
-      var specId = request.subResource();
-      NameValidator.requireValidSpecId(specId);
-      return ApiResponse.from(operations.spec(project, specId));
-    }
+  /** A path below a resource that has none, which names no method that could serve it. */
+  private ApiResponse malformed(Call call) {
+    call.project();
     throw methodNotAllowed();
   }
 
-  private ApiResponse routeDispatch(HttpExchange exchange, RouteRequest request, String project)
-      throws IOException {
-    if (request.size() != 4) {
-      throw methodNotAllowed();
-    }
-    requireMethod(request, POST);
+  private ApiResponse dispatch(Call call) throws IOException {
+    var project = call.project();
     return ApiResponse.from(
-        operations.dispatch(project, JsonBody.readDispatchRequest(exchange), nodeHandle.get()));
+        operations.dispatch(
+            project, JsonBody.readDispatchRequest(call.exchange()), nodeHandle.get()));
+  }
+
+  private ApiResponse createProject(Call call) throws IOException {
+    return ApiResponse.fromCreated(operations.createProject(call.body()));
+  }
+
+  private ApiResponse agentStatus(Call call) {
+    return ApiResponse.from(operations.agentStatus(call.project(), nodeHandle.get()));
+  }
+
+  private ApiResponse agentReport(Call call) {
+    return ApiResponse.from(operations.agentReport(call.project(), nodeHandle.get()));
+  }
+
+  private ApiResponse rooms(Call call) {
+    return ApiResponse.from(operations.rooms(call.query().get("project")));
+  }
+
+  private ApiResponse createRoom(Call call) throws IOException {
+    return ApiResponse.fromCreated(
+        operations.createRoom(RoomCreateRequest.fromMap(call.body()), nodeHandle.get()));
+  }
+
+  private ApiResponse addRoomMember(Call call) throws IOException {
+    var roomId = call.id("room");
+    return ApiResponse.from(
+        operations.addRoomMember(roomId, EngageRequest.fromMap(call.body()), nodeHandle.get()));
+  }
+
+  private ApiResponse removeRoomMember(Call call) {
+    return ApiResponse.from(operations.removeRoomMember(call.id("room"), nodeHandle.get()));
   }
 
   /**
-   * Builds the {@link Actor} for a request from the exchange attributes {@link ApiAuth} stamped:
-   * {@code token.fde} is the caller's FDE handle (null for a machine credential owning no FDE) and
-   * {@code token.role} resolves to the caller's {@link Role}; {@code token.scope} is the projects
-   * main's roster lets that FDE see, as the auth stamped it, and none when it stamped nothing:
-   * scope fails closed. The route tier has only admitted the credential to read; whether it may
-   * write is decided from this actor where the write is made — by the type's rule as the journal
-   * records it, or by the operation's admission before a side effect. Package-private so the SSE
-   * {@link AgentLogStreamer} builds the same actor from the same stamped attributes.
+   * The retired one-shot invite door answers with a pointed 404, so an old client learns where the
+   * verb went.
    */
-  static Actor actorOf(HttpExchange exchange) {
-    return new Actor(
-            Objects.toString(exchange.getAttribute("token.fde"), null),
-            Role.fromAttribute(exchange.getAttribute("token.role")),
-            Actor.Lane.API)
-        .withScope(
-            exchange.getAttribute(ApiAuth.SCOPE) instanceof ProjectScope scope
-                ? scope
-                : ProjectScope.none());
+  private ApiResponse retiredInvite(Call call) {
+    call.id("room");
+    throw new ApiException(
+        ErrorCode.NOT_FOUND,
+        "Room invites are retired: each room verb maps to one primitive.",
+        "Add a member (POST /v1/rooms/{id}/members) to converse, or dispatch a spec to"
+            + " delegate work.");
+  }
+
+  private ApiResponse roomMessages(Call call) {
+    var roomId = call.id("room");
+    var params = call.query();
+    return ApiResponse.from(
+        operations.roomMessages(
+            roomId,
+            params.get("before"),
+            params.get("after"),
+            clampedLimit(params.get(LIMIT), DEFAULT_MESSAGES, MAX_MESSAGES)));
+  }
+
+  /** A post is the caller's: the message rule decides it as the journal records it. */
+  private ApiResponse postRoomMessage(Call call) throws IOException {
+    var roomId = call.id("room");
+    return ApiResponse.fromCreated(
+        operations.postRoomMessage(
+            roomId,
+            SpecMessageRequest.fromMap(JsonBody.readMessageMap(call.exchange())),
+            actorOf(call.exchange()).handle()));
+  }
+
+  private ApiResponse globalSpecs(Call call) {
+    var params = call.query();
+    return ApiResponse.from(
+        operations.globalSpecs(
+            new SpecStore.SpecFilter(
+                params.get("project"),
+                params.get("status"),
+                resolveAssignee(params.get("assignee"), caller(call.exchange())),
+                params.get("repo"),
+                params.get("q"))));
+  }
+
+  private ApiResponse createGlobalSpec(Call call) throws IOException {
+    return ApiResponse.fromCreated(
+        operations.createGlobalSpec(SpecCreateRequest.fromMap(call.body())));
+  }
+
+  private ApiResponse globalBoard(Call call) {
+    return ApiResponse.from(operations.globalBoard(call.query().get("project")));
+  }
+
+  private ApiResponse updateGlobalSpec(Call call) throws IOException {
+    var specId = call.id(SPEC);
+    checkIfMatch(call.exchange(), specId);
+    return ApiResponse.from(
+        operations.updateGlobalSpec(specId, SpecUpdateRequest.fromMap(call.body())));
+  }
+
+  private ApiResponse deleteGlobalSpec(Call call) {
+    var specId = call.id(SPEC);
+    checkIfMatch(call.exchange(), specId);
+    return ApiResponse.from(operations.deleteGlobalSpec(specId));
+  }
+
+  private ApiResponse globalSpecContent(Call call) {
+    return ApiResponse.from(operations.globalSpecContent(call.id(SPEC)));
+  }
+
+  private ApiResponse setGlobalSpecContent(Call call) throws IOException {
+    var specId = call.id(SPEC);
+    checkIfMatch(call.exchange(), specId);
+    return ApiResponse.from(
+        operations.setGlobalSpecContent(specId, SpecContentRequest.fromMap(call.body())));
+  }
+
+  private ApiResponse reviewsForSpec(Call call) {
+    return ApiResponse.from(operations.reviewsForSpec(call.id(SPEC)));
+  }
+
+  private ApiResponse globalSpecHistory(Call call) {
+    return ApiResponse.from(operations.globalSpecHistory(call.id(SPEC)));
+  }
+
+  private ApiResponse restoreGlobalSpec(Call call) throws IOException {
+    var specId = call.id(SPEC);
+    return ApiResponse.from(
+        operations.restoreGlobalSpec(specId, SpecRestoreRequest.fromMap(call.body())));
+  }
+
+  private ApiResponse createFollowupSpec(Call call) throws IOException {
+    var specId = call.id(SPEC);
+    return ApiResponse.fromCreated(
+        operations.createFollowupSpec(specId, FollowupCreateRequest.fromMap(call.body())));
+  }
+
+  private ApiResponse prune(Call call) throws IOException {
+    return ApiResponse.from(operations.pruneSpecs(PruneRequest.fromMap(call.body())));
+  }
+
+  private ApiResponse reviewDetail(Call call) {
+    return ApiResponse.from(operations.reviewDetail(call.param("review")));
+  }
+
+  private ApiResponse approveReview(Call call) {
+    return ApiResponse.from(operations.approveReview(call.param("review")));
+  }
+
+  private ApiResponse dismissFinding(Call call) {
+    return ApiResponse.from(operations.dismissFinding(call.param("review"), call.param("finding")));
   }
 
   /**
-   * Routes the rooms surface: the room resource itself, its membership ({@code GET|POST|DELETE
-   * /v1/rooms/{id}/members}) and its conversation ({@code /v1/rooms/{id}/messages}). The
-   * spec-shaped conversation doors are retired; every id resolves spec-first, so a spec's room
-   * answers under the spec's id unchanged. The retired one-shot invite door answers with a pointed
-   * 404 so an old client learns where the verb went.
+   * {@code GET /v1/events?spec=<id>[&since=<eventId>][&limit=]} is the spec-scoped history read:
+   * {@code spec} is required for this route shape (the unscoped firehose stays {@code /recent}),
+   * {@code since} is the exclusive monotonic event-id cursor for gap-fill after an SSE reconnect,
+   * and {@code limit} is clamped rather than rejected.
    */
-  private ApiResponse routeRooms(HttpExchange exchange, RouteRequest request) throws IOException {
-    if (request.size() == 2) {
-      return switch (request.method()) {
-        case GET -> {
-          var params = QueryParameters.from(request.uri()).values();
-          yield ApiResponse.from(operations.rooms(params.get("project")));
-        }
-        case POST ->
-            ApiResponse.fromCreated(
-                operations.createRoom(
-                    RoomCreateRequest.fromMap(JsonBody.readMap(exchange)), nodeHandle.get()));
-        default -> throw methodNotAllowed();
-      };
-    }
-    if (request.size() == 3) {
-      var soloRoom = request.segments().get(2);
-      NameValidator.requireValidSpecId(soloRoom);
-      return switch (request.method()) {
-        case GET -> ApiResponse.from(operations.room(soloRoom));
-        case DELETE -> ApiResponse.from(operations.deleteRoom(soloRoom));
-        default -> throw methodNotAllowed();
-      };
-    }
-    if (request.size() != 4) {
-      throw notFound();
-    }
-    var roomId = request.segments().get(2);
-    NameValidator.requireValidSpecId(roomId);
-    var sub = request.segments().get(3);
-    if (MEMBERS.equals(sub)) {
-      return switch (request.method()) {
-        case GET -> ApiResponse.from(operations.roomMembers(roomId));
-        case POST ->
-            ApiResponse.from(
-                operations.addRoomMember(
-                    roomId, EngageRequest.fromMap(JsonBody.readMap(exchange)), nodeHandle.get()));
-        case DELETE -> ApiResponse.from(operations.removeRoomMember(roomId, nodeHandle.get()));
-        default -> throw methodNotAllowed();
-      };
-    }
-    if (INVITE.equals(sub)) {
-      throw new ApiException(
-          ErrorCode.NOT_FOUND,
-          "Room invites are retired: each room verb maps to one primitive.",
-          "Add a member (POST /v1/rooms/{id}/members) to converse, or dispatch a spec to"
-              + " delegate work.");
-    }
-    if (MESSAGES.equals(sub)) {
-      return switch (request.method()) {
-        case GET -> {
-          var params = QueryParameters.from(request.uri()).values();
-          yield ApiResponse.from(
-              operations.roomMessages(
-                  roomId,
-                  params.get("before"),
-                  params.get("after"),
-                  clampedLimit(params.get(LIMIT), DEFAULT_MESSAGES, MAX_MESSAGES)));
-        }
-        case POST -> {
-          var principal = actorOf(exchange);
-          if (principal.handle() == null) {
-            throw new ApiException(
-                ErrorCode.FORBIDDEN,
-                "Room messages require an FDE-bound credential so authorship can be"
-                    + " synchronized.");
-          }
-          yield ApiResponse.fromCreated(
-              operations.postRoomMessage(
-                  roomId,
-                  SpecMessageRequest.fromMap(JsonBody.readMessageMap(exchange)),
-                  principal.handle()));
-        }
-        default -> throw methodNotAllowed();
-      };
-    }
-    throw notFound();
-  }
-
-  private ApiResponse routeGlobalSpecs(HttpExchange exchange, RouteRequest request)
-      throws IOException {
-    if (request.size() == 2) {
-      return switch (request.method()) {
-        case GET -> {
-          var params = QueryParameters.from(request.uri());
-          yield ApiResponse.from(
-              operations.globalSpecs(
-                  new SpecStore.SpecFilter(
-                      params.values().get("project"),
-                      params.values().get("status"),
-                      resolveAssignee(params.values().get("assignee"), caller(exchange)),
-                      params.values().get("repo"),
-                      params.values().get("q"))));
-        }
-        case POST ->
-            ApiResponse.fromCreated(
-                operations.createGlobalSpec(SpecCreateRequest.fromMap(JsonBody.readMap(exchange))));
-        default -> throw methodNotAllowed();
-      };
-    }
-    if (request.size() == 3) {
-      var segment = request.segments().get(2);
-      if (BOARD.equals(segment)) {
-        requireMethod(request, GET);
-        var params = QueryParameters.from(request.uri());
-        return ApiResponse.from(operations.globalBoard(params.values().get("project")));
-      }
-      var specId = segment;
-      NameValidator.requireValidSpecId(specId);
-      return switch (request.method()) {
-        case GET -> globalSpecWithEtag(specId);
-        case PUT -> {
-          checkIfMatch(exchange, specId);
-          yield ApiResponse.from(
-              operations.updateGlobalSpec(
-                  specId, SpecUpdateRequest.fromMap(JsonBody.readMap(exchange))));
-        }
-        case DELETE -> {
-          checkIfMatch(exchange, specId);
-          yield ApiResponse.from(operations.deleteGlobalSpec(specId));
-        }
-        default -> throw methodNotAllowed();
-      };
-    }
-    if (request.size() == 4) {
-      var specId = request.segments().get(2);
-      NameValidator.requireValidSpecId(specId);
-      var sub = request.segments().get(3);
-      if (CONTENT.equals(sub)) {
-        return switch (request.method()) {
-          case GET -> ApiResponse.from(operations.globalSpecContent(specId));
-          case PUT -> {
-            checkIfMatch(exchange, specId);
-            yield ApiResponse.from(
-                operations.setGlobalSpecContent(
-                    specId, SpecContentRequest.fromMap(JsonBody.readMap(exchange))));
-          }
-          default -> throw methodNotAllowed();
-        };
-      }
-      if (REVIEWS.equals(sub)) {
-        requireMethod(request, GET);
-        return ApiResponse.from(operations.reviewsForSpec(specId));
-      }
-      if (HISTORY.equals(sub)) {
-        requireMethod(request, GET);
-        return ApiResponse.from(operations.globalSpecHistory(specId));
-      }
-      if (RESTORE.equals(sub)) {
-        requireMethod(request, POST);
-        return ApiResponse.from(
-            operations.restoreGlobalSpec(
-                specId, SpecRestoreRequest.fromMap(JsonBody.readMap(exchange))));
-      }
-      if (FOLLOWUP.equals(sub)) {
-        requireMethod(request, POST);
-        return ApiResponse.fromCreated(
-            operations.createFollowupSpec(
-                specId, FollowupCreateRequest.fromMap(JsonBody.readMap(exchange))));
-      }
-    }
-    throw notFound();
-  }
-
-  private ApiResponse routeReviews(HttpExchange exchange, RouteRequest request) throws IOException {
-    if (request.size() == 3) {
-      var reviewId = request.segments().get(2);
-      requireMethod(request, GET);
-      return ApiResponse.from(operations.reviewDetail(reviewId));
-    }
-    if (request.size() == 4) {
-      var reviewId = request.segments().get(2);
-      var sub = request.segments().get(3);
-      return switch (sub) {
-        case APPROVE -> {
-          requireMethod(request, POST);
-          yield ApiResponse.from(operations.approveReview(reviewId));
-        }
-        default -> throw notFound();
-      };
-    }
-    if (request.size() == 5) {
-      var reviewId = request.segments().get(2);
-      var sub = request.segments().get(3);
-      var findingId = request.segments().get(4);
-      if (DISMISS.equals(sub)) {
-        requireMethod(request, POST);
-        return ApiResponse.from(operations.dismissFinding(reviewId, findingId));
-      }
-    }
-    throw notFound();
-  }
-
-  /**
-   * The events surface. {@code GET /v1/events?spec=<id>[&since=<eventId>][&limit=]} is the
-   * spec-scoped history read: {@code spec} is required for this route shape (the unscoped firehose
-   * stays {@code /recent}), {@code since} is the exclusive monotonic event-id cursor for gap-fill
-   * after an SSE reconnect, and {@code limit} is clamped rather than rejected.
-   */
-  private ApiResponse routeEvents(HttpExchange exchange, RouteRequest request) throws IOException {
-    if (request.size() == 2) {
-      return switch (request.method()) {
-        case GET -> specEvents(request);
-        case POST -> ApiResponse.from(operations.publishEvent(JsonBody.readEvent(exchange)));
-        default -> throw methodNotAllowed();
-      };
-    }
-    if (request.size() == 3) {
-      return switch (request.segments().get(2)) {
-        case RECENT -> {
-          requireMethod(request, GET);
-          yield ApiResponse.from(
-              operations.recentEvents(QueryParameters.from(request.uri()).limit()));
-        }
-        case STATS -> {
-          requireMethod(request, GET);
-          yield ApiResponse.from(operations.eventBusStats());
-        }
-        default -> throw notFound();
-      };
-    }
-    throw notFound();
-  }
-
-  private ApiResponse specEvents(RouteRequest request) {
-    var params = QueryParameters.from(request.uri()).values();
+  private ApiResponse specEvents(Call call) {
+    var params = call.query();
     var specId = params.get(SPEC);
     if (Strings.isBlank(specId)) {
       throw new ApiException(
@@ -787,6 +782,14 @@ public final class ApiRouter implements HttpHandler {
             specId,
             sinceOf(params.get(SINCE)),
             clampedLimit(params.get(LIMIT), DEFAULT_RECENT, MAX_SPEC_EVENTS)));
+  }
+
+  private ApiResponse recentEvents(Call call) {
+    return ApiResponse.from(operations.recentEvents(QueryParameters.from(call.uri()).limit()));
+  }
+
+  private ApiResponse eventBusStats(Call call) {
+    return ApiResponse.from(operations.eventBusStats());
   }
 
   private static Long sinceOf(String value) {
@@ -804,60 +807,29 @@ public final class ApiRouter implements HttpHandler {
     }
   }
 
-  private ApiResponse routeAgent(RouteRequest request, String project) {
-    if (request.size() == 4) {
-      requireMethod(request, GET);
-      return ApiResponse.from(operations.agentStatus(project, nodeHandle.get()));
-    }
-    if (request.size() != 5) {
-      throw methodNotAllowed();
-    }
-    if (REPORT.equals(request.subResource())) {
-      requireMethod(request, POST);
-      return ApiResponse.from(operations.agentReport(project, nodeHandle.get()));
-    }
-    throw notFound();
+  private ApiResponse runs(Call call) {
+    var params = call.query();
+    return ApiResponse.from(operations.runs(params.get("project"), params.get(SPEC)));
   }
 
   /**
-   * Routes the run-addressed surface — {@code /v1/runs}, {@code /v1/runs/{id}}, {@code
-   * /v1/runs/{id}/log}, {@code /v1/runs/{id}/stop}. The {@code /stream} SSE variant never reaches
-   * here; it is intercepted up front like the agent stream. The log and stop handlers pass this
-   * box's handle so the operation's provenance guard can refuse a run that executed elsewhere.
+   * A run's log and its stop pass this box's handle so the operation's provenance guard can refuse
+   * a run that executed elsewhere.
    */
-  private ApiResponse routeRuns(RouteRequest request, String localHandle) {
-    if (request.size() == 2) {
-      requireMethod(request, GET);
-      var params = QueryParameters.from(request.uri());
-      return ApiResponse.from(
-          operations.runs(params.values().get("project"), params.values().get("spec")));
-    }
-    var runId = request.segments().get(2);
-    if (request.size() == 3) {
-      requireMethod(request, GET);
-      return ApiResponse.from(operations.run(runId));
-    }
-    if (request.size() != 4) {
-      throw notFound();
-    }
-    return switch (request.segments().get(3)) {
-      case LOG -> {
-        requireMethod(request, GET);
-        yield ApiResponse.from(
-            operations.runLog(runId, QueryParameters.from(request.uri()).tail(), localHandle));
-      }
-      case STOP -> {
-        requireMethod(request, POST);
-        yield ApiResponse.from(operations.stopRun(runId, localHandle));
-      }
-      default -> throw notFound();
-    };
+  private ApiResponse runLog(Call call) {
+    return ApiResponse.from(
+        operations.runLog(
+            call.param("run"), QueryParameters.from(call.uri()).tail(), nodeHandle.get()));
   }
 
-  private static void requireMethod(RouteRequest request, String method) {
-    if (!request.is(method)) {
-      throw methodNotAllowed();
-    }
+  private ApiResponse stopRun(Call call) {
+    return ApiResponse.from(operations.stopRun(call.param("run"), nodeHandle.get()));
+  }
+
+  /** The run's log as a stream, which {@link AgentLogStreamer} answers and closes itself. */
+  private ApiResponse streamRunLog(Call call) throws IOException {
+    agentStreamer.handle(call.exchange());
+    return null;
   }
 
   /** Whether the caller sent the {@code --no-sync} opt-out header for this request. */
@@ -876,37 +848,36 @@ public final class ApiRouter implements HttpHandler {
   }
 
   /**
-   * Reflects the authenticated caller's identity back from the exchange attributes stamped by
-   * {@link ApiAuth} — no store access. Mirrors {@link #caller}: {@code fde} is present only for
-   * FDE-owned credentials, {@code name} is the credential name. {@code display_name} and {@code
-   * email} are present only on passkey/session logins (the {@link SessionAwareAuth} path resolves
-   * the FDE record); they are omitted for machine/CI tokens, which carry no personal identity.
-   * Capabilities are derived from the role so clients gate UI on a capability rather than a
-   * hardcoded role→power map. Marked {@code Cache-Control: no-store} because the response is
-   * per-credential session state.
+   * Reflects the authenticated caller back: {@code fde} is present only for a credential that acts
+   * as an FDE, {@code name} is the credential's name, and {@code display_name} and {@code email}
+   * are present only on a passkey session (the {@link SessionAwareAuth} path resolves the FDE
+   * record). Its role and capabilities are {@link Principal}'s view of the caller, so clients gate
+   * UI on a capability rather than a hardcoded role→power map. Marked {@code Cache-Control:
+   * no-store} because the response is per-credential session state.
    */
-  private static ApiResponse whoami(HttpExchange exchange) {
-    var role = Role.fromAttribute(exchange.getAttribute("token.role"));
-    var capabilities = Arrays.stream(Capability.values()).filter(role::allows).toList();
+  private ApiResponse whoami(Call call) {
+    var exchange = call.exchange();
+    var actor = actorOf(exchange);
+    var principal = Principal.of(actor);
     var response =
         new WhoamiResponse(
-            Objects.toString(exchange.getAttribute("token.fde"), null),
+            actor.handle(),
             Objects.toString(exchange.getAttribute("token.name"), null),
             Objects.toString(exchange.getAttribute("token.displayName"), null),
             Objects.toString(exchange.getAttribute("token.email"), null),
-            role,
-            capabilities);
+            principal.role(),
+            principal.capabilities());
     return ApiResponse.ok(response).withHeader("Cache-Control", "no-store");
   }
 
   /**
-   * Who {@code me} names in a list filter: the authenticated FDE handle when the token has an
-   * owner, otherwise the token name (machine/CI credential). Null only when unauthenticated.
+   * Who {@code me} names in a list filter: the caller's FDE when it acts as one, otherwise the
+   * token's name (a machine credential).
    */
   private static String caller(HttpExchange exchange) {
-    var fde = exchange.getAttribute("token.fde");
+    var fde = actorOf(exchange).handle();
     if (fde != null) {
-      return fde.toString();
+      return fde;
     }
     var name = exchange.getAttribute("token.name");
     return name == null ? null : name.toString();
@@ -926,11 +897,6 @@ public final class ApiRouter implements HttpHandler {
   private static ApiException methodNotAllowed() {
     return new ApiException(
         ErrorCode.METHOD_NOT_ALLOWED, "HTTP method is not allowed for this endpoint.");
-  }
-
-  private static String cleanPath(URI uri) {
-    var path = uri.getPath();
-    return Strings.isBlank(path) ? "/" : path;
   }
 
   private static ApiException notFound() {
@@ -1016,78 +982,6 @@ public final class ApiRouter implements HttpHandler {
     exchange.sendResponseHeaders(response.status(), body.length == 0 ? -1 : body.length);
     try (var output = exchange.getResponseBody()) {
       output.write(body);
-    }
-  }
-
-  private record RouteRequest(String method, URI uri, List<String> segments) {
-    static RouteRequest from(HttpExchange exchange) {
-      var uri = exchange.getRequestURI();
-      return new RouteRequest(exchange.getRequestMethod(), uri, segments(cleanPath(uri)));
-    }
-
-    boolean matches(String method, String... path) {
-      return is(method) && segments.equals(List.of(path));
-    }
-
-    boolean is(String method) {
-      return this.method.equals(method);
-    }
-
-    boolean hasProjectPrefix() {
-      return segments.size() >= 2 && V1.equals(segments.get(0)) && PROJECTS.equals(segments.get(1));
-    }
-
-    boolean isProjectCollection() {
-      return segments.size() == 2;
-    }
-
-    boolean hasEventsPrefix() {
-      return segments.size() >= 2 && V1.equals(segments.get(0)) && EVENTS.equals(segments.get(1));
-    }
-
-    boolean hasGlobalSpecsPrefix() {
-      return segments.size() >= 2 && V1.equals(segments.get(0)) && SPECS.equals(segments.get(1));
-    }
-
-    boolean hasRoomsPrefix() {
-      return segments.size() >= 2 && V1.equals(segments.get(0)) && ROOMS.equals(segments.get(1));
-    }
-
-    boolean hasReviewsPrefix() {
-      return segments.size() >= 2 && V1.equals(segments.get(0)) && REVIEWS.equals(segments.get(1));
-    }
-
-    boolean hasRunsPrefix() {
-      return segments.size() >= 2 && V1.equals(segments.get(0)) && RUNS.equals(segments.get(1));
-    }
-
-    boolean isProjectRoot() {
-      return segments.size() == 3;
-    }
-
-    String project() {
-      return segments.get(2);
-    }
-
-    String resource() {
-      return segments.get(3);
-    }
-
-    String subResource() {
-      return segments.get(4);
-    }
-
-    int size() {
-      return segments.size();
-    }
-
-    private static List<String> segments(String path) {
-      if (path.equals("/")) {
-        return List.of();
-      }
-      return Arrays.stream(path.substring(1).split("/"))
-          .filter(segment -> !segment.isBlank())
-          .toList();
     }
   }
 

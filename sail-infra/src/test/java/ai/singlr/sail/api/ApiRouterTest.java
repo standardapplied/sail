@@ -28,7 +28,6 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
@@ -433,11 +432,12 @@ class ApiRouterTest {
   }
 
   @Test
-  void theRouteTierIsReadForEveryRouteAndAdminForTheControlPlaneNeverWrite() throws Exception {
+  void aViewersWriteReachesTheOperationWhoseRuleDecidesIt() throws Exception {
     var operations = new SeamOperations();
-    ApiAuth viewer = exchange -> exchange.setAttribute("token.role", "viewer");
+    ApiAuth viewer =
+        exchange ->
+            exchange.setAttribute(ApiAuth.ACTOR, new Actor(null, Role.VIEWER, Actor.Lane.API));
     try (var server = serverWith(operations, true, viewer)) {
-      assertEquals(200, get(server, "/v1/sync", "token").statusCode());
       assertEquals(200, get(server, "/v1/conflicts", "token").statusCode());
       assertEquals(
           200,
@@ -445,10 +445,6 @@ class ApiRouterTest {
               .statusCode(),
           "a write reaches the operation, where its rule decides it");
       assertEquals(Resolution.Strategy.MINE, operations.resolution.strategy());
-      assertEquals(200, post(server, "/v1/sync", "token", "{}").statusCode());
-      var repointed = post(server, "/v1/sync", "token", "{\"main\":\"sail@elsewhere\"}");
-      assertEquals(403, repointed.statusCode(), "naming another main is an admin's");
-      assertTrue(repointed.body().contains("\"forbidden\""), repointed.body());
     }
   }
 
@@ -778,6 +774,26 @@ class ApiRouterTest {
 
       assertEquals(405, response.statusCode());
       assertTrue(response.body().contains("method_not_allowed"));
+    }
+  }
+
+  @Test
+  void aLiteralRouteIsAnsweredByItsOwnMethodsNotByAPlaceholderRouteBesideIt() throws Exception {
+    var ops = new FakeOperations();
+    try (var server = serverWith(ops, true)) {
+      assertEquals(405, put(server, "/v1/specs/board", "token", "{}").statusCode());
+      assertEquals(405, delete(server, "/v1/specs/board", "token").statusCode());
+      assertEquals(405, post(server, "/v1/conflicts/resolve", "token", "{}").statusCode());
+    }
+  }
+
+  @Test
+  void aDoorThatStampsNoPrincipalIsAnInternalFailureNeverAnAnonymousCaller() throws Exception {
+    try (var server = serverWith(new FakeOperations(), true, exchange -> {})) {
+      var response = get(server, "/v1/specs", "token");
+
+      assertEquals(500, response.statusCode());
+      assertEquals("sail API request failed.", errorOf(response).get("message"));
     }
   }
 
@@ -1148,10 +1164,8 @@ class ApiRouterTest {
   @Test
   void aViewerReadsThePortsButMayNotServe() throws Exception {
     ApiAuth viewer =
-        exchange -> {
-          exchange.setAttribute("token.role", "viewer");
-          exchange.setAttribute(ApiAuth.SCOPE, ProjectScope.all());
-        };
+        exchange ->
+            exchange.setAttribute(ApiAuth.ACTOR, new Actor(null, Role.VIEWER, Actor.Lane.API));
     try (var server = serverWith(withStack(), true, viewer)) {
       assertEquals(200, get(server, "/v1/projects/acme/ports", "token").statusCode());
       assertEquals(403, post(server, "/v1/projects/acme/serve", "token", "").statusCode());
@@ -1780,19 +1794,6 @@ class ApiRouterTest {
   }
 
   @Test
-  void roomMessagePostsRejectUnownedCredentialsLikeTheSpecDoor() throws Exception {
-    var ops = new FakeOperations();
-    try (var server = serverWith(ops, true)) {
-      var response =
-          post(server, "/v1/rooms/auth-flow/messages", "token", "{\"body\":\"progress\"}");
-
-      assertEquals(403, response.statusCode());
-      assertTrue(response.body().contains("FDE-bound credential"));
-      assertNull(ops.lastRoomPost);
-    }
-  }
-
-  @Test
   void roomsCrudRoutesThroughThePort() throws Exception {
     var ops = new FakeOperations();
     try (var server = serverWith(ops, true)) {
@@ -2149,7 +2150,7 @@ class ApiRouterTest {
     ApiAuth auth =
         exchange -> {
           delegate.require(exchange);
-          exchange.setAttribute("token.fde", "ada");
+          exchange.setAttribute(ApiAuth.ACTOR, new Actor("ada", Role.ADMIN, Actor.Lane.API));
         };
     return serverWith(ops, autoStart, auth);
   }
