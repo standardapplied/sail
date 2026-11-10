@@ -169,12 +169,12 @@ public final class SseHandler implements HttpHandler {
     var recheck = new StreamRecheck(() -> refusal(exchange), clock);
     var filter = parseFilter(uri, ApiRouter.actorOf(exchange));
     try (var out = exchange.getResponseBody()) {
+      var lastHeartbeat = clock.instant();
       writeComment(out, "subscribed");
       var state = roomOf(uri).flatMap(turns::stateOf);
       if (state.isPresent() && filter.test(state.get())) {
         writeEvent(out, state.get());
       }
-      var lastHeartbeat = clock.instant();
       try {
         while (true) {
           Event event;
