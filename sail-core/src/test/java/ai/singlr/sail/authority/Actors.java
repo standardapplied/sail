@@ -6,6 +6,7 @@
 package ai.singlr.sail.authority;
 
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.identity.Role;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -21,8 +22,8 @@ public final class Actors {
   public static final String OTHER = "bob";
   public static final String RUN = "019fee00-0000-7000-8000-00000000a0a0";
   public static final String OTHER_RUN = "019fee00-0000-7000-8000-00000000b0b0";
-  public static final String AGENT_HANDLE = "claude/" + RUN;
-  public static final String ROOM_HANDLE = "claude/room-" + RUN;
+  public static final String AGENT_HANDLE = agentHandle(RUN);
+  public static final String ROOM_HANDLE = roomHandle(RUN);
 
   public static final Actor ADMIN = new Actor("root", Role.ADMIN, Actor.Lane.API);
   public static final Actor OWNER_API = new Actor(OWNER, Role.MEMBER, Actor.Lane.API);
@@ -41,6 +42,16 @@ public final class Actors {
   public static final Actor SYSTEM = Actor.system();
 
   private Actors() {}
+
+  /** The handle a build of run {@code runId} acts as, as sail mints it. */
+  public static String agentHandle(String runId) {
+    return PrincipalHandle.mint("claude", PrincipalHandle.Marker.BUILD, runId);
+  }
+
+  /** The handle a room's wake, run {@code runId}, acts as, as sail mints it. */
+  public static String roomHandle(String runId) {
+    return PrincipalHandle.mint("claude", PrincipalHandle.Marker.ROOM, runId);
+  }
 
   /** A projection of alternating keys and values; a null value is kept. */
   static Map<String, Object> projection(Object... pairs) {

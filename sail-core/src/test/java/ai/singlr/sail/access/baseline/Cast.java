@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.access.baseline;
 
+import ai.singlr.sail.authority.Actors;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
@@ -23,9 +24,9 @@ import java.util.Set;
  */
 public final class Cast {
 
-  public static final String OWNER = "ada";
-  public static final String OTHER = "bob";
-  public static final String ADMIN = "root";
+  public static final String OWNER = Actors.OWNER;
+  public static final String OTHER = Actors.OTHER;
+  public static final String ADMIN = Actors.ADMIN.handle();
 
   /** Ada's build run on {@code s-ada}. */
   public static final String ADA_RUN = "019fee00-0000-7000-8000-0000000ada01";
@@ -39,10 +40,10 @@ public final class Cast {
   /** Bob's room agent's run in his room {@code den}. */
   public static final String BOB_ROOM_RUN = "019fee00-0000-7000-8000-0000000b0b02";
 
-  public static final String ADA_AGENT = "claude/" + ADA_RUN;
-  public static final String BOB_AGENT = "claude/" + BOB_RUN;
-  public static final String ADA_ROOM_AGENT = "claude/room-" + ADA_ROOM_RUN;
-  public static final String BOB_ROOM_AGENT = "claude/room-" + BOB_ROOM_RUN;
+  public static final String ADA_AGENT = Actors.agentHandle(ADA_RUN);
+  public static final String BOB_AGENT = Actors.agentHandle(BOB_RUN);
+  public static final String ADA_ROOM_AGENT = Actors.roomHandle(ADA_ROOM_RUN);
+  public static final String BOB_ROOM_AGENT = Actors.roomHandle(BOB_ROOM_RUN);
 
   /** One member of the cast: the label its cells carry, and the actor a door binds. */
   public record Member(String label, Actor actor) {}

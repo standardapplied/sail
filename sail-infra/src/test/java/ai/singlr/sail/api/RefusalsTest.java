@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resource;
@@ -80,7 +81,9 @@ class RefusalsTest {
     var thrown =
         assertThrows(
             ApiException.class,
-            () -> Refusals.require(VIEWER_OF_ALPHA, Action.SERVE, BRAVO, () -> absent));
+            () ->
+                Refusals.require(
+                    Access.decide(VIEWER_OF_ALPHA, Action.SERVE, BRAVO), () -> absent));
 
     assertEquals(absent, thrown);
   }
@@ -90,12 +93,13 @@ class RefusalsTest {
     var thrown =
         assertThrows(
             ApiException.class,
-            () -> Refusals.require(VIEWER_OF_ALPHA, Action.SERVE, ALPHA, () -> null));
+            () ->
+                Refusals.require(Access.decide(VIEWER_OF_ALPHA, Action.SERVE, ALPHA), () -> null));
 
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, thrown.failure().errorCode());
     assertEquals(
         "Your credential is read-only and cannot start or stop a project's processes.",
         thrown.getMessage());
-    Refusals.require(OF_ALPHA, Action.SERVE, ALPHA, () -> null);
+    Refusals.require(Access.decide(OF_ALPHA, Action.SERVE, ALPHA), () -> null);
   }
 }

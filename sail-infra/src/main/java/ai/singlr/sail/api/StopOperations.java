@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.common.Strings;
@@ -576,9 +577,10 @@ public final class StopOperations {
       return;
     }
     Refusals.require(
-        Actor.current(),
-        Action.OPERATE_RUN,
-        run.resource(spec -> ownerSeen(Actor.reader(), specStore.findById(spec))),
+        Access.decide(
+            Actor.current(),
+            Action.OPERATE_RUN,
+            run.resource(spec -> ownerSeen(Actor.reader(), specStore.findById(spec)))),
         () -> noRun(run.id()));
   }
 

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
@@ -48,9 +49,7 @@ public final class LaunchAdmission {
   public static void requireAllowedForRoom(
       String roomId, String project, String owner, String localHandle) {
     Refusals.require(
-        Actor.current(),
-        Action.DISPATCH,
-        Resources.room(roomId, project, owner),
+        Access.decide(Actor.current(), Action.DISPATCH, Resources.room(roomId, project, owner)),
         () -> ProjectReader.absent(project));
     if (Strings.isBlank(localHandle)) {
       throw new ApiException(
@@ -79,9 +78,10 @@ public final class LaunchAdmission {
    */
   public static void requireAllowed(Spec spec, String localHandle) {
     Refusals.require(
-        Actor.current(),
-        Action.DISPATCH,
-        Resources.spec(spec.id(), spec.project(), spec.assignee(), spec.createdBy()),
+        Access.decide(
+            Actor.current(),
+            Action.DISPATCH,
+            Resources.spec(spec.id(), spec.project(), spec.assignee(), spec.createdBy())),
         () -> Refusals.specNotFound(spec.id()));
     if (Strings.isBlank(localHandle)) {
       throw nodeHandleUnset();
