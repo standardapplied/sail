@@ -16,6 +16,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * What a write of one synced type answers when it reaches outside its actor's audience, and what a
@@ -84,7 +85,7 @@ public final class ScopeRule {
       return taken(id);
     }
     var project = changeLog.projectOf(type, id, next);
-    if (inside(actor, project, next)) {
+    if (inside(actor, () -> project, next)) {
       return held == null && next != null ? bornBeyond(actor, id, next) : Optional.empty();
     }
     return project != null
@@ -142,25 +143,27 @@ public final class ScopeRule {
    * Why main refuses pusher {@code actor}'s offer of {@code next} as {@code id} before anything
    * else is read of it: the offer belongs to no project the pusher reads, or main already holds the
    * id — live, deleted or erased — outside its audience. Decided from the head's project alone,
-   * which an erasure keeps, and naming the id and nothing main holds of it.
+   * which an erasure keeps, and naming the id and nothing main holds of it. A pusher that reads
+   * every project is answered without reading main's log.
    */
   public Optional<Refusal> pushed(Actor actor, String id, Map<String, Object> next) {
-    if (!inside(actor, changeLog.projectOf(type, id, next), next)) {
+    if (!inside(actor, () -> changeLog.projectOf(type, id, next), next)) {
       return unplaced(id);
     }
-    return changeLog.head(type, id).isEmpty()
-            || ReadFilter.reads(actor, () -> changeLog.headProject(type, id).orElse(null))
+    return ReadFilter.reads(actor, () -> changeLog.headProject(type, id).orElse(null))
+            || changeLog.head(type, id).isEmpty()
         ? Optional.empty()
         : taken(id);
   }
 
   /**
    * Whether a write of {@code next}, belonging to {@code project}, stays inside {@code actor}'s
-   * audience.
+   * audience: a deletion that names no project is decided by what it deletes. The project is read
+   * only for an actor that does not read every one.
    */
-  private static boolean inside(Actor actor, String project, Map<String, Object> next) {
-    return ReadFilter.reads(actor, () -> project)
-        || (project == null && Snapshots.isDeletion(next));
+  private static boolean inside(Actor actor, Supplier<String> project, Map<String, Object> next) {
+    return ReadFilter.reads(actor, project)
+        || (Snapshots.isDeletion(next) && project.get() == null);
   }
 
   private Optional<Refusal> unplaced(String id) {

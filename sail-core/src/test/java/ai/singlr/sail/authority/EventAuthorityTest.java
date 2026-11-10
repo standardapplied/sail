@@ -5,18 +5,18 @@
 
 package ai.singlr.sail.authority;
 
-import static ai.singlr.sail.authority.Actors.ADMIN;
-import static ai.singlr.sail.authority.Actors.AGENT;
-import static ai.singlr.sail.authority.Actors.MACHINE;
-import static ai.singlr.sail.authority.Actors.OTHER;
-import static ai.singlr.sail.authority.Actors.OTHERS_AGENT;
-import static ai.singlr.sail.authority.Actors.OTHER_API;
-import static ai.singlr.sail.authority.Actors.OTHER_RUN;
-import static ai.singlr.sail.authority.Actors.OWNER;
-import static ai.singlr.sail.authority.Actors.OWNER_API;
-import static ai.singlr.sail.authority.Actors.ROOM;
-import static ai.singlr.sail.authority.Actors.RUN;
-import static ai.singlr.sail.authority.Actors.VIEWER;
+import static ai.singlr.sail.identity.Actors.ADMIN;
+import static ai.singlr.sail.identity.Actors.AGENT;
+import static ai.singlr.sail.identity.Actors.MACHINE;
+import static ai.singlr.sail.identity.Actors.OTHER;
+import static ai.singlr.sail.identity.Actors.OTHERS_AGENT;
+import static ai.singlr.sail.identity.Actors.OTHER_API;
+import static ai.singlr.sail.identity.Actors.OTHER_RUN;
+import static ai.singlr.sail.identity.Actors.OWNER;
+import static ai.singlr.sail.identity.Actors.OWNER_API;
+import static ai.singlr.sail.identity.Actors.ROOM;
+import static ai.singlr.sail.identity.Actors.RUN;
+import static ai.singlr.sail.identity.Actors.VIEWER;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -27,6 +27,7 @@ import ai.singlr.sail.access.Refusal.Kind;
 import ai.singlr.sail.authority.EventAuthority.Subject;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.RunStore;

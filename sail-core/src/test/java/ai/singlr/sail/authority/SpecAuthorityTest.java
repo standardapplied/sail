@@ -5,27 +5,27 @@
 
 package ai.singlr.sail.authority;
 
-import static ai.singlr.sail.authority.Actors.ADMIN;
-import static ai.singlr.sail.authority.Actors.ADMIN_SYNC;
-import static ai.singlr.sail.authority.Actors.AGENT;
-import static ai.singlr.sail.authority.Actors.AGENT_HANDLE;
-import static ai.singlr.sail.authority.Actors.MACHINE;
-import static ai.singlr.sail.authority.Actors.MAIN;
-import static ai.singlr.sail.authority.Actors.OTHER;
-import static ai.singlr.sail.authority.Actors.OTHERS_AGENT;
-import static ai.singlr.sail.authority.Actors.OTHER_API;
-import static ai.singlr.sail.authority.Actors.OTHER_RUN;
-import static ai.singlr.sail.authority.Actors.OTHER_SYNC;
-import static ai.singlr.sail.authority.Actors.OWNER;
-import static ai.singlr.sail.authority.Actors.OWNER_API;
-import static ai.singlr.sail.authority.Actors.OWNER_CLI;
-import static ai.singlr.sail.authority.Actors.OWNER_SYNC;
-import static ai.singlr.sail.authority.Actors.ROOM;
-import static ai.singlr.sail.authority.Actors.SYSTEM;
-import static ai.singlr.sail.authority.Actors.VIEWER;
-import static ai.singlr.sail.authority.Actors.VIEWER_SYNC;
-import static ai.singlr.sail.authority.Actors.projection;
-import static ai.singlr.sail.authority.Actors.with;
+import static ai.singlr.sail.identity.Actors.ADMIN;
+import static ai.singlr.sail.identity.Actors.ADMIN_SYNC;
+import static ai.singlr.sail.identity.Actors.AGENT;
+import static ai.singlr.sail.identity.Actors.AGENT_HANDLE;
+import static ai.singlr.sail.identity.Actors.MACHINE;
+import static ai.singlr.sail.identity.Actors.MAIN;
+import static ai.singlr.sail.identity.Actors.OTHER;
+import static ai.singlr.sail.identity.Actors.OTHERS_AGENT;
+import static ai.singlr.sail.identity.Actors.OTHER_API;
+import static ai.singlr.sail.identity.Actors.OTHER_RUN;
+import static ai.singlr.sail.identity.Actors.OTHER_SYNC;
+import static ai.singlr.sail.identity.Actors.OWNER;
+import static ai.singlr.sail.identity.Actors.OWNER_API;
+import static ai.singlr.sail.identity.Actors.OWNER_CLI;
+import static ai.singlr.sail.identity.Actors.OWNER_SYNC;
+import static ai.singlr.sail.identity.Actors.ROOM;
+import static ai.singlr.sail.identity.Actors.SYSTEM;
+import static ai.singlr.sail.identity.Actors.VIEWER;
+import static ai.singlr.sail.identity.Actors.VIEWER_SYNC;
+import static ai.singlr.sail.identity.Actors.projection;
+import static ai.singlr.sail.identity.Actors.with;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
@@ -456,7 +456,10 @@ class SpecAuthorityTest {
     assertEquals(
         readOnly("assign specs"), rule.decide(VIEWER, SPEC, OWNED, with(OWNED, "assignee", OTHER)));
     assertEquals(readOnly("change specs"), rule.decide(VIEWER, SPEC, OWNED, null));
-    assertEquals(readOnly("change specs"), rule.decide(VIEWER, "never-held", null, null));
+    assertEquals(
+        readOnly("create specs"),
+        rule.decide(VIEWER, "never-held", null, null),
+        "a deletion of an id this box holds no head of is decided as its birth");
   }
 
   private static Optional<Refusal> readOnly(String act) {

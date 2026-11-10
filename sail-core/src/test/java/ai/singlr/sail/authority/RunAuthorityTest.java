@@ -5,30 +5,31 @@
 
 package ai.singlr.sail.authority;
 
-import static ai.singlr.sail.authority.Actors.ADMIN;
-import static ai.singlr.sail.authority.Actors.ADMIN_SYNC;
-import static ai.singlr.sail.authority.Actors.AGENT;
-import static ai.singlr.sail.authority.Actors.AGENT_HANDLE;
-import static ai.singlr.sail.authority.Actors.MACHINE;
-import static ai.singlr.sail.authority.Actors.MAIN;
-import static ai.singlr.sail.authority.Actors.OTHER;
-import static ai.singlr.sail.authority.Actors.OTHERS_AGENT;
-import static ai.singlr.sail.authority.Actors.OTHER_API;
-import static ai.singlr.sail.authority.Actors.OTHER_RUN;
-import static ai.singlr.sail.authority.Actors.OTHER_SYNC;
-import static ai.singlr.sail.authority.Actors.OWNER;
-import static ai.singlr.sail.authority.Actors.OWNER_API;
-import static ai.singlr.sail.authority.Actors.OWNER_CLI;
-import static ai.singlr.sail.authority.Actors.OWNER_SYNC;
-import static ai.singlr.sail.authority.Actors.ROOM;
-import static ai.singlr.sail.authority.Actors.ROOM_HANDLE;
-import static ai.singlr.sail.authority.Actors.RUN;
-import static ai.singlr.sail.authority.Actors.SYSTEM;
-import static ai.singlr.sail.authority.Actors.VIEWER;
-import static ai.singlr.sail.authority.Actors.VIEWER_SYNC;
-import static ai.singlr.sail.authority.Actors.projection;
-import static ai.singlr.sail.authority.Actors.with;
+import static ai.singlr.sail.identity.Actors.ADMIN;
+import static ai.singlr.sail.identity.Actors.ADMIN_SYNC;
+import static ai.singlr.sail.identity.Actors.AGENT;
+import static ai.singlr.sail.identity.Actors.AGENT_HANDLE;
+import static ai.singlr.sail.identity.Actors.MACHINE;
+import static ai.singlr.sail.identity.Actors.MAIN;
+import static ai.singlr.sail.identity.Actors.OTHER;
+import static ai.singlr.sail.identity.Actors.OTHERS_AGENT;
+import static ai.singlr.sail.identity.Actors.OTHER_API;
+import static ai.singlr.sail.identity.Actors.OTHER_RUN;
+import static ai.singlr.sail.identity.Actors.OTHER_SYNC;
+import static ai.singlr.sail.identity.Actors.OWNER;
+import static ai.singlr.sail.identity.Actors.OWNER_API;
+import static ai.singlr.sail.identity.Actors.OWNER_CLI;
+import static ai.singlr.sail.identity.Actors.OWNER_SYNC;
+import static ai.singlr.sail.identity.Actors.ROOM;
+import static ai.singlr.sail.identity.Actors.ROOM_HANDLE;
+import static ai.singlr.sail.identity.Actors.RUN;
+import static ai.singlr.sail.identity.Actors.SYSTEM;
+import static ai.singlr.sail.identity.Actors.VIEWER;
+import static ai.singlr.sail.identity.Actors.VIEWER_SYNC;
+import static ai.singlr.sail.identity.Actors.projection;
+import static ai.singlr.sail.identity.Actors.with;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Refusal.Kind;
@@ -36,7 +37,10 @@ import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.PushOutcome;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
 import java.util.Map;
@@ -80,6 +84,8 @@ class RunAuthorityTest {
           null,
           "principals",
           List.of(AGENT_HANDLE, ROOM_HANDLE));
+
+  private static final Map<String, Object> MARKED = Map.of("_actor", OWNER);
 
   private Board board;
   private RunAuthority rule;
@@ -375,6 +381,49 @@ class RunAuthorityTest {
     assertEquals(
         Optional.ofNullable(row.refused()),
         rule.decide(row.actor(), row.id(), row.held(), row.next()).map(Refusal::kind));
+  }
+
+  /**
+   * A scoped member's marked deletion of a run this box holds no head of, asked as the journal and
+   * main's commit ask it, behind the scope rule: it names no project, so the scope rule lets it
+   * through, and it is decided as main decided it, a birth naming no work, refused as an admin's,
+   * never thrown as a write outside the actor's audience.
+   */
+  @Test
+  void aScopedMembersMarkedDeletionOfARunThisBoxHoldsNoHeadOfIsAnAdminsAsOnMain() {
+    var scoped = ProjectScope.of(List.of("acme"));
+    var adHoc =
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Run run-x is an ad-hoc session.",
+                "Only its owner or an admin may access this run."));
+    var scoping = new ScopeRule(new ChangeLog(board.db), "run").before(rule);
+
+    assertEquals(adHoc, scoping.decide(OWNER_API.withScope(scoped), "run-x", null, MARKED));
+    assertEquals(adHoc, scoping.decide(OWNER_SYNC.withScope(scoped), "run-x", null, MARKED));
+    assertEquals(Optional.empty(), scoping.decide(ADMIN.withScope(scoped), "run-x", null, MARKED));
+  }
+
+  /**
+   * The same deletion pushed to main, of a run whose row main holds with no head — the one such
+   * deletion main's commit decides rather than takes as changing nothing — is denied there as main
+   * denied it.
+   */
+  @Test
+  void mainsCommitDeniesAScopedNodesMarkedDeletionOfARunItHoldsNoHeadOf() {
+    var runs = new RunStore(board.db);
+    board.db.execute(
+        "DELETE FROM change_heads WHERE entity_type = 'run' AND entity_id = ?", OTHER_RUN);
+
+    var outcome =
+        Actor.call(
+            OWNER_SYNC.withScope(ProjectScope.of(List.of("acme"))),
+            () -> runs.commitRevision(OTHER_RUN, MARKED, null, runs.authority()));
+
+    assertEquals(
+        "Run " + OTHER_RUN + " is an ad-hoc session.",
+        assertInstanceOf(PushOutcome.Denied.class, outcome).reason());
   }
 
   @Test

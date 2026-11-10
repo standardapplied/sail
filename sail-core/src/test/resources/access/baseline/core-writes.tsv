@@ -1706,6 +1706,67 @@ write project p-new create as sync viewer bob acme	allowed
 write project p-new create as sync viewer bob all	allowed
 write project p-new create as sync viewer bob beta	allowed
 write project p-new create as system admin sail all	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as agent member ada-agent acme	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as agent member ada-agent all	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as agent member ada-agent beta	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as agent member bob-agent acme	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as agent member bob-agent all	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as agent member bob-agent beta	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as agent viewer ada-agent acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as agent viewer ada-agent all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as agent viewer ada-agent beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as agent viewer bob-agent acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as agent viewer bob-agent all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as agent viewer bob-agent beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as api admin root all	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as api member ada acme	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as api member ada all	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as api member ada beta	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as api member bob acme	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as api member bob all	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as api member bob beta	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as api member machine all	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as api viewer ada beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as api viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as api viewer bob all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as api viewer bob beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as cli admin root all	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as cli member ada acme	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as cli member ada all	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as cli member ada beta	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as cli member bob acme	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as cli member bob all	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as cli member bob beta	denied NOT_OWNER Review 019fee00-0000-7000-8000-0000000c0c02 is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as cli viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as cli viewer ada all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as cli viewer ada beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as cli viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as cli viewer bob all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as cli viewer bob beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as main admin bob all	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as room viewer ada-room acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as room viewer ada-room all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as room viewer ada-room beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as room viewer bob-room acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as room viewer bob-room all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as room viewer bob-room beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync admin root all	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync member ada acme	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync member ada all	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync member ada beta	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync member bob acme	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync member bob all	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync member bob beta	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer ada acme	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer ada all	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer ada beta	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer anonymous none	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer bob acme	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer bob all	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer bob beta	allowed
+write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as system admin sail all	allowed
 write review create of s-ada as agent member ada-agent acme	allowed
 write review create of s-ada as agent member ada-agent all	allowed
 write review create of s-ada as agent member ada-agent beta	denied OUT_OF_SCOPE Review '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
@@ -2072,6 +2133,67 @@ write review review-ada dismiss finding-ada as sync viewer bob acme	allowed
 write review review-ada dismiss finding-ada as sync viewer bob all	allowed
 write review review-ada dismiss finding-ada as sync viewer bob beta	allowed
 write review review-ada dismiss finding-ada as system admin sail all	allowed
+write review review-ada marked deletion with no head as agent member ada-agent acme	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as agent member ada-agent all	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as agent member ada-agent beta	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as agent member bob-agent acme	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as agent member bob-agent all	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as agent member bob-agent beta	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as agent viewer ada-agent acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as agent viewer ada-agent all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as agent viewer ada-agent beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as agent viewer bob-agent acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as agent viewer bob-agent all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as agent viewer bob-agent beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as api admin root all	allowed
+write review review-ada marked deletion with no head as api member ada acme	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as api member ada all	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as api member ada beta	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as api member bob acme	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as api member bob all	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as api member bob beta	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as api member machine all	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as api viewer ada beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as api viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as api viewer bob all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as api viewer bob beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as cli admin root all	allowed
+write review review-ada marked deletion with no head as cli member ada acme	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as cli member ada all	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as cli member ada beta	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as cli member bob acme	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as cli member bob all	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as cli member bob beta	denied NOT_OWNER Review review-ada is for spec 'null', which has no owner. | Only the spec's owner or an admin may approve or dismiss it.
+write review review-ada marked deletion with no head as cli viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as cli viewer ada all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as cli viewer ada beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as cli viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as cli viewer bob all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as cli viewer bob beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as main admin bob all	allowed
+write review review-ada marked deletion with no head as room viewer ada-room acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as room viewer ada-room all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as room viewer ada-room beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as room viewer bob-room acme	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as room viewer bob-room all	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as room viewer bob-room beta	denied READ_ONLY Your credential is read-only and cannot change reviews. | Ask an admin for a member or admin credential.
+write review review-ada marked deletion with no head as sync admin root all	allowed
+write review review-ada marked deletion with no head as sync member ada acme	allowed
+write review review-ada marked deletion with no head as sync member ada all	allowed
+write review review-ada marked deletion with no head as sync member ada beta	allowed
+write review review-ada marked deletion with no head as sync member bob acme	allowed
+write review review-ada marked deletion with no head as sync member bob all	allowed
+write review review-ada marked deletion with no head as sync member bob beta	allowed
+write review review-ada marked deletion with no head as sync viewer ada acme	allowed
+write review review-ada marked deletion with no head as sync viewer ada all	allowed
+write review review-ada marked deletion with no head as sync viewer ada beta	allowed
+write review review-ada marked deletion with no head as sync viewer anonymous none	allowed
+write review review-ada marked deletion with no head as sync viewer bob acme	allowed
+write review review-ada marked deletion with no head as sync viewer bob all	allowed
+write review review-ada marked deletion with no head as sync viewer bob beta	allowed
+write review review-ada marked deletion with no head as system admin sail all	allowed
 write review review-bob approve as agent member ada-agent acme	denied NOT_OWNER Review review-bob is for spec 's-bob', owned by 'bob', not you. | Only bob or an admin may approve or dismiss it.
 write review review-bob approve as agent member ada-agent all	denied NOT_OWNER Review review-bob is for spec 's-bob', owned by 'bob', not you. | Only bob or an admin may approve or dismiss it.
 write review review-bob approve as agent member ada-agent beta	denied OUT_OF_SCOPE Review 'review-bob' already exists. | Pick another id.
@@ -2499,6 +2621,67 @@ write room b-room edit wake as sync viewer bob acme	allowed
 write room b-room edit wake as sync viewer bob all	allowed
 write room b-room edit wake as sync viewer bob beta	allowed
 write room b-room edit wake as system admin sail all	allowed
+write room b-room re-create in acme over a deletion filed there as agent member ada-agent acme	allowed
+write room b-room re-create in acme over a deletion filed there as agent member ada-agent all	allowed
+write room b-room re-create in acme over a deletion filed there as agent member ada-agent beta	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room re-create in acme over a deletion filed there as agent member bob-agent acme	denied NOT_OWNER Room 'b-room' belongs to 'ada', not you. | Ask ada to change it, or have an admin do it.
+write room b-room re-create in acme over a deletion filed there as agent member bob-agent all	denied NOT_OWNER Room 'b-room' belongs to 'ada', not you. | Ask ada to change it, or have an admin do it.
+write room b-room re-create in acme over a deletion filed there as agent member bob-agent beta	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room re-create in acme over a deletion filed there as agent viewer ada-agent acme	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as agent viewer ada-agent all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as agent viewer ada-agent beta	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room re-create in acme over a deletion filed there as agent viewer bob-agent acme	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as agent viewer bob-agent all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as agent viewer bob-agent beta	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room re-create in acme over a deletion filed there as api admin root all	allowed
+write room b-room re-create in acme over a deletion filed there as api member ada acme	allowed
+write room b-room re-create in acme over a deletion filed there as api member ada all	allowed
+write room b-room re-create in acme over a deletion filed there as api member ada beta	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room re-create in acme over a deletion filed there as api member bob acme	denied NOT_OWNER Room 'b-room' belongs to 'ada', not you. | Ask ada to change it, or have an admin do it.
+write room b-room re-create in acme over a deletion filed there as api member bob all	denied NOT_OWNER Room 'b-room' belongs to 'ada', not you. | Ask ada to change it, or have an admin do it.
+write room b-room re-create in acme over a deletion filed there as api member bob beta	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room re-create in acme over a deletion filed there as api member machine all	denied NOT_OWNER Room 'b-room' belongs to 'ada', not you. | Ask ada to change it, or have an admin do it.
+write room b-room re-create in acme over a deletion filed there as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as api viewer ada beta	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room re-create in acme over a deletion filed there as api viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as api viewer bob all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as api viewer bob beta	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room re-create in acme over a deletion filed there as cli admin root all	allowed
+write room b-room re-create in acme over a deletion filed there as cli member ada acme	allowed
+write room b-room re-create in acme over a deletion filed there as cli member ada all	allowed
+write room b-room re-create in acme over a deletion filed there as cli member ada beta	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room re-create in acme over a deletion filed there as cli member bob acme	denied NOT_OWNER Room 'b-room' belongs to 'ada', not you. | Ask ada to change it, or have an admin do it.
+write room b-room re-create in acme over a deletion filed there as cli member bob all	denied NOT_OWNER Room 'b-room' belongs to 'ada', not you. | Ask ada to change it, or have an admin do it.
+write room b-room re-create in acme over a deletion filed there as cli member bob beta	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room re-create in acme over a deletion filed there as cli viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as cli viewer ada all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as cli viewer ada beta	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room re-create in acme over a deletion filed there as cli viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as cli viewer bob all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as cli viewer bob beta	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room re-create in acme over a deletion filed there as main admin bob all	allowed
+write room b-room re-create in acme over a deletion filed there as room viewer ada-room acme	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as room viewer ada-room all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as room viewer ada-room beta	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room re-create in acme over a deletion filed there as room viewer bob-room acme	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as room viewer bob-room all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room re-create in acme over a deletion filed there as room viewer bob-room beta	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room re-create in acme over a deletion filed there as sync admin root all	allowed
+write room b-room re-create in acme over a deletion filed there as sync member ada acme	allowed
+write room b-room re-create in acme over a deletion filed there as sync member ada all	allowed
+write room b-room re-create in acme over a deletion filed there as sync member ada beta	allowed
+write room b-room re-create in acme over a deletion filed there as sync member bob acme	allowed
+write room b-room re-create in acme over a deletion filed there as sync member bob all	allowed
+write room b-room re-create in acme over a deletion filed there as sync member bob beta	allowed
+write room b-room re-create in acme over a deletion filed there as sync viewer ada acme	allowed
+write room b-room re-create in acme over a deletion filed there as sync viewer ada all	allowed
+write room b-room re-create in acme over a deletion filed there as sync viewer ada beta	allowed
+write room b-room re-create in acme over a deletion filed there as sync viewer anonymous none	allowed
+write room b-room re-create in acme over a deletion filed there as sync viewer bob acme	allowed
+write room b-room re-create in acme over a deletion filed there as sync viewer bob all	allowed
+write room b-room re-create in acme over a deletion filed there as sync viewer bob beta	allowed
+write room b-room re-create in acme over a deletion filed there as system admin sail all	allowed
 write room den assign bob as agent member ada-agent acme	denied NOT_OWNER Room 'den' belongs to 'bob', not you. | Ask bob to change it, or have an admin do it.
 write room den assign bob as agent member ada-agent all	denied NOT_OWNER Room 'den' belongs to 'bob', not you. | Ask bob to change it, or have an admin do it.
 write room den assign bob as agent member ada-agent beta	denied OUT_OF_SCOPE Room 'den' already exists. | Pick another id.
@@ -3231,6 +3414,67 @@ write room lobby edit wake as sync viewer bob acme	allowed
 write room lobby edit wake as sync viewer bob all	allowed
 write room lobby edit wake as sync viewer bob beta	allowed
 write room lobby edit wake as system admin sail all	allowed
+write room lobby marked deletion with no head as agent member ada-agent acme	allowed
+write room lobby marked deletion with no head as agent member ada-agent all	allowed
+write room lobby marked deletion with no head as agent member ada-agent beta	denied OUT_OF_SCOPE Room 'lobby' already exists. | Pick another id.
+write room lobby marked deletion with no head as agent member bob-agent acme	allowed
+write room lobby marked deletion with no head as agent member bob-agent all	allowed
+write room lobby marked deletion with no head as agent member bob-agent beta	denied OUT_OF_SCOPE Room 'lobby' already exists. | Pick another id.
+write room lobby marked deletion with no head as agent viewer ada-agent acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as agent viewer ada-agent all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as agent viewer ada-agent beta	denied OUT_OF_SCOPE Room 'lobby' already exists. | Pick another id.
+write room lobby marked deletion with no head as agent viewer bob-agent acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as agent viewer bob-agent all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as agent viewer bob-agent beta	denied OUT_OF_SCOPE Room 'lobby' already exists. | Pick another id.
+write room lobby marked deletion with no head as api admin root all	allowed
+write room lobby marked deletion with no head as api member ada acme	allowed
+write room lobby marked deletion with no head as api member ada all	allowed
+write room lobby marked deletion with no head as api member ada beta	denied OUT_OF_SCOPE Room 'lobby' already exists. | Pick another id.
+write room lobby marked deletion with no head as api member bob acme	allowed
+write room lobby marked deletion with no head as api member bob all	allowed
+write room lobby marked deletion with no head as api member bob beta	denied OUT_OF_SCOPE Room 'lobby' already exists. | Pick another id.
+write room lobby marked deletion with no head as api member machine all	allowed
+write room lobby marked deletion with no head as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as api viewer ada beta	denied OUT_OF_SCOPE Room 'lobby' already exists. | Pick another id.
+write room lobby marked deletion with no head as api viewer bob acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as api viewer bob all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as api viewer bob beta	denied OUT_OF_SCOPE Room 'lobby' already exists. | Pick another id.
+write room lobby marked deletion with no head as cli admin root all	allowed
+write room lobby marked deletion with no head as cli member ada acme	allowed
+write room lobby marked deletion with no head as cli member ada all	allowed
+write room lobby marked deletion with no head as cli member ada beta	denied OUT_OF_SCOPE Room 'lobby' already exists. | Pick another id.
+write room lobby marked deletion with no head as cli member bob acme	allowed
+write room lobby marked deletion with no head as cli member bob all	allowed
+write room lobby marked deletion with no head as cli member bob beta	denied OUT_OF_SCOPE Room 'lobby' already exists. | Pick another id.
+write room lobby marked deletion with no head as cli viewer ada acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as cli viewer ada all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as cli viewer ada beta	denied OUT_OF_SCOPE Room 'lobby' already exists. | Pick another id.
+write room lobby marked deletion with no head as cli viewer bob acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as cli viewer bob all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as cli viewer bob beta	denied OUT_OF_SCOPE Room 'lobby' already exists. | Pick another id.
+write room lobby marked deletion with no head as main admin bob all	allowed
+write room lobby marked deletion with no head as room viewer ada-room acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as room viewer ada-room all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as room viewer ada-room beta	denied OUT_OF_SCOPE Room 'lobby' already exists. | Pick another id.
+write room lobby marked deletion with no head as room viewer bob-room acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as room viewer bob-room all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room lobby marked deletion with no head as room viewer bob-room beta	denied OUT_OF_SCOPE Room 'lobby' already exists. | Pick another id.
+write room lobby marked deletion with no head as sync admin root all	allowed
+write room lobby marked deletion with no head as sync member ada acme	allowed
+write room lobby marked deletion with no head as sync member ada all	allowed
+write room lobby marked deletion with no head as sync member ada beta	allowed
+write room lobby marked deletion with no head as sync member bob acme	allowed
+write room lobby marked deletion with no head as sync member bob all	allowed
+write room lobby marked deletion with no head as sync member bob beta	allowed
+write room lobby marked deletion with no head as sync viewer ada acme	allowed
+write room lobby marked deletion with no head as sync viewer ada all	allowed
+write room lobby marked deletion with no head as sync viewer ada beta	allowed
+write room lobby marked deletion with no head as sync viewer anonymous none	allowed
+write room lobby marked deletion with no head as sync viewer bob acme	allowed
+write room lobby marked deletion with no head as sync viewer bob all	allowed
+write room lobby marked deletion with no head as sync viewer bob beta	allowed
+write room lobby marked deletion with no head as system admin sail all	allowed
 write room lobby move to beta as agent member ada-agent acme	denied OUT_OF_SCOPE Project 'beta' was not found. | Ask an admin on main for the project: sail fde grant <handle> <project>.
 write room lobby move to beta as agent member ada-agent all	allowed
 write room lobby move to beta as agent member ada-agent beta	denied OUT_OF_SCOPE Room 'lobby' already exists. | Pick another id.
@@ -3292,6 +3536,67 @@ write room lobby move to beta as sync viewer bob acme	allowed
 write room lobby move to beta as sync viewer bob all	allowed
 write room lobby move to beta as sync viewer bob beta	allowed
 write room lobby move to beta as system admin sail all	allowed
+write room r-never marked deletion never held as agent member ada-agent acme	allowed
+write room r-never marked deletion never held as agent member ada-agent all	allowed
+write room r-never marked deletion never held as agent member ada-agent beta	allowed
+write room r-never marked deletion never held as agent member bob-agent acme	allowed
+write room r-never marked deletion never held as agent member bob-agent all	allowed
+write room r-never marked deletion never held as agent member bob-agent beta	allowed
+write room r-never marked deletion never held as agent viewer ada-agent acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as agent viewer ada-agent all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as agent viewer ada-agent beta	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as agent viewer bob-agent acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as agent viewer bob-agent all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as agent viewer bob-agent beta	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as api admin root all	allowed
+write room r-never marked deletion never held as api member ada acme	allowed
+write room r-never marked deletion never held as api member ada all	allowed
+write room r-never marked deletion never held as api member ada beta	allowed
+write room r-never marked deletion never held as api member bob acme	allowed
+write room r-never marked deletion never held as api member bob all	allowed
+write room r-never marked deletion never held as api member bob beta	allowed
+write room r-never marked deletion never held as api member machine all	allowed
+write room r-never marked deletion never held as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as api viewer ada beta	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as api viewer bob acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as api viewer bob all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as api viewer bob beta	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as cli admin root all	allowed
+write room r-never marked deletion never held as cli member ada acme	allowed
+write room r-never marked deletion never held as cli member ada all	allowed
+write room r-never marked deletion never held as cli member ada beta	allowed
+write room r-never marked deletion never held as cli member bob acme	allowed
+write room r-never marked deletion never held as cli member bob all	allowed
+write room r-never marked deletion never held as cli member bob beta	allowed
+write room r-never marked deletion never held as cli viewer ada acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as cli viewer ada all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as cli viewer ada beta	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as cli viewer bob acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as cli viewer bob all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as cli viewer bob beta	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as main admin bob all	allowed
+write room r-never marked deletion never held as room viewer ada-room acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as room viewer ada-room all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as room viewer ada-room beta	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as room viewer bob-room acme	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as room viewer bob-room all	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as room viewer bob-room beta	denied READ_ONLY Your credential is read-only and cannot create rooms. | Ask an admin for a member or admin credential.
+write room r-never marked deletion never held as sync admin root all	allowed
+write room r-never marked deletion never held as sync member ada acme	allowed
+write room r-never marked deletion never held as sync member ada all	allowed
+write room r-never marked deletion never held as sync member ada beta	allowed
+write room r-never marked deletion never held as sync member bob acme	allowed
+write room r-never marked deletion never held as sync member bob all	allowed
+write room r-never marked deletion never held as sync member bob beta	allowed
+write room r-never marked deletion never held as sync viewer ada acme	allowed
+write room r-never marked deletion never held as sync viewer ada all	allowed
+write room r-never marked deletion never held as sync viewer ada beta	allowed
+write room r-never marked deletion never held as sync viewer anonymous none	allowed
+write room r-never marked deletion never held as sync viewer bob acme	allowed
+write room r-never marked deletion never held as sync viewer bob all	allowed
+write room r-never marked deletion never held as sync viewer bob beta	allowed
+write room r-never marked deletion never held as system admin sail all	allowed
 write room r-new create by ada as agent member ada-agent acme	allowed
 write room r-new create by ada as agent member ada-agent all	allowed
 write room r-new create by ada as agent member ada-agent beta	denied OUT_OF_SCOPE Project 'acme' was not found. | Ask an admin on main for the project: sail fde grant <handle> <project>.
@@ -4085,6 +4390,67 @@ write run 019fee00-0000-7000-8000-0000000ada01 complete as sync viewer bob acme	
 write run 019fee00-0000-7000-8000-0000000ada01 complete as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 complete as sync viewer bob beta	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 complete as system admin sail all	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as agent member ada-agent acme	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as agent member ada-agent all	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as agent member ada-agent beta	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as agent member bob-agent acme	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as agent member bob-agent all	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as agent member bob-agent beta	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as agent viewer ada-agent acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as agent viewer ada-agent all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as agent viewer ada-agent beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as agent viewer bob-agent acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as agent viewer bob-agent all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as agent viewer bob-agent beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as api admin root all	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as api member ada acme	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as api member ada all	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as api member ada beta	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as api member bob acme	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as api member bob all	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as api member bob beta	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as api member machine all	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as api viewer ada beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as api viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as api viewer bob all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as api viewer bob beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as cli admin root all	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as cli member ada acme	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as cli member ada all	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as cli member ada beta	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as cli member bob acme	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as cli member bob all	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as cli member bob beta	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000ada01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as cli viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as cli viewer ada all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as cli viewer ada beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as cli viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as cli viewer bob all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as cli viewer bob beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as main admin bob all	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as room viewer ada-room acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as room viewer ada-room all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as room viewer ada-room beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as room viewer bob-room acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as room viewer bob-room all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as room viewer bob-room beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync admin root all	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync member ada acme	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync member ada all	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync member ada beta	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync member bob acme	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync member bob all	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync member bob beta	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer ada acme	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer ada all	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer ada beta	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer anonymous none	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer bob acme	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer bob all	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer bob beta	allowed
+write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as system admin sail all	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 report session as agent member ada-agent acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 report session as agent member ada-agent all	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 report session as agent member ada-agent beta	denied OUT_OF_SCOPE Run '019fee00-0000-7000-8000-0000000ada01' already exists. | Pick another id.
@@ -5122,6 +5488,67 @@ write run 019fee00-0000-7000-8000-0000000b0b01 stop as sync viewer bob acme	allo
 write run 019fee00-0000-7000-8000-0000000b0b01 stop as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 stop as sync viewer bob beta	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 stop as system admin sail all	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as agent member ada-agent acme	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as agent member ada-agent all	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as agent member ada-agent beta	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as agent member bob-agent acme	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as agent member bob-agent all	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as agent member bob-agent beta	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as agent viewer ada-agent acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as agent viewer ada-agent all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as agent viewer ada-agent beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as agent viewer bob-agent acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as agent viewer bob-agent all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as agent viewer bob-agent beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as api admin root all	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as api member ada acme	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as api member ada all	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as api member ada beta	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as api member bob acme	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as api member bob all	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as api member bob beta	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as api member machine all	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as api viewer ada beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as api viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as api viewer bob all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as api viewer bob beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as cli admin root all	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as cli member ada acme	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as cli member ada all	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as cli member ada beta	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as cli member bob acme	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as cli member bob all	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as cli member bob beta	denied NOT_OWNER Run 019fee00-0000-7000-8000-0000000c0c01 is an ad-hoc session. | Only its owner or an admin may access this run.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as cli viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as cli viewer ada all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as cli viewer ada beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as cli viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as cli viewer bob all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as cli viewer bob beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as main admin bob all	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as room viewer ada-room acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as room viewer ada-room all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as room viewer ada-room beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as room viewer bob-room acme	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as room viewer bob-room all	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as room viewer bob-room beta	denied READ_ONLY Your credential is read-only and cannot change runs. | Ask an admin for a member or admin credential.
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync admin root all	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync member ada acme	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync member ada all	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync member ada beta	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync member bob acme	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync member bob all	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync member bob beta	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer ada acme	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer ada all	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer ada beta	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer anonymous none	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer bob acme	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer bob all	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer bob beta	allowed
+write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as system admin sail all	allowed
 write run create ad-hoc on ada's box as agent member ada-agent acme	allowed
 write run create ad-hoc on ada's box as agent member ada-agent all	allowed
 write run create ad-hoc on ada's box as agent member ada-agent beta	denied OUT_OF_SCOPE Project 'acme' was not found. | Ask an admin on main for the project: sail fde grant <handle> <project>.
@@ -7013,6 +7440,67 @@ write spec s-ada edit title as sync viewer bob acme	allowed
 write spec s-ada edit title as sync viewer bob all	allowed
 write spec s-ada edit title as sync viewer bob beta	allowed
 write spec s-ada edit title as system admin sail all	allowed
+write spec s-ada marked deletion with no head as agent member ada-agent acme	allowed
+write spec s-ada marked deletion with no head as agent member ada-agent all	allowed
+write spec s-ada marked deletion with no head as agent member ada-agent beta	denied OUT_OF_SCOPE Spec 's-ada' already exists. | Pick another id.
+write spec s-ada marked deletion with no head as agent member bob-agent acme	denied NOT_OWNER Room 's-ada' already exists, and a spec's id is reserved for its own room. | Pick another spec id.
+write spec s-ada marked deletion with no head as agent member bob-agent all	denied NOT_OWNER Room 's-ada' already exists, and a spec's id is reserved for its own room. | Pick another spec id.
+write spec s-ada marked deletion with no head as agent member bob-agent beta	denied OUT_OF_SCOPE Spec 's-ada' already exists. | Pick another id.
+write spec s-ada marked deletion with no head as agent viewer ada-agent acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as agent viewer ada-agent all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as agent viewer ada-agent beta	denied OUT_OF_SCOPE Spec 's-ada' already exists. | Pick another id.
+write spec s-ada marked deletion with no head as agent viewer bob-agent acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as agent viewer bob-agent all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as agent viewer bob-agent beta	denied OUT_OF_SCOPE Spec 's-ada' already exists. | Pick another id.
+write spec s-ada marked deletion with no head as api admin root all	allowed
+write spec s-ada marked deletion with no head as api member ada acme	allowed
+write spec s-ada marked deletion with no head as api member ada all	allowed
+write spec s-ada marked deletion with no head as api member ada beta	denied OUT_OF_SCOPE Spec 's-ada' already exists. | Pick another id.
+write spec s-ada marked deletion with no head as api member bob acme	denied NOT_OWNER Room 's-ada' already exists, and a spec's id is reserved for its own room. | Pick another spec id.
+write spec s-ada marked deletion with no head as api member bob all	denied NOT_OWNER Room 's-ada' already exists, and a spec's id is reserved for its own room. | Pick another spec id.
+write spec s-ada marked deletion with no head as api member bob beta	denied OUT_OF_SCOPE Spec 's-ada' already exists. | Pick another id.
+write spec s-ada marked deletion with no head as api member machine all	denied NOT_OWNER Room 's-ada' already exists, and a spec's id is reserved for its own room. | Pick another spec id.
+write spec s-ada marked deletion with no head as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as api viewer ada beta	denied OUT_OF_SCOPE Spec 's-ada' already exists. | Pick another id.
+write spec s-ada marked deletion with no head as api viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as api viewer bob all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as api viewer bob beta	denied OUT_OF_SCOPE Spec 's-ada' already exists. | Pick another id.
+write spec s-ada marked deletion with no head as cli admin root all	allowed
+write spec s-ada marked deletion with no head as cli member ada acme	allowed
+write spec s-ada marked deletion with no head as cli member ada all	allowed
+write spec s-ada marked deletion with no head as cli member ada beta	denied OUT_OF_SCOPE Spec 's-ada' already exists. | Pick another id.
+write spec s-ada marked deletion with no head as cli member bob acme	denied NOT_OWNER Room 's-ada' already exists, and a spec's id is reserved for its own room. | Pick another spec id.
+write spec s-ada marked deletion with no head as cli member bob all	denied NOT_OWNER Room 's-ada' already exists, and a spec's id is reserved for its own room. | Pick another spec id.
+write spec s-ada marked deletion with no head as cli member bob beta	denied OUT_OF_SCOPE Spec 's-ada' already exists. | Pick another id.
+write spec s-ada marked deletion with no head as cli viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as cli viewer ada all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as cli viewer ada beta	denied OUT_OF_SCOPE Spec 's-ada' already exists. | Pick another id.
+write spec s-ada marked deletion with no head as cli viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as cli viewer bob all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as cli viewer bob beta	denied OUT_OF_SCOPE Spec 's-ada' already exists. | Pick another id.
+write spec s-ada marked deletion with no head as main admin bob all	allowed
+write spec s-ada marked deletion with no head as room viewer ada-room acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as room viewer ada-room all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as room viewer ada-room beta	denied OUT_OF_SCOPE Spec 's-ada' already exists. | Pick another id.
+write spec s-ada marked deletion with no head as room viewer bob-room acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as room viewer bob-room all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-ada marked deletion with no head as room viewer bob-room beta	denied OUT_OF_SCOPE Spec 's-ada' already exists. | Pick another id.
+write spec s-ada marked deletion with no head as sync admin root all	allowed
+write spec s-ada marked deletion with no head as sync member ada acme	allowed
+write spec s-ada marked deletion with no head as sync member ada all	allowed
+write spec s-ada marked deletion with no head as sync member ada beta	allowed
+write spec s-ada marked deletion with no head as sync member bob acme	allowed
+write spec s-ada marked deletion with no head as sync member bob all	allowed
+write spec s-ada marked deletion with no head as sync member bob beta	allowed
+write spec s-ada marked deletion with no head as sync viewer ada acme	allowed
+write spec s-ada marked deletion with no head as sync viewer ada all	allowed
+write spec s-ada marked deletion with no head as sync viewer ada beta	allowed
+write spec s-ada marked deletion with no head as sync viewer anonymous none	allowed
+write spec s-ada marked deletion with no head as sync viewer bob acme	allowed
+write spec s-ada marked deletion with no head as sync viewer bob all	allowed
+write spec s-ada marked deletion with no head as sync viewer bob beta	allowed
+write spec s-ada marked deletion with no head as system admin sail all	allowed
 write spec s-ada move room to den as agent member ada-agent acme	denied FIXED The room_id of spec 's-ada' is set when it is created and never changes. | Create a new spec instead.
 write spec s-ada move room to den as agent member ada-agent all	denied FIXED The room_id of spec 's-ada' is set when it is created and never changes. | Create a new spec instead.
 write spec s-ada move room to den as agent member ada-agent beta	denied OUT_OF_SCOPE Spec 's-ada' already exists. | Pick another id.
@@ -9148,6 +9636,67 @@ write spec s-beta edit title as sync viewer bob acme	allowed
 write spec s-beta edit title as sync viewer bob all	allowed
 write spec s-beta edit title as sync viewer bob beta	allowed
 write spec s-beta edit title as system admin sail all	allowed
+write spec s-beta re-create in acme over a deletion filed there as agent member ada-agent acme	allowed
+write spec s-beta re-create in acme over a deletion filed there as agent member ada-agent all	allowed
+write spec s-beta re-create in acme over a deletion filed there as agent member ada-agent beta	denied OUT_OF_SCOPE Spec 's-beta' already exists. | Pick another id.
+write spec s-beta re-create in acme over a deletion filed there as agent member bob-agent acme	denied NOT_OWNER Spec 's-beta' is assigned to 'ada', not you. | Ask ada to make this change, or have an admin do it.
+write spec s-beta re-create in acme over a deletion filed there as agent member bob-agent all	denied NOT_OWNER Spec 's-beta' is assigned to 'ada', not you. | Ask ada to make this change, or have an admin do it.
+write spec s-beta re-create in acme over a deletion filed there as agent member bob-agent beta	denied OUT_OF_SCOPE Spec 's-beta' already exists. | Pick another id.
+write spec s-beta re-create in acme over a deletion filed there as agent viewer ada-agent acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as agent viewer ada-agent all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as agent viewer ada-agent beta	denied OUT_OF_SCOPE Spec 's-beta' already exists. | Pick another id.
+write spec s-beta re-create in acme over a deletion filed there as agent viewer bob-agent acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as agent viewer bob-agent all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as agent viewer bob-agent beta	denied OUT_OF_SCOPE Spec 's-beta' already exists. | Pick another id.
+write spec s-beta re-create in acme over a deletion filed there as api admin root all	allowed
+write spec s-beta re-create in acme over a deletion filed there as api member ada acme	allowed
+write spec s-beta re-create in acme over a deletion filed there as api member ada all	allowed
+write spec s-beta re-create in acme over a deletion filed there as api member ada beta	denied OUT_OF_SCOPE Spec 's-beta' already exists. | Pick another id.
+write spec s-beta re-create in acme over a deletion filed there as api member bob acme	denied NOT_OWNER Spec 's-beta' is assigned to 'ada', not you. | Ask ada to make this change, or have an admin do it.
+write spec s-beta re-create in acme over a deletion filed there as api member bob all	denied NOT_OWNER Spec 's-beta' is assigned to 'ada', not you. | Ask ada to make this change, or have an admin do it.
+write spec s-beta re-create in acme over a deletion filed there as api member bob beta	denied OUT_OF_SCOPE Spec 's-beta' already exists. | Pick another id.
+write spec s-beta re-create in acme over a deletion filed there as api member machine all	denied NOT_OWNER Spec 's-beta' is assigned to 'ada', not you. | Ask ada to make this change, or have an admin do it.
+write spec s-beta re-create in acme over a deletion filed there as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as api viewer ada beta	denied OUT_OF_SCOPE Spec 's-beta' already exists. | Pick another id.
+write spec s-beta re-create in acme over a deletion filed there as api viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as api viewer bob all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as api viewer bob beta	denied OUT_OF_SCOPE Spec 's-beta' already exists. | Pick another id.
+write spec s-beta re-create in acme over a deletion filed there as cli admin root all	allowed
+write spec s-beta re-create in acme over a deletion filed there as cli member ada acme	allowed
+write spec s-beta re-create in acme over a deletion filed there as cli member ada all	allowed
+write spec s-beta re-create in acme over a deletion filed there as cli member ada beta	denied OUT_OF_SCOPE Spec 's-beta' already exists. | Pick another id.
+write spec s-beta re-create in acme over a deletion filed there as cli member bob acme	denied NOT_OWNER Spec 's-beta' is assigned to 'ada', not you. | Ask ada to make this change, or have an admin do it.
+write spec s-beta re-create in acme over a deletion filed there as cli member bob all	denied NOT_OWNER Spec 's-beta' is assigned to 'ada', not you. | Ask ada to make this change, or have an admin do it.
+write spec s-beta re-create in acme over a deletion filed there as cli member bob beta	denied OUT_OF_SCOPE Spec 's-beta' already exists. | Pick another id.
+write spec s-beta re-create in acme over a deletion filed there as cli viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as cli viewer ada all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as cli viewer ada beta	denied OUT_OF_SCOPE Spec 's-beta' already exists. | Pick another id.
+write spec s-beta re-create in acme over a deletion filed there as cli viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as cli viewer bob all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as cli viewer bob beta	denied OUT_OF_SCOPE Spec 's-beta' already exists. | Pick another id.
+write spec s-beta re-create in acme over a deletion filed there as main admin bob all	allowed
+write spec s-beta re-create in acme over a deletion filed there as room viewer ada-room acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as room viewer ada-room all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as room viewer ada-room beta	denied OUT_OF_SCOPE Spec 's-beta' already exists. | Pick another id.
+write spec s-beta re-create in acme over a deletion filed there as room viewer bob-room acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as room viewer bob-room all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-beta re-create in acme over a deletion filed there as room viewer bob-room beta	denied OUT_OF_SCOPE Spec 's-beta' already exists. | Pick another id.
+write spec s-beta re-create in acme over a deletion filed there as sync admin root all	allowed
+write spec s-beta re-create in acme over a deletion filed there as sync member ada acme	allowed
+write spec s-beta re-create in acme over a deletion filed there as sync member ada all	allowed
+write spec s-beta re-create in acme over a deletion filed there as sync member ada beta	allowed
+write spec s-beta re-create in acme over a deletion filed there as sync member bob acme	allowed
+write spec s-beta re-create in acme over a deletion filed there as sync member bob all	allowed
+write spec s-beta re-create in acme over a deletion filed there as sync member bob beta	allowed
+write spec s-beta re-create in acme over a deletion filed there as sync viewer ada acme	allowed
+write spec s-beta re-create in acme over a deletion filed there as sync viewer ada all	allowed
+write spec s-beta re-create in acme over a deletion filed there as sync viewer ada beta	allowed
+write spec s-beta re-create in acme over a deletion filed there as sync viewer anonymous none	allowed
+write spec s-beta re-create in acme over a deletion filed there as sync viewer bob acme	allowed
+write spec s-beta re-create in acme over a deletion filed there as sync viewer bob all	allowed
+write spec s-beta re-create in acme over a deletion filed there as sync viewer bob beta	allowed
+write spec s-beta re-create in acme over a deletion filed there as system admin sail all	allowed
 write spec s-beta status archived as agent member ada-agent acme	denied OUT_OF_SCOPE Spec 's-beta' already exists. | Pick another id.
 write spec s-beta status archived as agent member ada-agent all	allowed
 write spec s-beta status archived as agent member ada-agent beta	allowed
@@ -12747,6 +13296,67 @@ write spec s-lobby status done as sync viewer bob acme	allowed
 write spec s-lobby status done as sync viewer bob all	allowed
 write spec s-lobby status done as sync viewer bob beta	allowed
 write spec s-lobby status done as system admin sail all	allowed
+write spec s-never marked deletion never held as agent member ada-agent acme	allowed
+write spec s-never marked deletion never held as agent member ada-agent all	allowed
+write spec s-never marked deletion never held as agent member ada-agent beta	allowed
+write spec s-never marked deletion never held as agent member bob-agent acme	allowed
+write spec s-never marked deletion never held as agent member bob-agent all	allowed
+write spec s-never marked deletion never held as agent member bob-agent beta	allowed
+write spec s-never marked deletion never held as agent viewer ada-agent acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as agent viewer ada-agent all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as agent viewer ada-agent beta	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as agent viewer bob-agent acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as agent viewer bob-agent all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as agent viewer bob-agent beta	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as api admin root all	allowed
+write spec s-never marked deletion never held as api member ada acme	allowed
+write spec s-never marked deletion never held as api member ada all	allowed
+write spec s-never marked deletion never held as api member ada beta	allowed
+write spec s-never marked deletion never held as api member bob acme	allowed
+write spec s-never marked deletion never held as api member bob all	allowed
+write spec s-never marked deletion never held as api member bob beta	allowed
+write spec s-never marked deletion never held as api member machine all	allowed
+write spec s-never marked deletion never held as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as api viewer ada beta	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as api viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as api viewer bob all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as api viewer bob beta	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as cli admin root all	allowed
+write spec s-never marked deletion never held as cli member ada acme	allowed
+write spec s-never marked deletion never held as cli member ada all	allowed
+write spec s-never marked deletion never held as cli member ada beta	allowed
+write spec s-never marked deletion never held as cli member bob acme	allowed
+write spec s-never marked deletion never held as cli member bob all	allowed
+write spec s-never marked deletion never held as cli member bob beta	allowed
+write spec s-never marked deletion never held as cli viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as cli viewer ada all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as cli viewer ada beta	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as cli viewer bob acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as cli viewer bob all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as cli viewer bob beta	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as main admin bob all	allowed
+write spec s-never marked deletion never held as room viewer ada-room acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as room viewer ada-room all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as room viewer ada-room beta	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as room viewer bob-room acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as room viewer bob-room all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as room viewer bob-room beta	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+write spec s-never marked deletion never held as sync admin root all	allowed
+write spec s-never marked deletion never held as sync member ada acme	allowed
+write spec s-never marked deletion never held as sync member ada all	allowed
+write spec s-never marked deletion never held as sync member ada beta	allowed
+write spec s-never marked deletion never held as sync member bob acme	allowed
+write spec s-never marked deletion never held as sync member bob all	allowed
+write spec s-never marked deletion never held as sync member bob beta	allowed
+write spec s-never marked deletion never held as sync viewer ada acme	allowed
+write spec s-never marked deletion never held as sync viewer ada all	allowed
+write spec s-never marked deletion never held as sync viewer ada beta	allowed
+write spec s-never marked deletion never held as sync viewer anonymous none	allowed
+write spec s-never marked deletion never held as sync viewer bob acme	allowed
+write spec s-never marked deletion never held as sync viewer bob all	allowed
+write spec s-never marked deletion never held as sync viewer bob beta	allowed
+write spec s-never marked deletion never held as system admin sail all	allowed
 write spec s-new create as agent member ada-agent acme	allowed
 write spec s-new create as agent member ada-agent all	allowed
 write spec s-new create as agent member ada-agent beta	denied OUT_OF_SCOPE Project 'acme' was not found. | Ask an admin on main for the project: sail fde grant <handle> <project>.

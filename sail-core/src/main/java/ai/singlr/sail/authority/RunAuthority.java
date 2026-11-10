@@ -13,6 +13,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.PrincipalHandle;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
@@ -30,21 +31,24 @@ import java.util.stream.Stream;
  * session, made by one of the run's own principals, narrates it ({@link Action#NARRATE}), even on a
  * read-only lane; every other revision changes it ({@link Action#CHANGE}): a birth is decided on
  * whoever's box runs the work it names ({@link Resources#launched}), a later revision on the people
- * it works for ({@link Resources#run}), the rule stop and log access admit by. Beyond that, every
- * principal a run carries names the run itself ({@link PrincipalHandle#namesRun}), its spec and
- * room never change, and it names a room only when it works no spec ({@link #created}), so no box
- * starts or pushes a run on another FDE's work. On {@link Actor.Lane#SYNC} a run is its executing
- * box's: its {@code node} is the pusher before and after, it acts for the pusher, and a deleted run
- * is never brought back.
+ * it works for ({@link Resources#run}), the rule stop and log access admit by. A deletion of a run
+ * this box holds no head of is decided as a birth, on the work its marks name: none, so it is an
+ * admin's. Beyond that, every principal a run carries names the run itself ({@link
+ * PrincipalHandle#namesRun}), its spec and room never change, and it names a room only when it
+ * works no spec ({@link #created}), so no box starts or pushes a run on another FDE's work. On
+ * {@link Actor.Lane#SYNC} a run is its executing box's: its {@code node} is the pusher before and
+ * after, it acts for the pusher, and a deleted run is never brought back.
  */
 public final class RunAuthority implements WriteAuthority {
 
+  private static final String TYPE = "run";
   private static final Set<String> SESSION_FIELDS =
       Set.of("session_id", "session_source", "last_activity_at");
 
   private final SpecStore specs;
   private final RoomStore rooms;
   private final RunStore runs;
+  private final ChangeLog changeLog;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
@@ -52,6 +56,7 @@ public final class RunAuthority implements WriteAuthority {
     this.specs = new SpecStore(db);
     this.rooms = new RoomStore(db);
     this.runs = new RunStore(db);
+    this.changeLog = new ChangeLog(db);
     this.attribution = new Attribution(db);
   }
 
@@ -106,7 +111,7 @@ public final class RunAuthority implements WriteAuthority {
   private Resource asHeld(String id, Map<String, Object> held) {
     return Resources.run(
         id,
-        Snapshots.text(held, "project"),
+        changeLog.filed(TYPE, id, held),
         Snapshots.text(held, "owner"),
         Snapshots.text(held, "spec_id"),
         Snapshots.text(held, "node"),
@@ -132,7 +137,7 @@ public final class RunAuthority implements WriteAuthority {
                 .map(room -> rooms.ownerOf(roomId, room));
     return Resources.launched(
         id,
-        Snapshots.text(next, "project"),
+        changeLog.filed(TYPE, id, next),
         specId,
         worker.orElseGet(() -> Snapshots.text(next, "owner")));
   }

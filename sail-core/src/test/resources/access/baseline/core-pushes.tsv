@@ -1454,6 +1454,20 @@ push review 019fee00-0000-7000-8000-0000000c0c02 create of s-open-bob written as
 push review 019fee00-0000-7000-8000-0000000c0c02 create of s-open-bob written as sail as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change reviews.
 push review 019fee00-0000-7000-8000-0000000c0c02 create of s-open-bob written as sail as sync viewer bob all	denied DENIED Your credential is read-only and cannot change reviews.
 push review 019fee00-0000-7000-8000-0000000c0c02 create of s-open-bob written as sail as sync viewer bob beta	denied DENIED Review '019fee00-0000-7000-8000-0000000c0c02' is in no project this FDE is granted.
+push review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync admin root all	allowed
+push review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync member ada acme	allowed
+push review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync member ada all	allowed
+push review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync member ada beta	allowed
+push review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync member bob acme	allowed
+push review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync member bob all	allowed
+push review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync member bob beta	allowed
+push review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer ada acme	allowed
+push review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer ada all	allowed
+push review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer ada beta	allowed
+push review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer anonymous none	allowed
+push review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer bob acme	allowed
+push review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer bob all	allowed
+push review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer bob beta	allowed
 push review review-ada decide as sync admin root all	allowed
 push review review-ada decide as sync member ada acme	allowed
 push review review-ada decide as sync member ada all	allowed
@@ -1468,6 +1482,20 @@ push review review-ada decide as sync viewer anonymous none	denied DENIED Review
 push review review-ada decide as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change reviews.
 push review review-ada decide as sync viewer bob all	denied DENIED Your credential is read-only and cannot change reviews.
 push review review-ada decide as sync viewer bob beta	denied DENIED Review 'review-ada' is in no project this FDE is granted.
+push review review-ada marked deletion with no head as sync admin root all	denied DENIED 'root' may not write as 'ada'.
+push review review-ada marked deletion with no head as sync member ada acme	denied DENIED Review review-ada is for spec 'null', which has no owner.
+push review review-ada marked deletion with no head as sync member ada all	denied DENIED Review review-ada is for spec 'null', which has no owner.
+push review review-ada marked deletion with no head as sync member ada beta	denied DENIED Review review-ada is for spec 'null', which has no owner.
+push review review-ada marked deletion with no head as sync member bob acme	denied DENIED 'bob' may not write as 'ada'.
+push review review-ada marked deletion with no head as sync member bob all	denied DENIED 'bob' may not write as 'ada'.
+push review review-ada marked deletion with no head as sync member bob beta	denied DENIED 'bob' may not write as 'ada'.
+push review review-ada marked deletion with no head as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change reviews.
+push review review-ada marked deletion with no head as sync viewer ada all	denied DENIED Your credential is read-only and cannot change reviews.
+push review review-ada marked deletion with no head as sync viewer ada beta	denied DENIED Your credential is read-only and cannot change reviews.
+push review review-ada marked deletion with no head as sync viewer anonymous none	denied DENIED Your credential is read-only and cannot change reviews.
+push review review-ada marked deletion with no head as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change reviews.
+push review review-ada marked deletion with no head as sync viewer bob all	denied DENIED Your credential is read-only and cannot change reviews.
+push review review-ada marked deletion with no head as sync viewer bob beta	denied DENIED Your credential is read-only and cannot change reviews.
 push review review-ada move to spec s-open-bob as sync admin root all	denied DENIED The spec_id of review 'review-ada' is set when it is created and never changes.
 push review review-ada move to spec s-open-bob as sync member ada acme	denied DENIED The spec_id of review 'review-ada' is set when it is created and never changes.
 push review review-ada move to spec s-open-bob as sync member ada all	denied DENIED The spec_id of review 'review-ada' is set when it is created and never changes.
@@ -1678,6 +1706,20 @@ push room b-room edit wake as sync viewer anonymous none	denied DENIED Room 'b-r
 push room b-room edit wake as sync viewer bob acme	denied DENIED Room 'b-room' is in no project this FDE is granted.
 push room b-room edit wake as sync viewer bob all	denied DENIED Your credential is read-only and cannot change rooms.
 push room b-room edit wake as sync viewer bob beta	denied DENIED Your credential is read-only and cannot change rooms.
+push room b-room re-create in acme over a deletion filed there as sync admin root all	allowed
+push room b-room re-create in acme over a deletion filed there as sync member ada acme	allowed
+push room b-room re-create in acme over a deletion filed there as sync member ada all	allowed
+push room b-room re-create in acme over a deletion filed there as sync member ada beta	denied DENIED Room 'b-room' is in no project this FDE is granted.
+push room b-room re-create in acme over a deletion filed there as sync member bob acme	denied DENIED Room 'b-room' belongs to 'ada', not you.
+push room b-room re-create in acme over a deletion filed there as sync member bob all	denied DENIED Room 'b-room' belongs to 'ada', not you.
+push room b-room re-create in acme over a deletion filed there as sync member bob beta	denied DENIED Room 'b-room' is in no project this FDE is granted.
+push room b-room re-create in acme over a deletion filed there as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change rooms.
+push room b-room re-create in acme over a deletion filed there as sync viewer ada all	denied DENIED Your credential is read-only and cannot change rooms.
+push room b-room re-create in acme over a deletion filed there as sync viewer ada beta	denied DENIED Room 'b-room' is in no project this FDE is granted.
+push room b-room re-create in acme over a deletion filed there as sync viewer anonymous none	denied DENIED Room 'b-room' is in no project this FDE is granted.
+push room b-room re-create in acme over a deletion filed there as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change rooms.
+push room b-room re-create in acme over a deletion filed there as sync viewer bob all	denied DENIED Your credential is read-only and cannot change rooms.
+push room b-room re-create in acme over a deletion filed there as sync viewer bob beta	denied DENIED Room 'b-room' is in no project this FDE is granted.
 push room den assign bob as sync admin root all	allowed
 push room den assign bob as sync member ada acme	denied DENIED Room 'den' belongs to 'bob', not you.
 push room den assign bob as sync member ada all	denied DENIED Room 'den' belongs to 'bob', not you.
@@ -2056,6 +2098,20 @@ push room lobby edit wake as sync viewer anonymous none	denied DENIED Room 'lobb
 push room lobby edit wake as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change rooms.
 push room lobby edit wake as sync viewer bob all	denied DENIED Your credential is read-only and cannot change rooms.
 push room lobby edit wake as sync viewer bob beta	denied DENIED Room 'lobby' is in no project this FDE is granted.
+push room lobby marked deletion with no head as sync admin root all	denied DENIED 'root' may not write as 'ada'.
+push room lobby marked deletion with no head as sync member ada acme	allowed
+push room lobby marked deletion with no head as sync member ada all	allowed
+push room lobby marked deletion with no head as sync member ada beta	denied DENIED Room 'lobby' already exists.
+push room lobby marked deletion with no head as sync member bob acme	denied DENIED 'bob' may not write as 'ada'.
+push room lobby marked deletion with no head as sync member bob all	denied DENIED 'bob' may not write as 'ada'.
+push room lobby marked deletion with no head as sync member bob beta	denied DENIED Room 'lobby' already exists.
+push room lobby marked deletion with no head as sync viewer ada acme	denied DENIED Your credential is read-only and cannot create rooms.
+push room lobby marked deletion with no head as sync viewer ada all	denied DENIED Your credential is read-only and cannot create rooms.
+push room lobby marked deletion with no head as sync viewer ada beta	denied DENIED Room 'lobby' already exists.
+push room lobby marked deletion with no head as sync viewer anonymous none	denied DENIED Room 'lobby' already exists.
+push room lobby marked deletion with no head as sync viewer bob acme	denied DENIED Your credential is read-only and cannot create rooms.
+push room lobby marked deletion with no head as sync viewer bob all	denied DENIED Your credential is read-only and cannot create rooms.
+push room lobby marked deletion with no head as sync viewer bob beta	denied DENIED Room 'lobby' already exists.
 push room lobby move to beta as sync admin root all	allowed
 push room lobby move to beta as sync member ada acme	denied DENIED Room 'lobby' is in no project this FDE is granted.
 push room lobby move to beta as sync member ada all	allowed
@@ -2070,6 +2126,20 @@ push room lobby move to beta as sync viewer anonymous none	denied DENIED Room 'l
 push room lobby move to beta as sync viewer bob acme	denied DENIED Room 'lobby' is in no project this FDE is granted.
 push room lobby move to beta as sync viewer bob all	denied DENIED Your credential is read-only and cannot change rooms.
 push room lobby move to beta as sync viewer bob beta	denied DENIED Room 'lobby' already exists.
+push room r-never marked deletion never held as sync admin root all	allowed
+push room r-never marked deletion never held as sync member ada acme	allowed
+push room r-never marked deletion never held as sync member ada all	allowed
+push room r-never marked deletion never held as sync member ada beta	allowed
+push room r-never marked deletion never held as sync member bob acme	allowed
+push room r-never marked deletion never held as sync member bob all	allowed
+push room r-never marked deletion never held as sync member bob beta	allowed
+push room r-never marked deletion never held as sync viewer ada acme	allowed
+push room r-never marked deletion never held as sync viewer ada all	allowed
+push room r-never marked deletion never held as sync viewer ada beta	allowed
+push room r-never marked deletion never held as sync viewer anonymous none	allowed
+push room r-never marked deletion never held as sync viewer bob acme	allowed
+push room r-never marked deletion never held as sync viewer bob all	allowed
+push room r-never marked deletion never held as sync viewer bob beta	allowed
 push room r-new create by ada as sync admin root all	denied DENIED 'root' may not create for 'ada'.
 push room r-new create by ada as sync member ada acme	allowed
 push room r-new create by ada as sync member ada all	allowed
@@ -2322,6 +2392,20 @@ push run 019fee00-0000-7000-8000-0000000ada01 delete as sync viewer anonymous no
 push run 019fee00-0000-7000-8000-0000000ada01 delete as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change runs.
 push run 019fee00-0000-7000-8000-0000000ada01 delete as sync viewer bob all	denied DENIED Your credential is read-only and cannot change runs.
 push run 019fee00-0000-7000-8000-0000000ada01 delete as sync viewer bob beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' already exists.
+push run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync admin root all	denied DENIED 'root' may not write as 'ada'.
+push run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync member ada acme	denied DENIED Only the node that executed run '019fee00-0000-7000-8000-0000000ada01' may change it, and this is 'ada'.
+push run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync member ada all	denied DENIED Only the node that executed run '019fee00-0000-7000-8000-0000000ada01' may change it, and this is 'ada'.
+push run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync member ada beta	denied DENIED Only the node that executed run '019fee00-0000-7000-8000-0000000ada01' may change it, and this is 'ada'.
+push run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync member bob acme	denied DENIED 'bob' may not write as 'ada'.
+push run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync member bob all	denied DENIED 'bob' may not write as 'ada'.
+push run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync member bob beta	denied DENIED 'bob' may not write as 'ada'.
+push run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer ada all	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer ada beta	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer anonymous none	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer bob all	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer bob beta	denied DENIED Your credential is read-only and cannot change runs.
 push run 019fee00-0000-7000-8000-0000000ada01 move to spec s-bob as sync admin root all	denied DENIED The spec_id of run '019fee00-0000-7000-8000-0000000ada01' is set when it is created and never changes.
 push run 019fee00-0000-7000-8000-0000000ada01 move to spec s-bob as sync member ada acme	denied DENIED The spec_id of run '019fee00-0000-7000-8000-0000000ada01' is set when it is created and never changes.
 push run 019fee00-0000-7000-8000-0000000ada01 move to spec s-bob as sync member ada all	denied DENIED The spec_id of run '019fee00-0000-7000-8000-0000000ada01' is set when it is created and never changes.
@@ -3344,6 +3428,20 @@ push run 019fee00-0000-7000-8000-0000000c0c01 create of s-open-bob by ada writte
 push run 019fee00-0000-7000-8000-0000000c0c01 create of s-open-bob by ada written as sail as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change runs.
 push run 019fee00-0000-7000-8000-0000000c0c01 create of s-open-bob by ada written as sail as sync viewer bob all	denied DENIED Your credential is read-only and cannot change runs.
 push run 019fee00-0000-7000-8000-0000000c0c01 create of s-open-bob by ada written as sail as sync viewer bob beta	denied DENIED Run '019fee00-0000-7000-8000-0000000c0c01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync admin root all	allowed
+push run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync member ada acme	allowed
+push run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync member ada all	allowed
+push run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync member ada beta	allowed
+push run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync member bob acme	allowed
+push run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync member bob all	allowed
+push run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync member bob beta	allowed
+push run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer ada acme	allowed
+push run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer ada all	allowed
+push run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer ada beta	allowed
+push run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer anonymous none	allowed
+push run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer bob acme	allowed
+push run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer bob all	allowed
+push run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer bob beta	allowed
 push spec attic create over the room as sync admin root all	allowed
 push spec attic create over the room as sync member ada acme	allowed
 push spec attic create over the room as sync member ada all	allowed
@@ -3624,6 +3722,20 @@ push spec s-ada edit title written as sail as sync viewer anonymous none	denied 
 push spec s-ada edit title written as sail as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
 push spec s-ada edit title written as sail as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
 push spec s-ada edit title written as sail as sync viewer bob beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada marked deletion with no head as sync admin root all	denied DENIED 'root' may not write as 'ada'.
+push spec s-ada marked deletion with no head as sync member ada acme	allowed
+push spec s-ada marked deletion with no head as sync member ada all	allowed
+push spec s-ada marked deletion with no head as sync member ada beta	denied DENIED Spec 's-ada' already exists.
+push spec s-ada marked deletion with no head as sync member bob acme	denied DENIED 'bob' may not write as 'ada'.
+push spec s-ada marked deletion with no head as sync member bob all	denied DENIED 'bob' may not write as 'ada'.
+push spec s-ada marked deletion with no head as sync member bob beta	denied DENIED Spec 's-ada' already exists.
+push spec s-ada marked deletion with no head as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada marked deletion with no head as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada marked deletion with no head as sync viewer ada beta	denied DENIED Spec 's-ada' already exists.
+push spec s-ada marked deletion with no head as sync viewer anonymous none	denied DENIED Spec 's-ada' already exists.
+push spec s-ada marked deletion with no head as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada marked deletion with no head as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada marked deletion with no head as sync viewer bob beta	denied DENIED Spec 's-ada' already exists.
 push spec s-ada move room to den as sync admin root all	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
 push spec s-ada move room to den as sync member ada acme	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
 push spec s-ada move room to den as sync member ada all	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
@@ -4394,6 +4506,20 @@ push spec s-beta edit title written as sail as sync viewer anonymous none	denied
 push spec s-beta edit title written as sail as sync viewer bob acme	denied DENIED Spec 's-beta' is in no project this FDE is granted.
 push spec s-beta edit title written as sail as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
 push spec s-beta edit title written as sail as sync viewer bob beta	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-beta re-create in acme over a deletion filed there as sync admin root all	allowed
+push spec s-beta re-create in acme over a deletion filed there as sync member ada acme	allowed
+push spec s-beta re-create in acme over a deletion filed there as sync member ada all	allowed
+push spec s-beta re-create in acme over a deletion filed there as sync member ada beta	denied DENIED Spec 's-beta' is in no project this FDE is granted.
+push spec s-beta re-create in acme over a deletion filed there as sync member bob acme	denied DENIED Spec 's-beta' is assigned to 'ada', not you.
+push spec s-beta re-create in acme over a deletion filed there as sync member bob all	denied DENIED Spec 's-beta' is assigned to 'ada', not you.
+push spec s-beta re-create in acme over a deletion filed there as sync member bob beta	denied DENIED Spec 's-beta' is in no project this FDE is granted.
+push spec s-beta re-create in acme over a deletion filed there as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-beta re-create in acme over a deletion filed there as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-beta re-create in acme over a deletion filed there as sync viewer ada beta	denied DENIED Spec 's-beta' is in no project this FDE is granted.
+push spec s-beta re-create in acme over a deletion filed there as sync viewer anonymous none	denied DENIED Spec 's-beta' is in no project this FDE is granted.
+push spec s-beta re-create in acme over a deletion filed there as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-beta re-create in acme over a deletion filed there as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-beta re-create in acme over a deletion filed there as sync viewer bob beta	denied DENIED Spec 's-beta' is in no project this FDE is granted.
 push spec s-beta status archived as sync admin root all	allowed
 push spec s-beta status archived as sync member ada acme	denied DENIED Spec 's-beta' is in no project this FDE is granted.
 push spec s-beta status archived as sync member ada all	allowed
@@ -5640,6 +5766,20 @@ push spec s-lobby status done as sync viewer anonymous none	denied DENIED Spec '
 push spec s-lobby status done as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
 push spec s-lobby status done as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
 push spec s-lobby status done as sync viewer bob beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-never marked deletion never held as sync admin root all	allowed
+push spec s-never marked deletion never held as sync member ada acme	allowed
+push spec s-never marked deletion never held as sync member ada all	allowed
+push spec s-never marked deletion never held as sync member ada beta	allowed
+push spec s-never marked deletion never held as sync member bob acme	allowed
+push spec s-never marked deletion never held as sync member bob all	allowed
+push spec s-never marked deletion never held as sync member bob beta	allowed
+push spec s-never marked deletion never held as sync viewer ada acme	allowed
+push spec s-never marked deletion never held as sync viewer ada all	allowed
+push spec s-never marked deletion never held as sync viewer ada beta	allowed
+push spec s-never marked deletion never held as sync viewer anonymous none	allowed
+push spec s-never marked deletion never held as sync viewer bob acme	allowed
+push spec s-never marked deletion never held as sync viewer bob all	allowed
+push spec s-never marked deletion never held as sync viewer bob beta	allowed
 push spec s-new create as sync admin root all	allowed
 push spec s-new create as sync member ada acme	allowed
 push spec s-new create as sync member ada all	allowed

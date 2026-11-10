@@ -5,8 +5,8 @@
 
 package ai.singlr.sail.access.baseline;
 
-import ai.singlr.sail.authority.Actors;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import java.util.ArrayList;

@@ -64,6 +64,9 @@ class OneDecisionSweepTest {
   private static final String ROLE_RULE = IDENTITY + "RoleRule";
   private static final String RUN_ROW = "ai/singlr/sail/store/RunStore$RunRow";
   private static final String CALLER = "ai/singlr/sail/api/LocalApiRouter$Caller$";
+  private static final String SCOPE = IDENTITY + "ProjectScope";
+  private static final String AUDIENCE = "ai/singlr/sail/access/Access#audience";
+  private static final Set<String> SCOPE_ASKED = Set.of(SCOPE + "#unrestricted", SCOPE + "#admits");
 
   /** The members whose call reads a role, a lane, a scope or whom an actor acts for. */
   private static final Map<String, Set<String>> READS =
@@ -84,9 +87,7 @@ class OneDecisionSweepTest {
           ROLE_RULE,
           Set.of("roleOf", "roleOfUnbound", "actorOf"),
           RUN_ROW,
-          Set.of("readOnlyLane"),
-          "ai/singlr/sail/access/Access",
-          Set.of("overrulesOwners"));
+          Set.of("readOnlyLane"));
 
   private static final List<String> EXEMPT =
       List.of(
@@ -155,14 +156,6 @@ class OneDecisionSweepTest {
         "fact: a run's read of its own room is a delivery");
     allowed.put(API + "RoomCommitGuard#guardRoomRun", "fact: which runs are a room's wakes");
     allowed.put(RULES + "Attribution#decide", "fact: a push names only its pusher (attribution)");
-    for (var overruled : List.of("SpecAuthority#intoAbsent", "MessageAuthority#posting")) {
-      allowed.put(
-          RULES + overruled,
-          "fact: an admin's write passes a conversation this box does not hold, as on main");
-    }
-    allowed.put(
-        RULES + "SpecAuthority#takenRoom",
-        "fact: an admin's birth may take a room's reserved id from its owner, as on main");
     allowed.put(RULES + "MessageAuthority#mayPostAs", "fact: as whom a pusher posts (attribution)");
     allowed.put(
         RULES + "EventAuthority#refused", "fact: whose work a refused event's words describe");
@@ -177,6 +170,16 @@ class OneDecisionSweepTest {
     allowed.put(RULES + "RunAuthority#decide", "fact: which box executed a pushed run");
     allowed.put(RULES + "WriteAuthority#local", "fact: which box decides a write, main a push");
     allowed.put(SYNC_SERVER + "#<init>", "fact: a sync server serves a sync session alone");
+    allowed.put(
+        SYNC_SERVER + "#serve",
+        "fact: only a scoped session is served over main's change heads, which its scope rule"
+            + " reads; an unscoped one has none to ask");
+    for (var content : List.of("requireServed", "serving", "receiveContent")) {
+      allowed.put(
+          SYNC_SERVER + "#" + content,
+          "audience: content named by hash alone is read by a scoped session only as main served"
+              + " it rows this session, the Read rule where no row names its project");
+    }
     for (var content : List.of("result", "serveContent", "unshared")) {
       allowed.put(SYNC_SERVER + "#" + content, EVERY_DOOR);
     }
@@ -233,7 +236,7 @@ class OneDecisionSweepTest {
               leaky + "viaPattern",
               leaky + "returnsARole",
               leaky + "roomWake",
-              leaky + "overrules"),
+              leaky + "audience"),
           reads(bytes.readAllBytes()));
     }
   }
@@ -328,8 +331,8 @@ class OneDecisionSweepTest {
       return run.readOnlyLane();
     }
 
-    boolean overrules(Actor actor) {
-      return Access.overrulesOwners(actor);
+    boolean audience(Actor actor) {
+      return Access.audience(actor).unrestricted();
     }
   }
 
@@ -376,8 +379,20 @@ class OneDecisionSweepTest {
       return true;
     }
     var code = method.code();
-    return code.isPresent()
-        && code.get().elementStream().anyMatch(element -> reads(referencesOf(element)));
+    if (code.isEmpty()) {
+      return false;
+    }
+    var references = code.get().elementStream().map(OneDecisionSweepTest::referencesOf).toList();
+    return references.stream().anyMatch(OneDecisionSweepTest::reads)
+        || asksAudience(references.stream().flatMap(List::stream).toList());
+  }
+
+  /**
+   * Whether {@code references} take an actor's audience ({@code Access#audience}) and ask it of a
+   * project or of every one in Java, a branch on the scope rather than a filter handed to a query.
+   */
+  private static boolean asksAudience(List<String> references) {
+    return references.contains(AUDIENCE) && references.stream().anyMatch(SCOPE_ASKED::contains);
   }
 
   /**

@@ -3,11 +3,8 @@
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.sail.authority;
+package ai.singlr.sail.identity;
 
-import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.PrincipalHandle;
-import ai.singlr.sail.identity.Role;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -54,7 +51,7 @@ public final class Actors {
   }
 
   /** A projection of alternating keys and values; a null value is kept. */
-  static Map<String, Object> projection(Object... pairs) {
+  public static Map<String, Object> projection(Object... pairs) {
     var map = new LinkedHashMap<String, Object>();
     for (var i = 0; i < pairs.length; i += 2) {
       map.put((String) pairs[i], pairs[i + 1]);
@@ -63,7 +60,7 @@ public final class Actors {
   }
 
   /** {@code base} with {@code key} set to {@code value}. */
-  static Map<String, Object> with(Map<String, Object> base, String key, Object value) {
+  public static Map<String, Object> with(Map<String, Object> base, String key, Object value) {
     var map = new LinkedHashMap<>(base);
     map.put(key, value);
     return map;

@@ -68,6 +68,29 @@ class PushesBaselineTest {
                         "push " + offer.label() + " as " + pusher.label(),
                         () -> push(world, pusher.actor(), offer.change(), offer.author()));
                   }
+                  for (var headless : List.of(false, true)) {
+                    for (var change : Changes.unheld(world, headless)) {
+                      corpus.ask(
+                          "push " + change.label() + " as " + pusher.label(),
+                          () -> unheld(world, pusher.actor(), change, headless));
+                    }
+                  }
+                  for (var change : Changes.filedElsewhere(world)) {
+                    corpus.ask(
+                        "push " + change.label() + " as " + pusher.label(),
+                        () ->
+                            answer(
+                                world,
+                                pusher.actor(),
+                                new SyncWire.Push(
+                                    change.type(),
+                                    List.of(
+                                        new MainReplica.Offer(
+                                            change.id(),
+                                            authored(change, pusher.actor().handle()),
+                                            World.ADOPTED_REV))),
+                                () -> world.adoptDeletion(change.type(), change.id(), "acme")));
+                  }
                   for (var erase : erasures()) {
                     corpus.ask(
                         "erase "
@@ -152,6 +175,23 @@ class PushesBaselineTest {
   }
 
   /**
+   * Main's answer to {@code pusher} offering {@code change}, a deletion of what main holds no head
+   * of, as the first revision of it: of a row main holds with no head when {@code headless}.
+   */
+  private static String unheld(World world, Actor pusher, Changes.Change change, boolean headless) {
+    return answer(
+        world,
+        pusher,
+        new SyncWire.Push(
+            change.type(), List.of(new MainReplica.Offer(change.id(), change.next(), null))),
+        () -> {
+          if (headless) {
+            world.dropHead(change.type(), change.id());
+          }
+        });
+  }
+
+  /**
    * {@code change}'s snapshot as a box writes it when {@code author} made it: under its {@code
    * _actor}, as the creator of a spec it creates, as the author of a message it posts.
    */
@@ -178,6 +218,11 @@ class PushesBaselineTest {
    * of the type, and makes {@code push}.
    */
   private static String answer(World world, Actor pusher, SyncWire.Push push) {
+    return answer(world, pusher, push, () -> {});
+  }
+
+  /** As {@link #answer(World, Actor, SyncWire.Push)}, once {@code first} has run in the session. */
+  private static String answer(World world, Actor pusher, SyncWire.Push push, Runnable first) {
     var box = Objects.requireNonNullElse(pusher.handle(), "anonymous") + "-box";
     var held = List.copyOf(world.store(push.type()).syncEntityIds());
     var request =
@@ -190,6 +235,7 @@ class PushesBaselineTest {
     var replies =
         world.db.rehearse(
             () -> {
+              first.run();
               var out = new ByteStreams.Output();
               try {
                 world.box.server(pusher).serve(new ByteStreams.Input(request), out);

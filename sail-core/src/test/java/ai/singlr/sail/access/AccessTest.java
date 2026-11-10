@@ -14,12 +14,11 @@ import static ai.singlr.sail.access.AccessTest.Outcome.READ_ONLY;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.authority.Actors;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import java.util.ArrayList;
@@ -432,12 +431,27 @@ class AccessTest {
   }
 
   @Test
-  void onlySailItselfAndAnAdminOverruleOwners() {
-    assertTrue(Access.overrulesOwners(Actors.SYSTEM));
-    assertTrue(Access.overrulesOwners(Actors.MAIN));
-    assertTrue(Access.overrulesOwners(Actors.ADMIN));
-    assertFalse(Access.overrulesOwners(Actors.OWNER_API));
-    assertFalse(Access.overrulesOwners(Actors.AGENT));
+  void whatNoOneHereCanOwnIsSailsAndAnAdminsToWriteAndRefusedByItsFactForEveryoneElse() {
+    var fact = Refusal.noConversation("ghost").orElseThrow();
+
+    for (var overrules : List.of(Actors.SYSTEM, Actors.MAIN, Actors.ADMIN)) {
+      assertEquals(new Decision.Allowed(), Access.unowned(overrules, fact));
+    }
+    for (var bound : List.of(Actors.OWNER_API, Actors.AGENT, Actors.ROOM, Actors.VIEWER)) {
+      assertEquals(new Decision.Refused(fact), Access.unowned(bound, fact));
+    }
+  }
+
+  @Test
+  void aDecisionWithinTheAudienceIsEveryStepButTheAudience() {
+    var outside = Actors.OTHER_API.withScope(ProjectScope.of(List.of("beta")));
+
+    assertEquals(new Decision.NotFound(), Access.decide(outside, Action.CHANGE, SPEC_BOB));
+    assertEquals(Optional.empty(), Access.withinAudience(outside, Action.CHANGE, SPEC_BOB));
+    assertEquals(
+        Access.decide(Actors.OTHER_API, Action.CHANGE, SPEC_ADA).refused(),
+        Access.withinAudience(outside, Action.CHANGE, SPEC_ADA));
+    assertEquals(Optional.empty(), Access.withinAudience(Actor.system(), Action.PURGE, SPEC_ADA));
   }
 
   @Test
@@ -651,11 +665,12 @@ class AccessTest {
     assertEquals(
         new Decision.Allowed(), Access.decide(Actor.system(), Action.PURGE, Resource.Kind.PROJECT));
     assertEquals(
-        "POST is ROOM's on its own work alone, which a kind does not name.",
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> Access.decide(Actors.ROOM, Action.POST, Resource.Kind.ROOM))
-            .getMessage());
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'" + Actors.ROOM_HANDLE + "' acts only on its own work, and no room of it is named.",
+            "An agent acts only on the work sail launched it for."),
+        Access.decide(Actors.ROOM, Action.POST, Resource.Kind.ROOM),
+        "a lane's grant on its own work alone has no work in hand to be its own");
     assertEquals(
         refused(
             Refusal.Kind.READ_ONLY,

@@ -7,17 +7,14 @@ package ai.singlr.sail.authority;
 
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
-import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Sqlite;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Supplier;
 
 /**
  * Who may write one synced type: the one rule the journal asks as it records every write of this
@@ -33,11 +30,13 @@ import java.util.function.Supplier;
  * is never asked ({@link Actor#isSail}): main has decided, or this box's machinery is writing.
  *
  * <p>A write is answered in one order, whichever rule decides it. What lies outside the actor's
- * audience is not found, which the scope rule says before any rule is asked ({@link ScopeRule}).
- * Then what this box does not hold is not there: a project its catalog does not hold, a
- * conversation it holds no row of. Then {@link Access} decides the actions the revision takes,
- * which the rule names. Last come the rule's own facts: attribution, fields that never change, a
- * spec's reserved room id, which box executed a run.
+ * audience is not found, which the scope rule says before any rule is asked ({@link ScopeRule}),
+ * from the project the journal files the row under: the one audience a write has. Then what this
+ * box does not hold is not there: a project its catalog does not hold, a conversation it holds no
+ * row of. Then {@link Access} decides the actions the revision takes, which the rule names; a
+ * deletion of an id this box holds no head of is decided as the rule decides a birth, as on main.
+ * Last come the rule's own facts: attribution, fields that never change, a spec's reserved room id,
+ * which box executed a run.
  */
 @FunctionalInterface
 public interface WriteAuthority {
@@ -99,42 +98,18 @@ public interface WriteAuthority {
 
   /**
    * Why {@code actor} may not take what {@code taking} names: the first refusal {@link Access}
-   * answers, empty when it allows every action.
-   *
-   * @throws IllegalStateException when the row lies outside the actor's audience: the scope rule
-   *     answers that, asked first on every lane ({@link ScopeRule#before}, {@link
-   *     ScopeRule#pushed}), so a rule is never asked of a row its actor cannot read
+   * answers, empty when it allows every action. The row's audience is the scope rule's, asked first
+   * on every lane ({@link ScopeRule#before}, {@link ScopeRule#pushed}), so {@link Access} decides
+   * the steps after it ({@link Access#withinAudience}).
    */
   static Optional<Refusal> refused(Actor actor, Taking taking) {
-    var resource = taking.resource();
     for (var action : taking.actions()) {
-      var decision = Access.decide(actor, action, resource);
-      if (decision instanceof Decision.NotFound) {
-        throw new IllegalStateException(
-            resource.named() + " lies outside its actor's audience, which the scope rule answers.");
-      }
-      if (decision.refused().isPresent()) {
-        return decision.refused();
+      var refused = Access.withinAudience(actor, action, taking.resource());
+      if (refused.isPresent()) {
+        return refused;
       }
     }
     return Optional.empty();
-  }
-
-  /**
-   * Why {@code actor} may not write {@code held} into {@code next}, a row of {@code kind}, taking
-   * what {@code taking} names. A deletion of an id this box holds no head of ({@link
-   * Snapshots#isDeletion}) names no row and is filed nowhere, so it is decided as a change of the
-   * kind by the role and lane alone ({@link Access#decide(Actor, Action, Resource.Kind)}).
-   */
-  static Optional<Refusal> refused(
-      Actor actor,
-      Resource.Kind kind,
-      Map<String, Object> held,
-      Map<String, Object> next,
-      Supplier<Taking> taking) {
-    return held == null && Snapshots.isDeletion(next)
-        ? Access.decide(actor, Action.CHANGE, kind).refused()
-        : refused(actor, taking.get());
   }
 
   /**

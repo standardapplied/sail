@@ -10,11 +10,11 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Why a rule refuses a write: its {@link Kind}, the message a client shows, and the action that
- * unblocks it ({@code fix}, {@link Remedy#NONE} when there is none to name), its commands kept as
- * data until a door renders them for its reader. Every door translates the kind to its own error
- * envelope, and main answers the message as its denial, so one refusal reads the same wherever the
- * rule decides.
+ * Why an action is refused, by {@link Access}, a write's rule or a door: its {@link Kind}, the
+ * message a client shows, and the action that unblocks it ({@code fix}, {@link Remedy#NONE} when
+ * there is none to name), its commands kept as data until a door renders them for its reader. Every
+ * door translates the kind to its own error envelope, and main answers the message as its denial,
+ * so one refusal reads the same wherever the rule decides.
  */
 public record Refusal(Kind kind, String message, Remedy fix) {
 

@@ -56,6 +56,39 @@ final class Changes {
     return changes.changes;
   }
 
+  /**
+   * A deletion this box holds no head of, of each type whose rule reads the row it deletes: marked,
+   * as main records one even of a row it never held, of an id never held ({@code headless} false),
+   * and of a row the box holds with no head ({@code headless} true), the one such deletion main's
+   * commit decides rather than takes as changing nothing.
+   */
+  static List<Change> unheld(World world, boolean headless) {
+    var changes = new Changes(world);
+    var marked = Map.<String, Object>of(Snapshots.ACTOR, Cast.OWNER);
+    var what = headless ? "marked deletion with no head" : "marked deletion never held";
+    changes.add("spec", headless ? "s-ada" : "s-never", what, marked);
+    changes.add("room", headless ? "lobby" : "r-never", what, marked);
+    changes.add("run", headless ? Cast.ADA_RUN : NEW_RUN, what, marked);
+    changes.add("review", headless ? world.id("review-ada") : NEW_REVIEW, what, marked);
+    return changes.changes;
+  }
+
+  /**
+   * A re-creation in {@code acme} of a row of {@code beta} whose deletion main moved to {@code
+   * acme} ({@link World#adoptDeletion}): the head files it under {@code acme}, its last state under
+   * {@code beta}.
+   */
+  static List<Change> filedElsewhere(World world) {
+    var changes = new Changes(world);
+    for (var row : List.of(Map.entry("spec", "s-beta"), Map.entry("room", "b-room"))) {
+      var next = world.snapshot(row.getKey(), row.getValue());
+      next.put("project", "acme");
+      changes.add(
+          row.getKey(), row.getValue(), "re-create in acme over a deletion filed there", next);
+    }
+    return changes.changes;
+  }
+
   /** The revisions of every synced type. */
   static List<Change> all(World world) {
     var changes = new Changes(world);

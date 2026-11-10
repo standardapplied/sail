@@ -382,7 +382,7 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     return WriteAuthority.table(
         db,
         (id, held, next) -> {
-          var project = changeLog.projectOf(ENTITY, id, held);
+          var project = changeLog.filed(ENTITY, id, held);
           return WriteAuthority.Taking.of(
               Resources.project(
                   project,

@@ -5,33 +5,33 @@
 
 package ai.singlr.sail.authority;
 
-import static ai.singlr.sail.authority.Actors.ADMIN;
-import static ai.singlr.sail.authority.Actors.ADMIN_SYNC;
-import static ai.singlr.sail.authority.Actors.AGENT;
-import static ai.singlr.sail.authority.Actors.AGENT_HANDLE;
-import static ai.singlr.sail.authority.Actors.MACHINE;
-import static ai.singlr.sail.authority.Actors.MAIN;
-import static ai.singlr.sail.authority.Actors.OTHER;
-import static ai.singlr.sail.authority.Actors.OTHER_API;
-import static ai.singlr.sail.authority.Actors.OTHER_SYNC;
-import static ai.singlr.sail.authority.Actors.OWNER;
-import static ai.singlr.sail.authority.Actors.OWNER_API;
-import static ai.singlr.sail.authority.Actors.OWNER_CLI;
-import static ai.singlr.sail.authority.Actors.OWNER_SYNC;
-import static ai.singlr.sail.authority.Actors.ROOM;
-import static ai.singlr.sail.authority.Actors.SYSTEM;
-import static ai.singlr.sail.authority.Actors.VIEWER;
-import static ai.singlr.sail.authority.Actors.VIEWER_SYNC;
-import static ai.singlr.sail.authority.Actors.projection;
-import static ai.singlr.sail.authority.Actors.with;
+import static ai.singlr.sail.identity.Actors.ADMIN;
+import static ai.singlr.sail.identity.Actors.ADMIN_SYNC;
+import static ai.singlr.sail.identity.Actors.AGENT;
+import static ai.singlr.sail.identity.Actors.AGENT_HANDLE;
+import static ai.singlr.sail.identity.Actors.MACHINE;
+import static ai.singlr.sail.identity.Actors.MAIN;
+import static ai.singlr.sail.identity.Actors.OTHER;
+import static ai.singlr.sail.identity.Actors.OTHER_API;
+import static ai.singlr.sail.identity.Actors.OTHER_SYNC;
+import static ai.singlr.sail.identity.Actors.OWNER;
+import static ai.singlr.sail.identity.Actors.OWNER_API;
+import static ai.singlr.sail.identity.Actors.OWNER_CLI;
+import static ai.singlr.sail.identity.Actors.OWNER_SYNC;
+import static ai.singlr.sail.identity.Actors.ROOM;
+import static ai.singlr.sail.identity.Actors.SYSTEM;
+import static ai.singlr.sail.identity.Actors.VIEWER;
+import static ai.singlr.sail.identity.Actors.VIEWER_SYNC;
+import static ai.singlr.sail.identity.Actors.projection;
+import static ai.singlr.sail.identity.Actors.with;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Refusal.Kind;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ProjectStore;
@@ -197,23 +197,24 @@ class WriteAuthorityTest {
   }
 
   @Test
-  void aRowOutsideItsActorsAudienceIsNeverAskedOfARuleTheScopeRuleAnswersItFirst() {
+  void aRowsAudienceIsTheScopeRulesSoTheSeamDecidesTheStepsAfterIt() {
     var scoped = OWNER_API.withScope(ProjectScope.of(List.of("beta")));
 
     assertEquals(
-        "Project 'acme' lies outside its actor's audience, which the scope rule answers.",
-        assertThrows(
-                IllegalStateException.class,
-                () ->
-                    WriteAuthority.refused(
-                        scoped,
-                        WriteAuthority.Taking.of(
-                            Resources.project("acme", OWNER), Action.CONFIGURE)))
-            .getMessage());
-    assertEquals(
         Optional.empty(),
         WriteAuthority.refused(
-            scoped, WriteAuthority.Taking.of(Resources.project("beta", OWNER), Action.SHARE)));
+            scoped, WriteAuthority.Taking.of(Resources.project("acme", OWNER), Action.CONFIGURE)));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.ADMIN_ONLY,
+                "Only an admin may erase the name of project 'acme' everywhere, as purging or"
+                    + " renaming it does.",
+                "Ask an admin to do it.")),
+        WriteAuthority.refused(
+            scoped,
+            WriteAuthority.Taking.of(
+                Resources.project("acme", OWNER), Action.CONFIGURE, Action.PURGE)));
   }
 
   @Test

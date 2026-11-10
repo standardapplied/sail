@@ -11,6 +11,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.Finding;
@@ -22,7 +23,10 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.store.SyncedStore;
+import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.io.ByteArrayInputStream;
@@ -288,6 +292,30 @@ public final class World implements AutoCloseable {
   /** The store of synced {@code type}. */
   public SyncedStore store(String type) {
     return SyncedEntities.require(type).store(db);
+  }
+
+  /** The rev main's deletion of a row is adopted at ({@link #adoptDeletion}). */
+  public static final String ADOPTED_REV = "9-main";
+
+  /**
+   * Adopts main's deletion of {@code type} {@code id}, filed under {@code project} as main sends
+   * it: the tombstone keeps this box's last state, the head main's project.
+   */
+  public void adoptDeletion(String type, String id, String project) {
+    var replica =
+        new StoreReplica(
+            "node", store(type), new ChangeLog(db), new SyncConflicts(db), new SyncState(db));
+    Actor.call(
+        Actor.main(Cast.ADMIN),
+        () -> {
+          replica.adopt(id, null, ADOPTED_REV, project);
+          return null;
+        });
+  }
+
+  /** Forgets the journal's head of {@code type} {@code id}, leaving its row as it is. */
+  public void dropHead(String type, String id) {
+    db.execute("DELETE FROM change_heads WHERE entity_type = ? AND entity_id = ?", type, id);
   }
 
   /** The comparable state of {@code type} {@code id} as this box holds it; null if absent. */

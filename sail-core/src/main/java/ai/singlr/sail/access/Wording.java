@@ -11,32 +11,32 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * The one place a permission refusal is worded: what {@link Access} says when a step refuses, in
- * the words a person reads. Owners are joined as each sentence has always joined them: a
- * conversation's and a run's fix bare with "or", a run's message quoted with "and", a room's or a
+ * What {@link Access} says when a step refuses, in the words a person reads. The sentences a rule
+ * outside this package says as well live in {@link Refusal}: read-only ({@link Refusal#readOnly}),
+ * an unclaimed spec's dispatch ({@link Refusal#unclaimed}) and a conversation this box does not
+ * hold ({@link Refusal#noConversation}). Owners are joined as each sentence has always joined them:
+ * a conversation's and a run's fix bare with "or", a run's message quoted with "and", a room's or a
  * box's message quoted with "or".
  */
 final class Wording {
 
   private Wording() {}
 
-  /** The role step's refusal: read-only for a credential that writes nothing, admin-only else. */
-  static Refusal belowRole(Actor actor, Action action, Resource resource) {
+  /**
+   * The role step's refusal of {@code action} on {@code resource}, or on some resource of {@code
+   * kind} when it is null: read-only for a credential that writes nothing, admin-only else, naming
+   * the spec a reassignment would move and the project a purge would erase when one is in hand.
+   */
+  static Refusal belowRole(Actor actor, Action action, Resource.Kind kind, Resource resource) {
     if (!actor.canWrite()) {
-      return Refusal.readOnly(action.act(resource.kind())).orElseThrow();
+      return Refusal.readOnly(action.act(kind)).orElseThrow();
     }
-    return switch (action) {
-      case ASSIGN -> notReassignable(resource);
-      case PURGE -> notPurgeable(resource);
-      default -> adminOnly(action, resource.kind());
-    };
-  }
-
-  /** As {@link #belowRole(Actor, Action, Resource)}, asked of a kind before one row is in hand. */
-  static Refusal belowRole(Actor actor, Action action, Resource.Kind kind) {
-    return actor.canWrite()
-        ? adminOnly(action, kind)
-        : Refusal.readOnly(action.act(kind)).orElseThrow();
+    if (resource != null && action == Action.ASSIGN) {
+      return notReassignable(resource);
+    }
+    return resource != null && action == Action.PURGE
+        ? notPurgeable(resource)
+        : adminOnly(action, kind);
   }
 
   /**
@@ -87,7 +87,23 @@ final class Wording {
         "Only an operator lane (CLI or API token) may do this.");
   }
 
-  static Refusal outsideWork(Actor actor, Action action, Resource resource) {
+  /**
+   * The refusal of {@code action}, which {@code actor}'s lane grants on its own work alone, on
+   * {@code resource}, or on some resource of {@code kind} when it is null, which names no work to
+   * be its own.
+   */
+  static Refusal outsideWork(Actor actor, Action action, Resource.Kind kind, Resource resource) {
+    var fix = "An agent acts only on the work sail launched it for.";
+    if (resource == null) {
+      return new Refusal(
+          Refusal.Kind.NOT_OWNER,
+          "'"
+              + actor.handle()
+              + "' acts only on its own work, and no "
+              + kind.noun()
+              + " of it is named.",
+          fix);
+    }
     if (action == Action.POST) {
       return ownedBy(
           resource,
@@ -102,11 +118,11 @@ final class Wording {
             + "' may "
             + action.verb()
             + " only its own work, not "
-            + resource.kind().noun()
+            + kind.noun()
             + " '"
             + resource.id()
             + "'.",
-        "An agent acts only on the work sail launched it for.");
+        fix);
   }
 
   /**

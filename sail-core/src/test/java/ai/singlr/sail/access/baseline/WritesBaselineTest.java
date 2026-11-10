@@ -6,7 +6,10 @@
 package ai.singlr.sail.access.baseline;
 
 import ai.singlr.sail.access.Refusal;
+import ai.singlr.sail.authority.ScopeRule;
+import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.RunStore;
 import java.io.ByteArrayInputStream;
@@ -58,6 +61,32 @@ class WritesBaselineTest {
               "write " + change.label() + " as " + member.label(),
               () -> Corpus.decided(Actor.call(member.actor(), () -> preAsk(world, change))));
         }
+        for (var headless : List.of(false, true)) {
+          for (var change : Changes.unheld(world, headless)) {
+            corpus.ask(
+                "write " + change.label() + " as " + member.label(),
+                () ->
+                    world.db.rehearse(
+                        () -> {
+                          if (headless) {
+                            world.dropHead(change.type(), change.id());
+                          }
+                          return Corpus.decided(
+                              Actor.call(member.actor(), () -> journaled(world, change)));
+                        }));
+          }
+        }
+        for (var change : Changes.filedElsewhere(world)) {
+          corpus.ask(
+              "write " + change.label() + " as " + member.label(),
+              () ->
+                  world.db.rehearse(
+                      () -> {
+                        world.adoptDeletion(change.type(), change.id(), "acme");
+                        return Corpus.decided(
+                            Actor.call(member.actor(), () -> preAsk(world, change)));
+                      }));
+        }
         for (var mutation : mutations) {
           corpus.ask(
               "write " + mutation.label() + " as " + member.label(),
@@ -87,6 +116,19 @@ class WritesBaselineTest {
               : world.projects.decide(change.id(), change.next());
       default -> throw new IllegalArgumentException("No pre-ask for " + change.type());
     };
+  }
+
+  /**
+   * The journal's decision of {@code change} as this box's own, which holds no head of it: the
+   * scope rule, then the type's rule, as the journal asks them ({@code RevisionJournal#decide}).
+   */
+  private static Optional<Refusal> journaled(World world, Changes.Change change) {
+    return WriteAuthority.local(
+        new ScopeRule(new ChangeLog(world.db), change.type())
+            .before(world.store(change.type()).authority()),
+        change.id(),
+        null,
+        change.next());
   }
 
   private static List<Mutation> mutations(World world) {

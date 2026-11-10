@@ -38,16 +38,19 @@ import java.util.Optional;
  * Attribution}); {@code room_id} never changes after create; and a spec's id is reserved for its
  * own room, so a create whose id names a room is refused when it is born in another room, whoever
  * asks — the room on its id would stop answering to it — and when it would hand that room to
- * another owner, unless the actor overrules owners.
+ * another owner, unless the actor may assign the room ({@link Action#ASSIGN}).
  */
 public final class SpecAuthority implements WriteAuthority {
 
+  private static final String TYPE = "spec";
+  private static final String ROOM = "room";
   private static final String ASSIGNEE = "assignee";
   private static final String ROOM_ID = "room_id";
 
   private final RoomStore rooms;
   private final SpecStore specs;
   private final ProjectStore projects;
+  private final ChangeLog changeLog;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
@@ -55,6 +58,7 @@ public final class SpecAuthority implements WriteAuthority {
     this.rooms = new RoomStore(db);
     this.specs = new SpecStore(db);
     this.projects = new ProjectStore(db);
+    this.changeLog = new ChangeLog(db);
     this.attribution = new Attribution(db);
   }
 
@@ -71,24 +75,20 @@ public final class SpecAuthority implements WriteAuthority {
     var refused =
         WriteAuthority.refused(
             actor,
-            Resource.Kind.SPEC,
-            held,
-            next,
-            () ->
-                taking(actor, id, held == null ? asBorn(id, next) : asHeld(id, held), held, next));
+            taking(actor, id, held == null ? asBorn(id, next) : asHeld(id, held), held, next));
     return refused.isPresent() ? refused : facts(actor, id, held, next);
   }
 
   /**
    * Why spec {@code id} may not be born as {@code next} into the room it names: this box holds no
-   * conversation there ({@link RoomStore#holds}), so it has no owner here to ask, unless the actor
-   * overrules owners ({@link Access#overrulesOwners}).
+   * conversation there ({@link RoomStore#holds}), so no owner of it is here to ask, and what no one
+   * here can own is an admin's to write ({@link Access#unowned}).
    */
   private Optional<Refusal> intoAbsent(Actor actor, String id, Map<String, Object> next) {
     var bornIn = bornIn(id, next);
-    return bornIn == null || Access.overrulesOwners(actor) || rooms.holds(bornIn, id)
+    return bornIn == null || rooms.holds(bornIn, id)
         ? Optional.empty()
-        : Refusal.noConversation(bornIn);
+        : Access.unowned(actor, Refusal.noConversation(bornIn).orElseThrow()).refused();
   }
 
   /**
@@ -150,7 +150,7 @@ public final class SpecAuthority implements WriteAuthority {
    * it. One this box does not hold was answered already ({@link #intoAbsent}).
    */
   private Resource asBorn(String id, Map<String, Object> next) {
-    var spec = Resources.spec(id, projectOf(next), null, null);
+    var spec = Resources.spec(id, changeLog.filed(TYPE, id, next), null, null);
     var bornIn = bornIn(id, next);
     return bornIn == null ? spec : Resources.bornIn(spec, conversation(bornIn, spec, null));
   }
@@ -162,22 +162,26 @@ public final class SpecAuthority implements WriteAuthority {
   private Resource asHeld(String id, Map<String, Object> held) {
     var spec =
         Resources.spec(
-            id, projectOf(held), assigneeOf(held), Snapshots.text(held, Snapshots.CREATOR));
+            id,
+            changeLog.filed(TYPE, id, held),
+            assigneeOf(held),
+            Snapshots.text(held, Snapshots.CREATOR));
     var bornIn = bornIn(id, held);
     return bornIn == null ? spec : Resources.bornIn(spec, conversation(bornIn, spec, held));
   }
 
   private Resource conversation(String roomId, Resource spec, Map<String, Object> held) {
-    return Resources.conversation(roomId, spec.project(), rooms.owners(roomId, spec.id(), held));
+    return Resources.conversation(
+        roomId, changeLog.conversationProject(roomId), rooms.owners(roomId, spec.id(), held));
   }
 
   /**
    * Why spec {@code id} may not be born over the room already holding its id, live or deleted: the
    * room, and the conversation in it, would become the spec's. It may when it adopts that room and
    * that moves no ownership — the room is already its owner's, as when a node's own identity room
-   * reaches main before its spec does — or when the actor overrules owners ({@link
-   * Access#overrulesOwners}). A spec born in another room never may, whoever asks: a conversation
-   * is addressed spec-first, so the room on its id would answer as the room the spec lives in. The
+   * reaches main before its spec does — or when the actor may assign the room to another owner
+   * ({@link Action#ASSIGN}). A spec born in another room never may, whoever asks: a conversation is
+   * addressed spec-first, so the room on its id would answer as the room the spec lives in. The
    * room's owner is read from the room alone: until this birth it was no spec's, and the spec being
    * born never names it.
    */
@@ -186,10 +190,13 @@ public final class SpecAuthority implements WriteAuthority {
     if (taken == null) {
       return Optional.empty();
     }
-    var room = Resources.room(id, projectOf(taken), RoomStore.ownerOf(taken));
-    var spec = Resources.spec(id, projectOf(next), assigneeOf(next), creatorOf(actor, next));
+    var room = Resources.room(id, changeLog.filed(ROOM, id, taken), RoomStore.ownerOf(taken));
+    var spec =
+        Resources.spec(
+            id, changeLog.filed(TYPE, id, next), assigneeOf(next), creatorOf(actor, next));
     if (bornIn(id, next) == null
-        && (spec.owners().equals(room.owners()) || Access.overrulesOwners(actor))) {
+        && (spec.owners().equals(room.owners())
+            || Access.withinAudience(actor, Action.ASSIGN, room).isEmpty())) {
       return Optional.empty();
     }
     return Refusal.of(

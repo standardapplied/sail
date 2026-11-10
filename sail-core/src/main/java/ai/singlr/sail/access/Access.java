@@ -11,6 +11,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.identity.ProjectScope;
 import java.util.EnumSet;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -23,15 +24,17 @@ import java.util.Set;
  * <ol>
  *   <li>Sail itself (main's decisions as a node adopts them, this box's machinery) is allowed: it
  *       was decided already.
- *   <li>Audience: a resource filed under a project outside the actor's scope is not found.
- *   <li>Role: the cell of the actor's role says no: refused, read-only or admin-only.
- *   <li>Lane: an agent's lane says no: refused, naming the lane. An agent's own work is its lane's
- *       to grant, whatever its role: a room agent, read-only by construction, posts in its room and
- *       narrates its run.
- *   <li>Ownership: the role's cell says owner, and the actor neither overrules owners ({@link
- *       #overrulesOwners}) nor acts for an owner; or it starts work in the room a spec was born in
- *       ({@link Resource#bornIn}) — creates or claims the spec there — and does not act for that
- *       room's owners: refused, naming the owners.
+ *   <li>Audience: a resource filed under a project outside the actor's scope is not found. A write
+ *       has had this step already, from the project the journal files its row under ({@link
+ *       #withinAudience}).
+ *   <li>Role: the cell of the actor's role says no: refused, read-only or admin-only; unless the
+ *       actor's lane grants the action on its own work, whatever its role, which decides it alone —
+ *       a room agent, read-only by construction, posts in its room and narrates its run.
+ *   <li>Lane: an agent's lane says no: refused, naming the lane.
+ *   <li>Ownership: the role's cell says owner, and the actor neither is an admin nor acts for an
+ *       owner; or it starts work in the room a spec was born in ({@link Resource#bornIn}) — creates
+ *       or claims the spec there — and does not act for that room's owners: refused, naming the
+ *       owners.
  *   <li>Otherwise allowed.
  * </ol>
  *
@@ -54,49 +57,42 @@ public final class Access {
     if (resource.kind().filed() && !audience(actor).admits(resource.project())) {
       return NOT_FOUND;
     }
-    if (lane(actor, action) == Cell.OWN_WORK) {
-      return ownWork(actor, resource)
-          ? ALLOWED
-          : refused(Wording.outsideWork(actor, action, resource));
-    }
-    if (role(actor, action) == Cell.NO) {
-      return refused(Wording.belowRole(actor, action, resource));
-    }
-    if (lane(actor, action) == Cell.NO) {
-      return refused(Wording.laneForbidden(action, resource.kind()));
-    }
-    if (role(actor, action) == Cell.OWNER && !owns(actor, resource)) {
-      return refused(Wording.notOwner(action, resource));
-    }
-    var bornIn = resource.bornIn();
-    if (bornIn != null && SEATED.contains(action) && !owns(actor, bornIn)) {
-      return refused(Wording.notSeated(action, bornIn));
-    }
-    return ALLOWED;
+    return answer(steps(actor, action, resource.kind(), resource));
+  }
+
+  /**
+   * Why {@code actor} may not take {@code action} on {@code resource}, whose audience was decided
+   * already: every step of {@link #decide(Actor, Action, Resource)} but the audience. A write's
+   * audience is the scope rule's ({@code ScopeRule}), asked first on every lane from the project
+   * the journal files the row under, so the write path decides it once, on the one project the
+   * row's head and snapshot name, and a write is never not found here.
+   */
+  public static Optional<Refusal> withinAudience(Actor actor, Action action, Resource resource) {
+    return actor.isSail() ? Optional.empty() : steps(actor, action, resource.kind(), resource);
   }
 
   /**
    * Whether {@code actor} may take {@code action} at all, on some resource of {@code kind} it
    * reads: Sail itself, the role and the lane, as {@link #decide(Actor, Action, Resource)} decides
    * them, for a question asked before there is one resource to read — an erasure asked for before
-   * the specs it names are read, or again once nothing of it is left to own — or where a revision
-   * names none. Whose the resource is is that decision's once the resource is in hand.
-   *
-   * @throws IllegalArgumentException for an action the actor's lane grants on its own work alone,
-   *     which only the work itself can decide
+   * the specs it names are read, or again once nothing of it is left to own, a conflict's
+   * resolution — and never not found. Whose the resource is is that decision's once the resource is
+   * in hand; a lane that grants the action on its own work alone is refused, since no work is in
+   * hand to be its own.
    */
   public static Decision decide(Actor actor, Action action, Resource.Kind kind) {
-    if (actor.isSail()) {
-      return ALLOWED;
-    }
-    if (lane(actor, action) == Cell.OWN_WORK) {
-      throw new IllegalArgumentException(
-          action + " is " + actor.lane() + "'s on its own work alone, which a kind does not name.");
-    }
-    if (role(actor, action) == Cell.NO) {
-      return refused(Wording.belowRole(actor, action, kind));
-    }
-    return lane(actor, action) == Cell.NO ? refused(Wording.laneForbidden(action, kind)) : ALLOWED;
+    return actor.isSail() ? ALLOWED : answer(steps(actor, action, kind, null));
+  }
+
+  /**
+   * Whether {@code actor} may write what no one here can own, which {@code fact} says it is not: a
+   * conversation this box holds no row of, whose owners it cannot ask, or a post by a credential
+   * that acts for no FDE, which would be no one's. What no one here can own is an admin's to write,
+   * as the ownership step passes an admin whoever owns what it acts on; everyone else is refused by
+   * the fact.
+   */
+  public static Decision unowned(Actor actor, Refusal fact) {
+    return overrulesOwners(actor) ? ALLOWED : refused(fact);
   }
 
   /**
@@ -122,23 +118,35 @@ public final class Access {
   }
 
   /**
-   * Whether no owner binds {@code actor}, so the ownership step passes it whoever owns what it acts
-   * on: Sail itself, and an admin. A rule's facts that stand where no owner can be asked — a
-   * conversation this box does not hold, a post that would be no one's, a room a spec's id would
-   * take from its owner — bind everyone else.
+   * The role, lane and ownership steps, of {@code resource}, or of some resource of {@code kind}
+   * when it is null: a question of a kind has no work to be the actor's own and no owners to ask.
    */
-  public static boolean overrulesOwners(Actor actor) {
-    return actor.isSail() || actor.isAdmin();
-  }
-
-  /** What the column of {@code actor}'s role allows of {@code action}. */
-  private static Cell role(Actor actor, Action action) {
-    return Policy.cell(action, Column.role(actor.role()));
-  }
-
-  /** What {@code actor}'s lane allows of {@code action}: a person's lane narrows nothing. */
-  private static Cell lane(Actor actor, Action action) {
-    return Column.lane(actor.lane()).map(column -> Policy.cell(action, column)).orElse(Cell.YES);
+  private static Optional<Refusal> steps(
+      Actor actor, Action action, Resource.Kind kind, Resource resource) {
+    var role = Policy.cell(action, Column.role(actor.role()));
+    var lane =
+        Column.lane(actor.lane()).map(column -> Policy.cell(action, column)).orElse(Cell.YES);
+    if (lane == Cell.OWN_WORK) {
+      return resource != null && ownWork(actor, resource)
+          ? Optional.empty()
+          : Optional.of(Wording.outsideWork(actor, action, kind, resource));
+    }
+    if (role == Cell.NO) {
+      return Optional.of(Wording.belowRole(actor, action, kind, resource));
+    }
+    if (lane == Cell.NO) {
+      return Optional.of(Wording.laneForbidden(action, kind));
+    }
+    if (resource == null) {
+      return Optional.empty();
+    }
+    if (role == Cell.OWNER && !owns(actor, resource)) {
+      return Optional.of(Wording.notOwner(action, resource));
+    }
+    var bornIn = resource.bornIn();
+    return bornIn != null && SEATED.contains(action) && !owns(actor, bornIn)
+        ? Optional.of(Wording.notSeated(action, bornIn))
+        : Optional.empty();
   }
 
   /**
@@ -154,6 +162,15 @@ public final class Access {
 
   private static boolean owns(Actor actor, Resource resource) {
     return overrulesOwners(actor) || resource.owners().stream().anyMatch(actor::actsFor);
+  }
+
+  /** Whether no owner binds {@code actor}: Sail itself, and an admin. */
+  private static boolean overrulesOwners(Actor actor) {
+    return actor.isSail() || actor.isAdmin();
+  }
+
+  private static Decision answer(Optional<Refusal> refusal) {
+    return refusal.map(Access::refused).orElse(ALLOWED);
   }
 
   private static Decision refused(Refusal refusal) {
