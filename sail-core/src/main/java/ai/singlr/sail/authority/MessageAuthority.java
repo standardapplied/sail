@@ -7,9 +7,11 @@ package ai.singlr.sail.authority;
 
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
@@ -101,7 +103,7 @@ public final class MessageAuthority implements WriteAuthority {
     if (MessageStore.SAIL_AUTHOR.equals(author)) {
       return runs.ranInConversation(actor.handle(), roomId) && rooms.steers(roomId, actor.handle());
     }
-    return RunStore.isPrincipalHandle(author)
+    return PrincipalHandle.matches(author)
         && attribution.principalOfOwnedRun(actor.handle(), author);
   }
 }

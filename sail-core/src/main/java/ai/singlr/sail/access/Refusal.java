@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.sail.authority;
+package ai.singlr.sail.access;
 
 import ai.singlr.sail.common.Remedy;
 import java.util.Objects;
@@ -85,7 +85,7 @@ public record Refusal(Kind kind, String message, Remedy fix) {
   }
 
   /** The refusal of a field that never changes after create. */
-  static Optional<Refusal> fixed(String type, String id, String field) {
+  public static Optional<Refusal> fixed(String type, String id, String field) {
     return of(
         Kind.FIXED,
         "The "

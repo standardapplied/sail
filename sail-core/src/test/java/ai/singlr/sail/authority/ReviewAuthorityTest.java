@@ -26,7 +26,8 @@ import static ai.singlr.sail.authority.Actors.projection;
 import static ai.singlr.sail.authority.Actors.with;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import ai.singlr.sail.authority.Refusal.Kind;
+import ai.singlr.sail.access.Refusal;
+import ai.singlr.sail.access.Refusal.Kind;
 import ai.singlr.sail.identity.Actor;
 import java.util.List;
 import java.util.Map;

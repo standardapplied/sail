@@ -5,8 +5,8 @@
 
 package ai.singlr.sail.access.baseline;
 
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.EventAuthority;
-import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.identity.Actor;
 import java.util.List;
 import java.util.Optional;

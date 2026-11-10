@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.access.baseline;
 
-import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.RunStore;

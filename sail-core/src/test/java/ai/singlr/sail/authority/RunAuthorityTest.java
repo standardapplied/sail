@@ -30,8 +30,9 @@ import static ai.singlr.sail.authority.Actors.projection;
 import static ai.singlr.sail.authority.Actors.with;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ai.singlr.sail.access.Refusal;
+import ai.singlr.sail.access.Refusal.Kind;
 import ai.singlr.sail.access.Resources;
-import ai.singlr.sail.authority.Refusal.Kind;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;

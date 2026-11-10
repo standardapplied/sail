@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.authority.EventAuthority;
-import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.ScopeRule;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Remedy;

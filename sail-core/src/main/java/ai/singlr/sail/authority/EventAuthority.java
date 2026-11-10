@@ -8,11 +8,13 @@ package ai.singlr.sail.authority;
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -315,7 +317,7 @@ public final class EventAuthority {
           "Event type '" + type + "' is not available to agent principals.",
           Remedy.NONE);
     }
-    if (RunStore.namesRun(actor.handle(), subject.runId())) {
+    if (PrincipalHandle.namesRun(actor.handle(), subject.runId())) {
       return Optional.empty();
     }
     return Refusal.of(

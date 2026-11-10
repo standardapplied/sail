@@ -15,6 +15,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -684,11 +685,11 @@ final class GlobalSpecOperations {
 
   /**
    * An assignee is an FDE handle, or blank for anyone to claim — never a run's principal, whose
-   * shape ({@link RunStore#isPrincipalHandle}) no FDE handle has. A handle this box's roster does
-   * not know yet is accepted: a node may not have synced a new FDE.
+   * shape ({@link PrincipalHandle#matches}) no FDE handle has. A handle this box's roster does not
+   * know yet is accepted: a node may not have synced a new FDE.
    */
   private static String validAssignee(String assignee) {
-    if (RunStore.isPrincipalHandle(assignee)) {
+    if (PrincipalHandle.matches(assignee)) {
       throw new ApiException(
           ErrorCode.INVALID_REQUEST,
           "Assignee '" + assignee + "' names a run, not an FDE.",

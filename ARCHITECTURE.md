@@ -2569,7 +2569,7 @@ no pairing is removed through the gateway as before, and no key file is touched.
   a spec born in a room gives a voice in its conversation, never its settings. A spec left
   without an assignee stays unassigned, and so does its identity room; dispatch refuses it until
   someone claims it. An assignee is an FDE handle, never an agent type or a run's principal
-  (`RunStore.isPrincipalHandle`). `created_by` is the acting FDE (`Actor.actingFde`: the handle,
+  (`PrincipalHandle.matches`). `created_by` is the acting FDE (`Actor.actingFde`: the handle,
   or the FDE a run acts for), written once at create. A spec's creator travels as `_created_by`
   beside `_actor`: main keeps the one it holds, records the pusher when a node-born create names
   none, and fills a creator it never recorded only from that creator's own push; a node adopts

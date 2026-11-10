@@ -15,6 +15,7 @@ import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.PrincipalHandle;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -1176,61 +1177,16 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     recordPrincipal(id, Snapshots.text(snapshot, "principal"));
   }
 
-  /**
-   * Whether {@code handle} has the shape {@link #principalHandle} mints for a run's principal —
-   * {@code <family>/<id>} — which no FDE handle has. How an assignee that names a run rather than
-   * an FDE is told apart.
-   */
-  public static boolean isPrincipalHandle(String handle) {
-    return handle != null && handle.contains("/");
-  }
-
-  /**
-   * Whether {@code principal} names run {@code runId} in the shape {@link #principalHandle} mints —
-   * {@code <family>/<marker><run id>}, the marker one of none, {@code review-}, {@code fix-} or
-   * {@code room-} — so a run can carry no principal but its own.
-   */
-  public static boolean namesRun(String principal, String runId) {
-    return runId != null && runOf(principal).filter(runId::equals).isPresent();
-  }
-
-  /** The run {@code principal} names, when it has the shape {@link #principalHandle} mints. */
-  public static Optional<String> runOf(String principal) {
-    if (!isPrincipalHandle(principal) || principal.indexOf('/') != principal.lastIndexOf('/')) {
-      return Optional.empty();
-    }
-    var tail = principal.substring(principal.indexOf('/') + 1);
-    var marker = PRINCIPAL_MARKERS.stream().filter(tail::startsWith).findFirst().orElse("");
-    var runId = tail.substring(marker.length());
-    return runId.isEmpty() ? Optional.empty() : Optional.of(runId);
-  }
-
-  private static final String REVIEW_MARKER = "review-";
-  private static final String FIX_MARKER = "fix-";
-  private static final String ROOM_MARKER = "room-";
-  private static final List<String> PRINCIPAL_MARKERS =
-      List.of(REVIEW_MARKER, FIX_MARKER, ROOM_MARKER);
-
-  /**
-   * The run's minted principal handle: the agent family (the yaml name up to its first dash) over
-   * the full run id, with review and fix invocations marked as such — {@code claude/<run-uuid>},
-   * {@code claude/review-<run-uuid>}, {@code claude/fix-<run-uuid>}. The whole UUID, never a
-   * truncation: the handle is a security identity compared in ownership checks and audit rows, so
-   * it must be exactly as collision-proof as the run id itself.
-   */
+  /** The handle of run {@code id}'s principal, marked by its {@code role}'s lane. */
   private static String principalHandle(String agent, String role, String id) {
-    var family = Objects.toString(agent, "");
-    var dash = family.indexOf('-');
-    var base = dash > 0 ? family.substring(0, dash) : family;
-    var runId = Objects.requireNonNull(id, "run id");
     var marker =
         switch (Lane.of(role).orElse(null)) {
-          case REVIEW -> REVIEW_MARKER;
-          case FIX -> FIX_MARKER;
-          case ROOM -> ROOM_MARKER;
-          case null, default -> "";
+          case REVIEW -> PrincipalHandle.Marker.REVIEW;
+          case FIX -> PrincipalHandle.Marker.FIX;
+          case ROOM -> PrincipalHandle.Marker.ROOM;
+          case null, default -> PrincipalHandle.Marker.BUILD;
         };
-    return base + "/" + marker + runId;
+    return PrincipalHandle.mint(agent, marker, id);
   }
 
   private String mintCredential(String id, Duration maxDuration) {
@@ -1698,7 +1654,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   private List<String> principalsOf(String id) {
     var principals = new LinkedHashSet<>(principals(id));
     findById(id).map(RunRow::principal).ifPresent(principals::add);
-    return principals.stream().filter(principal -> namesRun(principal, id)).toList();
+    return principals.stream()
+        .filter(principal -> PrincipalHandle.namesRun(principal, id))
+        .toList();
   }
 
   /** Removes an erased run's row, with the box-local credential it was issued. */

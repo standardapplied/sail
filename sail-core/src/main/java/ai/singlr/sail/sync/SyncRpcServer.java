@@ -6,8 +6,8 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.EraseAuthority;
-import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.ScopeRule;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;

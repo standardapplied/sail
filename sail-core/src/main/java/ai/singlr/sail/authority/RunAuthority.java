@@ -7,11 +7,13 @@ package ai.singlr.sail.authority;
 
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
@@ -31,11 +33,11 @@ import java.util.stream.Stream;
  * read-only lane; every other revision changes it ({@link Action#CHANGE}): a birth is decided on
  * whoever's box runs the work it names ({@link Resources#launched}), a later revision on the people
  * it works for ({@link Resources#run}), the rule stop and log access admit by. Beyond that, every
- * principal a run carries names the run itself ({@link RunStore#namesRun}), its spec and room never
- * change, and it names a room only when it works no spec ({@link #created}), so no box starts or
- * pushes a run on another FDE's work. On {@link Actor.Lane#SYNC} a run is its executing box's: its
- * {@code node} is the pusher before and after, it acts for the pusher, and a deleted run is never
- * brought back.
+ * principal a run carries names the run itself ({@link PrincipalHandle#namesRun}), its spec and
+ * room never change, and it names a room only when it works no spec ({@link #created}), so no box
+ * starts or pushes a run on another FDE's work. On {@link Actor.Lane#SYNC} a run is its executing
+ * box's: its {@code node} is the pusher before and after, it acts for the pusher, and a deleted run
+ * is never brought back.
  */
 public final class RunAuthority implements WriteAuthority {
 
@@ -94,7 +96,9 @@ public final class RunAuthority implements WriteAuthority {
       return refused;
     }
     var foreign =
-        principalsOf(next).filter(principal -> !RunStore.namesRun(principal, id)).findFirst();
+        principalsOf(next)
+            .filter(principal -> !PrincipalHandle.namesRun(principal, id))
+            .findFirst();
     if (foreign.isPresent()) {
       return Refusal.of(
           Refusal.Kind.NOT_AUTHOR,

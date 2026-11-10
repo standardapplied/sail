@@ -18,6 +18,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -1952,10 +1953,10 @@ class RunStoreTest {
     var id = DateTimeUtils.newId().toString();
     reservedCredential(id, "auth", List.of("app"));
 
-    assertTrue(RunStore.isPrincipalHandle(store.findById(id).orElseThrow().principal()));
-    assertTrue(RunStore.isPrincipalHandle("/" + id), "a run with no agent family still mints one");
-    assertFalse(RunStore.isPrincipalHandle("uday"));
-    assertFalse(RunStore.isPrincipalHandle(null));
+    assertTrue(PrincipalHandle.matches(store.findById(id).orElseThrow().principal()));
+    assertTrue(PrincipalHandle.matches("/" + id), "a run with no agent family still mints one");
+    assertFalse(PrincipalHandle.matches("uday"));
+    assertFalse(PrincipalHandle.matches(null));
   }
 
   @Test

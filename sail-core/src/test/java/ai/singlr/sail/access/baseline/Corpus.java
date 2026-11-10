@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.access.baseline;
 
-import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Remedy;
 import java.util.Map;

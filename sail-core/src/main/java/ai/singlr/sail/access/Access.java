@@ -7,11 +7,10 @@ package ai.singlr.sail.access;
 
 import ai.singlr.sail.access.Policy.Cell;
 import ai.singlr.sail.access.Policy.Column;
-import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.identity.ProjectScope;
-import ai.singlr.sail.store.RunStore;
 import java.util.EnumSet;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -134,7 +133,7 @@ public final class Access {
    */
   private static boolean ownWork(Actor actor, Resource resource) {
     return resource.kind() == Resource.Kind.RUN
-        ? RunStore.namesRun(actor.handle(), resource.id())
+        ? PrincipalHandle.namesRun(actor.handle(), resource.id())
         : resource.owners().stream().anyMatch(actor::actsFor);
   }
 
