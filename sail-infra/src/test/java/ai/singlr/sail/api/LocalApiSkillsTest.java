@@ -95,7 +95,8 @@ class LocalApiSkillsTest {
                             .withScope(ProjectScope.of(List.of("acme"))))
                     : super.boxActorForCredential(credential);
               }
-            });
+            },
+            () -> TestOperations.BOX_HANDLE);
   }
 
   @AfterEach
@@ -353,7 +354,8 @@ class LocalApiSkillsTest {
               public SkillOperations skills() {
                 return skills;
               }
-            });
+            },
+            () -> TestOperations.BOX_HANDLE);
 
     var failed =
         interrupted.handle(

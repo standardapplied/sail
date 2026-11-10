@@ -15,7 +15,6 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -62,10 +61,6 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
   private final Supplier<String> boxFde;
   private final List<Route<Handler>> routes;
 
-  LocalApiRouter(LocalLaneOperations operations) {
-    this(operations, NodeIdentity::handle);
-  }
-
   /** A router whose box gate decides on the box of the FDE {@code boxFde} names when asked. */
   LocalApiRouter(LocalLaneOperations operations, Supplier<String> boxFde) {
     this.operations = operations;
@@ -104,6 +99,11 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
                 Gate.decides(Action.SERVE, ProjectGate.class),
                 this::serve),
             route("GET", "/v1/projects/{project}/ports", Gate.READS_IN_SCOPE, this::ports),
+            route(
+                "GET",
+                "/v1/projects/{project}/{rest...}",
+                Gate.READS_IN_SCOPE,
+                (request, caller, path) -> noRoute(request)),
             route("GET", "/v1/specs", Gate.READS_IN_SCOPE, this::specs),
             route("POST", "/v1/specs", Gate.JOURNAL, this::specs),
             route("GET", "/v1/specs/board", Gate.READS_IN_SCOPE, this::board),

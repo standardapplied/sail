@@ -910,7 +910,7 @@ class ScopedReadsTest {
   void aRunIsDeliveredNothingOfAProjectItsFdeNoLongerHolds() throws Exception {
     var runs = new RunStore(db);
     var messages = new MessageStore(db);
-    var local = new LocalApiRouter(operations);
+    var local = new LocalApiRouter(operations, () -> TestOperations.BOX_HANDLE);
     var run = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     var reserved =
         Acting.system(
@@ -1252,7 +1252,7 @@ class ScopedReadsTest {
   void aRunNarratesItsOwnLifecycleAfterAnAdminMovedItsSpecOutOfTheScope() throws Exception {
     Acting.system(this::bravoArrives);
     var runs = new RunStore(db);
-    var local = new LocalApiRouter(operations);
+    var local = new LocalApiRouter(operations, () -> TestOperations.BOX_HANDLE);
     var run = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     var reserved =
         Acting.system(

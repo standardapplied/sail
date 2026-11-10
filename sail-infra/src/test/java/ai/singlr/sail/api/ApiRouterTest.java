@@ -41,12 +41,14 @@ import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
+import com.sun.net.httpserver.HttpServer;
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
+import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -795,6 +797,140 @@ class ApiRouterTest {
       assertEquals(200, get(server, "/v1/%20/specs//board/", "token").statusCode());
       assertEquals(422, get(server, "/v1/projects/Bad_Name/dispatch/extra", "token").statusCode());
       assertEquals(422, post(server, "/v1/rooms/Bad_Name/invite", "token", "{}").statusCode());
+    }
+  }
+
+  @Test
+  void aNameThePathAddressesIsCheckedBeforeItsMethodOrWhatLiesBelowIt() throws Exception {
+    var project =
+        "Invalid project name: 'Bad_Name'. Must match [a-z0-9][a-z0-9-]*, max 63 characters.";
+    var id = "Invalid spec id: 'Bad_Name'. Must match [a-z0-9][a-z0-9-]*, max 80 characters.";
+    try (var server = serverWith(new FakeOperations(), true)) {
+      for (var asked :
+          Map.ofEntries(
+                  Map.entry("PATCH /v1/projects/Bad_Name", project),
+                  Map.entry("POST /v1/projects/Bad_Name/specs", project),
+                  Map.entry("GET /v1/projects/Bad_Name/dispatch", project),
+                  Map.entry("PUT /v1/projects/Bad_Name/ports", project),
+                  Map.entry("DELETE /v1/projects/Bad_Name/zz", project),
+                  Map.entry("GET /v1/projects/Bad_Name/agent/zz", project),
+                  Map.entry("GET /v1/projects/Bad_Name/definition/a/b", project),
+                  Map.entry("POST /v1/rooms/Bad_Name", id),
+                  Map.entry("PUT /v1/rooms/Bad_Name/members", id),
+                  Map.entry("GET /v1/rooms/Bad_Name/zz", id),
+                  Map.entry("POST /v1/specs/Bad_Name", id),
+                  Map.entry("DELETE /v1/specs/Bad_Name/history", id),
+                  Map.entry("GET /v1/specs/Bad_Name/zz", id))
+              .entrySet()) {
+        var response = send(server, asked.getKey(), "token");
+
+        assertEquals(422, response.statusCode(), asked.getKey());
+        assertEquals("invalid_request", errorOf(response).get("code"), asked.getKey());
+        assertEquals(asked.getValue(), errorOf(response).get("message"), asked.getKey());
+      }
+      for (var unknown :
+          List.of("GET /v1/rooms/r1/zz", "POST /v1/specs/e1/zz", "GET /v1/rooms/Bad_Name/a/b")) {
+        var response = send(server, unknown, "token");
+
+        assertEquals(404, response.statusCode(), unknown);
+        assertEquals("API endpoint was not found.", errorOf(response).get("message"), unknown);
+      }
+    }
+  }
+
+  @Test
+  void aMethodTheWholeOfAPathIsNotServedByIsNotFound() throws Exception {
+    try (var server = serverWith(new FakeOperations(), true)) {
+      for (var path : List.of("/v1/health", "/v1/whoami", "/v1/fdes", "/v1/agents")) {
+        for (var method : List.of("POST", "PUT", "DELETE")) {
+          var response = send(server, method + " " + path, "token");
+
+          assertEquals(404, response.statusCode(), method + " " + path);
+          assertEquals(
+              Map.of("code", "not_found", "message", "API endpoint was not found."),
+              Map.of(
+                  "code",
+                  errorOf(response).get("code"),
+                  "message",
+                  errorOf(response).get("message")),
+              method + " " + path);
+        }
+      }
+      assertEquals(401, send(server, "POST /v1/health", null).statusCode());
+      assertEquals(200, get(server, "/v1/health", null).statusCode());
+    }
+  }
+
+  @Test
+  void aSharedFileMethodNoRouteServesIsRefusedOnlyOnceTheProjectAndThePathAreRead()
+      throws Exception {
+    var asked = new ArrayList<String>();
+    var operations =
+        new FakeOperations() {
+          @Override
+          public ProjectFiles projectFiles(String project) {
+            asked.add(project);
+            if (project.equals("beta")) {
+              throw ProjectReader.absent(project);
+            }
+            return null;
+          }
+        };
+    try (var server = serverWith(operations, true)) {
+      var hidden = send(server, "POST /v1/projects/beta/files", "token");
+      var unsafe = send(server, "PATCH /v1/projects/acme/files//etc", "token");
+      var listed = send(server, "POST /v1/projects/acme/files", "token");
+
+      assertEquals(404, hidden.statusCode());
+      assertEquals("project_not_in_catalog", errorOf(hidden).get("code"));
+      assertEquals(422, unsafe.statusCode());
+      assertEquals("Unsafe share path: '/etc'.", errorOf(unsafe).get("message"));
+      assertEquals(405, listed.statusCode());
+      assertEquals(List.of("beta", "acme", "acme"), asked);
+    }
+  }
+
+  @Test
+  void aRunsStreamIsRecognisedByItsPathAsSentWhateverItsRunSegmentHolds() throws Exception {
+    var asked = new ArrayList<String>();
+    var auth = new FixedTokenTestAuth("token");
+    var streamer =
+        new AgentLogStreamer(
+            auth,
+            run -> {
+              asked.add(run);
+              return Optional.empty();
+            },
+            spec -> Optional.empty(),
+            () -> "node");
+    var http = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    PrivateAttributes.context(
+        http,
+        "/",
+        new ApiRouter(new FakeOperations(), auth, new RateLimitGate(), streamer, () -> "node"));
+    http.start();
+    try (var client = HttpClient.newHttpClient()) {
+      var base = "http://127.0.0.1:" + http.getAddress().getPort();
+      var blank =
+          client.send(
+              HttpRequest.newBuilder(URI.create(base + "/v1/runs//stream"))
+                  .header("Authorization", "Bearer token")
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
+      var collapsed =
+          client.send(
+              HttpRequest.newBuilder(URI.create(base + "/v1//runs/r1/stream"))
+                  .header("Authorization", "Bearer token")
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
+
+      assertEquals(404, blank.statusCode());
+      assertEquals("No run ''.", YamlUtil.parseMap(blank.body()).get("message"));
+      assertEquals(List.of(""), asked);
+      assertEquals(404, collapsed.statusCode());
+      assertEquals("API endpoint was not found.", errorOf(collapsed).get("message"));
+    } finally {
+      http.stop(0);
     }
   }
 
@@ -2213,6 +2349,19 @@ class ApiRouterTest {
     var builder =
         HttpRequest.newBuilder(uri(server, path))
             .method("DELETE", HttpRequest.BodyPublishers.noBody());
+    if (token != null) {
+      builder.header("Authorization", "Bearer " + token);
+    }
+    return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofString());
+  }
+
+  /** Sends {@code asked}, a method and a path, with {@code token} when there is one. */
+  private static HttpResponse<String> send(SailApiServer server, String asked, String token)
+      throws Exception {
+    var parts = asked.split(" ", 2);
+    var builder =
+        HttpRequest.newBuilder(uri(server, parts[1]))
+            .method(parts[0], HttpRequest.BodyPublishers.ofString("{}"));
     if (token != null) {
       builder.header("Authorization", "Bearer " + token);
     }

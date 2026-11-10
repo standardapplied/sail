@@ -48,7 +48,8 @@ class LocalApiStackTest {
             public StackOperations stack() {
               return stack;
             }
-          });
+          },
+          () -> TestOperations.BOX_HANDLE);
 
   private ApiResponse ask(String method, String path, String credential, String form) {
     return router.handle(

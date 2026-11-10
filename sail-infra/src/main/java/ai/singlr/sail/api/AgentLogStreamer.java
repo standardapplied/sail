@@ -357,6 +357,15 @@ public final class AgentLogStreamer implements HttpHandler {
     return null;
   }
 
+  /** True when {@code path} is exactly {@code /v1/runs/{id}/stream}. */
+  static boolean isStreamPath(String path) {
+    var segments = path.split("/");
+    return segments.length == 5
+        && "v1".equals(segments[1])
+        && "runs".equals(segments[2])
+        && "stream".equals(segments[4]);
+  }
+
   static int parseSince(String query) {
     if (query == null) return 0;
     for (var part : query.split("&")) {

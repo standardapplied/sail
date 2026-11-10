@@ -624,7 +624,7 @@ class EventDoorTest {
   }
 
   private ApiResponse socket(String credential, String json) {
-    return new LocalApiRouter(operations)
+    return new LocalApiRouter(operations, () -> TestOperations.BOX_HANDLE)
         .handle(
             new LocalApiRequest(
                 "POST",

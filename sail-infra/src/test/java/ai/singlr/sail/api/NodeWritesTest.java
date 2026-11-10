@@ -238,7 +238,7 @@ class NodeWritesTest {
   }
 
   private ApiResponse socket(String method, String path, String credential, String form) {
-    return new LocalApiRouter(operations)
+    return new LocalApiRouter(operations, () -> TestOperations.BOX_HANDLE)
         .handle(
             new LocalApiRequest(
                 method,

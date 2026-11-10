@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.NodeIdentity;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -61,7 +62,7 @@ public final class LocalApiSocket implements AutoCloseable {
   private volatile boolean closed;
 
   public LocalApiSocket(LocalLaneOperations operations, Path socketPath) {
-    this(new LocalApiRouter(operations), socketPath, DEFAULT_MAX_IN_FLIGHT);
+    this(new LocalApiRouter(operations, NodeIdentity::handle), socketPath, DEFAULT_MAX_IN_FLIGHT);
   }
 
   LocalApiSocket(LocalApiHandler handler, Path socketPath, int maxInFlight) {

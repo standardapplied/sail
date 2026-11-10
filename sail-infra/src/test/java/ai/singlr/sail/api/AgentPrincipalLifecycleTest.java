@@ -170,7 +170,7 @@ class AgentPrincipalLifecycleTest {
             new FdeStore(db),
             SessionYield.NONE);
     TestControlPlane.standalone(operations, db, tempDir);
-    var router = new LocalApiRouter(operations);
+    var router = new LocalApiRouter(operations, () -> TestOperations.BOX_HANDLE);
     var delivered = new CountDownLatch(1);
     var subscription =
         bus.subscribe(
@@ -338,7 +338,7 @@ class AgentPrincipalLifecycleTest {
             SyncScheduler.disabled(),
             new FdeStore(db),
             SessionYield.NONE);
-    var router = new LocalApiRouter(operations);
+    var router = new LocalApiRouter(operations, () -> TestOperations.BOX_HANDLE);
     var updated = router.handle(request("PUT", "/v1/specs/auth", credential.get(), "priority=7"));
     assertEquals(
         200,

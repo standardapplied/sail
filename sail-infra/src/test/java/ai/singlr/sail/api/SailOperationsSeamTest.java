@@ -525,7 +525,7 @@ class SailOperationsSeamTest {
       parkRetitle(box, "owner");
       var head = box.specs.latestRev("auth");
       var response =
-          new LocalApiRouter(operations)
+          new LocalApiRouter(operations, () -> TestOperations.BOX_HANDLE)
               .handle(
                   new LocalApiRequest(
                       "POST",
@@ -565,7 +565,7 @@ class SailOperationsSeamTest {
             }
           };
       var response =
-          new LocalApiRouter(lane)
+          new LocalApiRouter(lane, () -> TestOperations.BOX_HANDLE)
               .handle(
                   new LocalApiRequest(
                       "POST",

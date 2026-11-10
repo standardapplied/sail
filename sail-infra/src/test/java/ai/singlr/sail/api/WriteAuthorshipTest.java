@@ -188,7 +188,7 @@ class WriteAuthorshipTest {
                       "claude-code",
                       List.of()));
       var principal = runs.findByCredential(credential).orElseThrow().principal();
-      var router = new LocalApiRouter(operations);
+      var router = new LocalApiRouter(operations, () -> TestOperations.BOX_HANDLE);
 
       var status = router.handle(put("/v1/specs/auth", credential, "status=pending"));
       assertEquals(200, status.status(), status.body().toString());

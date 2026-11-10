@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.store.SpecStore;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -144,7 +145,10 @@ public final class SailApiServer implements AutoCloseable {
     server = HttpServer.create(new InetSocketAddress(host, port), 32);
     executor = Executors.newVirtualThreadPerTaskExecutor();
     PrivateAttributes.context(
-        server, "/", new ApiRouter(operations, auth, rateLimits, new AgentLogStreamer(auth)));
+        server,
+        "/",
+        new ApiRouter(
+            operations, auth, rateLimits, new AgentLogStreamer(auth), NodeIdentity::handle));
     if (passkeyHandler != null) {
       PrivateAttributes.context(server, "/v1/auth", rateLimits.wrap(passkeyHandler));
       var pages = rateLimits.wrap(new WebauthnPageHandler());

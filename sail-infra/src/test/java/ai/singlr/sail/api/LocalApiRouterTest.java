@@ -41,7 +41,7 @@ import org.junit.jupiter.api.Test;
 class LocalApiRouterTest {
 
   private final RecordingOps ops = new RecordingOps();
-  private final LocalApiRouter router = new LocalApiRouter(ops);
+  private final LocalApiRouter router = new LocalApiRouter(ops, () -> TestOperations.BOX_HANDLE);
 
   private static Map<String, String> auth() {
     return Map.of("authorization", "Bearer " + TestOperations.RUN_CREDENTIAL);
@@ -120,8 +120,27 @@ class LocalApiRouterTest {
   }
 
   @Test
+  void aPathBelowAProjectNoRouteServesIsAnsweredOnlyOnceTheProjectIsRead() {
+    assertEquals(
+        "400 bad_request Invalid project name: 'Bad_Name'. Must match [a-z0-9][a-z0-9-]*, max 63"
+            + " characters.",
+        refusal(router.handle(form("PUT", "/v1/projects/Bad_Name/zz", ""))));
+    assertEquals(
+        "404 project_not_in_catalog Project 'nope' is not in the catalog.",
+        refusal(router.handle(get("/v1/projects/nope/zz", Map.of()))));
+    assertEquals(
+        "404 {error=No route for /v1/projects/acme/zz}",
+        answer(router.handle(form("DELETE", "/v1/projects/acme/zz", ""))));
+  }
+
+  private static String refusal(ApiResponse response) {
+    var error = (Map<?, ?>) response.body().get("error");
+    return response.status() + " " + error.get("code") + " " + error.get("message");
+  }
+
+  @Test
   void agentsReadConflictsButCannotTriggerSync() {
-    var local = new LocalApiRouter(new SyncingOperations());
+    var local = new LocalApiRouter(new SyncingOperations(), () -> TestOperations.BOX_HANDLE);
     assertEquals(List.of(), local.handle(get("/v1/conflicts", Map.of())).body().get("conflicts"));
     assertEquals(405, local.handle(form("POST", "/v1/sync", "")).status());
     assertEquals(405, local.handle(form("POST", "/v1/conflicts", "")).status());
@@ -150,7 +169,7 @@ class LocalApiRouterTest {
                 type == null ? ErrorCode.BAD_REQUEST : ErrorCode.CONFLICT, "refused " + id);
           }
         };
-    var local = new LocalApiRouter(operations);
+    var local = new LocalApiRouter(operations, () -> TestOperations.BOX_HANDLE);
     var body = "strategy=mine".getBytes(StandardCharsets.UTF_8);
 
     var stale =
@@ -178,7 +197,8 @@ class LocalApiRouterTest {
                 throw new WriteRefused(
                     new Refusal(Refusal.Kind.ADMIN_ONLY, "Only an admin may.", "Ask one."));
               }
-            });
+            },
+            () -> TestOperations.BOX_HANDLE);
 
     var refused =
         lane.handle(
@@ -225,7 +245,8 @@ class LocalApiRouterTest {
                     String type, String id, Resolution resolution) {
                   return conflicts.resolve(type, id, resolution);
                 }
-              });
+              },
+              () -> TestOperations.BOX_HANDLE);
       var started = template(lane);
       var posted =
           lane.handle(
@@ -912,7 +933,9 @@ class LocalApiRouterTest {
             return Optional.of(new Actor("impostor", Role.ADMIN, Actor.Lane.CLI));
           }
         };
-    var response = new LocalApiRouter(greedy).handle(get("/v1/whoami", Map.of()));
+    var response =
+        new LocalApiRouter(greedy, () -> TestOperations.BOX_HANDLE)
+            .handle(get("/v1/whoami", Map.of()));
 
     assertEquals(TestOperations.PRINCIPAL, response.body().get("handle"));
     assertEquals("agent", response.body().get("lane"));
@@ -933,7 +956,8 @@ class LocalApiRouterTest {
               public Optional<Actor> runActor(RunStore.RunRow run) {
                 return Optional.empty();
               }
-            });
+            },
+            () -> TestOperations.BOX_HANDLE);
 
     var refused = lane.handle(get("/v1/specs", Map.of()));
 
@@ -978,7 +1002,8 @@ class LocalApiRouterTest {
                     "Spec " + id + " is unreadable.",
                     Remedy.of("Run '", Remedy.sail("migrate"), "'."));
               }
-            });
+            },
+            () -> TestOperations.BOX_HANDLE);
 
     var refused = lane.handle(get("/v1/specs/taken", Map.of()));
 
@@ -1001,7 +1026,8 @@ class LocalApiRouterTest {
                     "Spec " + id + " has no content hash.",
                     Remedy.of("Run '", Remedy.sail("migrate"), "'."));
               }
-            });
+            },
+            () -> TestOperations.BOX_HANDLE);
 
     var refused = lane.handle(get("/v1/specs/taken", Map.of()));
 

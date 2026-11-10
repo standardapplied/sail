@@ -395,6 +395,23 @@ class AgentLogStreamerTest {
     assertTrue(Arrays.asList(cmd).contains(legacy), Arrays.toString(cmd));
   }
 
+  @Test
+  void isStreamPathMatchesCanonicalRunPath() {
+    assertTrue(AgentLogStreamer.isStreamPath("/v1/runs/run-1/stream"));
+  }
+
+  @Test
+  void isStreamPathRejectsOtherRunSubResources() {
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/runs/run-1/log"));
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/runs/run-1"));
+  }
+
+  @Test
+  void isStreamPathRejectsWrongPrefix() {
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/other/run-1/stream"));
+    assertFalse(AgentLogStreamer.isStreamPath("/v1/events/stream"));
+  }
+
   private static final ApiError ENDED = AgentLogStreamer.tailEnded("acme", "r1");
 
   @Test
