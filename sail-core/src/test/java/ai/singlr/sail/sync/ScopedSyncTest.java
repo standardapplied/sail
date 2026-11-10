@@ -409,6 +409,21 @@ class ScopedSyncTest {
   }
 
   @Test
+  void aDeletionMainTookFromAScopedNodeIsHandedBackThoughItNamesNoProject() throws Exception {
+    seed(main, A, "nia");
+    SyncBox.quiesce(main, nia);
+    Acting.as("nia", () -> nia.specs.delete("alpha-work"));
+    SyncBox.quiesce(main, nia);
+
+    var answered =
+        serve(main.server(scoped(ONLY_A)), HELLO, new SyncWire.Need("spec", List.of("alpha-work")));
+
+    var accepted = assertInstanceOf(SyncWire.Page.class, answered.get(1)).accepted();
+    assertEquals(List.of("alpha-work"), accepted.stream().map(SyncWire.Entry::id).toList());
+    assertEquals(null, accepted.getFirst().snapshot(), "what main took was the deletion itself");
+  }
+
+  @Test
   void aMarkNamingAnIdOutsideTheScopeIsAnsweredAsOneNamingAnIdMainNeverHeld() throws Exception {
     main.specs.create(spec("short-lived", A, "nia"));
     var erased = new ChangeLog(main.db).head("spec", "short-lived").orElseThrow().seq();
