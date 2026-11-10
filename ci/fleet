@@ -39,7 +39,10 @@ Usage:
   ci/fleet access RUN           the access matrix's rows sail answers today, at each door that offers them:
                                 client comments on eng's e1 and claims an open spec, but cannot edit,
                                 reassign or retell a review of e1, claim a spec born in eng's room r1, read
-                                beta's ids, or keep one, or an offline edit main refuses, past a sync
+                                beta's ids, or keep one, or an offline edit main refuses, past a sync; row
+                                4, a push into a project client is not granted, is proven by the unit tests
+                                (PushesBaselineTest, AccessScenarioTest), as client's box drops an ungranted
+                                project before it offers anything and only a forged sync client reaches main
   ci/fleet files RUN            files shared on main and on client reach exactly the nodes granted their
                                 project, updates and removals follow, and a viewer cannot share
   ci/fleet portal RUN           main declares beta's app; eng serves it, it answers in the container, at
@@ -353,7 +356,7 @@ projects() {
   check "$run" "eng holds every project" holds "$run" eng "acme beta demo gamma"
   check "$run" "client holds acme alone" holds "$run" client "acme"
   check "$run" "observer holds acme and beta" holds "$run" observer "acme beta"
-  check "$run" "client's database has no trace of beta, gamma or demo" holds_no_trace_of "$run" client beta gamma demo
+  check "$run" "matrix 3: main sends client nothing of beta, gamma or demo, and its database has no trace of them [sync]" holds_no_trace_of "$run" client beta gamma demo
   check "$run" "observer's database has no trace of gamma or demo" holds_no_trace_of "$run" observer gamma demo
 }
 
@@ -541,9 +544,11 @@ while_cut_off() {
   [[ -n $main_ip ]] || { echo "main has no address"; return 1; }
   rule="OUTPUT -d $main_ip -j REJECT"
   on "$run" "$box" "command -v iptables > /dev/null || sudo apt-get install -y -qq iptables > /dev/null 2>&1; sudo iptables -I $rule" || return 1
+  trap "on $(printf %q "$run") $(printf %q "$box") $(printf %q "sudo iptables -D $rule")" EXIT INT TERM
   echo "$box cannot reach main at $main_ip"
   { on "$run" main "$on_main" && on "$run" "$box" "$on_box"; } || status=1
   on "$run" "$box" "sudo iptables -D $rule" || status=1
+  trap - EXIT INT TERM
   return $status
 }
 
@@ -577,10 +582,12 @@ access() {
     allowed "$run" client "sudo sail spec create -p acme --id c7 --title 'client wrote c7' && sudo sail sync"
   check "$run" "every node syncs twice" sync_all "$run"
   check "$run" "matrix 1: obs reads e1 inside its acme [socket]" container_allows "$run" observer acme "spec show e1 > /dev/null"
-  check "$run" "matrix 3: client reads beta's b1, not found [CLI]" refused "$run" client "Spec 'b1' was not found." "sudo sail spec show b1"
-  check "$run" "matrix 3: client reads beta's b1, not found [HTTP]" \
+  check "$run" "matrix 3: client reads beta's b1 on main, which holds it, and it is not found [HTTP]" \
+    http_door "$run" main client 404 GET /v1/specs/b1 '' "Spec 'b1' was not found."
+  check "$run" "client's box holds nothing of beta's b1 [CLI]" refused "$run" client "Spec 'b1' was not found." "sudo sail spec show b1"
+  check "$run" "client's box holds nothing of beta's b1 [HTTP]" \
     http_door "$run" client client 404 GET /v1/specs/b1 '' "Spec 'b1' was not found."
-  check "$run" "matrix 3: client reads beta's b1, not found [socket]" \
+  check "$run" "client's box holds nothing of beta's b1 [socket]" \
     container_refuses "$run" client acme "Spec 'b1' was not found." "spec show b1"
   check "$run" "matrix 6: client comments on e1 [CLI]" allowed "$run" client "sudo sail spec comment e1 --body 'client: a word on e1'"
   check "$run" "matrix 6: client comments on e1 [HTTP]" \

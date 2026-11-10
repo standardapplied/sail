@@ -96,6 +96,12 @@ class ReviewAuthorityTest {
       rows.add(new Case(verb + " by a room principal", ROOM, held, next, Kind.READ_ONLY));
     }
     rows.add(
+        new Case("a deletion of a review this box holds no head of", OTHER_API, null, null, null));
+    var specless = with(RUNNING, "spec_id", null);
+    rows.add(new Case("an admin writes a review of no spec", ADMIN, null, specless, null));
+    rows.add(
+        new Case("a review of no spec is no member's", OTHER_API, null, specless, Kind.NOT_OWNER));
+    rows.add(
         new Case(
             "an admin cannot move a review to another spec",
             ADMIN,

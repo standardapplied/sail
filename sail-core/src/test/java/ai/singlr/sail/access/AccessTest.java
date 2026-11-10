@@ -14,6 +14,7 @@ import static ai.singlr.sail.access.AccessTest.Outcome.READ_ONLY;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.authority.Actors;
 import ai.singlr.sail.common.Remedy;
@@ -428,6 +429,31 @@ class AccessTest {
         Access.decide(Actors.OTHER_API, Action.DISPATCH, UNASSIGNED_ADA));
     assertEquals(
         new Decision.Allowed(), Access.decide(Actors.OWNER_API, Action.DISPATCH, UNASSIGNED_ADA));
+  }
+
+  @Test
+  void onlySailItselfAndAnAdminOverruleOwners() {
+    assertTrue(Access.overrulesOwners(Actors.SYSTEM));
+    assertTrue(Access.overrulesOwners(Actors.MAIN));
+    assertTrue(Access.overrulesOwners(Actors.ADMIN));
+    assertFalse(Access.overrulesOwners(Actors.OWNER_API));
+    assertFalse(Access.overrulesOwners(Actors.AGENT));
+  }
+
+  @Test
+  void seatingAgentsInARoomIsSaidAsManagingItsMembership() {
+    assertEquals(
+        refused(
+            Refusal.Kind.READ_ONLY,
+            "Your credential is read-only and cannot manage room membership.",
+            READ_ONLY_FIX),
+        Access.decide(Actors.VIEWER, Action.DISPATCH, LOBBY));
+    assertEquals(
+        refused(
+            Refusal.Kind.LANE_FORBIDDEN,
+            "Agent principals cannot manage room membership.",
+            LANE_FIX),
+        Access.decide(Actors.AGENT, Action.DISPATCH, LOBBY));
   }
 
   @Test

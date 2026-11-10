@@ -334,8 +334,8 @@ class ErasureSyncTest {
       var refused =
           assertThrows(
               SyncTransportException.class, () -> link.reconcile("spec", replicas().get("spec")));
-      assertTrue(
-          refused.getMessage().contains("Your credential is read-only and cannot prune specs."),
+      assertEquals(
+          "spec: main refused to prune mine: Your credential is read-only and cannot prune specs.",
           refused.getMessage());
     }
 

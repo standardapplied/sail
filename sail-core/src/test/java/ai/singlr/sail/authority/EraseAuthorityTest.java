@@ -166,6 +166,19 @@ class EraseAuthorityTest {
   }
 
   @Test
+  void aProjectErasedAlreadyIsAnsweredToAnAdminAsNothingLeftToDo() {
+    Acting.system(
+        () -> {
+          var erasure = new Erasure(board.db);
+          erasure.erase(
+              erasure.closure(List.of(new Erasure.Target("project", "acme"))),
+              ChangeLog.Entry.LOCAL);
+        });
+
+    assertEquals(Optional.empty(), rule.requested(Actors.ADMIN_SYNC, "project", "acme"));
+  }
+
+  @Test
   void aPlanWithARunStillGoingMustWait() {
     board.spec("solo", "solo", OWNER, OWNER);
     var runs = new RunStore(board.db);

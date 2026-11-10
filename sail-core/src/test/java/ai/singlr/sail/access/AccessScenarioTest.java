@@ -140,6 +140,11 @@ class AccessScenarioTest {
         new ScopeRule(new ChangeLog(db), "spec").pushed(pushing, "b1", revised));
   }
 
+  /**
+   * Row 5 has two doors. Here, on a box that holds beta, as main does when client's push of the
+   * birth reaches it, the id is taken. On client's own box, which holds nothing of beta, the birth
+   * is a new spec there and main denies it at sync: the fleet's matrix 5 checks that door.
+   */
   @Test
   void row5AnIdABetaSpecHoldsAlreadyExistsForClient() {
     var born = new LinkedHashMap<>(edited("b1", "project", "acme"));
@@ -195,6 +200,11 @@ class AccessScenarioTest {
         Actor.call(CLIENT, () -> specs.decide("e1", edited("e1", "assignee", "client"))));
   }
 
+  /**
+   * Row 10, permission half: both may dispatch e1. Its placement half, uday refused from his own
+   * box since e1 runs on eng's, is the dispatch admission's in sail-infra ({@code
+   * LaunchAdmissionTest#row10UdayMayDispatchE1ButOnlyEngsBoxRunsIt}).
+   */
   @Test
   void row10EngAndUdayMayDispatchE1WhereverItsPlacementSendsIt() {
     assertEquals(ALLOWED, Access.decide(ENG, Action.DISPATCH, E1));

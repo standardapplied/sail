@@ -176,6 +176,43 @@ class LaunchAdmissionTest {
     assertEquals("Spec 'auth' was not found.", ex.getMessage());
   }
 
+  /**
+   * The access matrix's row 10, through the real admission: eng and uday may both dispatch e1, and
+   * e1 runs only on eng's box, so uday is refused from his own as placement.
+   */
+  @Test
+  void row10UdayMayDispatchE1ButOnlyEngsBoxRunsIt() {
+    var e1 =
+        new Spec(
+            "e1",
+            "acme",
+            "E1",
+            SpecStatus.PENDING,
+            "eng",
+            List.of(),
+            List.of(),
+            null,
+            null,
+            null,
+            null);
+    assertDoesNotThrow(
+        () ->
+            Actor.run(
+                new Actor("eng", Role.MEMBER, Actor.Lane.CLI),
+                () -> LaunchAdmission.requireAllowed(e1, "eng")));
+    var placed =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.run(
+                    new Actor("uday", Role.ADMIN, Actor.Lane.CLI),
+                    () -> LaunchAdmission.requireAllowed(e1, "uday")));
+    assertEquals(ErrorCode.RUNS_ON_OTHER_NODE, placed.failure().errorCode());
+    assertEquals(
+        "Spec 'e1' is assigned to 'eng', which runs on that FDE's devbox, not this node ('uday').",
+        placed.getMessage());
+  }
+
   @Test
   void placementRunsASpecOnlyOnItsAssigneesBox() {
     var admin = new Actor("ops", Role.ADMIN, Actor.Lane.API);

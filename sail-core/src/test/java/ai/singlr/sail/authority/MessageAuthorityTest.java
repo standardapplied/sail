@@ -193,6 +193,11 @@ class MessageAuthorityTest {
   }
 
   @Test
+  void aMessageNeverChangesSoItsTombstoneIsNothingToDecide() {
+    assertEquals(Optional.empty(), rule.decide(Actors.VIEWER, "m-1", null, null));
+  }
+
+  @Test
   void refusalsSpeakTheTextsClientsSee() {
     assertEquals(
         new Refusal(

@@ -128,6 +128,7 @@ class RunAuthorityTest {
             "_actor",
             "claude/" + NEW_RUN);
     return Stream.of(
+        row("a deletion of a run this box holds no head of", OTHER_API, null, null, null),
         row("an admin stops it", ADMIN, RUNNING, stopped, null),
         row("the FDE it acts for stops it", OWNER_API, RUNNING, stopped, null),
         row("the operator stops it", OWNER_CLI, RUNNING, stopped, null),
