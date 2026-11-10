@@ -260,6 +260,10 @@ class RoleRuleTest {
         node.principal(Credential.machine("admin")),
         "a machine token acts as no one, seeing no more than the box's FDE");
     assertEquals(
+        Optional.of(new Actor(null, Role.VIEWER, Actor.Lane.API).withScope(alpha)),
+        node.principal(Credential.machine("viewer")),
+        "and no more than it was minted with");
+    assertEquals(
         Optional.of(new Actor("uday", Role.ADMIN, Actor.Lane.CLI)),
         new RoleRule(() -> MAIN, roster).principal(Credential.box(Actor.Lane.CLI)),
         "main's own FDE is its admin, never scoped");

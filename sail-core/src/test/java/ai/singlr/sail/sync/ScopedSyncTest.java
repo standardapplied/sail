@@ -207,6 +207,28 @@ class ScopedSyncTest {
   }
 
   @Test
+  void aReadOnlySessionsContentIsNeverTakenAndItsOfferIsTheRulesToDeny() throws Exception {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    var secret = bodyHash(main, "beta-work");
+    var rev = new ChangeLog(main.db).head("spec", "alpha-work").orElseThrow().rev();
+    var forged = new LinkedHashMap<>(main.replicas().get("spec").current("alpha-work"));
+    forged.put("body_hash", secret);
+
+    var answered =
+        serve(
+            main.server(Actor.sync("nia", Role.VIEWER).withScope(ONLY_A)),
+            HELLO,
+            new SyncWire.Announce(List.of(secret)),
+            new SyncWire.Push("spec", List.of(new MainReplica.Offer("alpha-work", forged, rev))));
+
+    assertEquals(new SyncWire.Lack(List.of()), answered.get(1));
+    assertEquals(
+        "Your credential is read-only and cannot change specs.",
+        assertInstanceOf(SyncWire.Denied.class, only(answered.get(2))).reason());
+  }
+
+  @Test
   void aScopedOfferNamesOnlyContentItsSessionSentOrWasServed() throws Exception {
     seed(main, A, "nia");
     seed(main, B, "uma");
