@@ -302,8 +302,10 @@ public final class MembershipService {
 
   /**
    * Asks the journal, before any snapshot or launch, whether it will take the actor's change to the
-   * roster of {@code roomId} — a spec's own room, the room it was born in, whoever's that is, or a
-   * room with no spec — so a membership the room rule refuses starts nothing.
+   * roster of {@code roomId}, a spec's own room or the room it was born in, whoever's that is, so a
+   * membership the room rule refuses starts nothing. A room with no spec is not asked: its seat is
+   * Dispatch on the room ({@link LaunchAdmission}), its owner's and an admin's alone, which implies
+   * the room rule's Change.
    */
   private void authorizeRoster(String roomId) {
     var store = requireRooms();

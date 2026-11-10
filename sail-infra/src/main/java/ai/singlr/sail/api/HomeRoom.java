@@ -25,8 +25,9 @@ import java.util.Map;
  * the box that applies the project with the member the definition names already seated. After that
  * it is a room like any other. The definition is read once: a room that exists is its owner's, and
  * a later apply leaves it alone. The room is born seated, in one write, so a refused member leaves
- * no room behind and an empty roster is only ever its owner's choice. A viewer posts in no room, so
- * it has no home room, and its apply makes none.
+ * no room behind and an empty roster is only ever its owner's choice. One who may not create the
+ * room has no home room, and its apply makes none: a read-only credential, since every other
+ * principal that applies a project may create a room in one it reads.
  */
 public final class HomeRoom {
 
@@ -75,9 +76,12 @@ public final class HomeRoom {
    * room is named, and the box's operator, who ensures one, sees every project.
    */
   static boolean has(Actor actor, String project, String handle) {
+    return home(actor, project, handle) instanceof Decision.Allowed;
+  }
+
+  private static Decision home(Actor actor, String project, String handle) {
     return Access.decide(
-            actor, Action.CREATE, Resources.room(idOf(project, handle), project, handle))
-        instanceof Decision.Allowed;
+        actor, Action.CREATE, Resources.room(idOf(project, handle), project, handle));
   }
 
   /**
@@ -94,10 +98,17 @@ public final class HomeRoom {
       return Outcome.skipped("the definition names no agent, so it has no home room");
     }
     var project = definition.name();
-    if (!has(Actor.current(), project, handle)) {
-      return Outcome.skipped(
-          "this box's FDE holds a read-only credential and posts in no room, so it has no home"
-              + " room");
+    switch (home(Actor.current(), project, handle)) {
+      case Decision.Allowed allowed -> {}
+      case Decision.NotFound absent -> {
+        return Outcome.skipped(
+            "this box's FDE does not read project '" + project + "', so it has no home room there");
+      }
+      case Decision.Refused refused -> {
+        return Outcome.skipped(
+            "this box's FDE holds a read-only credential and posts in no room, so it has no home"
+                + " room");
+      }
     }
     var id = idOf(project, handle);
     var held = operations.room(id);

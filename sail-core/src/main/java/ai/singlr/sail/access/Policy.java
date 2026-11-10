@@ -15,12 +15,10 @@ import ai.singlr.sail.identity.Role;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumMap;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -58,6 +56,9 @@ import java.util.stream.Stream;
  *   <li>Operate a run: the row decides a stop; a run's log is read by anyone the run works for,
  *       whatever their role ({@link Access#owned}), until sail-every-door-asks-access asks this row
  *       of the log doors too.
+ *   <li>Narrate: an admin may narrate any run, where the agreed table gives it the runs this box
+ *       executed; the event rule leans on it, so a run another box executed has no narrator here
+ *       but an admin ({@code EventAuthority}), until sail-every-door-asks-access narrows it.
  *   <li>Operate the box: a viewer may not, until sail-every-door-asks-access gives a person their
  *       own box.
  * </ul>
@@ -65,7 +66,7 @@ import java.util.stream.Stream;
 public final class Policy {
 
   /** What a column allows for one action. */
-  public enum Cell {
+  enum Cell {
     /** Never. */
     NO("no"),
     /** Always. */
@@ -82,13 +83,13 @@ public final class Policy {
     }
 
     /** The cell as the permission table shows it. */
-    public String label() {
+    String label() {
       return label;
     }
   }
 
   /** A kind of principal: a role a person holds, or a lane an agent or a credential comes in by. */
-  public enum Column {
+  enum Column {
     /** A person whose role is {@link Role#VIEWER}. */
     VIEWER("Viewer"),
     /** A person whose role is {@link Role#MEMBER}. */
@@ -107,12 +108,12 @@ public final class Policy {
     }
 
     /** The column's header in the permission table. */
-    public String label() {
+    String label() {
       return label;
     }
 
     /** The column a person of {@code role} reads. */
-    public static Column role(Role role) {
+    static Column role(Role role) {
       return switch (role) {
         case VIEWER -> VIEWER;
         case MEMBER -> MEMBER;
@@ -124,7 +125,7 @@ public final class Policy {
      * The column {@code lane} narrows its role by, if any: an agent's lane does; a person's lanes
      * (the API, the CLI, a push over sync) carry their role whole.
      */
-    public static Optional<Column> lane(Actor.Lane lane) {
+    static Optional<Column> lane(Actor.Lane lane) {
       return switch (lane) {
         case AGENT -> Optional.of(WORK_AGENT);
         case ROOM -> Optional.of(ROOM_AGENT);
@@ -188,18 +189,16 @@ public final class Policy {
 
   private static final Map<Action, Row> ROWS = indexed(TABLE);
 
-  private static final Set<Column> STEERED = EnumSet.of(Column.WORK_AGENT, Column.ROOM_AGENT);
-
   private Policy() {}
 
   /**
-   * Whether {@code reader} reads a conversation only as the voices that steer it say it (A6): an
-   * agent's column reads a room's messages through the steering filter, its owners', its admins'
-   * and Sail's words, never a comment another member left for people. The filter itself is the
-   * stores' query; which readers it binds is the table's.
+   * Whether {@code reader} reads a conversation only as the voices that steer it say it (A6): every
+   * lane the table gives a column of its own, an agent's, reads a room's messages through the
+   * steering filter, its owners', its admins' and Sail's words, never a comment another member left
+   * for people. The filter itself is the stores' query; which readers it binds is the table's.
    */
   public static boolean hearsOnlySteering(Actor reader) {
-    return Column.lane(reader.lane()).filter(STEERED::contains).isPresent();
+    return Column.lane(reader.lane()).isPresent();
   }
 
   /** What {@code column} allows for {@code action}. */

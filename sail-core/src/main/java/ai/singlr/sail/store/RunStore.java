@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -28,6 +30,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * The Run aggregate on SQLite: one dispatch execution of a spec. Records where it ran ({@code node}
@@ -120,6 +123,14 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     /** The conversation this run serves — its spec's room, or the room itself when spec-less. */
     public String conversationId() {
       return specId != null ? specId : roomId;
+    }
+
+    /**
+     * This run as the people it works for may stop it and read its log ({@link Resources#run}), its
+     * spec's owner as {@code specOwner} finds it for whoever asks.
+     */
+    public Resource resource(Function<String, Optional<String>> specOwner) {
+      return Resources.run(id, project, owner, specId, node, specOwner);
     }
 
     /** A row without activity — the shape every run has until its first progress stamp. */

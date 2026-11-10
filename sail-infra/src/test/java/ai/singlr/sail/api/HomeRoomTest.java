@@ -270,6 +270,23 @@ class HomeRoomTest {
   }
 
   @Test
+  void anFdeWhoDoesNotReadTheProjectHasNoHomeRoomThere() {
+    var ops = operations();
+
+    var outcome =
+        Actor.call(
+            new Actor("ada", Role.MEMBER, Actor.Lane.CLI)
+                .withScope(ProjectScope.of(List.of("beta"))),
+            () -> HomeRoom.ensure(ops, definition(CLAUDE_ONLY), "ada"));
+
+    assertEquals(
+        HomeRoom.Outcome.skipped(
+            "this box's FDE does not read project 'acme', so it has no home room there"),
+        outcome);
+    assertTrue(roomStore.listAll().isEmpty());
+  }
+
+  @Test
   void aHomeRoomIsHadByWhoeverMayCreateARoomInAProjectTheyRead() {
     var member = new Actor("ada", Role.MEMBER, Actor.Lane.CLI);
 

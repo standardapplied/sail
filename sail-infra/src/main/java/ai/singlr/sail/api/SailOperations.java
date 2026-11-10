@@ -1369,7 +1369,7 @@ public final class SailOperations implements HostOperations {
           var run =
               ReadFilter.readable(
                       Actor.reader(), requireRunStore().findById(runId), RunStore.RunRow::project)
-                  .orElseThrow(() -> runNotFound(runId));
+                  .orElseThrow(() -> Refusals.runNotFound(runId));
           return new RunDetailResponse(RunView.from(run));
         });
   }
@@ -1414,11 +1414,10 @@ public final class SailOperations implements HostOperations {
 
   /**
    * Resolves a run, applies the provenance guard, then the ownership step ({@link Access#owned})
-   * before handing it to {@code served}: an absent store is an internal error, an unknown run a
-   * 404, a run that executed elsewhere a structured {@code run_on_other_node} refusal, and a caller
-   * who is neither the run's spec assignee nor an admin a {@code forbidden_not_assignee}. The
-   * served branch only ever sees a local run the caller may access — one guard for both the log
-   * tail and stop.
+   * before handing it to {@code served}, the log tail: an absent store is an internal error, an
+   * unknown run a 404, a run that executed elsewhere a structured {@code run_on_other_node}
+   * refusal, and a caller who is none of the run's owners — the FDE it acts for, its spec's owner,
+   * or for a spec-less run the box that ran it — nor an admin a {@code forbidden_not_assignee}.
    */
   private <T> Result<T> onLocalRun(
       String runId, String localHandle, Function<RunStore.RunRow, Result<T>> served) {
@@ -1429,16 +1428,12 @@ public final class SailOperations implements HostOperations {
         ReadFilter.readable(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project)
             .orElse(null);
     if (run == null) {
-      return Result.failure(ErrorCode.RUN_NOT_FOUND, "No run '" + runId + "'.");
+      return Result.failure(ErrorCode.RUN_NOT_FOUND, Refusals.runNotFound(runId).getMessage());
     }
     if (isForeign(run, localHandle)) {
       return foreignRun(run);
     }
-    var refused =
-        Access.owned(
-            Actor.current(),
-            Resources.run(
-                run.id(), run.project(), run.owner(), run.specId(), run.node(), this::specOwner));
+    var refused = Access.owned(Actor.current(), run.resource(this::specOwner));
     if (refused.isPresent()) {
       return Refusals.failure(refused.get());
     }
@@ -1461,10 +1456,6 @@ public final class SailOperations implements HostOperations {
       throw storeUnavailable("Run store");
     }
     return runStore;
-  }
-
-  private static ApiException runNotFound(String runId) {
-    return new ApiException(ErrorCode.RUN_NOT_FOUND, "No run '" + runId + "'.");
   }
 
   /**

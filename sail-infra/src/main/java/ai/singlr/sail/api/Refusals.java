@@ -56,6 +56,11 @@ public final class Refusals {
     return new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
   }
 
+  /** The answer for a run the caller may not see: the same as for one that is not there. */
+  public static ApiException runNotFound(String runId) {
+    return new ApiException(ErrorCode.RUN_NOT_FOUND, "No run '" + runId + "'.");
+  }
+
   /** The answer for a spec the caller may not see: the same as for one that is not there. */
   static ApiException specNotFound(String specId) {
     return new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.");

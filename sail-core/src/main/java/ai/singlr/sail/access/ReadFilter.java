@@ -18,7 +18,8 @@ import java.util.function.Supplier;
  * under is in {@link Access#audience}. The project is asked only of a restricted reader: working it
  * out may cost a query, and no project hides a row from an unrestricted one, so a list read by one
  * adds no query per row. A read that filters many rows inside one query filters by the audience
- * itself.
+ * itself. A conversation's messages have a second Read rule, which binds an agent alone: it hears
+ * only the voices that steer it ({@link Policy#hearsOnlySteering}).
  */
 public final class ReadFilter {
 

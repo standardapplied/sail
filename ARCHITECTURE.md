@@ -2270,19 +2270,22 @@ the row in hand. It is reached in this order, so one principal hears the same re
 1. Sail itself, main's decisions as a node adopts them and this box's machinery, is allowed.
 2. Audience: a resource filed under a project outside the principal's scope is not found. A box and
    the org's people are filed under none.
-3. Role: the role's cell says no: refused, read-only or admin-only.
-4. Lane: an agent's lane says no: refused, naming the lane. An agent's own work is its lane's to
-   grant whatever its role, so a room agent, read-only by construction, posts in its room and
-   narrates its run.
+3. Role: the role's cell says no: refused, read-only or admin-only; unless the agent's lane grants
+   the action on its own work, which decides it alone whatever the role, so a room agent,
+   read-only by construction, posts in its room and narrates its run.
+4. Lane: an agent's lane says no: refused, naming the lane.
 5. Ownership: the role's cell says owner and the principal is neither an admin nor acting for an
    owner, or it starts work in the room a spec was born in (creates or claims the spec there)
    without acting for that room's owners: refused, naming the owners.
 6. Otherwise allowed.
 
 A write is answered in one order (`WriteAuthority`): what lies outside the actor's audience is
-not found, which the scope rule says before any type rule is asked; what this box does not hold,
-a project or a conversation, is not there; then `Access` decides the actions the revision takes;
-last come the rule's own facts. A door's placement comes after `Access` too. The table is
+not found, which the scope rule says before any type rule is asked, from the project the journal
+files the row under, the one audience a write has; what this box does not hold, a project or a
+conversation, is not there; then `Access` decides the actions the revision takes, every step
+after the audience (`Access.withinAudience`, which only a write's rule asks); last come the
+rule's own facts. A deletion of an id this box holds no head of is decided as the rule decides a
+birth, as on main. A door's placement comes after `Access` too. The table is
 `Policy`, and this copy of it is generated (`PolicyTableTest`):
 
 | Action | Covers | Viewer | Member | Admin | Work agent | Read-only room agent |
@@ -2313,9 +2316,10 @@ narrows it: a lane cell is yes (it narrows nothing), no, or own work, the lane's
 the role; whose the work is, is the role column's to say. A cell holds today's answer where the
 agreed design changes it, and `Policy` names the spec that does; the in-container credential is
 its person's on the CLI lane until sail-agents-act-on-their-own-work gives it a lane and a column
-of its own. A question asked before there is one
-resource, a prune by policy or of a whole project, or again once an erased spec has nothing left
-to own, is the role and lane alone (`Access.decide(actor, action, kind)`).
+of its own. A question asked before there is one resource, a prune by policy or of a whole
+project, a conflict's resolution, or again once an erased spec has nothing left to own, is the
+role and lane alone (`Access.atAll`), answered as a refusal or none, never not found; a lane's
+grant on its own work alone is refused there, since no work is in hand.
 
 **Whose a resource is.** `Resources` builds each resource from the row in hand, with the project
 it is filed under and its owners, each owner rule once:
@@ -2344,9 +2348,9 @@ does not hold is answered before that, and the rule's own facts after it:
 
 | Rule | Actions | Its own facts |
 | --- | --- | --- |
-| `SpecAuthority` | a birth is Create, plus Claim or Assign for one born in another room naming an assignee; an edit, tombstone or restore is Change; moving a live spec's assignee is Claim (an unassigned spec, for the FDE the actor acts as) or Assign | not held: a project this box holds, a conversation it holds to be born in (an admin passes the conversation); facts: a push names only its pusher; `room_id` never changes; a spec's id is reserved for its own room |
+| `SpecAuthority` | a birth is Create, plus Claim or Assign for one born in another room naming an assignee; an edit, tombstone or restore is Change; moving a live spec's assignee is Claim (an unassigned spec, for the FDE the actor acts as) or Assign | not held: a project this box holds, a conversation it holds to be born in (what no one here can own is an admin's, `Access.unowned`); taking a room's reserved id from its owner is Assign of the room; facts: a push names only its pusher; `room_id` never changes; a spec's id is reserved for its own room |
 | `RoomAuthority` | a birth is Create; every later revision, tombstone included, is Change of its settings | not held: a project this box holds; facts: attribution |
-| `MessageAuthority` | Post in its conversation | not held: a conversation this box holds, unless the actor is an admin; facts: a credential acting for no FDE posts nothing unless the actor is an admin; as whom a pusher posts |
+| `MessageAuthority` | Post in its conversation | not held: a conversation this box holds; facts: a credential acting for no FDE posts nothing; both are of what no one here can own, an admin's (`Access.unowned`); as whom a pusher posts |
 | `RunAuthority` | a run's own session report by its own principal is Narrate; every other revision is Change | its principals are its own; attribution; spec and room never change; a run names a spec or a room, never both; a pushed run is its executing box's |
 | `ReviewAuthority` | Approve | attribution; a review never moves to another spec, a stage never to another review |
 | files, projects (`WriteAuthority.table`) | a file is Share; a project's definition is Configure, and a rename Configure plus Purge of the old name | attribution |
@@ -2368,30 +2372,33 @@ run's reports of itself are Narrate, a run's stop or failure Operate a run, a di
 Dispatch, the review types Approve, a message's announcement Post, and an event about the box
 Operate the box. The rule keeps three facts: whether its sender speaks for this box (Operate the
 box) or only retells what another box did, whether this box executed the run, and that a run's
-own principal publishes only its own run's narration (until sail-agents-act-on-their-own-work). Work outside the sender's
-scope is not found.
+own principal publishes only its own run's narration (until sail-agents-act-on-their-own-work).
+Work outside the sender's scope is not found.
 
 **Reads and sync.** Read is yes in every column, so a read is the audience alone. One read filter
 (`ReadFilter`) decides each row by the project it is filed under and asks that project only of a
 reader whose audience is restricted, so a list an unscoped reader reads adds no query per row; a
-filter inside one query takes the same scope (`Access.audience`). A node receives a row only when its person may read it (`SyncRpcServer`'s
-pages, current rows and handed-back versions), and main accepts a push only when the pusher may
-write it, by the type's rule at main's commit. An agent's column hears a conversation only
+filter inside one query takes the same scope (`Access.audience`). A node receives a row only when
+its person may read it (`SyncRpcServer`'s pages, current rows and handed-back versions), and main
+accepts a push only when the pusher may write it, by the type's rule at main's commit. An agent's column hears a conversation only
 through the voices that steer it (`Policy.hearsOnlySteering`; the filter is `RoomStore.steering`'s
 query): its owners, an active admin of main's roster, sail and the runs working for them.
 
 **Doors** ask `Access` for the side effects no row's rule decides: dispatch and seating
-(`LaunchAdmission`, then its placement; a seating then asks the journal whether it will take the
-roster), stop (Operate a run), posting into a room without a message (the terminal's room pin, a
-room session's report), serving a stack (`Refusals.requireProject`, the one project gate), restoring
-a snapshot, reading a definition, pruning, resolving a conflict. Every door reads the row it acts on in its
+(`LaunchAdmission`, then its placement; seating an agent for a spec then asks the journal whether
+it will take the spec room's roster, while a spec-less room's seat is Dispatch on the room, which
+its owner alone and an admin take, so it implies the room rule's Change), stop (Operate a run),
+posting into a room without a message (the terminal's room pin and a room session's report ask
+the message rule's own post, `MessageAuthority.post`), serving a stack, restoring a snapshot and
+reading a definition (`ProjectGate`, the one project gate), pruning, resolving a conflict. Every door reads the row it acts on in its
 caller's scope first, or is reached only by the box's operator, who sees every project. The
 checks a door still makes by role, lane or scope (resolving a credential, a run credential's own
 routes), until `sail-every-door-asks-access` and `sail-agents-act-on-their-own-work`, and the facts
 that read a lane or role to know which applies, are the allowlist of `OneDecisionSweepTest`. It
 sees every such read compiled code makes: of a role, a lane, a scope or whom an actor acts for, a
-role constant, resolver or `switch`, a type check of the socket's run or box caller, and anything
-of `Capability`; it cannot see one read as data, in SQL or from a map, which is why a filter
+role constant, resolver or `switch`, a type check of the socket's run or box caller, an audience
+asked of a project in Java (`Access.audience` with `ProjectScope.admits` or `unrestricted`), and
+anything of `Capability`; it cannot see one read as data, in SQL or from a map, which is why a filter
 inside a query takes its scope from `Access.audience`.
 
 ## Security model

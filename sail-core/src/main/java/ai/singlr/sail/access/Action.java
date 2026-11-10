@@ -123,7 +123,7 @@ public enum Action {
    * ("change specs", "restore or delete snapshots"). Taking agents in and out of a room is
    * dispatching there, said as managing its membership; changing a conflict is resolving it.
    */
-  public String act(Resource.Kind kind) {
+  String act(Resource.Kind kind) {
     if (this == DISPATCH && kind == Resource.Kind.ROOM) {
       return "manage room membership";
     }

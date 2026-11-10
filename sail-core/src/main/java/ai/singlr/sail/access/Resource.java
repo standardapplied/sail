@@ -41,7 +41,10 @@ public record Resource(
     RUN("run", "runs", true),
     /** A project: its definition, files, skills, processes and snapshots. */
     PROJECT("project", "projects", true),
-    /** A conflict a sync parked on a row, filed under the row's project. */
+    /**
+     * A conflict a sync parked on a row. Resolving one is asked of the kind ({@link Access#atAll});
+     * the row it is parked on is found in the reader's audience first.
+     */
     CONFLICT("conflict", "conflicts", true),
     /** A box: its sync health, its bus stats, the main it points at. Filed under no project. */
     BOX("box", "boxes", false),
@@ -72,7 +75,7 @@ public record Resource(
      * Whether a resource of this kind is filed under a project, so its audience is that project's.
      * A box and the org's people are no project's: no scope hides them.
      */
-    public boolean filed() {
+    boolean filed() {
       return filed;
     }
   }

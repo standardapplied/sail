@@ -135,16 +135,7 @@ public final class EventAuthority {
         held.project(),
         worked.conversation(),
         held.id(),
-        worked.conversation() == null
-            ? Resources.run(
-                    held.id(),
-                    held.project(),
-                    held.owner(),
-                    held.specId(),
-                    held.node(),
-                    this::specOwner)
-                .owners()
-            : worked.owners(),
+        worked.conversation() == null ? held.resource(this::specOwner).owners() : worked.owners(),
         held.ownedBy(boxFde.get()));
   }
 
@@ -208,7 +199,9 @@ public final class EventAuthority {
    */
   private Resource resource(Action action, Subject subject) {
     var executed =
-        subject.executedHere() ? Resources.box(boxFde.get()).owners() : List.<String>of();
+        subject.executedHere()
+            ? Stream.ofNullable(boxFde.get()).filter(Strings::isNotBlank).toList()
+            : List.<String>of();
     return switch (action) {
       case OPERATE_BOX -> Resources.box(boxFde.get());
       case NARRATE -> work(subject, executed);
@@ -311,18 +304,19 @@ public final class EventAuthority {
         "Publish events only about work in the projects you are granted.");
   }
 
-  private static Optional<Refusal> principal(
-      Actor actor, String type, Action action, Subject subject) {
+  private Optional<Refusal> principal(Actor actor, String type, Action action, Subject subject) {
     if (action != Action.NARRATE) {
       return Refusal.of(
           Refusal.Kind.NOT_PUBLISHABLE,
           "Event type '" + type + "' is not available to agent principals.",
           "Ask the FDE the agent works for, or an admin, to publish it.");
     }
-    var run =
-        Resources.run(
-            subject.runId(), subject.project(), null, null, null, spec -> Optional.empty());
-    return switch (Access.decide(actor, Action.NARRATE, run)) {
+    var work =
+        Optional.ofNullable(subject.runId())
+            .flatMap(runs::findById)
+            .map(run -> run.resource(this::specOwner))
+            .orElseGet(() -> work(subject, List.of()));
+    return switch (Access.decide(actor, Action.NARRATE, work)) {
       case Decision.Allowed allowed -> Optional.empty();
       case Decision.NotFound notFound -> unseen(type, subject);
       case Decision.Refused refused ->

@@ -8,7 +8,6 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.ReadFilter;
-import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentPresence;
@@ -202,7 +201,7 @@ public final class StopOperations {
   private Outcome stopRun(String runId, String localHandle, boolean dryRun) {
     var run =
         ReadFilter.readable(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project)
-            .orElseThrow(() -> noRun(runId));
+            .orElseThrow(() -> Refusals.runNotFound(runId));
     authorize(run, dryRun);
     if (!run.ownedBy(localHandle)) {
       var node = Strings.isBlank(run.node()) ? "an unknown node" : run.node();
@@ -581,19 +580,8 @@ public final class StopOperations {
         Access.decide(
             Actor.current(),
             Action.OPERATE_RUN,
-            Resources.run(
-                run.id(),
-                run.project(),
-                run.owner(),
-                run.specId(),
-                run.node(),
-                spec -> ownerSeen(Actor.reader(), specStore.findById(spec)))),
-        () -> noRun(run.id()));
-  }
-
-  /** The answer for run {@code runId} the caller cannot find: one it may not read is not there. */
-  private static ApiException noRun(String runId) {
-    return new ApiException(ErrorCode.RUN_NOT_FOUND, "No run '" + runId + "'.");
+            run.resource(spec -> ownerSeen(Actor.reader(), specStore.findById(spec)))),
+        () -> Refusals.runNotFound(run.id()));
   }
 
   /**
