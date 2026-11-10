@@ -6,8 +6,8 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Access;
-import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
@@ -203,9 +203,19 @@ public final class AgentLogStreamer implements HttpHandler {
     if (SailOperations.isForeign(run, localHandle.get())) {
       return foreign(run);
     }
-    if (Access.owned(
-            actor, run.resource(spec -> StopOperations.ownerSeen(actor, specLookup.apply(spec))))
-        instanceof Decision.Refused(var refused)) {
+    var refusal =
+        Access.owned(
+                actor,
+                Resources.run(
+                    run.id(),
+                    run.project(),
+                    run.owner(),
+                    run.specId(),
+                    run.node(),
+                    spec -> StopOperations.ownerSeen(actor, specLookup.apply(spec))))
+            .refused();
+    if (refusal.isPresent()) {
+      var refused = refusal.get();
       var code = Refusals.code(refused.kind());
       var fix = ", \"fix\": \"" + jsonEscape(refused.fix().described()) + "\"";
       return new Refused(code.httpCode(), code.code(), refused.message(), fix);

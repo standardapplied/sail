@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentPresence;
@@ -580,7 +581,13 @@ public final class StopOperations {
         Access.decide(
             Actor.current(),
             Action.OPERATE_RUN,
-            run.resource(spec -> ownerSeen(Actor.reader(), specStore.findById(spec)))),
+            Resources.run(
+                run.id(),
+                run.project(),
+                run.owner(),
+                run.specId(),
+                run.node(),
+                spec -> ownerSeen(Actor.reader(), specStore.findById(spec)))),
         () -> noRun(run.id()));
   }
 

@@ -5,13 +5,9 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.access.Access;
-import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Refusal;
-import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.WriteRefused;
-import ai.singlr.sail.identity.Actor;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -56,7 +52,7 @@ public final class Refusals {
   }
 
   /** The answer for a room the caller may not see: the same as for one that is not there. */
-  static ApiException roomNotFound(String roomId) {
+  public static ApiException roomNotFound(String roomId) {
     return new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
   }
 
@@ -66,20 +62,9 @@ public final class Refusals {
   }
 
   /**
-   * Refuses {@code actor} {@code action} on {@code project}, its creator's ({@code createdBy}): the
-   * one gate of a door that acts on a project. One the actor may not read is one the catalog does
-   * not hold ({@link ProjectReader#absent}), and a refusal is its exception.
-   */
-  static void requireProject(Actor actor, Action action, String project, String createdBy) {
-    require(
-        Access.decide(actor, action, Resources.project(project, createdBy)),
-        () -> ProjectReader.absent(project));
-  }
-
-  /**
    * Throws unless {@code decision} allows: not found is {@code notFound}, a refusal its exception.
    */
-  static void require(Decision decision, Supplier<? extends RuntimeException> notFound) {
+  public static void require(Decision decision, Supplier<? extends RuntimeException> notFound) {
     switch (decision) {
       case Decision.Allowed allowed -> {}
       case Decision.NotFound absent -> throw notFound.get();

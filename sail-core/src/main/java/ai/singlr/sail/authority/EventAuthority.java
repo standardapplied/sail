@@ -13,7 +13,6 @@ import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -136,7 +135,16 @@ public final class EventAuthority {
         held.project(),
         worked.conversation(),
         held.id(),
-        worked.conversation() == null ? held.resource(this::specOwner).owners() : worked.owners(),
+        worked.conversation() == null
+            ? Resources.run(
+                    held.id(),
+                    held.project(),
+                    held.owner(),
+                    held.specId(),
+                    held.node(),
+                    this::specOwner)
+                .owners()
+            : worked.owners(),
         held.ownedBy(boxFde.get()));
   }
 
@@ -311,19 +319,24 @@ public final class EventAuthority {
           "Event type '" + type + "' is not available to agent principals.",
           "Ask the FDE the agent works for, or an admin, to publish it.");
     }
-    if (PrincipalHandle.namesRun(actor.handle(), subject.runId())) {
-      return Optional.empty();
-    }
-    return Refusal.of(
-        Refusal.Kind.NOT_OWNER,
-        "Event type '"
-            + type
-            + "' narrates "
-            + described(subject)
-            + ", and '"
-            + actor.handle()
-            + "' may narrate only its own run.",
-        "An agent narrates only the run sail launched it for.");
+    var run =
+        Resources.run(
+            subject.runId(), subject.project(), null, null, null, spec -> Optional.empty());
+    return switch (Access.decide(actor, Action.NARRATE, run)) {
+      case Decision.Allowed allowed -> Optional.empty();
+      case Decision.NotFound notFound -> unseen(type, subject);
+      case Decision.Refused refused ->
+          Refusal.of(
+              Refusal.Kind.NOT_OWNER,
+              "Event type '"
+                  + type
+                  + "' narrates "
+                  + described(subject)
+                  + ", and '"
+                  + actor.handle()
+                  + "' may narrate only its own run.",
+              refused.refusal().fix());
+    };
   }
 
   private Optional<String> specOwner(String specId) {

@@ -338,9 +338,7 @@ final class GlobalSpecOperations {
   private RoomStore.RoomRow identityRoom(String specId) {
     var store = rooms.get();
     var held = store == null ? null : store.findById(specId).orElse(null);
-    if (held != null
-        && ReadFilter.readable(Actor.reader(), Optional.of(held), RoomStore.RoomRow::project)
-            .isEmpty()) {
+    if (held != null && !ReadFilter.reads(Actor.reader(), held::project)) {
       throw new ApiException(
           ErrorCode.CONFLICT,
           "Room '" + specId + "' already exists, and a spec's id is reserved for its own room.",

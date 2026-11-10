@@ -408,7 +408,9 @@ class RunAuthorityTest {
   void aSpeclessRunIsOwnedByTheBoxThatRanIt() {
     var speclessHeld = with(with(RUNNING, "spec_id", null), "owner", null);
 
-    assertEquals(List.of(OWNER), Resources.run(RUN, "acme", null, null, OWNER, "carol").owners());
+    assertEquals(
+        List.of(OWNER),
+        Resources.run(RUN, "acme", null, null, OWNER, spec -> Optional.of("carol")).owners());
     assertEquals(
         Optional.empty(),
         rule.decide(OWNER_API, RUN, speclessHeld, with(speclessHeld, "status", "x")));
@@ -426,21 +428,45 @@ class RunAuthorityTest {
   void aRunIsOwnedByItsFdeAndItsSpecsOwnerOrTheBoxThatRanIt() {
     assertEquals(
         List.of("uday", "raj"),
-        Resources.run(RUN, "acme", "uday", "auth", "box", "raj").owners(),
+        Resources.run(RUN, "acme", "uday", "auth", "box", spec -> Optional.of("raj")).owners(),
         "its own FDE may still reach it after its spec moved");
     assertEquals(
-        List.of("uday", "box"), Resources.run(RUN, "acme", "uday", null, "box", null).owners());
-    assertEquals(List.of("box"), Resources.run(RUN, "acme", null, " ", "box", null).owners());
-    assertEquals(List.of(), Resources.run(RUN, "acme", " ", "auth", "box", null).owners());
+        List.of("uday", "box"),
+        Resources.run(RUN, "acme", "uday", null, "box", spec -> Optional.empty()).owners());
     assertEquals(
-        List.of("uday"), Resources.run(RUN, "acme", "uday", "auth", "box", "uday").owners());
+        List.of("box"),
+        Resources.run(RUN, "acme", null, " ", "box", spec -> Optional.empty()).owners());
+    assertEquals(
+        List.of(),
+        Resources.run(RUN, "acme", " ", "auth", "box", spec -> Optional.empty()).owners());
+    assertEquals(
+        List.of("uday"),
+        Resources.run(RUN, "acme", "uday", "auth", "box", spec -> Optional.of("uday")).owners());
   }
 
   @Test
   void aRowsOwnersAreItsRunsAsTheDoorsSeeItsSpec() {
     var run = new RunStore(board.db).findById(RUN).orElseThrow();
 
-    assertEquals(List.of(OWNER, "carol"), run.resource(spec -> Optional.of("carol")).owners());
-    assertEquals(List.of(OWNER), run.resource(spec -> Optional.empty()).owners());
+    assertEquals(
+        List.of(OWNER, "carol"),
+        Resources.run(
+                run.id(),
+                run.project(),
+                run.owner(),
+                run.specId(),
+                run.node(),
+                spec -> Optional.of("carol"))
+            .owners());
+    assertEquals(
+        List.of(OWNER),
+        Resources.run(
+                run.id(),
+                run.project(),
+                run.owner(),
+                run.specId(),
+                run.node(),
+                spec -> Optional.empty())
+            .owners());
   }
 }

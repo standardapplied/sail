@@ -5,8 +5,6 @@
 
 package ai.singlr.sail.authority;
 
-import ai.singlr.sail.access.Access;
-import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.common.Remedy;
@@ -21,15 +19,14 @@ import java.util.Optional;
 
 /**
  * What a write of one synced type answers when it reaches outside its actor's audience, and what a
- * birth may name. Whether a project is inside the audience is {@link Access}'s to answer, as a
- * {@link Action#READ} of it ({@link #reads}): the state a write puts must belong to a project the
- * actor reads, and what it writes over must be filed under one. A deletion names no project of its
- * own and is decided by what it deletes. A row is born naming only rows inside the audience too
- * ({@link #bornBeyond}): the type's rule reads who owns the conversation a spec is born in and the
- * work a run does, and would say so. Asked ahead of the type's own rule on every lane ({@link
- * #before}), so an actor learns nothing of a row outside its audience but that its id is taken —
- * ids are one namespace, and a spec's id is reserved for its own room — or that the project a write
- * names was not found.
+ * birth may name. Whether a project is inside the audience is the read filter's to answer ({@link
+ * ReadFilter}): the state a write puts must belong to a project the actor reads, and what it writes
+ * over must be filed under one. A deletion names no project of its own and is decided by what it
+ * deletes. A row is born naming only rows inside the audience too ({@link #bornBeyond}): the type's
+ * rule reads who owns the conversation a spec is born in and the work a run does, and would say so.
+ * Asked ahead of the type's own rule on every lane ({@link #before}), so an actor learns nothing of
+ * a row outside its audience but that its id is taken — ids are one namespace, and a spec's id is
+ * reserved for its own room — or that the project a write names was not found.
  */
 public final class ScopeRule {
 
@@ -93,7 +90,7 @@ public final class ScopeRule {
     return project != null
             && (project.equals(id) || next != null && project.equals(next.get("project")))
         ? Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Project '" + project + "' was not found.", GRANT)
-        : unplaced(named(type, id));
+        : unplaced(id);
   }
 
   /**
@@ -149,7 +146,7 @@ public final class ScopeRule {
    */
   public Optional<Refusal> pushed(Actor actor, String id, Map<String, Object> next) {
     if (!inside(actor, changeLog.projectOf(type, id, next), next)) {
-      return unplaced(named(type, id));
+      return unplaced(id);
     }
     return changeLog.head(type, id).isEmpty()
             || ReadFilter.reads(actor, () -> changeLog.headProject(type, id).orElse(null))
@@ -166,13 +163,11 @@ public final class ScopeRule {
         || (project == null && Snapshots.isDeletion(next));
   }
 
-  /**
-   * The refusal of a write of {@code named} ("Run 'r-1'") that belongs to no project its actor
-   * reads.
-   */
-  static Optional<Refusal> unplaced(String named) {
+  private Optional<Refusal> unplaced(String id) {
     return Refusal.of(
-        Refusal.Kind.OUT_OF_SCOPE, named + " is in no project this FDE is granted.", GRANT);
+        Refusal.Kind.OUT_OF_SCOPE,
+        named(type, id) + " is in no project this FDE is granted.",
+        GRANT);
   }
 
   private Optional<Refusal> taken(String id) {

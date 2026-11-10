@@ -47,18 +47,17 @@ public final class EraseAuthority {
   }
 
   /**
-   * Why {@code actor} may not erase at all, asked before what it erases is read: whether its role
+   * Whether {@code actor} may erase at all, asked before what it erases is read: whether its role
    * and lane may prune specs, or, for a {@code wholesale} erasure — a whole project, or a policy's
-   * sweep — purge ({@link Access#decide(Actor, Action, Resource.Kind)}).
+   * sweep — purge ({@link Access#decide(Actor, Action, Resource.Kind)}). Every decision of this
+   * rule is a {@link Decision}; main's answer to a node's request ({@link #requested}) and the wait
+   * for a run ({@link #idle}) are worded refusals.
    */
-  public Optional<Refusal> request(Actor actor, boolean wholesale) {
+  public Decision request(Actor actor, boolean wholesale) {
     return Access.decide(
-                actor,
-                wholesale ? Action.PURGE : Action.PRUNE,
-                wholesale ? Resource.Kind.PROJECT : Resource.Kind.SPEC)
-            instanceof Decision.Refused refused
-        ? Optional.of(refused.refusal())
-        : Optional.empty();
+        actor,
+        wholesale ? Action.PURGE : Action.PRUNE,
+        wholesale ? Resource.Kind.PROJECT : Resource.Kind.SPEC);
   }
 
   /**
@@ -77,6 +76,7 @@ public final class EraseAuthority {
     }
     if (!Erasure.PROJECT.equals(type)) {
       return request(actor, false)
+          .refused()
           .or(
               () ->
                   Refusal.of(
@@ -88,7 +88,7 @@ public final class EraseAuthority {
       return unheld(type, id);
     }
     var target = new Erasure.Target(type, id);
-    var denied = request(actor, true);
+    var denied = request(actor, true).refused();
     return denied.isPresent() || erasure.isErased(target) || erasure.holds(target)
         ? denied
         : unheld(type, id);

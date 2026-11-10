@@ -51,10 +51,12 @@ public final class RoomAuthority implements WriteAuthority {
       return unheld;
     }
     var refused =
-        WriteAuthority.namesNothing(held, next)
-            ? WriteAuthority.unnamed(actor, Resource.Kind.ROOM)
-            : WriteAuthority.refused(
-                actor,
+        WriteAuthority.refused(
+            actor,
+            Resource.Kind.ROOM,
+            held,
+            next,
+            () ->
                 held == null
                     ? Taking.of(
                         Resources.room(id, Snapshots.text(next, PROJECT), null), Action.CREATE)

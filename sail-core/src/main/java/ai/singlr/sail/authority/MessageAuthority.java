@@ -69,27 +69,25 @@ public final class MessageAuthority implements WriteAuthority {
   }
 
   /**
-   * Why {@code actor} may not post in conversation {@code roomId}, filed under {@code project}:
-   * {@link Access} refuses the post, or one of two facts holds that bind whoever does not overrule
-   * owners ({@link Access#overrulesOwners}): a conversation this box does not hold has no owner
-   * here to ask, so it takes no post; and a post is someone's, so a credential acting for no FDE
-   * posts nothing.
+   * Why {@code actor} may not post in conversation {@code roomId}, filed under {@code project}. A
+   * conversation this box does not hold is not here, which is said first, as for every row this box
+   * does not hold; then {@link Access} decides the post; and last the fact that a post is
+   * someone's, so a credential acting for no FDE posts nothing. Both facts bind whoever does not
+   * overrule owners ({@link Access#overrulesOwners}), as on main: an admin's post passes them.
    */
   private Optional<Refusal> posting(Actor actor, String roomId, String project) {
-    var conversation = Resources.conversation(roomId, project, rooms.owners(roomId));
-    var refused = WriteAuthority.refused(actor, Taking.of(conversation, Action.POST));
-    if (refused.isPresent() || Access.overrulesOwners(actor)) {
-      return refused;
-    }
-    if (!rooms.holds(roomId, null)) {
+    var overrules = Access.overrulesOwners(actor);
+    if (!overrules && !rooms.holds(roomId, null)) {
       return Refusal.noConversation(roomId);
     }
-    return Strings.isBlank(actor.actingFde())
-        ? Refusal.of(
+    var conversation = Resources.conversation(roomId, project, rooms.owners(roomId));
+    var refused = WriteAuthority.refused(actor, Taking.of(conversation, Action.POST));
+    return refused.isPresent() || overrules || Strings.isNotBlank(actor.actingFde())
+        ? refused
+        : Refusal.of(
             Refusal.Kind.NOT_AUTHOR,
             "This credential acts for no FDE, so a post in '" + roomId + "' would be no one's.",
-            "Post with an FDE's own credential.")
-        : Optional.empty();
+            "Post with an FDE's own credential.");
   }
 
   private boolean mayPostAs(Actor actor, String author, String roomId) {

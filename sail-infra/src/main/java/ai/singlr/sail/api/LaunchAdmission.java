@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
@@ -109,7 +110,7 @@ public final class LaunchAdmission {
     if (Strings.isBlank(spec.assignee())) {
       return new ApiException(
           ErrorCode.RUNS_ON_OTHER_NODE,
-          "Spec '" + spec.id() + "' is unassigned, so no node may dispatch it.",
+          Refusal.unclaimed(spec.id()).message(),
           Remedy.of("Claim it first: ", claim));
     }
     return new ApiException(

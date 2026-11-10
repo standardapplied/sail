@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.access.Access;
 import ai.singlr.sail.engine.SpecCliHelper;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Capability;
@@ -83,7 +84,9 @@ class OneDecisionSweepTest {
           ROLE_RULE,
           Set.of("roleOf", "roleOfUnbound", "actorOf"),
           RUN_ROW,
-          Set.of("readOnlyLane"));
+          Set.of("readOnlyLane"),
+          "ai/singlr/sail/access/Access",
+          Set.of("overrulesOwners"));
 
   private static final List<String> EXEMPT =
       List.of(
@@ -132,11 +135,13 @@ class OneDecisionSweepTest {
             "commands/SyncServerCommand#principal",
             "engine/CliOperator#of",
             "engine/HostAccess#actorOf",
-            "engine/HostAccess#identity",
             "engine/HostAccess#roleOf",
             "ssh/SshGateway#authorize")) {
       allowed.put("ai/singlr/sail/" + resolves, EVERY_DOOR);
     }
+    allowed.put(
+        "ai/singlr/sail/engine/HostAccess#identity",
+        EVERY_DOOR + ": the admin flag it puts on PtyIdentity, which PtySessionHost reads");
     allowed.put(RULES + "EventAuthority#decide", OWN_WORK);
     allowed.put(API + "LocalApiRouter#messages", OWN_WORK);
     allowed.put(API + "LocalApiRouter#project", OWN_WORK);
@@ -150,6 +155,14 @@ class OneDecisionSweepTest {
         "fact: a run's read of its own room is a delivery");
     allowed.put(API + "RoomCommitGuard#guardRoomRun", "fact: which runs are a room's wakes");
     allowed.put(RULES + "Attribution#decide", "fact: a push names only its pusher (attribution)");
+    for (var overruled : List.of("SpecAuthority#intoAbsent", "MessageAuthority#posting")) {
+      allowed.put(
+          RULES + overruled,
+          "fact: an admin's write passes a conversation this box does not hold, as on main");
+    }
+    allowed.put(
+        RULES + "SpecAuthority#takenRoom",
+        "fact: an admin's birth may take a room's reserved id from its owner, as on main");
     allowed.put(RULES + "MessageAuthority#mayPostAs", "fact: as whom a pusher posts (attribution)");
     allowed.put(
         RULES + "EventAuthority#refused", "fact: whose work a refused event's words describe");
@@ -164,14 +177,9 @@ class OneDecisionSweepTest {
     allowed.put(RULES + "RunAuthority#decide", "fact: which box executed a pushed run");
     allowed.put(RULES + "WriteAuthority#local", "fact: which box decides a write, main a push");
     allowed.put(SYNC_SERVER + "#<init>", "fact: a sync server serves a sync session alone");
-    allowed.put(SYNC_SERVER + "#result", "fact: a writing session's pushed run must name its node");
-    allowed.put(
-        SYNC_SERVER + "#serveContent",
-        "fact: content a read-only session sends is never stored, as main denies every offer it"
-            + " would carry");
-    allowed.put(
-        SYNC_SERVER + "#unshared",
-        "fact: a read-only session's offer is its rule's to deny, not unshared content's");
+    for (var content : List.of("result", "serveContent", "unshared")) {
+      allowed.put(SYNC_SERVER + "#" + content, EVERY_DOOR);
+    }
     return allowed;
   }
 
@@ -224,7 +232,8 @@ class OneDecisionSweepTest {
               leaky + "viaSwitch",
               leaky + "viaPattern",
               leaky + "returnsARole",
-              leaky + "roomWake"),
+              leaky + "roomWake",
+              leaky + "overrules"),
           reads(bytes.readAllBytes()));
     }
   }
@@ -317,6 +326,10 @@ class OneDecisionSweepTest {
 
     boolean roomWake(RunStore.RunRow run) {
       return run.readOnlyLane();
+    }
+
+    boolean overrules(Actor actor) {
+      return Access.overrulesOwners(actor);
     }
   }
 

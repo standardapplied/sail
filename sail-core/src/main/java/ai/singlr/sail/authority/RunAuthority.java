@@ -104,16 +104,13 @@ public final class RunAuthority implements WriteAuthority {
    * for and the owner of the spec it works as this box holds it, or the box that ran it.
    */
   private Resource asHeld(String id, Map<String, Object> held) {
-    var specId = Snapshots.text(held, "spec_id");
     return Resources.run(
         id,
         Snapshots.text(held, "project"),
         Snapshots.text(held, "owner"),
-        specId,
+        Snapshots.text(held, "spec_id"),
         Snapshots.text(held, "node"),
-        Strings.isBlank(specId)
-            ? null
-            : specs.findById(specId).map(SpecStore.SpecRow::owner).orElse(null));
+        spec -> specs.findById(spec).map(SpecStore.SpecRow::owner));
   }
 
   /**

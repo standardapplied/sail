@@ -9,7 +9,6 @@ import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.ReadFilter;
-import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -297,36 +296,11 @@ public final class SailOperations implements HostOperations {
     return new ConflictOperations(controlPlane).mergeTemplate(type, id);
   }
 
-  /**
-   * Settles a parked conflict. Keeping this box's side or merging is an edit, decided by the type's
-   * rule as the journal records it ({@link WriteRefused}). Adopting main's side decides no row, yet
-   * gives up what this box parked, so the conflict, once found, is settled only by whoever may
-   * change a row of its type at all ({@link Access#decide(Actor, Action, Resource.Kind)}): a
-   * conflict that is not there is not found first, as any id is.
-   */
   @Override
   public SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution) {
-    var operations = new ConflictOperations(controlPlane);
-    var conflict = operations.find(type, id);
-    if (conflict != null
-        && Access.decide(Actor.current(), Action.CHANGE, kindOf(conflict.entityType()))
-            instanceof Decision.Refused refused) {
-      throw Refusals.exception(refused.refusal());
-    }
-    var resolved = operations.resolve(type, id, resolution);
+    var resolved = new ConflictOperations(controlPlane).resolve(type, id, resolution);
     triggerSyncAfterWrite();
     return resolved;
-  }
-
-  /** The kind of a row of synced {@code type}: its own, or for a file the project it is in. */
-  private static Resource.Kind kindOf(String type) {
-    return switch (type) {
-      case "spec" -> Resource.Kind.SPEC;
-      case "room" -> Resource.Kind.ROOM;
-      case "run" -> Resource.Kind.RUN;
-      case "review" -> Resource.Kind.REVIEW;
-      default -> Resource.Kind.PROJECT;
-    };
   }
 
   @Override
@@ -789,7 +763,7 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public StackOperations stack() {
-    return new StackOperations(shell, projects, Thread::sleep, System::nanoTime);
+    return new StackOperations(shell, projectStore, projects, Thread::sleep, System::nanoTime);
   }
 
   /** The review and fix lanes the review pipeline launches through — see {@code reviewLanes}. */
@@ -1298,15 +1272,12 @@ public final class SailOperations implements HostOperations {
   @Override
   public Result<SnapshotActionResponse> restoreSnapshot(
       String project, String label, String localHandle) {
-    return safe(
-        () ->
-            snapshotOps.restore(
-                held(Actor.current(), Action.RESTORE, project), label, localHandle));
+    return safe(() -> snapshotOps.restore(held(Action.RESTORE, project), label, localHandle));
   }
 
   @Override
   public Result<SnapshotActionResponse> deleteSnapshot(String project, String label) {
-    return safe(() -> snapshotOps.delete(held(Actor.current(), Action.RESTORE, project), label));
+    return safe(() -> snapshotOps.delete(held(Action.RESTORE, project), label));
   }
 
   @Override
@@ -1328,24 +1299,25 @@ public final class SailOperations implements HostOperations {
     return new ApiException(ErrorCode.INTERNAL, store + " not available.", START_SERVER);
   }
 
-  /** {@code project} as a route addresses it to read, by {@link #held}. */
+  /**
+   * {@code project} as a route addresses it to read ({@link ProjectReader#readable}): one this
+   * box's catalog does not hold is refused, never answered as empty, and one its reader may not
+   * read is answered the same, so a caller cannot tell a project it was not granted from one that
+   * does not exist.
+   */
   private String readable(String project) {
-    return held(Actor.reader(), Action.READ, project);
+    NameValidator.requireValidProjectName(project);
+    ProjectReader.readable(projectStore, project);
+    return project;
   }
 
   /**
-   * {@code project} as a route addresses it for {@code actor} to take {@code action} on: one this
-   * box's catalog does not hold is refused, never answered as empty, and one {@code actor} may not
-   * read is answered the same, so a caller cannot tell a project it was not granted from one that
-   * does not exist; otherwise the decision's refusal, if any.
+   * {@code project} as a route addresses it to take {@code action} on ({@link
+   * ProjectReader#require}).
    */
-  private String held(Actor actor, Action action, String project) {
+  private String held(Action action, String project) {
     NameValidator.requireValidProjectName(project);
-    var row = projectStore == null ? null : projectStore.findByName(project).orElse(null);
-    if (projectStore != null && row == null) {
-      throw ProjectReader.absent(project);
-    }
-    Refusals.requireProject(actor, action, project, row == null ? null : row.createdBy());
+    ProjectReader.require(projectStore, action, project);
     return project;
   }
 
@@ -1457,9 +1429,19 @@ public final class SailOperations implements HostOperations {
     if (isForeign(run, localHandle)) {
       return foreignRun(run);
     }
-    if (Access.owned(Actor.current(), run.resource(this::specOwner))
-        instanceof Decision.Refused refused) {
-      return Refusals.failure(refused.refusal());
+    var refused =
+        Access.owned(
+                Actor.current(),
+                Resources.run(
+                    run.id(),
+                    run.project(),
+                    run.owner(),
+                    run.specId(),
+                    run.node(),
+                    this::specOwner))
+            .refused();
+    if (refused.isPresent()) {
+      return Refusals.failure(refused.get());
     }
     return served.apply(run);
   }
@@ -2099,15 +2081,14 @@ public final class SailOperations implements HostOperations {
           if (Strings.isBlank(sessionId)) {
             throw new ApiException(ErrorCode.BAD_REQUEST, "session_id must not be blank.");
           }
-          var room = requireRoomOrSpec(roomId);
-          if (Access.decide(
+          var room = roomOrSpec(roomId).orElseThrow(() -> Refusals.roomNotFound(roomId));
+          Refusals.require(
+              Access.decide(
                   actor,
                   Action.POST,
                   Resources.conversation(
-                      room.id(), room.project(), requireRoomStore().owners(room.id())))
-              instanceof Decision.Refused refused) {
-            throw Refusals.exception(refused.refusal());
-          }
+                      room.id(), room.project(), requireRoomStore().owners(room.id()))),
+              () -> Refusals.roomNotFound(roomId));
           var cli = Strings.isBlank(agent) ? null : agent.strip();
           var data = new LinkedHashMap<String, Object>();
           data.put("room_id", room.id());

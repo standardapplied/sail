@@ -18,7 +18,6 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -70,13 +69,13 @@ public final class SpecAuthority implements WriteAuthority {
       return absent;
     }
     var refused =
-        WriteAuthority.namesNothing(held, next)
-            ? WriteAuthority.unnamed(actor, Resource.Kind.SPEC)
-            : WriteAuthority.refused(
-                actor,
-                new Taking(
-                    held == null ? asBorn(id, next) : asHeld(id, held),
-                    actions(actor, id, held, next)));
+        WriteAuthority.refused(
+            actor,
+            Resource.Kind.SPEC,
+            held,
+            next,
+            () ->
+                taking(actor, id, held == null ? asBorn(id, next) : asHeld(id, held), held, next));
     return refused.isPresent() ? refused : facts(actor, id, held, next);
   }
 
@@ -92,21 +91,24 @@ public final class SpecAuthority implements WriteAuthority {
         : Refusal.noConversation(bornIn);
   }
 
-  /** The actions writing {@code next} over {@code held} takes, each of which must be allowed. */
-  private List<Action> actions(
-      Actor actor, String id, Map<String, Object> held, Map<String, Object> next) {
+  /**
+   * What writing {@code next} over {@code held} takes, on {@code spec}: the actions, each of which
+   * must be allowed.
+   */
+  private Taking taking(
+      Actor actor, String id, Resource spec, Map<String, Object> held, Map<String, Object> next) {
     if (held == null) {
       var assignee = assigneeOf(next);
       return assignee == null || bornIn(id, next) == null
-          ? List.of(Action.CREATE)
-          : List.of(Action.CREATE, movement(actor, null, assignee));
+          ? Taking.of(spec, Action.CREATE)
+          : Taking.of(spec, Action.CREATE, movement(actor, null, assignee));
     }
     var assignee = assigneeOf(held);
     if (next == null || Objects.equals(assignee, assigneeOf(next))) {
-      return List.of(Action.CHANGE);
+      return Taking.of(spec, Action.CHANGE);
     }
     var moved = movement(actor, assignee, assigneeOf(next));
-    return restoring(id) ? List.of(Action.CHANGE, moved) : List.of(moved);
+    return restoring(id) ? Taking.of(spec, Action.CHANGE, moved) : Taking.of(spec, moved);
   }
 
   /**
@@ -150,7 +152,7 @@ public final class SpecAuthority implements WriteAuthority {
   private Resource asBorn(String id, Map<String, Object> next) {
     var spec = Resources.spec(id, projectOf(next), null, null);
     var bornIn = bornIn(id, next);
-    return bornIn == null ? spec : spec.withBornIn(conversation(bornIn, spec, null));
+    return bornIn == null ? spec : Resources.bornIn(spec, conversation(bornIn, spec, null));
   }
 
   /**
@@ -162,7 +164,7 @@ public final class SpecAuthority implements WriteAuthority {
         Resources.spec(
             id, projectOf(held), assigneeOf(held), Snapshots.text(held, Snapshots.CREATOR));
     var bornIn = bornIn(id, held);
-    return bornIn == null ? spec : spec.withBornIn(conversation(bornIn, spec, held));
+    return bornIn == null ? spec : Resources.bornIn(spec, conversation(bornIn, spec, held));
   }
 
   private Resource conversation(String roomId, Resource spec, Map<String, Object> held) {

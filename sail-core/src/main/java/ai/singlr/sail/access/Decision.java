@@ -6,11 +6,20 @@
 package ai.singlr.sail.access;
 
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * The answer {@link Access#decide} gives: allowed, not found, or refused with a reason and a fix.
  */
 public sealed interface Decision {
+
+  /**
+   * Why the principal may not take the action, if the decision refuses it; empty when it is
+   * allowed, and for a resource not found, whose answer only its door knows.
+   */
+  default Optional<Refusal> refused() {
+    return this instanceof Refused(var refusal) ? Optional.of(refusal) : Optional.empty();
+  }
 
   /** The principal may take the action. */
   record Allowed() implements Decision {}

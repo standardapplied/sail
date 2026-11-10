@@ -28,13 +28,10 @@ public enum Action {
    */
   CREATE("Create", "a spec, a room, a project", "create"),
   /**
-   * Editing, deleting or restoring a spec or a room, and settling its conflict by keeping the local
-   * version or merging.
+   * Editing, deleting or restoring a spec or a room, and settling a conflict a sync parked: keeping
+   * the local version, merging, or adopting main's side.
    */
-  CHANGE(
-      "Change",
-      "edit, delete or restore a spec or room; keep-local or merge its conflict",
-      "change"),
+  CHANGE("Change", "edit, delete or restore a spec or room; settle a parked conflict", "change"),
   /**
    * Taking an unassigned spec for the FDE the principal acts as. One born in a room also takes that
    * room's owners, since its owner gains a voice there. Any other move of the assignee is {@link
@@ -106,17 +103,17 @@ public enum Action {
   }
 
   /** The action's name in the permission table. */
-  public String label() {
+  String label() {
     return label;
   }
 
   /** What the action covers, as the permission table says it. */
-  public String covers() {
+  String covers() {
     return covers;
   }
 
   /** The verb a refusal of this action uses: "change". */
-  public String verb() {
+  String verb() {
     return verb;
   }
 
@@ -124,11 +121,14 @@ public enum Action {
    * What a refusal says a principal cannot do, taking this action on resources of {@code kind}: the
    * verb before what it acts on, which is the kind's plural unless the action names its own
    * ("change specs", "restore or delete snapshots"). Taking agents in and out of a room is
-   * dispatching there, and is said as managing its membership.
+   * dispatching there, said as managing its membership; changing a conflict is resolving it.
    */
   public String act(Resource.Kind kind) {
     if (this == DISPATCH && kind == Resource.Kind.ROOM) {
       return "manage room membership";
+    }
+    if (this == CHANGE && kind == Resource.Kind.CONFLICT) {
+      return "resolve conflicts";
     }
     return verb + " " + (object != null ? object : kind.plural());
   }

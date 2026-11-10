@@ -246,7 +246,9 @@ class LaunchAdmissionTest {
             ApiException.class,
             () -> Actor.run(admin, () -> LaunchAdmission.requireAllowed(spec(null), "uday")));
     assertEquals(ErrorCode.RUNS_ON_OTHER_NODE, unassigned.failure().errorCode());
-    assertEquals("Spec 'auth' is unassigned, so no node may dispatch it.", unassigned.getMessage());
+    assertEquals(
+        "Spec 'auth' is unassigned, so no one may dispatch it until it is claimed.",
+        unassigned.getMessage());
     assertEquals(
         "Claim it first: sail spec update auth --assignee uday", unassigned.remedy().plain());
   }

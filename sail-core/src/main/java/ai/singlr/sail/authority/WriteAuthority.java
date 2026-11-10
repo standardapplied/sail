@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Who may write one synced type: the one rule the journal asks as it records every write of this
@@ -28,10 +29,15 @@ import java.util.Optional;
  * last live projection. {@code next} is the revision being written, null for a tombstone, or a
  * tombstone's marks. An authority may read this box's database for owners, and never writes; the
  * journal asks it after the row is written, so whatever it derives from the row being decided is
- * read from {@code held}, never from the database, and a revision never admits itself. Who may take
- * the actions a revision takes is {@link Access}'s to answer; a rule names them and keeps the facts
- * only it knows. Sail itself is never asked ({@link Actor#isSail}): main has decided, or this box's
- * machinery is writing.
+ * read from {@code held}, never from the database, and a revision never admits itself. Sail itself
+ * is never asked ({@link Actor#isSail}): main has decided, or this box's machinery is writing.
+ *
+ * <p>A write is answered in one order, whichever rule decides it. What lies outside the actor's
+ * audience is not found, which the scope rule says before any rule is asked ({@link ScopeRule}).
+ * Then what this box does not hold is not there: a project its catalog does not hold, a
+ * conversation it holds no row of. Then {@link Access} decides the actions the revision takes,
+ * which the rule names. Last come the rule's own facts: attribution, fields that never change, a
+ * spec's reserved room id, which box executed a run.
  */
 @FunctionalInterface
 public interface WriteAuthority {
@@ -93,44 +99,42 @@ public interface WriteAuthority {
 
   /**
    * Why {@code actor} may not take what {@code taking} names: the first refusal {@link Access}
-   * answers, empty when it allows every action. A row outside the actor's audience is refused as
-   * one in no project it is granted, as the scope rule words a write it finds outside ({@link
-   * ScopeRule}), which the journal asks first.
+   * answers, empty when it allows every action.
+   *
+   * @throws IllegalStateException when the row lies outside the actor's audience: the scope rule
+   *     answers that, asked first on every lane ({@link ScopeRule#before}, {@link
+   *     ScopeRule#pushed}), so a rule is never asked of a row its actor cannot read
    */
   static Optional<Refusal> refused(Actor actor, Taking taking) {
     var resource = taking.resource();
     for (var action : taking.actions()) {
-      switch (Access.decide(actor, action, resource)) {
-        case Decision.Allowed ignored -> {}
-        case Decision.NotFound ignored -> {
-          return ScopeRule.unplaced(resource.named());
-        }
-        case Decision.Refused refused -> {
-          return Optional.of(refused.refusal());
-        }
+      var decision = Access.decide(actor, action, resource);
+      if (decision instanceof Decision.NotFound) {
+        throw new IllegalStateException(
+            resource.named() + " lies outside its actor's audience, which the scope rule answers.");
+      }
+      if (decision.refused().isPresent()) {
+        return decision.refused();
       }
     }
     return Optional.empty();
   }
 
   /**
-   * Whether a revision from {@code held} to {@code next} names no row: a deletion ({@link
-   * Snapshots#isDeletion}) of an id this box holds no head of, which is filed nowhere, so no
-   * resource is there to decide it on ({@link #unnamed}).
+   * Why {@code actor} may not write {@code held} into {@code next}, a row of {@code kind}, taking
+   * what {@code taking} names. A deletion of an id this box holds no head of ({@link
+   * Snapshots#isDeletion}) names no row and is filed nowhere, so it is decided as a change of the
+   * kind by the role and lane alone ({@link Access#decide(Actor, Action, Resource.Kind)}).
    */
-  static boolean namesNothing(Map<String, Object> held, Map<String, Object> next) {
-    return held == null && Snapshots.isDeletion(next);
-  }
-
-  /**
-   * Why {@code actor} may not write a revision of {@code kind} that names no row ({@link
-   * #namesNothing}): its role and lane alone decide, as a create of the kind ({@link
-   * Access#decide(Actor, Action, Resource.Kind)}).
-   */
-  static Optional<Refusal> unnamed(Actor actor, Resource.Kind kind) {
-    return Access.decide(actor, Action.CREATE, kind) instanceof Decision.Refused refused
-        ? Optional.of(refused.refusal())
-        : Optional.empty();
+  static Optional<Refusal> refused(
+      Actor actor,
+      Resource.Kind kind,
+      Map<String, Object> held,
+      Map<String, Object> next,
+      Supplier<Taking> taking) {
+    return held == null && Snapshots.isDeletion(next)
+        ? Access.decide(actor, Action.CHANGE, kind).refused()
+        : refused(actor, taking.get());
   }
 
   /**

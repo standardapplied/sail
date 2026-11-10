@@ -16,6 +16,10 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.HeldProjects;
+import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -40,10 +44,18 @@ class StackOperationsTest {
           .onOk("ss -ltnH", LISTENING);
   private final List<Duration> paused = new ArrayList<>();
 
+  /** A catalog that holds acme, as the box the stack serves does. */
+  static ProjectStore catalog() {
+    var db = Sqlite.openMemory();
+    new SchemaManager(db).migrate();
+    return new ProjectStore(HeldProjects.hold(db, "acme"));
+  }
+
   static StackOperations stack(ShellExec shell, ProjectServer.Pause pause) {
     var definition = TestDefinitions.yaml(ACME);
     return new StackOperations(
         shell,
+        catalog(),
         new ProjectLoader(
             shell, project -> "acme".equals(project) ? Optional.of(definition) : Optional.empty()),
         pause,

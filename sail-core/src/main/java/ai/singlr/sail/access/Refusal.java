@@ -84,6 +84,17 @@ public record Refusal(Kind kind, String message, Remedy fix) {
         "Check the spec or room id.");
   }
 
+  /**
+   * The refusal of a dispatch of spec {@code specId}, which is unassigned: it runs on no one's box
+   * until it is claimed, so no one dispatches it, whoever asks.
+   */
+  public static Refusal unclaimed(String specId) {
+    return new Refusal(
+        Kind.NOT_OWNER,
+        "Spec '" + specId + "' is unassigned, so no one may dispatch it until it is claimed.",
+        "Claim it first with --assignee <you>, then dispatch it.");
+  }
+
   /** The refusal of a field that never changes after create. */
   public static Optional<Refusal> fixed(String type, String id, String field) {
     return of(

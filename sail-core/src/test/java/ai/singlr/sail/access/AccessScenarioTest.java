@@ -59,7 +59,8 @@ class AccessScenarioTest {
   private static final Resource E1 = Resources.spec("e1", "acme", "eng", "eng");
   private static final Resource E1_ROOM = Resources.conversation("e1", "acme", List.of("eng"));
   private static final Resource R1 = Resources.conversation("r1", "acme", List.of("eng"));
-  private static final Resource ENGS_RUN = Resources.run(RUN, "acme", "eng", "e1", "eng", "eng");
+  private static final Resource ENGS_RUN =
+      Resources.run(RUN, "acme", "eng", "e1", "eng", spec -> Optional.of("eng"));
 
   private static final Decision ALLOWED = new Decision.Allowed();
   private static final Remedy GRANT =

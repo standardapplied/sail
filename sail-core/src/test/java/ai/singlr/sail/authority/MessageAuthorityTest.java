@@ -125,11 +125,17 @@ class MessageAuthorityTest {
         new Case(
             "a room principal posts only for its FDE", ROOM, "den", ROOM_HANDLE, Kind.NOT_OWNER),
         new Case(
-            "a room principal posts nowhere this box does not hold",
+            "a room principal hears first that a conversation this box does not hold is not here",
             ROOM,
             "nowhere",
             ROOM_HANDLE,
-            Kind.NOT_OWNER),
+            Kind.NO_CONVERSATION),
+        new Case(
+            "a viewer hears first that a conversation this box does not hold is not here",
+            VIEWER,
+            "nowhere",
+            OWNER,
+            Kind.NO_CONVERSATION),
         new Case("a machine credential posts as no one", MACHINE, "lobby", null, Kind.NOT_AUTHOR),
         new Case(
             "an admin acting for no FDE posts all the same",

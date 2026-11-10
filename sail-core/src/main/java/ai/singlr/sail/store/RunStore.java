@@ -5,8 +5,6 @@
 
 package ai.singlr.sail.store;
 
-import ai.singlr.sail.access.Resource;
-import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -30,7 +28,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
 
 /**
  * The Run aggregate on SQLite: one dispatch execution of a spec. Records where it ran ({@code node}
@@ -273,16 +270,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
      */
     public boolean readOnlyLane() {
       return Lane.readOnly(role);
-    }
-
-    /**
-     * This run as the people it works for may stop it and read its log ({@link Resources#run}): the
-     * FDE it acts for, and the owner of the spec it works as {@code specOwner} finds it, or for a
-     * run that works none the box that ran it.
-     */
-    public Resource resource(Function<String, Optional<String>> specOwner) {
-      var specOwned = Strings.isBlank(specId) ? null : specOwner.apply(specId).orElse(null);
-      return Resources.run(id, project, owner, specId, node, specOwned);
     }
 
     /**

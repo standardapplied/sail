@@ -25,10 +25,10 @@ import static ai.singlr.sail.authority.Actors.VIEWER_SYNC;
 import static ai.singlr.sail.authority.Actors.projection;
 import static ai.singlr.sail.authority.Actors.with;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Refusal.Kind;
-import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -250,21 +250,29 @@ class RoomAuthorityTest {
   }
 
   @Test
-  void aRoomOutsideTheActorsScopeIsOneItCannotFind() {
+  void aDeletionOfARoomThisBoxNeverHeldIsAChangeOfRooms() {
     assertEquals(
         Optional.of(
             new Refusal(
-                Kind.OUT_OF_SCOPE,
-                "Room 'lobby' is in no project this FDE is granted.",
-                Remedy.of(
-                    "Ask an admin on main for the project: ",
-                    Remedy.sail("fde grant", "<handle>", "<project>"),
-                    "."))),
-        rule.decide(
-            OWNER_API.withScope(ProjectScope.of(List.of("beta"))),
-            "lobby",
-            LOBBY,
-            with(LOBBY, "wake", "off")));
+                Kind.READ_ONLY,
+                "Your credential is read-only and cannot change rooms.",
+                "Ask an admin for a member or admin credential.")),
+        rule.decide(VIEWER, "never-held", null, Map.of()));
+  }
+
+  @Test
+  void aRoomOutsideTheActorsScopeIsTheScopeRulesToAnswerSoTheRuleIsNeverAskedOfIt() {
+    assertEquals(
+        "Room 'lobby' lies outside its actor's audience, which the scope rule answers.",
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                    rule.decide(
+                        OWNER_API.withScope(ProjectScope.of(List.of("beta"))),
+                        "lobby",
+                        LOBBY,
+                        with(LOBBY, "wake", "off")))
+            .getMessage());
   }
 
   @Test

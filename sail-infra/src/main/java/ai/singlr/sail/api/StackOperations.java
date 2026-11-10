@@ -9,7 +9,7 @@ import ai.singlr.sail.access.Action;
 import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.ProjectServer;
 import ai.singlr.sail.engine.ShellExec;
-import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.ProjectStore;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
@@ -35,13 +35,19 @@ public final class StackOperations {
   public static final Duration MAX_TIMEOUT = Duration.ofMinutes(10);
 
   private final ShellExec shell;
+  private final ProjectStore catalog;
   private final ProjectLoader projects;
   private final ProjectServer.Pause pause;
   private final LongSupplier nanos;
 
   StackOperations(
-      ShellExec shell, ProjectLoader projects, ProjectServer.Pause pause, LongSupplier nanos) {
+      ShellExec shell,
+      ProjectStore catalog,
+      ProjectLoader projects,
+      ProjectServer.Pause pause,
+      LongSupplier nanos) {
     this.shell = Objects.requireNonNull(shell, "shell");
+    this.catalog = catalog;
     this.projects = Objects.requireNonNull(projects, "projects");
     this.pause = Objects.requireNonNull(pause, "pause");
     this.nanos = Objects.requireNonNull(nanos, "nanos");
@@ -91,7 +97,7 @@ public final class StackOperations {
    */
   public Ports serve(String project, Duration timeout)
       throws IOException, InterruptedException, TimeoutException {
-    Refusals.requireProject(Actor.current(), Action.SERVE, project, null);
+    ProjectReader.require(catalog, Action.SERVE, project);
     if (timeout.isNegative() || timeout.isZero() || timeout.compareTo(MAX_TIMEOUT) > 0) {
       throw new IllegalArgumentException(
           "A serve's timeout is 1 to "
@@ -105,14 +111,14 @@ public final class StackOperations {
 
   /** Where each declared port of {@code project} stands now, starting nothing. */
   public Ports ports(String project) throws IOException, InterruptedException, TimeoutException {
-    Refusals.requireProject(Actor.reader(), Action.READ, project, null);
+    ProjectReader.readable(catalog, project);
     var config = projects.loadRunning(project).config();
     return Ports.of(project, server().ports(project, config));
   }
 
   /** Stops {@code project}'s processes; its services keep running. */
   public Ports stop(String project) throws IOException, InterruptedException, TimeoutException {
-    Refusals.requireProject(Actor.current(), Action.SERVE, project, null);
+    ProjectReader.require(catalog, Action.SERVE, project);
     var config = projects.loadRunning(project).config();
     var server = server();
     server.stop(project);

@@ -188,7 +188,8 @@ class WriteAuthorshipTest {
                           operations.resolveConflict(
                               "spec", "auth", new Resolution(Resolution.Strategy.THEIRS, null))),
               "adopting main's side writes no row of this box's, yet gives up what it parked");
-      assertEquals("Your credential is read-only and cannot change specs.", adopting.getMessage());
+      assertEquals(
+          "Your credential is read-only and cannot resolve conflicts.", adopting.getMessage());
 
       fdes.update("mady", null, null, "member");
       TestAuth.asOperator(operations, () -> operations.resolveConflict("spec", "auth", mine()));

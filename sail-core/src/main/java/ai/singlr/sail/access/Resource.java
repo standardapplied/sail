@@ -41,6 +41,8 @@ public record Resource(
     RUN("run", "runs", true),
     /** A project: its definition, files, skills, processes and snapshots. */
     PROJECT("project", "projects", true),
+    /** A conflict a sync parked on a row, filed under the row's project. */
+    CONFLICT("conflict", "conflicts", true),
     /** A box: its sync health, its bus stats, the main it points at. Filed under no project. */
     BOX("box", "boxes", false),
     /** The org's people, tokens and pairings. Filed under no project. */
@@ -57,12 +59,12 @@ public record Resource(
     }
 
     /** One of this kind, as a refusal names it: "spec". */
-    public String noun() {
+    String noun() {
       return noun;
     }
 
     /** This kind in the plural, as a refusal names it: "specs". */
-    public String plural() {
+    String plural() {
       return plural;
     }
 
@@ -81,11 +83,6 @@ public record Resource(
     if (bornIn != null && kind != Kind.SPEC) {
       throw new IllegalArgumentException("Only a spec is born in a room, not " + kind + " " + id);
     }
-  }
-
-  /** This spec as born in the room whose conversation {@code room} is. */
-  public Resource withBornIn(Resource room) {
-    return new Resource(kind, id, project, owners, assignee, spec, room);
   }
 
   /** This resource at the start of a sentence: "Room 'lobby'". */

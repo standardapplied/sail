@@ -2279,7 +2279,10 @@ the row in hand. It is reached in this order, so one principal hears the same re
    without acting for that room's owners: refused, naming the owners.
 6. Otherwise allowed.
 
-After it, a type rule checks the facts only it knows, and a door its placement. The table is
+A write is answered in one order (`WriteAuthority`): what lies outside the actor's audience is
+not found, which the scope rule says before any type rule is asked; what this box does not hold,
+a project or a conversation, is not there; then `Access` decides the actions the revision takes;
+last come the rule's own facts. A door's placement comes after `Access` too. The table is
 `Policy`, and this copy of it is generated (`PolicyTableTest`):
 
 | Action | Covers | Viewer | Member | Admin | Work agent | Read-only room agent |
@@ -2288,7 +2291,7 @@ After it, a type rule checks the facts only it knows, and a door its placement. 
 | Read a definition | a project's definition | no | yes | yes | yes | no |
 | Post | a message in a conversation | no | yes | yes | yes | own work |
 | Create | a spec, a room, a project | no | yes | yes | yes | no |
-| Change | edit, delete or restore a spec or room; keep-local or merge its conflict | no | owner | yes | yes | no |
+| Change | edit, delete or restore a spec or room; settle a parked conflict | no | owner | yes | yes | no |
 | Claim | take an unassigned spec; one born in a room also needs that room's owners | no | yes | yes | yes | no |
 | Assign | give or move a spec to someone | no | no | yes | no | no |
 | Approve | promote a draft to ready; approve or dismiss findings; mark done | no | owner | yes | yes | no |
@@ -2336,14 +2339,14 @@ it is filed under and its owners, each owner rule once:
 
 **Type rules name actions.** Each synced type's `WriteAuthority`, declared by its store
 (`SyncedStore.authority`), names the actions a revision takes, every one of which `Access` must
-allow (`WriteAuthority.refused`, the one seam from a decision to a write's refusal), then checks
-its own facts:
+allow (`WriteAuthority.refused`, the one seam from a decision to a write's refusal). What this box
+does not hold is answered before that, and the rule's own facts after it:
 
 | Rule | Actions | Its own facts |
 | --- | --- | --- |
-| `SpecAuthority` | a birth is Create, plus Claim or Assign for one born in another room naming an assignee; an edit, tombstone or restore is Change; moving a live spec's assignee is Claim (an unassigned spec, for the FDE the actor acts as) or Assign | a project this box holds; a push names only its pusher; `room_id` never changes; a spec's id is reserved for its own room |
-| `RoomAuthority` | a birth is Create; every later revision, tombstone included, is Change of its settings | a project this box holds; attribution |
-| `MessageAuthority` | Post in its conversation | a conversation this box does not hold, and a credential acting for no FDE, post nothing unless the actor may change the conversation itself; as whom a pusher posts |
+| `SpecAuthority` | a birth is Create, plus Claim or Assign for one born in another room naming an assignee; an edit, tombstone or restore is Change; moving a live spec's assignee is Claim (an unassigned spec, for the FDE the actor acts as) or Assign | not held: a project this box holds, a conversation it holds to be born in (an admin passes the conversation); facts: a push names only its pusher; `room_id` never changes; a spec's id is reserved for its own room |
+| `RoomAuthority` | a birth is Create; every later revision, tombstone included, is Change of its settings | not held: a project this box holds; facts: attribution |
+| `MessageAuthority` | Post in its conversation | not held: a conversation this box holds, unless the actor is an admin; facts: a credential acting for no FDE posts nothing unless the actor is an admin; as whom a pusher posts |
 | `RunAuthority` | a run's own session report by its own principal is Narrate; every other revision is Change | its principals are its own; attribution; spec and room never change; a run names a spec or a room, never both; a pushed run is its executing box's |
 | `ReviewAuthority` | Approve | attribution; a review never moves to another spec, a stage never to another review |
 | files, projects (`WriteAuthority.table`) | a file is Share; a project's definition is Configure, and a rename Configure plus Purge of the old name | attribution |
@@ -2365,7 +2368,7 @@ run's reports of itself are Narrate, a run's stop or failure Operate a run, a di
 Dispatch, the review types Approve, a message's announcement Post, and an event about the box
 Operate the box. The rule keeps three facts: whether its sender speaks for this box (Operate the
 box) or only retells what another box did, whether this box executed the run, and that a run's
-own principal publishes only its own run's narration (until spec 3). Work outside the sender's
+own principal publishes only its own run's narration (until sail-agents-act-on-their-own-work). Work outside the sender's
 scope is not found.
 
 **Reads and sync.** Read is yes in every column, so a read is the audience alone. One read filter

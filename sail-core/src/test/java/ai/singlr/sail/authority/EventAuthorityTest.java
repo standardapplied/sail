@@ -613,7 +613,7 @@ class EventAuthorityTest {
                     + " of 'auth' (owned by 'carol'), and '"
                     + Actors.AGENT_HANDLE
                     + "' may narrate only its own run.",
-                "An agent narrates only the run sail launched it for.")),
+                "An agent acts only on the work sail launched it for.")),
         agent);
     assertEquals(Refusal.readOnly("publish events"), viewer);
   }

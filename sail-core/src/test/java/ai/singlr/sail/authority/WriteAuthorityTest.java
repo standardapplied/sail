@@ -25,12 +25,12 @@ import static ai.singlr.sail.authority.Actors.VIEWER_SYNC;
 import static ai.singlr.sail.authority.Actors.projection;
 import static ai.singlr.sail.authority.Actors.with;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Refusal.Kind;
 import ai.singlr.sail.access.Resources;
-import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.FileStore;
@@ -197,20 +197,19 @@ class WriteAuthorityTest {
   }
 
   @Test
-  void aRowOutsideItsActorsAudienceIsInNoProjectItIsGranted() {
+  void aRowOutsideItsActorsAudienceIsNeverAskedOfARuleTheScopeRuleAnswersItFirst() {
     var scoped = OWNER_API.withScope(ProjectScope.of(List.of("beta")));
 
     assertEquals(
-        Optional.of(
-            new Refusal(
-                Kind.OUT_OF_SCOPE,
-                "Project 'acme' is in no project this FDE is granted.",
-                Remedy.of(
-                    "Ask an admin on main for the project: ",
-                    Remedy.sail("fde grant", "<handle>", "<project>"),
-                    "."))),
-        WriteAuthority.refused(
-            scoped, WriteAuthority.Taking.of(Resources.project("acme", OWNER), Action.CONFIGURE)));
+        "Project 'acme' lies outside its actor's audience, which the scope rule answers.",
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                    WriteAuthority.refused(
+                        scoped,
+                        WriteAuthority.Taking.of(
+                            Resources.project("acme", OWNER), Action.CONFIGURE)))
+            .getMessage());
     assertEquals(
         Optional.empty(),
         WriteAuthority.refused(

@@ -16,7 +16,7 @@ import java.util.Optional;
  * The single domain home for dispatch restart resolution, shared by both lanes (the in-process
  * {@code sail spec dispatch --restart} CLI and the HTTP API's {@code restart} field). Pure and
  * I/O-free — it never touches stores, git, or shells — so the full decision matrix is exhaustively
- * table-testable, exactly like {@link LaunchAdmission}.
+ * table-testable.
  *
  * <p>{@link #decide} answers one question: given the requested spec (or its absence) and the {@code
  * restart} flag, how must dispatch treat the spec's lifecycle status? Either a {@link Refused} with

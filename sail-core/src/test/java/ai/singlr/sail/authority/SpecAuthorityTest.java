@@ -456,6 +456,7 @@ class SpecAuthorityTest {
     assertEquals(
         readOnly("assign specs"), rule.decide(VIEWER, SPEC, OWNED, with(OWNED, "assignee", OTHER)));
     assertEquals(readOnly("change specs"), rule.decide(VIEWER, SPEC, OWNED, null));
+    assertEquals(readOnly("change specs"), rule.decide(VIEWER, "never-held", null, null));
   }
 
   private static Optional<Refusal> readOnly(String act) {

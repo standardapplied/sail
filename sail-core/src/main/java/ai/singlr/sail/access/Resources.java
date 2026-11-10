@@ -8,6 +8,8 @@ package ai.singlr.sail.access;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Ownership;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 /**
@@ -40,6 +42,15 @@ public final class Resources {
   }
 
   /**
+   * {@code spec} as born in the room whose conversation {@code room} is, when that is not its own:
+   * a create or a claim of it there also takes that conversation's owners.
+   */
+  public static Resource bornIn(Resource spec, Resource room) {
+    return new Resource(
+        spec.kind(), spec.id(), spec.project(), spec.owners(), spec.assignee(), spec.spec(), room);
+  }
+
+  /**
    * Room {@code id} of {@code project} as its settings (roster, wake, title, assignee) are decided:
    * {@code owner}'s, whom {@code RoomStore.ownerOf} names — a spec's identity room its spec's
    * owner, as the box last knew the spec, any other room the owner its own row names — since only
@@ -65,18 +76,23 @@ public final class Resources {
 
   /**
    * Run {@code id} of {@code project} as the people it works for may stop it and read its log: the
-   * FDE it acts for ({@code owner}), and the owner of spec {@code specId} as the caller sees it
-   * ({@code specOwner}), or for a run that works no spec the box that ran it ({@code node}). So
+   * FDE it acts for ({@code owner}), and the owner of spec {@code specId} as {@code specOwner}
+   * finds it for the caller, or for a run that works no spec the box that ran it ({@code node}). So
    * work that moved to another owner can still be stopped by the FDE whose box runs it.
    */
   public static Resource run(
-      String id, String project, String owner, String specId, String node, String specOwner) {
+      String id,
+      String project,
+      String owner,
+      String specId,
+      String node,
+      Function<String, Optional<String>> specOwner) {
     var adHoc = Strings.isBlank(specId);
     return new Resource(
         Resource.Kind.RUN,
         id,
         project,
-        Stream.of(owner, adHoc ? node : specOwner).toList(),
+        Stream.of(owner, adHoc ? node : specOwner.apply(specId).orElse(null)).toList(),
         null,
         adHoc ? null : specId,
         null);

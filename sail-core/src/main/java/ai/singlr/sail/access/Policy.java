@@ -55,6 +55,9 @@ import java.util.stream.Stream;
  *       lane ({@code EventAuthority}), whatever this table says of the action, until
  *       sail-agents-act-on-their-own-work gives an agent's actor its work.
  *   <li>Configure: any member may, until sail-people-are-managed gives it to a project's creator.
+ *   <li>Operate a run: the row decides a stop; a run's log is read by anyone the run works for,
+ *       whatever their role ({@link Access#owned}), until sail-every-door-asks-access asks this row
+ *       of the log doors too.
  *   <li>Operate the box: a viewer may not, until sail-every-door-asks-access gives a person their
  *       own box.
  * </ul>
@@ -200,12 +203,12 @@ public final class Policy {
   }
 
   /** What {@code column} allows for {@code action}. */
-  public static Cell cell(Action action, Column column) {
+  static Cell cell(Action action, Column column) {
     return ROWS.get(action).cell(column);
   }
 
   /** The permission table as Markdown, the section ARCHITECTURE.md carries verbatim. */
-  public static String table() {
+  static String table() {
     var lines = new ArrayList<String>();
     var header = new ArrayList<>(List.of("Action", "Covers"));
     Arrays.stream(Column.values()).map(Column::label).forEach(header::add);

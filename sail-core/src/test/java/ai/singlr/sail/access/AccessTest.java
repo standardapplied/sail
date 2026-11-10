@@ -53,9 +53,9 @@ class AccessTest {
   private static final Resource REVIEW_ADA = Resources.review("rev-1", "acme", "auth", "ada");
   private static final Resource REVIEW_BOB = Resources.review("rev-1", "acme", "auth", "bob");
   private static final Resource RUN_ADA =
-      Resources.run(Actors.RUN, "acme", "ada", "auth", "ada", "ada");
+      Resources.run(Actors.RUN, "acme", "ada", "auth", "ada", spec -> Optional.of("ada"));
   private static final Resource RUN_BOB =
-      Resources.run(Actors.OTHER_RUN, "acme", "bob", "auth", "bob", "bob");
+      Resources.run(Actors.OTHER_RUN, "acme", "bob", "auth", "bob", spec -> Optional.of("bob"));
   private static final Resource PROJECT_ADA = Resources.project("acme", "ada");
   private static final Resource PROJECT_BOB = Resources.project("acme", "bob");
   private static final Resource BOX_ADA = Resources.box("ada");
@@ -389,7 +389,7 @@ class AccessTest {
 
   @Test
   void aSpecBornInARoomTakesThatRoomsOwnersToBeCreatedOrClaimed() {
-    var inDen = Resources.spec("brief", "acme", null, "ada").withBornIn(DEN);
+    var inDen = Resources.bornIn(Resources.spec("brief", "acme", null, "ada"), DEN);
     var seated = "'den' belongs to bob: only bob or an admin may start work there, not you.";
 
     assertEquals(
@@ -404,7 +404,7 @@ class AccessTest {
     assertEquals(new Decision.Allowed(), Access.decide(Actors.OTHER_API, Action.CLAIM, inDen));
     assertEquals(
         new Decision.Allowed(),
-        Access.decide(Actors.OWNER_API, Action.CREATE, inDen.withBornIn(LOBBY)));
+        Access.decide(Actors.OWNER_API, Action.CREATE, Resources.bornIn(inDen, LOBBY)));
     assertEquals(
         refused(
             Refusal.Kind.NOT_OWNER,
@@ -413,12 +413,12 @@ class AccessTest {
         Access.decide(
             Actors.OWNER_API,
             Action.CREATE,
-            inDen.withBornIn(Resources.conversation("den", "acme", List.of()))));
+            Resources.bornIn(inDen, Resources.conversation("den", "acme", List.of()))));
   }
 
   @Test
   void aSpecIsDispatchedByItsOwnerWhereverItWasBornAndAnUnassignedOneByNoOneYet() {
-    var inDen = Resources.spec("brief", "acme", "ada", "ada").withBornIn(DEN);
+    var inDen = Resources.bornIn(Resources.spec("brief", "acme", "ada", "ada"), DEN);
 
     assertEquals(new Decision.Allowed(), Access.decide(Actors.OWNER_API, Action.DISPATCH, inDen));
     assertEquals(
@@ -490,10 +490,10 @@ class AccessTest {
 
   @Test
   void aRunNamesTheWorkItDoesAndTheFdesItWorksFor() {
-    var adHoc = Resources.run("r-1", "acme", "bob", null, "bob", null);
-    var nobodys = Resources.run("r-1", "acme", null, null, null, null);
-    var shared = Resources.run("r-1", "acme", "bob", "auth", "bob", "cy");
-    var unowned = Resources.run("r-1", "acme", null, "auth", null, null);
+    var adHoc = Resources.run("r-1", "acme", "bob", null, "bob", spec -> Optional.empty());
+    var nobodys = Resources.run("r-1", "acme", null, null, null, spec -> Optional.empty());
+    var shared = Resources.run("r-1", "acme", "bob", "auth", "bob", spec -> Optional.of("cy"));
+    var unowned = Resources.run("r-1", "acme", null, "auth", null, spec -> Optional.empty());
     var launched = Resources.launched("r-1", "acme", "auth", "bob");
 
     assertEquals(
@@ -719,7 +719,7 @@ class AccessTest {
         "Only a spec is born in a room, not RUN r-1",
         assertThrows(
                 IllegalArgumentException.class,
-                () -> Resources.launched("r-1", "acme", "auth", "ada").withBornIn(DEN))
+                () -> Resources.bornIn(Resources.launched("r-1", "acme", "auth", "ada"), DEN))
             .getMessage());
     assertThrows(NullPointerException.class, () -> new Decision.Refused(null));
     assertEquals(
@@ -734,23 +734,37 @@ class AccessTest {
   void theOwnershipStepIsAnAdminsOrAnOwnersOrOneActingForAnOwnerReadOnlyIncluded() {
     assertEquals(
         Optional.empty(),
-        owned(Actors.ADMIN, Resources.run("r1", "acme", null, "auth", null, null)));
+        owned(
+            Actors.ADMIN,
+            Resources.run("r1", "acme", null, "auth", null, spec -> Optional.empty())));
     assertEquals(
         Optional.empty(),
-        owned(Actors.OWNER_API, Resources.run("r1", "acme", Actors.OWNER, "auth", null, "carol")));
+        owned(
+            Actors.OWNER_API,
+            Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
     assertEquals(
         Optional.empty(),
-        owned(Actors.VIEWER, Resources.run("r1", "acme", Actors.OWNER, "auth", null, "carol")));
+        owned(
+            Actors.VIEWER,
+            Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
     assertEquals(
         Optional.empty(),
-        owned(Actors.ROOM, Resources.run("r1", "acme", Actors.OWNER, "auth", null, "carol")));
+        owned(
+            Actors.ROOM,
+            Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
     assertEquals(
         Optional.of(Refusal.Kind.NOT_OWNER),
-        owned(Actors.MACHINE, Resources.run("r1", "acme", Actors.OWNER, "auth", null, "carol"))
+        owned(
+                Actors.MACHINE,
+                Resources.run(
+                    "r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol")))
             .map(Refusal::kind));
     assertEquals(
         Optional.of(Refusal.Kind.NOT_OWNER),
-        owned(Actors.OTHERS_AGENT, Resources.run("r1", "acme", Actors.OWNER, "auth", null, "carol"))
+        owned(
+                Actors.OTHERS_AGENT,
+                Resources.run(
+                    "r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol")))
             .map(Refusal::kind));
   }
 
@@ -762,29 +776,39 @@ class AccessTest {
                 Refusal.Kind.NOT_OWNER,
                 "Run r1 belongs to spec 'auth', owned by 'ada' and 'carol', not you.",
                 "Only ada or carol or an admin may access this run.")),
-        owned(Actors.OTHER_API, Resources.run("r1", "acme", Actors.OWNER, "auth", null, "carol")));
+        owned(
+            Actors.OTHER_API,
+            Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
     assertEquals(
         Optional.of(
             new Refusal(
                 Refusal.Kind.NOT_OWNER,
                 "Run r1 is an ad-hoc session launched by 'ada', not you.",
                 "Only ada or an admin may access this run.")),
-        owned(Actors.OTHER_API, Resources.run("r1", "acme", Actors.OWNER, null, null, null)));
+        owned(
+            Actors.OTHER_API,
+            Resources.run("r1", "acme", Actors.OWNER, null, null, spec -> Optional.empty())));
     assertEquals(
         Optional.of(
             new Refusal(
                 Refusal.Kind.NOT_OWNER,
                 "Run r1 belongs to spec 'auth', which has no owner.",
                 "Only its owner or an admin may access this run.")),
-        owned(Actors.OTHER_API, Resources.run("r1", "acme", null, "auth", null, null)));
+        owned(
+            Actors.OTHER_API,
+            Resources.run("r1", "acme", null, "auth", null, spec -> Optional.empty())));
     assertEquals(
         "Run r1 is an ad-hoc session.",
-        owned(Actors.OTHER_API, Resources.run("r1", "acme", null, null, null, null))
+        owned(
+                Actors.OTHER_API,
+                Resources.run("r1", "acme", null, null, null, spec -> Optional.empty()))
             .orElseThrow()
             .message());
     assertEquals(
         Optional.empty(),
-        owned(Actors.AGENT, Resources.run("r1", "acme", Actors.OWNER, null, null, null)));
+        owned(
+            Actors.AGENT,
+            Resources.run("r1", "acme", Actors.OWNER, null, null, spec -> Optional.empty())));
   }
 
   private static Optional<Refusal> owned(Actor actor, Resource run) {

@@ -33,6 +33,7 @@ class LocalApiStackTest {
             private final StackOperations stack =
                 new StackOperations(
                     shell,
+                    StackOperationsTest.catalog(),
                     new ProjectLoader(
                         shell,
                         project ->
