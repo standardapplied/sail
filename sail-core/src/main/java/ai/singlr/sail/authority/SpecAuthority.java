@@ -144,15 +144,13 @@ public final class SpecAuthority implements WriteAuthority {
 
   /**
    * Spec {@code id} as {@code next} would bear it, before it has an assignee to move: in its
-   * project, and born into the conversation it names where this box holds one, as that
-   * conversation's owners stand without it.
+   * project, and born into the conversation it names, as that conversation's owners stand without
+   * it. One this box does not hold was answered already ({@link #intoAbsent}).
    */
   private Resource asBorn(String id, Map<String, Object> next) {
     var spec = Resources.spec(id, projectOf(next), null, null);
     var bornIn = bornIn(id, next);
-    return bornIn == null || !rooms.holds(bornIn, id)
-        ? spec
-        : spec.withBornIn(conversation(bornIn, spec, null));
+    return bornIn == null ? spec : spec.withBornIn(conversation(bornIn, spec, null));
   }
 
   /**

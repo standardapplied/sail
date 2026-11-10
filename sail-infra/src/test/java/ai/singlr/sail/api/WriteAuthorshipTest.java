@@ -178,6 +178,17 @@ class WriteAuthorshipTest {
           ErrorCode.READ_ONLY_CREDENTIAL,
           refused.failure().errorCode(),
           "a read-only credential is refused before any side is looked at");
+      var adopting =
+          assertThrows(
+              ApiException.class,
+              () ->
+                  TestAuth.asOperator(
+                      operations,
+                      () ->
+                          operations.resolveConflict(
+                              "spec", "auth", new Resolution(Resolution.Strategy.THEIRS, null))),
+              "adopting main's side writes no row of this box's, yet gives up what it parked");
+      assertEquals("Your credential is read-only and cannot change specs.", adopting.getMessage());
 
       fdes.update("mady", null, null, "member");
       TestAuth.asOperator(operations, () -> operations.resolveConflict("spec", "auth", mine()));
