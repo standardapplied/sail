@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
@@ -195,13 +195,7 @@ public final class AgentLogStreamer implements HttpHandler {
   private Admission admit(HttpExchange exchange, String runId) {
     var actor = ApiRouter.actorOf(exchange);
     var run =
-        Refusals.readable(
-                actor,
-                runLookup.apply(runId),
-                Resource.Kind.RUN,
-                RunStore.RunRow::id,
-                RunStore.RunRow::project)
-            .orElse(null);
+        ReadFilter.readable(actor, runLookup.apply(runId), RunStore.RunRow::project).orElse(null);
     if (run == null) {
       return new Refused(404, "run_not_found", "No run '" + runId + "'.", null);
     }

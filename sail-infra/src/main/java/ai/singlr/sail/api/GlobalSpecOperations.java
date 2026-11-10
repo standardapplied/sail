@@ -6,7 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Access;
-import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
@@ -103,12 +103,7 @@ final class GlobalSpecOperations {
 
   /** The specs matching {@code filter} that the reader may see. */
   List<SpecStore.SpecRow> readable(SpecStore.SpecFilter filter) {
-    return Refusals.readable(
-        Actor.reader(),
-        specStore.list(filter),
-        Resource.Kind.SPEC,
-        SpecStore.SpecRow::id,
-        SpecStore.SpecRow::project);
+    return ReadFilter.readable(Actor.reader(), specStore.list(filter), SpecStore.SpecRow::project);
   }
 
   GlobalSpecDetailResponse get(String specId) {
@@ -133,12 +128,8 @@ final class GlobalSpecOperations {
     if (runStore == null) {
       return null;
     }
-    return Refusals.readable(
-            Actor.reader(),
-            runStore.listForSpec(specId),
-            Resource.Kind.RUN,
-            RunStore.RunRow::id,
-            RunStore.RunRow::project)
+    return ReadFilter.readable(
+            Actor.reader(), runStore.listForSpec(specId), RunStore.RunRow::project)
         .stream()
         .findFirst()
         .map(RunSummary::from)
@@ -234,12 +225,7 @@ final class GlobalSpecOperations {
           "This box keeps no rooms, so a spec cannot be born in room '" + roomId + "'.",
           Remedy.of("Start the server with '", Remedy.sail("server start"), "' or omit the room."));
     }
-    return Refusals.readable(
-            Actor.reader(),
-            store.findById(roomId),
-            Resource.Kind.ROOM,
-            RoomStore.RoomRow::id,
-            RoomStore.RoomRow::project)
+    return ReadFilter.readable(Actor.reader(), store.findById(roomId), RoomStore.RoomRow::project)
         .orElseThrow(() -> Refusals.roomNotFound(roomId));
   }
 
@@ -336,11 +322,9 @@ final class GlobalSpecOperations {
     var room =
         store == null
             ? null
-            : Refusals.readable(
+            : ReadFilter.readable(
                     Actor.reader(),
                     store.findById(row.roomIdOrIdentity()),
-                    Resource.Kind.ROOM,
-                    RoomStore.RoomRow::id,
                     RoomStore.RoomRow::project)
                 .orElse(null);
     return GlobalSpecView.from(row, room);
@@ -355,12 +339,7 @@ final class GlobalSpecOperations {
     var store = rooms.get();
     var held = store == null ? null : store.findById(specId).orElse(null);
     if (held != null
-        && Refusals.readable(
-                Actor.reader(),
-                Optional.of(held),
-                Resource.Kind.ROOM,
-                RoomStore.RoomRow::id,
-                RoomStore.RoomRow::project)
+        && ReadFilter.readable(Actor.reader(), Optional.of(held), RoomStore.RoomRow::project)
             .isEmpty()) {
       throw new ApiException(
           ErrorCode.CONFLICT,
@@ -412,12 +391,7 @@ final class GlobalSpecOperations {
     var held = store.findById(roomId);
     var room =
         held.isPresent()
-            ? Refusals.readable(
-                    Actor.reader(),
-                    held,
-                    Resource.Kind.ROOM,
-                    RoomStore.RoomRow::id,
-                    RoomStore.RoomRow::project)
+            ? ReadFilter.readable(Actor.reader(), held, RoomStore.RoomRow::project)
                 .orElseThrow(() -> Refusals.roomNotFound(roomId))
             : store.ensureFor(roomId, updated.project(), updated.title(), updated.assignee(), null);
     if (!Objects.equals(room.wake(), wake)) {
@@ -462,12 +436,8 @@ final class GlobalSpecOperations {
           specStore.delete(specId);
           if (store != null
               && mintedItsRoom
-              && Refusals.readable(
-                      Actor.reader(),
-                      store.findById(specId),
-                      Resource.Kind.ROOM,
-                      RoomStore.RoomRow::id,
-                      RoomStore.RoomRow::project)
+              && ReadFilter.readable(
+                      Actor.reader(), store.findById(specId), RoomStore.RoomRow::project)
                   .isPresent()) {
             store.delete(specId);
           }
@@ -526,12 +496,8 @@ final class GlobalSpecOperations {
     if (reviewStore == null) {
       return 0;
     }
-    return Refusals.readable(
-            Actor.reader(),
-            reviewStore.latestReviewForSpec(specId),
-            Resource.Kind.REVIEW,
-            ReviewStore.ReviewRow::id,
-            reviewStore::projectOf)
+    return ReadFilter.readable(
+            Actor.reader(), reviewStore.latestReviewForSpec(specId), reviewStore::projectOf)
         .map(seen -> reviewStore.openFindingsAfterPass(specId).size())
         .orElse(0);
   }
@@ -545,12 +511,8 @@ final class GlobalSpecOperations {
     requireStore();
     return GlobalSpecHistoryResponse.from(
         specId,
-        Refusals.readable(
-            Actor.reader(),
-            specStore.history(specId),
-            Resource.Kind.SPEC,
-            revision -> specId,
-            GlobalSpecOperations::projectOf));
+        ReadFilter.readable(
+            Actor.reader(), specStore.history(specId), GlobalSpecOperations::projectOf));
   }
 
   private static String projectOf(ChangeLog.Entry revision) {
@@ -595,11 +557,9 @@ final class GlobalSpecOperations {
    */
   private SpecStore.LastKnown restorable(String specId) {
     var head =
-        Refusals.readable(
+        ReadFilter.readable(
                 Actor.reader(),
                 specStore.head(specId),
-                Resource.Kind.SPEC,
-                found -> specId,
                 found -> specStore.headProject(specId).orElse(null))
             .orElseThrow(() -> Refusals.specNotFound(specId));
     if (head.kind() == ChangeLog.Kind.ERASURE) {
@@ -613,11 +573,9 @@ final class GlobalSpecOperations {
    * outside the caller's scope, which the history hides from it, is one its history does not hold.
    */
   private Map<String, Object> revision(String specId, String rev) {
-    return Refusals.readable(
+    return ReadFilter.readable(
             Actor.reader(),
             Optional.ofNullable(specStore.comparableAtRev(specId, rev)),
-            Resource.Kind.SPEC,
-            revision -> specId,
             revision -> Snapshots.text(revision, "project"))
         .orElseThrow(
             () -> ApiException.of(ErrorCode.INVALID_REQUEST, specStore.unrestorable(specId, rev)));
@@ -656,12 +614,8 @@ final class GlobalSpecOperations {
    * answered as one that is not there.
    */
   private SpecStore.SpecRow findOrThrow(String specId) {
-    return Refusals.readable(
-            Actor.reader(),
-            specStore.findById(specId),
-            Resource.Kind.SPEC,
-            SpecStore.SpecRow::id,
-            SpecStore.SpecRow::project)
+    return ReadFilter.readable(
+            Actor.reader(), specStore.findById(specId), SpecStore.SpecRow::project)
         .orElseThrow(() -> Refusals.specNotFound(specId));
   }
 

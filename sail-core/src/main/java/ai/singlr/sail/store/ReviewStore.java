@@ -5,11 +5,7 @@
 
 package ai.singlr.sail.store;
 
-import ai.singlr.sail.access.Access;
-import ai.singlr.sail.access.Action;
-import ai.singlr.sail.access.Decision;
-import ai.singlr.sail.access.Resource;
-import ai.singlr.sail.access.Resources;
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.authority.ReviewAuthority;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -788,7 +784,12 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
     var reader = Actor.reader();
     var reviews = new LinkedHashSet<String>();
     for (var findingId : changes.keySet()) {
-      reviewOfFinding(findingId).filter(review -> reads(reader, review)).ifPresent(reviews::add);
+      reviewOfFinding(findingId)
+          .filter(
+              review ->
+                  ReadFilter.reads(
+                      reader, () -> changeLog.headProject(ENTITY, review).orElse(null)))
+          .ifPresent(reviews::add);
     }
     for (var reviewId : reviews) {
       var amended = new ArrayList<Map<String, Object>>();
@@ -803,14 +804,6 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
         writeContent(reviewId, amended);
       }
     }
-  }
-
-  /** Whether {@code reader} may read review {@code reviewId} where its head files it. */
-  private boolean reads(Actor reader, String reviewId) {
-    var review =
-        Resources.filed(
-            Resource.Kind.REVIEW, reviewId, changeLog.headProject(ENTITY, reviewId).orElse(null));
-    return Access.decide(reader, Action.READ, review) instanceof Decision.Allowed;
   }
 
   /** Stores {@code findings} as the review's content and journals the revision. */

@@ -12,10 +12,7 @@ import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.identity.Actor;
-import java.util.List;
 import java.util.Optional;
-import java.util.function.Function;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -23,8 +20,7 @@ import java.util.function.Supplier;
  * clients get: its kind picks the {@link ErrorCode}, and its message and fix are carried verbatim.
  * A write the journal refused ({@link WriteRefused}) is translated here too, so every door answers
  * a kind with one code. A resource the caller may not read is the door's own answer for an id it
- * does not hold, and a row it may not read is left out of what a read hands it, so a door can never
- * tell a caller that something it may not see exists.
+ * does not hold, so a door can never tell a caller that something it may not see exists.
  */
 public final class Refusals {
 
@@ -101,42 +97,6 @@ public final class Refusals {
       case Decision.NotFound absent -> throw notFound.get();
       case Decision.Refused refused -> throw exception(refused.refusal());
     }
-  }
-
-  /**
-   * The rows of {@code rows} {@code actor} may read, in their order, each decided as {@link
-   * #readable(Actor, Resource.Kind, Function, Function)} decides a row.
-   */
-  public static <T> List<T> readable(
-      Actor actor,
-      List<T> rows,
-      Resource.Kind kind,
-      Function<? super T, String> id,
-      Function<? super T, String> project) {
-    return rows.stream().filter(readable(actor, kind, id, project)).toList();
-  }
-
-  /** {@code row} when {@code actor} may read it, decided as a row of a list is; empty if not. */
-  public static <T> Optional<T> readable(
-      Actor actor,
-      Optional<T> row,
-      Resource.Kind kind,
-      Function<? super T, String> id,
-      Function<? super T, String> project) {
-    return row.filter(readable(actor, kind, id, project));
-  }
-
-  /**
-   * Whether {@code actor} may read a row: one of {@code kind} whose id {@code id} names, filed
-   * under the project {@code project} names, asked only of a row a restricted reader reads ({@link
-   * Access#reads}).
-   */
-  public static <T> Predicate<T> readable(
-      Actor actor,
-      Resource.Kind kind,
-      Function<? super T, String> id,
-      Function<? super T, String> project) {
-    return row -> Access.reads(actor, kind, id.apply(row), () -> project.apply(row));
   }
 
   /** Throws {@code refusal}'s exception, if the rule refused; a no-op when it allowed. */

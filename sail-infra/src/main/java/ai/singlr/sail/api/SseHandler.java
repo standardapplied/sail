@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import com.sun.net.httpserver.HttpExchange;
@@ -254,8 +254,7 @@ public final class SseHandler implements HttpHandler {
    * ({@link Event#SAIL_AGENT} stands in for one), so it reaches an unrestricted subscriber alone.
    */
   static Predicate<Event> parseFilter(URI uri, Actor actor) {
-    Predicate<Event> scoped =
-        Refusals.readable(actor, Resource.Kind.PROJECT, Event::project, Event::project);
+    Predicate<Event> scoped = ReadFilter.readable(actor, Event::project);
     return scoped.and(queryFilter(uri));
   }
 

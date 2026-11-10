@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.authority.EraseAuthority;
 import ai.singlr.sail.authority.ScopeRule;
@@ -35,7 +36,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Supplier;
 
 /**
  * Main's side of one sync session: a request loop over the SSH channel's stdio. Nothing is served
@@ -319,10 +319,10 @@ public final class SyncRpcServer {
 
   /**
    * Whether the session may see what main holds of {@code id}: the session's FDE may read it as its
-   * head files it ({@link #reads}).
+   * head files it ({@link ReadFilter}), A5: a box receives a row only when its person may read it.
    */
   private boolean admits(String type, String id) {
-    return reads(type, id, () -> headProject(type, id));
+    return ReadFilter.reads(principal, () -> headProject(type, id));
   }
 
   /**
@@ -332,19 +332,7 @@ public final class SyncRpcServer {
    */
   private boolean admits(String type, String id, MainReplica.State version) {
     return version.snapshot() == null
-        || reads(
-            type,
-            id,
-            () -> changeLog == null ? null : changeLog.projectOf(type, id, version.snapshot()));
-  }
-
-  /**
-   * Whether the session's FDE may read row {@code id} of {@code type} filed under the project
-   * {@code project} names, asked only of a scoped session ({@link Access#reads}): A5, a box
-   * receives a row only when its person may read it.
-   */
-  private boolean reads(String type, String id, Supplier<String> project) {
-    return Access.reads(principal, SyncedEntities.require(type).kind(), id, project);
+        || ReadFilter.reads(principal, () -> changeLog.projectOf(type, id, version.snapshot()));
   }
 
   /** The project main's head of {@code id} carries, null when unknown or main keeps no journal. */
@@ -630,10 +618,10 @@ public final class SyncRpcServer {
    * One page of {@code pull.type()}'s change log after {@code pull.since()}: the heads in seq
    * order, each read as its current row, until {@code limit} entries or the frame is full. {@code
    * next} is the last seq included, so the node checkpoints exactly what it has seen. A head the
-   * session's FDE may not read ({@link #reads}) is passed over by its head alone, no row read, and
-   * {@code next} moves past it all the same: a scoped node's checkpoint reaches main's tip having
-   * seen only its own projects, and a page may be empty yet not the last. The whole page is read as
-   * one snapshot of main, so it is internally consistent and no writer waits on it.
+   * session's FDE may not read ({@link ReadFilter}) is passed over by its head alone, no row read,
+   * and {@code next} moves past it all the same: a scoped node's checkpoint reaches main's tip
+   * having seen only its own projects, and a page may be empty yet not the last. The whole page is
+   * read as one snapshot of main, so it is internally consistent and no writer waits on it.
    */
   private SyncWire.Response page(SyncWire.Pull pull, int frame) {
     var main = replicas.get(pull.type());
@@ -652,7 +640,7 @@ public final class SyncRpcServer {
     var entries = new ArrayList<SyncWire.Entry>();
     var next = pull.since();
     for (var head : heads.after(pull.type(), pull.since(), pull.limit())) {
-      if (!reads(pull.type(), head.entityId(), head::project)) {
+      if (!ReadFilter.reads(principal, head::project)) {
         next = head.seq();
         continue;
       }

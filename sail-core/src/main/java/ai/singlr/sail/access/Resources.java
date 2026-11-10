@@ -106,15 +106,6 @@ public final class Resources {
         Strings.isBlank(specId) ? null : named(specId, project, null));
   }
 
-  /**
-   * Row {@code id} of {@code kind}, filed under {@code project}, as a read decides it from the
-   * row's head alone: a list builds one per row from what the row carries and looks up no owner,
-   * since Read asks none ({@link Policy}). Every other action is decided on its kind's own factory.
-   */
-  public static Resource filed(Resource.Kind kind, String id, String project) {
-    return new Resource(kind, id, project, List.of(), null, null);
-  }
-
   /** Project {@code name}, filed under itself: its creator's ({@code projects.created_by}). */
   public static Resource project(String name, String createdBy) {
     return new Resource(Resource.Kind.PROJECT, name, name, one(createdBy), null, null);

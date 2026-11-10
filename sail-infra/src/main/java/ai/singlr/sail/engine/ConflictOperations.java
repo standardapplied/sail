@@ -5,10 +5,9 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
-import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.api.Resolution;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
@@ -68,12 +67,8 @@ public final class ConflictOperations {
    */
   private List<SyncConflicts.Conflict> readable() {
     var changes = new ChangeLog(db);
-    return Refusals.readable(
-        Actor.reader(),
-        conflicts.pending(),
-        Resource.Kind.PROJECT,
-        conflict -> projectOf(changes, conflict),
-        conflict -> projectOf(changes, conflict));
+    return ReadFilter.readable(
+        Actor.reader(), conflicts.pending(), conflict -> projectOf(changes, conflict));
   }
 
   /**

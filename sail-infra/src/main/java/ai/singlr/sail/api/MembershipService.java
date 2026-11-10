@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Engagement;
@@ -103,12 +103,7 @@ public final class MembershipService {
    */
   private static RoomStore.RoomRow readable(RoomStore store, String roomId) {
     var held = store == null ? Optional.<RoomStore.RoomRow>empty() : store.findById(roomId);
-    return Refusals.readable(
-            Actor.reader(),
-            held,
-            Resource.Kind.ROOM,
-            RoomStore.RoomRow::id,
-            RoomStore.RoomRow::project)
+    return ReadFilter.readable(Actor.reader(), held, RoomStore.RoomRow::project)
         .orElseThrow(() -> Refusals.roomNotFound(roomId));
   }
 
@@ -123,21 +118,9 @@ public final class MembershipService {
         store == null
             ? Optional.<RoomStore.RoomRow>empty()
             : store.findById(spec.roomIdOrIdentity());
-    if (Refusals.readable(
-                reader,
-                Optional.of(spec),
-                Resource.Kind.SPEC,
-                SpecStore.SpecRow::id,
-                SpecStore.SpecRow::project)
-            .isEmpty()
+    if (ReadFilter.readable(reader, Optional.of(spec), SpecStore.SpecRow::project).isEmpty()
         || (room.isPresent()
-            && Refusals.readable(
-                    reader,
-                    room,
-                    Resource.Kind.ROOM,
-                    RoomStore.RoomRow::id,
-                    RoomStore.RoomRow::project)
-                .isEmpty())) {
+            && ReadFilter.readable(reader, room, RoomStore.RoomRow::project).isEmpty())) {
       throw Refusals.roomNotFound(spec.id());
     }
     return spec;

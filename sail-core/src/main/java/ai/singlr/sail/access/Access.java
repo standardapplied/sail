@@ -13,7 +13,6 @@ import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.identity.ProjectScope;
 import java.util.EnumSet;
 import java.util.Set;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -105,25 +104,12 @@ public final class Access {
 
   /**
    * The projects whose resources {@code actor} may read: the audience step of {@link #decide} as a
-   * scope, every project for Sail itself. A read that filters many rows inside one query, rather
-   * than deciding each row in hand, filters by this scope, so the Read rule is the same whichever
-   * way it is asked.
+   * scope, every project for Sail itself. Rows in hand are read through {@link ReadFilter}, and a
+   * read that filters many rows inside one query filters by this scope, so the Read rule is the
+   * same whichever way it is asked.
    */
   public static ProjectScope audience(Actor actor) {
     return actor.isSail() ? ProjectScope.all() : actor.scope();
-  }
-
-  /**
-   * Whether {@code actor} may read row {@code id} of {@code kind}, filed under the project {@code
-   * project} names: {@link Action#READ} of the row as it is filed ({@link Resources#filed}). The
-   * project is asked only when the actor's audience is restricted: working it out may cost a query,
-   * and no project hides a row from an unrestricted reader, so a list read by one adds no query per
-   * row.
-   */
-  public static boolean reads(
-      Actor actor, Resource.Kind kind, String id, Supplier<String> project) {
-    var filed = audience(actor).unrestricted() ? null : project.get();
-    return decide(actor, Action.READ, Resources.filed(kind, id, filed)) instanceof Decision.Allowed;
   }
 
   /**

@@ -7,9 +7,8 @@ package ai.singlr.sail.authority;
 
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
-import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.access.Refusal;
-import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
@@ -84,7 +83,7 @@ public final class ScopeRule {
    */
   public Optional<Refusal> decide(
       Actor actor, String id, Map<String, Object> held, Map<String, Object> next) {
-    if (held != null && !reads(actor, changeLog.filed(type, id, held))) {
+    if (held != null && !ReadFilter.reads(actor, () -> changeLog.filed(type, id, held))) {
       return taken(id);
     }
     var project = changeLog.projectOf(type, id, next);
@@ -139,7 +138,7 @@ public final class ScopeRule {
         ROOM.equals(of)
             ? changeLog.conversationProject(named)
             : changeLog.headProject(of, named).orElse(null);
-    return project != null && !reads(actor, project);
+    return project != null && !ReadFilter.reads(actor, () -> project);
   }
 
   /**
@@ -153,7 +152,7 @@ public final class ScopeRule {
       return unplaced(named(type, id));
     }
     return changeLog.head(type, id).isEmpty()
-            || reads(actor, changeLog.headProject(type, id).orElse(null))
+            || ReadFilter.reads(actor, () -> changeLog.headProject(type, id).orElse(null))
         ? Optional.empty()
         : taken(id);
   }
@@ -163,16 +162,8 @@ public final class ScopeRule {
    * audience.
    */
   private static boolean inside(Actor actor, String project, Map<String, Object> next) {
-    return reads(actor, project) || (project == null && Snapshots.isDeletion(next));
-  }
-
-  /**
-   * Whether {@code actor} reads what is filed under {@code project}, null for none: the audience
-   * step of {@link Access}, asked of the project itself, which every row it files shares.
-   */
-  static boolean reads(Actor actor, String project) {
-    return !(Access.decide(actor, Action.READ, Resources.project(project, null))
-        instanceof Decision.NotFound);
+    return ReadFilter.reads(actor, () -> project)
+        || (project == null && Snapshots.isDeletion(next));
   }
 
   /**

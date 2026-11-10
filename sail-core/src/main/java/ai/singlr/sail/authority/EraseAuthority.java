@@ -8,6 +8,7 @@ package ai.singlr.sail.authority;
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
@@ -114,7 +115,7 @@ public final class EraseAuthority {
    * head carries, which outlives the row and its erasure.
    */
   private boolean sees(Actor actor, String type, String id) {
-    return ScopeRule.reads(actor, changeLog.headProject(type, id).orElse(null));
+    return ReadFilter.reads(actor, () -> changeLog.headProject(type, id).orElse(null));
   }
 
   /**

@@ -20,27 +20,19 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 /**
- * Every decision reaches a client as its door's answer: a refusal as the code it has always seen, a
- * resource it may not read as the door's not-found, and a row it may not read as no row at all.
+ * Every decision reaches a client as its door's answer: a refusal as the code it has always seen,
+ * and a resource it may not read as the door's not-found.
  */
 class RefusalsTest {
 
-  private static final Actor UNRESTRICTED = new Actor("ada", Role.ADMIN, Actor.Lane.API);
   private static final Actor OF_ALPHA =
       new Actor("sam", Role.ADMIN, Actor.Lane.API).withScope(ProjectScope.of(List.of("alpha")));
-  private static final Actor OF_NOTHING =
-      new Actor("nia", Role.ADMIN, Actor.Lane.API).withScope(ProjectScope.none());
   private static final Actor VIEWER_OF_ALPHA =
       new Actor("vic", Role.VIEWER, Actor.Lane.API).withScope(ProjectScope.of(List.of("alpha")));
-
-  /** The project of each row id; a row the map does not hold is of no known project. */
-  private static final Function<String, String> PROJECT =
-      Map.of("a1", "alpha", "a2", "alpha", "b1", "bravo")::get;
 
   private static final Resource BRAVO = Resources.project("bravo", null);
   private static final Resource ALPHA = Resources.project("alpha", null);
@@ -82,37 +74,6 @@ class RefusalsTest {
   }
 
   @Test
-  void aScopedActorIsHandedTheRowsOfItsProjectsInTheirOrder() {
-    var rows = List.of("b1", "a2", "unplaced", "a1");
-
-    assertEquals(
-        List.of("a2", "a1"),
-        Refusals.readable(OF_ALPHA, rows, Resource.Kind.SPEC, Function.identity(), PROJECT));
-    assertEquals(
-        List.of(),
-        Refusals.readable(OF_NOTHING, rows, Resource.Kind.SPEC, Function.identity(), PROJECT));
-    assertEquals(
-        rows,
-        Refusals.readable(UNRESTRICTED, rows, Resource.Kind.SPEC, Function.identity(), PROJECT));
-  }
-
-  @Test
-  void aRowOutsideTheScopeIsARowThatIsNotThere() {
-    assertEquals(Optional.of("a1"), read(OF_ALPHA, Optional.of("a1")));
-    assertEquals(Optional.empty(), read(OF_ALPHA, Optional.of("b1")));
-    assertEquals(Optional.empty(), read(OF_ALPHA, Optional.of("unplaced")));
-    assertEquals(Optional.empty(), read(OF_ALPHA, Optional.empty()));
-    assertEquals(Optional.empty(), read(OF_NOTHING, Optional.of("a1")));
-  }
-
-  @Test
-  void anUnrestrictedActorIsHandedEveryRowEvenOneOfNoKnownProject() {
-    assertEquals(Optional.of("b1"), read(UNRESTRICTED, Optional.of("b1")));
-    assertEquals(Optional.of("unplaced"), read(UNRESTRICTED, Optional.of("unplaced")));
-    assertEquals(Optional.empty(), read(UNRESTRICTED, Optional.empty()));
-  }
-
-  @Test
   void anActionOnWhatTheCallerMayNotReadIsTheDoorsOwnNotFound() {
     var absent = new ApiException(ErrorCode.PROJECT_NOT_IN_CATALOG, "Project 'bravo' is gone.");
 
@@ -134,26 +95,5 @@ class RefusalsTest {
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, thrown.failure().errorCode());
     assertEquals("Your credential is read-only and cannot serve projects.", thrown.getMessage());
     Refusals.require(OF_ALPHA, Action.SERVE, ALPHA, () -> null);
-  }
-
-  @Test
-  void anUnrestrictedReadNeverAsksTheProject() {
-    var rows = List.of("b1", "unplaced");
-    Function<String, String> neverAsked =
-        row -> {
-          throw new AssertionError("an unrestricted read asked the project of " + row);
-        };
-
-    assertEquals(
-        rows,
-        Refusals.readable(UNRESTRICTED, rows, Resource.Kind.SPEC, Function.identity(), neverAsked));
-    assertEquals(
-        Optional.of("b1"),
-        Refusals.readable(
-            UNRESTRICTED, Optional.of("b1"), Resource.Kind.SPEC, Function.identity(), neverAsked));
-  }
-
-  private static Optional<String> read(Actor actor, Optional<String> row) {
-    return Refusals.readable(actor, row, Resource.Kind.SPEC, Function.identity(), PROJECT);
   }
 }

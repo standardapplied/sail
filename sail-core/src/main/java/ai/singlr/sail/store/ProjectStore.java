@@ -5,9 +5,8 @@
 
 package ai.singlr.sail.store;
 
-import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
-import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.WriteAuthority;
@@ -253,7 +252,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     }
     var visible =
         list().stream()
-            .filter(project -> reads(actor, project))
+            .filter(project -> ReadFilter.reads(actor, project::name))
             .map(ProjectRow::name)
             .filter(granted::admits)
             .toList();
@@ -269,11 +268,6 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
             + (visible.isEmpty() ? "none" : String.join(", ", visible))
             + ".",
         scoped ? ungranted(handle, nextProject) : Remedy.NONE);
-  }
-
-  private static boolean reads(Actor actor, ProjectRow project) {
-    var resource = Resources.project(project.name(), project.createdBy());
-    return Access.decide(actor, Action.READ, resource) instanceof Decision.Allowed;
   }
 
   /**

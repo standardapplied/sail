@@ -6,7 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Action;
-import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecStatus;
@@ -200,12 +200,7 @@ public final class StopOperations {
 
   private Outcome stopRun(String runId, String localHandle, boolean dryRun) {
     var run =
-        Refusals.readable(
-                Actor.reader(),
-                runStore.findById(runId),
-                Resource.Kind.RUN,
-                RunStore.RunRow::id,
-                RunStore.RunRow::project)
+        ReadFilter.readable(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project)
             .orElseThrow(() -> noRun(runId));
     authorize(run, dryRun);
     if (!run.ownedBy(localHandle)) {
@@ -599,8 +594,7 @@ public final class StopOperations {
    * owns that spec now.
    */
   static Optional<String> ownerSeen(Actor reader, Optional<SpecStore.SpecRow> spec) {
-    return Refusals.readable(
-            reader, spec, Resource.Kind.SPEC, SpecStore.SpecRow::id, SpecStore.SpecRow::project)
+    return ReadFilter.readable(reader, spec, SpecStore.SpecRow::project)
         .map(SpecStore.SpecRow::owner);
   }
 

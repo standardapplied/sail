@@ -14,7 +14,6 @@ import static ai.singlr.sail.access.AccessTest.Outcome.READ_ONLY;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.authority.Actors;
 import ai.singlr.sail.common.Remedy;
@@ -27,7 +26,6 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -504,26 +502,6 @@ class AccessTest {
   }
 
   @Test
-  void aRowIsReadByWhereItIsFiledWhichOnlyARestrictedReaderAsks() {
-    var acme = Actors.VIEWER.withScope(ProjectScope.of(List.of("acme")));
-    var asked = new ArrayList<String>();
-    Supplier<String> beta =
-        () -> {
-          asked.add("beta");
-          return "beta";
-        };
-
-    assertTrue(Access.reads(Actors.VIEWER, Resource.Kind.REVIEW, "rv-1", beta));
-    assertTrue(
-        Access.reads(
-            Actors.SYSTEM.withScope(ProjectScope.none()), Resource.Kind.REVIEW, "rv-1", beta));
-    assertEquals(List.of(), asked, "an unrestricted reader is never asked where a row is filed");
-    assertFalse(Access.reads(acme, Resource.Kind.REVIEW, "rv-1", beta));
-    assertTrue(Access.reads(acme, Resource.Kind.REVIEW, "rv-2", () -> "acme"));
-    assertEquals(List.of("beta"), asked);
-  }
-
-  @Test
   void aReviewOfASpecNoOneOwnsIsAnAdminsToApprove() {
     assertEquals(
         refused(
@@ -677,18 +655,6 @@ class AccessTest {
         Access.decide(
             Actors.ADMIN.withScope(ProjectScope.of(List.of("acme"))), Action.READ, placeless));
     assertEquals(new Decision.Allowed(), Access.decide(Actors.VIEWER, Action.READ, placeless));
-  }
-
-  @Test
-  void aRowAsAReadDecidesItIsWhereItIsFiledAndNoOnesToOwn() {
-    var review = Resources.filed(Resource.Kind.REVIEW, "rv-1", "beta");
-
-    assertEquals(new Resource(Resource.Kind.REVIEW, "rv-1", "beta", List.of(), null, null), review);
-    assertEquals(new Decision.Allowed(), Access.decide(Actors.VIEWER, Action.READ, review));
-    assertEquals(
-        new Decision.NotFound(),
-        Access.decide(
-            Actors.VIEWER.withScope(ProjectScope.of(List.of("acme"))), Action.READ, review));
   }
 
   @Test
