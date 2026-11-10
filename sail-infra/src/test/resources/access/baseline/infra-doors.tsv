@@ -2817,9 +2817,9 @@ list specs of omega as room viewer ada-room beta	denied PROJECT_NOT_IN_CATALOG 4
 list specs of omega as room viewer bob-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 list specs of omega as room viewer bob-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 list specs of omega as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
-pin a terminal to attic as cli admin root all	failed IOException Room 'attic' was not found.
-pin a terminal to attic as cli member ada all	failed IOException Room 'attic' was not found.
-pin a terminal to attic as cli member bob all	failed IOException Room 'attic' was not found.
+pin a terminal to attic as cli admin root all	denied IOException Room 'attic' was not found. | 
+pin a terminal to attic as cli member ada all	denied IOException Room 'attic' was not found. | 
+pin a terminal to attic as cli member bob all	denied IOException Room 'attic' was not found. | 
 pin a terminal to b-room as cli admin root all	ok admitted
 pin a terminal to b-room as cli member ada all	ok admitted
 pin a terminal to b-room as cli member bob all	ok admitted

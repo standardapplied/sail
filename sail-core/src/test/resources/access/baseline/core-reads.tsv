@@ -8,7 +8,6 @@ pull file acme/notes.md to sync member bob beta	withheld
 pull file acme/notes.md to sync viewer ada acme	received REVISION
 pull file acme/notes.md to sync viewer ada all	received REVISION
 pull file acme/notes.md to sync viewer ada beta	withheld
-pull file acme/notes.md to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull file acme/notes.md to sync viewer bob acme	received REVISION
 pull file acme/notes.md to sync viewer bob all	received REVISION
 pull file acme/notes.md to sync viewer bob beta	withheld
@@ -22,7 +21,6 @@ pull file beta/notes.md to sync member bob beta	received REVISION
 pull file beta/notes.md to sync viewer ada acme	withheld
 pull file beta/notes.md to sync viewer ada all	received REVISION
 pull file beta/notes.md to sync viewer ada beta	received REVISION
-pull file beta/notes.md to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull file beta/notes.md to sync viewer bob acme	withheld
 pull file beta/notes.md to sync viewer bob all	received REVISION
 pull file beta/notes.md to sync viewer bob beta	received REVISION
@@ -36,7 +34,6 @@ pull message msg(b-room by ada) to sync member bob beta	received REVISION
 pull message msg(b-room by ada) to sync viewer ada acme	withheld
 pull message msg(b-room by ada) to sync viewer ada all	received REVISION
 pull message msg(b-room by ada) to sync viewer ada beta	received REVISION
-pull message msg(b-room by ada) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(b-room by ada) to sync viewer bob acme	withheld
 pull message msg(b-room by ada) to sync viewer bob all	received REVISION
 pull message msg(b-room by ada) to sync viewer bob beta	received REVISION
@@ -50,7 +47,6 @@ pull message msg(b-room by bob) to sync member bob beta	received REVISION
 pull message msg(b-room by bob) to sync viewer ada acme	withheld
 pull message msg(b-room by bob) to sync viewer ada all	received REVISION
 pull message msg(b-room by bob) to sync viewer ada beta	received REVISION
-pull message msg(b-room by bob) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(b-room by bob) to sync viewer bob acme	withheld
 pull message msg(b-room by bob) to sync viewer bob all	received REVISION
 pull message msg(b-room by bob) to sync viewer bob beta	received REVISION
@@ -64,7 +60,6 @@ pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync 
 pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada acme	withheld
 pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada all	received REVISION
 pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada beta	received REVISION
-pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob acme	withheld
 pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob all	received REVISION
 pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob beta	received REVISION
@@ -78,7 +73,6 @@ pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync 
 pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada acme	withheld
 pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada all	received REVISION
 pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada beta	received REVISION
-pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob acme	withheld
 pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob all	received REVISION
 pull message msg(b-room by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob beta	received REVISION
@@ -92,7 +86,6 @@ pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to 
 pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada acme	withheld
 pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada all	received REVISION
 pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada beta	received REVISION
-pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob acme	withheld
 pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob all	received REVISION
 pull message msg(b-room by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob beta	received REVISION
@@ -106,7 +99,6 @@ pull message msg(b-room by root) to sync member bob beta	received REVISION
 pull message msg(b-room by root) to sync viewer ada acme	withheld
 pull message msg(b-room by root) to sync viewer ada all	received REVISION
 pull message msg(b-room by root) to sync viewer ada beta	received REVISION
-pull message msg(b-room by root) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(b-room by root) to sync viewer bob acme	withheld
 pull message msg(b-room by root) to sync viewer bob all	received REVISION
 pull message msg(b-room by root) to sync viewer bob beta	received REVISION
@@ -120,7 +112,6 @@ pull message msg(b-room by sail) to sync member bob beta	received REVISION
 pull message msg(b-room by sail) to sync viewer ada acme	withheld
 pull message msg(b-room by sail) to sync viewer ada all	received REVISION
 pull message msg(b-room by sail) to sync viewer ada beta	received REVISION
-pull message msg(b-room by sail) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(b-room by sail) to sync viewer bob acme	withheld
 pull message msg(b-room by sail) to sync viewer bob all	received REVISION
 pull message msg(b-room by sail) to sync viewer bob beta	received REVISION
@@ -134,7 +125,6 @@ pull message msg(den by ada) to sync member bob beta	withheld
 pull message msg(den by ada) to sync viewer ada acme	received REVISION
 pull message msg(den by ada) to sync viewer ada all	received REVISION
 pull message msg(den by ada) to sync viewer ada beta	withheld
-pull message msg(den by ada) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(den by ada) to sync viewer bob acme	received REVISION
 pull message msg(den by ada) to sync viewer bob all	received REVISION
 pull message msg(den by ada) to sync viewer bob beta	withheld
@@ -148,7 +138,6 @@ pull message msg(den by bob) to sync member bob beta	withheld
 pull message msg(den by bob) to sync viewer ada acme	received REVISION
 pull message msg(den by bob) to sync viewer ada all	received REVISION
 pull message msg(den by bob) to sync viewer ada beta	withheld
-pull message msg(den by bob) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(den by bob) to sync viewer bob acme	received REVISION
 pull message msg(den by bob) to sync viewer bob all	received REVISION
 pull message msg(den by bob) to sync viewer bob beta	withheld
@@ -162,7 +151,6 @@ pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync mem
 pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada acme	received REVISION
 pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada all	received REVISION
 pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada beta	withheld
-pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob acme	received REVISION
 pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob all	received REVISION
 pull message msg(den by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob beta	withheld
@@ -176,7 +164,6 @@ pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync mem
 pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada acme	received REVISION
 pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada all	received REVISION
 pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada beta	withheld
-pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob acme	received REVISION
 pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob all	received REVISION
 pull message msg(den by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob beta	withheld
@@ -190,7 +177,6 @@ pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to syn
 pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada acme	received REVISION
 pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada all	received REVISION
 pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada beta	withheld
-pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob acme	received REVISION
 pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob all	received REVISION
 pull message msg(den by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob beta	withheld
@@ -204,7 +190,6 @@ pull message msg(den by root) to sync member bob beta	withheld
 pull message msg(den by root) to sync viewer ada acme	received REVISION
 pull message msg(den by root) to sync viewer ada all	received REVISION
 pull message msg(den by root) to sync viewer ada beta	withheld
-pull message msg(den by root) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(den by root) to sync viewer bob acme	received REVISION
 pull message msg(den by root) to sync viewer bob all	received REVISION
 pull message msg(den by root) to sync viewer bob beta	withheld
@@ -218,7 +203,6 @@ pull message msg(den by sail) to sync member bob beta	withheld
 pull message msg(den by sail) to sync viewer ada acme	received REVISION
 pull message msg(den by sail) to sync viewer ada all	received REVISION
 pull message msg(den by sail) to sync viewer ada beta	withheld
-pull message msg(den by sail) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(den by sail) to sync viewer bob acme	received REVISION
 pull message msg(den by sail) to sync viewer bob all	received REVISION
 pull message msg(den by sail) to sync viewer bob beta	withheld
@@ -232,7 +216,6 @@ pull message msg(lobby by ada) to sync member bob beta	withheld
 pull message msg(lobby by ada) to sync viewer ada acme	received REVISION
 pull message msg(lobby by ada) to sync viewer ada all	received REVISION
 pull message msg(lobby by ada) to sync viewer ada beta	withheld
-pull message msg(lobby by ada) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(lobby by ada) to sync viewer bob acme	received REVISION
 pull message msg(lobby by ada) to sync viewer bob all	received REVISION
 pull message msg(lobby by ada) to sync viewer bob beta	withheld
@@ -246,7 +229,6 @@ pull message msg(lobby by bob) to sync member bob beta	withheld
 pull message msg(lobby by bob) to sync viewer ada acme	received REVISION
 pull message msg(lobby by bob) to sync viewer ada all	received REVISION
 pull message msg(lobby by bob) to sync viewer ada beta	withheld
-pull message msg(lobby by bob) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(lobby by bob) to sync viewer bob acme	received REVISION
 pull message msg(lobby by bob) to sync viewer bob all	received REVISION
 pull message msg(lobby by bob) to sync viewer bob beta	withheld
@@ -260,7 +242,6 @@ pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync m
 pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada acme	received REVISION
 pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada all	received REVISION
 pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada beta	withheld
-pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob acme	received REVISION
 pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob all	received REVISION
 pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob beta	withheld
@@ -274,7 +255,6 @@ pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync m
 pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada acme	received REVISION
 pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada all	received REVISION
 pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada beta	withheld
-pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob acme	received REVISION
 pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob all	received REVISION
 pull message msg(lobby by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob beta	withheld
@@ -288,7 +268,6 @@ pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to s
 pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada acme	received REVISION
 pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada all	received REVISION
 pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada beta	withheld
-pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob acme	received REVISION
 pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob all	received REVISION
 pull message msg(lobby by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob beta	withheld
@@ -302,7 +281,6 @@ pull message msg(lobby by root) to sync member bob beta	withheld
 pull message msg(lobby by root) to sync viewer ada acme	received REVISION
 pull message msg(lobby by root) to sync viewer ada all	received REVISION
 pull message msg(lobby by root) to sync viewer ada beta	withheld
-pull message msg(lobby by root) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(lobby by root) to sync viewer bob acme	received REVISION
 pull message msg(lobby by root) to sync viewer bob all	received REVISION
 pull message msg(lobby by root) to sync viewer bob beta	withheld
@@ -316,7 +294,6 @@ pull message msg(lobby by sail) to sync member bob beta	withheld
 pull message msg(lobby by sail) to sync viewer ada acme	received REVISION
 pull message msg(lobby by sail) to sync viewer ada all	received REVISION
 pull message msg(lobby by sail) to sync viewer ada beta	withheld
-pull message msg(lobby by sail) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(lobby by sail) to sync viewer bob acme	received REVISION
 pull message msg(lobby by sail) to sync viewer bob all	received REVISION
 pull message msg(lobby by sail) to sync viewer bob beta	withheld
@@ -330,7 +307,6 @@ pull message msg(s-ada by ada) to sync member bob beta	withheld
 pull message msg(s-ada by ada) to sync viewer ada acme	received REVISION
 pull message msg(s-ada by ada) to sync viewer ada all	received REVISION
 pull message msg(s-ada by ada) to sync viewer ada beta	withheld
-pull message msg(s-ada by ada) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(s-ada by ada) to sync viewer bob acme	received REVISION
 pull message msg(s-ada by ada) to sync viewer bob all	received REVISION
 pull message msg(s-ada by ada) to sync viewer bob beta	withheld
@@ -344,7 +320,6 @@ pull message msg(s-ada by bob) to sync member bob beta	withheld
 pull message msg(s-ada by bob) to sync viewer ada acme	received REVISION
 pull message msg(s-ada by bob) to sync viewer ada all	received REVISION
 pull message msg(s-ada by bob) to sync viewer ada beta	withheld
-pull message msg(s-ada by bob) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(s-ada by bob) to sync viewer bob acme	received REVISION
 pull message msg(s-ada by bob) to sync viewer bob all	received REVISION
 pull message msg(s-ada by bob) to sync viewer bob beta	withheld
@@ -358,7 +333,6 @@ pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync m
 pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada acme	received REVISION
 pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada all	received REVISION
 pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer ada beta	withheld
-pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob acme	received REVISION
 pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob all	received REVISION
 pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000ada01) to sync viewer bob beta	withheld
@@ -372,7 +346,6 @@ pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync m
 pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada acme	received REVISION
 pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada all	received REVISION
 pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer ada beta	withheld
-pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob acme	received REVISION
 pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob all	received REVISION
 pull message msg(s-ada by claude/019fee00-0000-7000-8000-0000000b0b01) to sync viewer bob beta	withheld
@@ -386,7 +359,6 @@ pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to s
 pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada acme	received REVISION
 pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada all	received REVISION
 pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer ada beta	withheld
-pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob acme	received REVISION
 pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob all	received REVISION
 pull message msg(s-ada by claude/room-019fee00-0000-7000-8000-0000000ada02) to sync viewer bob beta	withheld
@@ -400,7 +372,6 @@ pull message msg(s-ada by root) to sync member bob beta	withheld
 pull message msg(s-ada by root) to sync viewer ada acme	received REVISION
 pull message msg(s-ada by root) to sync viewer ada all	received REVISION
 pull message msg(s-ada by root) to sync viewer ada beta	withheld
-pull message msg(s-ada by root) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(s-ada by root) to sync viewer bob acme	received REVISION
 pull message msg(s-ada by root) to sync viewer bob all	received REVISION
 pull message msg(s-ada by root) to sync viewer bob beta	withheld
@@ -414,7 +385,6 @@ pull message msg(s-ada by sail) to sync member bob beta	withheld
 pull message msg(s-ada by sail) to sync viewer ada acme	received REVISION
 pull message msg(s-ada by sail) to sync viewer ada all	received REVISION
 pull message msg(s-ada by sail) to sync viewer ada beta	withheld
-pull message msg(s-ada by sail) to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull message msg(s-ada by sail) to sync viewer bob acme	received REVISION
 pull message msg(s-ada by sail) to sync viewer bob all	received REVISION
 pull message msg(s-ada by sail) to sync viewer bob beta	withheld
@@ -428,7 +398,6 @@ pull project acme to sync member bob beta	withheld
 pull project acme to sync viewer ada acme	received REVISION
 pull project acme to sync viewer ada all	received REVISION
 pull project acme to sync viewer ada beta	withheld
-pull project acme to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull project acme to sync viewer bob acme	received REVISION
 pull project acme to sync viewer bob all	received REVISION
 pull project acme to sync viewer bob beta	withheld
@@ -442,7 +411,6 @@ pull project beta to sync member bob beta	received REVISION
 pull project beta to sync viewer ada acme	withheld
 pull project beta to sync viewer ada all	received REVISION
 pull project beta to sync viewer ada beta	received REVISION
-pull project beta to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull project beta to sync viewer bob acme	withheld
 pull project beta to sync viewer bob all	received REVISION
 pull project beta to sync viewer bob beta	received REVISION
@@ -456,7 +424,6 @@ pull project delta to sync member bob beta	withheld
 pull project delta to sync viewer ada acme	withheld
 pull project delta to sync viewer ada all	received REVISION
 pull project delta to sync viewer ada beta	withheld
-pull project delta to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull project delta to sync viewer bob acme	withheld
 pull project delta to sync viewer bob all	received REVISION
 pull project delta to sync viewer bob beta	withheld
@@ -470,7 +437,6 @@ pull review review-ada to sync member bob beta	withheld
 pull review review-ada to sync viewer ada acme	received REVISION
 pull review review-ada to sync viewer ada all	received REVISION
 pull review review-ada to sync viewer ada beta	withheld
-pull review review-ada to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull review review-ada to sync viewer bob acme	received REVISION
 pull review review-ada to sync viewer bob all	received REVISION
 pull review review-ada to sync viewer bob beta	withheld
@@ -484,7 +450,6 @@ pull review review-bob to sync member bob beta	withheld
 pull review review-bob to sync viewer ada acme	received REVISION
 pull review review-bob to sync viewer ada all	received REVISION
 pull review review-bob to sync viewer ada beta	withheld
-pull review review-bob to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull review review-bob to sync viewer bob acme	received REVISION
 pull review review-bob to sync viewer bob all	received REVISION
 pull review review-bob to sync viewer bob beta	withheld
@@ -498,7 +463,6 @@ pull room attic to sync member bob beta	withheld
 pull room attic to sync viewer ada acme	received TOMBSTONE
 pull room attic to sync viewer ada all	received TOMBSTONE
 pull room attic to sync viewer ada beta	withheld
-pull room attic to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull room attic to sync viewer bob acme	received TOMBSTONE
 pull room attic to sync viewer bob all	received TOMBSTONE
 pull room attic to sync viewer bob beta	withheld
@@ -512,7 +476,6 @@ pull room b-room to sync member bob beta	received REVISION
 pull room b-room to sync viewer ada acme	withheld
 pull room b-room to sync viewer ada all	received REVISION
 pull room b-room to sync viewer ada beta	received REVISION
-pull room b-room to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull room b-room to sync viewer bob acme	withheld
 pull room b-room to sync viewer bob all	received REVISION
 pull room b-room to sync viewer bob beta	received REVISION
@@ -526,7 +489,6 @@ pull room den to sync member bob beta	withheld
 pull room den to sync viewer ada acme	received REVISION
 pull room den to sync viewer ada all	received REVISION
 pull room den to sync viewer ada beta	withheld
-pull room den to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull room den to sync viewer bob acme	received REVISION
 pull room den to sync viewer bob all	received REVISION
 pull room den to sync viewer bob beta	withheld
@@ -540,7 +502,6 @@ pull room hall to sync member bob beta	withheld
 pull room hall to sync viewer ada acme	received REVISION
 pull room hall to sync viewer ada all	received REVISION
 pull room hall to sync viewer ada beta	withheld
-pull room hall to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull room hall to sync viewer bob acme	received REVISION
 pull room hall to sync viewer bob all	received REVISION
 pull room hall to sync viewer bob beta	withheld
@@ -554,7 +515,6 @@ pull room lobby to sync member bob beta	withheld
 pull room lobby to sync viewer ada acme	received REVISION
 pull room lobby to sync viewer ada all	received REVISION
 pull room lobby to sync viewer ada beta	withheld
-pull room lobby to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull room lobby to sync viewer bob acme	received REVISION
 pull room lobby to sync viewer bob all	received REVISION
 pull room lobby to sync viewer bob beta	withheld
@@ -568,7 +528,6 @@ pull room s-ada to sync member bob beta	withheld
 pull room s-ada to sync viewer ada acme	received REVISION
 pull room s-ada to sync viewer ada all	received REVISION
 pull room s-ada to sync viewer ada beta	withheld
-pull room s-ada to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull room s-ada to sync viewer bob acme	received REVISION
 pull room s-ada to sync viewer bob all	received REVISION
 pull room s-ada to sync viewer bob beta	withheld
@@ -582,7 +541,6 @@ pull run 019fee00-0000-7000-8000-0000000ada01 to sync member bob beta	withheld
 pull run 019fee00-0000-7000-8000-0000000ada01 to sync viewer ada acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada01 to sync viewer ada all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada01 to sync viewer ada beta	withheld
-pull run 019fee00-0000-7000-8000-0000000ada01 to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull run 019fee00-0000-7000-8000-0000000ada01 to sync viewer bob acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada01 to sync viewer bob all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada01 to sync viewer bob beta	withheld
@@ -596,7 +554,6 @@ pull run 019fee00-0000-7000-8000-0000000ada02 to sync member bob beta	withheld
 pull run 019fee00-0000-7000-8000-0000000ada02 to sync viewer ada acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada02 to sync viewer ada all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada02 to sync viewer ada beta	withheld
-pull run 019fee00-0000-7000-8000-0000000ada02 to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull run 019fee00-0000-7000-8000-0000000ada02 to sync viewer bob acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada02 to sync viewer bob all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada02 to sync viewer bob beta	withheld
@@ -610,7 +567,6 @@ pull run 019fee00-0000-7000-8000-0000000ada03 to sync member bob beta	withheld
 pull run 019fee00-0000-7000-8000-0000000ada03 to sync viewer ada acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada03 to sync viewer ada all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada03 to sync viewer ada beta	withheld
-pull run 019fee00-0000-7000-8000-0000000ada03 to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull run 019fee00-0000-7000-8000-0000000ada03 to sync viewer bob acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada03 to sync viewer bob all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada03 to sync viewer bob beta	withheld
@@ -624,7 +580,6 @@ pull run 019fee00-0000-7000-8000-0000000ada04 to sync member bob beta	withheld
 pull run 019fee00-0000-7000-8000-0000000ada04 to sync viewer ada acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada04 to sync viewer ada all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada04 to sync viewer ada beta	withheld
-pull run 019fee00-0000-7000-8000-0000000ada04 to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull run 019fee00-0000-7000-8000-0000000ada04 to sync viewer bob acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada04 to sync viewer bob all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada04 to sync viewer bob beta	withheld
@@ -638,7 +593,6 @@ pull run 019fee00-0000-7000-8000-0000000ada05 to sync member bob beta	received R
 pull run 019fee00-0000-7000-8000-0000000ada05 to sync viewer ada acme	withheld
 pull run 019fee00-0000-7000-8000-0000000ada05 to sync viewer ada all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada05 to sync viewer ada beta	received REVISION
-pull run 019fee00-0000-7000-8000-0000000ada05 to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull run 019fee00-0000-7000-8000-0000000ada05 to sync viewer bob acme	withheld
 pull run 019fee00-0000-7000-8000-0000000ada05 to sync viewer bob all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada05 to sync viewer bob beta	received REVISION
@@ -652,7 +606,6 @@ pull run 019fee00-0000-7000-8000-0000000ada06 to sync member bob beta	withheld
 pull run 019fee00-0000-7000-8000-0000000ada06 to sync viewer ada acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada06 to sync viewer ada all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada06 to sync viewer ada beta	withheld
-pull run 019fee00-0000-7000-8000-0000000ada06 to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull run 019fee00-0000-7000-8000-0000000ada06 to sync viewer bob acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada06 to sync viewer bob all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada06 to sync viewer bob beta	withheld
@@ -666,7 +619,6 @@ pull run 019fee00-0000-7000-8000-0000000ada07 to sync member bob beta	withheld
 pull run 019fee00-0000-7000-8000-0000000ada07 to sync viewer ada acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada07 to sync viewer ada all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada07 to sync viewer ada beta	withheld
-pull run 019fee00-0000-7000-8000-0000000ada07 to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull run 019fee00-0000-7000-8000-0000000ada07 to sync viewer bob acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada07 to sync viewer bob all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000ada07 to sync viewer bob beta	withheld
@@ -680,7 +632,6 @@ pull run 019fee00-0000-7000-8000-0000000b0b01 to sync member bob beta	withheld
 pull run 019fee00-0000-7000-8000-0000000b0b01 to sync viewer ada acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000b0b01 to sync viewer ada all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000b0b01 to sync viewer ada beta	withheld
-pull run 019fee00-0000-7000-8000-0000000b0b01 to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull run 019fee00-0000-7000-8000-0000000b0b01 to sync viewer bob acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000b0b01 to sync viewer bob all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000b0b01 to sync viewer bob beta	withheld
@@ -694,7 +645,6 @@ pull run 019fee00-0000-7000-8000-0000000b0b02 to sync member bob beta	withheld
 pull run 019fee00-0000-7000-8000-0000000b0b02 to sync viewer ada acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000b0b02 to sync viewer ada all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000b0b02 to sync viewer ada beta	withheld
-pull run 019fee00-0000-7000-8000-0000000b0b02 to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull run 019fee00-0000-7000-8000-0000000b0b02 to sync viewer bob acme	received REVISION
 pull run 019fee00-0000-7000-8000-0000000b0b02 to sync viewer bob all	received REVISION
 pull run 019fee00-0000-7000-8000-0000000b0b02 to sync viewer bob beta	withheld
@@ -708,7 +658,6 @@ pull spec s-ada to sync member bob beta	withheld
 pull spec s-ada to sync viewer ada acme	received REVISION
 pull spec s-ada to sync viewer ada all	received REVISION
 pull spec s-ada to sync viewer ada beta	withheld
-pull spec s-ada to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull spec s-ada to sync viewer bob acme	received REVISION
 pull spec s-ada to sync viewer bob all	received REVISION
 pull spec s-ada to sync viewer bob beta	withheld
@@ -722,7 +671,6 @@ pull spec s-archived to sync member bob beta	withheld
 pull spec s-archived to sync viewer ada acme	received REVISION
 pull spec s-archived to sync viewer ada all	received REVISION
 pull spec s-archived to sync viewer ada beta	withheld
-pull spec s-archived to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull spec s-archived to sync viewer bob acme	received REVISION
 pull spec s-archived to sync viewer bob all	received REVISION
 pull spec s-archived to sync viewer bob beta	withheld
@@ -736,7 +684,6 @@ pull spec s-archived-bob to sync member bob beta	withheld
 pull spec s-archived-bob to sync viewer ada acme	received REVISION
 pull spec s-archived-bob to sync viewer ada all	received REVISION
 pull spec s-archived-bob to sync viewer ada beta	withheld
-pull spec s-archived-bob to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull spec s-archived-bob to sync viewer bob acme	received REVISION
 pull spec s-archived-bob to sync viewer bob all	received REVISION
 pull spec s-archived-bob to sync viewer bob beta	withheld
@@ -750,7 +697,6 @@ pull spec s-archived-busy to sync member bob beta	withheld
 pull spec s-archived-busy to sync viewer ada acme	received REVISION
 pull spec s-archived-busy to sync viewer ada all	received REVISION
 pull spec s-archived-busy to sync viewer ada beta	withheld
-pull spec s-archived-busy to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull spec s-archived-busy to sync viewer bob acme	received REVISION
 pull spec s-archived-busy to sync viewer bob all	received REVISION
 pull spec s-archived-busy to sync viewer bob beta	withheld
@@ -764,7 +710,6 @@ pull spec s-beta to sync member bob beta	received REVISION
 pull spec s-beta to sync viewer ada acme	withheld
 pull spec s-beta to sync viewer ada all	received REVISION
 pull spec s-beta to sync viewer ada beta	received REVISION
-pull spec s-beta to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull spec s-beta to sync viewer bob acme	withheld
 pull spec s-beta to sync viewer bob all	received REVISION
 pull spec s-beta to sync viewer bob beta	received REVISION
@@ -778,7 +723,6 @@ pull spec s-bob to sync member bob beta	withheld
 pull spec s-bob to sync viewer ada acme	received REVISION
 pull spec s-bob to sync viewer ada all	received REVISION
 pull spec s-bob to sync viewer ada beta	withheld
-pull spec s-bob to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull spec s-bob to sync viewer bob acme	received REVISION
 pull spec s-bob to sync viewer bob all	received REVISION
 pull spec s-bob to sync viewer bob beta	withheld
@@ -792,7 +736,6 @@ pull spec s-busy to sync member bob beta	withheld
 pull spec s-busy to sync viewer ada acme	received REVISION
 pull spec s-busy to sync viewer ada all	received REVISION
 pull spec s-busy to sync viewer ada beta	withheld
-pull spec s-busy to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull spec s-busy to sync viewer bob acme	received REVISION
 pull spec s-busy to sync viewer bob all	received REVISION
 pull spec s-busy to sync viewer bob beta	withheld
@@ -806,7 +749,6 @@ pull spec s-den to sync member bob beta	withheld
 pull spec s-den to sync viewer ada acme	received REVISION
 pull spec s-den to sync viewer ada all	received REVISION
 pull spec s-den to sync viewer ada beta	withheld
-pull spec s-den to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull spec s-den to sync viewer bob acme	received REVISION
 pull spec s-den to sync viewer bob all	received REVISION
 pull spec s-den to sync viewer bob beta	withheld
@@ -820,7 +762,6 @@ pull spec s-done to sync member bob beta	withheld
 pull spec s-done to sync viewer ada acme	received REVISION
 pull spec s-done to sync viewer ada all	received REVISION
 pull spec s-done to sync viewer ada beta	withheld
-pull spec s-done to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull spec s-done to sync viewer bob acme	received REVISION
 pull spec s-done to sync viewer bob all	received REVISION
 pull spec s-done to sync viewer bob beta	withheld
@@ -834,7 +775,6 @@ pull spec s-draft to sync member bob beta	withheld
 pull spec s-draft to sync viewer ada acme	received REVISION
 pull spec s-draft to sync viewer ada all	received REVISION
 pull spec s-draft to sync viewer ada beta	withheld
-pull spec s-draft to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull spec s-draft to sync viewer bob acme	received REVISION
 pull spec s-draft to sync viewer bob all	received REVISION
 pull spec s-draft to sync viewer bob beta	withheld
@@ -848,7 +788,6 @@ pull spec s-gone to sync member bob beta	withheld
 pull spec s-gone to sync viewer ada acme	received TOMBSTONE
 pull spec s-gone to sync viewer ada all	received TOMBSTONE
 pull spec s-gone to sync viewer ada beta	withheld
-pull spec s-gone to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull spec s-gone to sync viewer bob acme	received TOMBSTONE
 pull spec s-gone to sync viewer bob all	received TOMBSTONE
 pull spec s-gone to sync viewer bob beta	withheld
@@ -862,7 +801,6 @@ pull spec s-lobby to sync member bob beta	withheld
 pull spec s-lobby to sync viewer ada acme	received REVISION
 pull spec s-lobby to sync viewer ada all	received REVISION
 pull spec s-lobby to sync viewer ada beta	withheld
-pull spec s-lobby to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull spec s-lobby to sync viewer bob acme	received REVISION
 pull spec s-lobby to sync viewer bob all	received REVISION
 pull spec s-lobby to sync viewer bob beta	withheld
@@ -876,7 +814,6 @@ pull spec s-open-ada to sync member bob beta	withheld
 pull spec s-open-ada to sync viewer ada acme	received REVISION
 pull spec s-open-ada to sync viewer ada all	received REVISION
 pull spec s-open-ada to sync viewer ada beta	withheld
-pull spec s-open-ada to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull spec s-open-ada to sync viewer bob acme	received REVISION
 pull spec s-open-ada to sync viewer bob all	received REVISION
 pull spec s-open-ada to sync viewer bob beta	withheld
@@ -890,7 +827,6 @@ pull spec s-open-bob to sync member bob beta	withheld
 pull spec s-open-bob to sync viewer ada acme	received REVISION
 pull spec s-open-bob to sync viewer ada all	received REVISION
 pull spec s-open-bob to sync viewer ada beta	withheld
-pull spec s-open-bob to sync viewer anonymous none	failed SyncTransportException main authenticated this session as no FDE, but this box has no sync handle, so this round offers and adopts nothing. Set the sync handle to the one main knows, or have an admin tie this box's sync key to its FDE on main.
 pull spec s-open-bob to sync viewer bob acme	received REVISION
 pull spec s-open-bob to sync viewer bob all	received REVISION
 pull spec s-open-bob to sync viewer bob beta	withheld

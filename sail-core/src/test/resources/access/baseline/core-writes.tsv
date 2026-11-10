@@ -322,7 +322,7 @@ write message post in attic as the poster as api member ada beta	denied OUT_OF_S
 write message post in attic as the poster as api member bob acme	denied NO_CONVERSATION No conversation 'attic' is on this box: it was deleted, or never here. | Check the spec or room id.
 write message post in attic as the poster as api member bob all	denied NO_CONVERSATION No conversation 'attic' is on this box: it was deleted, or never here. | Check the spec or room id.
 write message post in attic as the poster as api member bob beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
-write message post in attic as the poster as api member machine all	failed IllegalArgumentException message author is required
+write message post in attic as the poster as api member machine all	denied NO_CONVERSATION No conversation 'attic' is on this box: it was deleted, or never here. | Check the spec or room id.
 write message post in attic as the poster as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in attic as the poster as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in attic as the poster as api viewer ada beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
@@ -359,7 +359,7 @@ write message post in attic as the poster as sync member bob beta	allowed
 write message post in attic as the poster as sync viewer ada acme	allowed
 write message post in attic as the poster as sync viewer ada all	allowed
 write message post in attic as the poster as sync viewer ada beta	allowed
-write message post in attic as the poster as sync viewer anonymous none	failed IllegalArgumentException message author is required
+write message post in attic as the poster as sync viewer anonymous none	allowed
 write message post in attic as the poster as sync viewer bob acme	allowed
 write message post in attic as the poster as sync viewer bob all	allowed
 write message post in attic as the poster as sync viewer bob beta	allowed
@@ -383,7 +383,7 @@ write message post in b-room as the poster as api member ada beta	allowed
 write message post in b-room as the poster as api member bob acme	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
 write message post in b-room as the poster as api member bob all	allowed
 write message post in b-room as the poster as api member bob beta	allowed
-write message post in b-room as the poster as api member machine all	failed IllegalArgumentException message author is required
+write message post in b-room as the poster as api member machine all	denied NOT_AUTHOR This credential acts for no FDE, so a post in 'b-room' would be no one's. | Post with an FDE's own credential.
 write message post in b-room as the poster as api viewer ada acme	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
 write message post in b-room as the poster as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in b-room as the poster as api viewer ada beta	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
@@ -420,7 +420,7 @@ write message post in b-room as the poster as sync member bob beta	allowed
 write message post in b-room as the poster as sync viewer ada acme	allowed
 write message post in b-room as the poster as sync viewer ada all	allowed
 write message post in b-room as the poster as sync viewer ada beta	allowed
-write message post in b-room as the poster as sync viewer anonymous none	failed IllegalArgumentException message author is required
+write message post in b-room as the poster as sync viewer anonymous none	allowed
 write message post in b-room as the poster as sync viewer bob acme	allowed
 write message post in b-room as the poster as sync viewer bob all	allowed
 write message post in b-room as the poster as sync viewer bob beta	allowed
@@ -444,7 +444,7 @@ write message post in den as the poster as api member ada beta	denied OUT_OF_SCO
 write message post in den as the poster as api member bob acme	allowed
 write message post in den as the poster as api member bob all	allowed
 write message post in den as the poster as api member bob beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
-write message post in den as the poster as api member machine all	failed IllegalArgumentException message author is required
+write message post in den as the poster as api member machine all	denied NOT_AUTHOR This credential acts for no FDE, so a post in 'den' would be no one's. | Post with an FDE's own credential.
 write message post in den as the poster as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in den as the poster as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in den as the poster as api viewer ada beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
@@ -481,7 +481,7 @@ write message post in den as the poster as sync member bob beta	allowed
 write message post in den as the poster as sync viewer ada acme	allowed
 write message post in den as the poster as sync viewer ada all	allowed
 write message post in den as the poster as sync viewer ada beta	allowed
-write message post in den as the poster as sync viewer anonymous none	failed IllegalArgumentException message author is required
+write message post in den as the poster as sync viewer anonymous none	allowed
 write message post in den as the poster as sync viewer bob acme	allowed
 write message post in den as the poster as sync viewer bob all	allowed
 write message post in den as the poster as sync viewer bob beta	allowed
@@ -505,7 +505,7 @@ write message post in ghost as the poster as api member ada beta	denied OUT_OF_S
 write message post in ghost as the poster as api member bob acme	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
 write message post in ghost as the poster as api member bob all	denied NO_CONVERSATION No conversation 'ghost' is on this box: it was deleted, or never here. | Check the spec or room id.
 write message post in ghost as the poster as api member bob beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
-write message post in ghost as the poster as api member machine all	failed IllegalArgumentException message author is required
+write message post in ghost as the poster as api member machine all	denied NO_CONVERSATION No conversation 'ghost' is on this box: it was deleted, or never here. | Check the spec or room id.
 write message post in ghost as the poster as api viewer ada acme	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
 write message post in ghost as the poster as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in ghost as the poster as api viewer ada beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
@@ -542,7 +542,7 @@ write message post in ghost as the poster as sync member bob beta	allowed
 write message post in ghost as the poster as sync viewer ada acme	allowed
 write message post in ghost as the poster as sync viewer ada all	allowed
 write message post in ghost as the poster as sync viewer ada beta	allowed
-write message post in ghost as the poster as sync viewer anonymous none	failed IllegalArgumentException message author is required
+write message post in ghost as the poster as sync viewer anonymous none	allowed
 write message post in ghost as the poster as sync viewer bob acme	allowed
 write message post in ghost as the poster as sync viewer bob all	allowed
 write message post in ghost as the poster as sync viewer bob beta	allowed
@@ -566,7 +566,7 @@ write message post in hall as the poster as api member ada beta	denied OUT_OF_SC
 write message post in hall as the poster as api member bob acme	allowed
 write message post in hall as the poster as api member bob all	allowed
 write message post in hall as the poster as api member bob beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
-write message post in hall as the poster as api member machine all	failed IllegalArgumentException message author is required
+write message post in hall as the poster as api member machine all	denied NOT_AUTHOR This credential acts for no FDE, so a post in 'hall' would be no one's. | Post with an FDE's own credential.
 write message post in hall as the poster as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in hall as the poster as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in hall as the poster as api viewer ada beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
@@ -603,7 +603,7 @@ write message post in hall as the poster as sync member bob beta	allowed
 write message post in hall as the poster as sync viewer ada acme	allowed
 write message post in hall as the poster as sync viewer ada all	allowed
 write message post in hall as the poster as sync viewer ada beta	allowed
-write message post in hall as the poster as sync viewer anonymous none	failed IllegalArgumentException message author is required
+write message post in hall as the poster as sync viewer anonymous none	allowed
 write message post in hall as the poster as sync viewer bob acme	allowed
 write message post in hall as the poster as sync viewer bob all	allowed
 write message post in hall as the poster as sync viewer bob beta	allowed
@@ -810,7 +810,7 @@ write message post in lobby as the poster as api member ada beta	denied OUT_OF_S
 write message post in lobby as the poster as api member bob acme	allowed
 write message post in lobby as the poster as api member bob all	allowed
 write message post in lobby as the poster as api member bob beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
-write message post in lobby as the poster as api member machine all	failed IllegalArgumentException message author is required
+write message post in lobby as the poster as api member machine all	denied NOT_AUTHOR This credential acts for no FDE, so a post in 'lobby' would be no one's. | Post with an FDE's own credential.
 write message post in lobby as the poster as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in lobby as the poster as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in lobby as the poster as api viewer ada beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
@@ -847,7 +847,7 @@ write message post in lobby as the poster as sync member bob beta	allowed
 write message post in lobby as the poster as sync viewer ada acme	allowed
 write message post in lobby as the poster as sync viewer ada all	allowed
 write message post in lobby as the poster as sync viewer ada beta	allowed
-write message post in lobby as the poster as sync viewer anonymous none	failed IllegalArgumentException message author is required
+write message post in lobby as the poster as sync viewer anonymous none	allowed
 write message post in lobby as the poster as sync viewer bob acme	allowed
 write message post in lobby as the poster as sync viewer bob all	allowed
 write message post in lobby as the poster as sync viewer bob beta	allowed
@@ -871,7 +871,7 @@ write message post in s-ada as the poster as api member ada beta	denied OUT_OF_S
 write message post in s-ada as the poster as api member bob acme	allowed
 write message post in s-ada as the poster as api member bob all	allowed
 write message post in s-ada as the poster as api member bob beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
-write message post in s-ada as the poster as api member machine all	failed IllegalArgumentException message author is required
+write message post in s-ada as the poster as api member machine all	denied NOT_AUTHOR This credential acts for no FDE, so a post in 's-ada' would be no one's. | Post with an FDE's own credential.
 write message post in s-ada as the poster as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in s-ada as the poster as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in s-ada as the poster as api viewer ada beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
@@ -908,7 +908,7 @@ write message post in s-ada as the poster as sync member bob beta	allowed
 write message post in s-ada as the poster as sync viewer ada acme	allowed
 write message post in s-ada as the poster as sync viewer ada all	allowed
 write message post in s-ada as the poster as sync viewer ada beta	allowed
-write message post in s-ada as the poster as sync viewer anonymous none	failed IllegalArgumentException message author is required
+write message post in s-ada as the poster as sync viewer anonymous none	allowed
 write message post in s-ada as the poster as sync viewer bob acme	allowed
 write message post in s-ada as the poster as sync viewer bob all	allowed
 write message post in s-ada as the poster as sync viewer bob beta	allowed
@@ -932,7 +932,7 @@ write message post in s-bob as the poster as api member ada beta	denied OUT_OF_S
 write message post in s-bob as the poster as api member bob acme	allowed
 write message post in s-bob as the poster as api member bob all	allowed
 write message post in s-bob as the poster as api member bob beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
-write message post in s-bob as the poster as api member machine all	failed IllegalArgumentException message author is required
+write message post in s-bob as the poster as api member machine all	denied NOT_AUTHOR This credential acts for no FDE, so a post in 's-bob' would be no one's. | Post with an FDE's own credential.
 write message post in s-bob as the poster as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in s-bob as the poster as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in s-bob as the poster as api viewer ada beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
@@ -969,7 +969,7 @@ write message post in s-bob as the poster as sync member bob beta	allowed
 write message post in s-bob as the poster as sync viewer ada acme	allowed
 write message post in s-bob as the poster as sync viewer ada all	allowed
 write message post in s-bob as the poster as sync viewer ada beta	allowed
-write message post in s-bob as the poster as sync viewer anonymous none	failed IllegalArgumentException message author is required
+write message post in s-bob as the poster as sync viewer anonymous none	allowed
 write message post in s-bob as the poster as sync viewer bob acme	allowed
 write message post in s-bob as the poster as sync viewer bob all	allowed
 write message post in s-bob as the poster as sync viewer bob beta	allowed
@@ -993,7 +993,7 @@ write message post in s-lobby as the poster as api member ada beta	denied OUT_OF
 write message post in s-lobby as the poster as api member bob acme	denied NO_CONVERSATION No conversation 's-lobby' is on this box: it was deleted, or never here. | Check the spec or room id.
 write message post in s-lobby as the poster as api member bob all	denied NO_CONVERSATION No conversation 's-lobby' is on this box: it was deleted, or never here. | Check the spec or room id.
 write message post in s-lobby as the poster as api member bob beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
-write message post in s-lobby as the poster as api member machine all	failed IllegalArgumentException message author is required
+write message post in s-lobby as the poster as api member machine all	denied NO_CONVERSATION No conversation 's-lobby' is on this box: it was deleted, or never here. | Check the spec or room id.
 write message post in s-lobby as the poster as api viewer ada acme	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in s-lobby as the poster as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 write message post in s-lobby as the poster as api viewer ada beta	denied OUT_OF_SCOPE Message '<new id>' is in no project this FDE is granted. | Ask an admin on main for the project: sail fde grant <handle> <project>.
@@ -1030,7 +1030,7 @@ write message post in s-lobby as the poster as sync member bob beta	allowed
 write message post in s-lobby as the poster as sync viewer ada acme	allowed
 write message post in s-lobby as the poster as sync viewer ada all	allowed
 write message post in s-lobby as the poster as sync viewer ada beta	allowed
-write message post in s-lobby as the poster as sync viewer anonymous none	failed IllegalArgumentException message author is required
+write message post in s-lobby as the poster as sync viewer anonymous none	allowed
 write message post in s-lobby as the poster as sync viewer bob acme	allowed
 write message post in s-lobby as the poster as sync viewer bob all	allowed
 write message post in s-lobby as the poster as sync viewer bob beta	allowed

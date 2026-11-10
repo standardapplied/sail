@@ -12,6 +12,7 @@ import ai.singlr.sail.access.baseline.Cast;
 import ai.singlr.sail.access.baseline.Corpus;
 import ai.singlr.sail.access.baseline.World;
 import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
@@ -571,8 +572,10 @@ class AccessDoorsBaselineTest {
       return failed instanceof Remedied remedied
           ? Corpus.denied(failed.getClass().getSimpleName(), remedied.reason(), remedied.remedy())
           : Corpus.failed(failed);
-    } catch (Exception failed) {
-      return "failed " + failed.getClass().getSimpleName() + " " + failed.getMessage();
+    } catch (Exception refused) {
+      return refused instanceof Remedied remedied
+          ? Corpus.denied(refused.getClass().getSimpleName(), remedied.reason(), remedied.remedy())
+          : Corpus.denied(refused.getClass().getSimpleName(), refused.getMessage(), Remedy.NONE);
     }
   }
 

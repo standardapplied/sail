@@ -58,6 +58,7 @@ public final class Baseline {
   private static final String DIRECTORY = "access/baseline/";
   private static final Path SOURCES = Path.of("src", "test", "resources");
   private static final int SHOWN = 40;
+  private static final String FAILED = "failed ";
 
   /**
    * The kinds and door codes of a not-found answer: outside the asker's audience, a project or a
@@ -100,7 +101,7 @@ public final class Baseline {
   /**
    * Every way {@code now} departs from {@code baseline} once {@code moved} is applied, each as the
    * cell and its two answers ({@link #difference}), after every moved line that breaks the rules of
-   * a move.
+   * a move and every cell whose ask failed rather than being decided, which would compare nothing.
    */
   static List<String> differences(
       SortedMap<String, String> baseline, List<Moved> moved, SortedMap<String, String> now) {
@@ -115,6 +116,13 @@ public final class Baseline {
         expected.put(cell.cell(), cell.answer());
       }
     }
+    now.forEach(
+        (cell, answer) -> {
+          if (answer.startsWith(FAILED)) {
+            problems.add(
+                cell + "\n  now:      " + answer + "\n  a cell records a decision, not a failure");
+          }
+        });
     var cells = new TreeSet<>(expected.keySet());
     cells.addAll(now.keySet());
     for (var cell : cells) {

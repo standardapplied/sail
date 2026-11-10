@@ -134,6 +134,16 @@ class BaselineTest {
   }
 
   @Test
+  void aCellWhoseAskFailedComparesNothingAndIsAFinding() {
+    var failed = "failed IllegalArgumentException author is required";
+    var baseline = answers("a", failed);
+
+    assertEquals(
+        List.of("a\n  now:      " + failed + "\n  a cell records a decision, not a failure"),
+        Baseline.differences(baseline, List.of(), baseline));
+  }
+
+  @Test
   void aCellIsAnsweredOnceOnOneLine() {
     var corpus = new Corpus();
     corpus.put("cell", "first line\nsecond\tline");

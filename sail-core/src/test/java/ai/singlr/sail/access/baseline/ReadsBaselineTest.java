@@ -12,7 +12,6 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.util.List;
-import java.util.Objects;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
@@ -39,9 +38,9 @@ class ReadsBaselineTest {
               () -> shown(world, member.actor(), conversation));
         }
       }
-      for (var pusher : Cast.pushers()) {
-        pulled(world, pusher, corpus);
-      }
+      Cast.pushers().stream()
+          .filter(pusher -> pusher.actor().handle() != null)
+          .forEach(pusher -> pulled(world, pusher, corpus));
       Baseline.check("core-reads", corpus);
     }
   }
@@ -56,11 +55,11 @@ class ReadsBaselineTest {
 
   /**
    * One full round of a box that syncs as {@code pusher} and starts with no row, and, per row main
-   * holds, whether the box holds it after.
+   * holds, whether the box holds it after. A session that names no FDE pulls no row to decide: its
+   * box refuses the round at the hello, before any row is read, so it is not asked.
    */
   private static void pulled(World world, Cast.Member pusher, Corpus corpus) {
-    var handle = Objects.requireNonNullElse(pusher.actor().handle(), "anonymous");
-    try (var node = new SyncBox(handle + "-box").syncsAs(pusher.actor())) {
+    try (var node = new SyncBox(pusher.actor().handle() + "-box").syncsAs(pusher.actor())) {
       HeldProjects.hold(node.db, "beta");
       String failed = null;
       try {

@@ -13,6 +13,7 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -211,13 +212,21 @@ class WritesBaselineTest {
     }
   }
 
+  /**
+   * Who posts "as the poster": the bound actor's own handle, or for a credential that names none an
+   * author it is not, so the rule decides the post rather than the store refusing a blank one.
+   */
+  private static String poster() {
+    return Objects.requireNonNullElse(Actor.current().handle(), "nobody");
+  }
+
   private static void messages(List<Mutation> mutations) {
     for (var room :
         List.of("lobby", "den", "hall", "s-ada", "s-bob", "s-lobby", "b-room", "attic", "ghost")) {
       mutations.add(
           Mutation.of(
               "message post in " + room + " as the poster",
-              world -> world.messages.append(room, Actor.current().handle(), "hi", null)));
+              world -> world.messages.append(room, poster(), "hi", null)));
     }
     for (var author : List.of(Cast.OWNER, Actor.SYSTEM_HANDLE, Cast.ADA_AGENT)) {
       mutations.add(
