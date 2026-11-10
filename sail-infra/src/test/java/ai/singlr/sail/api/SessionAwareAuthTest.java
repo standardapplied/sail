@@ -8,17 +8,24 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -56,6 +63,43 @@ class SessionAwareAuthTest {
   private String sessionFor(String handle, String role) {
     var fde = fdes.add(handle, null, null, role);
     return sessions.create(fde.id(), Duration.ofMinutes(30)).token();
+  }
+
+  @Test
+  void aSessionIsItsFdeOnTheApiLaneWithTheRoleAndScopeTheRosterGivesIt() throws Exception {
+    var session = sessionFor("mady", "member");
+    fdes.restrict("mady");
+    fdes.grant("mady", "acme");
+    var auth = TestAuth.sessions(db);
+    var http = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    http.createContext(
+        "/",
+        exchange -> {
+          auth.require(exchange);
+          var stamped = ApiRouter.actorOf(exchange).toString().getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(200, stamped.length);
+          try (var body = exchange.getResponseBody()) {
+            body.write(stamped);
+          }
+        });
+    http.start();
+    try (var client = HttpClient.newHttpClient()) {
+      var stamped =
+          client.send(
+              HttpRequest.newBuilder(
+                      URI.create("http://127.0.0.1:" + http.getAddress().getPort() + "/"))
+                  .header("Authorization", "Bearer " + session)
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
+
+      assertEquals(
+          new Actor("mady", Role.MEMBER, Actor.Lane.API)
+              .withScope(ProjectScope.of(List.of("acme")))
+              .toString(),
+          stamped.body());
+    } finally {
+      http.stop(0);
+    }
   }
 
   @Test
