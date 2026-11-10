@@ -113,6 +113,11 @@ class ScopedReadsTest {
           "/v1/runs",
           "/v1/projects");
 
+  /**
+   * The unaddressed routes that are the box's to read, which only its own person or an admin do.
+   */
+  private static final Set<String> THE_BOXS = Set.of("/v1/sync", "/v1/events/stats");
+
   /** The unaddressed routes on which an unrestricted caller is shown something of bravo. */
   private static final Set<String> SHOW_EVERY_PROJECT =
       Set.of(
@@ -363,13 +368,21 @@ class ScopedReadsTest {
       assertEquals(withoutBravo.get(route), withBravo.get(route), route);
     }
     for (var route : withBravo.keySet()) {
-      if (!route.startsWith("bravo ")) {
+      if (!route.startsWith("bravo ") && !THE_BOXS.contains(route)) {
         assertEquals("200", withBravo.get(route).substring(0, 3), route + " served sam");
         assertEquals("200", unrestricted.get(route).substring(0, 3), route + " served ada");
       }
       if (route.startsWith("bravo ") || SHOW_EVERY_PROJECT.contains(route)) {
         assertNotEquals(withBravo.get(route), unrestricted.get(route), route + " shows ada bravo");
       }
+    }
+    for (var route : THE_BOXS) {
+      assertEquals(
+          """
+          403 {"schema_version": 1, "error": {"code": "forbidden_not_assignee", "message": "Box 'main' belongs to 'main', not you.", "action": "Ask main to operate it, or have an admin do it.", "field_errors": []}}""",
+          withBravo.get(route),
+          route + " is main's box, not sam's");
+      assertEquals("200", unrestricted.get(route).substring(0, 3), route + " served ada");
     }
     assertEquals(
         """

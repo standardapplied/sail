@@ -160,12 +160,12 @@ class SseHandlerTest {
   void aScopedStreamCarriesItsProjectsEventsAndAnUnrestrictedOneEveryEvent() throws Exception {
     ApiAuth auth =
         exchange -> {
-          exchange.setAttribute("token.role", "member");
-          exchange.setAttribute(ApiAuth.SCOPE, ProjectScope.all());
-          if ("Bearer scoped".equals(exchange.getRequestHeaders().getFirst("Authorization"))) {
-            exchange.setAttribute("token.fde", "sam");
-            exchange.setAttribute(ApiAuth.SCOPE, ProjectScope.of(List.of("light")));
-          }
+          exchange.setAttribute(
+              ApiAuth.ACTOR,
+              "Bearer scoped".equals(exchange.getRequestHeaders().getFirst("Authorization"))
+                  ? new Actor("sam", Role.MEMBER, Actor.Lane.API)
+                      .withScope(ProjectScope.of(List.of("light")))
+                  : new Actor(null, Role.MEMBER, Actor.Lane.API));
         };
     try (var bus = new EventBus()) {
       var httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -587,12 +587,12 @@ class SseHandlerTest {
       throws Exception {
     ApiAuth auth =
         exchange -> {
-          exchange.setAttribute("token.role", "member");
-          exchange.setAttribute(ApiAuth.SCOPE, ProjectScope.all());
-          if ("Bearer dark-only".equals(exchange.getRequestHeaders().getFirst("Authorization"))) {
-            exchange.setAttribute("token.fde", "sam");
-            exchange.setAttribute(ApiAuth.SCOPE, ProjectScope.of(List.of("dark")));
-          }
+          exchange.setAttribute(
+              ApiAuth.ACTOR,
+              "Bearer dark-only".equals(exchange.getRequestHeaders().getFirst("Authorization"))
+                  ? new Actor("sam", Role.MEMBER, Actor.Lane.API)
+                      .withScope(ProjectScope.of(List.of("dark")))
+                  : new Actor(null, Role.MEMBER, Actor.Lane.API));
         };
     var httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     httpServer.createContext(

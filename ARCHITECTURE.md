@@ -891,7 +891,7 @@ clone a project's source repos into its container at provision time, not to move
   - FDE-gateway commands (`spec`, `agent`, `events`, `fde`) target `sail@host`. The
     engineer's SSH key hits the forced command `sail _gateway --fde <handle>`, which
     resolves their FDE, mints a short-lived session token, and re-executes the command, so
-    the loopback API sees who is acting and `Authorizer` enforces their role.
+    the loopback API sees who is acting and asks `Access` for each thing they do.
   - Everything else (project lifecycle, interactive `shell` and `exec`) is forwarded as the
     plain SSH host, because it needs host privileges the `sail` user must never have.
 
@@ -2402,17 +2402,17 @@ the box's operator, who sees every project. The checks a door still makes by rol
 routes), until `sail-every-door-asks-access` and `sail-agents-act-on-their-own-work`, and the facts
 that read a lane or role to know which applies, are the allowlist of `OneDecisionSweepTest`. It
 sees every such read compiled code makes: of a role, a lane, a scope or whom an actor acts for, a
-role constant, resolver or `switch`, a type check of the socket's run or box caller, an audience
-asked of a project in Java (`Access.audience` with `ProjectScope.admits` or `unrestricted`), and
-anything of `Capability`; it cannot see one read as data, in SQL or from a map, which is why a filter
+role constant, resolver or `switch`, a type check of the socket's run or box caller, and an
+audience asked of a project in Java (`Access.audience` with `ProjectScope.admits` or
+`unrestricted`); it cannot see one read as data, in SQL or from a map, which is why a filter
 inside a query takes its scope from `Access.audience`.
 
 ## Security model
 
 **One ingress by design.** The only network surface a box exposes is sshd, which the
 operator runs anyway. `sail-api` binds `127.0.0.1` and is never network-reachable by
-default. There are exactly two identity doors, and both land on the same `fdes` row, role,
-and `Authorizer`:
+default. There are exactly two identity doors, and both land on the same `fdes` row, the
+principal `RoleRule` resolves for it, and `Access`:
 
 1. **Terminal: SSH key to FDE.** Each registered key is pinned in the `sail` user's
    `authorized_keys` to `command="…/sail _gateway --fde <handle>",restrict`, with no shell

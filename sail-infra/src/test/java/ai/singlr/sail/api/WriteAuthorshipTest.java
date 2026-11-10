@@ -114,6 +114,60 @@ class WriteAuthorshipTest {
   }
 
   @Test
+  void aMachineTokensRoomPostIsRefusedByTheMessageRuleAsNoOnesPost() throws Exception {
+    try (var operations = operations(() -> SyncConfig.unset());
+        var server = server(operations)) {
+      var uday = token("uday", "member");
+      var room =
+          send(
+              server,
+              "POST",
+              "/v1/rooms",
+              uday,
+              "{\"id\": \"lobby\", \"project\": \"acme\", \"title\": \"Lobby\"}");
+      assertEquals(201, room.statusCode(), room.body());
+      var machine = new TokenStore(db).create("ci-bot", "member").token();
+
+      var posted = send(server, "POST", "/v1/rooms/lobby/messages", machine, "{\"body\": \"hi\"}");
+
+      assertEquals(403, posted.statusCode(), posted.body());
+      assertEquals(
+          Map.of(
+              "code",
+              "forbidden_not_author",
+              "message",
+              "This credential acts for no FDE, so a post in 'lobby' would be no one's.",
+              "action",
+              "Post with an FDE's own credential.",
+              "field_errors",
+              List.of()),
+          YamlUtil.parseMap(posted.body()).get("error"));
+    }
+  }
+
+  @Test
+  void anAdminMachineTokenTheMessageRuleAdmitsStillPostsNothingWithoutAnAuthor() throws Exception {
+    try (var operations = operations(() -> SyncConfig.unset());
+        var server = server(operations)) {
+      var uday = token("uday", "member");
+      send(
+          server,
+          "POST",
+          "/v1/rooms",
+          uday,
+          "{\"id\": \"lobby\", \"project\": \"acme\", \"title\": \"Lobby\"}");
+      var machine = new TokenStore(db).create("ops-bot", "admin").token();
+
+      var posted = send(server, "POST", "/v1/rooms/lobby/messages", machine, "{\"body\": \"hi\"}");
+
+      assertEquals(400, posted.statusCode(), posted.body());
+      assertEquals(
+          "message author is required",
+          ((Map<?, ?>) YamlUtil.parseMap(posted.body()).get("error")).get("message"));
+    }
+  }
+
+  @Test
   void aSocketWriteIsAuthoredByTheRunsPrincipal() {
     new FdeStore(db).add("uday", null, null, "member");
     try (var operations = operations(() -> SyncConfig.unset());

@@ -18,7 +18,9 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -209,8 +211,10 @@ class AgentLogStreamerTest {
 
   @Test
   void aRunOutsideTheCallersScopeIsAnsweredAsAnUnknownRun() throws Exception {
-    var outside = new CapturingExchange("/v1/runs/r1/stream").as("sam", "admin");
-    outside.setAttribute(ApiAuth.SCOPE, ProjectScope.of(List.of("nautilus")));
+    var outside =
+        new CapturingExchange("/v1/runs/r1/stream")
+            .as("sam", "admin")
+            .scoped(ProjectScope.of(List.of("nautilus")));
     var unknown = new CapturingExchange("/v1/runs/r1/stream").as("sam", "admin");
 
     streamer(id -> Optional.of(runOn("node-b")), "node-a").handle(outside);
@@ -223,8 +227,10 @@ class AgentLogStreamerTest {
 
   @Test
   void aRunInsideTheCallersScopeIsDecidedAsForAnyCaller() throws Exception {
-    var inside = new CapturingExchange("/v1/runs/r1/stream").as("sam", "admin");
-    inside.setAttribute(ApiAuth.SCOPE, ProjectScope.of(List.of("acme")));
+    var inside =
+        new CapturingExchange("/v1/runs/r1/stream")
+            .as("sam", "admin")
+            .scoped(ProjectScope.of(List.of("acme")));
 
     streamer(id -> Optional.of(runOn("node-b")), "node-a").handle(inside);
 
@@ -389,23 +395,6 @@ class AgentLogStreamerTest {
     assertTrue(Arrays.asList(cmd).contains(legacy), Arrays.toString(cmd));
   }
 
-  @Test
-  void isStreamPathMatchesCanonicalRunPath() {
-    assertTrue(AgentLogStreamer.isStreamPath("/v1/runs/run-1/stream"));
-  }
-
-  @Test
-  void isStreamPathRejectsOtherRunSubResources() {
-    assertFalse(AgentLogStreamer.isStreamPath("/v1/runs/run-1/log"));
-    assertFalse(AgentLogStreamer.isStreamPath("/v1/runs/run-1"));
-  }
-
-  @Test
-  void isStreamPathRejectsWrongPrefix() {
-    assertFalse(AgentLogStreamer.isStreamPath("/v1/other/run-1/stream"));
-    assertFalse(AgentLogStreamer.isStreamPath("/v1/events/stream"));
-  }
-
   private static final ApiError ENDED = AgentLogStreamer.tailEnded("acme", "r1");
 
   @Test
@@ -483,14 +472,15 @@ class AgentLogStreamerTest {
         new AgentLogStreamer(
             exchange -> {
               asked.incrementAndGet();
-              exchange.setAttribute(ApiAuth.SCOPE, scope.get());
+              exchange.setAttribute(
+                  ApiAuth.ACTOR, ApiRouter.actorOf(exchange).withScope(scope.get()));
             },
             id -> Optional.of(runOn("node-a")),
             id -> Optional.of(specOf(id, "raj")),
             () -> "node-a",
             clock);
-    var exchange = new CapturingExchange("/v1/runs/r1/stream").as("raj", "member");
-    exchange.setAttribute(ApiAuth.SCOPE, scope.get());
+    var exchange =
+        new CapturingExchange("/v1/runs/r1/stream").as("raj", "member").scoped(scope.get());
     var process = new ProcessBuilder("sh", "-c", "true").start();
     process.waitFor();
     var lines = List.of("first", "second", "third").iterator();
@@ -562,13 +552,17 @@ class AgentLogStreamerTest {
 
     private CapturingExchange(String path) {
       this.uri = URI.create(path);
-      attributes.put(ApiAuth.SCOPE, ProjectScope.all());
+      attributes.put(ApiAuth.ACTOR, new Actor(null, Role.VIEWER, Actor.Lane.API));
     }
 
     private CapturingExchange as(String fde, String role) {
-      attributes.put("token.fde", fde);
-      attributes.put("token.role", role);
+      attributes.put(ApiAuth.ACTOR, new Actor(fde, Role.fromAttribute(role), Actor.Lane.API));
       attributes.put("token.name", fde);
+      return this;
+    }
+
+    private CapturingExchange scoped(ProjectScope scope) {
+      attributes.put(ApiAuth.ACTOR, ApiRouter.actorOf(this).withScope(scope));
       return this;
     }
 

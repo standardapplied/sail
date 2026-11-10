@@ -26,8 +26,7 @@ class ApiRouterRateLimitTest {
 
   @Test
   void aRequestWithinBudgetIsServed() throws Exception {
-    var router =
-        new ApiRouter(ops, new FixedTokenTestAuth("token"), new RateLimiter(1, 0d, () -> 0L));
+    var router = router();
 
     var response = router.route(exchange("GET", "/v1/specs/board"));
 
@@ -36,8 +35,7 @@ class ApiRouterRateLimitTest {
 
   @Test
   void exceedingTheBudgetIsRejectedWith429() throws Exception {
-    var router =
-        new ApiRouter(ops, new FixedTokenTestAuth("token"), new RateLimiter(1, 0d, () -> 0L));
+    var router = router();
     router.route(exchange("GET", "/v1/specs/board"));
 
     var e =
@@ -45,6 +43,12 @@ class ApiRouterRateLimitTest {
 
     assertEquals(ErrorCode.RATE_LIMITED, e.failure().errorCode());
     assertEquals(429, e.failure().errorCode().httpCode());
+  }
+
+  private ApiRouter router() {
+    var auth = new FixedTokenTestAuth("token");
+    return new ApiRouter(
+        ops, auth, new RateLimitGate(new RateLimiter(1, 0d, () -> 0L)), new AgentLogStreamer(auth));
   }
 
   private static HttpExchange exchange(String method, String path) {

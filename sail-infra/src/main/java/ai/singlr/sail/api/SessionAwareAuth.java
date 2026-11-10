@@ -5,8 +5,9 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
+import ai.singlr.sail.identity.RoleRule.Credential;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import com.sun.net.httpserver.HttpExchange;
@@ -14,13 +15,12 @@ import java.util.Objects;
 
 /**
  * Accepts two kinds of bearer credential. A token prefixed {@code sess_} is a login session minted
- * by the passkey/OIDC flow: it is resolved against the {@link AuthSessionStore}, mapped to its FDE,
- * and the role {@link RoleRule} gives that FDE is stamped on the exchange so {@link Authorizer}
- * governs it exactly like a token's role; a disabled FDE's session is refused. Anything else is
- * delegated to the wrapped {@link ApiAuth} (the machine/CI {@code api_tokens} path). The exchange
- * attributes ({@code token.name}, {@code token.fde}, {@code token.role}) are identical in shape
- * across both paths, so every downstream consumer — attribution, authorization, {@code --assignee
- * me} — is unaffected by which credential authenticated the call.
+ * by the passkey flow or the SSH gateway: it is validated against the {@link AuthSessionStore} and
+ * the principal {@link RoleRule} resolves for its FDE is stamped on the exchange, with the FDE's
+ * name and email for {@code whoami}; a session whose FDE is gone or disabled is refused. Anything
+ * else is delegated to the wrapped {@link ApiAuth} (the machine/CI {@code api_tokens} path). Both
+ * stamp the same principal shape, so every downstream consumer — attribution, the route's gate,
+ * {@code --assignee me} — is unaffected by which credential authenticated the call.
  */
 public final class SessionAwareAuth implements ApiAuth {
 
@@ -56,16 +56,14 @@ public final class SessionAwareAuth implements ApiAuth {
   }
 
   private void authenticateSession(HttpExchange exchange, String token) {
-    var fde =
-        sessions
-            .validate(token)
-            .flatMap(session -> roster.byId(session.fdeId()))
+    var session = sessions.validate(token).orElseThrow(SessionAwareAuth::invalid);
+    var actor =
+        roles
+            .principal(Credential.session(session, Actor.Lane.API))
             .orElseThrow(SessionAwareAuth::invalid);
-    var role = roles.roleOf(fde.handle(), Role.ADMIN).orElseThrow(SessionAwareAuth::invalid);
-    exchange.setAttribute("token.name", fde.handle());
-    exchange.setAttribute("token.fde", fde.handle());
-    exchange.setAttribute("token.role", role.attribute());
-    exchange.setAttribute(ApiAuth.SCOPE, roles.scopeOf(fde.handle()));
+    var fde = roster.byId(session.fdeId()).orElseThrow(SessionAwareAuth::invalid);
+    exchange.setAttribute("token.name", actor.handle());
+    exchange.setAttribute(ApiAuth.ACTOR, actor);
     if (fde.displayName() != null) {
       exchange.setAttribute("token.displayName", fde.displayName());
     }

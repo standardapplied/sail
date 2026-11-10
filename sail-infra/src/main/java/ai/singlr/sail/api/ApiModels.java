@@ -18,9 +18,7 @@ import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.harness.Harnesses;
-import ai.singlr.sail.identity.Capability;
 import ai.singlr.sail.identity.ProjectScope;
-import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.MessageStore;
@@ -50,8 +48,8 @@ record WhoamiResponse(
     String name,
     String displayName,
     String email,
-    Role role,
-    List<Capability> capabilities)
+    String role,
+    List<String> capabilities)
     implements Mappable {
   @Override
   public Map<String, Object> toMap() {

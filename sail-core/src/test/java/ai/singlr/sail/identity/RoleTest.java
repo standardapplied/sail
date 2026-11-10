@@ -6,8 +6,6 @@
 package ai.singlr.sail.identity;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -33,26 +31,5 @@ class RoleTest {
   void unrecognizedRoleFailsSafeToViewer() {
     assertEquals(Role.VIEWER, Role.fromAttribute("superuser"));
     assertEquals(Role.VIEWER, Role.fromAttribute("root"));
-  }
-
-  @Test
-  void adminAllowsEverything() {
-    assertTrue(Role.ADMIN.allows(Capability.READ));
-    assertTrue(Role.ADMIN.allows(Capability.WRITE));
-    assertTrue(Role.ADMIN.allows(Capability.ADMIN));
-  }
-
-  @Test
-  void memberAllowsReadAndWriteButNotAdmin() {
-    assertTrue(Role.MEMBER.allows(Capability.READ));
-    assertTrue(Role.MEMBER.allows(Capability.WRITE));
-    assertFalse(Role.MEMBER.allows(Capability.ADMIN));
-  }
-
-  @Test
-  void viewerAllowsOnlyRead() {
-    assertTrue(Role.VIEWER.allows(Capability.READ));
-    assertFalse(Role.VIEWER.allows(Capability.WRITE));
-    assertFalse(Role.VIEWER.allows(Capability.ADMIN));
   }
 }

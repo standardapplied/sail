@@ -42,10 +42,11 @@ import java.util.function.Supplier;
  * verdict for an identical caller. {@code ?since=N} replays from a line number for client
  * reconnection.
  *
- * <p>Mounted by {@link ApiRouter}, which delegates the stream path straight to this handler so the
- * long-lived connection never runs through the buffered request/response path. It is not registered
- * as its own {@code createContext} because the path carries a variable run id, which
- * prefix-matching cannot isolate from the rest of {@code /v1/runs/...}.
+ * <p>Mounted by {@link ApiRouter} as its {@code /v1/runs/{id}/stream} route, whose handler hands
+ * the exchange straight to this one so the long-lived connection never runs through the buffered
+ * request/response path. It is not registered as its own {@code createContext} because the path
+ * carries a variable run id, which prefix-matching cannot isolate from the rest of {@code
+ * /v1/runs/...}.
  *
  * <p>Authentication is the {@code Authorization: Bearer} header only — the same gate {@code
  * /v1/events/stream} uses. A browser {@code EventSource} cannot set headers and is unsupported; a
@@ -354,15 +355,6 @@ public final class AgentLogStreamer implements HttpHandler {
       return segments[3];
     }
     return null;
-  }
-
-  /** True when {@code path} is exactly {@code /v1/runs/{id}/stream}. */
-  static boolean isStreamPath(String path) {
-    var segments = path.split("/");
-    return segments.length == 5
-        && "v1".equals(segments[1])
-        && "runs".equals(segments[2])
-        && "stream".equals(segments[4]);
   }
 
   static int parseSince(String query) {

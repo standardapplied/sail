@@ -5,13 +5,11 @@
 
 package ai.singlr.sail.identity;
 
-import java.util.EnumSet;
 import java.util.Locale;
-import java.util.Set;
 
 /**
- * Authorization role attached to an API credential. Each role grants a fixed set of {@link
- * Capability}. Roles are stored as lowercase strings on the token ({@code token.role}); {@link
+ * The role a person or credential holds; what each may do is its column of the access policy
+ * ({@code ai.singlr.sail.access.Policy}). Roles are stored as lowercase strings; {@link
  * #fromAttribute} resolves the stored value, failing safe to the least-privileged {@link #VIEWER}
  * for any missing, blank, or unrecognized value so a malformed role can never silently escalate.
  * Every credential carries an explicit role — {@code api_tokens.role} and {@code fdes.role} are
@@ -19,19 +17,9 @@ import java.util.Set;
  * any live credential travels.
  */
 public enum Role {
-  ADMIN(EnumSet.allOf(Capability.class)),
-  MEMBER(EnumSet.of(Capability.READ, Capability.WRITE)),
-  VIEWER(EnumSet.of(Capability.READ));
-
-  private final Set<Capability> capabilities;
-
-  Role(Set<Capability> capabilities) {
-    this.capabilities = capabilities;
-  }
-
-  public boolean allows(Capability capability) {
-    return capabilities.contains(capability);
-  }
+  ADMIN,
+  MEMBER,
+  VIEWER;
 
   /**
    * This role, or {@code cap} when {@code cap} grants less: a credential never outranks itself. The
@@ -47,9 +35,8 @@ public enum Role {
   }
 
   /**
-   * Resolves the role from the {@code token.role} exchange attribute. Any null, blank, or
-   * unrecognized value fails safe to {@link #VIEWER} so a malformed or absent role can never
-   * silently escalate to a privileged capability.
+   * Resolves the role from its stored form. Any null, blank, or unrecognized value fails safe to
+   * {@link #VIEWER} so a malformed or absent role can never silently escalate.
    */
   public static Role fromAttribute(Object attribute) {
     if (attribute == null) {
