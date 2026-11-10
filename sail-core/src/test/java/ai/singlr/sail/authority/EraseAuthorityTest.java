@@ -27,6 +27,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -81,7 +82,11 @@ class EraseAuthorityTest {
     return Stream.of(
         new Case("the owner erases their archived spec", OWNER_API, archived, null),
         new Case("the owner's push erases it", OWNER_SYNC, archived, null),
-        new Case("the owner's agent passes the rule", AGENT, archived, null),
+        new Case(
+            "the owner's agent may not: erasing is its FDE's",
+            AGENT,
+            archived,
+            Kind.LANE_FORBIDDEN),
         new Case("an admin erases anyone's", ADMIN, archived, null),
         new Case("an admin's push erases anyone's", ADMIN_SYNC, archived, null),
         new Case("the creator erases an unassigned one", OWNER_API, unassigned, null),
@@ -89,7 +94,11 @@ class EraseAuthorityTest {
         new Case("an admin erases an ownerless one", ADMIN, ownerless, null),
         new Case("another member may not", OTHER_API, archived, Kind.NOT_OWNER),
         new Case("another member's push may not", OTHER_SYNC, archived, Kind.NOT_OWNER),
-        new Case("another FDE's agent may not", OTHERS_AGENT, archived, Kind.NOT_OWNER),
+        new Case(
+            "another FDE's agent is told its lane first",
+            OTHERS_AGENT,
+            archived,
+            Kind.LANE_FORBIDDEN),
         new Case("a machine credential may not", MACHINE, archived, Kind.NOT_OWNER),
         new Case("a member may not erase an ownerless one", OWNER_API, ownerless, Kind.NOT_OWNER),
         new Case("a viewer may not", VIEWER, archived, Kind.READ_ONLY),
@@ -116,6 +125,39 @@ class EraseAuthorityTest {
     assertEquals(
         Optional.of(Kind.READ_ONLY),
         rule.request(new Actor(OWNER, Role.VIEWER, Actor.Lane.CLI), true).map(Refusal::kind));
+  }
+
+  @Test
+  void whatLiesOutsideTheAudienceIsNotFoundBeforeAnyRoleIsAsked() {
+    var archived = spec(SpecStatus.ARCHIVED, OWNER, OWNER, true);
+    var outsider = VIEWER.withScope(ProjectScope.of(List.of("beta")));
+
+    assertEquals(
+        Optional.of(new Refusal(Kind.OUT_OF_SCOPE, "Spec 'auth' was not found.", Remedy.NONE)),
+        rule.spec(outsider, archived));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_PRUNABLE,
+                "main holds no spec 'auth', so it cannot tell whose it is; sync it before pruning",
+                "Sync the spec before pruning it.")),
+        rule.requested(Actor.sync(OWNER, Role.VIEWER).withScope(outsider.scope()), "spec", "auth"));
+  }
+
+  @Test
+  void anErasureAskedAgainIsAnsweredToWhoeverMayEraseAtAll() {
+    Acting.system(
+        () -> {
+          new SpecStore(board.db).create(row("gone", "acme"));
+          var erasure = new Erasure(board.db);
+          erasure.erase(
+              erasure.closure(List.of(new Erasure.Target("spec", "gone"))), ChangeLog.Entry.LOCAL);
+        });
+
+    assertEquals(Optional.empty(), rule.requested(OTHER_SYNC, "spec", "gone"));
+    assertEquals(
+        Optional.of(Kind.READ_ONLY),
+        rule.requested(VIEWER_SYNC, "spec", "gone").map(Refusal::kind));
   }
 
   @Test
@@ -233,9 +275,15 @@ class EraseAuthorityTest {
     assertEquals(
         new Refusal(
             Kind.READ_ONLY,
-            "Your role is read-only: it cannot prune.",
-            "Ask an admin to prune, or for a member role."),
+            "Your credential is read-only and cannot prune specs.",
+            "Ask an admin for a member or admin credential."),
         rule.request(VIEWER, false).orElseThrow());
+    assertEquals(
+        new Refusal(
+            Kind.LANE_FORBIDDEN,
+            "Agent principals cannot prune specs.",
+            "Only an operator lane (CLI or API token) may do this."),
+        rule.request(AGENT, false).orElseThrow());
     assertEquals(
         new Refusal(
             Kind.ADMIN_ONLY,

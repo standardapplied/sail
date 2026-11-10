@@ -5,9 +5,10 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.authority.WriteRefused;
-import ai.singlr.sail.authority.WriterAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.FileLimits;
 import java.io.InputStream;
@@ -371,10 +372,26 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     materialized.forget(id);
   }
 
-  /** Who may write files on this box: any writer, as the journal and main's commit decide. */
+  /**
+   * Who may write files on this box, as the journal and main's commit decide: whoever may share in
+   * the project a file's id names ({@link Action#SHARE}).
+   */
   @Override
-  public WriterAuthority authority() {
-    return new WriterAuthority(db, "files");
+  public WriteAuthority authority() {
+    var projects = new ProjectStore(db);
+    return WriteAuthority.table(
+        db,
+        (id, held, next) -> {
+          var project = changeLog.projectOf(ENTITY, id, held);
+          return WriteAuthority.Taking.of(
+              Resources.project(
+                  project,
+                  projects
+                      .findByName(project)
+                      .map(ProjectStore.ProjectRow::createdBy)
+                      .orElse(null)),
+              Action.SHARE);
+        });
   }
 
   /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */

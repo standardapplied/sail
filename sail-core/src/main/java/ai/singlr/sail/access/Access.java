@@ -8,7 +8,6 @@ package ai.singlr.sail.access;
 import ai.singlr.sail.access.Policy.Cell;
 import ai.singlr.sail.access.Policy.Column;
 import ai.singlr.sail.authority.Refusal;
-import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
@@ -37,7 +36,7 @@ import java.util.stream.Collectors;
  * </ol>
  *
  * <p>A push over sync is its person's: main decides it by the pusher's role as it commits it, once,
- * and the journal records it without deciding it again ({@link WriteAuthority#local}).
+ * and the journal records it without deciding it again.
  */
 public final class Access {
 
@@ -48,15 +47,14 @@ public final class Access {
 
   /** Whether {@code actor} may take {@code action} on {@code resource}, and if not, why. */
   public static Decision decide(Actor actor, Action action, Resource resource) {
-    if (WriteAuthority.decided(actor)) {
+    if (actor.isSail()) {
       return ALLOWED;
     }
     if (resource.kind().filed() && !actor.scope().admits(resource.project())) {
       return NOT_FOUND;
     }
     var role = Policy.cell(action, Column.role(actor.role()));
-    var lane =
-        Column.lane(actor.lane()).map(column -> Policy.cell(action, column)).orElse(Cell.YES);
+    var lane = lane(actor, action);
     if (lane == Cell.OWN_WORK) {
       return ownWork(actor, resource) ? ALLOWED : refused(outsideWork(actor, action, resource));
     }
@@ -64,7 +62,7 @@ public final class Access {
       return refused(belowRole(actor, action, resource));
     }
     if (lane == Cell.NO) {
-      return refused(laneForbidden(action, resource));
+      return refused(laneForbidden(action, resource.kind()));
     }
     if (EnumSet.of(role, lane).contains(Cell.OWNER) && !owns(actor, resource)) {
       return refused(notOwner(resource));
@@ -73,6 +71,32 @@ public final class Access {
       return refused(notSeated(resource.parent()));
     }
     return ALLOWED;
+  }
+
+  /**
+   * Whether {@code actor} may take {@code action} at all, on some resource of {@code kind} it
+   * reads: Sail itself, the role and the lane, as {@link #decide(Actor, Action, Resource)} decides
+   * them, for a question asked before there is one resource to read — an erasure asked for before
+   * the specs it names are read, or again once nothing of it is left to own. Whose the resource is,
+   * and whether it is an agent's own work, is that decision's once the resource is in hand.
+   */
+  public static Decision decide(Actor actor, Action action, Resource.Kind kind) {
+    if (actor.isSail()) {
+      return ALLOWED;
+    }
+    var lane = lane(actor, action);
+    if (lane == Cell.OWN_WORK) {
+      return ALLOWED;
+    }
+    if (Policy.cell(action, Column.role(actor.role())) == Cell.NO) {
+      return refused(belowRole(actor, action, kind));
+    }
+    return lane == Cell.NO ? refused(laneForbidden(action, kind)) : ALLOWED;
+  }
+
+  /** What {@code actor}'s lane allows of {@code action}: a person's lane narrows nothing. */
+  private static Cell lane(Actor actor, Action action) {
+    return Column.lane(actor.lane()).map(column -> Policy.cell(action, column)).orElse(Cell.YES);
   }
 
   /**
@@ -102,47 +126,49 @@ public final class Access {
     return new Decision.Refused(refusal);
   }
 
-  private static String act(Action action, Resource resource) {
-    return action.verb() + " " + resource.kind().plural();
+  private static String act(Action action, Resource.Kind kind) {
+    return action.verb() + " " + kind.plural();
   }
 
   private static Refusal belowRole(Actor actor, Action action, Resource resource) {
+    return actor.canWrite() && action == Action.ASSIGN
+        ? notReassignable(resource)
+        : belowRole(actor, action, resource.kind());
+  }
+
+  private static Refusal belowRole(Actor actor, Action action, Resource.Kind kind) {
     return actor.canWrite()
-        ? adminOnly(action, resource)
-        : Refusal.readOnly(act(action, resource)).orElseThrow();
+        ? adminOnly(action, kind)
+        : Refusal.readOnly(act(action, kind)).orElseThrow();
   }
 
-  private static Refusal adminOnly(Action action, Resource resource) {
-    return switch (action) {
-      case ASSIGN ->
-          new Refusal(
-              Refusal.Kind.ADMIN_ONLY,
-              "Reassigning spec '"
-                  + resource.id()
-                  + "' moves work between FDEs and is an admin-only action"
-                  + (resource.assignee() != null
-                      ? " (currently '" + resource.assignee() + "')"
-                      : "")
-                  + ".",
-              "Ask an admin to reassign it. You may grab a spec only while it is unassigned.");
-      case PURGE ->
-          new Refusal(
-              Refusal.Kind.ADMIN_ONLY,
-              "Pruning by policy or a whole project is admin-only.",
-              Remedy.of(
-                  "Name the specs you own by id: ", Remedy.sail("spec prune", "<id...>"), "."));
-      default ->
-          new Refusal(
-              Refusal.Kind.ADMIN_ONLY,
-              "Only an admin may " + act(action, resource) + ".",
-              "Ask an admin to do it.");
-    };
+  private static Refusal notReassignable(Resource spec) {
+    return new Refusal(
+        Refusal.Kind.ADMIN_ONLY,
+        "Reassigning spec '"
+            + spec.id()
+            + "' moves work between FDEs and is an admin-only action"
+            + (spec.assignee() != null ? " (currently '" + spec.assignee() + "')" : "")
+            + ".",
+        "Ask an admin to reassign it. You may grab a spec only while it is unassigned.");
   }
 
-  private static Refusal laneForbidden(Action action, Resource resource) {
+  private static Refusal adminOnly(Action action, Resource.Kind kind) {
+    return action == Action.PURGE
+        ? new Refusal(
+            Refusal.Kind.ADMIN_ONLY,
+            "Pruning by policy or a whole project is admin-only.",
+            Remedy.of("Name the specs you own by id: ", Remedy.sail("spec prune", "<id...>"), "."))
+        : new Refusal(
+            Refusal.Kind.ADMIN_ONLY,
+            "Only an admin may " + act(action, kind) + ".",
+            "Ask an admin to do it.");
+  }
+
+  private static Refusal laneForbidden(Action action, Resource.Kind kind) {
     return new Refusal(
         Refusal.Kind.LANE_FORBIDDEN,
-        "Agent principals cannot " + act(action, resource) + ".",
+        "Agent principals cannot " + act(action, kind) + ".",
         "Only an operator lane (CLI or API token) may do this.");
   }
 

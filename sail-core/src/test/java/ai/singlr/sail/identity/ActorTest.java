@@ -160,6 +160,17 @@ class ActorTest {
   }
 
   @Test
+  void onlyMainAndThisBoxsMachineryAreSailItself() {
+    assertTrue(Actor.main().isSail());
+    assertTrue(Actor.system().isSail());
+    for (var lane : List.of(Actor.Lane.CLI, Actor.Lane.API, Actor.Lane.SYNC)) {
+      assertFalse(new Actor("root", Role.ADMIN, lane).isSail(), lane + " is a person's");
+    }
+    assertFalse(Actor.agentPrincipal("claude/r-1", "ada").isSail());
+    assertFalse(Actor.roomPrincipal("claude/room-r-1", "ada").isSail());
+  }
+
+  @Test
   void onlyASyncedRevisionNamesAPeerOrKeepsTheAuthorItOffers() {
     var pusher = Actor.sync("sumesh", Role.MEMBER);
     assertEquals("sumesh", pusher.peer());

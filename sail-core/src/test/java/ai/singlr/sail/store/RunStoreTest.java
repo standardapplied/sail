@@ -1230,7 +1230,10 @@ class RunStoreTest {
           assertInstanceOf(
               PushOutcome.Denied.class,
               Actor.call(other, () -> store.commitRevision(id, offered, rev, store.authority())));
-      assertTrue(denied.reason().contains("'node-b'"), denied.reason());
+      assertEquals(
+          "Run " + id + " belongs to spec 'auth', owned by 'node-a', not you.",
+          denied.reason(),
+          "whose the run is is answered before which node executed it");
       assertEquals(rev, denied.currentRev());
       assertEquals("node-a", denied.currentSnapshot().get("node"));
     }

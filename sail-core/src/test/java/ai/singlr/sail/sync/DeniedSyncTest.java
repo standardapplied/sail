@@ -580,7 +580,9 @@ class DeniedSyncTest {
 
     assertNull(report.failure());
     assertEquals(List.of(id), report.denials().stream().map(SyncSession.Denial::id).toList());
-    assertTrue(report.denials().getFirst().reason().contains("'ada'"));
+    assertEquals(
+        "Run " + id + " belongs to spec 'auth', owned by 'grace', not you.",
+        report.denials().getFirst().reason());
     assertEquals("running", runs.findById(id).orElseThrow().status());
     assertEquals(new RunStore(main.db).latestRev(id), runs.latestRev(id));
     assertEquals("running", new RunStore(main.db).findById(id).orElseThrow().status());

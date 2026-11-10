@@ -5,6 +5,11 @@
 
 package ai.singlr.sail.authority;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
@@ -17,12 +22,12 @@ import java.util.Optional;
 
 /**
  * Who may erase — the one rule a local prune and main's decision on a node's request to erase both
- * ask, each on its own copy. A read-only role erases nothing. A whole project, or a policy's sweep,
- * is an admin's alone. A spec is erased by its owner ({@link SpecStore.LastKnown#owner}) or an
- * admin, once it is archived, cancelled or deleted. Nothing is erased while a run in it has not
- * finished, bar a project purged whole ({@link #idle}). An actor scoped to its granted projects
- * erases only inside them: what lies outside is, to it, not there, and a spec with anything
- * belonging to it outside them is not its to erase.
+ * ask, each on its own copy. A spec is pruned ({@link Action#PRUNE}) by its owner ({@link
+ * SpecStore.LastKnown#owner}) or an admin, once it is archived, cancelled or deleted; a whole
+ * project, or a policy's sweep, is purged ({@link Action#PURGE}), whoever's work is in it. Nothing
+ * is erased while a run in it has not finished, bar a project purged whole ({@link #idle}). What
+ * lies outside the actor's audience is, to it, not there, and a spec with anything belonging to it
+ * outside is not its to erase.
  */
 public final class EraseAuthority {
 
@@ -40,68 +45,66 @@ public final class EraseAuthority {
   }
 
   /**
-   * Why {@code actor} may not erase at all: a read-only role never may, and a {@code wholesale}
-   * erasure — a whole project, or a policy's sweep — is admin-only.
+   * Why {@code actor} may not erase at all, asked before what it erases is read: whether its role
+   * and lane may prune specs, or, for a {@code wholesale} erasure — a whole project, or a policy's
+   * sweep — purge ({@link Access#decide(Actor, Action, Resource.Kind)}).
    */
   public Optional<Refusal> request(Actor actor, boolean wholesale) {
-    if (!actor.canWrite()) {
-      return Refusal.of(
-          Refusal.Kind.READ_ONLY,
-          "Your role is read-only: it cannot prune.",
-          "Ask an admin to prune, or for a member role.");
-    }
-    if (wholesale && !actor.isAdmin()) {
-      return Refusal.of(
-          Refusal.Kind.ADMIN_ONLY,
-          "Pruning by policy or a whole project is admin-only.",
-          Remedy.of("Name the specs you own by id: ", Remedy.sail("spec prune", "<id...>"), "."));
-    }
-    return Optional.empty();
+    return Access.decide(
+                actor,
+                wholesale ? Action.PURGE : Action.PRUNE,
+                wholesale ? Resource.Kind.PROJECT : Resource.Kind.SPEC)
+            instanceof Decision.Refused refused
+        ? Optional.of(refused.refusal())
+        : Optional.empty();
   }
 
   /**
    * Why main refuses a node's request, made as {@code actor}, to erase {@code type} {@code id},
-   * decided on main's own copy. Only specs and projects are erased on request. One main has already
-   * erased has nothing left to protect, so asking again only answers the erasure it has; one main
-   * holds nothing of has no owner main can establish.
+   * decided on main's own copy. Only specs and projects are erased on request. What main holds
+   * nothing of, or holds outside the actor's audience, has no owner main can establish. One main
+   * has already erased has nothing left to own, so asking again only answers the erasure it has, to
+   * whoever may erase at all.
    */
   public Optional<Refusal> requested(Actor actor, String type, String id) {
     var project = Erasure.PROJECT.equals(type);
-    var denied = request(actor, project);
-    if (denied.isPresent()) {
-      return denied;
+    if (!project && !Erasure.SPEC.equals(type)) {
+      return request(actor, false)
+          .or(
+              () ->
+                  Refusal.of(
+                      Refusal.Kind.NOT_PRUNABLE,
+                      "only specs and projects are pruned on request, not a " + type,
+                      "Prune the spec or project it belongs to."));
     }
-    if (!Erasure.SPEC.equals(type) && !project) {
-      return Refusal.of(
-          Refusal.Kind.NOT_PRUNABLE,
-          "only specs and projects are pruned on request, not a " + type,
-          "Prune the spec or project it belongs to.");
-    }
-    var target = new Erasure.Target(type, id);
     if (!sees(actor, type, id)) {
       return unheld(type, id);
     }
-    if (erasure.isErased(target)) {
-      return Optional.empty();
-    }
+    var target = new Erasure.Target(type, id);
     if (project) {
-      return erasure.holds(target) ? Optional.empty() : unheld(type, id);
+      var denied = request(actor, true);
+      return denied.isPresent() || erasure.isErased(target) || erasure.holds(target)
+          ? denied
+          : unheld(type, id);
+    }
+    if (erasure.isErased(target)) {
+      return request(actor, false);
     }
     return specs.lastKnown(id).map(spec -> spec(actor, spec)).orElseGet(() -> unheld(type, id));
   }
 
   /**
-   * Whether {@code actor}'s scope admits what this box holds of {@code type} {@code id}, by the
-   * project its head carries, which outlives the row and its erasure.
+   * Whether {@code actor} reads what this box holds of {@code type} {@code id}, by the project its
+   * head carries, which outlives the row and its erasure.
    */
   private boolean sees(Actor actor, String type, String id) {
-    var scope = actor.scope();
-    return scope.unrestricted() || scope.admits(changeLog.headProject(type, id).orElse(null));
+    return ScopeRule.reads(actor, changeLog.headProject(type, id).orElse(null));
   }
 
   /**
-   * Whether this box holds {@code target} outside {@code actor}'s scope. What it holds no history
-   * of — the room a spec would have minted and never did — is nothing an erasure takes from anyone.
+   * Whether this box holds {@code target} outside {@code actor}'s audience. What it holds no
+   * history of — the room a spec would have minted and never did — is nothing an erasure takes from
+   * anyone.
    */
   private boolean beyond(Actor actor, Erasure.Target target) {
     return changeLog.head(target.type(), target.id()).isPresent()
@@ -127,23 +130,29 @@ public final class EraseAuthority {
   }
 
   /**
-   * Why {@code actor} may not erase {@code spec}, as this box last knew it. A spec outside the
-   * actor's scope is one it cannot find. One inside it is erased with everything that belongs to it
-   * ({@link Erasure#closure}), so it is refused whole while any of that — a run, a review, the room
-   * it minted, left in the project the spec moved from — is filed outside the scope, and the
-   * refusal names none of it.
+   * Why {@code actor} may not erase {@code spec}, as this box last knew it: whether it may prune it
+   * ({@link Action#PRUNE}), a spec outside its audience being one it cannot find. One it may is
+   * erased with everything that belongs to it ({@link Erasure#closure}), so it is refused whole
+   * while it is still on the board, or while any of that — a run, a review, the room it minted,
+   * left in the project the spec moved from — lies outside the actor's audience, and the refusal
+   * names none of it.
    */
   public Optional<Refusal> spec(Actor actor, SpecStore.LastKnown spec) {
-    var denied = request(actor, false);
-    if (denied.isPresent()) {
-      return denied;
-    }
-    if (!sees(actor, Erasure.SPEC, spec.id())) {
-      return Refusal.of(
-          Refusal.Kind.OUT_OF_SCOPE, "Spec '" + spec.id() + "' was not found.", Remedy.NONE);
-    }
-    if (!actor.isAdmin() && !actor.actsFor(spec.owner())) {
-      return SpecAuthority.notOwner(spec.id(), spec.assignee(), spec.createdBy());
+    var pruned =
+        Resources.spec(
+            spec.id(),
+            changeLog.headProject(Erasure.SPEC, spec.id()).orElse(null),
+            spec.assignee(),
+            spec.createdBy());
+    switch (Access.decide(actor, Action.PRUNE, pruned)) {
+      case Decision.NotFound ignored -> {
+        return Refusal.of(
+            Refusal.Kind.OUT_OF_SCOPE, "Spec '" + spec.id() + "' was not found.", Remedy.NONE);
+      }
+      case Decision.Refused refused -> {
+        return Optional.of(refused.refusal());
+      }
+      case Decision.Allowed ignored -> {}
     }
     if (!spec.prunable()) {
       return Refusal.of(
@@ -158,9 +167,8 @@ public final class EraseAuthority {
               Remedy.sail("spec update", spec.id(), "--status", "archived"),
               "."));
     }
-    if (!actor.scope().unrestricted()
-        && erasure.closure(List.of(new Erasure.Target(Erasure.SPEC, spec.id()))).stream()
-            .anyMatch(target -> beyond(actor, target))) {
+    if (erasure.closure(List.of(new Erasure.Target(Erasure.SPEC, spec.id()))).stream()
+        .anyMatch(target -> beyond(actor, target))) {
       return Refusal.of(
           Refusal.Kind.NOT_PRUNABLE,
           "Pruning spec '" + spec.id() + "' would erase work outside your project scope.",

@@ -5,9 +5,15 @@
 
 package ai.singlr.sail.authority;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Sqlite;
+import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -20,8 +26,9 @@ import java.util.Optional;
  * last live projection. {@code next} is the revision being written, null for a tombstone, or a
  * tombstone's marks. An authority may read this box's database for owners, and never writes; the
  * journal asks it after the row is written, so whatever it derives from the row being decided is
- * read from {@code held}, never from the database, and a revision never admits itself. {@link
- * Actor.Lane#MAIN} and {@link Actor.Lane#SYSTEM} always pass: main has decided, or this box's
+ * read from {@code held}, never from the database, and a revision never admits itself. Who may take
+ * the actions a revision takes is {@link Access}'s to answer; a rule names them and keeps the facts
+ * only it knows. Sail itself is never asked ({@link Actor#isSail}): main has decided, or this box's
  * machinery is writing.
  */
 @FunctionalInterface
@@ -33,21 +40,80 @@ public interface WriteAuthority {
   Optional<Refusal> decide(
       Actor actor, String id, Map<String, Object> held, Map<String, Object> next);
 
-  /** Whether {@code actor} has already been decided for: main, or this box's own machinery. */
+  /** Whether {@code actor} has already been decided for: Sail itself ({@link Actor#isSail}). */
   static boolean decided(Actor actor) {
-    return actor.lane() == Actor.Lane.MAIN || actor.lane() == Actor.Lane.SYSTEM;
+    return actor.isSail();
   }
 
   /**
    * Why the bound {@link Actor} may not write {@code next} over {@code held} for {@code id} as this
    * box's own, by {@code rule}; empty if it may. The one decision of every write that is not a
    * push: a pushed revision ({@link Actor.Lane#SYNC}) was decided at main's commit and is not
-   * decided again.
+   * decided again, and Sail itself was decided already.
    */
   static Optional<Refusal> local(
       WriteAuthority rule, String id, Map<String, Object> held, Map<String, Object> next) {
     var actor = Actor.current();
-    return actor.lane() == Actor.Lane.SYNC ? Optional.empty() : rule.decide(actor, id, held, next);
+    return actor.lane() == Actor.Lane.SYNC || actor.isSail()
+        ? Optional.empty()
+        : rule.decide(actor, id, held, next);
+  }
+
+  /**
+   * What a revision takes: every one of {@code actions}, each of which must be allowed, on {@code
+   * resource}, the row it is decided on.
+   */
+  record Taking(Resource resource, List<Action> actions) {
+
+    public Taking {
+      Objects.requireNonNull(resource, "resource");
+      actions = List.copyOf(actions);
+    }
+
+    /** {@code actions} taken on {@code resource}. */
+    public static Taking of(Resource resource, Action... actions) {
+      return new Taking(resource, List.of(actions));
+    }
+  }
+
+  /** What a revision of {@code id} from {@code held} to {@code next} takes. */
+  @FunctionalInterface
+  interface Takes {
+    Taking of(String id, Map<String, Object> held, Map<String, Object> next);
+  }
+
+  /**
+   * The rule of a type the permission table decides alone: a revision is refused unless {@link
+   * Access} allows every action {@code takes} names for it, and a push names only the authors its
+   * pusher may write as, on {@code db}'s copy.
+   */
+  static WriteAuthority table(Sqlite db, Takes takes) {
+    var attribution = new Attribution(db);
+    return (actor, id, held, next) ->
+        refused(actor, takes.of(id, held, next))
+            .or(() -> attribution.decide(actor, held, next, null, null));
+  }
+
+  /**
+   * Why {@code actor} may not take what {@code taking} names: the first refusal {@link Access}
+   * answers, empty when it allows every action. A row outside the actor's audience is refused as
+   * one in no project it is granted, as the scope rule words a write it finds outside ({@link
+   * ScopeRule}), which the journal asks first.
+   */
+  static Optional<Refusal> refused(Actor actor, Taking taking) {
+    var resource = taking.resource();
+    for (var action : taking.actions()) {
+      switch (Access.decide(actor, action, resource)) {
+        case Decision.Allowed ignored -> {}
+        case Decision.NotFound ignored -> {
+          return ScopeRule.unplaced(resource.kind().title() + " '" + resource.id() + "'");
+        }
+        case Decision.Refused refused -> {
+          return Optional.of(refused.refusal());
+        }
+      }
+    }
+    return Optional.empty();
   }
 
   /**

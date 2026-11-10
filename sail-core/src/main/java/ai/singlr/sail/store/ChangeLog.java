@@ -408,6 +408,17 @@ public final class ChangeLog {
   }
 
   /**
+   * The project {@code entityId} is filed under, as a write over it is decided: its head's, which a
+   * review or a message keeps from its first write wherever its parent has moved since, so a write
+   * over one is decided as a read of it and a push over it are; {@code snapshot}'s own ({@link
+   * #projectOf}) where no head names one, as for a birth.
+   */
+  public String filed(String entityType, String entityId, Map<String, Object> snapshot) {
+    return headProject(entityType, entityId)
+        .orElseGet(() -> projectOf(entityType, entityId, snapshot));
+  }
+
+  /**
    * The project the head of {@code entityId} files it under while that head is a live revision —
    * not a tombstone, an erasure or a withdrawal — so a restore reads as a birth into its project.
    */

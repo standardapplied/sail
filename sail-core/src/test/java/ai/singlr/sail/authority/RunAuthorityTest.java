@@ -30,6 +30,7 @@ import static ai.singlr.sail.authority.Actors.projection;
 import static ai.singlr.sail.authority.Actors.with;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.Refusal.Kind;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.Acting;
@@ -260,13 +261,13 @@ class RunAuthorityTest {
             "its box cannot push a birth acting for no one",
             OWNER_SYNC,
             null,
-            with(RUNNING, "owner", null),
+            with(born, "owner", null),
             Kind.NOT_AUTHOR),
         row(
             "its box cannot push progress acting for no one",
             OWNER_SYNC,
-            with(RUNNING, "owner", null),
-            with(stopped, "owner", null),
+            with(born, "owner", null),
+            with(with(born, "status", "stopped"), "owner", null),
             Kind.NOT_AUTHOR),
         row("another box cannot push it", OTHER_SYNC, RUNNING, stopped, Kind.NOT_OWNER),
         row("an admin's box cannot push it", ADMIN_SYNC, RUNNING, stopped, Kind.NOT_OWNER),
@@ -294,7 +295,7 @@ class RunAuthorityTest {
             "a box's run acts for no other FDE",
             OWNER_SYNC,
             null,
-            with(RUNNING, "owner", OTHER),
+            with(born, "owner", OTHER),
             Kind.NOT_AUTHOR),
         row("a viewer's box pushes none", VIEWER_SYNC, RUNNING, stopped, Kind.READ_ONLY),
         row(
@@ -319,8 +320,20 @@ class RunAuthorityTest {
             "a local birth naming another run",
             OWNER_CLI,
             null,
-            with(RUNNING, "principal", "claude/review-" + OTHER_RUN),
+            with(born, "principal", "claude/review-" + OTHER_RUN),
             Kind.NOT_AUTHOR),
+        row(
+            "a birth on another FDE's spec is told whose it is before what it names",
+            OWNER_CLI,
+            null,
+            with(RUNNING, "principal", "claude/review-" + OTHER_RUN),
+            Kind.NOT_OWNER),
+        row(
+            "a push of another box's run is told whose it is before who wrote it",
+            OTHER_SYNC,
+            RUNNING,
+            with(stopped, "_actor", OWNER),
+            Kind.NOT_OWNER),
         row(
             "a review principal of its own",
             OWNER_SYNC,
@@ -393,8 +406,7 @@ class RunAuthorityTest {
   void aSpeclessRunIsOwnedByTheBoxThatRanIt() {
     var speclessHeld = with(with(RUNNING, "spec_id", null), "owner", null);
 
-    assertEquals(
-        List.of(OWNER), RunAuthority.owners(null, null, OWNER, spec -> Optional.of("carol")));
+    assertEquals(List.of(OWNER), Resources.run(RUN, "acme", null, null, OWNER, "carol").owners());
     assertEquals(
         Optional.empty(),
         rule.decide(OWNER_API, RUN, speclessHeld, with(speclessHeld, "status", "x")));
@@ -412,14 +424,22 @@ class RunAuthorityTest {
   void aRunIsOwnedByItsFdeAndItsSpecsOwnerOrTheBoxThatRanIt() {
     assertEquals(
         List.of("uday", "raj"),
-        RunAuthority.owners("uday", "auth", "box", spec -> Optional.of("raj")),
+        Resources.run(RUN, "acme", "uday", "auth", "box", "raj").owners(),
         "its own FDE may still reach it after its spec moved");
     assertEquals(
-        List.of("uday", "box"), RunAuthority.owners("uday", null, "box", spec -> Optional.empty()));
-    assertEquals(List.of("box"), RunAuthority.owners(null, " ", "box", spec -> Optional.empty()));
-    assertEquals(List.of(), RunAuthority.owners(" ", "auth", "box", spec -> Optional.empty()));
+        List.of("uday", "box"), Resources.run(RUN, "acme", "uday", null, "box", null).owners());
+    assertEquals(List.of("box"), Resources.run(RUN, "acme", null, " ", "box", null).owners());
+    assertEquals(List.of(), Resources.run(RUN, "acme", " ", "auth", "box", null).owners());
     assertEquals(
-        List.of("uday"), RunAuthority.owners("uday", "auth", "box", spec -> Optional.of("uday")));
+        List.of("uday"), Resources.run(RUN, "acme", "uday", "auth", "box", "uday").owners());
+  }
+
+  @Test
+  void aRowsOwnersAreItsRunsAsTheDoorsSeeItsSpec() {
+    var run = new RunStore(board.db).findById(RUN).orElseThrow();
+
+    assertEquals(List.of(OWNER, "carol"), RunAuthority.owners(run, spec -> Optional.of("carol")));
+    assertEquals(List.of(OWNER), RunAuthority.owners(run, spec -> Optional.empty()));
   }
 
   @Test
