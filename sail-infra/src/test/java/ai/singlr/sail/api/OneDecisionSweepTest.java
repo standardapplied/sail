@@ -108,9 +108,6 @@ class OneDecisionSweepTest {
     for (var resolves :
         List.of(
             "Authorizer#require",
-            "LocalApiRouter#whoami",
-            "LocalApiRouter#requirePerson",
-            "LocalApiRouter#runSession",
             "SessionAwareAuth#authenticateSession",
             "TokenAuth#require",
             "TokenAuth#roleOf",
@@ -128,11 +125,15 @@ class OneDecisionSweepTest {
     allowed.put(RULES + "EventAuthority#decide", OWN_WORK);
     allowed.put(API + "LocalApiRouter#messages", OWN_WORK);
     allowed.put(API + "LocalApiRouter#project", OWN_WORK);
+    allowed.put(API + "LocalApiRouter#requirePerson", OWN_WORK);
     allowed.put(
         API + "Event$Publisher#of", "fact: the role and lane an event's publisher acted on");
     allowed.put(API + "LocalApiRouter#events", "fact: only a run credential has a run to narrate");
     allowed.put(
         API + "LocalApiRouter#runMessages", "fact: only a run credential has an inbox to read");
+    allowed.put(
+        API + "LocalApiRouter#runSession",
+        "fact: only a run credential has a run to report a session onto; the box reports a room's");
     allowed.put(
         API + "LocalApiRouter#markDeliveredOnSelfRead",
         "fact: a run's read of its own room is a delivery");

@@ -5,13 +5,17 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Principal;
 import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -24,6 +28,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * Routes requests arriving over the local Unix-domain socket to a deliberately small surface: event
@@ -36,28 +41,84 @@ import java.util.concurrent.TimeoutException;
  * Authorization: Bearer}). A sail-launched run presents the credential minted with its reservation
  * ({@code SAIL_RUN_CREDENTIAL}), resolving to its agent principal; an interactive session — an
  * engineer's shell, an IDE-spawned agent — presents the box's ambient credential (the {@code
- * box.credential} file sharing the socket's bind mount), resolving to the box FDE with its roster
- * role. Run credentials resolve first, so a launched agent is always its principal. A missing,
- * revoked, or unknown credential fails loud with 401 and never falls back to a client-chosen actor.
- * Spec writes are decided by the spec rule ({@code SpecAuthority}) either way; the events route is
+ * box.credential} file sharing the socket's bind mount), resolving to the box's own person. Both
+ * resolve through the role rule, as every door's credential does. Run credentials resolve first, so
+ * a launched agent is always its principal. A missing, revoked, or unknown credential fails loud
+ * with 401 and never falls back to a client-chosen actor.
+ *
+ * <p>Every route is one of the table's ({@link #routes}), each declaring its {@link Gate}, which
+ * this router applies as the caller before the route's handler runs: operating the box (sync
+ * health) is the box's person's or an admin's; spec writes are decided by the spec rule ({@code
+ * SpecAuthority}) as the journal records them; reads see only the caller's scope, and a project the
+ * path names that the caller cannot read is not there, whatever is asked of it. The events route is
  * run-only, and the dispatch/stop routes do not exist here at all.
  */
-final class LocalApiRouter implements LocalApiHandler {
+final class LocalApiRouter implements LocalApiHandler, RouteTable {
 
-  private static final String SPECS = "/v1/specs";
-  private static final String EVENTS = "/v1/events";
-  private static final String WHOAMI = "/v1/whoami";
-  private static final String RUN_MESSAGES = "/v1/run/messages";
-  private static final String RUN_SESSION = "/v1/run/session";
-  private static final String PROJECTS = "/v1/projects/";
-  private static final String SKILLS = "skills";
-  private static final String SERVE = "serve";
-  private static final String PORTS = "ports";
+  private static final String PROJECT = "project";
+  private static final String RESOLVE = "/resolve";
 
   private final LocalLaneOperations operations;
+  private final Supplier<String> boxFde;
+  private final List<Route<Handler>> routes;
 
   LocalApiRouter(LocalLaneOperations operations) {
+    this(operations, NodeIdentity::handle);
+  }
+
+  /** A router whose box gate decides on the box of the FDE {@code boxFde} names when asked. */
+  LocalApiRouter(LocalLaneOperations operations, Supplier<String> boxFde) {
     this.operations = operations;
+    this.boxFde = boxFde;
+    this.routes =
+        List.of(
+            route("GET", "/v1/sync", Gate.BOX, this::sync),
+            route("GET", "/v1/conflicts", Gate.READS_IN_SCOPE, this::conflicts),
+            route(
+                "POST",
+                "/v1/conflicts/{id...}",
+                Gate.decides(Action.CHANGE, ConflictOperations.class),
+                this::conflict),
+            route("GET", "/v1/conflicts/{id...}", Gate.READS_IN_SCOPE, this::conflict),
+            route("GET", "/v1/whoami", Gate.READS_IN_SCOPE, LocalApiRouter::whoami),
+            route("POST", "/v1/events", Gate.JOURNAL, this::events),
+            route("GET", "/v1/run/messages", Gate.READS_IN_SCOPE, this::runMessages),
+            route(
+                "POST",
+                "/v1/run/messages",
+                Gate.decides(Action.NARRATE, LocalLaneOperations.class),
+                this::runMessages),
+            route("POST", "/v1/run/session", Gate.JOURNAL, this::runSession),
+            route("GET", "/v1/projects/{project}/skills", Gate.READS_IN_SCOPE, this::skills),
+            route("POST", "/v1/projects/{project}/skills", Gate.JOURNAL, this::skills),
+            route("GET", "/v1/projects/{project}/skills/{name}", Gate.READS_IN_SCOPE, this::skill),
+            route("DELETE", "/v1/projects/{project}/skills/{name}", Gate.JOURNAL, this::skill),
+            route(
+                "POST",
+                "/v1/projects/{project}/serve",
+                Gate.decides(Action.SERVE, ProjectGate.class),
+                this::serve),
+            route(
+                "DELETE",
+                "/v1/projects/{project}/serve",
+                Gate.decides(Action.SERVE, ProjectGate.class),
+                this::serve),
+            route("GET", "/v1/projects/{project}/ports", Gate.READS_IN_SCOPE, this::ports),
+            route("GET", "/v1/specs", Gate.READS_IN_SCOPE, this::specs),
+            route("POST", "/v1/specs", Gate.JOURNAL, this::specs),
+            route("GET", "/v1/specs/board", Gate.READS_IN_SCOPE, this::board),
+            route("GET", "/v1/specs/{id}", Gate.READS_IN_SCOPE, this::spec),
+            route("PUT", "/v1/specs/{id}", Gate.JOURNAL, this::spec),
+            route("DELETE", "/v1/specs/{id}", Gate.JOURNAL, this::spec),
+            route("GET", "/v1/specs/{id}/content", Gate.READS_IN_SCOPE, this::content),
+            route("PUT", "/v1/specs/{id}/content", Gate.JOURNAL, this::content),
+            route("GET", "/v1/specs/{id}/messages", Gate.READS_IN_SCOPE, this::messages),
+            route("POST", "/v1/specs/{id}/messages", Gate.JOURNAL, this::messages));
+  }
+
+  @Override
+  public List<Route<?>> routes() {
+    return List.copyOf(routes);
   }
 
   @Override
@@ -79,13 +140,29 @@ final class LocalApiRouter implements LocalApiHandler {
   }
 
   /**
+   * What answers a request on a route's path, with the placeholders the path filled. Each handler
+   * answers every method its path is asked with, refusing those no route of the path declares.
+   */
+  @FunctionalInterface
+  private interface Handler {
+    ApiResponse handle(LocalApiRequest request, Caller caller, Map<String, String> path)
+        throws IOException, InterruptedException, TimeoutException;
+  }
+
+  private static Route<Handler> route(String method, String pattern, Gate gate, Handler handler) {
+    return new Route<>(method, pattern, gate, handler);
+  }
+
+  /**
    * Who is on the other end of the socket: a sail-launched run authenticated by its minted
-   * credential, or an interactive session covered by the box's ambient FDE credential. Each is the
-   * {@link Actor} its request acts as; only the run caller may narrate run lifecycle on the events
-   * route.
+   * credential, or an interactive session covered by the box's ambient credential. Each is the
+   * {@link Actor} its request acts as; only the run caller has a run to narrate.
    */
   private sealed interface Caller {
     Actor actor();
+
+    /** What {@code whoami} shows of the credential beside the principal it resolved to. */
+    Map<String, Object> shown();
 
     /**
      * A run's credential, acting as {@code actor} ({@link LocalLaneOperations#runActor}): a
@@ -94,12 +171,22 @@ final class LocalApiRouter implements LocalApiHandler {
      * by anything the session says. A full turn carries the agent principal a dispatched agent
      * holds, nothing more.
      */
-    record Run(RunStore.RunRow run, Actor actor) implements Caller {}
-
-    record Box(Actor fde) implements Caller {
+    record Run(RunStore.RunRow run, Actor actor) implements Caller {
       @Override
-      public Actor actor() {
-        return fde;
+      public Map<String, Object> shown() {
+        var shown = new LinkedHashMap<String, Object>();
+        shown.put("owner", run.owner());
+        shown.put("run_id", run.id());
+        shown.put("project", run.project());
+        return shown;
+      }
+    }
+
+    /** The box credential, acting as the box's own person. */
+    record Box(Actor actor) implements Caller {
+      @Override
+      public Map<String, Object> shown() {
+        return Map.of("credential", "box");
       }
     }
   }
@@ -147,107 +234,110 @@ final class LocalApiRouter implements LocalApiHandler {
     return Actor.call(caller.actor(), () -> route(request, caller));
   }
 
-  /** Routes an authenticated request, acting as its caller. */
+  /** Routes an authenticated request, acting as its caller, by the first route its path matches. */
   private ApiResponse route(LocalApiRequest request, Caller caller) {
-    var path = request.path();
-    if ("/v1/sync".equals(path)) {
-      return "GET".equals(request.method())
-          ? ApiResponse.ok(SyncViews.status(operations.syncStatus()))
-          : problem(405, "Only GET is available.");
-    }
-    if ("/v1/conflicts".equals(path)) {
-      return "GET".equals(request.method())
-          ? ApiResponse.ok(SyncViews.conflicts(operations.conflicts()))
-          : problem(405, "Only GET is available.");
-    }
-    if (path.startsWith("/v1/conflicts/")
-        && path.endsWith("/resolve")
-        && path.length() > "/v1/conflicts//resolve".length()) {
-      if (!"POST".equals(request.method())) return problem(405, "Conflict resolution accepts POST");
-      var id = path.substring("/v1/conflicts/".length(), path.length() - "/resolve".length());
-      var body =
-          request.headers().getOrDefault("content-type", "").startsWith("application/json")
-              ? YamlUtil.parseMapStrict(request.bodyText())
-              : request.form();
-      var strategy = body.get("strategy");
-      if (!(strategy instanceof String text) || text.isBlank()) {
-        return problem(400, "resolution strategy is required");
-      }
-      var merged = body.get("merged");
-      if (merged != null && !(merged instanceof String)) return problem(400, "merged must be text");
-      var resolution =
-          new Resolution(
-              Resolution.Strategy.valueOf(text.toUpperCase(Locale.ROOT)), (String) merged);
-      return ApiResponse.ok(
-          SyncViews.conflict(
-              operations.resolveConflict(request.query().get("type"), id, resolution)));
-    }
-    if (path.startsWith("/v1/conflicts/")
-        && Boolean.parseBoolean(request.query().get("template"))) {
-      if (!"GET".equals(request.method())) return problem(405, "A merge template accepts GET");
-      var id = path.substring("/v1/conflicts/".length());
-      return ApiResponse.ok(
-          Map.of("template", operations.conflictMergeTemplate(request.query().get("type"), id)));
-    }
-    if (WHOAMI.equals(path)) {
-      return whoami(request, caller);
-    }
-    if (EVENTS.equals(path)) {
-      return events(request, caller);
-    }
-    if (RUN_MESSAGES.equals(path)) {
-      return runMessages(request, caller);
-    }
-    if (RUN_SESSION.equals(path)) {
-      return runSession(request, caller);
-    }
-    if (path.startsWith(PROJECTS)) {
-      try {
-        return project(request, caller, path.substring(PROJECTS.length()).split("/", -1));
-      } catch (IOException | TimeoutException failed) {
-        throw ApiException.of(ErrorCode.CONTAINER_ERROR, failed);
-      } catch (InterruptedException interrupted) {
-        Thread.currentThread().interrupt();
-        throw ApiException.of(ErrorCode.CONTAINER_ERROR, interrupted);
+    for (var route : routes) {
+      var path = route.match(request.path());
+      if (path.isPresent()) {
+        return dispatch(route, request, caller, path.get());
       }
     }
-    if (SPECS.equals(path)) {
-      return specsCollection(request);
-    }
-    if ((SPECS + "/board").equals(path)) {
-      return board(request);
-    }
-    if (path.startsWith(SPECS + "/")) {
-      return specItem(request, caller, path.substring((SPECS + "/").length()));
-    }
-    return problem(404, "No route for " + path);
+    return noRoute(request);
   }
 
   /**
-   * Reflects the authenticated identity: a run's minted principal with the FDE it acts for, or the
-   * box FDE covered by the ambient credential.
+   * Answers a request on {@code matched}'s path. A project the path names is read first, so one the
+   * caller cannot read is not there whatever is asked of it. Then the route of the request's method
+   * admits the caller through its gate and serves it; a method no route of the path declares is
+   * refused by the path's handler, which serves nothing for it.
    */
-  private static ApiResponse whoami(LocalApiRequest request, Caller caller) {
+  private ApiResponse dispatch(
+      Route<Handler> matched, LocalApiRequest request, Caller caller, Map<String, String> path) {
+    try {
+      if (path.containsKey(PROJECT)) {
+        project(caller, path.get(PROJECT));
+      }
+      var declared =
+          routes.stream()
+              .filter(route -> route.pattern().equals(matched.pattern()))
+              .filter(route -> route.method().equals(request.method()))
+              .findFirst();
+      declared.ifPresent(route -> route.gate().admit(caller.actor(), boxFde));
+      return declared.orElse(matched).handler().handle(request, caller, path);
+    } catch (IOException | TimeoutException failed) {
+      throw ApiException.of(ErrorCode.CONTAINER_ERROR, failed);
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw ApiException.of(ErrorCode.CONTAINER_ERROR, interrupted);
+    }
+  }
+
+  private ApiResponse sync(LocalApiRequest request, Caller caller, Map<String, String> path) {
+    return "GET".equals(request.method())
+        ? ApiResponse.ok(SyncViews.status(operations.syncStatus()))
+        : problem(405, "Only GET is available.");
+  }
+
+  private ApiResponse conflicts(LocalApiRequest request, Caller caller, Map<String, String> path) {
+    return "GET".equals(request.method())
+        ? ApiResponse.ok(SyncViews.conflicts(operations.conflicts()))
+        : problem(405, "Only GET is available.");
+  }
+
+  /**
+   * A parked conflict, named by its id, slashes and all, as a file's {@code project/path} is:
+   * {@code POST .../resolve} settles it, and {@code GET ...?template=true} reads the record a merge
+   * starts from.
+   */
+  private ApiResponse conflict(LocalApiRequest request, Caller caller, Map<String, String> path) {
+    var id = path.get("id");
+    if (id.endsWith(RESOLVE) && id.length() > RESOLVE.length()) {
+      return resolve(request, id.substring(0, id.length() - RESOLVE.length()));
+    }
+    if (!Boolean.parseBoolean(request.query().get("template"))) {
+      return noRoute(request);
+    }
+    return "GET".equals(request.method())
+        ? ApiResponse.ok(
+            Map.of("template", operations.conflictMergeTemplate(request.query().get("type"), id)))
+        : problem(405, "A merge template accepts GET");
+  }
+
+  private ApiResponse resolve(LocalApiRequest request, String id) {
+    if (!"POST".equals(request.method())) return problem(405, "Conflict resolution accepts POST");
+    var body =
+        request.headers().getOrDefault("content-type", "").startsWith("application/json")
+            ? YamlUtil.parseMapStrict(request.bodyText())
+            : request.form();
+    var strategy = body.get("strategy");
+    if (!(strategy instanceof String text) || text.isBlank()) {
+      return problem(400, "resolution strategy is required");
+    }
+    var merged = body.get("merged");
+    if (merged != null && !(merged instanceof String)) return problem(400, "merged must be text");
+    var resolution =
+        new Resolution(Resolution.Strategy.valueOf(text.toUpperCase(Locale.ROOT)), (String) merged);
+    return ApiResponse.ok(
+        SyncViews.conflict(
+            operations.resolveConflict(request.query().get("type"), id, resolution)));
+  }
+
+  /**
+   * Reflects the authenticated identity as the access rule shows a principal its own ({@link
+   * Principal}): a run's minted principal with the FDE it acts for, or the box's person the ambient
+   * credential stands for.
+   */
+  private static ApiResponse whoami(
+      LocalApiRequest request, Caller caller, Map<String, String> path) {
     if (!"GET".equals(request.method())) {
       return problem(405, "whoami accepts GET");
     }
+    var principal = Principal.of(caller.actor());
     var body = new LinkedHashMap<String, Object>();
-    switch (caller) {
-      case Caller.Run(var run, var actor) -> {
-        body.put("handle", run.principal());
-        body.put("owner", run.owner());
-        body.put("role", actor.role().name().toLowerCase());
-        body.put("lane", actor.lane().name().toLowerCase());
-        body.put("run_id", run.id());
-        body.put("project", run.project());
-      }
-      case Caller.Box(var fde) -> {
-        body.put("handle", fde.handle());
-        body.put("role", fde.role().name().toLowerCase());
-        body.put("lane", fde.lane().name().toLowerCase());
-        body.put("credential", "box");
-      }
-    }
+    body.put("handle", caller.actor().handle());
+    body.put("role", principal.role());
+    body.put("lane", principal.lane());
+    body.putAll(caller.shown());
     return new ApiResponse(200, body);
   }
 
@@ -265,7 +355,7 @@ final class LocalApiRouter implements LocalApiHandler {
    * ({@code source}, {@code exit_code}, {@code watcher_pid}) are stripped as well, so nothing an
    * agent publishes can impersonate the watcher's verified exit.
    */
-  private ApiResponse events(LocalApiRequest request, Caller caller) {
+  private ApiResponse events(LocalApiRequest request, Caller caller, Map<String, String> path) {
     if (!"POST".equals(request.method())) {
       return problem(405, "events accepts POST");
     }
@@ -305,33 +395,15 @@ final class LocalApiRouter implements LocalApiHandler {
   }
 
   /**
-   * A project's skills, one of this socket's two project surfaces beside its stack: {@code GET}
-   * lists every skill an agent of the project can see and reads one's {@code SKILL.md}; {@code
-   * POST} shares a folder in the container, {@code DELETE} stops sharing one. A run reaches only
-   * its own project. Sharing and removing are a person's: a shared skill is instructions every
-   * other agent and every other box will follow, so a run's credential, whatever its lane, is
-   * refused them, and the box credential writes as the box's FDE, whose write the journal decides.
+   * Reads {@code project} as the caller, before anything is asked of it: a project the caller
+   * cannot read is not there, and a run reaches only its own project.
    */
-  private ApiResponse project(LocalApiRequest request, Caller caller, String[] segments)
-      throws IOException, InterruptedException, TimeoutException {
-    if (segments.length < 2) {
-      return problem(404, "No route for " + request.path());
-    }
-    var project = segments[0];
+  private static void project(Caller caller, String project) {
     NameValidator.requireValidProjectName(project);
     if (caller instanceof Caller.Run(var run, _) && !project.equals(run.project())
         || !ReadFilter.reads(caller.actor(), () -> project)) {
       throw ProjectReader.absent(project);
     }
-    return switch (segments[1]) {
-      case SKILLS ->
-          segments.length <= 3
-              ? projectSkills(request, caller, project, segments)
-              : noRoute(request);
-      case SERVE -> segments.length == 2 ? serve(request, project) : noRoute(request);
-      case PORTS -> segments.length == 2 ? ports(request, project) : noRoute(request);
-      default -> noRoute(request);
-    };
   }
 
   private static ApiResponse noRoute(LocalApiRequest request) {
@@ -342,8 +414,9 @@ final class LocalApiRouter implements LocalApiHandler {
    * {@code POST} brings the project's stack up, {@code timeout} seconds at most (default 60);
    * {@code DELETE} stops its processes. Both are writes, refused to a read-only run.
    */
-  private ApiResponse serve(LocalApiRequest request, String project)
+  private ApiResponse serve(LocalApiRequest request, Caller caller, Map<String, String> path)
       throws IOException, InterruptedException, TimeoutException {
+    var project = path.get(PROJECT);
     return switch (request.method()) {
       case "POST" ->
           ApiResponse.ok(
@@ -359,39 +432,54 @@ final class LocalApiRouter implements LocalApiHandler {
     };
   }
 
-  private ApiResponse ports(LocalApiRequest request, String project)
+  private ApiResponse ports(LocalApiRequest request, Caller caller, Map<String, String> path)
       throws IOException, InterruptedException, TimeoutException {
     return "GET".equals(request.method())
-        ? ApiResponse.ok(operations.stack().ports(project))
+        ? ApiResponse.ok(operations.stack().ports(path.get(PROJECT)))
         : problem(405, "ports accepts GET");
   }
 
-  private ApiResponse projectSkills(
-      LocalApiRequest request, Caller caller, String project, String[] segments)
+  /**
+   * A project's skills, one of this socket's two project surfaces beside its stack: {@code GET}
+   * lists every skill an agent of the project can see, {@code POST} shares a folder in the
+   * container. Sharing is a person's: a shared skill is instructions every other agent and every
+   * other box will follow, so a run's credential, whatever its lane, is refused it, and the box
+   * credential writes as the box's person, whose write the journal decides.
+   */
+  private ApiResponse skills(LocalApiRequest request, Caller caller, Map<String, String> path)
       throws IOException, InterruptedException, TimeoutException {
-    var skills = operations.skills();
-    if (segments.length == 2) {
-      return switch (request.method()) {
-        case "GET" -> ApiResponse.ok(skills.rows(project));
-        case "POST" -> {
-          var form = request.form();
-          var folder = Objects.requireNonNullElse(form.get("folder"), "");
-          requirePerson(
-              caller,
-              "share",
-              Remedy.of(
-                  "Ask them to run 'skill add ",
-                  folder.isBlank() ? "<folder>" : folder,
-                  "' in their own session."));
-          yield ApiResponse.ok(skills.shareFromContainer(project, folder, form.get("name")));
-        }
-        default -> problem(405, "skills accepts GET or POST");
-      };
-    }
-    var name = segments[2];
+    var project = path.get(PROJECT);
+    return switch (request.method()) {
+      case "GET" -> ApiResponse.ok(operations.skills().rows(project));
+      case "POST" -> {
+        var form = request.form();
+        var folder = Objects.requireNonNullElse(form.get("folder"), "");
+        requirePerson(
+            caller,
+            "share",
+            Remedy.of(
+                "Ask them to run 'skill add ",
+                folder.isBlank() ? "<folder>" : folder,
+                "' in their own session."));
+        yield ApiResponse.ok(
+            operations.skills().shareFromContainer(project, folder, form.get("name")));
+      }
+      default -> problem(405, "skills accepts GET or POST");
+    };
+  }
+
+  /**
+   * One shared skill: {@code GET} reads its {@code SKILL.md}, {@code DELETE} stops sharing it,
+   * which like sharing is a person's.
+   */
+  private ApiResponse skill(LocalApiRequest request, Caller caller, Map<String, String> path)
+      throws IOException, InterruptedException, TimeoutException {
+    var project = path.get(PROJECT);
+    var name = path.get("name");
     return switch (request.method()) {
       case "GET" ->
-          ApiResponse.ok(Map.of("name", name, "skill_md", skills.manifest(project, name)));
+          ApiResponse.ok(
+              Map.of("name", name, "skill_md", operations.skills().manifest(project, name)));
       case "DELETE" -> {
         requirePerson(
             caller,
@@ -402,7 +490,8 @@ final class LocalApiRouter implements LocalApiHandler {
                 "' in their own session, or '",
                 Remedy.sail("project skills rm", name, "-p", project),
                 "' on the devbox."));
-        yield ApiResponse.ok(Map.of("name", name, "files", skills.remove(project, name)));
+        yield ApiResponse.ok(
+            Map.of("name", name, "files", operations.skills().remove(project, name)));
       }
       default -> problem(405, "a skill accepts GET or DELETE");
     };
@@ -425,7 +514,7 @@ final class LocalApiRouter implements LocalApiHandler {
    * Spec creation is the spec rule's, like every spec write: a read-only credential — a room
    * session's, or a viewer's box credential — is refused there, never minting a work item.
    */
-  private ApiResponse specsCollection(LocalApiRequest request) {
+  private ApiResponse specs(LocalApiRequest request, Caller caller, Map<String, String> path) {
     return switch (request.method()) {
       case "GET" -> ApiResponse.from(operations.globalSpecs(filterFrom(request.query())));
       case "POST" ->
@@ -434,33 +523,25 @@ final class LocalApiRouter implements LocalApiHandler {
     };
   }
 
-  private ApiResponse board(LocalApiRequest request) {
+  private ApiResponse board(LocalApiRequest request, Caller caller, Map<String, String> path) {
     if (!"GET".equals(request.method())) {
       return problem(405, "board accepts GET");
     }
     return ApiResponse.from(operations.globalBoard(request.query().get("project")));
   }
 
-  private ApiResponse specItem(LocalApiRequest request, Caller caller, String tail) {
-    var slash = tail.indexOf('/');
-    if (slash >= 0) {
-      var id = tail.substring(0, slash);
-      var sub = tail.substring(slash + 1);
-      return switch (sub) {
-        case "content" -> content(request, caller, id);
-        case "messages" -> messages(request, caller, id);
-        default -> problem(404, "No route for spec sub-resource " + sub);
-      };
-    }
+  private ApiResponse spec(LocalApiRequest request, Caller caller, Map<String, String> path) {
+    var id = path.get("id");
     return switch (request.method()) {
-      case "GET" -> ApiResponse.from(operations.globalSpec(tail));
-      case "PUT" -> ApiResponse.from(operations.updateGlobalSpec(tail, updateFrom(request.form())));
-      case "DELETE" -> ApiResponse.from(operations.deleteGlobalSpec(tail));
+      case "GET" -> ApiResponse.from(operations.globalSpec(id));
+      case "PUT" -> ApiResponse.from(operations.updateGlobalSpec(id, updateFrom(request.form())));
+      case "DELETE" -> ApiResponse.from(operations.deleteGlobalSpec(id));
       default -> problem(405, "spec accepts GET, PUT, or DELETE");
     };
   }
 
-  private ApiResponse messages(LocalApiRequest request, Caller caller, String id) {
+  private ApiResponse messages(LocalApiRequest request, Caller caller, Map<String, String> path) {
+    var id = path.get("id");
     return switch (request.method()) {
       case "GET" -> {
         var before = request.query().get("before");
@@ -511,7 +592,8 @@ final class LocalApiRouter implements LocalApiHandler {
    * run names the spec. {@code GET} reads the undelivered inbox; {@code POST} acknowledges exactly
    * the messages the caller showed ({@code delivered=<id>[,<id>...]}, idempotent).
    */
-  private ApiResponse runMessages(LocalApiRequest request, Caller caller) {
+  private ApiResponse runMessages(
+      LocalApiRequest request, Caller caller, Map<String, String> path) {
     if (!(caller instanceof Caller.Run(var run, _))) {
       return problem(
           403,
@@ -538,7 +620,7 @@ final class LocalApiRouter implements LocalApiHandler {
    * session exported), which becomes a record-class {@code agent_conversation_started} event in the
    * room — the seam that later lets one conversation be reopened through either door.
    */
-  private ApiResponse runSession(LocalApiRequest request, Caller caller) {
+  private ApiResponse runSession(LocalApiRequest request, Caller caller, Map<String, String> path) {
     if (caller instanceof Caller.Box && Strings.isBlank(request.form().get("room_id"))) {
       return problem(
           403,
@@ -586,7 +668,8 @@ final class LocalApiRouter implements LocalApiHandler {
     }
   }
 
-  private ApiResponse content(LocalApiRequest request, Caller caller, String id) {
+  private ApiResponse content(LocalApiRequest request, Caller caller, Map<String, String> path) {
+    var id = path.get("id");
     return switch (request.method()) {
       case "GET" -> ApiResponse.from(operations.globalSpecContent(id));
       case "PUT" -> {
