@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ReviewRuns;
@@ -637,6 +638,26 @@ class StopOperationsTest {
     var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
     assertEquals(R1, stopped.runId());
     assertTrue(stopped.specCancelled());
+  }
+
+  @Test
+  void aProjectsRunIsNoRunToAnActorOutsideTheProject() throws Exception {
+    var ops = stopOps(liveAgentShell(), failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    var outside = ADMIN.withScope(ProjectScope.of(List.of("beta")));
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    outside,
+                    () -> ops.stop(new StopOperations.ProjectTarget("acme"), LOCAL_HANDLE, false)));
+
+    assertEquals(ErrorCode.RUN_NOT_FOUND, refusal.failure().errorCode());
+    assertEquals("No run '" + R1 + "'.", refusal.getMessage());
+    assertEquals("running", runStore.findById(R1).orElseThrow().status());
   }
 
   @Test
