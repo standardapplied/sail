@@ -152,7 +152,7 @@ class SyncServerCommandTest {
         Thread.ofVirtual()
             .start(
                 () -> {
-                  try {
+                  try (toClient) {
                     SyncServerCommand.serve(mainReplicaDb, "main", token, serverIn, toClient, sink);
                   } catch (IOException e) {
                     throw new UncheckedIOException(e);
@@ -265,7 +265,7 @@ class SyncServerCommandTest {
         Thread.ofVirtual()
             .start(
                 () -> {
-                  try {
+                  try (toClient) {
                     SyncServerCommand.serve(
                         mainReplicaDb,
                         "main",

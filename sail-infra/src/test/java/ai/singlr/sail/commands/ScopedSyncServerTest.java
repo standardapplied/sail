@@ -219,7 +219,7 @@ class ScopedSyncServerTest {
         Thread.ofVirtual()
             .start(
                 () -> {
-                  try {
+                  try (toClient) {
                     SyncServerCommand.serve(main, "main", token, serverIn, toClient);
                   } catch (IOException e) {
                     throw new UncheckedIOException(e);
