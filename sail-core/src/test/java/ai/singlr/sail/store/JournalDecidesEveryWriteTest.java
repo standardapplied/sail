@@ -222,7 +222,7 @@ class JournalDecidesEveryWriteTest {
         owned(
             "SpecStore.updateReposAndStatus",
             f -> f.specs.updateReposAndStatus("theirs", List.of("app"), SpecStatus.REVIEW, "b")),
-        write("SpecStore.reHomeToOwnRoom", Kind.FIXED, f -> f.specs.reHomeToOwnRoom("guest")),
+        write("SpecStore.reHomeToOwnRoom", Kind.NOT_OWNER, f -> f.specs.reHomeToOwnRoom("guest")),
         owned("SpecStore.delete", f -> f.specs.delete("theirs")),
         owned("SpecStore.setContent", f -> f.specs.setContent("theirs", "body", "plan")),
         owned("SpecStore.restore", f -> f.specs.restore("gone", f.goneRev)),

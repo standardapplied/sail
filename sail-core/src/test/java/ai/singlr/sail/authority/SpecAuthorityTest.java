@@ -111,6 +111,7 @@ class SpecAuthorityTest {
         refuses("a room principal cannot create", ROOM, null, ownRoomCreate, Kind.READ_ONLY),
         refuses("a viewer's push cannot create", VIEWER_SYNC, null, ownRoomCreate, Kind.READ_ONLY),
         allows("a create in its own room may name anyone", OTHER_API, null, namingOther),
+        allows("a create in its own room may name another FDE", OWNER_API, null, namingOther),
         allows("the room's owner is born into it", OWNER_API, null, inLobby),
         allows("an agent of the room's owner is born into it", AGENT, null, inLobby),
         allows("an admin is born into any room", ADMIN, null, inLobby),
@@ -119,11 +120,16 @@ class SpecAuthorityTest {
         refuses("a machine credential is not born in", MACHINE, null, inLobby, Kind.NOT_OWNER),
         refuses("another member's push is not born in", OTHER_SYNC, null, inLobby, Kind.NOT_OWNER),
         refuses(
-            "a member is not born in a room this box does not hold",
+            "a member is not born in a room this box does not hold, which no one owns here",
             OTHER_API,
             null,
             with(inLobby, "room_id", "nowhere"),
-            Kind.NO_CONVERSATION),
+            Kind.NOT_OWNER),
+        allows(
+            "an admin is born in a room this box does not hold",
+            ADMIN,
+            null,
+            with(inLobby, "room_id", "nowhere")),
         allows("a birth claims for oneself", OWNER_API, null, with(inLobby, "assignee", OWNER)),
         refuses(
             "a birth naming another is admin-only",
@@ -238,17 +244,17 @@ class SpecAuthorityTest {
             BORN_IN_LOBBY,
             with(BORN_IN_LOBBY, "assignee", OWNER)),
         refuses(
-            "a member claims no spec born where they may not post",
+            "a member claims no spec born where they may not start work",
             OTHER_API,
             BORN_IN_LOBBY,
             with(BORN_IN_LOBBY, "assignee", OTHER),
-            Kind.ADMIN_ONLY),
+            Kind.NOT_OWNER),
         refuses(
-            "a push claims no spec born where it may not post",
+            "a push claims no spec born where it may not start work",
             OTHER_SYNC,
             BORN_IN_LOBBY,
             with(BORN_IN_LOBBY, "assignee", OTHER),
-            Kind.ADMIN_ONLY),
+            Kind.NOT_OWNER),
         allows(
             "an admin assigns a spec born anywhere",
             ADMIN,
@@ -421,6 +427,27 @@ class SpecAuthorityTest {
   }
 
   @Test
+  void aReadOnlyCredentialHearsWhatTheRevisionWouldDo() {
+    assertEquals(
+        readOnly("create specs"),
+        rule.decide(VIEWER, SPEC, null, with(UNASSIGNED, "title", "New")));
+    assertEquals(
+        readOnly("claim specs"),
+        rule.decide(VIEWER, SPEC, UNASSIGNED, with(UNASSIGNED, "assignee", OWNER)));
+    assertEquals(
+        readOnly("assign specs"), rule.decide(VIEWER, SPEC, OWNED, with(OWNED, "assignee", OTHER)));
+    assertEquals(readOnly("change specs"), rule.decide(VIEWER, SPEC, OWNED, null));
+  }
+
+  private static Optional<Refusal> readOnly(String act) {
+    return Optional.of(
+        new Refusal(
+            Kind.READ_ONLY,
+            "Your credential is read-only and cannot " + act + ".",
+            "Ask an admin for a member or admin credential."));
+  }
+
+  @Test
   void refusalsSpeakTheTextsClientsSee() {
     assertEquals(
         new Refusal(
@@ -443,10 +470,9 @@ class SpecAuthorityTest {
         rule.decide(OTHER_API, SPEC, OWNED, with(OWNED, "assignee", OTHER)).orElseThrow());
     assertEquals(
         new Refusal(
-            Kind.ADMIN_ONLY,
-            "Spec 'auth' lives in 'lobby', whose owners alone start work there, and claiming it"
-                + " would make you one.",
-            "Ask an admin to assign it to you."),
+            Kind.NOT_OWNER,
+            "'lobby' belongs to ada: only ada or an admin may start work there, not you.",
+            "Ask ada to create it there, or have an admin do it."),
         rule.decide(OTHER_API, SPEC, BORN_IN_LOBBY, with(BORN_IN_LOBBY, "assignee", OTHER))
             .orElseThrow());
     assertEquals(

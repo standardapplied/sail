@@ -27,9 +27,11 @@ import static ai.singlr.sail.authority.Actors.with;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.authority.Refusal.Kind;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 import java.util.Map;
@@ -229,6 +231,17 @@ class RoomAuthorityTest {
                 "Have an admin change it.")),
         rule.decide(OWNER_API, "lobby", ownerless, ownerless));
     assertEquals(Optional.empty(), rule.decide(ADMIN, "lobby", ownerless, ownerless));
+  }
+
+  @Test
+  void aRoomOutsideTheActorsScopeIsOneItCannotFind() {
+    assertEquals(
+        Optional.of(new Refusal(Kind.OUT_OF_SCOPE, "Room 'lobby' was not found.", Remedy.NONE)),
+        rule.decide(
+            OWNER_API.withScope(ProjectScope.of(List.of("beta"))),
+            "lobby",
+            LOBBY,
+            with(LOBBY, "wake", "off")));
   }
 
   @Test
