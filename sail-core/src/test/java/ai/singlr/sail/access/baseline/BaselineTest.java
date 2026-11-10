@@ -51,6 +51,23 @@ class BaselineTest {
   }
 
   @Test
+  void aSnapshotAnswersEachCellOnceOnALineOfItsOwn() {
+    assertEquals(
+        answers("a", Corpus.ALLOWED, "b", READ_ONLY),
+        Baseline.parsed("x", List.of("b\t" + READ_ONLY, "a\t" + Corpus.ALLOWED)));
+    assertEquals(
+        "x.tsv: a cell answered twice: a",
+        assertThrows(
+                IllegalStateException.class,
+                () -> Baseline.parsed("x", List.of("a\t" + Corpus.ALLOWED, "a\t" + READ_ONLY)))
+            .getMessage());
+    assertEquals(
+        "x.tsv: a line with no answer: a",
+        assertThrows(IllegalStateException.class, () -> Baseline.parsed("x", List.of("a")))
+            .getMessage());
+  }
+
+  @Test
   void anAskThatFailsOtherThanByARefusalFailsTheCorpus() {
     var corpus = new Corpus();
 

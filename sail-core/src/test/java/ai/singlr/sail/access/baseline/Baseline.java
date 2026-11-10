@@ -105,13 +105,25 @@ public final class Baseline {
 
   /** The snapshot {@code name} as recorded, sorted by cell. */
   static SortedMap<String, String> baseline(String name) {
+    return parsed(name, required(name + ".tsv"));
+  }
+
+  /**
+   * The cells {@code lines} of snapshot {@code name} answer, each a key, a tab and its answer.
+   *
+   * @throws IllegalStateException for a line with no answer, or a cell answered twice
+   */
+  static SortedMap<String, String> parsed(String name, List<String> lines) {
     var answers = new TreeMap<String, String>();
-    for (var line : required(name + ".tsv")) {
+    for (var line : lines) {
       var tab = line.indexOf('\t');
       if (tab < 0) {
         throw new IllegalStateException(name + ".tsv: a line with no answer: " + line);
       }
-      answers.put(line.substring(0, tab), line.substring(tab + 1));
+      var cell = line.substring(0, tab);
+      if (answers.putIfAbsent(cell, line.substring(tab + 1)) != null) {
+        throw new IllegalStateException(name + ".tsv: a cell answered twice: " + cell);
+      }
     }
     return answers;
   }

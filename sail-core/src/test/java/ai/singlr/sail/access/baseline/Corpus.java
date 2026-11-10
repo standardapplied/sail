@@ -88,11 +88,6 @@ public final class Corpus {
     return answers;
   }
 
-  /** The number of cells answered. */
-  public int size() {
-    return answers.size();
-  }
-
   /** {@code refusal} as an answer: allowed when empty. */
   public static String decided(Optional<Refusal> refusal) {
     return refusal.map(Corpus::denied).orElse(ALLOWED);
