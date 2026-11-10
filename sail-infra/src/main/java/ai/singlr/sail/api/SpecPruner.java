@@ -5,7 +5,12 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.EraseAuthority;
+import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.RetentionConfig;
@@ -25,6 +30,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntFunction;
@@ -241,15 +247,48 @@ final class SpecPruner {
     }
   }
 
+  /**
+   * Refuses a prune that names no spec unless the bound actor may purge what it names: a whole
+   * project, or for a policy's sweep the project it narrows to, or every project. Purging is an
+   * admin's alone and no admin is scoped, so whether the caller sees the project is not asked
+   * ({@link Refusals#refusal}). A prune by id is decided spec by spec, as each is found ({@link
+   * #roots}).
+   */
   private void authorize(PruneRequest request) {
-    var actor = Actor.current();
-    if (actor.agentLane()) {
-      throw new ApiException(
-          ErrorCode.AGENT_LANE_FORBIDDEN,
-          "An agent cannot prune: erasing is irreversible and belongs to the FDE.",
-          Remedy.of("Ask the FDE who owns the work to run '", Remedy.sail("spec prune"), "'."));
+    if (!request.ids().isEmpty()) {
+      return;
     }
-    Refusals.enforce(authority.request(actor, request.ids().isEmpty()));
+    var project = request.policy() == null ? request.project() : request.policy().project();
+    Refusals.enforce(
+        Refusals.refusal(Actor.current(), Action.PURGE, Resources.project(project, null)));
+  }
+
+  /**
+   * Whether spec {@code id} is erased already, once the bound actor may prune it ({@link
+   * Action#PRUNE}) as this box last knew it; one never recorded is not found. An erased spec leaves
+   * nothing to erase and no owner to name, so only a refusal that asks no owner stands for it.
+   */
+  private boolean alreadyErased(String id, Optional<SpecStore.LastKnown> spec) {
+    var erased = erasure.isErased(new Erasure.Target(Erasure.SPEC, id));
+    if (!erased && spec.isEmpty()) {
+      throw Refusals.specNotFound(id);
+    }
+    var known =
+        Resources.spec(
+            id,
+            specs.headProject(id).orElse(null),
+            spec.map(SpecStore.LastKnown::assignee).orElse(null),
+            spec.map(SpecStore.LastKnown::createdBy).orElse(null));
+    switch (Access.decide(Actor.current(), Action.PRUNE, known)) {
+      case Decision.Allowed allowed -> {}
+      case Decision.NotFound absent -> throw Refusals.specNotFound(id);
+      case Decision.Refused refused -> {
+        if (!erased || refused.refusal().kind() != Refusal.Kind.NOT_OWNER) {
+          throw Refusals.exception(refused.refusal());
+        }
+      }
+    }
+    return erased;
   }
 
   /**
@@ -262,16 +301,12 @@ final class SpecPruner {
   private List<Erasure.Target> roots(PruneRequest request, int limit) {
     var roots = new ArrayList<Erasure.Target>();
     for (var id : request.ids()) {
-      var target = new Erasure.Target(Erasure.SPEC, id);
-      if (!Actor.current().scope().admits(specs.headProject(id).orElse(null))) {
-        throw Refusals.specNotFound(id);
-      }
-      if (erasure.isErased(target)) {
+      var spec = specs.lastKnown(id);
+      if (alreadyErased(id, spec)) {
         continue;
       }
-      var spec = specs.lastKnown(id).orElseThrow(() -> Refusals.specNotFound(id));
-      Refusals.enforce(authority.spec(Actor.current(), spec));
-      roots.add(target);
+      Refusals.enforce(authority.spec(Actor.current(), spec.orElseThrow()));
+      roots.add(new Erasure.Target(Erasure.SPEC, id));
     }
     if (request.policy() != null) {
       var policy = request.policy();

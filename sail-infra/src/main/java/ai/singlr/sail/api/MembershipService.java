@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Engagement;
@@ -102,7 +103,12 @@ public final class MembershipService {
    */
   private static RoomStore.RoomRow readable(RoomStore store, String roomId) {
     var held = store == null ? Optional.<RoomStore.RoomRow>empty() : store.findById(roomId);
-    return Scoped.row(Actor.reader(), held, RoomStore.RoomRow::project)
+    return Refusals.readable(
+            Actor.reader(),
+            held,
+            Resource.Kind.ROOM,
+            RoomStore.RoomRow::id,
+            RoomStore.RoomRow::project)
         .orElseThrow(() -> Refusals.roomNotFound(roomId));
   }
 
@@ -117,8 +123,21 @@ public final class MembershipService {
         store == null
             ? Optional.<RoomStore.RoomRow>empty()
             : store.findById(spec.roomIdOrIdentity());
-    if (Scoped.row(reader, Optional.of(spec), SpecStore.SpecRow::project).isEmpty()
-        || (room.isPresent() && Scoped.row(reader, room, RoomStore.RoomRow::project).isEmpty())) {
+    if (Refusals.readable(
+                reader,
+                Optional.of(spec),
+                Resource.Kind.SPEC,
+                SpecStore.SpecRow::id,
+                SpecStore.SpecRow::project)
+            .isEmpty()
+        || (room.isPresent()
+            && Refusals.readable(
+                    reader,
+                    room,
+                    Resource.Kind.ROOM,
+                    RoomStore.RoomRow::id,
+                    RoomStore.RoomRow::project)
+                .isEmpty())) {
       throw Refusals.roomNotFound(spec.id());
     }
     return spec;
@@ -176,7 +195,8 @@ public final class MembershipService {
       String roomId, String agentYamlName, String mode, String model, String localHandle) {
     var store = requireRooms();
     var room = readable(store, roomId);
-    LaunchAdmission.requireAllowedForRoom(roomId, store.ownerOf(roomId), localHandle);
+    LaunchAdmission.requireAllowedForRoom(
+        roomId, room.project(), store.ownerOf(roomId), localHandle);
     authorizeRoster(roomId);
     var member = admit(room.project(), agentYamlName, mode, model, localHandle);
     store.updateRoster(roomId, Roster.solo(member).toJson());
@@ -197,7 +217,7 @@ public final class MembershipService {
       EngageRequest request,
       String localHandle,
       Function<String, T> create) {
-    LaunchAdmission.requireAllowedForRoom(roomId, owner, localHandle);
+    LaunchAdmission.requireAllowedForRoom(roomId, project, owner, localHandle);
     var member = admit(project, request.agent(), request.mode(), request.model(), localHandle);
     var created = create.apply(Roster.solo(member).toJson());
     publishEngaged(project, roomId, member, "");
@@ -283,7 +303,8 @@ public final class MembershipService {
   private String disengageSpecless(String roomId, String localHandle) {
     var store = requireRooms();
     var room = readable(store, roomId);
-    LaunchAdmission.requireAllowedForRoom(roomId, store.ownerOf(roomId), localHandle);
+    LaunchAdmission.requireAllowedForRoom(
+        roomId, room.project(), store.ownerOf(roomId), localHandle);
     authorizeRoster(roomId);
     var standing = Roster.fromJson(room.roster()).standing();
     if (standing == null) {

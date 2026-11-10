@@ -275,7 +275,15 @@ class SyncCommandTest {
           "the same failure read by root logged in directly");
 
       new SyncConflicts(db)
-          .record("spec", "auth", "base", "mine", "theirs", null, null, List.of("title"));
+          .record(
+              "spec",
+              "auth",
+              "{\"title\":\"base\"}",
+              "{\"title\":\"mine\"}",
+              "{\"title\":\"theirs\"}",
+              null,
+              null,
+              List.of("title"));
       var conflicted = nonNull(capture(() -> new CommandLine(status.get()).execute("--json")));
       assertEquals(1, conflicted.get("pending_conflicts"));
     }

@@ -5,7 +5,8 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.api.Scoped;
+import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.authority.PostingRule;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
@@ -57,7 +58,12 @@ public record HostAccess(Sqlite db, RoleRule roles) {
   public void admit(String roomId, String project, PtyIdentity who) throws IOException {
     var actor = actorOf(who.fde());
     var room =
-        Scoped.row(actor, new RoomStore(db).findById(roomId), RoomStore.RoomRow::project)
+        Refusals.readable(
+                actor,
+                new RoomStore(db).findById(roomId),
+                Resource.Kind.ROOM,
+                RoomStore.RoomRow::id,
+                RoomStore.RoomRow::project)
             .orElseThrow(() -> new IOException("Room '" + roomId + "' was not found."));
     if (!Objects.equals(room.project(), project)) {
       throw new IOException(

@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.ProjectServer;
 import ai.singlr.sail.engine.ShellExec;
@@ -26,7 +28,7 @@ import java.util.function.LongSupplier;
  * A project's stack, its services and processes, as every door brings it up and reads it: {@code
  * sail project serve}, {@code POST /v1/projects/{p}/serve} and the container's {@code portal}. A
  * project outside the caller's scope is one the catalog does not hold, and bringing a stack up or
- * stopping it is a write, refused to a read-only caller.
+ * stopping it is {@link Action#SERVE}.
  */
 public final class StackOperations {
 
@@ -90,8 +92,7 @@ public final class StackOperations {
    */
   public Ports serve(String project, Duration timeout)
       throws IOException, InterruptedException, TimeoutException {
-    requireReadable(project);
-    Refusals.requireWriter("bring a project's stack up");
+    require(Actor.current(), Action.SERVE, project);
     if (timeout.isNegative() || timeout.isZero() || timeout.compareTo(MAX_TIMEOUT) > 0) {
       throw new IllegalArgumentException(
           "A serve's timeout is 1 to "
@@ -105,15 +106,14 @@ public final class StackOperations {
 
   /** Where each declared port of {@code project} stands now, starting nothing. */
   public Ports ports(String project) throws IOException, InterruptedException, TimeoutException {
-    requireReadable(project);
+    require(Actor.reader(), Action.READ, project);
     var config = projects.loadRunning(project).config();
     return Ports.of(project, server().ports(project, config));
   }
 
   /** Stops {@code project}'s processes; its services keep running. */
   public Ports stop(String project) throws IOException, InterruptedException, TimeoutException {
-    requireReadable(project);
-    Refusals.requireWriter("stop a project's processes");
+    require(Actor.current(), Action.SERVE, project);
     var config = projects.loadRunning(project).config();
     var server = server();
     server.stop(project);
@@ -129,9 +129,13 @@ public final class StackOperations {
         nanos);
   }
 
-  private static void requireReadable(String project) {
-    if (!Actor.reader().scope().admits(project)) {
-      throw ProjectReader.absent(project);
-    }
+  /**
+   * Refuses {@code action} on {@code project} unless {@code actor} may take it: a project it may
+   * not read is one the catalog does not hold. Neither Serve nor Read asks an owner, so the
+   * project's creator is not looked up.
+   */
+  private static void require(Actor actor, Action action, String project) {
+    Refusals.require(
+        actor, action, Resources.project(project, null), () -> ProjectReader.absent(project));
   }
 }

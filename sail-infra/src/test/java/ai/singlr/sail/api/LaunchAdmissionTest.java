@@ -14,6 +14,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -110,15 +111,65 @@ class LaunchAdmissionTest {
   }
 
   @Test
-  void requireAllowedRefusesAMemberActingOnAnothersSpec() {
+  void requireAllowedRefusesAMemberActingOnAnothersSpecBeforeAskingWhereItRuns() {
     var ex =
         assertThrows(
             ApiException.class,
             () ->
                 Actor.run(
                     new Actor("mady", Role.MEMBER, Actor.Lane.API),
+                    () -> LaunchAdmission.requireAllowed(spec("uday"), "mady")));
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, ex.failure().errorCode());
+    assertEquals("Spec 'auth' is assigned to 'uday', not you.", ex.getMessage());
+  }
+
+  @Test
+  void aViewerIsRefusedReadOnlyBeforeWhereTheSpecRunsIsAsked() {
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.run(
+                    new Actor("uday", Role.VIEWER, Actor.Lane.API),
+                    () -> LaunchAdmission.requireAllowed(spec("raj"), "uday")));
+    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, ex.failure().errorCode());
+    assertEquals("Your credential is read-only and cannot dispatch specs.", ex.getMessage());
+  }
+
+  @Test
+  void anAgentLaneIsRefusedOutrightEvenForItsOwnersSpec() {
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.run(
+                    Actor.agentPrincipal("claude/a1b2c3", "uday"),
                     () -> LaunchAdmission.requireAllowed(spec("uday"), "uday")));
-    assertEquals(ErrorCode.NOT_YOUR_SPEC, ex.failure().errorCode());
+    assertEquals(ErrorCode.AGENT_LANE_FORBIDDEN, ex.failure().errorCode());
+    assertEquals("Agent principals cannot dispatch specs.", ex.getMessage());
+  }
+
+  @Test
+  void anAdminMayDispatchAnySpecButOnlyOnTheBoxItRunsOn() {
+    var admin = new Actor("ops", Role.ADMIN, Actor.Lane.API);
+    assertDoesNotThrow(
+        () -> Actor.run(admin, () -> LaunchAdmission.requireAllowed(spec("uday"), "uday")));
+
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () -> Actor.run(admin, () -> LaunchAdmission.requireAllowed(spec("raj"), "uday")));
+    assertEquals(ErrorCode.RUNS_ON_OTHER_NODE, ex.failure().errorCode());
+  }
+
+  @Test
+  void requireAllowedLeavesTheAudienceToTheReadThatFoundTheSpec() {
+    assertDoesNotThrow(
+        () ->
+            Actor.run(
+                new Actor("uday", Role.MEMBER, Actor.Lane.API)
+                    .withScope(ProjectScope.of(List.of("beta"))),
+                () -> LaunchAdmission.requireAllowed(spec("uday"), "uday")));
   }
 
   @Test
@@ -208,15 +259,30 @@ class LaunchAdmissionTest {
   }
 
   @Test
-  void roomAdmissionRefusesTheLaneAndTheBoxAndLeavesTheActorToTheRoomRule() {
+  void roomAdmissionDecidesTheActorThenTheBox() {
     var agent =
         assertThrows(
             ApiException.class,
             () ->
                 Actor.run(
                     Actor.agentPrincipal("claude/x", "uday"),
-                    () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday")));
-    assertEquals(ErrorCode.FORBIDDEN, agent.failure().errorCode());
+                    () -> LaunchAdmission.requireAllowedForRoom("chat", "acme", "uday", "uday")));
+    assertEquals(ErrorCode.AGENT_LANE_FORBIDDEN, agent.failure().errorCode());
+    assertEquals("Agent principals cannot dispatch rooms.", agent.getMessage());
+
+    var viewer =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.run(
+                    new Actor("uday", Role.VIEWER, Actor.Lane.API),
+                    () -> LaunchAdmission.requireAllowedForRoom("chat", "acme", "uday", " ")));
+    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, viewer.failure().errorCode());
+    assertEquals("Your credential is read-only and cannot dispatch rooms.", viewer.getMessage());
+
+    Actor.run(
+        new Actor("uday", Role.MEMBER, Actor.Lane.API).withScope(ProjectScope.of(List.of("beta"))),
+        () -> LaunchAdmission.requireAllowedForRoom("chat", "acme", "uday", "uday"));
 
     var noHandle =
         assertThrows(
@@ -224,7 +290,7 @@ class LaunchAdmissionTest {
             () ->
                 Actor.run(
                     Actor.cliOperator("uday"),
-                    () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", " ")));
+                    () -> LaunchAdmission.requireAllowedForRoom("chat", "acme", "uday", " ")));
     assertEquals(ErrorCode.COMMAND_FAILED, noHandle.failure().errorCode());
 
     var foreign =
@@ -233,14 +299,11 @@ class LaunchAdmissionTest {
             () ->
                 Actor.run(
                     Actor.cliOperator("uday"),
-                    () -> LaunchAdmission.requireAllowedForRoom("chat", "ada", "uday")));
+                    () -> LaunchAdmission.requireAllowedForRoom("chat", "acme", "ada", "uday")));
     assertEquals(ErrorCode.NOT_YOUR_SPEC, foreign.failure().errorCode());
 
     Actor.run(
-        new Actor("sam", Role.VIEWER, Actor.Lane.API, null),
-        () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday"));
-    Actor.run(
         Actor.cliOperator("uday"),
-        () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday"));
+        () -> LaunchAdmission.requireAllowedForRoom("chat", "acme", "uday", "uday"));
   }
 }

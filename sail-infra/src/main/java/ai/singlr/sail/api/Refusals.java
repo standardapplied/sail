@@ -5,15 +5,28 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
+import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
- * The one place a rule's {@link Refusal} becomes the error envelope API clients get: its kind picks
- * the {@link ErrorCode}, and its message and fix are carried verbatim. A write the journal refused
- * ({@link WriteRefused}) is translated here too, so every door answers a kind with one code.
+ * The one place a {@link Decision} becomes what a door answers. A refusal is the error envelope API
+ * clients get: its kind picks the {@link ErrorCode}, and its message and fix are carried verbatim.
+ * A write the journal refused ({@link WriteRefused}) is translated here too, so every door answers
+ * a kind with one code. A resource the caller may not read is the door's own answer for an id it
+ * does not hold, and a row it may not read is left out of what a read hands it, so a door can never
+ * tell a caller that something it may not see exists.
  */
 public final class Refusals {
 
@@ -60,12 +73,80 @@ public final class Refusals {
 
   /**
    * Refuses a read-only credential a side effect on this box that no synced row's rule decides — to
-   * {@code act} ("restore snapshots") — with the refusal every rule gives a read-only role.
+   * {@code act} ("resolve conflicts") — with the refusal every rule gives a read-only role.
    */
   static void requireWriter(String act) {
     if (!Actor.current().canWrite()) {
       throw exception(Refusal.readOnly(act).orElseThrow());
     }
+  }
+
+  /**
+   * Throws unless {@code actor} may take {@code action} on {@code resource}: one it may not read is
+   * {@code notFound}, the answer the door gives an id it does not hold, and a refusal is its
+   * exception.
+   */
+  static void require(
+      Actor actor,
+      Action action,
+      Resource resource,
+      Supplier<? extends RuntimeException> notFound) {
+    switch (Access.decide(actor, action, resource)) {
+      case Decision.Allowed allowed -> {}
+      case Decision.NotFound absent -> throw notFound.get();
+      case Decision.Refused refused -> throw exception(refused.refusal());
+    }
+  }
+
+  /**
+   * Why {@code actor} may not take {@code action} on {@code resource}, its audience aside; empty if
+   * it may. A door asks this where the audience is settled already or beside the point: a launch or
+   * a stop is of work its caller found by a read, which decided the audience; a purge is an admin's
+   * alone, and no admin is scoped; a home room is had by whoever may create one. So only the role,
+   * the lane and the owner decide.
+   */
+  static Optional<Refusal> refusal(Actor actor, Action action, Resource resource) {
+    return Access.decide(actor.withScope(ProjectScope.all()), action, resource)
+            instanceof Decision.Refused refused
+        ? Optional.of(refused.refusal())
+        : Optional.empty();
+  }
+
+  /**
+   * The rows of {@code rows} {@code actor} may read, in their order, each decided as {@link
+   * #readable(Actor, Resource.Kind, Function, Function)} decides a row.
+   */
+  public static <T> List<T> readable(
+      Actor actor,
+      List<T> rows,
+      Resource.Kind kind,
+      Function<? super T, String> id,
+      Function<? super T, String> project) {
+    return rows.stream().filter(readable(actor, kind, id, project)).toList();
+  }
+
+  /** {@code row} when {@code actor} may read it, decided as a row of a list is; empty if not. */
+  public static <T> Optional<T> readable(
+      Actor actor,
+      Optional<T> row,
+      Resource.Kind kind,
+      Function<? super T, String> id,
+      Function<? super T, String> project) {
+    return row.filter(readable(actor, kind, id, project));
+  }
+
+  /**
+   * Whether {@code actor} may read a row: one of {@code kind} whose id {@code id} names, filed
+   * under the project {@code project} names ({@link Resources#filed}).
+   */
+  public static <T> Predicate<T> readable(
+      Actor actor,
+      Resource.Kind kind,
+      Function<? super T, String> id,
+      Function<? super T, String> project) {
+    return row ->
+        Access.decide(actor, Action.READ, Resources.filed(kind, id.apply(row), project.apply(row)))
+            instanceof Decision.Allowed;
   }
 
   /** Throws {@code refusal}'s exception, if the rule refused; a no-op when it allowed. */

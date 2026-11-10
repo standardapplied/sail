@@ -237,8 +237,7 @@ class HomeRoomTest {
     assertEquals("mady", roomStore.findById("acme--mady").orElseThrow().assignee());
     var ops = operations();
     var refused = Actor.call(fde("mady"), () -> ops.removeRoomMember("acme--ada", "mady"));
-    assertEquals(
-        "Room 'acme--ada' belongs to 'ada', whose box serves its agents.", refused.errorMessage());
+    assertEquals("Room 'acme--ada' belongs to 'ada', not you.", refused.errorMessage());
     assertEquals(1, roster("acme--ada").size());
   }
 

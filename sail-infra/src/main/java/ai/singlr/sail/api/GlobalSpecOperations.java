@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
@@ -22,6 +23,7 @@ import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
@@ -99,7 +101,12 @@ final class GlobalSpecOperations {
 
   /** The specs matching {@code filter} that the reader may see. */
   List<SpecStore.SpecRow> readable(SpecStore.SpecFilter filter) {
-    return Scoped.rows(Actor.reader(), specStore.list(filter), SpecStore.SpecRow::project);
+    return Refusals.readable(
+        Actor.reader(),
+        specStore.list(filter),
+        Resource.Kind.SPEC,
+        SpecStore.SpecRow::id,
+        SpecStore.SpecRow::project);
   }
 
   GlobalSpecDetailResponse get(String specId) {
@@ -124,7 +131,12 @@ final class GlobalSpecOperations {
     if (runStore == null) {
       return null;
     }
-    return Scoped.rows(Actor.reader(), runStore.listForSpec(specId), RunStore.RunRow::project)
+    return Refusals.readable(
+            Actor.reader(),
+            runStore.listForSpec(specId),
+            Resource.Kind.RUN,
+            RunStore.RunRow::id,
+            RunStore.RunRow::project)
         .stream()
         .findFirst()
         .map(RunSummary::from)
@@ -220,7 +232,12 @@ final class GlobalSpecOperations {
           "This box keeps no rooms, so a spec cannot be born in room '" + roomId + "'.",
           Remedy.of("Start the server with '", Remedy.sail("server start"), "' or omit the room."));
     }
-    return Scoped.row(Actor.reader(), store.findById(roomId), RoomStore.RoomRow::project)
+    return Refusals.readable(
+            Actor.reader(),
+            store.findById(roomId),
+            Resource.Kind.ROOM,
+            RoomStore.RoomRow::id,
+            RoomStore.RoomRow::project)
         .orElseThrow(() -> Refusals.roomNotFound(roomId));
   }
 
@@ -317,9 +334,11 @@ final class GlobalSpecOperations {
     var room =
         store == null
             ? null
-            : Scoped.row(
+            : Refusals.readable(
                     Actor.reader(),
                     store.findById(row.roomIdOrIdentity()),
+                    Resource.Kind.ROOM,
+                    RoomStore.RoomRow::id,
                     RoomStore.RoomRow::project)
                 .orElse(null);
     return GlobalSpecView.from(row, room);
@@ -333,7 +352,14 @@ final class GlobalSpecOperations {
   private RoomStore.RoomRow identityRoom(String specId) {
     var store = rooms.get();
     var held = store == null ? null : store.findById(specId).orElse(null);
-    if (held != null && !Actor.reader().scope().admits(held.project())) {
+    if (held != null
+        && Refusals.readable(
+                Actor.reader(),
+                Optional.of(held),
+                Resource.Kind.ROOM,
+                RoomStore.RoomRow::id,
+                RoomStore.RoomRow::project)
+            .isEmpty()) {
       throw new ApiException(
           ErrorCode.CONFLICT,
           "Room '" + specId + "' already exists, and a spec's id is reserved for its own room.",
@@ -384,7 +410,12 @@ final class GlobalSpecOperations {
     var held = store.findById(roomId);
     var room =
         held.isPresent()
-            ? Scoped.row(Actor.reader(), held, RoomStore.RoomRow::project)
+            ? Refusals.readable(
+                    Actor.reader(),
+                    held,
+                    Resource.Kind.ROOM,
+                    RoomStore.RoomRow::id,
+                    RoomStore.RoomRow::project)
                 .orElseThrow(() -> Refusals.roomNotFound(roomId))
             : store.ensureFor(roomId, updated.project(), updated.title(), updated.assignee(), null);
     if (!Objects.equals(room.wake(), wake)) {
@@ -429,7 +460,12 @@ final class GlobalSpecOperations {
           specStore.delete(specId);
           if (store != null
               && mintedItsRoom
-              && Scoped.row(Actor.reader(), store.findById(specId), RoomStore.RoomRow::project)
+              && Refusals.readable(
+                      Actor.reader(),
+                      store.findById(specId),
+                      Resource.Kind.ROOM,
+                      RoomStore.RoomRow::id,
+                      RoomStore.RoomRow::project)
                   .isPresent()) {
             store.delete(specId);
           }
@@ -488,8 +524,12 @@ final class GlobalSpecOperations {
     if (reviewStore == null) {
       return 0;
     }
-    return Scoped.row(
-            Actor.reader(), reviewStore.latestReviewForSpec(specId), reviewStore::projectOf)
+    return Refusals.readable(
+            Actor.reader(),
+            reviewStore.latestReviewForSpec(specId),
+            Resource.Kind.REVIEW,
+            ReviewStore.ReviewRow::id,
+            reviewStore::projectOf)
         .map(seen -> reviewStore.openFindingsAfterPass(specId).size())
         .orElse(0);
   }
@@ -503,7 +543,12 @@ final class GlobalSpecOperations {
     requireStore();
     return GlobalSpecHistoryResponse.from(
         specId,
-        Scoped.rows(Actor.reader(), specStore.history(specId), GlobalSpecOperations::projectOf));
+        Refusals.readable(
+            Actor.reader(),
+            specStore.history(specId),
+            Resource.Kind.SPEC,
+            revision -> specId,
+            GlobalSpecOperations::projectOf));
   }
 
   private static String projectOf(ChangeLog.Entry revision) {
@@ -548,9 +593,11 @@ final class GlobalSpecOperations {
    */
   private SpecStore.LastKnown restorable(String specId) {
     var head =
-        Scoped.row(
+        Refusals.readable(
                 Actor.reader(),
                 specStore.head(specId),
+                Resource.Kind.SPEC,
+                found -> specId,
                 found -> specStore.headProject(specId).orElse(null))
             .orElseThrow(() -> Refusals.specNotFound(specId));
     if (head.kind() == ChangeLog.Kind.ERASURE) {
@@ -564,11 +611,14 @@ final class GlobalSpecOperations {
    * outside the caller's scope, which the history hides from it, is one its history does not hold.
    */
   private Map<String, Object> revision(String specId, String rev) {
-    var revision = specStore.comparableAtRev(specId, rev);
-    if (revision == null || !Actor.reader().scope().admits(Snapshots.text(revision, "project"))) {
-      throw ApiException.of(ErrorCode.INVALID_REQUEST, specStore.unrestorable(specId, rev));
-    }
-    return revision;
+    return Refusals.readable(
+            Actor.reader(),
+            Optional.ofNullable(specStore.comparableAtRev(specId, rev)),
+            Resource.Kind.SPEC,
+            revision -> specId,
+            revision -> Snapshots.text(revision, "project"))
+        .orElseThrow(
+            () -> ApiException.of(ErrorCode.INVALID_REQUEST, specStore.unrestorable(specId, rev)));
   }
 
   private void publishStatusChanged(
@@ -604,7 +654,12 @@ final class GlobalSpecOperations {
    * answered as one that is not there.
    */
   private SpecStore.SpecRow findOrThrow(String specId) {
-    return Scoped.row(Actor.reader(), specStore.findById(specId), SpecStore.SpecRow::project)
+    return Refusals.readable(
+            Actor.reader(),
+            specStore.findById(specId),
+            Resource.Kind.SPEC,
+            SpecStore.SpecRow::id,
+            SpecStore.SpecRow::project)
         .orElseThrow(() -> Refusals.specNotFound(specId));
   }
 

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.BranchPolicy;
@@ -412,7 +413,14 @@ public final class BuildDispatch {
     }
     var earlier =
         reviewStore.reviewsForSpec(specId).stream().filter(review -> !review.superseded()).toList();
-    return Scoped.rows(Actor.reader(), earlier, reviewStore::projectOf).size() == earlier.size();
+    return Refusals.readable(
+                Actor.reader(),
+                earlier,
+                Resource.Kind.REVIEW,
+                ReviewStore.ReviewRow::id,
+                reviewStore::projectOf)
+            .size()
+        == earlier.size();
   }
 
   /**

@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.engine.NameValidator;
@@ -64,6 +66,18 @@ public final class HomeRoom {
   }
 
   /**
+   * Whether {@code actor}, acting as {@code handle}, has a home room in {@code project}: whether it
+   * may create one there ({@link Action#CREATE}), its audience aside ({@link Refusals#refusal}). A
+   * viewer posts in no room, so it has a home room in none, and whether it may see the project is
+   * the room creation's own to answer.
+   */
+  static boolean has(Actor actor, String project, String handle) {
+    return Refusals.refusal(
+            actor, Action.CREATE, Resources.room(idOf(project, handle), project, null, handle))
+        .isEmpty();
+  }
+
+  /**
    * Leaves {@code handle}'s home room for {@code definition} in the catalog, seating the project's
    * member, through the same door the API's room creation takes, so every admission check runs as
    * it does there. Runs as the bound actor, the box's FDE.
@@ -76,12 +90,12 @@ public final class HomeRoom {
     if (member == null) {
       return Outcome.skipped("the definition names no agent, so it has no home room");
     }
-    if (!Actor.current().canWrite()) {
+    var project = definition.name();
+    if (!has(Actor.current(), project, handle)) {
       return Outcome.skipped(
           "this box's FDE holds a read-only credential and posts in no room, so it has no home"
               + " room");
     }
-    var project = definition.name();
     var id = idOf(project, handle);
     var held = operations.room(id);
     if (held instanceof Result.Success<RoomDetailResponse> found) {

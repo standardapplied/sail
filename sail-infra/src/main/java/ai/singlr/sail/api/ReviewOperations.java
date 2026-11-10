@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.NameValidator;
@@ -88,15 +89,22 @@ final class ReviewOperations {
   FollowupSpecResponse createFollowup(String sourceSpecId, FollowupCreateRequest request) {
     requireStore();
     var source =
-        Scoped.row(Actor.reader(), specStore.findById(sourceSpecId), SpecStore.SpecRow::project)
+        Refusals.readable(
+                Actor.reader(),
+                specStore.findById(sourceSpecId),
+                Resource.Kind.SPEC,
+                SpecStore.SpecRow::id,
+                SpecStore.SpecRow::project)
             .orElseThrow(
                 () ->
                     new ApiException(
                         ErrorCode.SPEC_NOT_FOUND, "Spec '" + sourceSpecId + "' was not found."));
     var review =
-        Scoped.row(
+        Refusals.readable(
                 Actor.reader(),
                 reviewStore.latestReviewForSpec(sourceSpecId),
+                Resource.Kind.REVIEW,
+                ReviewStore.ReviewRow::id,
                 reviewStore::projectOf)
             .orElseThrow(() -> noReview(sourceSpecId));
     var findings = reviewStore.openFindingsForReview(review.id());
@@ -199,13 +207,23 @@ final class ReviewOperations {
    * its spec is now.
    */
   private ReviewStore.ReviewRow findReviewOrThrow(String reviewId) {
-    return Scoped.row(Actor.reader(), reviewStore.findReview(reviewId), reviewStore::projectOf)
+    return Refusals.readable(
+            Actor.reader(),
+            reviewStore.findReview(reviewId),
+            Resource.Kind.REVIEW,
+            ReviewStore.ReviewRow::id,
+            reviewStore::projectOf)
         .orElseThrow(() -> notFound(reviewId));
   }
 
   /** The reviews of {@code specId} the caller may see, oldest first. */
   private List<ReviewStore.ReviewRow> readable(String specId) {
-    return Scoped.rows(Actor.reader(), reviewStore.reviewsForSpec(specId), reviewStore::projectOf);
+    return Refusals.readable(
+        Actor.reader(),
+        reviewStore.reviewsForSpec(specId),
+        Resource.Kind.REVIEW,
+        ReviewStore.ReviewRow::id,
+        reviewStore::projectOf);
   }
 
   private static ApiException notFound(String reviewId) {

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import com.sun.net.httpserver.HttpExchange;
@@ -248,12 +249,13 @@ public final class SseHandler implements HttpHandler {
   }
 
   /**
-   * The events a subscriber is sent: those of the projects {@code actor}'s scope admits, narrowed
-   * by the query. An event of the box itself, a sync that degraded, is of no project in the catalog
+   * The events a subscriber is sent: those of the projects {@code actor} may read, narrowed by the
+   * query. An event of the box itself, a sync that degraded, is of no project in the catalog
    * ({@link Event#SAIL_AGENT} stands in for one), so it reaches an unrestricted subscriber alone.
    */
   static Predicate<Event> parseFilter(URI uri, Actor actor) {
-    Predicate<Event> scoped = event -> actor.scope().admits(event.project());
+    Predicate<Event> scoped =
+        Refusals.readable(actor, Resource.Kind.PROJECT, Event::project, Event::project);
     return scoped.and(queryFilter(uri));
   }
 
