@@ -308,6 +308,18 @@ class RunAuthorityTest {
             Kind.NOT_AUTHOR),
         row("a viewer's box pushes none", VIEWER_SYNC, RUNNING, stopped, Kind.READ_ONLY),
         row(
+            "a viewer is told its role before a principal naming an FDE",
+            VIEWER_SYNC,
+            RUNNING,
+            with(stopped, "principal", OTHER),
+            Kind.READ_ONLY),
+        row(
+            "a viewer is told its role before a run's fixed spec",
+            VIEWER,
+            RUNNING,
+            with(stopped, "spec_id", "other"),
+            Kind.READ_ONLY),
+        row(
             "a principal naming an FDE",
             OWNER_SYNC,
             RUNNING,

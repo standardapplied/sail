@@ -442,6 +442,38 @@ class StopOperationsTest {
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
   }
 
+  /**
+   * Whether the actor may stop a run is asked before where it runs: a viewer, an agent and a member
+   * the run is not for are told so, not that another box executed it.
+   */
+  @Test
+  void aForeignRunTellsWhoMayNotStopItWhyBeforeWhereItRuns() throws Exception {
+    var ops = stopOps(shell(), failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    var asked =
+        List.of(
+            new Actor("raj", Role.VIEWER, Actor.Lane.API),
+            Actor.agentPrincipal("claude/" + R1, LOCAL_HANDLE),
+            new Actor("raj", Role.MEMBER, Actor.Lane.API));
+    var codes =
+        List.of(
+            ErrorCode.READ_ONLY_CREDENTIAL,
+            ErrorCode.AGENT_LANE_FORBIDDEN,
+            ErrorCode.FORBIDDEN_NOT_ASSIGNEE);
+
+    for (var i = 0; i < asked.size(); i++) {
+      var actor = asked.get(i);
+      var refusal =
+          assertThrows(
+              ApiException.class,
+              () ->
+                  Actor.call(
+                      actor, () -> ops.stop(new StopOperations.RunTarget(R1), "sumesh", false)));
+      assertEquals(codes.get(i), refusal.failure().errorCode(), actor.toString());
+    }
+  }
+
   @Test
   void aBlankNodeRunFailsClosedToForeignForAHandledBox() throws Exception {
     var ops = stopOps(shell(), failingHalter(), StopOperations.Listener.NONE);

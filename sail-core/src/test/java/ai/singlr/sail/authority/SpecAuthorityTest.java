@@ -281,6 +281,18 @@ class SpecAuthorityTest {
             BORN_IN_DEN,
             with(BORN_IN_DEN, "assignee", OWNER)),
         refuses(
+            "a viewer is told its role before a spec's fixed room",
+            VIEWER,
+            OWNED,
+            with(OWNED, "room_id", "lobby"),
+            Kind.READ_ONLY),
+        refuses(
+            "another member is told whose it is before a spec's fixed room",
+            OTHER_API,
+            OWNED,
+            with(OWNED, "room_id", "lobby"),
+            Kind.NOT_OWNER),
+        refuses(
             "an admin cannot move a spec's room",
             ADMIN,
             OWNED,

@@ -118,6 +118,13 @@ class ReviewAuthorityTest {
             Kind.FIXED));
     rows.add(
         new Case(
+            "a viewer is told its role before a review's fixed spec",
+            VIEWER,
+            RUNNING,
+            with(RUNNING, "spec_id", "other"),
+            Kind.READ_ONLY));
+    rows.add(
+        new Case(
             "a push cannot move a review to another spec",
             OWNER_SYNC,
             RUNNING,
