@@ -72,6 +72,11 @@ class TestOperations implements Operations {
   static final String BOX_HANDLE = "uday";
 
   @Override
+  public String boxFde() {
+    return BOX_HANDLE;
+  }
+
+  @Override
   public Optional<Actor> boxActorForCredential(String credential) {
     if (!BOX_CREDENTIAL.equals(credential)) {
       return Operations.super.boxActorForCredential(credential);

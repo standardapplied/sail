@@ -109,6 +109,11 @@ public final class SailOperations implements HostOperations {
     return this;
   }
 
+  @Override
+  public String boxFde() {
+    return roles().boxFde().orElse(null);
+  }
+
   /** The role rule over this box's roster and its sync configuration ({@link #box}). */
   private RoleRule roles() {
     return new RoleRule(this::box, fdeStore);
@@ -1970,6 +1975,11 @@ public final class SailOperations implements HostOperations {
     return safeWrite(
         () -> {
           var run = requireRun(runId);
+          var actor = Actor.current();
+          if (Access.decide(actor, Action.NARRATE, run.resource(actor, this::spec))
+              instanceof Decision.Refused(var refusal)) {
+            throw Refusals.exception(refusal);
+          }
           if (delivered.isEmpty()) {
             throw new ApiException(
                 ErrorCode.BAD_REQUEST, "delivered must name at least one message id.");

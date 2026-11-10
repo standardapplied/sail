@@ -104,6 +104,11 @@ class OneDecisionSweepTest {
     allowed.put(
         API + "LocalApiRouter#runMessages", "fact: only a run credential has an inbox to read");
     allowed.put(
+        API + "LocalApiRouter#runAck", "fact: only a run credential has an inbox to acknowledge");
+    allowed.put(
+        API + "LocalApiRouter#beforeItsMethod",
+        "fact: the box credential has no run to deliver to, nor a session to report but a room's");
+    allowed.put(
         API + "LocalApiRouter#runSession",
         "fact: only a run credential has a run to report a session onto; the box reports a room's");
     allowed.put(

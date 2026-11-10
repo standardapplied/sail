@@ -15,7 +15,6 @@ import ai.singlr.sail.store.Sqlite;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpContext;
 import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpPrincipal;
 import java.io.BufferedReader;
 import java.io.InputStream;
@@ -35,7 +34,6 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -84,19 +82,20 @@ class RateLimitGateTest {
 
   @Test
   void throttledRequestNeverReachesTheHandler(@TempDir Path tmp) throws Exception {
-    var reached = new AtomicInteger();
-    HttpHandler passkeys =
-        exchange -> {
-          reached.incrementAndGet();
-          exchange.sendResponseHeaders(204, -1);
-          exchange.close();
-        };
-    try (var server = server(tmp, passkeys, null, oneRequest())) {
+    try (var db = Sqlite.open(tmp.resolve("sail.db"));
+        var server =
+            server(
+                tmp,
+                new WebauthnAuthHandler(null, null, TestAuth.sessions(db), null),
+                null,
+                oneRequest())) {
       server.start();
 
-      assertEquals(204, post(server, "/v1/auth/login/finish").statusCode());
+      assertEquals(
+          503,
+          post(server, "/v1/auth/login/finish").statusCode(),
+          "only the passkey handler answers that passkeys are not configured");
       assertEquals(429, post(server, "/v1/auth/login/finish").statusCode());
-      assertEquals(1, reached.get());
     }
   }
 
@@ -370,7 +369,7 @@ class RateLimitGateTest {
   }
 
   private static SailApiServer server(
-      Path tmp, HttpHandler passkeys, EventBus bus, RateLimitGate gate) throws Exception {
+      Path tmp, WebauthnAuthHandler passkeys, EventBus bus, RateLimitGate gate) throws Exception {
     return new SailApiServer(
         "127.0.0.1",
         0,

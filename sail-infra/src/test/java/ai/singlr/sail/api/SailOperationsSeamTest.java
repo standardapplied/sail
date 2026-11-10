@@ -525,8 +525,8 @@ class SailOperationsSeamTest {
       parkRetitle(box, "owner");
       var head = box.specs.latestRev("auth");
       var response =
-          new LocalApiRouter(operations, () -> TestOperations.BOX_HANDLE)
-              .handle(
+          new SocketDoor(operations)
+              .ask(
                   new LocalApiRequest(
                       "POST",
                       "/v1/conflicts/auth/resolve",
@@ -565,8 +565,8 @@ class SailOperationsSeamTest {
             }
           };
       var response =
-          new LocalApiRouter(lane, () -> TestOperations.BOX_HANDLE)
-              .handle(
+          new SocketDoor(lane)
+              .ask(
                   new LocalApiRequest(
                       "POST",
                       "/v1/conflicts/auth/resolve",
@@ -804,8 +804,7 @@ class SailOperationsSeamTest {
     PrivateAttributes.context(
         http,
         "/",
-        new ApiRouter(
-            operations, auth, new RateLimitGate(), new AgentLogStreamer(auth), () -> box));
+        new ApiRouter(operations, auth, new RateLimitGate(), new AgentLogStreamer(auth)));
     http.start();
     return new Api(http);
   }

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.access.Action;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -19,6 +20,11 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.SyncEngine;
 import com.sun.net.httpserver.HttpServer;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.lang.classfile.ClassFile;
+import java.lang.classfile.instruction.FieldInstruction;
+import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.reflect.Proxy;
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -52,6 +58,10 @@ import org.junit.jupiter.api.io.TempDir;
 class RouteGateSweepTest {
 
   private static final String BOX = "uday";
+
+  /** A POST that reads: it generates a report of the agent from what it reads, writing nothing. */
+  private static final String REPORTS_WHAT_IT_READS = "POST /v1/projects/{project}/agent/report";
+
   private static final RunStore.RunRow RUN =
       new TestOperations().runForCredential(TestOperations.RUN_CREDENTIAL).orElseThrow();
   private static final Set<String> METHODS = Set.of("GET", "POST", "PUT", "DELETE", "PATCH");
@@ -68,8 +78,7 @@ class RouteGateSweepTest {
     new SchemaManager(db).migrate();
     operations = new BoxOperations();
     var auth = TestAuth.tokens(db);
-    router =
-        new ApiRouter(operations, auth, new RateLimitGate(), new AgentLogStreamer(auth), () -> BOX);
+    router = new ApiRouter(operations, auth, new RateLimitGate(), new AgentLogStreamer(auth));
     http = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     PrivateAttributes.context(http, "/", router);
     http.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
@@ -83,102 +92,191 @@ class RouteGateSweepTest {
   }
 
   @Test
-  void everyWebRouteDeclaresTheOneGateThisTableNames() {
-    var passkeys = new WebauthnAuthHandler(null, null, TestAuth.sessions(db), null);
+  void everyPathTheWebServerServesDeclaresTheOneGateItsTableNames() throws Exception {
+    try (var server = everyContext()) {
+      assertEquals(
+          List.of(
+              "GET /v1/health unauthenticated: the liveness probe",
+              "* /v1/health serves nothing",
+              "GET /v1/whoami reads in scope",
+              "* /v1/whoami serves nothing",
+              "GET /v1/fdes reads in scope",
+              "* /v1/fdes serves nothing",
+              "GET /v1/agents reads in scope",
+              "* /v1/agents serves nothing",
+              "GET /v1/sync operates the box",
+              "POST /v1/sync operates the box",
+              "GET /v1/conflicts reads in scope",
+              "GET /v1/conflicts/{id...} reads in scope",
+              "POST /v1/conflicts/{id...} decides CHANGE through ConflictOperations",
+              "GET /v1/events reads in scope",
+              "POST /v1/events the journal decides",
+              "GET /v1/events/recent reads in scope",
+              "GET /v1/events/stats operates the box",
+              "POST /v1/specs:prune decides PRUNE through EraseAuthority",
+              "GET /v1/specs reads in scope",
+              "POST /v1/specs the journal decides",
+              "GET /v1/specs/board reads in scope",
+              "GET /v1/specs/{spec} reads in scope",
+              "PUT /v1/specs/{spec} the journal decides",
+              "DELETE /v1/specs/{spec} the journal decides",
+              "GET /v1/specs/{spec}/content reads in scope",
+              "PUT /v1/specs/{spec}/content the journal decides",
+              "GET /v1/specs/{spec}/reviews reads in scope",
+              "GET /v1/specs/{spec}/history reads in scope",
+              "POST /v1/specs/{spec}/restore the journal decides",
+              "POST /v1/specs/{spec}/followup the journal decides",
+              "* /v1/specs/{spec}/{sub} serves nothing",
+              "GET /v1/rooms reads in scope",
+              "POST /v1/rooms the journal decides",
+              "GET /v1/rooms/{room} reads in scope",
+              "DELETE /v1/rooms/{room} the journal decides",
+              "GET /v1/rooms/{room}/members reads in scope",
+              "POST /v1/rooms/{room}/members decides DISPATCH through LaunchAdmission",
+              "DELETE /v1/rooms/{room}/members decides DISPATCH through LaunchAdmission",
+              "* /v1/rooms/{room}/invite serves nothing",
+              "GET /v1/rooms/{room}/messages reads in scope",
+              "POST /v1/rooms/{room}/messages the journal decides",
+              "* /v1/rooms/{room}/{sub} serves nothing",
+              "GET /v1/reviews/{review} reads in scope",
+              "POST /v1/reviews/{review}/approve the journal decides",
+              "POST /v1/reviews/{review}/dismiss/{finding} the journal decides",
+              "GET /v1/runs reads in scope",
+              "GET /v1/runs/{run} reads in scope",
+              "GET /v1/runs/{run}/log decides OPERATE_RUN through LogAdmission",
+              "POST /v1/runs/{run}/stop decides OPERATE_RUN through StopOperations",
+              "* /v1/runs/{run}/stream decides OPERATE_RUN through LogAdmission",
+              "GET /v1/projects reads in scope",
+              "POST /v1/projects the journal decides",
+              "GET /v1/projects/{project} reads in scope",
+              "GET /v1/projects/{project}/specs reads in scope",
+              "GET /v1/projects/{project}/specs/{id} reads in scope",
+              "* /v1/projects/{project}/specs/{id}/{rest...} serves nothing",
+              "POST /v1/projects/{project}/dispatch decides DISPATCH through LaunchAdmission",
+              "* /v1/projects/{project}/dispatch/{rest...} serves nothing",
+              "GET /v1/projects/{project}/agent reads in scope",
+              "POST /v1/projects/{project}/agent/report reads in scope",
+              "* /v1/projects/{project}/agent/{sub}/{rest...} serves nothing",
+              "GET /v1/projects/{project}/connect reads in scope",
+              "GET /v1/projects/{project}/snapshots reads in scope",
+              "DELETE /v1/projects/{project}/snapshots/{label} decides RESTORE through SailOperations",
+              "POST /v1/projects/{project}/snapshots/{label}/restore decides RESTORE through SailOperations",
+              "GET /v1/projects/{project}/files reads in scope",
+              "GET /v1/projects/{project}/files/{path...} reads in scope",
+              "PUT /v1/projects/{project}/files/{path...} the journal decides",
+              "DELETE /v1/projects/{project}/files/{path...} the journal decides",
+              "* /v1/projects/{project}/files serves nothing",
+              "* /v1/projects/{project}/files/{path...} serves nothing",
+              "POST /v1/projects/{project}/serve decides SERVE through StackOperations",
+              "DELETE /v1/projects/{project}/serve decides SERVE through StackOperations",
+              "GET /v1/projects/{project}/ports reads in scope",
+              "GET /v1/projects/{project}/definition decides READ_DEFINITION through ProjectDefinitionOperations",
+              "PUT /v1/projects/{project}/definition/{section} the journal decides",
+              "* /v1/projects/{project}/{rest...} serves nothing",
+              "POST /v1/auth/register/ticket manages people",
+              "POST /v1/auth/register/start unauthenticated: an enrollment ticket authorizes it; without one, the people gate does",
+              "POST /v1/auth/register/finish unauthenticated: an enrollment ticket authorizes it; without one, the people gate does",
+              "POST /v1/auth/login/start unauthenticated: the caller signs in with a passkey: it holds no credential yet",
+              "POST /v1/auth/login/finish unauthenticated: the caller signs in with a passkey: it holds no credential yet",
+              "GET /login unauthenticated: the enrollment and sign-in pages",
+              "GET /enroll unauthenticated: the enrollment and sign-in pages",
+              "GET /v1/events/stream reads in scope"),
+          server.tables().stream()
+              .flatMap(table -> table.routes().stream())
+              .map(RouteGateSweepTest::described)
+              .toList());
+    }
+  }
 
-    assertEquals(
-        List.of(
-            "GET /v1/health unauthenticated: the liveness probe",
-            "* /v1/health reads in scope",
-            "GET /v1/whoami reads in scope",
-            "* /v1/whoami reads in scope",
-            "GET /v1/fdes reads in scope",
-            "* /v1/fdes reads in scope",
-            "GET /v1/agents reads in scope",
-            "* /v1/agents reads in scope",
-            "GET /v1/sync operates the box",
-            "POST /v1/sync operates the box",
-            "GET /v1/conflicts reads in scope",
-            "GET /v1/conflicts/{id...} reads in scope",
-            "POST /v1/conflicts/{id...} decides CHANGE through ConflictOperations",
-            "GET /v1/events reads in scope",
-            "POST /v1/events the journal decides",
-            "GET /v1/events/recent reads in scope",
-            "GET /v1/events/stats operates the box",
-            "POST /v1/specs:prune decides PRUNE through SpecPruner",
-            "GET /v1/specs reads in scope",
-            "POST /v1/specs the journal decides",
-            "GET /v1/specs/board reads in scope",
-            "GET /v1/specs/{spec} reads in scope",
-            "PUT /v1/specs/{spec} the journal decides",
-            "DELETE /v1/specs/{spec} the journal decides",
-            "GET /v1/specs/{spec}/content reads in scope",
-            "PUT /v1/specs/{spec}/content the journal decides",
-            "GET /v1/specs/{spec}/reviews reads in scope",
-            "GET /v1/specs/{spec}/history reads in scope",
-            "POST /v1/specs/{spec}/restore the journal decides",
-            "POST /v1/specs/{spec}/followup the journal decides",
-            "* /v1/specs/{spec}/{sub} reads in scope",
-            "GET /v1/rooms reads in scope",
-            "POST /v1/rooms the journal decides",
-            "GET /v1/rooms/{room} reads in scope",
-            "DELETE /v1/rooms/{room} the journal decides",
-            "GET /v1/rooms/{room}/members reads in scope",
-            "POST /v1/rooms/{room}/members decides DISPATCH through MembershipService",
-            "DELETE /v1/rooms/{room}/members decides DISPATCH through MembershipService",
-            "* /v1/rooms/{room}/invite reads in scope",
-            "GET /v1/rooms/{room}/messages reads in scope",
-            "POST /v1/rooms/{room}/messages the journal decides",
-            "* /v1/rooms/{room}/{sub} reads in scope",
-            "GET /v1/reviews/{review} reads in scope",
-            "POST /v1/reviews/{review}/approve the journal decides",
-            "POST /v1/reviews/{review}/dismiss/{finding} the journal decides",
-            "GET /v1/runs reads in scope",
-            "GET /v1/runs/{run} reads in scope",
-            "GET /v1/runs/{run}/log decides OPERATE_RUN through LogAdmission",
-            "POST /v1/runs/{run}/stop decides OPERATE_RUN through StopOperations",
-            "GET /v1/projects reads in scope",
-            "POST /v1/projects the journal decides",
-            "GET /v1/projects/{project} reads in scope",
-            "GET /v1/projects/{project}/specs reads in scope",
-            "GET /v1/projects/{project}/specs/{id} reads in scope",
-            "* /v1/projects/{project}/specs/{id}/{rest...} reads in scope",
-            "POST /v1/projects/{project}/dispatch decides DISPATCH through LaunchAdmission",
-            "* /v1/projects/{project}/dispatch/{rest...} reads in scope",
-            "GET /v1/projects/{project}/agent reads in scope",
-            "POST /v1/projects/{project}/agent/report reads in scope",
-            "* /v1/projects/{project}/agent/{sub}/{rest...} reads in scope",
-            "GET /v1/projects/{project}/connect reads in scope",
-            "GET /v1/projects/{project}/snapshots reads in scope",
-            "DELETE /v1/projects/{project}/snapshots/{label} decides RESTORE through ProjectGate",
-            "POST /v1/projects/{project}/snapshots/{label}/restore decides RESTORE through"
-                + " ProjectGate",
-            "GET /v1/projects/{project}/files reads in scope",
-            "GET /v1/projects/{project}/files/{path...} reads in scope",
-            "PUT /v1/projects/{project}/files/{path...} the journal decides",
-            "DELETE /v1/projects/{project}/files/{path...} the journal decides",
-            "* /v1/projects/{project}/files reads in scope",
-            "* /v1/projects/{project}/files/{path...} reads in scope",
-            "POST /v1/projects/{project}/serve decides SERVE through ProjectGate",
-            "DELETE /v1/projects/{project}/serve decides SERVE through ProjectGate",
-            "GET /v1/projects/{project}/ports reads in scope",
-            "GET /v1/projects/{project}/definition decides READ_DEFINITION through ProjectGate",
-            "PUT /v1/projects/{project}/definition/{section} the journal decides",
-            "* /v1/projects/{project}/{rest...} reads in scope",
-            "* /v1/runs/{run}/stream decides OPERATE_RUN through LogAdmission",
-            "POST /v1/auth/register/ticket manages people",
-            "POST /v1/auth/register/start unauthenticated: an enrollment ticket authorizes it;"
-                + " without one, the people gate does",
-            "POST /v1/auth/register/finish unauthenticated: an enrollment ticket authorizes it;"
-                + " without one, the people gate does",
-            "POST /v1/auth/login/start unauthenticated: the caller signs in with a passkey: it"
-                + " holds no credential yet",
-            "POST /v1/auth/login/finish unauthenticated: the caller signs in with a passkey: it"
-                + " holds no credential yet"),
-        Stream.of(router, passkeys)
-            .flatMap(table -> table.routes().stream())
-            .map(RouteGateSweepTest::described)
-            .toList());
+  @Test
+  void aWriteIsNeverMerelyAReadInScopeAndASocketRouteIsNeverServedToNoOne() throws Exception {
+    try (var server = everyContext()) {
+      var web = server.tables().stream().flatMap(table -> table.routes().stream()).toList();
+      var socket = socket(new ArrayList<>()).routes();
+      for (var route : Stream.concat(web.stream(), socket.stream()).toList()) {
+        assertTrue(
+            "GET".equals(route.method())
+                || !(route.gate() instanceof Gate.ReadsInScope)
+                || REPORTS_WHAT_IT_READS.equals(route.method() + " " + route.pattern()),
+            "a write is decided, not merely read in scope: " + described(route));
+      }
+      for (var route : socket) {
+        assertTrue(
+            !(route.gate() instanceof Gate.Unauthenticated),
+            "every request on the socket presents a credential: " + described(route));
+      }
+    }
+  }
+
+  @Test
+  void everyDecidingGateNamesASeamThatAsksAccessForItsAction() throws Exception {
+    try (var server = everyContext()) {
+      var deciding =
+          Stream.concat(
+                  server.tables().stream().flatMap(table -> table.routes().stream()),
+                  socket(new ArrayList<>()).routes().stream())
+              .map(Route::gate)
+              .filter(Gate.Decides.class::isInstance)
+              .map(Gate.Decides.class::cast)
+              .distinct()
+              .toList();
+
+      assertEquals(
+          List.of(), deciding.stream().filter(gate -> !asks(gate.seam(), gate.action())).toList());
+      assertEquals(
+          List.of(new Gate.Decides(Action.PRUNE, SpecPruner.class)),
+          Stream.of(new Gate.Decides(Action.PRUNE, SpecPruner.class))
+              .filter(gate -> !asks(gate.seam(), gate.action()))
+              .toList(),
+          "a seam that hands the decision to another class is not the seam");
+    }
+  }
+
+  /**
+   * Whether {@code seam}'s own bytecode names {@code action} and asks {@code Access}, or the
+   * project gate that does, of it.
+   */
+  private static boolean asks(Class<?> seam, Action action) {
+    try (var bytes = seam.getResourceAsStream(seam.getSimpleName() + ".class")) {
+      var instructions =
+          ClassFile.of().parse(bytes.readAllBytes()).methods().stream()
+              .flatMap(method -> method.code().stream())
+              .flatMap(code -> code.elementStream())
+              .toList();
+      var names =
+          instructions.stream()
+              .anyMatch(
+                  element ->
+                      element instanceof FieldInstruction field
+                          && field.owner().asInternalName().equals("ai/singlr/sail/access/Action")
+                          && field.name().equalsString(action.name()));
+      var decides =
+          instructions.stream()
+              .anyMatch(
+                  element ->
+                      element instanceof InvokeInstruction call
+                          && (call.owner().asInternalName().equals("ai/singlr/sail/access/Access")
+                              || call.owner()
+                                      .asInternalName()
+                                      .equals("ai/singlr/sail/api/ProjectGate")
+                                  && call.name().equalsString("taking")));
+      return names && decides;
+    } catch (IOException unreadable) {
+      throw new UncheckedIOException(unreadable);
+    }
+  }
+
+  /** A web server mounting every context it serves: the API, passkeys, their pages, the stream. */
+  private SailApiServer everyContext() throws IOException {
+    return new SailApiServer(
+        "127.0.0.1",
+        0,
+        operations,
+        TestAuth.sessions(db),
+        new EventBus(),
+        null,
+        null,
+        new WebauthnAuthHandler(null, null, TestAuth.sessions(db), null));
   }
 
   @Test
@@ -218,7 +316,8 @@ class RouteGateSweepTest {
     var root = tokens.create("root", "admin", roster.add("root", null, null, "admin").id(), null);
     var machine = tokens.create("ci-bot", "member");
     var adminMachine = tokens.create("ops-bot", "admin");
-    var boxRoutes = router.routes().stream().filter(route -> route.gate() == Gate.BOX).toList();
+    var boxRoutes =
+        router.routes().stream().filter(route -> route.gate() instanceof Gate.OperatesBox).toList();
     assertEquals(3, boxRoutes.size());
 
     for (var refused : List.of(eng.token(), machine.token())) {
@@ -267,21 +366,21 @@ class RouteGateSweepTest {
         List.of(
             "GET /v1/sync operates the box",
             "GET /v1/conflicts reads in scope",
-            "POST /v1/conflicts/{id...} decides CHANGE through ConflictOperations",
+            "POST /v1/conflicts/{id...}/resolve decides CHANGE through ConflictOperations",
             "GET /v1/conflicts/{id...} reads in scope",
             "GET /v1/whoami reads in scope",
             "POST /v1/events the journal decides",
             "GET /v1/run/messages reads in scope",
-            "POST /v1/run/messages decides NARRATE through LocalLaneOperations",
+            "POST /v1/run/messages decides NARRATE through SailOperations",
             "POST /v1/run/session the journal decides",
             "GET /v1/projects/{project}/skills reads in scope",
             "POST /v1/projects/{project}/skills the journal decides",
             "GET /v1/projects/{project}/skills/{name} reads in scope",
             "DELETE /v1/projects/{project}/skills/{name} the journal decides",
-            "POST /v1/projects/{project}/serve decides SERVE through ProjectGate",
-            "DELETE /v1/projects/{project}/serve decides SERVE through ProjectGate",
+            "POST /v1/projects/{project}/serve decides SERVE through StackOperations",
+            "DELETE /v1/projects/{project}/serve decides SERVE through StackOperations",
             "GET /v1/projects/{project}/ports reads in scope",
-            "GET /v1/projects/{project}/{rest...} reads in scope",
+            "* /v1/projects/{project}/{rest...} serves nothing",
             "GET /v1/specs reads in scope",
             "POST /v1/specs the journal decides",
             "GET /v1/specs/board reads in scope",
@@ -291,21 +390,9 @@ class RouteGateSweepTest {
             "GET /v1/specs/{id}/content reads in scope",
             "PUT /v1/specs/{id}/content the journal decides",
             "GET /v1/specs/{id}/messages reads in scope",
-            "POST /v1/specs/{id}/messages the journal decides"),
+            "POST /v1/specs/{id}/messages the journal decides",
+            "* /v1/specs/{id}/{sub} serves nothing"),
         socket(new ArrayList<>()).routes().stream().map(RouteGateSweepTest::described).toList());
-  }
-
-  @Test
-  void aSocketRouteNeitherReadsWhatItWritesNorIsServedToNoOne() {
-    for (var route : socket(new ArrayList<>()).routes()) {
-      var gate = route.gate();
-      assertTrue(
-          !(gate instanceof Gate.Unauthenticated),
-          "every request on the socket presents a credential: " + described(route));
-      assertTrue(
-          "GET".equals(route.method()) || !(gate instanceof Gate.ReadsInScope),
-          "a write is decided, not merely read in scope: " + described(route));
-    }
   }
 
   @Test
@@ -326,7 +413,7 @@ class RouteGateSweepTest {
         for (var credential :
             List.of(TestOperations.RUN_CREDENTIAL, TestOperations.BOX_CREDENTIAL)) {
           var asked = method + " " + pattern.getKey() + " as " + credential;
-          var answer = router.handle(request(method, path(pattern.getKey()), credential));
+          var answer = router.ask(request(method, path(pattern.getKey()), credential));
 
           assertTrue(answer.status() >= 400 && answer.status() < 500, asked + ": " + answer);
           assertEquals(List.of(), reached, asked);
@@ -343,16 +430,19 @@ class RouteGateSweepTest {
     for (var path :
         List.of(
             "/v1/widgets",
-            "/v1/specs/auth/history",
-            "/v1/specs/",
             "/v1/projects/acme",
             "/v1/projects/acme/files/a.md",
             "/v1/projects/acme/skills/a/b",
             "/v1/conflicts/")) {
-      var answer = router.handle(request("GET", path, TestOperations.RUN_CREDENTIAL));
+      var answer = router.ask(request("GET", path, TestOperations.RUN_CREDENTIAL));
 
       assertEquals("404 {error=No route for " + path + "}", answer.status() + " " + answer.body());
     }
+    var history =
+        router.ask(request("PATCH", "/v1/specs/auth/history", TestOperations.RUN_CREDENTIAL));
+    assertEquals(
+        "404 {error=No route for spec sub-resource history}",
+        history.status() + " " + history.body());
     assertEquals(List.of(), reached);
   }
 
@@ -374,6 +464,7 @@ class RouteGateSweepTest {
           case Gate.Journal journal -> "the journal decides";
           case Gate.OperatesBox box -> "operates the box";
           case Gate.ManagesPeople people -> "manages people";
+          case Gate.Unserved unserved -> "serves nothing";
           case Gate.Decides(var action, var seam) ->
               "decides " + action.name() + " through " + seam.getSimpleName();
           case Gate.Unauthenticated(var reason) -> "unauthenticated: " + reason;
@@ -402,7 +493,7 @@ class RouteGateSweepTest {
    * credential to the box's person, a member; every other operation is recorded in {@code reached}
    * and fails.
    */
-  private static LocalApiRouter socket(List<String> reached) {
+  private static SocketDoor socket(List<String> reached) {
     var lane =
         (LocalLaneOperations)
             Proxy.newProxyInstance(
@@ -414,6 +505,7 @@ class RouteGateSweepTest {
                           Optional.of(RUN)
                               .filter(_ -> TestOperations.RUN_CREDENTIAL.equals(args[0]));
                       case "runActor" -> Optional.of(RUN.principalActor());
+                      case "boxFde" -> BOX;
                       case "boxActorForCredential" ->
                           Optional.of(new Actor(BOX, Role.MEMBER, Actor.Lane.CLI))
                               .filter(_ -> TestOperations.BOX_CREDENTIAL.equals(args[0]));
@@ -422,7 +514,7 @@ class RouteGateSweepTest {
                         throw new IllegalStateException(method.getName() + " was reached");
                       }
                     });
-    return new LocalApiRouter(lane, () -> BOX);
+    return new SocketDoor(lane);
   }
 
   private int send(String method, String path, String token, String body) throws Exception {

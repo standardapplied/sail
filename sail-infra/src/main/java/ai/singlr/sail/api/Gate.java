@@ -19,9 +19,9 @@ import java.util.function.Supplier;
  * the router applies it ({@link #admit}) as the caller before the route's handler runs. A route
  * either decides an action through its operation's one seam, which holds the row the decision
  * reads; or reads in scope, every row through {@code ReadFilter}; or makes a write the journal
- * decides by its type's rule; or is unauthenticated, for a reason, before any credential is asked.
- * What no row is needed to decide, the router decides itself: operating the box, and managing
- * people.
+ * decides by its type's rule; or serves nothing, answering a request as the API always has; or is
+ * unauthenticated, for a reason, before any credential is asked. What no row is needed to decide,
+ * the router decides itself: operating the box, and managing people.
  */
 sealed interface Gate {
 
@@ -31,11 +31,19 @@ sealed interface Gate {
   /** A write the journal decides as it records it. */
   Gate JOURNAL = new Journal();
 
-  /** Operating the box: its sync health, bus stats, sync rounds and main. */
-  Gate BOX = new OperatesBox();
-
   /** Managing the org's people, tokens and pairings. */
   Gate PEOPLE = new ManagesPeople();
+
+  /** A request no operation serves, answered with the refusal the API has always given it. */
+  Gate UNSERVED = new Unserved();
+
+  /**
+   * Operating the box whose FDE {@code boxFde} names when asked: its sync health, bus stats, sync
+   * rounds and main.
+   */
+  static Gate box(Supplier<String> boxFde) {
+    return new OperatesBox(boxFde);
+  }
 
   /** A route whose operation decides {@code action} through {@code seam}, its one seam. */
   static Gate decides(Action action, Class<?> seam) {
@@ -48,13 +56,15 @@ sealed interface Gate {
   }
 
   /**
-   * Throws the refusal a router answers {@code actor} with before the route's handler runs,
-   * deciding on the box of the FDE {@code boxFde} names; nothing for a gate the operation or the
-   * journal applies.
+   * Throws the refusal a router answers {@code actor} with before the route's handler runs; nothing
+   * for a gate the operation, the read filter or the journal applies.
    */
-  default void admit(Actor actor, Supplier<String> boxFde) {}
+  default void admit(Actor actor) {}
 
-  /** The operation decides {@code action} on the resource it resolves, through {@code seam}. */
+  /**
+   * The operation decides {@code action} on the resource it resolves, through {@code seam}, so the
+   * router admits every caller and the seam refuses.
+   */
   record Decides(Action action, Class<?> seam) implements Gate {
     public Decides {
       Objects.requireNonNull(action, "action");
@@ -68,10 +78,17 @@ sealed interface Gate {
   /** The journal decides the route's write by its type's rule. */
   record Journal() implements Gate {}
 
+  /** The route reaches no operation, after reading at most the project the path names. */
+  record Unserved() implements Gate {}
+
   /** Operate the box: the box's own person, or an admin. */
-  record OperatesBox() implements Gate {
+  record OperatesBox(Supplier<String> boxFde) implements Gate {
+    public OperatesBox {
+      Objects.requireNonNull(boxFde, "boxFde");
+    }
+
     @Override
-    public void admit(Actor actor, Supplier<String> boxFde) {
+    public void admit(Actor actor) {
       enforce(Access.decide(actor, Action.OPERATE_BOX, Resources.box(boxFde.get())));
     }
   }
@@ -79,7 +96,7 @@ sealed interface Gate {
   /** Manage people: an admin. */
   record ManagesPeople() implements Gate {
     @Override
-    public void admit(Actor actor, Supplier<String> boxFde) {
+    public void admit(Actor actor) {
       enforce(Access.decide(actor, Action.MANAGE_PEOPLE, Resources.people()));
     }
   }

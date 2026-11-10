@@ -148,8 +148,8 @@ class UnassignedSpecTest {
     assertEquals(
         201, byCreator.statusCode(), "every writer of the project speaks: " + byCreator.body());
     var room = roomRunCredential("mady", "auth");
-    var router = new LocalApiRouter(operations, () -> TestOperations.BOX_HANDLE);
-    var answered = router.handle(form("POST", "/v1/specs/auth/messages", room, "body=on it"));
+    var router = new SocketDoor(operations);
+    var answered = router.ask(form("POST", "/v1/specs/auth/messages", room, "body=on it"));
     assertEquals(201, answered.status(), answered.body().toString());
     var terminal = new HostAccess(db, new RoleRule(SyncConfig::unset, new FdeStore(db)));
     terminal.admit(
@@ -273,19 +273,19 @@ class UnassignedSpecTest {
   void aRunCreatesItForTheFdeItActsForAndClaimsItForThatFde() {
     new FdeStore(db).add("uday", null, null, "member");
     var credential = runCredential("uday");
-    var router = new LocalApiRouter(operations, () -> TestOperations.BOX_HANDLE);
+    var router = new SocketDoor(operations);
 
     var created =
-        router.handle(form("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme"));
+        router.ask(form("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme"));
     assertEquals(201, created.status(), created.body().toString());
     assertUnassignedAndCreatedBy("draft", "uday");
 
     var principal = new RunStore(db).findByCredential(credential).orElseThrow().principal();
     var asPrincipal =
-        router.handle(form("PUT", "/v1/specs/draft", credential, "assignee=" + principal));
+        router.ask(form("PUT", "/v1/specs/draft", credential, "assignee=" + principal));
     assertEquals(422, asPrincipal.status(), "a run's principal is never an assignee");
 
-    var claimed = router.handle(form("PUT", "/v1/specs/draft", credential, "assignee=uday"));
+    var claimed = router.ask(form("PUT", "/v1/specs/draft", credential, "assignee=uday"));
     assertEquals(200, claimed.status(), claimed.body().toString());
     assertEquals("uday", specs.findById("draft").orElseThrow().assignee());
   }
@@ -296,8 +296,8 @@ class UnassignedSpecTest {
     var credential = new BoxCredentialStore(db).replace("uday");
     try (var udays = box(() -> new SyncConfig("node", "main", "uday", "box"))) {
       var created =
-          new LocalApiRouter(udays, () -> TestOperations.BOX_HANDLE)
-              .handle(form("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme"));
+          new SocketDoor(udays)
+              .ask(form("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme"));
 
       assertEquals(201, created.status(), created.body().toString());
     }

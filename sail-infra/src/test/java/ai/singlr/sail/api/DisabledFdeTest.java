@@ -213,8 +213,8 @@ class DisabledFdeTest {
   }
 
   private ApiResponse socket(String method, String path, String credential, String form) {
-    return new LocalApiRouter(operations, () -> TestOperations.BOX_HANDLE)
-        .handle(
+    return new SocketDoor(operations)
+        .ask(
             new LocalApiRequest(
                 method,
                 path,

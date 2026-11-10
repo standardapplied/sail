@@ -6,38 +6,46 @@
 package ai.singlr.sail.api;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
-import java.util.function.Supplier;
 
 /**
- * The container socket's router as a test outside this package asks it: one request, one answer.
+ * The container socket's router as a test asks it, without the socket's bytes: requests built
+ * whole, or one form-encoded request asked with a bearer credential.
  */
 public final class SocketDoor {
 
-  private SocketDoor() {}
+  private final LocalApiRouter router;
+
+  /** The socket over {@code operations}, whose box gate decides on the box they stand for. */
+  public SocketDoor(LocalLaneOperations operations) {
+    this.router = new LocalApiRouter(operations);
+  }
+
+  /** What the socket answers {@code request}. */
+  ApiResponse ask(LocalApiRequest request) {
+    return router.handle(request);
+  }
 
   /**
-   * What the socket of the box whose FDE {@code boxFde} names answers {@code method} on {@code
-   * path} with {@code form} as its body, asked with {@code bearer}.
+   * What the socket answers {@code method} on {@code path} with {@code form}, asked by {@code
+   * bearer}.
    */
-  public static ApiResponse ask(
-      LocalLaneOperations operations,
-      Supplier<String> boxFde,
-      String method,
-      String path,
-      String bearer,
-      String form) {
-    return new LocalApiRouter(operations, boxFde)
-        .handle(
-            new LocalApiRequest(
-                method,
-                path,
-                Map.of(),
-                Map.of(
-                    "authorization",
-                    "Bearer " + bearer,
-                    "content-type",
-                    "application/x-www-form-urlencoded"),
-                form.getBytes(StandardCharsets.UTF_8)));
+  public ApiResponse ask(String method, String path, String bearer, String form) {
+    return ask(
+        new LocalApiRequest(
+            method,
+            path,
+            Map.of(),
+            Map.of(
+                "authorization",
+                "Bearer " + bearer,
+                "content-type",
+                "application/x-www-form-urlencoded"),
+            form.getBytes(StandardCharsets.UTF_8)));
+  }
+
+  List<Route<?>> routes() {
+    return router.routes();
   }
 }

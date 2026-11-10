@@ -65,6 +65,12 @@ public interface LocalLaneOperations {
   StackOperations stack();
 
   /**
+   * The FDE this box stands for, as the role rule that resolves its credentials reads it: whom
+   * operating the box answers to. Null on a box that names none.
+   */
+  String boxFde();
+
+  /**
    * Resolves the box's ambient credential to the box's own person, as the role rule resolves the
    * box: the FDE this box is when asked, on the CLI lane. Empty when the credential is unknown, was
    * minted for an FDE the box no longer is, or that FDE has left the roster. Serves the local

@@ -21,8 +21,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
-import java.util.function.Supplier;
 
 /**
  * Serves the passkey ceremony endpoints under {@code /v1/auth}. An admin mints an enrollment ticket
@@ -48,9 +46,6 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
   private static final Base64.Encoder B64URL_ENC = Base64.getUrlEncoder().withoutPadding();
   private static final String TICKET_HEADER = "X-Enrollment-Ticket";
   private static final String POST = "POST";
-
-  /** The people gate decides on no box, so it never reads one. */
-  private static final Supplier<String> NO_BOX = Optional.<String>empty()::orElseThrow;
 
   private static final Gate ENROLLMENT =
       Gate.unauthenticated("an enrollment ticket authorizes it; without one, the people gate does");
@@ -136,12 +131,10 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
               Remedy.sail("server start"),
               "'."));
     }
-    var path = exchange.getRequestURI().getPath();
-    var route =
-        routes.stream()
-            .filter(candidate -> candidate.match(path).isPresent())
-            .findFirst()
-            .orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND, "Unknown passkey endpoint."));
+    if (!(RouteTable.serve(routes, POST, exchange.getRequestURI().getPath())
+        instanceof RouteTable.Served.Match<Ceremony>(var route, var params))) {
+      throw new ApiException(ErrorCode.NOT_FOUND, "Unknown passkey endpoint.");
+    }
     try {
       if (!(route.gate() instanceof Gate.Unauthenticated)) {
         admit(exchange, route.gate());
@@ -266,7 +259,7 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
   /** Authenticates {@code exchange}'s caller and admits it past {@code gate}, or refuses it. */
   private void admit(HttpExchange exchange, Gate gate) {
     auth.require(exchange);
-    gate.admit(ApiRouter.actorOf(exchange), NO_BOX);
+    gate.admit(ApiRouter.actorOf(exchange));
   }
 
   private static Map<String, Object> ceremonyBody(PasskeyCeremonies.Ceremony ceremony) {

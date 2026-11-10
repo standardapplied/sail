@@ -13,12 +13,17 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * One route a router serves: requests of {@code method} on a path {@code pattern} matches, decided
- * by {@code gate}, answered by {@code handler}. A pattern is an absolute path of segments, each
- * literal or a placeholder: {@code {name}} matches one non-empty segment, and {@code {name...}},
- * only last, matches the non-empty rest of the path, slashes and all.
+ * One route a router serves: requests of {@code method} ({@link #ANY} for every method) on a path
+ * {@code pattern} matches, decided by {@code gate}, answered by {@code handler}. A pattern is an
+ * absolute path of segments, each literal or a placeholder: {@code {name}} matches one segment, an
+ * empty one included, so a path as sent fills it as sent; {@code {name...}} matches the rest of the
+ * path, slashes and all, up to the literal segments after it, and holds something unless it is
+ * last.
  */
 record Route<H>(String method, String pattern, Gate gate, H handler) {
+
+  /** The method of a route that serves every method. */
+  static final String ANY = "*";
 
   private static final String REST = "...}";
 
@@ -29,11 +34,14 @@ record Route<H>(String method, String pattern, Gate gate, H handler) {
     if (!Objects.requireNonNull(pattern, "pattern").startsWith("/")) {
       throw new IllegalArgumentException("A route's pattern starts with '/': " + pattern);
     }
-    var segments = segments(pattern);
-    if (segments.subList(0, segments.size() - 1).stream().anyMatch(Route::rest)) {
-      throw new IllegalArgumentException(
-          "Route " + pattern + " captures the rest of the path before its last segment.");
+    if (segments(pattern).stream().filter(Route::rest).count() > 1) {
+      throw new IllegalArgumentException("Route " + pattern + " captures the rest more than once.");
     }
+  }
+
+  /** Whether this route serves {@code method}. */
+  boolean serves(String method) {
+    return this.method.equals(ANY) || this.method.equals(method);
   }
 
   /** The placeholders {@code path} fills, by name, when this route's pattern matches it. */
@@ -44,31 +52,37 @@ record Route<H>(String method, String pattern, Gate gate, H handler) {
     var wanted = segments(pattern);
     var given = segments(path);
     var filled = new LinkedHashMap<String, String>();
+    var taken = 0;
     for (var i = 0; i < wanted.size(); i++) {
       var segment = wanted.get(i);
       if (rest(segment)) {
-        var tail = i < given.size() ? String.join("/", given.subList(i, given.size())) : "";
-        return tail.isEmpty() ? Optional.empty() : Optional.of(fill(filled, segment, tail));
-      }
-      if (i >= given.size()) {
+        var after = wanted.size() - i - 1;
+        var end = given.size() - after;
+        if (end <= taken) {
+          return Optional.empty();
+        }
+        var tail = String.join("/", given.subList(taken, end));
+        if (after > 0 && tail.isEmpty()) {
+          return Optional.empty();
+        }
+        fill(filled, segment, tail);
+        taken = end;
+      } else if (taken >= given.size()
+          || !placeholder(segment) && !segment.equals(given.get(taken))) {
         return Optional.empty();
-      }
-      var value = given.get(i);
-      if (placeholder(segment) ? value.isEmpty() : !segment.equals(value)) {
-        return Optional.empty();
-      }
-      if (placeholder(segment)) {
-        fill(filled, segment, value);
+      } else {
+        if (placeholder(segment)) {
+          fill(filled, segment, given.get(taken));
+        }
+        taken++;
       }
     }
-    return given.size() == wanted.size() ? Optional.of(filled) : Optional.empty();
+    return taken == given.size() ? Optional.of(filled) : Optional.empty();
   }
 
-  private static Map<String, String> fill(
-      Map<String, String> filled, String segment, String value) {
+  private static void fill(Map<String, String> filled, String segment, String value) {
     var close = rest(segment) ? REST : "}";
     filled.put(segment.substring(1, segment.length() - close.length()), value);
-    return filled;
   }
 
   private static boolean placeholder(String segment) {

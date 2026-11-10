@@ -68,9 +68,7 @@ record DoorBox(SyncConfig config, Sqlite db, SailOperations operations, HttpServ
     var auth = TestAuth.sessions(db, config);
     var http = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     http.createContext(
-        "/",
-        new ApiRouter(
-            operations, auth, new RateLimitGate(), new AgentLogStreamer(auth), config::handle));
+        "/", new ApiRouter(operations, auth, new RateLimitGate(), new AgentLogStreamer(auth)));
     http.createContext(
         "/v1/auth",
         new WebauthnAuthHandler(
@@ -113,8 +111,8 @@ record DoorBox(SyncConfig config, Sqlite db, SailOperations operations, HttpServ
 
   /** What this box's socket answers its box credential, {@code method} on {@code path}. */
   ApiResponse socket(String method, String path, String form) {
-    return SocketDoor.ask(
-        operations, this::person, method, path, new BoxCredentialStore(db).replace(person()), form);
+    return new SocketDoor(operations)
+        .ask(method, path, new BoxCredentialStore(db).replace(person()), form);
   }
 
   @Override

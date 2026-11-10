@@ -55,7 +55,7 @@ class RoomPrincipalAccessTest {
   private EventBus bus;
   private SpecStore specStore;
   private MessageStore messageStore;
-  private LocalApiRouter router;
+  private SocketDoor router;
   private String credential;
   private String runId;
   private String principal;
@@ -109,7 +109,7 @@ class RoomPrincipalAccessTest {
                 SessionYield.NONE)
             .useMessages(messageStore)
             .useRooms(new RoomStore(db));
-    router = new LocalApiRouter(operations, () -> TestOperations.BOX_HANDLE);
+    router = new SocketDoor(operations);
   }
 
   @AfterEach
@@ -147,7 +147,7 @@ class RoomPrincipalAccessTest {
   }
 
   private ApiResponse call(String method, String path, String body) {
-    return router.handle(
+    return router.ask(
         new LocalApiRequest(
             method,
             path,

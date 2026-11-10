@@ -188,13 +188,13 @@ class WriteAuthorshipTest {
                       "claude-code",
                       List.of()));
       var principal = runs.findByCredential(credential).orElseThrow().principal();
-      var router = new LocalApiRouter(operations, () -> TestOperations.BOX_HANDLE);
+      var router = new SocketDoor(operations);
 
-      var status = router.handle(put("/v1/specs/auth", credential, "status=pending"));
+      var status = router.ask(put("/v1/specs/auth", credential, "status=pending"));
       assertEquals(200, status.status(), status.body().toString());
       assertAuthoredBy("auth", principal);
 
-      var content = router.handle(put("/v1/specs/auth/content", credential, "body=reviewed"));
+      var content = router.ask(put("/v1/specs/auth/content", credential, "body=reviewed"));
       assertEquals(200, content.status(), content.body().toString());
       assertAuthoredBy("auth", principal);
     }

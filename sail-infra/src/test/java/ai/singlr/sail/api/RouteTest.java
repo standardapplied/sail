@@ -13,7 +13,10 @@ import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
-/** A route's pattern: literal segments, one-segment placeholders, and a last rest placeholder. */
+/**
+ * A route's pattern: literal segments, one-segment placeholders, a rest placeholder, and the one
+ * dispatch every router asks of its table.
+ */
 class RouteTest {
 
   private static final Route<String> SPEC =
@@ -24,11 +27,11 @@ class RouteTest {
       new Route<>("GET", "/v1/specs/board", Gate.READS_IN_SCOPE, "board");
 
   @Test
-  void aLiteralMatchesItselfAndAPlaceholderOneNonEmptySegment() {
+  void aLiteralMatchesItselfAndAPlaceholderOneSegmentAsSentEmptyOrNot() {
     assertEquals(Optional.of(Map.of()), BOARD.match("/v1/specs/board"));
     assertEquals(Optional.of(Map.of("id", "auth")), SPEC.match("/v1/specs/auth"));
-    for (var path :
-        List.of("/v1/specs", "/v1/specs/", "/v1/specs/auth/content", "/v1/spec/auth", "v1/specs")) {
+    assertEquals(Optional.of(Map.of("id", "")), SPEC.match("/v1/specs/"));
+    for (var path : List.of("/v1/specs", "/v1/specs/auth/content", "/v1/spec/auth", "v1/specs")) {
       assertEquals(Optional.empty(), SPEC.match(path), path);
     }
     assertEquals(Optional.empty(), BOARD.match("/v1/specs/boards"));
@@ -38,25 +41,35 @@ class RouteTest {
   }
 
   @Test
-  void aRestPlaceholderTakesTheNonEmptyRestOfThePathSlashesAndAll() {
+  void aRestPlaceholderTakesTheRestOfThePathSlashesAndAllUpToTheLiteralsAfterIt() {
     assertEquals(
         Optional.of(Map.of("project", "acme", "path", "docs/a.md")),
         FILE.match("/v1/projects/acme/files/docs/a.md"));
     assertEquals(
         Optional.of(Map.of("project", "acme", "path", "docs/")),
         FILE.match("/v1/projects/acme/files/docs/"));
-    for (var path :
-        List.of(
-            "/v1/projects/acme/files",
-            "/v1/projects/acme/files/",
-            "/v1/projects//files/a.md",
-            "/v1/projects/acme/skills/a.md")) {
+    assertEquals(
+        Optional.of(Map.of("project", "acme", "path", "")),
+        FILE.match("/v1/projects/acme/files/"),
+        "last, the rest is what is sent");
+    assertEquals(
+        Optional.of(Map.of("project", "", "path", "a.md")), FILE.match("/v1/projects//files/a.md"));
+    for (var path : List.of("/v1/projects/acme/files", "/v1/projects/acme/skills/a.md")) {
       assertEquals(Optional.empty(), FILE.match(path), path);
+    }
+    var resolve = new Route<>("POST", "/v1/conflicts/{id...}/resolve", Gate.JOURNAL, "resolve");
+    assertEquals(
+        Optional.of(Map.of("id", "acme/config")),
+        resolve.match("/v1/conflicts/acme/config/resolve"));
+    for (var path :
+        List.of("/v1/conflicts/resolve", "/v1/conflicts//resolve", "/v1/conflicts/acme/config")) {
+      assertEquals(
+          Optional.empty(), resolve.match(path), "before literals the rest holds something");
     }
   }
 
   @Test
-  void aRouteNamesAllItsPartsAndCapturesTheRestOnlyLast() {
+  void aRouteNamesAllItsPartsAndCapturesTheRestOnce() {
     assertThrows(NullPointerException.class, () -> new Route<>(null, "/v1", Gate.JOURNAL, "h"));
     assertThrows(NullPointerException.class, () -> new Route<>("GET", null, Gate.JOURNAL, "h"));
     assertThrows(NullPointerException.class, () -> new Route<>("GET", "/v1", null, "h"));
@@ -68,11 +81,31 @@ class RouteTest {
                 () -> new Route<>("GET", "v1/specs", Gate.JOURNAL, "h"))
             .getMessage());
     assertEquals(
-        "Route /v1/{path...}/raw captures the rest of the path before its last segment.",
+        "Route /v1/{path...}/{more...} captures the rest more than once.",
         assertThrows(
                 IllegalArgumentException.class,
-                () -> new Route<>("GET", "/v1/{path...}/raw", Gate.JOURNAL, "h"))
+                () -> new Route<>("GET", "/v1/{path...}/{more...}", Gate.JOURNAL, "h"))
             .getMessage());
+  }
+
+  @Test
+  void theFirstMatchingPatternServesByItsMethodOrRefusesTheMethodAndNoMatchIsNotFound() {
+    var update = new Route<>("PUT", "/v1/specs/{id}", Gate.JOURNAL, "update");
+    var any = new Route<>(Route.ANY, "/v1/specs/{id}/{sub}", Gate.UNSERVED, "any");
+    var routes = List.of(BOARD, SPEC, update, any);
+
+    assertEquals(
+        new RouteTable.Served.Match<>(update, Map.of("id", "auth")),
+        RouteTable.serve(routes, "PUT", "/v1/specs/auth"));
+    assertEquals(
+        new RouteTable.Served.MethodNotAllowed<>("/v1/specs/board", Map.of()),
+        RouteTable.serve(routes, "PUT", "/v1/specs/board"),
+        "a literal answers for its own methods, not the placeholder beside it");
+    assertEquals(
+        new RouteTable.Served.Match<>(any, Map.of("id", "auth", "sub", "x")),
+        RouteTable.serve(routes, "PATCH", "/v1/specs/auth/x"));
+    assertEquals(
+        new RouteTable.Served.NotFound<>(), RouteTable.serve(routes, "GET", "/v1/widgets"));
   }
 
   @Test

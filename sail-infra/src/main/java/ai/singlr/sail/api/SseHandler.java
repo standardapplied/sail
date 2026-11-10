@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.InstantSource;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -54,7 +55,7 @@ import java.util.function.Predicate;
  * that frame is what a reader who connects mid-turn, or reconnects after missing a turn's end, is
  * told. A stream the bus drops an event for is ended, so its client reconnects and is told again.
  */
-public final class SseHandler implements HttpHandler {
+public final class SseHandler implements HttpHandler, RouteTable {
 
   /** Default cap on concurrent SSE connections. */
   public static final int DEFAULT_MAX_CONNECTIONS = 64;
@@ -106,6 +107,12 @@ public final class SseHandler implements HttpHandler {
     }
     this.maxConnections = maxConnections;
     this.connectionPermits = new Semaphore(maxConnections);
+  }
+
+  /** The event stream, read in the caller's scope. */
+  @Override
+  public List<Route<?>> routes() {
+    return List.of(new Route<>("GET", "/v1/events/stream", Gate.READS_IN_SCOPE, this));
   }
 
   /** Total SSE connection attempts rejected due to the connection cap. */

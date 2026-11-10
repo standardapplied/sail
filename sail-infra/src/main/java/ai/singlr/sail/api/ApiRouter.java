@@ -7,6 +7,8 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Principal;
+import ai.singlr.sail.api.RouteTable.Served;
+import ai.singlr.sail.authority.EraseAuthority;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
@@ -24,7 +26,6 @@ import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,19 +33,17 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
- * The web API's routes, each declaring its {@link Gate} (A3), dispatched through one table: the
- * first route whose pattern matches a request's path answers it, by the route of that pattern that
- * serves the request's method, or {@code 405} when none does; a path no pattern matches is {@code
- * 404}. A run's log stream is recognised by its path as sent, before the table's canon. A route
- * served before any credential is asked ({@link Gate.Unauthenticated}) answers first; every other
- * request is authenticated and rate-limited, its path's project, spec or room name checked, and
- * then answered as its caller, the actor {@link ApiAuth} stamped, once the router has applied the
- * route's gate.
+ * The web API's routes, each declaring its {@link Gate} (A3), dispatched as every router dispatches
+ * ({@link RouteTable#serve}): the first route whose pattern matches a request's path answers it, by
+ * the route of that pattern that serves the request's method, or {@code 405} when none does; a path
+ * no pattern matches is {@code 404}. A path is matched with its blank segments dropped, and a run's
+ * log stream as sent. A route served before any credential is asked ({@link Gate.Unauthenticated})
+ * answers first; every other request is authenticated and rate-limited, its path's project, spec or
+ * room name checked, and then answered as its caller, the actor {@link ApiAuth} stamped, once the
+ * router has applied the route's gate.
  */
 public final class ApiRouter implements HttpHandler, RouteTable {
 
@@ -54,7 +53,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   private static final String DELETE = "DELETE";
 
   /** A route of this method serves every method. */
-  private static final String ANY = "*";
+  private static final String ANY = Route.ANY;
 
   private static final String PROJECT = "/v1/projects/{project}";
   private static final String SPEC = "spec";
@@ -76,30 +75,23 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   private final ApiAuth auth;
   private final RateLimitGate rateLimits;
   private final AgentLogStreamer agentStreamer;
-  private final Supplier<String> nodeHandle;
-  private final List<Route<Handler>> routes = table();
-  private final Route<Handler> stream =
-      route(
-          ANY,
-          "/v1/runs/{run}/stream",
-          Gate.decides(Action.OPERATE_RUN, LogAdmission.class),
-          this::streamRunLog);
+  private final List<Route<Handler>> routes;
 
   /**
-   * A router answering as the box whose FDE {@code nodeHandle} names: the box the box gate decides
-   * on, and the box dispatch, the room seats and a run's provenance are local to.
+   * A router answering as the box {@code operations} stands for ({@link Operations#boxFde}): the
+   * box the box gate decides on, and the box dispatch, the room seats and a run's provenance are
+   * local to.
    */
   public ApiRouter(
       Operations operations,
       ApiAuth auth,
       RateLimitGate rateLimits,
-      AgentLogStreamer agentStreamer,
-      Supplier<String> nodeHandle) {
+      AgentLogStreamer agentStreamer) {
     this.operations = operations;
     this.auth = auth;
     this.rateLimits = rateLimits;
     this.agentStreamer = Objects.requireNonNull(agentStreamer, "agentStreamer");
-    this.nodeHandle = nodeHandle;
+    this.routes = table();
   }
 
   /** What answers a request a route serves, or null when it answered the exchange itself. */
@@ -131,33 +123,31 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     }
   }
 
-  /** The route that serves a request, and what its path fills of the route's placeholders. */
-  private record Match(Route<Handler> route, Map<String, String> params) {}
-
   @Override
   public List<Route<?>> routes() {
-    var all = new ArrayList<Route<?>>(routes);
-    all.add(stream);
-    return List.copyOf(all);
+    return List.copyOf(routes);
   }
 
   private List<Route<Handler>> table() {
     var reads = Gate.READS_IN_SCOPE;
     var journal = Gate.JOURNAL;
-    var serving = Gate.decides(Action.SERVE, ProjectGate.class);
-    var restoring = Gate.decides(Action.RESTORE, ProjectGate.class);
-    var seating = Gate.decides(Action.DISPATCH, MembershipService.class);
+    var unserved = Gate.UNSERVED;
+    var box = Gate.box(operations::boxFde);
+    var serving = Gate.decides(Action.SERVE, StackOperations.class);
+    var restoring = Gate.decides(Action.RESTORE, SailOperations.class);
+    var seating = Gate.decides(Action.DISPATCH, LaunchAdmission.class);
+    var runOperated = Gate.decides(Action.OPERATE_RUN, LogAdmission.class);
     return List.of(
         route(GET, "/v1/health", Gate.unauthenticated("the liveness probe"), this::health),
-        route(ANY, "/v1/health", reads, ApiRouter::absent),
+        route(ANY, "/v1/health", unserved, ApiRouter::absent),
         route(GET, "/v1/whoami", reads, this::whoami),
-        route(ANY, "/v1/whoami", reads, ApiRouter::absent),
+        route(ANY, "/v1/whoami", unserved, ApiRouter::absent),
         route(GET, "/v1/fdes", reads, call -> ApiResponse.from(operations.fdes())),
-        route(ANY, "/v1/fdes", reads, ApiRouter::absent),
+        route(ANY, "/v1/fdes", unserved, ApiRouter::absent),
         route(GET, "/v1/agents", reads, call -> ApiResponse.from(operations.agents())),
-        route(ANY, "/v1/agents", reads, ApiRouter::absent),
-        route(GET, "/v1/sync", Gate.BOX, this::syncStatus),
-        route(POST, "/v1/sync", Gate.BOX, this::sync),
+        route(ANY, "/v1/agents", unserved, ApiRouter::absent),
+        route(GET, "/v1/sync", box, this::syncStatus),
+        route(POST, "/v1/sync", box, this::sync),
         route(GET, "/v1/conflicts", reads, this::conflicts),
         route(GET, "/v1/conflicts/{id...}", reads, this::conflict),
         route(
@@ -172,8 +162,9 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             journal,
             call -> ApiResponse.from(operations.publishEvent(JsonBody.readEvent(call.exchange())))),
         route(GET, "/v1/events/recent", reads, this::recentEvents),
-        route(GET, "/v1/events/stats", Gate.BOX, this::eventBusStats),
-        route(POST, "/v1/specs:prune", Gate.decides(Action.PRUNE, SpecPruner.class), this::prune),
+        route(GET, "/v1/events/stats", box, this::eventBusStats),
+        route(
+            POST, "/v1/specs:prune", Gate.decides(Action.PRUNE, EraseAuthority.class), this::prune),
         route(GET, "/v1/specs", reads, this::globalSpecs),
         route(POST, "/v1/specs", journal, this::createGlobalSpec),
         route(GET, "/v1/specs/board", reads, this::globalBoard),
@@ -186,7 +177,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(GET, "/v1/specs/{spec}/history", reads, this::globalSpecHistory),
         route(POST, "/v1/specs/{spec}/restore", journal, this::restoreGlobalSpec),
         route(POST, "/v1/specs/{spec}/followup", journal, this::createFollowupSpec),
-        route(ANY, "/v1/specs/{spec}/{sub}", reads, ApiRouter::absent),
+        route(ANY, "/v1/specs/{spec}/{sub}", unserved, ApiRouter::absent),
         route(GET, "/v1/rooms", reads, this::rooms),
         route(POST, "/v1/rooms", journal, this::createRoom),
         route(
@@ -206,10 +197,10 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             call -> ApiResponse.from(operations.roomMembers(call.param(ROOM)))),
         route(POST, "/v1/rooms/{room}/members", seating, this::addRoomMember),
         route(DELETE, "/v1/rooms/{room}/members", seating, this::removeRoomMember),
-        route(ANY, "/v1/rooms/{room}/invite", reads, ApiRouter::retiredInvite),
+        route(ANY, "/v1/rooms/{room}/invite", unserved, ApiRouter::retiredInvite),
         route(GET, "/v1/rooms/{room}/messages", reads, this::roomMessages),
         route(POST, "/v1/rooms/{room}/messages", journal, this::postRoomMessage),
-        route(ANY, "/v1/rooms/{room}/{sub}", reads, ApiRouter::absent),
+        route(ANY, "/v1/rooms/{room}/{sub}", unserved, ApiRouter::absent),
         route(GET, "/v1/reviews/{review}", reads, this::reviewDetail),
         route(POST, "/v1/reviews/{review}/approve", journal, this::approveReview),
         route(POST, "/v1/reviews/{review}/dismiss/{finding}", journal, this::dismissFinding),
@@ -219,16 +210,13 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             "/v1/runs/{run}",
             reads,
             call -> ApiResponse.from(operations.run(call.param("run")))),
-        route(
-            GET,
-            "/v1/runs/{run}/log",
-            Gate.decides(Action.OPERATE_RUN, LogAdmission.class),
-            this::runLog),
+        route(GET, "/v1/runs/{run}/log", runOperated, this::runLog),
         route(
             POST,
             "/v1/runs/{run}/stop",
             Gate.decides(Action.OPERATE_RUN, StopOperations.class),
             this::stopRun),
+        route(ANY, "/v1/runs/{run}/stream", runOperated, this::streamRunLog),
         route(GET, "/v1/projects", reads, call -> ApiResponse.from(operations.projects())),
         route(POST, "/v1/projects", journal, this::createProject),
         route(GET, PROJECT, reads, call -> ApiResponse.from(operations.project(call.project()))),
@@ -238,16 +226,16 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             reads,
             call -> ApiResponse.from(operations.specs(call.project()))),
         route(GET, PROJECT + "/specs/{id}", reads, this::projectSpec),
-        route(ANY, PROJECT + "/specs/{id}/{rest...}", reads, ApiRouter::malformed),
+        route(ANY, PROJECT + "/specs/{id}/{rest...}", unserved, ApiRouter::malformed),
         route(
             POST,
             PROJECT + "/dispatch",
             Gate.decides(Action.DISPATCH, LaunchAdmission.class),
             this::dispatch),
-        route(ANY, PROJECT + "/dispatch/{rest...}", reads, ApiRouter::malformed),
+        route(ANY, PROJECT + "/dispatch/{rest...}", unserved, ApiRouter::malformed),
         route(GET, PROJECT + "/agent", reads, this::agentStatus),
         route(POST, PROJECT + "/agent/report", reads, this::agentReport),
-        route(ANY, PROJECT + "/agent/{sub}/{rest...}", reads, ApiRouter::malformed),
+        route(ANY, PROJECT + "/agent/{sub}/{rest...}", unserved, ApiRouter::malformed),
         route(
             GET,
             PROJECT + "/connect",
@@ -264,8 +252,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(GET, PROJECT + "/files/{path...}", reads, this::readFile),
         route(PUT, PROJECT + "/files/{path...}", journal, this::putFile),
         route(DELETE, PROJECT + "/files/{path...}", journal, this::removeFile),
-        route(ANY, PROJECT + "/files", reads, this::unservedFile),
-        route(ANY, PROJECT + "/files/{path...}", reads, this::unservedFile),
+        route(ANY, PROJECT + "/files", unserved, this::unservedFile),
+        route(ANY, PROJECT + "/files/{path...}", unserved, this::unservedFile),
         route(POST, PROJECT + "/serve", serving, this::serve),
         route(
             DELETE,
@@ -280,10 +268,10 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(
             GET,
             PROJECT + "/definition",
-            Gate.decides(Action.READ_DEFINITION, ProjectGate.class),
+            Gate.decides(Action.READ_DEFINITION, ProjectDefinitionOperations.class),
             call -> ApiResponse.from(operations.projectDefinition(call.project()))),
         route(PUT, PROJECT + "/definition/{section}", journal, this::writeProjectSection),
-        route(ANY, PROJECT + "/{rest...}", reads, ApiRouter::absent));
+        route(ANY, PROJECT + "/{rest...}", unserved, ApiRouter::absent));
   }
 
   private static Route<Handler> route(String method, String pattern, Gate gate, Handler handler) {
@@ -331,41 +319,30 @@ public final class ApiRouter implements HttpHandler, RouteTable {
    */
   ApiResponse route(HttpExchange exchange) throws Exception {
     var uri = exchange.getRequestURI();
-    var matched =
-        AgentLogStreamer.isStreamPath(uri.getPath())
-            ? Optional.of(new Match(stream, Map.of()))
-            : match(canonical(uri));
-    var served = matched.flatMap(match -> servedBy(match, exchange.getRequestMethod()));
-    if (served.isPresent() && served.get().route().gate() instanceof Gate.Unauthenticated) {
-      return served.get().route().handler().handle(new Call(exchange, uri, served.get().params()));
+    var served = RouteTable.serve(routes, exchange.getRequestMethod(), canonical(uri));
+    if (served instanceof Served.Match<Handler>(var open, var params)
+        && open.gate() instanceof Gate.Unauthenticated) {
+      return open.handler().handle(new Call(exchange, uri, params));
     }
     auth.require(exchange);
     rateLimits.require(exchange);
-    requireValidNames(matched.orElseThrow(ApiRouter::notFound).params());
-    var route = served.orElseThrow(ApiRouter::methodNotAllowed);
-    var actor = actorOf(exchange);
-    return Actor.call(
-        actor,
-        () -> {
-          route.route().gate().admit(actor, nodeHandle);
-          return route.route().handler().handle(new Call(exchange, uri, route.params()));
-        });
-  }
-
-  /** The first route whose pattern matches {@code path}, and what the path fills of it. */
-  private Optional<Match> match(String path) {
-    return routes.stream()
-        .flatMap(route -> route.match(path).map(params -> new Match(route, params)).stream())
-        .findFirst();
-  }
-
-  /** The route of {@code first}'s pattern that serves {@code method}, if one does. */
-  private Optional<Match> servedBy(Match first, String method) {
-    return Stream.concat(routes.stream(), Stream.of(stream))
-        .filter(route -> route.pattern().equals(first.route().pattern()))
-        .filter(route -> route.method().equals(ANY) || route.method().equals(method))
-        .findFirst()
-        .map(route -> new Match(route, first.params()));
+    return switch (served) {
+      case Served.NotFound<Handler> none -> throw notFound();
+      case Served.MethodNotAllowed<Handler>(var pattern, var params) -> {
+        requireValidNames(params);
+        throw methodNotAllowed();
+      }
+      case Served.Match<Handler>(var route, var params) -> {
+        requireValidNames(params);
+        var actor = actorOf(exchange);
+        yield Actor.call(
+            actor,
+            () -> {
+              route.gate().admit(actor);
+              return route.handler().handle(new Call(exchange, uri, params));
+            });
+      }
+    };
   }
 
   /**
@@ -378,11 +355,21 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     Optional.ofNullable(params.get(ROOM)).ifPresent(NameValidator::requireValidSpecId);
   }
 
-  /** {@code uri}'s path as the table matches it: no empty segment, and no trailing slash. */
+  /**
+   * {@code uri}'s path as the table matches it: with no blank segment and no trailing slash, except
+   * that a run's log stream is matched as sent, whatever its run segment holds, and a path only its
+   * blank segments make a stream is matched as sent too, which no route serves.
+   */
   private static String canonical(URI uri) {
-    return Arrays.stream(Objects.requireNonNullElse(uri.getPath(), "").split("/"))
-        .filter(segment -> !segment.isBlank())
-        .collect(Collectors.joining("/", "/", ""));
+    var path = Objects.requireNonNullElse(uri.getPath(), "");
+    if (AgentLogStreamer.isStreamPath(path)) {
+      return path.replaceAll("/+$", "");
+    }
+    var collapsed =
+        Arrays.stream(path.split("/"))
+            .filter(segment -> !segment.isBlank())
+            .collect(Collectors.joining("/", "/", ""));
+    return AgentLogStreamer.isStreamPath(collapsed) ? path : collapsed;
   }
 
   /**
@@ -564,7 +551,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
 
   private ApiResponse restoreSnapshot(Call call) {
     return ApiResponse.fromAccepted(
-        operations.restoreSnapshot(call.project(), call.param("label"), nodeHandle.get()));
+        operations.restoreSnapshot(call.project(), call.param("label"), operations.boxFde()));
   }
 
   /**
@@ -635,7 +622,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     var project = call.project();
     return ApiResponse.from(
         operations.dispatch(
-            project, JsonBody.readDispatchRequest(call.exchange()), nodeHandle.get()));
+            project, JsonBody.readDispatchRequest(call.exchange()), operations.boxFde()));
   }
 
   private ApiResponse createProject(Call call) throws IOException {
@@ -643,11 +630,11 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   }
 
   private ApiResponse agentStatus(Call call) {
-    return ApiResponse.from(operations.agentStatus(call.project(), nodeHandle.get()));
+    return ApiResponse.from(operations.agentStatus(call.project(), operations.boxFde()));
   }
 
   private ApiResponse agentReport(Call call) {
-    return ApiResponse.from(operations.agentReport(call.project(), nodeHandle.get()));
+    return ApiResponse.from(operations.agentReport(call.project(), operations.boxFde()));
   }
 
   private ApiResponse rooms(Call call) {
@@ -656,17 +643,17 @@ public final class ApiRouter implements HttpHandler, RouteTable {
 
   private ApiResponse createRoom(Call call) throws IOException {
     return ApiResponse.fromCreated(
-        operations.createRoom(RoomCreateRequest.fromMap(call.body()), nodeHandle.get()));
+        operations.createRoom(RoomCreateRequest.fromMap(call.body()), operations.boxFde()));
   }
 
   private ApiResponse addRoomMember(Call call) throws IOException {
     var roomId = call.param(ROOM);
     return ApiResponse.from(
-        operations.addRoomMember(roomId, EngageRequest.fromMap(call.body()), nodeHandle.get()));
+        operations.addRoomMember(roomId, EngageRequest.fromMap(call.body()), operations.boxFde()));
   }
 
   private ApiResponse removeRoomMember(Call call) {
-    return ApiResponse.from(operations.removeRoomMember(call.param(ROOM), nodeHandle.get()));
+    return ApiResponse.from(operations.removeRoomMember(call.param(ROOM), operations.boxFde()));
   }
 
   /**
@@ -842,11 +829,11 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   private ApiResponse runLog(Call call) {
     return ApiResponse.from(
         operations.runLog(
-            call.param("run"), QueryParameters.from(call.uri()).tail(), nodeHandle.get()));
+            call.param("run"), QueryParameters.from(call.uri()).tail(), operations.boxFde()));
   }
 
   private ApiResponse stopRun(Call call) {
-    return ApiResponse.from(operations.stopRun(call.param("run"), nodeHandle.get()));
+    return ApiResponse.from(operations.stopRun(call.param("run"), operations.boxFde()));
   }
 
   /** The run's log as a stream, which {@link AgentLogStreamer} answers and closes itself. */

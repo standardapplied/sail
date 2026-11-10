@@ -345,8 +345,8 @@ class OneDecisionTest {
 
   private static ApiResponse socket(
       LocalLaneOperations lane, String method, String path, String credential, String form) {
-    return new LocalApiRouter(lane, () -> TestOperations.BOX_HANDLE)
-        .handle(
+    return new SocketDoor(lane)
+        .ask(
             new LocalApiRequest(
                 method,
                 path,

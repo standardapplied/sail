@@ -28,8 +28,8 @@ class LocalApiStackTest {
       new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
           .onOk("incus list", StackOperationsTest.RUNNING)
           .onOk("ss -ltnH", StackOperationsTest.LISTENING);
-  private final LocalApiRouter router =
-      new LocalApiRouter(
+  private final SocketDoor router =
+      new SocketDoor(
           new TestOperations() {
             private final StackOperations stack =
                 new StackOperations(
@@ -48,11 +48,10 @@ class LocalApiStackTest {
             public StackOperations stack() {
               return stack;
             }
-          },
-          () -> TestOperations.BOX_HANDLE);
+          });
 
   private ApiResponse ask(String method, String path, String credential, String form) {
-    return router.handle(
+    return router.ask(
         new LocalApiRequest(
             method,
             path,
