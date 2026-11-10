@@ -18,19 +18,28 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
-import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
+import ai.singlr.sail.sync.SyncDatabase;
+import ai.singlr.sail.sync.SyncSession;
+import ai.singlr.sail.sync.SyncTransitionSink;
+import ai.singlr.sail.webauthn.TestAuthenticator;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -56,7 +65,10 @@ class DoorParityTest {
 
   private static final SyncConfig MAIN = new SyncConfig(SyncConfig.ROLE_MAIN, null, "uday", "main");
 
+  private static final Base64.Encoder BASE64 = Base64.getUrlEncoder().withoutPadding();
+
   @TempDir Path tempDir;
+  private SyncDatabase main;
   private Sqlite db;
   private String hostToken;
   private final Map<String, DoorBox> boxes = new HashMap<>();
@@ -96,6 +108,8 @@ class DoorParityTest {
       return switch (door) {
         case "cli" -> cli(true);
         case "host cli" -> cli(false);
+        case "gateway" -> message + " " + fix;
+        case "sync" -> message;
         default -> api();
       };
     }
@@ -103,8 +117,8 @@ class DoorParityTest {
 
   @BeforeEach
   void setUp() throws Exception {
-    db = Sqlite.open(tempDir.resolve("sail.db"));
-    new SchemaManager(db).migrate();
+    main = GatewayNode.main(tempDir.resolve("sail.db"));
+    db = main.db();
     var roster = new FdeStore(db);
     roster.add("uday", null, null, "admin");
     roster.add("eng", null, null, "member");
@@ -157,7 +171,7 @@ class DoorParityTest {
   @AfterEach
   void tearDown() {
     boxes.values().forEach(DoorBox::close);
-    db.close();
+    main.close();
   }
 
   @Test
@@ -335,7 +349,7 @@ class DoorParityTest {
   void aScopedPersonListsOnlyTheSpecsOfItsProjectsAtEveryDoor() throws Exception {
     var acme = List.of("a2", "e1", "in-r1");
 
-    assertEquals(acme, ids(webBody("uday", "client", "/v1/specs")));
+    assertEquals(acme, ids(webBody("uday", "client", "GET", "/v1/specs", null)));
     assertEquals(
         acme,
         ids(
@@ -354,6 +368,137 @@ class DoorParityTest {
     assertEquals(acme, ids(boxes.get("client").socket("GET", "/v1/specs", "").body()));
   }
 
+  /**
+   * Row 7 at sync. A node pushes only what it holds as its own, so client's push is of c7, which it
+   * wrote and which uday gave eng while client was not syncing; main's refusal is the web door's.
+   */
+  @Test
+  void row7ClientsPushOfAnEditToEngsSpecIsRefusedAtSyncNamingEng() throws Exception {
+    try (var clients = new GatewayNode(tempDir, main, MAIN, boxes.get("client").config())) {
+      clients.round();
+      Acting.as(
+          "client", () -> new SpecStore(clients.db()).create(spec("c7", "acme", "client", "c7")));
+      clients.round();
+      assertEquals(
+          "allowed", web("uday", "uday", "PUT", "/v1/specs/c7", "{\"assignee\": \"eng\"}").text());
+      Acting.as(
+          "client",
+          () -> new SpecStore(clients.db()).update(spec("c7", "acme", "client", "retitled")));
+
+      var denials = clients.round().denials();
+
+      assertEveryDoor(
+          Expected.refused(
+              403,
+              "forbidden_not_assignee",
+              "Spec 'c7' is assigned to 'eng', not you.",
+              "Ask eng to make this change, or have an admin do it."),
+          web("uday", "client", "PUT", "/v1/specs/c7", "{\"title\": \"retitled\"}"),
+          new Said(
+              "sync",
+              denials.stream()
+                  .filter(denial -> denial.id().equals("c7"))
+                  .map(SyncSession.Denial::reason)
+                  .findFirst()
+                  .orElse("no denial")));
+    }
+  }
+
+  @Test
+  void row25EngAddingAPersonIsAdminOnlyAtEveryDoorThatManagesPeople() throws Exception {
+    assertEveryDoor(
+        Expected.refused(
+            403,
+            "forbidden_admin_only",
+            "Only an admin may manage people.",
+            "Ask an admin to do it."),
+        web("uday", "eng", "POST", "/v1/auth/register/ticket", "{\"fde\": \"zed\"}"),
+        hostCli(SailCli.run(fde("eng"), "add", "zed", "--name", "Zed")),
+        new Said(
+            "gateway",
+            ((SshGateway.Rejected)
+                    GatewayNode.gateway(main, MAIN, "sail fde add zed --name Zed", "eng"))
+                .reason()));
+  }
+
+  /**
+   * Row 26, at the passkey routes, the one door that enrolls: a person the roster disables gets no
+   * ticket, uses none minted before, starts and finishes no registration, and signs in to no
+   * session. The admin minting the ticket did authenticate, so is told it as a conflict.
+   */
+  @Test
+  void row26ADisabledPersonEnrollsRegistersAndSignsInToNothing() throws Exception {
+    var ticket =
+        (String)
+            webBody("uday", "uday", "POST", "/v1/auth/register/ticket", "{\"fde\":\"obs\"}")
+                .get("ticket");
+    var started = webBody("uday", "uday", "POST", "/v1/auth/register/start", "{\"fde\":\"obs\"}");
+    var authenticator = new TestAuthenticator(DoorBox.RP_ID);
+    var registered =
+        webBody(
+            "uday",
+            "uday",
+            "POST",
+            "/v1/auth/register/finish",
+            registration(
+                webBody("uday", "uday", "POST", "/v1/auth/register/start", "{\"fde\":\"obs\"}"),
+                authenticator));
+    assertEquals("registered", registered.get("status"));
+    var login = webBody("uday", null, "POST", "/v1/auth/login/start", "{}");
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'obs'");
+    var disabled =
+        Expected.refused(
+            401,
+            "authentication_failed",
+            "FDE 'obs' is disabled. Ask an admin to re-enable it.",
+            null);
+
+    assertEveryDoor(
+        Expected.refused(
+            409, "conflict", "FDE 'obs' is disabled. Ask an admin to re-enable it.", null),
+        web("uday", "uday", "POST", "/v1/auth/register/ticket", "{\"fde\":\"obs\"}"));
+    assertEveryDoor(disabled, passkey("POST", "/v1/auth/register/start", ticket, "{}"));
+    assertEveryDoor(
+        disabled, web("uday", "uday", "POST", "/v1/auth/register/start", "{\"fde\":\"obs\"}"));
+    assertEveryDoor(
+        disabled,
+        web(
+            "uday",
+            "uday",
+            "POST",
+            "/v1/auth/register/finish",
+            registration(started, new TestAuthenticator(DoorBox.RP_ID))));
+    assertEveryDoor(
+        disabled,
+        web("uday", null, "POST", "/v1/auth/login/finish", assertion(login, authenticator)));
+  }
+
+  @Test
+  void row27MainServesNoSyncSessionWhoseTokenIsNoSession() throws Exception {
+    var err = new ByteArrayOutputStream();
+    var out = new ByteArrayOutputStream();
+    var original = System.err;
+    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+    int exit;
+    try {
+      exit =
+          SyncServerCommand.serve(
+              main,
+              "main",
+              "bogus",
+              new ByteArrayInputStream(new byte[0]),
+              out,
+              SyncTransitionSink.NONE,
+              () -> MAIN);
+    } finally {
+      System.setErr(original);
+    }
+
+    assertEquals(1, exit);
+    assertEquals(0, out.size(), "nothing is served");
+    assertEquals(SyncServerCommand.REFUSED + "\n", err.toString(StandardCharsets.UTF_8));
+  }
+
   /** What each door said, by door. */
   private record Said(String door, String text) {}
 
@@ -370,17 +515,10 @@ class DoorParityTest {
   /** {@code person}'s own token at the web door of {@code at}'s box. */
   private Said web(String at, String person, String method, String path, String json)
       throws Exception {
-    var request =
-        HttpRequest.newBuilder(URI.create(boxes.get(at).url() + path))
-            .header("Authorization", "Bearer " + tokens.get(person))
-            .header("Content-Type", "application/json")
-            .method(
-                method,
-                json == null
-                    ? HttpRequest.BodyPublishers.noBody()
-                    : HttpRequest.BodyPublishers.ofString(json));
     try (var client = HttpClient.newHttpClient()) {
-      var response = client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+      var response =
+          client.send(
+              request(at, person, method, path, json), HttpResponse.BodyHandlers.ofString());
       return new Said(
           "web",
           response.statusCode() / 100 == 2
@@ -389,6 +527,79 @@ class DoorParityTest {
                   response.statusCode(),
                   (Map<?, ?>) YamlUtil.parseMap(response.body()).get("error")));
     }
+  }
+
+  /** What {@code sail} printed of a refusal, its lines as one, or that it was allowed. */
+  private static Said hostCli(SailCli.Ran ran) {
+    return new Said(
+        "host cli",
+        ran.exit() == 0
+            ? "allowed"
+            : String.join(" ", ran.err().lines().map(String::strip).toList()));
+  }
+
+  /** {@code sail fde} on {@code person}'s own box, a node of main's. */
+  private FdeCommand fde(String person) {
+    return new FdeCommand(
+        () ->
+            new FdeCommand.Box(
+                tempDir.resolve("sail.db"),
+                "root",
+                person,
+                tempDir,
+                tempDir.resolve("ssh_host_ed25519_key.pub"),
+                tempDir.resolve("workstation_key.pub"),
+                new DoorBox.AcmeRuns(),
+                "sail@main"));
+  }
+
+  /**
+   * {@code body} posted to main's passkey route {@code path} with enrollment ticket {@code ticket}.
+   */
+  private Said passkey(String method, String path, String ticket, String body) throws Exception {
+    var request =
+        HttpRequest.newBuilder(URI.create(boxes.get("uday").url() + path))
+            .header("X-Enrollment-Ticket", ticket)
+            .header("Content-Type", "application/json")
+            .method(method, HttpRequest.BodyPublishers.ofString(body));
+    try (var client = HttpClient.newHttpClient()) {
+      var response = client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+      return new Said(
+          "web",
+          refusal(
+              response.statusCode(), (Map<?, ?>) YamlUtil.parseMap(response.body()).get("error")));
+    }
+  }
+
+  private static String registration(Map<String, Object> started, TestAuthenticator authenticator) {
+    var registered = authenticator.register(challenge(started), DoorBox.ORIGIN);
+    return "{\"challenge_id\":\""
+        + started.get("challenge_id")
+        + "\",\"client_data_json\":\""
+        + BASE64.encodeToString(registered.clientDataJson())
+        + "\",\"attestation_object\":\""
+        + BASE64.encodeToString(registered.attestationObject())
+        + "\"}";
+  }
+
+  private static String assertion(Map<String, Object> login, TestAuthenticator authenticator) {
+    var asserted = authenticator.assertResponse(challenge(login), DoorBox.ORIGIN);
+    return "{\"challenge_id\":\""
+        + login.get("challenge_id")
+        + "\",\"credential_id\":\""
+        + BASE64.encodeToString(asserted.credentialId())
+        + "\",\"client_data_json\":\""
+        + BASE64.encodeToString(asserted.clientDataJson())
+        + "\",\"authenticator_data\":\""
+        + BASE64.encodeToString(asserted.authenticatorData())
+        + "\",\"signature\":\""
+        + BASE64.encodeToString(asserted.signature())
+        + "\"}";
+  }
+
+  private static byte[] challenge(Map<String, Object> ceremony) {
+    var publicKey = (Map<?, ?>) ceremony.get("public_key");
+    return Base64.getUrlDecoder().decode((String) publicKey.get("challenge"));
   }
 
   /** {@code sail <args>} on {@code person}'s own box. */
@@ -439,18 +650,34 @@ class DoorParityTest {
     var ran =
         SailCli.run(
             command, "-p", "acme", "--spec", "e1", "--background", "--no-sync", "--no-snapshot");
-    return new Said("host cli", ran.exit() == 0 ? "allowed" : ran.err().strip());
+    return hostCli(ran);
   }
 
-  /** The body {@code person}'s own token reads at {@code path} of {@code at}'s web door. */
-  private Map<String, Object> webBody(String at, String person, String path) throws Exception {
+  /** The body {@code at}'s web door answers {@code person}'s request, as {@link #web} asks it. */
+  private Map<String, Object> webBody(
+      String at, String person, String method, String path, String json) throws Exception {
+    try (var client = HttpClient.newHttpClient()) {
+      return YamlUtil.parseMap(
+          client
+              .send(request(at, person, method, path, json), HttpResponse.BodyHandlers.ofString())
+              .body());
+    }
+  }
+
+  /** {@code person}'s request with their own token, or with none for a {@code null} person. */
+  private HttpRequest request(String at, String person, String method, String path, String json) {
     var request =
         HttpRequest.newBuilder(URI.create(boxes.get(at).url() + path))
-            .header("Authorization", "Bearer " + tokens.get(person))
-            .build();
-    try (var client = HttpClient.newHttpClient()) {
-      return YamlUtil.parseMap(client.send(request, HttpResponse.BodyHandlers.ofString()).body());
+            .header("Content-Type", "application/json")
+            .method(
+                method,
+                json == null
+                    ? HttpRequest.BodyPublishers.noBody()
+                    : HttpRequest.BodyPublishers.ofString(json));
+    if (person != null) {
+      request.header("Authorization", "Bearer " + tokens.get(person));
     }
+    return request.build();
   }
 
   private static List<String> ids(Map<String, Object> listed) {
@@ -469,10 +696,14 @@ class DoorParityTest {
   }
 
   private static SpecStore.SpecRow spec(String id, String project, String assignee) {
+    return spec(id, project, assignee, id);
+  }
+
+  private static SpecStore.SpecRow spec(String id, String project, String assignee, String title) {
     return new SpecStore.SpecRow(
         id,
         project,
-        id,
+        title,
         SpecStatus.PENDING,
         assignee,
         null,

@@ -16,25 +16,41 @@ import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SocketDoor;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestAuth;
+import ai.singlr.sail.api.WebauthnAuthHandler;
+import ai.singlr.sail.auth.EnrollmentService;
+import ai.singlr.sail.auth.PasskeyService;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
+import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxCredentialStore;
+import ai.singlr.sail.store.EnrollmentTicketStore;
+import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.PendingChallengeStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.WebauthnCredentialStore;
+import ai.singlr.sail.webauthn.RelyingParty;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 
 /**
  * A box as a door test asks it: its operations over {@code db}, configured as {@code config} so its
- * person is the FDE that config names, its web door and its socket. Its host runs acme's container
- * and nothing else; it never reaches main.
+ * person is the FDE that config names, its web door with its passkey routes, and its socket. Its
+ * host runs acme's container and nothing else; it never reaches main.
  */
 record DoorBox(SyncConfig config, Sqlite db, SailOperations operations, HttpServer http)
     implements AutoCloseable {
+
+  /** The relying party its passkey routes serve. */
+  static final String RP_ID = "sail.acme.dev";
+
+  /** The origin a browser signs a passkey ceremony for. */
+  static final String ORIGIN = "https://sail.acme.dev";
 
   static DoorBox open(Sqlite db, Path dir, SyncConfig config) throws IOException {
     var operations =
@@ -55,6 +71,19 @@ record DoorBox(SyncConfig config, Sqlite db, SailOperations operations, HttpServ
         "/",
         new ApiRouter(
             operations, auth, new RateLimitGate(), new AgentLogStreamer(auth), config::handle));
+    http.createContext(
+        "/v1/auth",
+        new WebauthnAuthHandler(
+            new PasskeyService(
+                new RelyingParty(RP_ID, "Sail", Set.of(ORIGIN)),
+                new FdeStore(db),
+                new WebauthnCredentialStore(db),
+                new AuthSessionStore(db),
+                new PendingChallengeStore(db),
+                Duration.ofDays(30)),
+            new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db)),
+            auth,
+            List.of(ORIGIN)));
     http.start();
     return new DoorBox(config, db, operations, http);
   }

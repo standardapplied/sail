@@ -11,16 +11,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.access.Principal;
-import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.HostAccess;
-import ai.singlr.sail.engine.PipedSyncChannel;
-import ai.singlr.sail.engine.ShellExec;
-import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -32,11 +28,9 @@ import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.AuthSessionStore;
-import ai.singlr.sail.store.BoxDatabase;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
-import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncScope;
@@ -46,8 +40,6 @@ import ai.singlr.sail.sync.SyncTransitionSink;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -85,17 +77,13 @@ class RosterChangeTest {
   private SyncDatabase main;
   private Sqlite mainDb;
   private FdeStore roster;
+  private GatewayNode node;
   private Sqlite nodeDb;
-  private SyncOperations node;
   private final PrintStream originalErr = System.err;
 
   @BeforeEach
   void setUp() {
-    var mainPath = tempDir.resolve("main.db");
-    try (var db = Sqlite.open(mainPath)) {
-      BoxDatabase.prepare(db);
-    }
-    main = SyncDatabase.converge(mainPath, "main");
+    main = GatewayNode.main(tempDir.resolve("main.db"));
     mainDb = main.db();
     roster = new FdeStore(mainDb);
     roster.add("ada", "Ada", "ada@x.dev", "admin");
@@ -114,48 +102,23 @@ class RosterChangeTest {
                 .create(
                     new RoomStore.RoomRow(
                         "lobby", "acme", "lobby", "ada", null, null, "ada", null, null, "ada")));
-    nodeDb = Sqlite.open(tempDir.resolve("node.db"));
-    new SchemaManager(nodeDb).migrate();
-    node =
-        new SyncOperations(
-            nodeDb,
-            "node",
-            tempDir.resolve("projects"),
-            () -> NODE,
-            target -> PipedSyncChannel.to(this::throughTheGateway),
-            event -> {},
-            remedy -> {},
-            new NoContainers());
-    node.prepare();
+    node = new GatewayNode(tempDir, main, MAIN, NODE);
+    nodeDb = node.db();
   }
 
   @AfterEach
   void tearDown() {
     System.setErr(originalErr);
-    nodeDb.close();
+    node.close();
     main.close();
   }
 
-  /** Main's side of one node session: the gateway's {@code _sync}, then the server it execs. */
-  private void throughTheGateway(InputStream in, OutputStream out) throws Exception {
-    var authorized = assertInstanceOf(SshGateway.Authorized.class, gateway("sail _sync", "nia"));
-    SyncServerCommand.serve(
-        main, "main", authorized.sessionToken(), in, out, SyncTransitionSink.NONE, () -> MAIN);
-  }
-
   private SshGateway.Decision gateway(String command, String handle) {
-    return SshGateway.authorize(
-        command, handle, roster, new RoleRule(() -> MAIN, roster), new AuthSessionStore(mainDb));
+    return GatewayNode.gateway(main, MAIN, command, handle);
   }
 
-  /** One round of the node, as {@code sail sync} runs it. */
   private void round() throws Exception {
-    System.setErr(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
-    try {
-      node.sync(new SyncRequest(null));
-    } finally {
-      System.setErr(originalErr);
-    }
+    node.round();
   }
 
   /** Whom every door on the node resolves for the box's own person. */
@@ -474,22 +437,5 @@ class RosterChangeTest {
         "nia",
         List.of(),
         List.of());
-  }
-
-  private static final class NoContainers implements ShellExec {
-    @Override
-    public Result exec(List<String> command) {
-      return new Result(0, "[]", "");
-    }
-
-    @Override
-    public Result exec(List<String> command, Path workDir, Duration timeout) {
-      return exec(command);
-    }
-
-    @Override
-    public boolean isDryRun() {
-      return false;
-    }
   }
 }
