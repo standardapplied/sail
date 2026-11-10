@@ -139,6 +139,7 @@ class RunAuthorityTest {
         row("the FDE it acts for stops it", OWNER_API, RUNNING, stopped, null),
         row("the operator stops it", OWNER_CLI, RUNNING, stopped, null),
         row("its agent reports on it", AGENT, RUNNING, stopped, null),
+        row("its own principal deletes it as a change, its FDE's", AGENT, RUNNING, null, null),
         row("its spec's owner stops it", carol, RUNNING, stopped, null),
         row("main's stop is decided", MAIN, RUNNING, stopped, null),
         row("the machinery completes it", SYSTEM, RUNNING, stopped, null),
@@ -424,6 +425,25 @@ class RunAuthorityTest {
     assertEquals(
         "Run " + OTHER_RUN + " names no spec and no one it acts for.",
         assertInstanceOf(PushOutcome.Denied.class, outcome).reason());
+  }
+
+  /**
+   * Only one of a run's own principals narrates its session; anyone else's session report is a
+   * change of the run, refused as one.
+   */
+  @Test
+  void aSessionReportByAnyoneButTheRunsOwnPrincipalIsAChange() {
+    var session = with(RUNNING, "session_id", "s-1");
+
+    assertEquals(
+        Optional.of(Refusal.readOnly("change runs")), rule.decide(VIEWER, RUN, RUNNING, session));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Run " + RUN + " belongs to spec 'auth', owned by 'ada' and 'carol', not you.",
+                "Only ada or carol or an admin may access this run.")),
+        rule.decide(OTHERS_AGENT, RUN, RUNNING, session));
   }
 
   @Test

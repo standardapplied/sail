@@ -117,9 +117,20 @@ class ProjectDefinitionOperationsTest {
         assertThrows(
             ApiException.class, () -> Acting.by(scoped, () -> operations.definition("acme")));
     var missing = assertThrows(ApiException.class, () -> operations.definition("ghost"));
+    var unheldToAViewer =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Acting.by(
+                    new Actor("vic", Role.VIEWER, Actor.Lane.API),
+                    () -> operations.definition("ghost")));
 
     assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, outside.failure().errorCode());
     assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, missing.failure().errorCode());
+    assertEquals(
+        ErrorCode.PROJECT_NOT_IN_CATALOG,
+        unheldToAViewer.failure().errorCode(),
+        "what the catalog does not hold is not there, said before the role");
   }
 
   @Test

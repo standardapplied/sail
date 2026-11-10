@@ -412,6 +412,14 @@ class SpecAuthorityTest {
     assertEquals(Optional.empty(), rule.decide(ADMIN, "den", null, create));
     assertEquals(
         Optional.of(Kind.NOT_OWNER),
+        rule.decide(OTHER_API, "den", null, with(create, "assignee", OWNER)).map(Refusal::kind),
+        "the room's own owner may not hand it to another through a spec: that is an assignment");
+    assertEquals(
+        Optional.empty(),
+        rule.decide(ADMIN, "den", null, with(create, "assignee", OWNER)),
+        "an admin may assign the room");
+    assertEquals(
+        Optional.of(Kind.NOT_OWNER),
         rule.decide(OWNER_SYNC, "nook", null, with(create, "room_id", "nook")).map(Refusal::kind),
         "the creator of a room assigned away cannot take it back through a spec");
     assertEquals(

@@ -36,6 +36,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.Decidability;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Standing;
 import java.time.Instant;
@@ -105,6 +106,18 @@ class MessageAuthorityTest {
         new Decision.Allowed(),
         MessageAuthority.post(
             Actors.AGENT, Resources.conversation("lobby", "acme", List.of(Actors.OWNER))));
+  }
+
+  /** Only a push speaks as the pipeline: a post on this box's own lanes is its actor's alone. */
+  @Test
+  void aLocalPostMayNotSpeakAsThePipeline() {
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_AUTHOR,
+                "'ada' may not post as 'sail' in this room.",
+                "Post as yourself.")),
+        rule.decide(OWNER_API, MESSAGE, null, post("lobby", MessageStore.SAIL_AUTHOR)));
   }
 
   private static Map<String, Object> post(String room, String author) {

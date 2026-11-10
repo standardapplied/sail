@@ -185,6 +185,24 @@ class EraseAuthorityTest {
   }
 
   @Test
+  void aProjectMainHoldsNoneOfIsSaidSoBeforeTheRoleAsWhatThisBoxDoesNotHoldIsEverywhere() {
+    var none =
+        Optional.of(
+            new Refusal(
+                Kind.NOT_PRUNABLE,
+                "main holds no project 'ghost'",
+                "Sync the project before pruning it."));
+
+    for (var actor : List.of(VIEWER_SYNC, OWNER_SYNC, Actors.ADMIN_SYNC)) {
+      assertEquals(none, rule.requested(actor, "project", "ghost"), actor.toString());
+    }
+    assertEquals(
+        Optional.of(Kind.ADMIN_ONLY),
+        rule.requested(OWNER_SYNC, "project", "acme").map(Refusal::kind),
+        "a project main holds is purged by an admin alone");
+  }
+
+  @Test
   void aPlanWithARunStillGoingMustWait() {
     board.spec("solo", "solo", OWNER, OWNER);
     var runs = new RunStore(board.db);
