@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
-import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.lang.classfile.ClassFile;
@@ -33,22 +32,22 @@ import org.junit.jupiter.api.Test;
 
 /**
  * A1, one decision, swept: outside {@code ai.singlr.sail.access}, {@code RoleRule} (which resolves
- * a role) and {@code FdeStore} (the roster's rules), no main class reads a role, a lane, a scope or
- * a capability but the members {@link #ALLOWED} names, each with the spec that deletes it or the
- * fact, not a permission, that needs it to know which fact applies. Read from the compiled classes
- * of every module, a member at a time, a lambda counted as the member it is written in, it sees: a
- * call of {@link Actor#isAdmin}, {@link Actor#isSail}, {@link Actor#role}, {@link Actor#lane},
- * {@link Actor#agentLane}, {@link Actor#roomLane}, {@link Actor#scope} or {@link Actor#actsFor}; of
- * {@code RoleRule}'s resolvers, {@link Role#fromAttribute}, {@link Role#cappedBy} or a role's
- * order; a {@link Role} constant (so an {@code Actor} built with a role literal), a {@code switch}
- * over a role, a type check of one, and any call that returns one; {@code RunRow#readOnlyLane}; and
- * a type check of the socket's run or box caller, each as a call, a field, a type check, a class
- * constant, or what an {@code invokedynamic} hands its bootstrap (a method reference, the types and
- * constants a pattern {@code switch} tests). It cannot see a role, a lane or a scope read as data:
- * in SQL, from a map, or through a type that hides it, so a filter inside a query takes its scope
- * from {@code Access.audience}. {@code Actor}, {@code Role} and the socket's callers define what is
- * read, so their own members are not swept. An entry that no longer matches a read fails too, so
- * the list shrinks as the later specs land.
+ * a credential to its principal, whose resolvers are its own) and {@code FdeStore} (the roster's
+ * rules), no main class reads a role, a lane or a scope but the members {@link #ALLOWED} names,
+ * each with the spec that deletes it or the fact, not a permission, that needs it to know which
+ * fact applies. Read from the compiled classes of every module, a member at a time, a lambda
+ * counted as the member it is written in, it sees: a call of {@link Actor#isAdmin}, {@link
+ * Actor#isSail}, {@link Actor#role}, {@link Actor#lane}, {@link Actor#agentLane}, {@link
+ * Actor#roomLane}, {@link Actor#scope} or {@link Actor#actsFor}; of {@link Role#fromAttribute},
+ * {@link Role#cappedBy} or a role's order; a {@link Role} constant (so an {@code Actor} built with
+ * a role literal), a {@code switch} over a role, a type check of one, and any call that returns
+ * one; {@code RunRow#readOnlyLane}; and a type check of the socket's run or box caller, each as a
+ * call, a field, a type check, a class constant, or what an {@code invokedynamic} hands its
+ * bootstrap (a method reference, the types and constants a pattern {@code switch} tests). It cannot
+ * see a role, a lane or a scope read as data: in SQL, from a map, or through a type that hides it,
+ * so a filter inside a query takes its scope from {@code Access.audience}. {@code Actor}, {@code
+ * Role} and the socket's callers define what is read, so their own members are not swept. An entry
+ * that no longer matches a read fails too, so the list shrinks as the later specs land.
  */
 class OneDecisionSweepTest {
 
@@ -69,8 +68,6 @@ class OneDecisionSweepTest {
           Set.of("isAdmin", "isSail", "role", "lane", "agentLane", "roomLane", "scope", "actsFor"),
           ROLE,
           Set.of("fromAttribute", "cappedBy", "ordinal", "compareTo"),
-          ROLE_RULE,
-          Set.of("roleOf", "roleOfUnbound", "actorOf"),
           RUN_ROW,
           Set.of("readOnlyLane"));
 
@@ -92,7 +89,7 @@ class OneDecisionSweepTest {
   private static final String SYNC_SERVER = "ai/singlr/sail/sync/SyncRpcServer";
   private static final String OWN_WORK = "sail-agents-act-on-their-own-work";
 
-  /** Every member that still reads a role, a lane or a capability, and why it may. */
+  /** Every member that still reads a role, a lane or a scope, and why it may. */
   private static final Map<String, String> ALLOWED = allowed();
 
   private static Map<String, String> allowed() {
@@ -142,8 +139,7 @@ class OneDecisionSweepTest {
   }
 
   @Test
-  void noMemberOutsideTheAccessPackageReadsARoleALaneOrACapabilityButTheNamedOnes()
-      throws Exception {
+  void noMemberOutsideTheAccessPackageReadsARoleALaneOrAScopeButTheNamedOnes() throws Exception {
     var reads = new TreeSet<String>();
     for (var bytes : OneDecisionPointTest.everyMainClass()) {
       reads.addAll(reads(bytes));
@@ -156,13 +152,13 @@ class OneDecisionSweepTest {
   void aReadTheListDoesNotNameAndAnEntryThatNamesNoReadAreBothFindings() {
     assertEquals(
         List.of(
-            "a member reads a role, a lane or a capability the allowlist does not name: a#leak",
+            "a member reads a role, a lane or a scope the allowlist does not name: a#leak",
             "an allowlisted member no longer reads one, so its entry goes: a#gone"),
         findings(Set.of("a#leak", "a#kept"), Set.of("a#kept", "a#gone")));
   }
 
   @Test
-  void theSweepFlagsEveryReadOfARoleALaneOrACapability() throws IOException {
+  void theSweepFlagsEveryReadOfARoleALaneOrAScope() throws IOException {
     try (var bytes = Leaky.class.getResourceAsStream("OneDecisionSweepTest$Leaky.class")) {
       var leaky = "ai/singlr/sail/api/OneDecisionSweepTest$Leaky#";
       assertEquals(
@@ -177,7 +173,6 @@ class OneDecisionSweepTest {
               leaky + "scope",
               leaky + "actsFor",
               leaky + "elevated",
-              leaky + "viaRule",
               leaky + "viaAttribute",
               leaky + "viaSwitch",
               leaky + "viaPattern",
@@ -236,10 +231,6 @@ class OneDecisionSweepTest {
       return new Actor(handle, Role.ADMIN, Actor.Lane.CLI);
     }
 
-    Object viaRule(RoleRule roles) {
-      return roles.roleOf("ada", null);
-    }
-
     Object viaAttribute(String attribute) {
       return Role.fromAttribute(attribute);
     }
@@ -277,7 +268,7 @@ class OneDecisionSweepTest {
             difference(reads, allowed).stream()
                 .map(
                     read ->
-                        "a member reads a role, a lane or a capability the allowlist does not"
+                        "a member reads a role, a lane or a scope the allowlist does not"
                             + " name: "
                             + read),
             difference(allowed, reads).stream()
@@ -293,7 +284,7 @@ class OneDecisionSweepTest {
     return left;
   }
 
-  /** Every member of the class {@code bytes} holds that reads a role, a lane or a capability. */
+  /** Every member of the class {@code bytes} holds that reads a role, a lane or a scope. */
   private static Set<String> reads(byte[] bytes) {
     var model = ClassFile.of().parse(bytes);
     var name = model.thisClass().asInternalName();

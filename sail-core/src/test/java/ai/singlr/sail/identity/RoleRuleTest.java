@@ -48,7 +48,17 @@ class RoleRuleTest {
   }
 
   private Optional<Role> roleOf(SyncConfig box, String handle, Role cap) {
-    return new RoleRule(() -> box, roster).roleOf(handle, cap);
+    return roleOf(new RoleRule(() -> box, roster), handle, cap);
+  }
+
+  /** The role {@code rule} gives a credential naming FDE {@code handle}, minted as {@code cap}. */
+  private static Optional<Role> roleOf(RoleRule rule, String handle, Role cap) {
+    return rule.principal(new Credential.Person(handle, cap, Actor.Lane.API)).map(Actor::role);
+  }
+
+  /** The role {@code rule} gives a credential naming no FDE, minted as {@code cap}. */
+  private static Optional<Role> unbound(RoleRule rule, Role cap) {
+    return rule.principal(new Credential.Machine(cap)).map(Actor::role);
   }
 
   @Test
@@ -89,9 +99,9 @@ class RoleRuleTest {
   void onANodeACredentialNamingNoFdeActsWithTheBoxFdesRole() {
     var rule = new RoleRule(() -> NODE, roster);
 
-    assertEquals(Optional.of(Role.MEMBER), rule.roleOfUnbound(Role.ADMIN));
+    assertEquals(Optional.of(Role.MEMBER), unbound(rule, Role.ADMIN));
     roster.update("uday", null, null, "admin");
-    assertEquals(Optional.of(Role.ADMIN), rule.roleOfUnbound(Role.ADMIN));
+    assertEquals(Optional.of(Role.ADMIN), unbound(rule, Role.ADMIN));
   }
 
   @Test
@@ -115,8 +125,10 @@ class RoleRuleTest {
     assertEquals(Optional.empty(), roleOf(NODE, "stranger", Role.ADMIN));
     assertEquals(
         Optional.of(Role.ADMIN),
-        new RoleRule(() -> new SyncConfig("main", null, "root", null), roster)
-            .roleOf("root", Role.ADMIN));
+        roleOf(
+            new RoleRule(() -> new SyncConfig("main", null, "root", null), roster),
+            "root",
+            Role.ADMIN));
   }
 
   @Test
@@ -124,22 +136,19 @@ class RoleRuleTest {
     assertEquals(Optional.empty(), roleOf(MAIN, " ", Role.ADMIN));
     assertEquals(Optional.empty(), roleOf(MAIN, null, Role.ADMIN));
     var bare = new RoleRule(() -> MAIN, null);
-    assertEquals(Optional.of(Role.ADMIN), bare.roleOf("uday", Role.ADMIN));
-    assertEquals(Optional.empty(), bare.roleOf("mady", Role.ADMIN));
+    assertEquals(Optional.of(Role.ADMIN), roleOf(bare, "uday", Role.ADMIN));
+    assertEquals(Optional.empty(), roleOf(bare, "mady", Role.ADMIN));
   }
 
   @Test
   void aCredentialNamingNoFdeActsAsTheBoxsFdeWhenTheBoxHasASyncHandle() {
+    assertEquals(Optional.of(Role.ADMIN), unbound(new RoleRule(() -> MAIN, roster), Role.ADMIN));
+    assertEquals(Optional.of(Role.MEMBER), unbound(new RoleRule(() -> NODE, roster), Role.ADMIN));
     assertEquals(
-        Optional.of(Role.ADMIN), new RoleRule(() -> MAIN, roster).roleOfUnbound(Role.ADMIN));
-    assertEquals(
-        Optional.of(Role.MEMBER), new RoleRule(() -> NODE, roster).roleOfUnbound(Role.ADMIN));
-    assertEquals(
-        Optional.of(Role.MEMBER),
-        new RoleRule(() -> STANDALONE, roster).roleOfUnbound(Role.MEMBER));
+        Optional.of(Role.MEMBER), unbound(new RoleRule(() -> STANDALONE, roster), Role.MEMBER));
     assertEquals(
         Optional.of(Role.ADMIN),
-        new RoleRule(SyncConfig::unset, roster).roleOfUnbound(Role.ADMIN),
+        unbound(new RoleRule(SyncConfig::unset, roster), Role.ADMIN),
         "a box with no sync handle has no FDE to cap it");
   }
 
@@ -147,15 +156,15 @@ class RoleRuleTest {
   void aCredentialNamingNoFdeOnANodeWhoseRosterLacksItsFdeIsRefused() {
     var stranger = new SyncConfig("node", "sail@main", "stranger", "node-box");
 
-    assertEquals(Optional.empty(), new RoleRule(() -> stranger, roster).roleOfUnbound(Role.ADMIN));
-    assertEquals(Optional.empty(), new RoleRule(() -> NODE, null).roleOfUnbound(Role.ADMIN));
+    assertEquals(Optional.empty(), unbound(new RoleRule(() -> stranger, roster), Role.ADMIN));
+    assertEquals(Optional.empty(), unbound(new RoleRule(() -> NODE, null), Role.ADMIN));
   }
 
   @Test
   void aCredentialNamingNoFdeOnANodeThatNamesNoFdeIsRefused() {
     var anonymous = new SyncConfig("node", "sail@main", null, "node-box");
 
-    assertEquals(Optional.empty(), new RoleRule(() -> anonymous, roster).roleOfUnbound(Role.ADMIN));
+    assertEquals(Optional.empty(), unbound(new RoleRule(() -> anonymous, roster), Role.ADMIN));
   }
 
   @Test
@@ -173,17 +182,27 @@ class RoleRuleTest {
     roster.grant("mady", "alpha");
     var rule = new RoleRule(() -> MAIN, roster);
 
-    assertEquals(ProjectScope.all(), rule.scopeOf("uday"), "main's own FDE acts as an admin");
+    assertEquals(
+        Optional.of(ProjectScope.all()),
+        rule.principal(new Credential.Person("uday", Role.ADMIN, Actor.Lane.API)).map(Actor::scope),
+        "main's own FDE acts as an admin");
     assertEquals(
         Optional.of(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-        rule.actorOf("uday", Role.ADMIN, Actor.Lane.API));
+        rule.principal(new Credential.Person("uday", Role.ADMIN, Actor.Lane.API)));
     assertEquals(
         Optional.of(
             new Actor("mady", Role.MEMBER, Actor.Lane.SYNC)
                 .withScope(ProjectScope.of(List.of("alpha")))),
-        rule.actorOf("mady", Role.ADMIN, Actor.Lane.SYNC));
-    assertEquals(Optional.empty(), rule.actorOf("nobody", Role.ADMIN, Actor.Lane.API));
-    assertEquals(ProjectScope.all(), new RoleRule(() -> MAIN, null).scopeOf("mady"));
+        rule.principal(new Credential.Person("mady", Role.ADMIN, Actor.Lane.SYNC)));
+    assertEquals(
+        Optional.empty(),
+        rule.principal(new Credential.Person("nobody", Role.ADMIN, Actor.Lane.API)));
+    assertEquals(
+        Optional.of(ProjectScope.all()),
+        new RoleRule(() -> MAIN, null)
+            .principal(new Credential.Machine(Role.ADMIN))
+            .map(Actor::scope),
+        "a box that keeps no roster scopes no one");
   }
 
   @Test

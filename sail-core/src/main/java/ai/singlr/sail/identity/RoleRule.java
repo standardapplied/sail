@@ -22,8 +22,8 @@ import java.util.function.Supplier;
  * roster gives it. Either way the credential's own role caps it, so no credential acts beyond what
  * it was minted with. An FDE the roster marks disabled is refused, and so is one it does not know,
  * unless it is the operator. A null {@code roster} is a box that keeps none yet: it knows no FDE
- * but its operator. A credential that names no FDE acts with the role of the box's FDE ({@link
- * #roleOfUnbound}), so no credential on a box acts beyond the FDE whose box it is.
+ * but its operator. A credential that names no FDE acts with the role of the box's FDE, so no
+ * credential on a box acts beyond the FDE whose box it is. {@link #principal} is the one way in.
  *
  * <p>A node's writes speak for its FDE: every revision it pushes reaches main on the box's session,
  * which main decides as that FDE's. So on a node a credential naming any other FDE, an admin's
@@ -150,7 +150,7 @@ public final class RoleRule {
    * The role a credential naming FDE {@code handle} and minted with {@code cap} acts with; empty
    * when the credential is refused.
    */
-  public Optional<Role> roleOf(String handle, Role cap) {
+  private Optional<Role> roleOf(String handle, Role cap) {
     if (Strings.isBlank(handle)) {
       return Optional.empty();
     }
@@ -170,7 +170,7 @@ public final class RoleRule {
    * role: the grants of an FDE main's roster scopes, every project otherwise. A box that keeps no
    * roster scopes no one, and the operator, an admin whatever the roster says, is never scoped.
    */
-  public ProjectScope scopeOf(String handle) {
+  private ProjectScope scopeOf(String handle) {
     return roster == null || Strings.isBlank(handle) || isOperator(handle)
         ? ProjectScope.all()
         : roster.scopeOf(handle);
@@ -180,7 +180,7 @@ public final class RoleRule {
    * The actor a credential naming FDE {@code handle} and minted with {@code cap} acts as on {@code
    * lane}: its role and its scope, resolved together; empty when the credential is refused.
    */
-  public Optional<Actor> actorOf(String handle, Role cap, Actor.Lane lane) {
+  private Optional<Actor> actorOf(String handle, Role cap, Actor.Lane lane) {
     return roleOf(handle, cap)
         .map(role -> new Actor(handle, role, lane).withScope(scopeOf(handle)));
   }
@@ -197,7 +197,7 @@ public final class RoleRule {
    * or a standalone box with no sync handle has no FDE to be, and the credential acts with {@code
    * cap}; a node with none syncs as no one, and is refused. Empty when the credential is refused.
    */
-  public Optional<Role> roleOfUnbound(Role cap) {
+  private Optional<Role> roleOfUnbound(Role cap) {
     var fde = boxFde();
     if (fde.isPresent()) {
       return roleOf(fde.get(), cap);

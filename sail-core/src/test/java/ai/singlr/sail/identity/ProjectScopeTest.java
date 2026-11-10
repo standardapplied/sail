@@ -16,6 +16,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -202,8 +203,19 @@ class ProjectScopeTest {
     fdes.grant("bob", "alpha");
     var box = new SyncConfig("main", null, "ada", "main-box");
 
-    assertEquals(ProjectScope.of(List.of("alpha")), new RoleRule(() -> box, fdes).scopeOf("bob"));
-    assertEquals(ProjectScope.all(), new RoleRule(() -> box, fdes).scopeOf("ada"));
-    assertEquals(ProjectScope.all(), new RoleRule(() -> box, null).scopeOf("bob"));
+    assertEquals(
+        Optional.of(ProjectScope.of(List.of("alpha"))),
+        scopeOf(new RoleRule(() -> box, fdes), "bob"));
+    assertEquals(Optional.of(ProjectScope.all()), scopeOf(new RoleRule(() -> box, fdes), "ada"));
+    assertEquals(
+        Optional.of(ProjectScope.all()),
+        new RoleRule(() -> box, null)
+            .principal(new RoleRule.Credential.Machine(Role.ADMIN))
+            .map(Actor::scope));
+  }
+
+  private static Optional<ProjectScope> scopeOf(RoleRule rule, String handle) {
+    return rule.principal(new RoleRule.Credential.Person(handle, Role.ADMIN, Actor.Lane.API))
+        .map(Actor::scope);
   }
 }
