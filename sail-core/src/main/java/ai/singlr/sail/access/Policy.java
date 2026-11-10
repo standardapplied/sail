@@ -15,10 +15,12 @@ import ai.singlr.sail.identity.Role;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -185,7 +187,19 @@ public final class Policy {
 
   private static final Map<Action, Row> ROWS = indexed(TABLE);
 
+  private static final Set<Column> STEERED = EnumSet.of(Column.WORK_AGENT, Column.ROOM_AGENT);
+
   private Policy() {}
+
+  /**
+   * Whether {@code reader} reads a conversation only as the voices that steer it say it (A6): an
+   * agent's column reads a room's messages through the steering filter, its owners', its admins'
+   * and Sail's words, never a comment another member left for people. The filter itself is the
+   * stores' query; which readers it binds is the table's.
+   */
+  public static boolean hearsOnlySteering(Actor reader) {
+    return Column.lane(reader.lane()).filter(STEERED::contains).isPresent();
+  }
 
   /** What {@code column} allows for {@code action}. */
   public static Cell cell(Action action, Column column) {

@@ -94,8 +94,8 @@ class EventsBaselineTest {
 
   /**
    * The rule's decision of {@code actor} publishing {@code type} about {@code subject}: the one
-   * direct call of a rule in this corpus, since no store asks it. When the rule moves onto the
-   * access decision, this line is the one to re-point.
+   * direct call of a rule in this corpus, since no store asks it, made as the event door makes it.
+   * The rule asks the access decision itself.
    */
   private static Optional<Refusal> publish(
       EventAuthority rule,

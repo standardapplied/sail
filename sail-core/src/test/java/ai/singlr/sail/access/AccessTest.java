@@ -474,6 +474,27 @@ class AccessTest {
   }
 
   @Test
+  void aRowReadByItsHeadAloneIsDecidedByItsAudience() {
+    var head = Resources.filed(Resource.Kind.MESSAGE, "m-1", "beta");
+
+    assertEquals(List.of(), head.owners());
+    assertEquals(new Decision.Allowed(), Access.decide(Actors.VIEWER, Action.READ, head));
+    assertEquals(
+        new Decision.NotFound(),
+        Access.decide(
+            Actors.OWNER_SYNC.withScope(ProjectScope.of(List.of("acme"))), Action.READ, head));
+  }
+
+  @Test
+  void theAudienceAFilterReadsIsTheOneDecideReads() {
+    var acme = ProjectScope.of(List.of("acme"));
+
+    assertEquals(acme, Access.audience(Actors.VIEWER.withScope(acme)));
+    assertEquals(ProjectScope.all(), Access.audience(Actors.SYSTEM.withScope(acme)));
+    assertEquals(ProjectScope.all(), Access.audience(Actors.MAIN.withScope(ProjectScope.none())));
+  }
+
+  @Test
   void aReviewOfASpecNoOneOwnsIsAnAdminsToApprove() {
     assertEquals(
         refused(

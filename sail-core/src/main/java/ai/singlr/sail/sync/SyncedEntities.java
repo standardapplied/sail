@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ConflictResolver;
 import ai.singlr.sail.store.FileStore;
@@ -41,12 +42,14 @@ public final class SyncedEntities {
   }
 
   /**
-   * One replicated type: its store, which declares who may write it ({@link SyncedStore#authority})
-   * and which of its changes a node pushes ({@link SyncedStore#mayPush}), how it resolves a parked
-   * conflict, and which of its revisions are transitions worth narrating.
+   * One replicated type: what kind of resource its rows are, which main's Read decides each by
+   * before a box receives it, its store, which declares who may write it ({@link
+   * SyncedStore#authority}) and which of its changes a node pushes ({@link SyncedStore#mayPush}),
+   * how it resolves a parked conflict, and which of its revisions are transitions worth narrating.
    */
   public record Entity(
       String type,
+      Resource.Kind kind,
       Function<Sqlite, SyncedStore> factory,
       Function<Sqlite, ConflictResolver> resolverFactory,
       TransitionDetector transitions,
@@ -66,21 +69,30 @@ public final class SyncedEntities {
       List.of(
           new Entity(
               "run",
+              Resource.Kind.RUN,
               RunStore::new,
               RunStore::new,
               (id, before, after) -> SyncTransitions.statusChange("run", id, before, after),
               Map.of("run", TransitionKind.RUN_STATUS)),
           new Entity(
               "spec",
+              Resource.Kind.SPEC,
               SpecStore::new,
               SpecStore::new,
               (id, before, after) -> SyncTransitions.statusChange("spec", id, before, after),
               Map.of("spec", TransitionKind.SPEC_STATUS)),
-          new Entity("room", RoomStore::new, RoomStore::new, NONE, Map.of()),
-          new Entity("file", FileStore::new, FileStore::new, NONE, Map.of()),
-          new Entity("project", ProjectStore::new, ProjectStore::new, NONE, Map.of()),
+          new Entity("room", Resource.Kind.ROOM, RoomStore::new, RoomStore::new, NONE, Map.of()),
+          new Entity("file", Resource.Kind.PROJECT, FileStore::new, FileStore::new, NONE, Map.of()),
+          new Entity(
+              "project",
+              Resource.Kind.PROJECT,
+              ProjectStore::new,
+              ProjectStore::new,
+              NONE,
+              Map.of()),
           new Entity(
               "review",
+              Resource.Kind.REVIEW,
               ReviewStore::new,
               ReviewStore::new,
               SyncTransitions::reviewChanges,
@@ -91,6 +103,7 @@ public final class SyncedEntities {
                   TransitionKind.REVIEW_STAGE_STATUS)),
           new Entity(
               "message",
+              Resource.Kind.MESSAGE,
               MessageStore::new,
               MessageStore::new,
               (id, before, after) ->

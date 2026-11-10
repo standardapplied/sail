@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.access.Access;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
@@ -367,8 +368,8 @@ public final class ChangeLog {
   /**
    * The SQL condition that the head of the {@code entityType} row whose id the expression {@code
    * id} names is filed under a project of the scope bound as argument {@code ?arg} ({@link
-   * #scopeArgument}): {@link ProjectScope#admits} asked inside a query, for a read whose limit or
-   * aggregate must count only what its reader sees.
+   * #scopeArgument}): the Read rule's audience ({@link Access#audience}) asked inside a query, for
+   * a read whose limit or aggregate must count only what its reader sees.
    */
   static String filedInside(String entityType, String id, int arg) {
     return """
@@ -379,8 +380,8 @@ public final class ChangeLog {
   }
 
   /**
-   * {@code scope} as the argument {@link #filedInside} reads: null when it admits every project,
-   * otherwise its projects.
+   * {@code scope}, a reader's audience ({@link Access#audience}), as the argument {@link
+   * #filedInside} reads: null when it admits every project, otherwise its projects.
    */
   static String scopeArgument(ProjectScope scope) {
     return scope.unrestricted() ? null : YamlUtil.dumpJson(List.copyOf(scope.projects()));
@@ -746,10 +747,11 @@ public final class ChangeLog {
    * Whether this log is still the one a reader of {@code entityType} read up to {@code mark}: the
    * entry of the mark's id at its rev sits at its seq — or nothing does, because the id's erasure
    * removed it, still the reader's to page, or {@link #compact} did and kept that it was this entry
-   * — and no head the reader's {@code scope} admits sits after that seq up to the checkpoint, where
-   * the reader saw none. A mark that read nothing names no entry, so only its stretch is asked
-   * about. An id the scope does not admit is never held, so a reader learns nothing of it. A log
-   * restored from an older copy and grown again holds other entries there.
+   * — and no head the reader's {@code scope} ({@link Access#audience}) admits sits after that seq
+   * up to the checkpoint, where the reader saw none. A mark that read nothing names no entry, so
+   * only its stretch is asked about. An id the scope does not admit is never held, so a reader
+   * learns nothing of it. A log restored from an older copy and grown again holds other entries
+   * there.
    */
   public boolean holds(String entityType, SyncState.Mark mark, ProjectScope scope) {
     return db.queryOne(

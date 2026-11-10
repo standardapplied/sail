@@ -21,11 +21,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.authority.EventAuthority.Rule;
+import ai.singlr.sail.access.Action;
 import ai.singlr.sail.authority.EventAuthority.Subject;
 import ai.singlr.sail.authority.Refusal.Kind;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
@@ -456,34 +458,31 @@ class EventAuthorityTest {
   }
 
   @Test
-  void theListIsExactlyWhatClientsPublish() {
-    var drives =
-        List.of(
-            STOP,
-            "agent_cancelled",
-            "agent_failed",
-            "spec_dispatched",
-            "spec_restarted",
+  void eachTypeAClientPublishesNamesTheOneActionItsSenderMustBeAllowed() {
+    var expected = new TreeMap<String, Action>();
+    List.of(STOP, "agent_cancelled", "agent_failed")
+        .forEach(type -> expected.put(type, Action.OPERATE_RUN));
+    List.of("spec_dispatched", "spec_restarted")
+        .forEach(type -> expected.put(type, Action.DISPATCH));
+    List.of(
             "review_iteration_started",
             "review_stage_started",
             "review_stage_passed",
             "review_stage_failed",
             "review_completed",
             "review_errored",
-            "review_escalated");
-    var narrates =
-        List.of("agent_session_started", "agent_stop_nudged", TOOL, "agent_tool_finished");
-    var expected = new TreeMap<String, Rule>();
-    drives.forEach(type -> expected.put(type, Rule.DRIVES));
-    narrates.forEach(type -> expected.put(type, Rule.NARRATES));
-    expected.put(POSTED, Rule.ANNOUNCES);
-    expected.put("snapshot_created", Rule.BOX);
-    expected.put(BOARD, Rule.BOX);
+            "review_escalated")
+        .forEach(type -> expected.put(type, Action.APPROVE));
+    List.of("agent_session_started", "agent_stop_nudged", TOOL, "agent_tool_finished")
+        .forEach(type -> expected.put(type, Action.NARRATE));
+    expected.put(POSTED, Action.POST);
+    expected.put("snapshot_created", Action.OPERATE_BOX);
+    expected.put(BOARD, Action.OPERATE_BOX);
 
     assertEquals(expected, new TreeMap<>(EventAuthority.publishable()));
     assertThrows(
         UnsupportedOperationException.class,
-        () -> EventAuthority.publishable().put("made_up", Rule.BOX));
+        () -> EventAuthority.publishable().put("made_up", Action.OPERATE_BOX));
   }
 
   @Test
@@ -565,12 +564,17 @@ class EventAuthorityTest {
     var box = rule.decide(OWNER_API, BOARD, rule.subject("acme", null, null), false);
     var posted = rule.decide(OWNER_API, POSTED, rule.subject("acme", null, null), true);
     var agent = rule.decide(AGENT, TOOL, rule.subject("acme", "auth", OTHER_RUN), false);
+    var viewer = rule.decide(VIEWER, STOP, rule.subject("acme", "auth", OTHER_RUN), true);
 
     assertEquals(
-        "Event type 'agent_session_stopped' makes this box act on run "
-            + OTHER_RUN
-            + " of 'auth' (owned by 'carol'), which you may not drive.",
-        run.orElseThrow().message());
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Event type 'agent_session_stopped' makes this box act on run "
+                    + OTHER_RUN
+                    + " of 'auth' (owned by 'carol'), which you may not drive.",
+                "Only its owner or an admin may publish it.")),
+        run);
     assertEquals(
         "Event type 'agent_session_stopped' makes this box act on 'billing' (owned by 'bob'), which"
             + " you may not drive.",
@@ -580,16 +584,38 @@ class EventAuthorityTest {
             + " may not drive.",
         none.orElseThrow().message());
     assertEquals(
-        "Event type 'agent_session_stopped' reports what this box observed of 'billing' (owned by"
-            + " 'bob'), which you may not drive: only this box's FDE or an admin reports that.",
-        observed.orElseThrow().message());
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Event type 'agent_session_stopped' reports what this box observed of 'billing'"
+                    + " (owned by 'bob'), which you may not drive: only this box's FDE or an admin"
+                    + " reports that.",
+                "What another box did reaches this one by sync.")),
+        observed);
     assertEquals(
         "Event type 'spec_message_posted' makes this box act on work it does not name, which you"
             + " may not drive.",
         posted.orElseThrow().message());
-    assertTrue(
-        box.orElseThrow().message().startsWith("Event type 'board_updated' speaks for this"));
-    assertTrue(agent.orElseThrow().message().contains("may narrate only its own run"));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Event type 'board_updated' speaks for this box, and you may not drive what it"
+                    + " does: only this box's FDE or an admin publishes it.",
+                Remedy.NONE)),
+        box);
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Event type 'agent_tool_started' narrates run "
+                    + OTHER_RUN
+                    + " of 'auth' (owned by 'carol'), and '"
+                    + Actors.AGENT_HANDLE
+                    + "' may narrate only its own run.",
+                Remedy.NONE)),
+        agent);
+    assertEquals(Refusal.readOnly("publish events"), viewer);
   }
 
   @Test
@@ -603,5 +629,53 @@ class EventAuthorityTest {
         "Event type 'agent_session_stopped' makes this box act on 'draft' (no owner here), which you"
             + " may not drive.",
         refusal.message());
+    assertEquals(
+        Optional.empty(), rule.decide(ADMIN, STOP, rule.subject("acme", "draft", null), true));
+  }
+
+  @Test
+  void workOutsideTheSendersScopeIsNotFoundWhoeverItIsAndWhateverTheSenderMayDo() {
+    var scoped = OWNER_API.withScope(ProjectScope.of(List.of("beta")));
+    var scopedViewer = VIEWER.withScope(ProjectScope.of(List.of("beta")));
+    var run = rule.subject("acme", "auth", OTHER_RUN);
+    var spec = rule.subject("acme", "draft", null);
+    var none = rule.subject("acme", null, null);
+
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.OUT_OF_SCOPE,
+                "Event type 'agent_session_stopped' names run "
+                    + OTHER_RUN
+                    + " of 'auth', which this box does not hold.",
+                "Publish events only about work in the projects you are granted.")),
+        rule.decide(scoped, STOP, run, true));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.OUT_OF_SCOPE,
+                "Event type 'agent_session_stopped' names 'draft', which this box does not hold.",
+                "Publish events only about work in the projects you are granted.")),
+        rule.decide(scopedViewer, STOP, spec, true));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.OUT_OF_SCOPE,
+                "Event type 'spec_message_posted' names no work this box holds.",
+                "Publish events only about work in the projects you are granted.")),
+        rule.decide(scoped, POSTED, none, true));
+  }
+
+  @Test
+  void anEventAboutTheBoxIsFiledUnderNoProjectSoNoScopeHidesIt() {
+    boxFde = OWNER;
+
+    assertEquals(
+        Optional.empty(),
+        rule.decide(
+            OWNER_API.withScope(ProjectScope.none()),
+            BOARD,
+            rule.subject("acme", null, null),
+            false));
   }
 }

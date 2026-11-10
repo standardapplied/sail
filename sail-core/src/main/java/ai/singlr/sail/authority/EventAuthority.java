@@ -5,10 +5,14 @@
 
 package ai.singlr.sail.authority;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -19,6 +23,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Which events a client may publish: the one rule every door that takes an event asks, as the actor
@@ -27,73 +32,46 @@ import java.util.stream.Collectors;
  * to moving, launching, notifying and reading as evidence only what the event's sender may drive.
  *
  * <p>Deny by default: a type {@link #publishable} does not list is the server's own, emitted after
- * the write it describes, and no client publishes it. Each listed type has one {@link Rule}, read
- * against the event's {@link Subject}: what the event is about as this box knows it, never as its
- * sender says.
+ * the write it describes, and no client publishes it. Each listed type names the one {@link Action}
+ * its sender must be allowed ({@link Access#decide}) on what the event is about, its {@link
+ * Subject}, as this box knows it, never as its sender says: a type the machinery acts on needs
+ * operating the run, dispatching or approving; an announcement of a message, posting; an event
+ * about the box, operating it; a run's report of itself, narrating it, which a person may only for
+ * a run this box executed.
  *
- * <p>Two kinds of sender speak about work. This box's FDE, whom the host CLI and the watcher act
- * as, reports what this box itself did and observed. Anyone else retells what another box did,
- * which is how main's sync server relays a node's transitions, as the FDE who pushed them: an event
- * marked as retold starts no review and finishes no run here. So a member is never taken at their
- * word for what this box observed, and a run another box executed is never a key to the spec it
- * names: its pusher wrote that row, and only the spec's own owner speaks for the spec.
+ * <p>Two kinds of sender speak about work, and which one an event's sender is stays this rule's own
+ * fact. Whoever speaks for this box ({@link Action#OPERATE_BOX}), its FDE whom the host CLI and the
+ * watcher act as, or an admin, reports what this box itself did and observed. Anyone else retells
+ * what another box did, which is how main's sync server relays a node's transitions, as the FDE who
+ * pushed them: an event marked as retold starts no review and finishes no run here. So a member is
+ * never taken at their word for what this box observed, and a run another box executed is never a
+ * key to the spec it names: its pusher wrote that row, and only the spec's own owner speaks for the
+ * spec. A run's own principal publishes only the narration of its own run, a fact of its lane until
+ * its actor carries its work.
  */
 public final class EventAuthority {
 
-  /** What the sender of a publishable type must be able to drive. */
-  public enum Rule {
-    /**
-     * The machinery acts on the event or reads it as evidence. Accepted from an admin; from this
-     * box's FDE for a run this box executed ({@link RunStore.RunRow#ownedBy}), as the host CLI and
-     * the watcher speak, or for a spec or room it owns; and, retold, from an actor who acts for the
-     * owner of the spec ({@link Ownership#ownerOf}) or room ({@link RoomStore#owners}) it names, or
-     * that the run it names works. A run that works no spec or room is its own owners' ({@link
-     * RunAuthority#owners}). Never from a run's own principal: a stop it published would finish a
-     * run still running.
-     */
-    DRIVES,
-    /**
-     * What a run does as it works, said on the box that executes it: accepted from an admin, from
-     * this box's FDE for a run this box executed, and from the run's own principal for that run
-     * alone, which is how the in-container hooks report.
-     */
-    NARRATES,
-    /**
-     * A message this box holds, announced so its room wakes and live clients see it: accepted from
-     * an admin, from this box's FDE for what its sync pulled, and, retold, from any writer who acts
-     * for an FDE about a message in a conversation, since every writer of the project may post
-     * there ({@link PostingRule}); which projects those are, the event door decides before this
-     * rule is asked.
-     */
-    ANNOUNCES,
-    /**
-     * The event speaks for this box rather than for a piece of work: accepted from an admin or this
-     * box's FDE.
-     */
-    BOX
-  }
-
-  private static final Map<String, Rule> PUBLISHABLE =
+  private static final Map<String, Action> PUBLISHABLE =
       Map.ofEntries(
-          Map.entry("agent_session_started", Rule.NARRATES),
-          Map.entry("agent_stop_nudged", Rule.NARRATES),
-          Map.entry("agent_tool_started", Rule.NARRATES),
-          Map.entry("agent_tool_finished", Rule.NARRATES),
-          Map.entry("agent_session_stopped", Rule.DRIVES),
-          Map.entry("agent_cancelled", Rule.DRIVES),
-          Map.entry("agent_failed", Rule.DRIVES),
-          Map.entry("spec_dispatched", Rule.DRIVES),
-          Map.entry("spec_restarted", Rule.DRIVES),
-          Map.entry("review_iteration_started", Rule.DRIVES),
-          Map.entry("review_stage_started", Rule.DRIVES),
-          Map.entry("review_stage_passed", Rule.DRIVES),
-          Map.entry("review_stage_failed", Rule.DRIVES),
-          Map.entry("review_completed", Rule.DRIVES),
-          Map.entry("review_errored", Rule.DRIVES),
-          Map.entry("review_escalated", Rule.DRIVES),
-          Map.entry("spec_message_posted", Rule.ANNOUNCES),
-          Map.entry("snapshot_created", Rule.BOX),
-          Map.entry("board_updated", Rule.BOX));
+          Map.entry("agent_session_started", Action.NARRATE),
+          Map.entry("agent_stop_nudged", Action.NARRATE),
+          Map.entry("agent_tool_started", Action.NARRATE),
+          Map.entry("agent_tool_finished", Action.NARRATE),
+          Map.entry("agent_session_stopped", Action.OPERATE_RUN),
+          Map.entry("agent_cancelled", Action.OPERATE_RUN),
+          Map.entry("agent_failed", Action.OPERATE_RUN),
+          Map.entry("spec_dispatched", Action.DISPATCH),
+          Map.entry("spec_restarted", Action.DISPATCH),
+          Map.entry("review_iteration_started", Action.APPROVE),
+          Map.entry("review_stage_started", Action.APPROVE),
+          Map.entry("review_stage_passed", Action.APPROVE),
+          Map.entry("review_stage_failed", Action.APPROVE),
+          Map.entry("review_completed", Action.APPROVE),
+          Map.entry("review_errored", Action.APPROVE),
+          Map.entry("review_escalated", Action.APPROVE),
+          Map.entry("spec_message_posted", Action.POST),
+          Map.entry("snapshot_created", Action.OPERATE_BOX),
+          Map.entry("board_updated", Action.OPERATE_BOX));
 
   private final SpecStore specs;
   private final RoomStore rooms;
@@ -108,8 +86,8 @@ public final class EventAuthority {
     this.boxFde = Objects.requireNonNull(boxFde, "boxFde");
   }
 
-  /** Every type a client may publish, each with the rule its sender is held to. */
-  public static Map<String, Rule> publishable() {
+  /** Every type a client may publish, each with the action its sender must be allowed. */
+  public static Map<String, Action> publishable() {
     return PUBLISHABLE;
   }
 
@@ -131,6 +109,11 @@ public final class EventAuthority {
 
     public Subject {
       owners = List.copyOf(owners);
+    }
+
+    /** Whether the event names a run or a conversation at all. */
+    boolean namesWork() {
+      return runId != null || conversation != null;
     }
   }
 
@@ -185,8 +168,8 @@ public final class EventAuthority {
    * reporting what this box observed.
    */
   public Optional<Refusal> decide(Actor actor, String type, Subject subject, boolean retold) {
-    var rule = PUBLISHABLE.get(type);
-    if (rule == null) {
+    var action = PUBLISHABLE.get(type);
+    if (action == null) {
       return Refusal.of(
           Refusal.Kind.NOT_PUBLISHABLE,
           "Event type '"
@@ -196,59 +179,137 @@ public final class EventAuthority {
           "Make the change through its own route; the server publishes the event.");
     }
     if (actor.agentLane()) {
-      return principal(actor, type, rule, subject);
+      return principal(actor, type, action, subject);
     }
-    if (!actor.canWrite()) {
+    return switch (Access.decide(actor, action, resource(action, subject))) {
+      case Decision.Allowed allowed ->
+          believed(actor, action, subject, retold)
+              ? Optional.empty()
+              : refused(Refusal.Kind.NOT_OWNER, actor, type, action, subject);
+      case Decision.Refused refused ->
+          refused(refused.refusal().kind(), actor, type, action, subject);
+      case Decision.NotFound notFound -> unseen(type, subject);
+    };
+  }
+
+  /**
+   * What {@code action} is taken on when an event is about {@code subject}. The box, for an event
+   * that speaks for it. Otherwise the work it names, answering to who drives it here: a run this
+   * box executed is also this box's; and a run's narration is a person's only on the box that
+   * executed it, so a run another box executed has no narrator here but an admin.
+   */
+  private Resource resource(Action action, Subject subject) {
+    var executed = subject.executedHere() ? box() : List.<String>of();
+    return switch (action) {
+      case OPERATE_BOX -> Resources.box(boxFde.get());
+      case NARRATE -> work(subject, executed);
+      default ->
+          work(subject, Stream.concat(subject.owners().stream(), executed.stream()).toList());
+    };
+  }
+
+  /**
+   * {@code subject}'s work, filed under its project and answering to {@code owners}: the
+   * conversation the run works or the event names. The decision reads its project and owners alone,
+   * and the refusal is this rule's, so nothing a sender sees rests on whether that conversation is
+   * a spec's or a room's.
+   */
+  private static Resource work(Subject subject, List<String> owners) {
+    return Resources.conversation(subject.conversation(), subject.project(), owners);
+  }
+
+  /**
+   * Whether a sender {@link Access} allows is taken at its word: what an event the machinery acts
+   * on reports, only whoever speaks for this box reports first-hand, and anyone else only retells,
+   * never what this box executed itself; an announcement is retold by a voice, about a
+   * conversation. An event about the box, and a narration, are decided by the action alone.
+   */
+  private boolean believed(Actor actor, Action action, Subject subject, boolean retold) {
+    var firstHand = speaksForBox(actor);
+    return switch (action) {
+      case OPERATE_BOX, NARRATE -> true;
+      case POST ->
+          firstHand
+              || (retold
+                  && Strings.isNotBlank(actor.actingFde())
+                  && subject.conversation() != null);
+      default -> firstHand || (retold && !subject.executedHere());
+    };
+  }
+
+  /**
+   * The refusal, of the {@code kind} it was decided as, worded as an event's: only this rule knows
+   * the event's type and what it would make this box do, as only a door knows its answer for an
+   * absent id. A read-only sender may publish nothing. Otherwise the event speaks for this box,
+   * which only its FDE or an admin does; or it reports what this box observed of work the sender
+   * owns, that this box executed, or that a run narrates, which only they report first-hand; or it
+   * makes this box act on work the sender may not drive.
+   */
+  private static Optional<Refusal> refused(
+      Refusal.Kind kind, Actor actor, String type, Action action, Subject subject) {
+    if (kind == Refusal.Kind.READ_ONLY) {
       return Refusal.readOnly("publish events");
     }
-    if (actor.isAdmin()) {
-      return Optional.empty();
-    }
-    var box = actor.actsFor(boxFde.get());
-    var owners = subject.owners();
-    var owner = owners.stream().anyMatch(actor::actsFor);
-    var voice = Strings.isNotBlank(actor.actingFde());
-    var admitted =
-        switch (rule) {
-          case BOX -> box;
-          case NARRATES -> box && subject.executedHere();
-          case ANNOUNCES -> box || (voice && retold && subject.conversation() != null);
-          case DRIVES -> subject.executedHere() ? box : owner && (box || retold);
-        };
-    if (admitted) {
-      return Optional.empty();
-    }
-    if (rule == Rule.BOX) {
+    if (action == Action.OPERATE_BOX) {
       return Refusal.of(
-          Refusal.Kind.NOT_OWNER,
+          kind,
           "Event type '"
               + type
               + "' speaks for this box, and you may not drive what it does: only this box's FDE or"
               + " an admin publishes it.",
           Remedy.NONE);
     }
-    if (owner || subject.executedHere() || rule == Rule.NARRATES) {
+    if (action == Action.NARRATE
+        || subject.executedHere()
+        || subject.owners().stream().anyMatch(actor::actsFor)) {
       return Refusal.of(
-          Refusal.Kind.NOT_OWNER,
+          kind,
           "Event type '"
               + type
               + "' reports what this box observed of "
-              + described(subject, owners)
+              + described(subject)
               + ", which you may not drive: only this box's FDE or an admin reports that.",
           "What another box did reaches this one by sync.");
     }
     return Refusal.of(
-        Refusal.Kind.NOT_OWNER,
+        kind,
         "Event type '"
             + type
             + "' makes this box act on "
-            + described(subject, owners)
+            + described(subject)
             + ", which you may not drive.",
         "Only its owner or an admin may publish it.");
   }
 
-  private static Optional<Refusal> principal(Actor actor, String type, Rule rule, Subject subject) {
-    if (rule != Rule.NARRATES) {
+  /** Whether {@code actor} speaks for this box: its FDE, or an admin. */
+  private boolean speaksForBox(Actor actor) {
+    return Access.decide(actor, Action.OPERATE_BOX, Resources.box(boxFde.get()))
+        instanceof Decision.Allowed;
+  }
+
+  private List<String> box() {
+    var fde = boxFde.get();
+    return Strings.isBlank(fde) ? List.of() : List.of(fde);
+  }
+
+  /**
+   * The answer for an event about work its sender may not read: as for work this box does not hold,
+   * so it says nothing of whose it is.
+   */
+  private static Optional<Refusal> unseen(String type, Subject subject) {
+    return Refusal.of(
+        Refusal.Kind.OUT_OF_SCOPE,
+        "Event type '"
+            + type
+            + (subject.namesWork()
+                ? "' names " + named(subject) + ", which this box does not hold."
+                : "' names no work this box holds."),
+        "Publish events only about work in the projects you are granted.");
+  }
+
+  private static Optional<Refusal> principal(
+      Actor actor, String type, Action action, Subject subject) {
+    if (action != Action.NARRATE) {
       return Refusal.of(
           Refusal.Kind.NOT_PUBLISHABLE,
           "Event type '" + type + "' is not available to agent principals.",
@@ -262,7 +323,7 @@ public final class EventAuthority {
         "Event type '"
             + type
             + "' narrates "
-            + described(subject, subject.owners())
+            + described(subject)
             + ", and '"
             + actor.handle()
             + "' may narrate only its own run.",
@@ -273,21 +334,27 @@ public final class EventAuthority {
     return specs.findById(specId).map(SpecStore.SpecRow::owner);
   }
 
-  private static String described(Subject subject, List<String> owners) {
-    var owned =
-        owners.isEmpty()
+  private static String described(Subject subject) {
+    if (!subject.namesWork()) {
+      return named(subject);
+    }
+    var owners = subject.owners();
+    return named(subject)
+        + (owners.isEmpty()
             ? " (no owner here)"
             : owners.stream()
                 .map(owner -> "'" + owner + "'")
-                .collect(Collectors.joining(" and ", " (owned by ", ")"));
+                .collect(Collectors.joining(" and ", " (owned by ", ")")));
+  }
+
+  private static String named(Subject subject) {
     if (subject.runId() != null) {
       return "run "
           + subject.runId()
-          + (subject.conversation() == null ? "" : " of '" + subject.conversation() + "'")
-          + owned;
+          + (subject.conversation() == null ? "" : " of '" + subject.conversation() + "'");
     }
     if (subject.conversation() != null) {
-      return "'" + subject.conversation() + "'" + owned;
+      return "'" + subject.conversation() + "'";
     }
     return "work it does not name";
   }

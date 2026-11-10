@@ -10,6 +10,7 @@ import ai.singlr.sail.access.Policy.Column;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.RunStore;
 import java.util.EnumSet;
 import java.util.stream.Collectors;
@@ -50,7 +51,7 @@ public final class Access {
     if (actor.isSail()) {
       return ALLOWED;
     }
-    if (resource.kind().filed() && !actor.scope().admits(resource.project())) {
+    if (resource.kind().filed() && !audience(actor).admits(resource.project())) {
       return NOT_FOUND;
     }
     var role = Policy.cell(action, Column.role(actor.role()));
@@ -97,6 +98,16 @@ public final class Access {
   /** What {@code actor}'s lane allows of {@code action}: a person's lane narrows nothing. */
   private static Cell lane(Actor actor, Action action) {
     return Column.lane(actor.lane()).map(column -> Policy.cell(action, column)).orElse(Cell.YES);
+  }
+
+  /**
+   * The projects whose resources {@code actor} may read: the audience step of {@link #decide} as a
+   * scope, every project for Sail itself. A read that filters many rows inside one query, rather
+   * than deciding each row in hand, filters by this scope, so the Read rule is the same whichever
+   * way it is asked.
+   */
+  public static ProjectScope audience(Actor actor) {
+    return actor.isSail() ? ProjectScope.all() : actor.scope();
   }
 
   /**

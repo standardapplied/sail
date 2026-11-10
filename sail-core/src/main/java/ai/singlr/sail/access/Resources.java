@@ -106,6 +106,14 @@ public final class Resources {
         Strings.isBlank(specId) ? null : named(specId, project, null));
   }
 
+  /**
+   * A row of {@code kind} as a read that holds only its head decides it: {@code id}, filed under
+   * {@code project}. Its owners are not read, since reading asks none.
+   */
+  public static Resource filed(Resource.Kind kind, String id, String project) {
+    return new Resource(kind, id, project, List.of(), null, null);
+  }
+
   /** Project {@code name}, filed under itself: its creator's ({@code projects.created_by}). */
   public static Resource project(String name, String createdBy) {
     return new Resource(Resource.Kind.PROJECT, name, name, one(createdBy), null, null);
