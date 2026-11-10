@@ -1308,21 +1308,39 @@ class ScopedReadsTest {
     var outside =
         assertThrows(
             IOException.class,
-            () -> door.admit("bravo-room", "bravo", new PtyIdentity("sam", false)));
+            () ->
+                door.admit(
+                    "bravo-room",
+                    "bravo",
+                    new PtyIdentity.Person(new Actor("sam", Role.MEMBER, Actor.Lane.API))));
     var misaddressed =
         assertThrows(
             IOException.class,
-            () -> door.admit("bravo-room", "alpha", new PtyIdentity("sam", false)));
+            () ->
+                door.admit(
+                    "bravo-room",
+                    "alpha",
+                    new PtyIdentity.Person(new Actor("sam", Role.MEMBER, Actor.Lane.API))));
     var missing =
         assertThrows(
             IOException.class,
-            () -> door.admit("ghost-room", "bravo", new PtyIdentity("sam", false)));
+            () ->
+                door.admit(
+                    "ghost-room",
+                    "bravo",
+                    new PtyIdentity.Person(new Actor("sam", Role.MEMBER, Actor.Lane.API))));
 
     assertEquals("Room 'bravo-room' was not found.", outside.getMessage());
     assertEquals("Room 'bravo-room' was not found.", misaddressed.getMessage());
     assertEquals("Room 'ghost-room' was not found.", missing.getMessage());
-    door.admit("alpha-room", "alpha", new PtyIdentity("sam", false));
-    door.admit("bravo-room", "bravo", new PtyIdentity("ada", true));
+    door.admit(
+        "alpha-room",
+        "alpha",
+        new PtyIdentity.Person(new Actor("sam", Role.MEMBER, Actor.Lane.API)));
+    door.admit(
+        "bravo-room",
+        "bravo",
+        new PtyIdentity.Person(new Actor("ada", Role.ADMIN, Actor.Lane.API)));
   }
 
   /**

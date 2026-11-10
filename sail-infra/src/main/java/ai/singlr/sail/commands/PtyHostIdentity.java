@@ -16,7 +16,7 @@ import java.util.function.Supplier;
  * The production {@link PtyIdentity.Resolver}: a gateway-minted session token resolves through the
  * control-plane sessions table to its FDE; a blank token is the box's ambient owner (the sync
  * handle). Never a client claim — the token is validated, the handle read from this box's own
- * configuration, and the admin bit from the FDE roster.
+ * configuration, and the role from the FDE roster.
  */
 final class PtyHostIdentity implements PtyIdentity.Resolver {
 
@@ -33,7 +33,7 @@ final class PtyHostIdentity implements PtyIdentity.Resolver {
   }
 
   @Override
-  public PtyIdentity resolve(String token) throws IOException {
+  public PtyIdentity.Person resolve(String token) throws IOException {
     try (var operations = OperationsFactory.open(dbPath)) {
       return operations.pty().identity(token, boxHandle.get());
     }

@@ -23,6 +23,8 @@ import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.store.BoxCredentialStore;
@@ -112,7 +114,9 @@ class PtyRoomSessionIT extends AbstractIncusIT {
                   dir.resolve("h.sock"),
                   dir.resolve("s"),
                   64 * 1024,
-                  token -> new PtyIdentity(token.isBlank() ? "it" : "mady", true),
+                  token ->
+                      new PtyIdentity.Person(
+                          new Actor(token.isBlank() ? "it" : "mady", Role.ADMIN, Actor.Lane.API)),
                   new PtyHostRooms(dbPath),
                   new PtyHostEvents(dbPath, dir.resolve("pty-events.drops")),
                   "0.0.0-test")) {

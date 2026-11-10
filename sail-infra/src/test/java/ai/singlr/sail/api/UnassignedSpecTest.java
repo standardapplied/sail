@@ -16,6 +16,8 @@ import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.BoxCredentialStore;
@@ -144,8 +146,10 @@ class UnassignedSpecTest {
     var answered = router.handle(form("POST", "/v1/specs/auth/messages", room, "body=on it"));
     assertEquals(201, answered.status(), answered.body().toString());
     var terminal = new HostAccess(db, new RoleRule(SyncConfig::unset, new FdeStore(db)));
-    terminal.admit("auth", "acme", new PtyIdentity("mady", false));
-    terminal.admit("auth", "acme", new PtyIdentity("uday", false));
+    terminal.admit(
+        "auth", "acme", new PtyIdentity.Person(new Actor("mady", Role.MEMBER, Actor.Lane.API)));
+    terminal.admit(
+        "auth", "acme", new PtyIdentity.Person(new Actor("uday", Role.MEMBER, Actor.Lane.API)));
     assertEquals(
         List.of("mady"), new RoomStore(db).owners("auth"), "the claim moved its ownership");
   }

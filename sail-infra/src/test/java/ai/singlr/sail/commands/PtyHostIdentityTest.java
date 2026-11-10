@@ -6,10 +6,10 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -44,7 +44,7 @@ class PtyHostIdentityTest {
     var identity = new PtyHostIdentity(() -> "uday", path).resolve(token);
 
     assertEquals("mady", identity.fde());
-    assertTrue(identity.admin());
+    assertEquals(Role.ADMIN, identity.actor().role());
   }
 
   @Test
@@ -57,7 +57,7 @@ class PtyHostIdentityTest {
     var identity = new PtyHostIdentity(() -> "uday", path).resolve("");
 
     assertEquals("uday", identity.fde());
-    assertFalse(identity.admin());
+    assertEquals(Role.MEMBER, identity.actor().role());
   }
 
   @Test

@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.io.IOException;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
@@ -47,9 +49,11 @@ class PtySessionHostTest {
           throw new IOException("Session token is not valid or has expired.");
         }
         return switch (token) {
-          case "", "tok-uday" -> new PtyIdentity("uday", false);
-          case "tok-mady" -> new PtyIdentity("mady", false);
-          case "tok-root" -> new PtyIdentity("root", true);
+          case "", "tok-uday" ->
+              new PtyIdentity.Person(new Actor("uday", Role.MEMBER, Actor.Lane.API));
+          case "tok-mady" -> new PtyIdentity.Person(new Actor("mady", Role.MEMBER, Actor.Lane.API));
+          case "tok-root" -> new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API));
+          case "tok-vic" -> new PtyIdentity.Person(new Actor("vic", Role.VIEWER, Actor.Lane.API));
           default -> throw new IOException("Session token is not valid or has expired.");
         };
       };
@@ -59,7 +63,7 @@ class PtySessionHostTest {
         if (!room.equals("design-talk")) {
           throw new IOException("Room '" + room + "' was not found.");
         }
-        if (!who.admin() && !who.fde().equals("uday")) {
+        if (!((PtyIdentity.Person) who).actor().isAdmin() && !who.fde().equals("uday")) {
           throw new IOException("Room 'design-talk' is assigned to 'uday', not you.");
         }
       };
@@ -676,6 +680,33 @@ class PtySessionHostTest {
         PtyWire.write(admin, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
         var listed = (PtyMessage.Sessions) readControl(admin);
         assertEquals(2, listed.sessions().size(), "an admin sees every owner's sessions");
+      }
+    }
+  }
+
+  @Test
+  void aViewerOperatesTheirOwnSessionsAndNoOneElses() throws Exception {
+    try (var ignored = startHost()) {
+      try (var uday = connect("tok-uday")) {
+        PtyWire.write(
+            uday,
+            new PtyMessage.Create("udays", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(uday));
+      }
+      try (var vic = connect("tok-vic")) {
+        PtyWire.write(
+            vic,
+            new PtyMessage.Create("vics", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(vic));
+        PtyWire.write(vic, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+        assertEquals(
+            List.of("vics"),
+            ((PtyMessage.Sessions) readControl(vic))
+                .sessions().stream().map(PtyMessage.SessionInfo::name).toList());
+        PtyWire.write(vic, new PtyMessage.Kill("udays"));
+        assertInstanceOf(PtyMessage.Err.class, readControl(vic), "not another person's");
+        PtyWire.write(vic, new PtyMessage.Kill("vics"));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(vic), "a viewer's own box is theirs");
       }
     }
   }

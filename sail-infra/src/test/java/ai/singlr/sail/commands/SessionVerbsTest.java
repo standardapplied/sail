@@ -9,6 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.pty.PtyIdentity;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
@@ -38,7 +41,7 @@ class SessionVerbsTest {
         PtyHostCommand.startHost(
             dir.resolve("h.sock"),
             dir.resolve("s"),
-            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
             ROOMS,
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       var socket = dir.resolve("h.sock").toString();
@@ -61,7 +64,7 @@ class SessionVerbsTest {
         PtyHostCommand.startHost(
             dir.resolve("h.sock"),
             dir.resolve("s"),
-            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
             ROOMS,
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       var socket = dir.resolve("h.sock").toString();
@@ -113,7 +116,7 @@ class SessionVerbsTest {
         PtyHostCommand.startHost(
             dir.resolve("h.sock"),
             dir.resolve("s"),
-            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
             ROOMS,
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       var socket = dir.resolve("h.sock").toString();
@@ -146,7 +149,7 @@ class SessionVerbsTest {
         PtyHostCommand.startHost(
             dir.resolve("h.sock"),
             dir.resolve("s"),
-            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
             ROOMS,
             ai.singlr.sail.pty.PtyEvents.NONE)) {
       var exit = run("attach", "ghost", "--socket", dir.resolve("h.sock").toString());

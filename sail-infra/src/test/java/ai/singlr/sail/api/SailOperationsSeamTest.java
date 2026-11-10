@@ -1456,13 +1456,26 @@ class SailOperationsSeamTest {
       assertTrue(operations.identity().tokens().isEmpty());
       assertTrue(operations.identity().sshKeys().isEmpty());
       assertTrue(operations.schema().version() > 0);
-      assertEquals(new PtyIdentity("owner", true), operations.pty().identity(null, "owner"));
+      assertEquals(
+          new PtyIdentity.Person(new Actor("owner", Role.ADMIN, Actor.Lane.API)),
+          operations.pty().identity(null, "owner"));
       var session = new AuthSessionStore(box.db).create(owner.id(), Duration.ofHours(1));
       assertEquals("owner", operations.pty().identity(session.token(), null).fde());
-      operations.pty().admitRoom("auth", "proj", new PtyIdentity("owner", true));
+      operations
+          .pty()
+          .admitRoom(
+              "auth",
+              "proj",
+              new PtyIdentity.Person(new Actor("owner", Role.ADMIN, Actor.Lane.API)));
       assertThrows(
           IOException.class,
-          () -> operations.pty().admitRoom("auth", "other", new PtyIdentity("owner", true)));
+          () ->
+              operations
+                  .pty()
+                  .admitRoom(
+                      "auth",
+                      "other",
+                      new PtyIdentity.Person(new Actor("owner", Role.ADMIN, Actor.Lane.API))));
       assertTrue(
           operations.identity().authorizeGateway("not-allowed", "owner")
               instanceof SshGateway.Rejected);

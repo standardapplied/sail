@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyMessage;
@@ -31,8 +33,9 @@ class PtyHostYieldTest {
   private static final PtyIdentity.Resolver RESOLVER =
       token ->
           switch (token) {
-            case "" -> new PtyIdentity("box", false);
-            case "tok-mady" -> new PtyIdentity("mady", false);
+            case "" -> new PtyIdentity.Person(new Actor("box", Role.MEMBER, Actor.Lane.API));
+            case "tok-mady" ->
+                new PtyIdentity.Person(new Actor("mady", Role.MEMBER, Actor.Lane.API));
             default -> throw new IOException("Session token is not valid or has expired.");
           };
 

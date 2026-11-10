@@ -278,7 +278,7 @@ final class HostLanes {
 
   record Pty(Sqlite db, RoleRule roles, EventStore events) implements HostPty {
     @Override
-    public PtyIdentity identity(String token, String boxHandle) throws IOException {
+    public PtyIdentity.Person identity(String token, String boxHandle) throws IOException {
       return new HostAccess(db, roles).identity(token, boxHandle);
     }
 

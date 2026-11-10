@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
@@ -81,24 +83,49 @@ class PtyHostRoomsTest {
 
   @Test
   void theRoomsAssigneeAndAnAdminMayPinASessionThere() {
-    assertDoesNotThrow(() -> rooms.admit("adas-room", "acme", new PtyIdentity("ada", false)));
-    assertDoesNotThrow(() -> rooms.admit("adas-room", "acme", new PtyIdentity("root", true)));
+    assertDoesNotThrow(
+        () ->
+            rooms.admit(
+                "adas-room",
+                "acme",
+                new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API))));
+    assertDoesNotThrow(
+        () ->
+            rooms.admit(
+                "adas-room",
+                "acme",
+                new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API))));
   }
 
   @Test
   void anotherMemberPinsButAViewerAndAStrangerAreRefusedByTheRoomsPostRight() {
     assertDoesNotThrow(
-        () -> rooms.admit("adas-room", "acme", new PtyIdentity("mallory", false)),
+        () ->
+            rooms.admit(
+                "adas-room",
+                "acme",
+                new PtyIdentity.Person(new Actor("mallory", Role.MEMBER, Actor.Lane.API))),
         "every writer of the project may speak in its rooms");
     assertTrue(
-        refusal("adas-room", "acme", new PtyIdentity("peek", false)).contains("read-only"),
+        refusal(
+                "adas-room",
+                "acme",
+                new PtyIdentity.Person(new Actor("peek", Role.MEMBER, Actor.Lane.API)))
+            .contains("read-only"),
         "a viewer's roster role, not the client's claim, decides");
     assertTrue(
-        refusal("adas-room", "acme", new PtyIdentity("nobody", false))
+        refusal(
+                "adas-room",
+                "acme",
+                new PtyIdentity.Person(new Actor("nobody", Role.MEMBER, Actor.Lane.API)))
             .contains("not in this box's roster"),
         "a handle absent from the roster is refused");
     assertTrue(
-        refusal("adas-room", "acme", new PtyIdentity("peek", true)).contains("read-only"),
+        refusal(
+                "adas-room",
+                "acme",
+                new PtyIdentity.Person(new Actor("peek", Role.ADMIN, Actor.Lane.API)))
+            .contains("read-only"),
         "the roster's role decides, never an admin bit riding the identity");
   }
 
@@ -108,21 +135,47 @@ class PtyHostRoomsTest {
       db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'ada'");
     }
 
-    assertTrue(refusal("adas-room", "acme", new PtyIdentity("ada", false)).contains("disabled"));
+    assertTrue(
+        refusal(
+                "adas-room",
+                "acme",
+                new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API)))
+            .contains("disabled"));
   }
 
   @Test
   void anUnassignedRoomIsPinnedByEveryWriterOfItsProject() {
-    assertDoesNotThrow(() -> rooms.admit("open-room", "acme", new PtyIdentity("ada", false)));
-    assertDoesNotThrow(() -> rooms.admit("open-room", "acme", new PtyIdentity("mallory", false)));
+    assertDoesNotThrow(
+        () ->
+            rooms.admit(
+                "open-room",
+                "acme",
+                new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API))));
+    assertDoesNotThrow(
+        () ->
+            rooms.admit(
+                "open-room",
+                "acme",
+                new PtyIdentity.Person(new Actor("mallory", Role.MEMBER, Actor.Lane.API))));
   }
 
   @Test
   void aMissingRoomOrTheWrongProjectIsRefusedBeforeAnyRightIsConsulted() {
-    assertTrue(refusal("ghost", "acme", new PtyIdentity("root", true)).contains("not found"));
-    var elsewhere = refusal("adas-room", "beta", new PtyIdentity("root", true));
+    assertTrue(
+        refusal(
+                "ghost",
+                "acme",
+                new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API)))
+            .contains("not found"));
+    var elsewhere =
+        refusal(
+            "adas-room",
+            "beta",
+            new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API)));
     assertTrue(elsewhere.contains("--project acme"), elsewhere);
-    var unprojected = refusal("adas-room", "", new PtyIdentity("root", true));
+    var unprojected =
+        refusal(
+            "adas-room", "", new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API)));
     assertTrue(unprojected.contains("--project acme"), unprojected);
   }
 }

@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -17,6 +16,7 @@ import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxCredentialStore;
@@ -164,7 +164,7 @@ class NodeWritesTest {
     assertEquals(READ_ONLY, roomRun.body().get("error"), "and for a room run of the box's own FDE");
     var access = new HostAccess(db, TestAuth.roles(db, ADAS_NODE));
     var identity = access.identity(session, null);
-    assertFalse(identity.admin(), "the terminal names no admin");
+    assertEquals(Role.VIEWER, identity.actor().role(), "the terminal names no admin");
     var terminal = assertThrows(IOException.class, () -> access.admit("rajs", "acme", identity));
     assertEquals(
         "Your credential is read-only and cannot post in rooms. Ask an admin for a member or admin"

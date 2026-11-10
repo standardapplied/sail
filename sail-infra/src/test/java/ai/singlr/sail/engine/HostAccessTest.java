@@ -13,6 +13,8 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
@@ -71,8 +73,12 @@ class HostAccessTest {
 
   @Test
   void aSessionWithNoTokenIsTheBoxsFdeWithItsRoleAndABoxWithNoneIsRefused() throws IOException {
-    assertEquals(new PtyIdentity("root", true), access.identity(null, "root"));
-    assertEquals(new PtyIdentity("ada", false), access.identity(" ", "ada"));
+    assertEquals(
+        new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API)),
+        access.identity(null, "root"));
+    assertEquals(
+        new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API)),
+        access.identity(" ", "ada"));
     assertEquals(
         "This box has no FDE identity. Set one with 'sail host config set sync-handle <handle>' or"
             + " connect through the gateway.",
@@ -89,8 +95,12 @@ class HostAccessTest {
     var root = sessions.create(fdes.byHandle("root").orElseThrow().id(), Duration.ofHours(1));
     var ada = sessions.create(fdes.byHandle("ada").orElseThrow().id(), Duration.ofHours(1));
 
-    assertEquals(new PtyIdentity("root", true), access.identity(root.token(), "ada"));
-    assertEquals(new PtyIdentity("ada", false), access.identity(ada.token(), "root"));
+    assertEquals(
+        new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API)),
+        access.identity(root.token(), "ada"));
+    assertEquals(
+        new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API)),
+        access.identity(ada.token(), "root"));
   }
 
   @Test
@@ -102,7 +112,11 @@ class HostAccessTest {
           mismatch,
           assertThrows(
                   IOException.class,
-                  () -> access.admit("lobby", "beta", new PtyIdentity(fde, false)))
+                  () ->
+                      access.admit(
+                          "lobby",
+                          "beta",
+                          new PtyIdentity.Person(new Actor(fde, Role.MEMBER, Actor.Lane.API))))
               .getMessage(),
           fde);
     }
@@ -111,9 +125,14 @@ class HostAccessTest {
             + " credential.",
         assertThrows(
                 Remedied.Io.class,
-                () -> access.admit("lobby", "acme", new PtyIdentity("vic", false)))
+                () ->
+                    access.admit(
+                        "lobby",
+                        "acme",
+                        new PtyIdentity.Person(new Actor("vic", Role.MEMBER, Actor.Lane.API))))
             .getMessage());
 
-    access.admit("lobby", "acme", new PtyIdentity("ada", false));
+    access.admit(
+        "lobby", "acme", new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API)));
   }
 }

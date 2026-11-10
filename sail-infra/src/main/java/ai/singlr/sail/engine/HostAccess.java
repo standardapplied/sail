@@ -29,7 +29,7 @@ import java.util.Objects;
  * RoleRule} gives it; a disabled FDE is refused.
  */
 public record HostAccess(Sqlite db, RoleRule roles) {
-  public PtyIdentity identity(String token, String boxHandle) throws IOException {
+  public PtyIdentity.Person identity(String token, String boxHandle) throws IOException {
     if (Strings.isBlank(token)) {
       if (Strings.isBlank(boxHandle)) {
         throw Remedied.io(
@@ -39,7 +39,7 @@ public record HostAccess(Sqlite db, RoleRule roles) {
                 Remedy.sail("host config set sync-handle", "<handle>"),
                 "' or connect through the gateway."));
       }
-      return new PtyIdentity(boxHandle, roleOf(boxHandle) == Role.ADMIN);
+      return new PtyIdentity.Person(actorOf(boxHandle));
     }
     var session =
         new AuthSessionStore(db)
@@ -49,7 +49,7 @@ public record HostAccess(Sqlite db, RoleRule roles) {
         new FdeStore(db)
             .byId(session.fdeId())
             .orElseThrow(() -> new IOException("The session's FDE no longer exists."));
-    return new PtyIdentity(fde.handle(), roleOf(fde.handle()) == Role.ADMIN);
+    return new PtyIdentity.Person(actorOf(fde.handle()));
   }
 
   /**
@@ -82,10 +82,6 @@ public record HostAccess(Sqlite db, RoleRule roles) {
     if (decision instanceof Decision.Refused(var refusal)) {
       throw Remedied.io(refusal.message(), refusal.fix());
     }
-  }
-
-  private Role roleOf(String handle) throws IOException {
-    return actorOf(handle).role();
   }
 
   private Actor actorOf(String handle) throws IOException {

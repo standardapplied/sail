@@ -124,13 +124,9 @@ class OneDecisionSweepTest {
             "commands/SyncServerCommand#principal",
             "engine/CliOperator#of",
             "engine/HostAccess#actorOf",
-            "engine/HostAccess#roleOf",
             "ssh/SshGateway#authorize")) {
       allowed.put("ai/singlr/sail/" + resolves, EVERY_DOOR);
     }
-    allowed.put(
-        "ai/singlr/sail/engine/HostAccess#identity",
-        EVERY_DOOR + ": the admin flag it puts on PtyIdentity, which PtySessionHost reads");
     allowed.put(RULES + "EventAuthority#decide", OWN_WORK);
     allowed.put(API + "LocalApiRouter#messages", OWN_WORK);
     allowed.put(API + "LocalApiRouter#project", OWN_WORK);

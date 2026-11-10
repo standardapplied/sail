@@ -21,6 +21,8 @@ import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyRooms;
@@ -139,7 +141,7 @@ class AgentAttachCommandTest {
         PtyHostCommand.startHost(
             dir.resolve("h.sock"),
             dir.resolve("s"),
-            token -> new PtyIdentity("uday", true),
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
             PtyRooms.NONE,
             PtyEvents.NONE)) {
       var plan =
@@ -316,7 +318,7 @@ class AgentAttachCommandTest {
             PtyHostCommand.startHost(
                 socket,
                 dir.resolve("s"),
-                token -> new PtyIdentity("uday", true),
+                token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
                 PtyRooms.NONE,
                 PtyEvents.NONE)) {
       new SchemaManager(db).migrate();

@@ -11,6 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
 import java.io.ByteArrayOutputStream;
 import java.io.PipedInputStream;
@@ -35,7 +38,7 @@ class AttachLoopTest {
             dir.resolve("h.sock"),
             dir.resolve("s"),
             64 * 1024,
-            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
             ai.singlr.sail.pty.PtyRooms.NONE,
             ai.singlr.sail.pty.PtyEvents.NONE,
             "0.0.0-test")) {
@@ -165,7 +168,7 @@ class AttachLoopTest {
             dir.resolve("h.sock"),
             dir.resolve("s"),
             64 * 1024,
-            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
             ai.singlr.sail.pty.PtyRooms.NONE,
             ai.singlr.sail.pty.PtyEvents.NONE,
             "0.0.0-test")) {
@@ -195,7 +198,7 @@ class AttachLoopTest {
             dir.resolve("h.sock"),
             dir.resolve("s"),
             64 * 1024,
-            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
             ai.singlr.sail.pty.PtyRooms.NONE,
             ai.singlr.sail.pty.PtyEvents.NONE,
             "0.0.0-test")) {
@@ -251,7 +254,7 @@ class AttachLoopTest {
             dir.resolve("h.sock"),
             dir.resolve("s"),
             64 * 1024,
-            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
             ai.singlr.sail.pty.PtyRooms.NONE,
             ai.singlr.sail.pty.PtyEvents.NONE,
             "0.0.0-test")) {

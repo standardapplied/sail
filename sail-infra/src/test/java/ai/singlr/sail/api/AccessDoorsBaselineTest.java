@@ -506,7 +506,10 @@ class AccessDoorsBaselineTest {
               new Door(
                   "fde " + fde + " pins a terminal to " + room + " on " + box.getKey(),
                   ops -> {
-                    host.admit(room, project, new PtyIdentity(fde, false, false));
+                    host.admit(
+                        room,
+                        project,
+                        new PtyIdentity.Person(new Actor(fde, Role.MEMBER, Actor.Lane.API)));
                     return "admitted";
                   },
                   AccessDoorsBaselineTest::operator));
@@ -517,7 +520,10 @@ class AccessDoorsBaselineTest {
             new Door(
                 "fde " + fde + " pins a terminal to lobby under beta on " + box.getKey(),
                 ops -> {
-                  host.admit("lobby", "beta", new PtyIdentity(fde, false, false));
+                  host.admit(
+                      "lobby",
+                      "beta",
+                      new PtyIdentity.Person(new Actor(fde, Role.MEMBER, Actor.Lane.API)));
                   return "admitted";
                 },
                 AccessDoorsBaselineTest::operator));

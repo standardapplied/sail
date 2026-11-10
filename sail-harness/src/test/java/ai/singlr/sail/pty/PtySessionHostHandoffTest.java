@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -48,9 +50,12 @@ class PtySessionHostHandoffTest {
   private static final PtyIdentity.Resolver RESOLVER =
       token ->
           switch (token) {
-            case "", "tok-uday" -> new PtyIdentity("uday", false);
-            case "tok-mady" -> new PtyIdentity("mady", false);
-            case "tok-root" -> new PtyIdentity("root", true);
+            case "", "tok-uday" ->
+                new PtyIdentity.Person(new Actor("uday", Role.MEMBER, Actor.Lane.API));
+            case "tok-mady" ->
+                new PtyIdentity.Person(new Actor("mady", Role.MEMBER, Actor.Lane.API));
+            case "tok-root" ->
+                new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API));
             default -> throw new IOException("Session token is not valid or has expired.");
           };
 

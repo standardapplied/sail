@@ -5,6 +5,10 @@
 
 package ai.singlr.sail.pty;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
@@ -605,8 +609,14 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
+  /**
+   * Whether {@code who} may attach to, replace or kill {@code session}: operating the box of the
+   * person who opened it, which that person and an admin may.
+   */
   private static boolean admitted(PtyIdentity who, PtySession session) {
-    return who.admin() || who.fde().equals(session.ownerFde());
+    return who instanceof PtyIdentity.Person(var actor)
+        && Access.decide(actor, Action.OPERATE_BOX, Resources.box(session.ownerFde()))
+            instanceof Decision.Allowed;
   }
 
   /** The session's command as requested; an empty request means a login shell. */
