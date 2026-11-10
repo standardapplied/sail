@@ -289,7 +289,11 @@ public final class Access {
             + ", or have an admin do it.");
   }
 
-  private static Refusal notOwner(Resource resource) {
+  /**
+   * The refusal of an action only {@code resource}'s owners or an admin may take, naming them: the
+   * ownership step's wording, for a door that still decides that step itself.
+   */
+  public static Refusal notOwner(Resource resource) {
     return switch (resource.kind()) {
       case SPEC -> notSpecOwner(resource);
       case RUN -> notRunOwner(resource);

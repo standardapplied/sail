@@ -150,7 +150,7 @@ class OneDecisionPointTest {
   /**
    * The bytes of every class in the module {@code anchor} was loaded from: a directory or a jar.
    */
-  private static List<byte[]> classesOf(Class<?> anchor) throws IOException, URISyntaxException {
+  static List<byte[]> classesOf(Class<?> anchor) throws IOException, URISyntaxException {
     var location = Path.of(anchor.getProtectionDomain().getCodeSource().getLocation().toURI());
     if (Files.isDirectory(location)) {
       return classesUnder(location);

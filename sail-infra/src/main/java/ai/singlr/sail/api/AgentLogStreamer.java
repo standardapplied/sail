@@ -211,10 +211,7 @@ public final class AgentLogStreamer implements HttpHandler {
     var refusal =
         RunAuthority.access(
             actor,
-            run.id(),
-            StopOperations.specIdOf(run),
-            RunAuthority.owners(
-                run, spec -> StopOperations.ownerSeen(actor, specLookup.apply(spec))));
+            RunAuthority.run(run, spec -> StopOperations.ownerSeen(actor, specLookup.apply(spec))));
     if (refusal.isPresent()) {
       var refused = refusal.get();
       var code = Refusals.code(refused.kind());

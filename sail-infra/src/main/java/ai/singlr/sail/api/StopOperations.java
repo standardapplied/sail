@@ -7,7 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Resource;
-import ai.singlr.sail.access.Resources;
+import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentPresence;
@@ -539,7 +539,7 @@ public final class StopOperations {
   }
 
   /** The run's spec id with the blank ad-hoc form normalized to null: no spec means no spec. */
-  static String specIdOf(RunStore.RunRow run) {
+  private static String specIdOf(RunStore.RunRow run) {
     return Strings.isBlank(run.specId()) ? null : run.specId();
   }
 
@@ -572,23 +572,19 @@ public final class StopOperations {
 
   /**
    * Refuses a stop the bound actor may not make: operating a run is its owners' ({@link
-   * Resources#run}), its spec's owner as the reader sees it. A stop by run id read the run in the
-   * caller's scope first; a stop of a whole project is the host CLI's, whose operator sees every
-   * project. A dry run writes and signals nothing, so it is described for whoever asks, with no one
-   * bound.
+   * RunAuthority#run}), its spec's owner as the reader sees it. A stop by run id read the run in
+   * the caller's scope first; a stop of a whole project is the host CLI's, whose operator sees
+   * every project. A dry run writes and signals nothing, so it is described for whoever asks, with
+   * no one bound.
    */
   private void authorize(RunStore.RunRow run, boolean dryRun) {
     if (dryRun) {
       return;
     }
-    var specOwner =
-        Strings.isBlank(run.specId())
-            ? null
-            : ownerSeen(Actor.reader(), specStore.findById(run.specId())).orElse(null);
     Refusals.require(
         Actor.current(),
         Action.OPERATE_RUN,
-        Resources.run(run.id(), run.project(), run.owner(), run.specId(), run.node(), specOwner),
+        RunAuthority.run(run, spec -> ownerSeen(Actor.reader(), specStore.findById(spec))),
         () -> noRun(run.id()));
   }
 

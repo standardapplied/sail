@@ -1486,12 +1486,7 @@ public final class SailOperations implements HostOperations {
     if (isForeign(run, localHandle)) {
       return foreignRun(run);
     }
-    var refused =
-        RunAuthority.access(
-            Actor.current(),
-            run.id(),
-            StopOperations.specIdOf(run),
-            RunAuthority.owners(run, this::specOwner));
+    var refused = RunAuthority.access(Actor.current(), RunAuthority.run(run, this::specOwner));
     if (refused.isPresent()) {
       return Refusals.failure(refused.get());
     }

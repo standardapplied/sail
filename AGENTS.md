@@ -74,11 +74,13 @@ tests bite, and the deletion count in the body.
   happened and what to do.
 - Untrusted input (names, paths, spec text, agent output) is validated once, at the edge,
   and reaches a shell only as an argument, never interpolated into script text.
-- One rule, one place: ownership (`Ownership.ownerOf`), roles (`RoleRule`), one write rule
-  per synced type (`ai.singlr.sail.authority`), one `Actor` bound at each door. A second
-  derivation of any of these is a bug, not a convenience. The journal decides every write as
-  it records the revision; a door never asks a write rule, and a rule never reads from the
-  database the row it is deciding (it has `held`).
+- One rule, one place: every permission is `Access.decide` over the `Policy` table
+  (`ai.singlr.sail.access`), every owner a `Resources` derivation, roles resolved by `RoleRule`,
+  one `Actor` bound at each door. A type rule (`ai.singlr.sail.authority`) names the actions a
+  revision takes and keeps only its own facts. Nothing else reads a role, a lane or a capability
+  to decide (`OneDecisionSweepTest`); a second derivation is a bug, not a convenience. The
+  journal decides every write as it records the revision; a door never asks a write rule, and a
+  rule never reads from the database the row it is deciding (it has `held`).
 - Prefer deleting over adding. The smallest change in the right place; a duplicated seam is
   a finding to fix in the same change.
 

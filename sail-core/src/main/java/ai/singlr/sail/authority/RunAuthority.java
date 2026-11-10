@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.authority;
 
+import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
@@ -22,7 +23,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -56,33 +56,25 @@ public final class RunAuthority implements WriteAuthority {
   }
 
   /**
-   * Who owns {@code run}: the people it works for ({@link Resources#run}), the owner of the spec it
-   * works as {@code specOwner} finds it.
+   * {@code run} as the people it works for may stop it and read its log ({@link Resources#run}):
+   * the owner of the spec it works as {@code specOwner} finds it.
    */
-  public static List<String> owners(
-      RunStore.RunRow run, Function<String, Optional<String>> specOwner) {
+  public static Resource run(RunStore.RunRow run, Function<String, Optional<String>> specOwner) {
     var specOwned =
         Strings.isBlank(run.specId()) ? null : specOwner.apply(run.specId()).orElse(null);
-    return Resources.run(run.id(), run.project(), run.owner(), run.specId(), run.node(), specOwned)
-        .owners();
+    return Resources.run(run.id(), run.project(), run.owner(), run.specId(), run.node(), specOwned);
   }
 
   /**
-   * Why {@code actor} may not act on run {@code runId}, of spec {@code specId} (null for none),
-   * owned by {@code owners}: it is neither an admin nor acting for an owner. The doors that stop a
-   * run and read its log ask it, each before its own lane and role checks, until they ask {@link
-   * Access} (sail-every-door-asks-access).
+   * Why {@code actor} may not act on {@code run} ({@link #run}): it is neither an admin nor acting
+   * for an owner, in the words {@link Access} refuses an operation of it with. The doors that read
+   * a run's log ask it, a viewer who owns the run included, until they ask {@link Access} for
+   * {@link Action#OPERATE_RUN} (sail-every-door-asks-access).
    */
-  public static Optional<Refusal> access(
-      Actor actor, String runId, String specId, List<String> owners) {
-    if (actor.isAdmin() || owners.stream().anyMatch(actor::actsFor)) {
-      return Optional.empty();
-    }
-    var named = owners.isEmpty() ? "its owner" : String.join(" or ", owners);
-    return Refusal.of(
-        Refusal.Kind.NOT_OWNER,
-        describe(runId, specId, owners),
-        "Only " + named + " or an admin may access this run.");
+  public static Optional<Refusal> access(Actor actor, Resource run) {
+    return actor.isAdmin() || run.owners().stream().anyMatch(actor::actsFor)
+        ? Optional.empty()
+        : Optional.of(Access.notOwner(run));
   }
 
   @Override
@@ -253,24 +245,5 @@ public final class RunAuthority implements WriteAuthority {
             Stream.ofNullable(Snapshots.text(run, "principal")),
             Snapshots.stringList(run, "principals").stream())
         .filter(Strings::isNotBlank);
-  }
-
-  private static String describe(String runId, String specId, List<String> owners) {
-    var owned =
-        owners.isEmpty()
-            ? null
-            : owners.stream().map(owner -> "'" + owner + "'").collect(Collectors.joining(" and "));
-    if (Strings.isBlank(specId)) {
-      return "Run "
-          + runId
-          + " is an ad-hoc session"
-          + (owned != null ? " launched by " + owned + ", not you." : ".");
-    }
-    return "Run "
-        + runId
-        + " belongs to spec '"
-        + specId
-        + "'"
-        + (owned != null ? ", owned by " + owned + ", not you." : ", which has no owner.");
   }
 }

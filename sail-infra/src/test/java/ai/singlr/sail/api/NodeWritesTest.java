@@ -166,7 +166,10 @@ class NodeWritesTest {
     var identity = access.identity(session, null);
     assertFalse(identity.admin(), "the terminal names no admin");
     var terminal = assertThrows(IOException.class, () -> access.admit("rajs", "acme", identity));
-    assertEquals("Your credential is read-only and cannot post in rooms.", terminal.getMessage());
+    assertEquals(
+        "Your credential is read-only and cannot post in rooms. Ask an admin for a member or admin"
+            + " credential.",
+        terminal.getMessage());
     assertEquals(0, count(), "nothing was written");
   }
 

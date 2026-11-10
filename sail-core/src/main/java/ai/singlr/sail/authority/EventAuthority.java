@@ -135,7 +135,7 @@ public final class EventAuthority {
         worked.conversation(),
         held.id(),
         worked.conversation() == null
-            ? RunAuthority.owners(held, this::specOwner)
+            ? RunAuthority.run(held, this::specOwner).owners()
             : worked.owners(),
         held.ownedBy(boxFde.get()));
   }

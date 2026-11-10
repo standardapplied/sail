@@ -211,7 +211,7 @@ and the spec that closes it.
 | C6 | Sync's notices are true and each prints once per round: a node never seeds the demo, and lets go of one it seeded before it joined, so a fresh node drops nothing; parked conflicts are a warning, and the round exits 0. | `DemoSeederTest` (the seed, and the node's first round through `SyncOperations` announcing nothing), `SyncCliTest` (a node's migrate and demo route seed nothing), `SyncCommandTest` (a round's summary repeats no notice; the conflict line), `ScopedSyncTest` |
 | E1 | An erased id is never written again on any box; what belongs to it goes with it; a node removes only what main never acknowledged. | `ErasureTest`, `ErasureSyncTest`; a prune racing a born-in spec, on an admin and a member node: `ErasureAuditTest` |
 | S1 | A scoped node holds exactly the rows of its granted projects: no row, erasure, blob or roster email of another project reaches it over any wire. | `ScopedSyncTest` (every type from an empty node; a blob fetched by hash and a chunk no served manifest lists are refused; an erasure reaches the nodes that held the row and no other; a version main took in a project since revoked is neither handed back nor its content served; an offer names only content its session sent or was served, and a scoped session is asked for every blob and chunk it announces, held on main or not), `ScopedSyncServerTest` (the roster of those who share a project, no email but the node's own, no assignee disabled; a scoped node removes whom main no longer lists, with their credentials, and never its own FDE), `NativeFleetIT` (real processes: rows, heads, blobs and roster) |
-| S2 | A scoped actor reads and writes inside its scope on every box; a write outside it is refused in the journal, on every lane, before the type's own rule. | `ScopeRuleTest` (a create into a hidden project is a project not found; a write over a hidden row says only that the id is taken; specs, posts, files and catalog rows on this box's lanes; a write over a review is decided by where the review is filed, wherever its spec is now; a prune), `MessageStoreTest` (a conversation is read message by message by the project each was filed under, the page as long as its limit of what its reader sees; a reply answers only a message its writer may read), `ScopedSyncTest` (a forged push, a project row, an erase request, and one for a spec moved into the scope whose earlier review is not; a row is born naming only what its pusher may see: a spec into or over a conversation outside the scope, a room over one, a run of a spec or room outside it, none told whose it is), `EraseAuthorityTest` (a scoped owner erases a spec only when all that belongs to it is inside the scope), `ScopedReadsTest` (every read route under `/v1` answers a scoped caller byte for byte the same whether or not another project exists, held complete against `Operations`; a write into a hidden project is a project not found and one addressed to a hidden row meets what a missing row answers; the terminal door; a run sees its owner's scope; a spec is born neither into nor over a hidden room; a spec moved into the scope shows nothing of the room and run it left behind, nor any review written before the move, its findings, their count or a follow-up drafted from them, and is not its owner's to prune, rehearsed or real, while anything belonging to it is filed outside the scope; a room's refusal names only the specs its reader sees; every write route that addresses a row answers one of a hidden project as one nobody holds, held complete against `Operations`; a moved spec is neither seated in nor restored to what it left behind, and shows no question asked in the room it left, nor is a message of that room announced under the spec's project; a run never names the owner of a spec that left the scope; a spec moved into the scope brings none of the talk held in the project it left, through its room, its page cursors, its open question or a run's inbox; a run is delivered nothing of a project its FDE no longer holds; a scoped owner's write on its spec rewrites no review filed outside its scope), `BuildDispatchCoverageTest` (a scoped caller dispatches no spec whose earlier review is filed outside its scope, and its prompt carries no talk filed outside it), `ScopedTest`, `SseHandlerTest` and `AgentLogStreamerTest` (the event and run-log streams; a scope changed while a run-log stream is open), `OpenStreamRecheckTest` (an open event stream follows a grant and a revoke from the next event a second later, asks once per second, and ends when its FDE is removed or disabled), `ConflictOperationsTest`, `ScopedRosterApiTest` (a session and a token of a scoped FDE both resolve to a scoped caller), `NativeFleetIT` (the gateway's `spec list` with a scoped node's key) |
+| S2 | A scoped actor reads and writes inside its scope on every box; a write outside it is refused in the journal, on every lane, before the type's own rule. | `ScopeRuleTest` (a create into a hidden project is a project not found; a write over a hidden row says only that the id is taken; specs, posts, files and catalog rows on this box's lanes; a write over a review is decided by where the review is filed, wherever its spec is now; a prune), `MessageStoreTest` (a conversation is read message by message by the project each was filed under, the page as long as its limit of what its reader sees; a reply answers only a message its writer may read), `ScopedSyncTest` (a forged push, a project row, an erase request, and one for a spec moved into the scope whose earlier review is not; a row is born naming only what its pusher may see: a spec into or over a conversation outside the scope, a room over one, a run of a spec or room outside it, none told whose it is), `EraseAuthorityTest` (a scoped owner erases a spec only when all that belongs to it is inside the scope), `ScopedReadsTest` (every read route under `/v1` answers a scoped caller byte for byte the same whether or not another project exists, held complete against `Operations`; a write into a hidden project is a project not found and one addressed to a hidden row meets what a missing row answers; the terminal door; a run sees its owner's scope; a spec is born neither into nor over a hidden room; a spec moved into the scope shows nothing of the room and run it left behind, nor any review written before the move, its findings, their count or a follow-up drafted from them, and is not its owner's to prune, rehearsed or real, while anything belonging to it is filed outside the scope; a room's refusal names only the specs its reader sees; every write route that addresses a row answers one of a hidden project as one nobody holds, held complete against `Operations`; a moved spec is neither seated in nor restored to what it left behind, and shows no question asked in the room it left, nor is a message of that room announced under the spec's project; a run never names the owner of a spec that left the scope; a spec moved into the scope brings none of the talk held in the project it left, through its room, its page cursors, its open question or a run's inbox; a run is delivered nothing of a project its FDE no longer holds; a scoped owner's write on its spec rewrites no review filed outside its scope), `BuildDispatchCoverageTest` (a scoped caller dispatches no spec whose earlier review is filed outside its scope, and its prompt carries no talk filed outside it), `RefusalsTest` (the read filter; an unrestricted read never asks a row's project), `SseHandlerTest` and `AgentLogStreamerTest` (the event and run-log streams; a scope changed while a run-log stream is open), `OpenStreamRecheckTest` (an open event stream follows a grant and a revoke from the next event a second later, asks once per second, and ends when its FDE is removed or disabled), `ConflictOperationsTest`, `ScopedRosterApiTest` (a session and a token of a scoped FDE both resolve to a scoped caller), `NativeFleetIT` (the gateway's `spec list` with a scoped node's key) |
 | S3 | Main decides scope alone, from its grants and the project each change head carries, and remembers nothing of what it sent. | `ScopedHeadsTest` (every type's head carries its project from its first write, through a deletion, a withdrawal, an erasure and a purge; a review and a message stay filed where they were first written when their spec moves and they are written again; the backfill), `MessageStoreTest` (a reply is filed with the message it answers), `ScopedSyncTest` (a thousand foreign heads are paged past by their heads alone, no row loaded, and the checkpoint reaches main's tip), `ProjectScopeTest` |
 | S4 | A grant shows after the next round; a revocation removes the project in the same round with its container and directory, unpushed work included, announced once and counting the unpushed rows only when there are any; a narrowing revokes every project it does not grant, and a widening grants every project. | `ScopedSyncTest` (a grant resets the checkpoints and what was held re-adopts unwritten; a revocation with nothing unpushed says so; a revocation drops rows, history, heads, offers, requests and content at the round's start; a project with a run under way here is kept until the run ends; what was erased or deleted before the node first synced leaves with its project; with a spec moved each way between two projects, a revocation takes what main files under the project and leaves what it files under the other, and the node equals main within its scope; a thread begun before its room moved arrives and leaves whole), `SyncScopeTest`, `ScopeChangeRoundTest` (a narrowing and a widening through a whole round; a container Sail provisioned deleted and one it did not kept; an unreachable Incus leaves the container to the next round; a run under way keeps both; an out-of-scope project's leftovers taken by the first round; an unchanged round's one `incus list`, and none unscoped), `ProjectTeardownTest`, `ScopeTeardownIT` (a real Incus daemon), `NativeFleetIT` (an FDE that joined unscoped narrowed in place, keeping its key) |
 | S5 | An unscoped FDE is untouched: a fleet with no scoped FDE behaves as it did. | every sync test, unchanged; `ScopedSyncTest` and `NativeFleetIT` (an unscoped node beside a scoped one equals main), `ScopedSyncServerTest` (the whole roster, with emails) |
@@ -356,7 +356,8 @@ container outside the scope, and an unscoped box asks Incus nothing. When `incus
 the next round that can reach Incus deletes its container. A project kept for a run under way
 here is still held, so it keeps both until the round after the run ends.
 
-**Main's API** has no single read seam, so one helper (`Scoped`) is applied in each read:
+**Main's API** has no single read seam, so one read filter (`Refusals.readable`, a Read of `Access` on each row as it is filed) is applied
+in each read:
 a row outside the caller's scope is the same not-found a missing row is, a list leaves it
 out, and an open event or run-log stream asks its caller's authentication again through the
 door it opened with (`StreamRecheck`), before an event or a heartbeat once a second or more has
@@ -372,7 +373,7 @@ publishes about work outside its scope is decided as one about work this box doe
 no sender whose scope does not admit that project. A row shown with another row's fields is not that row's licence to them: a
 spec's wake, engagement and open question are its room's and its latest run is a run's, each
 of its own project, which a spec moved between projects left behind, so each is read through
-the helper too; a member is seated through a spec only when its caller may see the room the
+the filter too; a member is seated through a spec only when its caller may see the room the
 spec lives in, a spec is born into a room only when its caller may see that room, a revision
 made in another project is one the spec's history does not hold, and a run names the owner
 of the spec it worked only to a reader who may see that spec. A review is read by the
@@ -387,7 +388,7 @@ where a page's limit counts only what its reader sees: a room's page and its cur
 inbox, a room's latest message and its open question, and the talk a dispatch puts in an
 agent's prompt. A run's credential outlives a revoked grant and its scope does not: the
 local socket resolves the run's actor on every request, and the run it addresses is looked up
-through `Scoped`, so a run whose FDE lost the project is answered as a run nobody holds. A
+through the same filter, so a run whose FDE lost the project is answered as a run nobody holds. A
 read reads as the actor
 its door bound (`Actor.reader`); one no door bound an actor to is the box's own, its root CLI
 describing what the box holds, and sees every project. The HTTP and local-socket routers bind
@@ -2195,14 +2196,24 @@ node's transitions, and it speaks as the FDE who pushed them, whose session the 
 it. A retold event starts no review, sends no webhook and finishes no run here. So a member is
 never taken at their word for what this box observed, and a run another box pushed is never a
 key to the spec it names: its pusher wrote that row, and only the spec's own owner speaks for
-the spec. Each listed type has one rule:
+the spec. Each listed type names the one action its sender must be allowed on what it is about
+(`EventAuthority.publishable`, decided by `Access`; the Access section above), and the rule keeps
+whether its sender speaks for this box, whether it retells, and whether this box executed the run:
 
-| Rule | Who may publish | Types | Published by |
-|---|---|---|---|
-| `DRIVES` | an admin; this box's FDE, for a run this box executed (`RunRow.ownedBy`) or a spec or room it owns; retold, an actor who acts for the owner of the spec (`Ownership.ownerOf`) or room (`RoomStore.owners`) it names or that the run it names works — a run that works neither is its own owners' (`RunAuthority.owners`). Never a run's own principal | `agent_session_stopped`, `agent_cancelled`, `agent_failed`, `spec_dispatched`, `spec_restarted`, `review_iteration_started`, `review_stage_started`, `review_stage_passed`, `review_stage_failed`, `review_completed`, `review_errored`, `review_escalated` | the watcher (`agent_session_stopped`); the host CLI's dispatch (`spec_dispatched`, `spec_restarted`) and stop (`agent_cancelled`); main's sync bridge, retelling what a node's synced transition tells (`SyncTransitionEvents`) |
-| `NARRATES` | an admin; this box's FDE for a run this box executed; a run's own principal for that run alone | `agent_session_started`, `agent_stop_nudged`, `agent_tool_started`, `agent_tool_finished` | the in-container hooks over the socket; the host CLI's dispatch and `sail run` (`agent_session_started`) |
-| `ANNOUNCES` | an admin; this box's FDE; retold, any writer who acts for an FDE, about a message in a conversation, since every writer of the project may post there (`PostingRule`) | `spec_message_posted` | a node's sync, for each message it pulled |
-| `BOX` | an admin, or this box's FDE | `snapshot_created`, `board_updated` | the host CLI's dispatch (`snapshot_created`); a node's sync, for a round that changed the board |
+| Action | Types | Published by |
+|---|---|---|
+| Operate a run | `agent_session_stopped`, `agent_cancelled`, `agent_failed` | the watcher (`agent_session_stopped`); the host CLI's stop (`agent_cancelled`); main's sync bridge, retelling what a node's synced transition tells (`SyncTransitionEvents`) |
+| Dispatch | `spec_dispatched`, `spec_restarted` | the host CLI's dispatch; main's sync bridge |
+| Approve | `review_iteration_started`, `review_stage_started`, `review_stage_passed`, `review_stage_failed`, `review_completed`, `review_errored`, `review_escalated` | main's sync bridge |
+| Narrate | `agent_session_started`, `agent_stop_nudged`, `agent_tool_started`, `agent_tool_finished` | the in-container hooks over the socket; the host CLI's dispatch and `sail run` (`agent_session_started`) |
+| Post | `spec_message_posted` | a node's sync, for each message it pulled |
+| Operate the box | `snapshot_created`, `board_updated` | the host CLI's dispatch (`snapshot_created`); a node's sync, for a round that changed the board |
+
+Those the machinery acts on are taken first-hand only from whoever speaks for this box (its FDE,
+or an admin), and retold only by one who may take the action on the work, about a run this box
+did not execute. A run's narration is a person's only on the box that executed it; a run's own
+principal narrates its own run alone, and publishes nothing else. An announcement is retold by
+any voice that acts for an FDE, about a conversation.
 
 The host token acts as the box's FDE: an admin on main or a standalone box, the synced
 roster role on a node. The socket's event route takes a run credential only; the box
@@ -2264,13 +2275,12 @@ the row in hand. It is reached in this order, so one principal hears the same re
    grant whatever its role, so a room agent, read-only by construction, posts in its room and
    narrates its run.
 5. Ownership: the cell says owner and the principal is neither an admin nor acting for an owner,
-   or it creates or claims a spec born in a room whose owners it does not act for: refused,
-   naming the owners.
+   or it starts work in the room a spec was born in (creates or claims the spec there, or seats an
+   agent there for it) without acting for that room's owners: refused, naming the owners.
 6. Otherwise allowed.
 
-`Resources` builds each resource with the project it is filed under and its owners, by the owner
-rules the security model names. The table is `Policy`, and this copy of it is generated
-(`PolicyTableTest`):
+After it, a type rule checks the facts only it knows, and a door its placement. The table is
+`Policy`, and this copy of it is generated (`PolicyTableTest`):
 
 | Action | Covers | Viewer | Member | Admin | Work agent | Read-only room agent | In-container credential |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -2298,7 +2308,79 @@ A person reads the column of their role on every lane they come in by, a push ov
 An agent reads its lane's column, and its role (its person's, capped by the lane) still caps every
 cell but own work. A cell holds today's answer where the agreed design changes it, and `Policy`
 names the spec that does: the in-container credential is its person's on the CLI lane until it has
-a lane of its own, so its column narrows nothing yet.
+a lane of its own, so its column narrows nothing yet. A question asked before there is one
+resource, a prune by policy or of a whole project, or again once an erased spec has nothing left
+to own, is the role and lane alone (`Access.decide(actor, action, kind)`).
+
+**Whose a resource is.** `Resources` builds each resource from the row in hand, with the project
+it is filed under and its owners, each owner rule once:
+
+- A spec is its assignee's, or its creator's while it is unassigned (`Ownership.ownerOf`). A spec
+  born in another room also names that room: its conversation's owners for a create or a claim,
+  which give a voice there, and the room's own owner for seating an agent there.
+- A room's settings (roster, wake, title, assignee) are its owner's (`RoomStore.ownerOf`): a
+  spec's identity room its spec's owner's, as this box last knew the spec, live or deleted; any
+  other room its own row's. Its conversation is every owner of the work in it (`RoomStore.owners`):
+  the room's owner and the owner of every spec born in it.
+- A message is filed under the project of its first write and owned by its conversation's owners;
+  a review under its own first write's project and owned by its spec's owner.
+- A run is the FDE it acts for and its spec's owner as the reader sees that spec, or for a
+  spec-less run the box that ran it (`Resources.run`), so a run's own FDE keeps it after its spec
+  is reassigned. A run being born answers to whoever's box runs the work it names: its spec's
+  assignee, a spec-less room's owner, or else the FDE it acts for (`Resources.launched`).
+- A project is its creator's (`projects.created_by`); a box is its FDE's; the org's people are
+  no one's, so an admin's alone.
+
+**Type rules name actions.** Each synced type's `WriteAuthority`, declared by its store
+(`SyncedStore.authority`), names the actions a revision takes, every one of which `Access` must
+allow (`WriteAuthority.refused`, the one seam from a decision to a write's refusal), then checks
+its own facts:
+
+| Rule | Actions | Its own facts |
+| --- | --- | --- |
+| `SpecAuthority` | a birth is Create, plus Claim or Assign for one born in another room naming an assignee; an edit, tombstone or restore is Change; moving a live spec's assignee is Claim (an unassigned spec, for the FDE the actor acts as) or Assign | a project this box holds; a push names only its pusher; `room_id` never changes; a spec's id is reserved for its own room |
+| `RoomAuthority` | a birth is Create; every later revision, tombstone included, is Change of its settings | a project this box holds; attribution |
+| `MessageAuthority` | Post in its conversation | a conversation this box does not hold, and a credential acting for no FDE, post nothing unless the actor may change the conversation itself; as whom a pusher posts |
+| `RunAuthority` | a run's own session report by its own principal is Narrate; every other revision is Change | its principals are its own; attribution; spec and room never change; a run names a spec or a room, never both; a pushed run is its executing box's |
+| `ReviewAuthority` | Approve | attribution; a review never moves to another spec, a stage never to another review |
+| files, projects (`WriteAuthority.table`) | a file is Share; a project's definition is Configure, and a rename Configure plus Purge of the old name | attribution |
+| `EraseAuthority` | a spec named by id is Prune (one this box erased already, Prune at all); a whole project or a policy's sweep is Purge | a prunable status; nothing of the spec's outside the actor's audience; no unfinished run, bar a project purged whole |
+
+Ahead of every rule, `ScopeRule` answers a write that reaches outside the actor's audience in the
+words a write has always heard ("already exists" for an id taken outside, "was not found" for a
+project it names, "is in no project this FDE is granted" on a push), asking `Access` whether the
+actor reads each project. One translator (`Refusals`) turns a refusal into the error clients get,
+a kind one code at every door: `READ_ONLY` → `read_only_credential`, `NOT_OWNER` →
+`forbidden_not_assignee`, `NO_CONVERSATION` → `room_not_found`, `ADMIN_ONLY` →
+`forbidden_admin_only`, `LANE_FORBIDDEN` → `agent_lane_forbidden`, `NOT_AUTHOR` →
+`forbidden_not_author`, `FIXED` → `invalid_request`, `NOT_PRUNABLE` → `spec_not_prunable`,
+`NOT_PUBLISHABLE` → `forbidden`, `OUT_OF_SCOPE` and `UNHELD_PROJECT` → `not_found`. A not-found
+carries no text: the door that asked supplies its own answer for an id it does not hold.
+
+**Events.** Each type a client may publish names one action (`EventAuthority.publishable`): a
+run's reports of itself are Narrate, a run's stop or failure Operate a run, a dispatch or restart
+Dispatch, the review types Approve, a message's announcement Post, and an event about the box
+Operate the box. The rule keeps three facts: whether its sender speaks for this box (Operate the
+box) or only retells what another box did, whether this box executed the run, and that a run's
+own principal publishes only its own run's narration (until spec 3). Work outside the sender's
+scope is not found.
+
+**Reads and sync.** Read is the audience alone. A read filter decides each row as it is filed
+(`Access.reads`) and asks a row's project only of a reader whose audience is restricted, so a list
+an unscoped reader reads adds no query per row; a filter inside one query takes the same scope
+(`Access.audience`). A node receives a row only when its person may read it (`SyncRpcServer`'s
+pages, current rows and handed-back versions), and main accepts a push only when the pusher may
+write it, by the type's rule at main's commit. An agent's column hears a conversation only
+through the voices that steer it (`Policy.hearsOnlySteering`; the filter is `RoomStore.steering`'s
+query): its owners, an active admin of main's roster, sail and the runs working for them.
+
+**Doors** ask `Access` for the side effects no row's rule decides: dispatch and seating
+(`LaunchAdmission`, then placement in `DispatchPolicy`), stop (Operate a run), serving a stack,
+restoring a snapshot, reading a definition, pruning. Every door reads the row it acts on in its
+caller's scope first, or is reached only by the box's operator, who sees every project. The
+checks a door still makes by role or lane, until `sail-every-door-asks-access` and
+`sail-agents-act-on-their-own-work`, and the facts that read a lane to know which applies, are
+the allowlist of `OneDecisionSweepTest`.
 
 ## Security model
 
@@ -2451,10 +2533,8 @@ reach the operator's. So that account refuses `fde pair` and `fde unpair`, and r
 of a paired FDE before removing anything: each names the command to run on the host. An FDE with
 no pairing is removed through the gateway as before, and no key file is touched.
 
-- **Roles and Authorizer.** The roles are `admin`, `member`, and `viewer`, enforced at the
-  API boundary: GET maps to READ, mutating verbs to WRITE, and sensitive routes to ADMIN. An
-  unknown or blank role fails safe to viewer. Attribution (`created_by`, `updated_by`) is the
-  bound actor (below), never client input.
+- **Roles.** The roles are `admin`, `member` and `viewer`; what each may do is the Access table
+  above. An unknown or blank role fails safe to viewer.
 - **One identity per FDE, whichever door.** One rule, `RoleRule` (`ai.singlr.sail.identity`),
   decides the role a credential that names an FDE acts with: this box's operator on main or a
   standalone box, the FDE its sync handle names, is admin, because they hold root on it; every
@@ -2485,75 +2565,36 @@ no pairing is removed through the gateway as before, and no key file is touched.
   - **A run's credential** acts as the run's principal, with the role `RoleRule` gives the FDE
     the run acts for, capped by its lane (`member` for an agent run, `viewer` for a room run).
     A run whose FDE is disabled is refused at the socket.
-- **One owner rule.** `Ownership.ownerOf(assignee, createdBy)` is the only derivation of whose
-  a spec or room is: its assignee, or its creator while it is unassigned. The spec rule, the
-  erase rule, the room rule, the room wake and membership (whose box serves a room's agents: the
-  room's own owner, one box) and the review rule read it. Three rules derive from it and are each
-  implemented once:
-  - **Who owns a room** (`RoomStore.ownerOf`): a spec's identity room is its spec's owner's, as
-    this box last knew the spec, live or deleted (`SpecStore.lastKnown`); any other room is its
-    own row's. A room's settings (roster, wake, title, assignee) are its owner's.
-  - **Who owns a conversation** (`RoomStore.owners`): the room's owner, and the owner of every
-    spec born in it. Only the room lane reads it: a room principal posts exactly where it acts for
-    one of them. Every writer who acts for an FDE posts in every conversation of the projects its
-    scope admits that this box holds (`Access`'s Post row, then `RoomStore.holds` in
-    `MessageAuthority`; the terminal door still asks `PostingRule`), at the terminal door and at
-    main's decision on a synced message alike. Seating work in a room, a spec born there or a
-    claim of one born there, stays its owners' and an admin's (`Access`, for a create or claim of
-    a spec born in a room), since the work's owner becomes one of the room's owners. Owning a spec born in a room is never its settings.
-    Speaking is not steering: only the owners and an active admin of main's roster reach the
-    agents at work in a conversation (`RoomStore.steering`), with sail's own words (`sail` is no
-    FDE's handle) and a run's, weighed as its FDE's through every principal it has had. A running
-    build's inbox (`MessageStore.listUndelivered`, which also carries the run's own FDE, who keeps
-    the run after a reassignment), a wake (`RoomWakeReactor`), a live member's prompt, the room
-    every build, review, fix and room prompt is shown (`MessageStore.steering`), and an agent's
-    own read of the room (`MessageStore.list` on the agent and room lanes) carry nothing else. So
-    another member's comment never instructs an agent that runs on someone else's box with their
-    credentials, and never answers its question (`MessageStore.openQuestions`). Main admits sail's
-    words pushed from a node only from one that steers the conversation too (`MessageAuthority`),
-    so a box whose work was reassigned narrates there no more.
-  - **Who owns a run** (`Resources.run`): the FDE the run acts for, and its spec's owner
-    (for a spec-less run, the box that ran it). Its owners or an admin read its log, stop it and
-    change it; a run's own FDE keeps it after its spec is reassigned. A run is born only for
-    the owner of the work it names — its spec's owner, a spec-less room's (`RoomStore.ownerOf`),
-    or, naming neither, the FDE it acts for — or by an admin, on this box's lanes and pushed
-    alike. It names a spec or a spec-less room, never both, whoever asks: a run on a spec its
-    pusher owns never enters a room that is someone else's. Runs sync before specs and rooms,
-    so one that reaches main ahead of a spec or room its own box made is that box's until they
-    land.
-
-  A spec left without an assignee stays unassigned, and so does its identity room; any member
-  may claim it by assigning it to themselves, an agent for the FDE it acts for, and dispatch
-  refuses it until then. Owning a spec gives a voice in its conversation, so a spec born in a
-  room is claimed, or created with an assignee, only by one who may already start work there and
-  only for themselves (a claim, in `SpecAuthority`); giving it to anyone else is an admin's act. A claim
-  never opens someone else's room. An assignee is an FDE handle, never an agent type or a run's principal
-  (`RunStore.isPrincipalHandle`). `created_by` is the acting FDE (`Actor.actingFde`: the
-  handle, or the FDE a run acts for), written once at create. A spec's creator travels as
-  `_created_by` beside `_actor`: main keeps the one it holds, records the pusher when a
-  node-born create names none, and fills a creator it never recorded only from that creator's
-  own push; a node adopts main's, the pushing node from the creator main names when it accepts
-  the push.
-- **One rule per type, and each write decided once.** Who may write a synced row is one
-  `WriteAuthority` per type in sail-core (`ai.singlr.sail.authority`), declared by its store
-  (`SyncedStore.authority`): `SpecAuthority`, `RoomAuthority`, `ReviewAuthority`,
-  `RunAuthority` and `MessageAuthority`; files and project definitions are the permission
-  table's rows alone (`WriteAuthority.table`: Share, Configure, and for a rename, which moves
-  every spec and file of the project, Purge of the old name too). A rule names the actions a
-  revision takes, every one of which `Access.decide` must allow, and keeps the facts only it
-  knows. A rule
-  reads the type's synced projection — `held`, what this box holds, and `next`, the revision
-  (null for a tombstone, or a tombstone's marks) — may read this box's database for owners,
-  never writes, and reads whatever it derives from the row it decides from `held`, so a
-  revision never admits itself. `held` is the projection at the journal's head
-  (`RevisionJournal.held`: the last live state over a tombstone, nothing over a withdrawal or
-  an erasure), never the row, which the write being decided has already reached. A rule
-  answers a `Refusal` (`READ_ONLY`, `NOT_OWNER`, `NO_CONVERSATION`, `ADMIN_ONLY`, `NOT_AUTHOR`,
-  `FIXED`, and the erase rule's `NOT_PRUNABLE`) with the message and fix clients see. Sail
-  itself (`Actor.isSail`: `MAIN` and `SYSTEM`) is never asked; a read-only role is refused,
-  except a run's principal reporting its own session and a room principal posting where the
-  posting rule lets it. A write is decided at
-  exactly one of two points:
+- **Whose a row is** is `Resources`' (the Access section above), each owner rule once. Owning
+  a spec born in a room gives a voice in its conversation, never its settings. A spec left
+  without an assignee stays unassigned, and so does its identity room; dispatch refuses it until
+  someone claims it. An assignee is an FDE handle, never an agent type or a run's principal
+  (`RunStore.isPrincipalHandle`). `created_by` is the acting FDE (`Actor.actingFde`: the handle,
+  or the FDE a run acts for), written once at create. A spec's creator travels as `_created_by`
+  beside `_actor`: main keeps the one it holds, records the pusher when a node-born create names
+  none, and fills a creator it never recorded only from that creator's own push; a node adopts
+  main's, the pushing node from the creator main names when it accepts the push.
+- **Speaking is not steering.** Every writer who acts for an FDE posts in every conversation of
+  the projects its scope admits that this box holds, but only the owners and an active admin of
+  main's roster reach the agents at work in a conversation (`RoomStore.steering`), with sail's
+  own words (`sail` is no FDE's handle) and a run's, weighed as its FDE's through every principal
+  it has had. A running build's inbox (`MessageStore.listUndelivered`, which also carries the
+  run's own FDE, who keeps the run after a reassignment), a wake (`RoomWakeReactor`), a live
+  member's prompt, the room every build, review, fix and room prompt is shown
+  (`MessageStore.steering`), and an agent's own read of the room (`MessageStore.list` on the
+  agent and room lanes) carry nothing else. So another member's comment never instructs an agent
+  that runs on someone else's box with their credentials, and never answers its question
+  (`MessageStore.openQuestions`). Main admits sail's words pushed from a node only from one that
+  steers the conversation too (`MessageAuthority`), so a box whose work was reassigned narrates
+  there no more.
+- **Each write is decided once,** by its type's rule (the Access section above). A rule reads
+  the type's synced projection — `held`, what this box holds, and `next`, the revision (null for
+  a tombstone, or a tombstone's marks) — may read this box's database for owners, never writes,
+  and reads whatever it derives from the row it decides from `held`, so a revision never admits
+  itself. `held` is the projection at the journal's head (`RevisionJournal.held`: the last live
+  state over a tombstone, nothing over a withdrawal or an erasure), never the row, which the
+  write being decided has already reached. Sail itself (`Actor.isSail`: `MAIN` and `SYSTEM`) is
+  never asked. A write is decided at exactly one of two points:
   - **The journal** decides every write that is not a push, as its revision is recorded
     (`RevisionJournal.recordRevision`, `recordTombstone`, and the chosen side of a resolved
     conflict; `MessageStore.append` for a post), with the bound `Actor` on the `CLI`, `API`,
@@ -2563,24 +2604,14 @@ no pairing is removed through the gateway as before, and no key file is touched.
     (`OneDecisionPointTest`); a new store method that journals is decided without asking.
     `stampActivity`, `Erasure.discard`, `ChangeLog.purge` and `compact`, and a box re-stamping
     the runs it made (`RunStore.stamp`, as `SYSTEM`) record no decision of an actor's.
-  - **The doors** admit side effects only — HTTP, the host CLI, the socket, the terminal.
-    `DispatchPolicy`, `LaunchAdmission`'s box and lane checks, `RoomWakePolicy`, the run-owner
-    rule for stop and logs, and the posting rule for the terminal, engage and conversation
-    reports refuse before anything starts. Before a side effect the journal would then refuse
+  - **The doors** admit side effects only — HTTP, the host CLI, the socket, the terminal —
+    asking `Access` before anything starts. Before a side effect the journal would then refuse
     to record, a door asks the journal's own decision (`SpecStore.decide`, `RoomStore.decide`,
-    `ProjectStore.decide` and `decideRename`, one method the journal also runs): a stop that would cancel a spec,
-    a membership before its snapshot, a catalog edit before a command clones or starts
-    anything, a rename before its container is stopped, a file before its bytes are ingested. HTTP tiers a route for `READ`, and for
-    `ADMIN` where it administers the control plane, never for `WRITE`; a snapshot restored or
-    deleted, which no row's rule decides, is refused a read-only credential by its own
-    admission with the same refusal. One translator (`Refusals`) turns a refusal, thrown by
-    the journal or answered by an admission, into the error clients get, so a kind has one
-    code at every door: `READ_ONLY` → `read_only_credential`, `NOT_OWNER` →
-    `forbidden_not_assignee`, `NO_CONVERSATION` → `room_not_found`, `ADMIN_ONLY` → `forbidden_admin_only`,
-    `LANE_FORBIDDEN` → `agent_lane_forbidden`, `NOT_AUTHOR` →
-    `forbidden_not_author`, `FIXED` → `invalid_request`, `NOT_PRUNABLE` → `spec_not_prunable`,
-    `NOT_PUBLISHABLE` → `forbidden`. The socket answers a thrown refusal in HTTP's envelope
-    (code, message, fix); the terminal keeps its message-and-fix text.
+    `ProjectStore.decide` and `decideRename`, one method the journal also runs): a stop that
+    would cancel a spec, a catalog edit before a command clones or starts anything, a rename
+    before its container is stopped, a file before its bytes are ingested. The socket answers a
+    thrown refusal in HTTP's envelope (code, message, fix); the terminal keeps its
+    message-and-fix text.
   - **An operation that writes several rows commits them once**, so a refusal of any row
     leaves none: a spec's birth with its room, its update with its wake and the findings a
     move into or out of `done` resolves, its delete and restore with its room, a follow-up
@@ -2592,11 +2623,6 @@ no pairing is removed through the gateway as before, and no key file is touched.
     decides no row, yet gives up what this box parked, so a read-only credential is refused it
     and any that can write may; keeping this box's side or merging writes over main's version,
     which the type's rule decides with `held` = main's version.
-  - **A spec's id is reserved for its own room by the spec rule**, at the door as on main: a
-    spec is born over a room holding its id only when that moves no ownership — the room is
-    already its owner's — or by an admin, and it then adopts that room and mints none. One born
-    in another room never is, whoever asks: a conversation is addressed spec-first, so the room
-    on its id would answer as the room the spec lives in.
   - **Main's commit** (`RevisionJournal`, `ProjectStore`, `MessageStore`, each handed the type's
     rule by `StoreReplica.commit`) asks it for every pushed revision with the pusher as the
     actor. On `SYNC` it also decides whom a revision names: its `_actor` is the pusher, `sail` or
@@ -2605,23 +2631,15 @@ no pairing is removed through the gateway as before, and no key file is touched.
     pusher, its runs' principals, or `sail` where a run of its is in the conversation. A run is its
     executing box's: `node` is the pusher, it acts for the pusher, every principal names the run
     itself, and a deleted run is never brought back; so a review run acts for the box's own FDE.
-    It is born only on a spec or room its pusher owns, by the rule the node's journal decided it
-    by, so a run pushed on another FDE's work is denied; one whose spec or room main holds
-    nothing of yet is its box's, and they follow in the same round. A rename is an admin's on
-    main as on the node. Blob presence is checked after the rule, not before: a denied offer's content is
+    A run whose spec or room main holds nothing of yet is its box's, and they follow in the same
+    round. Blob presence is checked after the rule, not before: a denied offer's content is
     never uploaded, so a read-only session's push is denied, not refused for a missing blob, and
     an accepted one still lands only with its blob. A spec born in a room main has never held is
     refused, not denied, like a message there: specs sync before rooms, so the next round decides
-    it. A spec is never born over a room holding its id, live or deleted, unless that moves no
-    ownership (a node's own identity room reaching main first) or an admin asks, and a restore
-    keeps the creator its tombstone recorded, for rooms as for specs. Main's denial never removes
+    it. A restore keeps the creator its tombstone recorded, for rooms as for specs. Main's denial
+    never removes
     work still under way on the node (`SyncedStore.live`): a run that has not finished, or a
     review the node is still running; once it finishes, the denial settles it.
-  - **The erase rule** (`EraseAuthority`) is one rule for a local prune and main's decision on a
-    node's request: write capability, the owner or an admin, a whole project admin-only, a
-    prunable status, no unfinished run — bar a project, which is purged whole once its
-    container is gone, its runs with it, and never waits (`EraseAuthority.idle`, the one place
-    that says so); on a request, only a spec or project main holds.
   - **A node's writes speak for its FDE.** On a node, `RoleRule` caps a credential naming any FDE
     but the box's own at `viewer`: only the box's FDE and the runs acting for it write there,
     because anything else would reach main as that FDE's on the box's session, and be denied.
@@ -2670,10 +2688,9 @@ no pairing is removed through the gateway as before, and no key file is touched.
   stamped on the run row (they replicate with the run), and an opaque run credential hashed
   at rest in the local-only `run_credentials` table. The credential authenticates the
   in-container lane; every run finisher revokes it and the expired-row sweep collects
-  stragglers. Agent principals are member-tier on the spec/event surface — never admin —
-  and the dispatch and stop routes refuse the agent lane outright. Agent-ness is a
-  relationship, not a type: the owner link is attribution and policy tiering, never a
-  separate authorization system.
+  stragglers. What an agent principal may do is its lane's column of the Access table, its
+  person's role capped by the lane. Agent-ness is a relationship, not a type: the owner link is
+  attribution and its column, never a separate authorization system.
 - **Tokens.** Host-local bearer tokens are SHA-256 hashed at rest, returned in plaintext
   once, and stored `0600` under a `0700` `~/.sail`. They carry a 90-day default expiry, where
   a null TTL means never-expires and is kept only for break-glass and bootstrap, and an

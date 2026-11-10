@@ -6,12 +6,32 @@
 package ai.singlr.sail.access;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.singlr.sail.authority.EventAuthority;
 import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.ScopeRule;
+import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.RoomStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.Sqlite;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -19,7 +39,9 @@ import org.junit.jupiter.api.Test;
  * is already today's, played by the fleet's cast: uday is the admin, eng a member of every project,
  * client a member of acme only, obs a viewer of acme and beta. {@code e1} is eng's spec in acme and
  * {@code r1} eng's room there; eng's agent is a build run on {@code e1}, and eng's room agent sits
- * in {@code r1}. Each refusal is asserted whole, its fix included (A12).
+ * in {@code r1}. A row that is a write is played through the type's rule as the journal, main's
+ * commit or the event door asks it, on a box holding acme and beta; the rest through {@link
+ * Access#decide}. Each refusal is asserted whole, its fix included (A12).
  */
 class AccessScenarioTest {
 
@@ -41,6 +63,42 @@ class AccessScenarioTest {
   private static final Resource ENGS_RUN = Resources.run(RUN, "acme", "eng", "e1", "eng", "eng");
 
   private static final Decision ALLOWED = new Decision.Allowed();
+  private static final Remedy GRANT =
+      Remedy.of(
+          "Ask an admin on main for the project: ",
+          Remedy.sail("fde grant", "<handle>", "<project>"),
+          ".");
+
+  private Sqlite db;
+  private SpecStore specs;
+
+  @BeforeEach
+  void setUp() {
+    db = Sqlite.openMemory();
+    new SchemaManager(db).migrate();
+    specs = new SpecStore(db);
+    Acting.system(
+        () ->
+            List.of("acme", "beta")
+                .forEach(project -> new ProjectStore(db).upsert(TestDefinitions.named(project))));
+    Acting.as(
+        "eng",
+        () -> {
+          new RoomStore(db)
+              .create(
+                  new RoomStore.RoomRow(
+                      "r1", "acme", "r1", "eng", null, null, "eng", null, null, "eng"));
+          specs.create(spec("e1", "acme", "eng"));
+          specs.create(spec("b1", "beta", "eng"));
+          specs.create(spec("in-r1", "acme", null).withRoomId("r1"));
+        });
+    Acting.as("uday", () -> specs.create(spec("a2", "acme", null)));
+  }
+
+  @AfterEach
+  void tearDown() {
+    db.close();
+  }
 
   @Test
   void row1ObsReadsAcmesSpecs() {
@@ -49,12 +107,17 @@ class AccessScenarioTest {
 
   @Test
   void row2ObsCommentingOnE1IsReadOnly() {
+    var refused =
+        assertThrows(
+            WriteRefused.class,
+            () -> Actor.call(OBS, () -> new MessageStore(db).append("e1", "obs", "hi", null)));
+
     assertEquals(
-        refused(
+        new Refusal(
             Refusal.Kind.READ_ONLY,
             "Your credential is read-only and cannot post in rooms.",
             "Ask an admin for a member or admin credential."),
-        Access.decide(OBS, Action.POST, E1_ROOM));
+        refused.refusal());
   }
 
   @Test
@@ -65,58 +128,72 @@ class AccessScenarioTest {
   }
 
   @Test
-  void row4ClientsPushOfABetaSpecFindsNothingOnMain() {
+  void row4ClientsPushOfABetaSpecIsInNoProjectItIsGranted() {
     var pushing = Actor.sync("client", Role.MEMBER).withScope(CLIENT.scope());
+    var revised = edited("b1", "title", "pushed");
 
     assertEquals(
-        new Decision.NotFound(),
-        Access.decide(pushing, Action.CHANGE, Resources.spec("b1", "beta", "client", "client")));
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.OUT_OF_SCOPE,
+                "Spec 'b1' is in no project this FDE is granted.",
+                GRANT)),
+        new ScopeRule(new ChangeLog(db), "spec").pushed(pushing, "b1", revised));
   }
 
   @Test
-  void row5AnIdABetaSpecHoldsIsOutsideClientsScope() {
+  void row5AnIdABetaSpecHoldsAlreadyExistsForClient() {
+    var born = new LinkedHashMap<>(edited("b1", "project", "acme"));
+
     assertEquals(
-        new Decision.NotFound(),
-        Access.decide(CLIENT, Action.CREATE, Resources.spec("b1", "beta", "eng", "eng")));
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.OUT_OF_SCOPE, "Spec 'b1' already exists.", "Pick another id.")),
+        Actor.call(CLIENT, () -> specs.decide("b1", born)));
   }
 
   @Test
   void row6ClientCommentsOnE1() {
-    assertEquals(ALLOWED, Access.decide(CLIENT, Action.POST, E1_ROOM));
+    var posted = Actor.call(CLIENT, () -> new MessageStore(db).append("e1", "client", "hi", null));
+
+    assertEquals("client", posted.author());
   }
 
   @Test
   void row7ClientEditingE1IsRefusedNamingEng() {
     assertEquals(
-        refused(
-            Refusal.Kind.NOT_OWNER,
-            "Spec 'e1' is assigned to 'eng', not you.",
-            "Ask eng to make this change, or have an admin do it."),
-        Access.decide(CLIENT, Action.CHANGE, E1));
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.NOT_OWNER,
+                "Spec 'e1' is assigned to 'eng', not you.",
+                "Ask eng to make this change, or have an admin do it.")),
+        Actor.call(CLIENT, () -> specs.decide("e1", edited("e1", "title", "retitled"))));
   }
 
   @Test
   void row8ClientClaimsAnUnassignedSpecButNotOneBornInR1() {
-    var unassigned = Resources.spec("a2", "acme", null, "uday");
-
-    assertEquals(ALLOWED, Access.decide(CLIENT, Action.CLAIM, unassigned));
     assertEquals(
-        refused(
-            Refusal.Kind.NOT_OWNER,
-            "'r1' belongs to eng: only eng or an admin may start work there, not you.",
-            "Ask eng to create it there, or have an admin do it."),
-        Access.decide(CLIENT, Action.CLAIM, unassigned.withParent(R1)));
+        Optional.empty(),
+        Actor.call(CLIENT, () -> specs.decide("a2", edited("a2", "assignee", "client"))));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.NOT_OWNER,
+                "'r1' belongs to eng: only eng or an admin may start work there, not you.",
+                "Ask eng to create it there, or have an admin do it.")),
+        Actor.call(CLIENT, () -> specs.decide("in-r1", edited("in-r1", "assignee", "client"))));
   }
 
   @Test
   void row9ClientReassigningE1IsAdminOnly() {
     assertEquals(
-        refused(
-            Refusal.Kind.ADMIN_ONLY,
-            "Reassigning spec 'e1' moves work between FDEs and is an admin-only action"
-                + " (currently 'eng').",
-            "Ask an admin to reassign it. You may grab a spec only while it is unassigned."),
-        Access.decide(CLIENT, Action.ASSIGN, E1));
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.ADMIN_ONLY,
+                "Reassigning spec 'e1' moves work between FDEs and is an admin-only action"
+                    + " (currently 'eng').",
+                "Ask an admin to reassign it. You may grab a spec only while it is unassigned.")),
+        Actor.call(CLIENT, () -> specs.decide("e1", edited("e1", "assignee", "client"))));
   }
 
   @Test
@@ -167,12 +244,56 @@ class AccessScenarioTest {
   }
 
   @Test
+  void row22ClientRetellingReviewCompletedOnE1IsNotEngsOrAnAdmins() {
+    var events = new EventAuthority(db, () -> "uday");
+
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.NOT_OWNER,
+                "Event type 'review_completed' makes this box act on 'e1' (owned by 'eng'), which"
+                    + " you may not drive.",
+                "Only its owner or an admin may publish it.")),
+        events.decide(CLIENT, "review_completed", events.subject("acme", "e1", null), true));
+    assertEquals(
+        Optional.empty(),
+        events.decide(ENG, "review_completed", events.subject("acme", "e1", null), true));
+  }
+
+  @Test
   void row25EngAddingAPersonIsAdminOnly() {
     assertEquals(
         refused(
             Refusal.Kind.ADMIN_ONLY, "Only an admin may manage people.", "Ask an admin to do it."),
         Access.decide(ENG, Action.MANAGE_PEOPLE, Resources.people()));
     assertEquals(ALLOWED, Access.decide(UDAY, Action.MANAGE_PEOPLE, Resources.people()));
+  }
+
+  /** Spec {@code id} as this box holds it, with {@code field} written as {@code value}. */
+  private Map<String, Object> edited(String id, String field, Object value) {
+    var next = new LinkedHashMap<>(specs.held(id));
+    next.put(field, value);
+    return next;
+  }
+
+  private static SpecStore.SpecRow spec(String id, String project, String assignee) {
+    return new SpecStore.SpecRow(
+        id,
+        project,
+        id,
+        SpecStatus.PENDING,
+        assignee,
+        null,
+        null,
+        null,
+        null,
+        0,
+        null,
+        null,
+        null,
+        null,
+        List.of(),
+        List.of());
   }
 
   private static Decision refused(Refusal.Kind kind, String message, String fix) {
