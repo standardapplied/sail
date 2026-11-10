@@ -882,6 +882,12 @@ class LocalApiRouterTest {
 
     assertEquals(403, response.status());
     assertTrue(response.body().get("error").toString().contains("run credential"));
+    assertEquals(
+        "405 {error=events accepts POST}",
+        answer(
+            router.handle(
+                new LocalApiRequest("GET", "/v1/events", Map.of(), boxAuth(), new byte[0]))),
+        "a method the route does not take is refused before who asks it");
   }
 
   @Test
