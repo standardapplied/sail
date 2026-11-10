@@ -158,6 +158,10 @@ class EraseAuthorityTest {
     assertEquals(
         Optional.of(Kind.READ_ONLY),
         rule.requested(VIEWER_SYNC, "spec", "gone").map(Refusal::kind));
+    assertEquals(
+        new Decision.NotFound(),
+        rule.prune(OTHER_SYNC.withScope(ProjectScope.of(List.of("beta"))), "gone"),
+        "and one erased outside the asker's projects is not there");
   }
 
   @Test

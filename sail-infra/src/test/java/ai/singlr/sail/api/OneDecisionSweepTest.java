@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -114,14 +115,16 @@ class OneDecisionSweepTest {
     }
 
     assertTrue(scanned > 500, "every module's classes were read: " + scanned);
+    assertEquals(List.of(), findings(reads, ALLOWED.keySet()));
+  }
+
+  @Test
+  void aReadTheListDoesNotNameAndAnEntryThatNamesNoReadAreBothFindings() {
     assertEquals(
-        Set.of(),
-        difference(reads, ALLOWED.keySet()),
-        "a member reads a role, a lane or a capability the allowlist does not name");
-    assertEquals(
-        Set.of(),
-        difference(ALLOWED.keySet(), reads),
-        "an allowlisted member no longer reads one: delete its entry");
+        List.of(
+            "a member reads a role, a lane or a capability the allowlist does not name: a#leak",
+            "an allowlisted member no longer reads one, so its entry goes: a#gone"),
+        findings(Set.of("a#leak", "a#kept"), Set.of("a#kept", "a#gone")));
   }
 
   @Test
@@ -180,6 +183,22 @@ class OneDecisionSweepTest {
     boolean inALambda(List<Actor> actors) {
       return actors.stream().anyMatch(Actor::isAdmin);
     }
+  }
+
+  /** Each read {@code allowed} does not name, then each entry of it that names no read. */
+  private static List<String> findings(Set<String> reads, Set<String> allowed) {
+    return Stream.concat(
+            difference(reads, allowed).stream()
+                .map(
+                    read ->
+                        "a member reads a role, a lane or a capability the allowlist does not"
+                            + " name: "
+                            + read),
+            difference(allowed, reads).stream()
+                .map(
+                    entry ->
+                        "an allowlisted member no longer reads one, so its entry goes: " + entry))
+        .toList();
   }
 
   private static Set<String> difference(Set<String> of, Set<String> without) {
