@@ -11,6 +11,7 @@ import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.RunStore;
 import java.util.EnumSet;
 import java.util.stream.Collectors;
@@ -51,7 +52,7 @@ public final class Access {
     if (WriteAuthority.decided(actor)) {
       return ALLOWED;
     }
-    if (resource.kind().filed() && !actor.scope().admits(resource.project())) {
+    if (resource.kind().filed() && !audience(actor).admits(resource.project())) {
       return NOT_FOUND;
     }
     var role = Policy.cell(action, Column.role(actor.role()));
@@ -73,6 +74,16 @@ public final class Access {
       return refused(notSeated(resource.parent()));
     }
     return ALLOWED;
+  }
+
+  /**
+   * The projects whose resources {@code actor} may read: the audience step of {@link #decide} as a
+   * scope, every project for Sail itself. A read that filters many rows inside one query, rather
+   * than deciding each row in hand, filters by this scope, so the Read rule is the same whichever
+   * way it is asked.
+   */
+  public static ProjectScope audience(Actor actor) {
+    return WriteAuthority.decided(actor) ? ProjectScope.all() : actor.scope();
   }
 
   /**
@@ -236,17 +247,19 @@ public final class Access {
         owners.isEmpty()
             ? null
             : owners.stream().map(owner -> "'" + owner + "'").collect(Collectors.joining(" and "));
-    var spec = specOf(run);
+    var work = run.parent();
     var message =
-        spec == null
+        work == null
             ? "Run "
                 + run.id()
                 + " is an ad-hoc session"
                 + (owned != null ? " launched by " + owned + ", not you." : ".")
             : "Run "
                 + run.id()
-                + " belongs to spec '"
-                + spec
+                + " belongs to "
+                + work.kind().noun()
+                + " '"
+                + work.id()
                 + "'"
                 + (owned != null ? ", owned by " + owned + ", not you." : ", which has no owner.");
     var named = owners.isEmpty() ? "its owner" : String.join(" or ", owners);

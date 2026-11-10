@@ -105,6 +105,24 @@ public final class Resources {
         Strings.isBlank(specId) ? null : named(specId, project, null));
   }
 
+  /**
+   * Run {@code id} of {@code project} as an event about it is decided: it answers to {@code
+   * owners}, who the event rule finds drive it on this box, and does the work of {@code
+   * conversation}, null for an ad-hoc run.
+   */
+  public static Resource reported(
+      String id, String project, List<String> owners, Resource conversation) {
+    return new Resource(Resource.Kind.RUN, id, project, owners, null, conversation);
+  }
+
+  /**
+   * A row of {@code kind} as a read that holds only its head decides it: {@code id}, filed under
+   * {@code project}. Its owners are not read, since reading asks none.
+   */
+  public static Resource filed(Resource.Kind kind, String id, String project) {
+    return new Resource(kind, id, project, List.of(), null, null);
+  }
+
   /** Project {@code name}, filed under itself: its creator's ({@code projects.created_by}). */
   public static Resource project(String name, String createdBy) {
     return new Resource(Resource.Kind.PROJECT, name, name, one(createdBy), null, null);

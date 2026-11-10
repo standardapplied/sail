@@ -54,6 +54,29 @@ class PolicyTest {
   }
 
   @Test
+  void onlyAnAgentsColumnHearsAConversationThroughTheVoicesThatSteerIt() {
+    var heard =
+        Arrays.stream(Actor.Lane.values())
+            .collect(
+                Collectors.toMap(
+                    Function.identity(),
+                    lane ->
+                        Policy.hearsOnlySteering(
+                            new Actor("claude/r-1", Role.MEMBER, lane, "ada"))));
+
+    assertEquals(
+        Map.of(
+            Actor.Lane.CLI, false,
+            Actor.Lane.API, false,
+            Actor.Lane.AGENT, true,
+            Actor.Lane.ROOM, true,
+            Actor.Lane.SYNC, false,
+            Actor.Lane.MAIN, false,
+            Actor.Lane.SYSTEM, false),
+        heard);
+  }
+
+  @Test
   void theInContainerCredentialNarrowsNothingUntilItHasALane() {
     assertEquals(
         Arrays.stream(Action.values())
