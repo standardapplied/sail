@@ -121,6 +121,7 @@ class StackOperationsTest {
     for (var call :
         List.<StackCall>of(
             stack -> stack.serve("acme", Duration.ofSeconds(60)),
+            stack -> stack.serve("acme", Duration.ZERO),
             stack -> stack.ports("acme"),
             stack -> stack.stop("acme"))) {
       var refused =

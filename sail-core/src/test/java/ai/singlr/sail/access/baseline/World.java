@@ -313,6 +313,11 @@ public final class World implements AutoCloseable {
         });
   }
 
+  /** Forgets catalog row {@code project}, leaving every row filed under it as it is. */
+  public void uncatalog(String project) {
+    db.execute("DELETE FROM projects WHERE name = ?", project);
+  }
+
   /** Forgets the journal's head of {@code type} {@code id}, leaving its row as it is. */
   public void dropHead(String type, String id) {
     db.execute("DELETE FROM change_heads WHERE entity_type = ? AND entity_id = ?", type, id);

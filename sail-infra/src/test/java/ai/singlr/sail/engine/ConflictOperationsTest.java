@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Resolution;
 import ai.singlr.sail.commands.CliCommand;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -584,6 +585,26 @@ class ConflictOperationsTest {
     assertEquals(List.of(), operations.list());
     assertEquals(
         b64("theirs"), ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "x.txt"));
+  }
+
+  /** Whether the actor may resolve conflicts at all is asked before what the conflict kept. */
+  @Test
+  void aViewerIsToldItsRoleBeforeAConflictThatKeptNoRevisionOfMains() throws IOException {
+    parkTitle();
+    node.db.execute("UPDATE sync_conflicts SET remote_rev = NULL, remote_author = NULL");
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Acting.by(
+                    new Actor("vic", Role.VIEWER, Actor.Lane.API),
+                    () ->
+                        operations.resolve("spec", "auth", resolution(Resolution.Strategy.MINE))));
+
+    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, refused.failure().errorCode());
+    assertEquals(
+        "Your credential is read-only and cannot resolve conflicts.", refused.getMessage());
   }
 
   @ParameterizedTest

@@ -493,6 +493,28 @@ class EventAuthorityTest {
         () -> EventAuthority.publishable().put("made_up", Action.OPERATE_BOX));
   }
 
+  /**
+   * Every refusal of an event says the earliest reason: a viewer's announcement is read-only before
+   * it speaks for the box, and an agent's event of a type no client publishes is that type's before
+   * the agent's lane.
+   */
+  @Test
+  void anEventIsRefusedForItsEarliestReason() {
+    var nothing = rule.subject("acme", null, null);
+
+    assertEquals(
+        Optional.of(Refusal.readOnly("publish events")),
+        rule.decide(VIEWER, BOARD, nothing, false));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_PUBLISHABLE,
+                "Event type 'spec_created' is not one a client may publish: the server emits its"
+                    + " own events after the writes they describe.",
+                "Make the change through its own route; the server publishes the event.")),
+        rule.decide(AGENT, "spec_created", nothing, false));
+  }
+
   @Test
   void aBoxWithNoFdeIsSpokenForByAnAdminAlone() {
     boxFde = null;

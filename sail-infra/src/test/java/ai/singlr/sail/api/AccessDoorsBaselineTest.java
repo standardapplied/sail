@@ -311,6 +311,15 @@ class AccessDoorsBaselineTest {
               return ops.resolveConflict(
                   "file", "acme/notes.md", new Resolution(Resolution.Strategy.MINE, null));
             }));
+    doors.add(
+        new Door(
+            "resolve a conflict of spec s-ada parked before conflicts kept main's revision",
+            ops -> {
+              parkConflict(world, "spec", "s-ada");
+              world.db.execute("UPDATE sync_conflicts SET remote_rev = NULL, remote_author = NULL");
+              return ops.resolveConflict(
+                  "spec", "s-ada", new Resolution(Resolution.Strategy.MINE, null));
+            }));
     var review = world.id("review-ada");
     var finding = world.id("finding-ada");
     doors.add(new Door("approve review-ada", ops -> ops.approveReview(review)));

@@ -76,6 +76,17 @@ class WritesBaselineTest {
                         }));
           }
         }
+        for (var change : Changes.uncatalogued(world)) {
+          corpus.ask(
+              "write " + change.label() + " as " + member.label(),
+              () ->
+                  world.db.rehearse(
+                      () -> {
+                        world.uncatalog("beta");
+                        return Corpus.decided(
+                            Actor.call(member.actor(), () -> preAsk(world, change)));
+                      }));
+        }
         for (var change : Changes.filedElsewhere(world)) {
           corpus.ask(
               "write " + change.label() + " as " + member.label(),

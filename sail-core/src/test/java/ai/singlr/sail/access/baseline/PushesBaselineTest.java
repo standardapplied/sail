@@ -91,6 +91,22 @@ class PushesBaselineTest {
                                             World.ADOPTED_REV))),
                                 () -> world.adoptDeletion(change.type(), change.id(), "acme")));
                   }
+                  for (var change : Changes.uncatalogued(world)) {
+                    corpus.ask(
+                        "push " + change.label() + " as " + pusher.label(),
+                        () ->
+                            answer(
+                                world,
+                                pusher.actor(),
+                                new SyncWire.Push(
+                                    change.type(),
+                                    List.of(
+                                        new MainReplica.Offer(
+                                            change.id(),
+                                            authored(change, pusher.actor().handle()),
+                                            world.store(change.type()).latestRev(change.id())))),
+                                () -> world.uncatalog("beta")));
+                  }
                   for (var erase : erasures()) {
                     corpus.ask(
                         "erase "
@@ -136,6 +152,8 @@ class PushesBaselineTest {
     for (var change : Changes.all(world)) {
       if (change.what().equals("edit title")
           || change.what().equals("status completed")
+          || change.what().equals("move room to den")
+          || change.what().equals("name a foreign principal")
           || change.what().startsWith("create of s-")
           || change.what().equals("create")) {
         for (var author : AUTHORS) {

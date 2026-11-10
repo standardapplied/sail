@@ -1622,6 +1622,20 @@ push room b-room edit title as sync viewer anonymous none	denied DENIED Room 'b-
 push room b-room edit title as sync viewer bob acme	denied DENIED Room 'b-room' is in no project this FDE is granted.
 push room b-room edit title as sync viewer bob all	denied DENIED Your credential is read-only and cannot change rooms.
 push room b-room edit title as sync viewer bob beta	denied DENIED Your credential is read-only and cannot change rooms.
+push room b-room edit title in a project the catalog lost as sync admin root all	allowed
+push room b-room edit title in a project the catalog lost as sync member ada acme	denied DENIED Room 'b-room' is in no project this FDE is granted.
+push room b-room edit title in a project the catalog lost as sync member ada all	allowed
+push room b-room edit title in a project the catalog lost as sync member ada beta	allowed
+push room b-room edit title in a project the catalog lost as sync member bob acme	denied DENIED Room 'b-room' is in no project this FDE is granted.
+push room b-room edit title in a project the catalog lost as sync member bob all	denied DENIED Room 'b-room' belongs to 'ada', not you.
+push room b-room edit title in a project the catalog lost as sync member bob beta	denied DENIED Room 'b-room' belongs to 'ada', not you.
+push room b-room edit title in a project the catalog lost as sync viewer ada acme	denied DENIED Room 'b-room' is in no project this FDE is granted.
+push room b-room edit title in a project the catalog lost as sync viewer ada all	denied DENIED Your credential is read-only and cannot change rooms.
+push room b-room edit title in a project the catalog lost as sync viewer ada beta	denied DENIED Your credential is read-only and cannot change rooms.
+push room b-room edit title in a project the catalog lost as sync viewer anonymous none	denied DENIED Room 'b-room' is in no project this FDE is granted.
+push room b-room edit title in a project the catalog lost as sync viewer bob acme	denied DENIED Room 'b-room' is in no project this FDE is granted.
+push room b-room edit title in a project the catalog lost as sync viewer bob all	denied DENIED Your credential is read-only and cannot change rooms.
+push room b-room edit title in a project the catalog lost as sync viewer bob beta	denied DENIED Your credential is read-only and cannot change rooms.
 push room b-room edit title written as ada as sync admin root all	denied DENIED 'root' may not write as 'ada'.
 push room b-room edit title written as ada as sync member ada acme	denied DENIED Room 'b-room' is in no project this FDE is granted.
 push room b-room edit title written as ada as sync member ada all	allowed
@@ -2434,6 +2448,76 @@ push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal as sync v
 push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change runs.
 push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal as sync viewer bob all	denied DENIED Your credential is read-only and cannot change runs.
 push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal as sync viewer bob beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as ada as sync admin root all	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as ada as sync member ada acme	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as ada as sync member ada all	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as ada as sync member ada beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as ada as sync member bob acme	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as ada as sync member bob all	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as ada as sync member bob beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as ada as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as ada as sync viewer ada all	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as ada as sync viewer ada beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as ada as sync viewer anonymous none	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as ada as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as ada as sync viewer bob all	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as ada as sync viewer bob beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as bob as sync admin root all	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as bob as sync member ada acme	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as bob as sync member ada all	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as bob as sync member ada beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as bob as sync member bob acme	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as bob as sync member bob all	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as bob as sync member bob beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as bob as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as bob as sync viewer ada all	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as bob as sync viewer ada beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as bob as sync viewer anonymous none	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as bob as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as bob as sync viewer bob all	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as bob as sync viewer bob beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000ada01 as sync admin root all	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member ada acme	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member ada all	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member ada beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member bob acme	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member bob all	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member bob beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer ada all	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer ada beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer anonymous none	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer bob all	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer bob beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync admin root all	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member ada acme	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member ada all	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member ada beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member bob acme	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member bob all	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member bob beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer ada all	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer ada beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer anonymous none	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer bob all	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer bob beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as sail as sync admin root all	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as sail as sync member ada acme	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as sail as sync member ada all	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as sail as sync member ada beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as sail as sync member bob acme	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as sail as sync member bob all	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' names 'claude/019fee00-0000-7000-8000-0000000b0b01' as its principal, which is not its own.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as sail as sync member bob beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as sail as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as sail as sync viewer ada all	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as sail as sync viewer ada beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as sail as sync viewer anonymous none	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as sail as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as sail as sync viewer bob all	denied DENIED Your credential is read-only and cannot change runs.
+push run 019fee00-0000-7000-8000-0000000ada01 name a foreign principal written as sail as sync viewer bob beta	denied DENIED Run '019fee00-0000-7000-8000-0000000ada01' is in no project this FDE is granted.
 push run 019fee00-0000-7000-8000-0000000ada01 report session as sync admin root all	denied DENIED Only the node that executed run '019fee00-0000-7000-8000-0000000ada01' may change it, and this is 'root'.
 push run 019fee00-0000-7000-8000-0000000ada01 report session as sync member ada acme	allowed
 push run 019fee00-0000-7000-8000-0000000ada01 report session as sync member ada all	allowed
@@ -3750,6 +3834,76 @@ push spec s-ada move room to den as sync viewer anonymous none	denied DENIED Spe
 push spec s-ada move room to den as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
 push spec s-ada move room to den as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
 push spec s-ada move room to den as sync viewer bob beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as ada as sync admin root all	denied DENIED 'root' may not write as 'ada'.
+push spec s-ada move room to den written as ada as sync member ada acme	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
+push spec s-ada move room to den written as ada as sync member ada all	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
+push spec s-ada move room to den written as ada as sync member ada beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as ada as sync member bob acme	denied DENIED 'bob' may not write as 'ada'.
+push spec s-ada move room to den written as ada as sync member bob all	denied DENIED 'bob' may not write as 'ada'.
+push spec s-ada move room to den written as ada as sync member bob beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as ada as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as ada as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as ada as sync viewer ada beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as ada as sync viewer anonymous none	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as ada as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as ada as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as ada as sync viewer bob beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as bob as sync admin root all	denied DENIED 'root' may not write as 'bob'.
+push spec s-ada move room to den written as bob as sync member ada acme	denied DENIED 'ada' may not write as 'bob'.
+push spec s-ada move room to den written as bob as sync member ada all	denied DENIED 'ada' may not write as 'bob'.
+push spec s-ada move room to den written as bob as sync member ada beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as bob as sync member bob acme	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
+push spec s-ada move room to den written as bob as sync member bob all	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
+push spec s-ada move room to den written as bob as sync member bob beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as bob as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as bob as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as bob as sync viewer ada beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as bob as sync viewer anonymous none	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as bob as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as bob as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as bob as sync viewer bob beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync admin root all	denied DENIED 'root' may not write as 'claude/019fee00-0000-7000-8000-0000000ada01'.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member ada acme	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member ada all	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member ada beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member bob acme	denied DENIED 'bob' may not write as 'claude/019fee00-0000-7000-8000-0000000ada01'.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member bob all	denied DENIED 'bob' may not write as 'claude/019fee00-0000-7000-8000-0000000ada01'.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member bob beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer ada beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer anonymous none	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer bob beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync admin root all	denied DENIED 'root' may not write as 'claude/019fee00-0000-7000-8000-0000000b0b01'.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member ada acme	denied DENIED 'ada' may not write as 'claude/019fee00-0000-7000-8000-0000000b0b01'.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member ada all	denied DENIED 'ada' may not write as 'claude/019fee00-0000-7000-8000-0000000b0b01'.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member ada beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member bob acme	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member bob all	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member bob beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer ada beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer anonymous none	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer bob beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as sail as sync admin root all	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
+push spec s-ada move room to den written as sail as sync member ada acme	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
+push spec s-ada move room to den written as sail as sync member ada all	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
+push spec s-ada move room to den written as sail as sync member ada beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as sail as sync member bob acme	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
+push spec s-ada move room to den written as sail as sync member bob all	denied DENIED The room_id of spec 's-ada' is set when it is created and never changes.
+push spec s-ada move room to den written as sail as sync member bob beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as sail as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as sail as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as sail as sync viewer ada beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as sail as sync viewer anonymous none	denied DENIED Spec 's-ada' is in no project this FDE is granted.
+push spec s-ada move room to den written as sail as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as sail as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-ada move room to den written as sail as sync viewer bob beta	denied DENIED Spec 's-ada' is in no project this FDE is granted.
 push spec s-ada move to beta as sync admin root all	allowed
 push spec s-ada move to beta as sync member ada acme	denied DENIED Spec 's-ada' is in no project this FDE is granted.
 push spec s-ada move to beta as sync member ada all	allowed
@@ -5696,6 +5850,76 @@ push spec s-lobby move room to den as sync viewer anonymous none	denied DENIED S
 push spec s-lobby move room to den as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
 push spec s-lobby move room to den as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
 push spec s-lobby move room to den as sync viewer bob beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as ada as sync admin root all	denied DENIED 'root' may not write as 'ada'.
+push spec s-lobby move room to den written as ada as sync member ada acme	denied DENIED The room_id of spec 's-lobby' is set when it is created and never changes.
+push spec s-lobby move room to den written as ada as sync member ada all	denied DENIED The room_id of spec 's-lobby' is set when it is created and never changes.
+push spec s-lobby move room to den written as ada as sync member ada beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as ada as sync member bob acme	denied DENIED 'bob' may not write as 'ada'.
+push spec s-lobby move room to den written as ada as sync member bob all	denied DENIED 'bob' may not write as 'ada'.
+push spec s-lobby move room to den written as ada as sync member bob beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as ada as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as ada as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as ada as sync viewer ada beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as ada as sync viewer anonymous none	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as ada as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as ada as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as ada as sync viewer bob beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as bob as sync admin root all	denied DENIED 'root' may not write as 'bob'.
+push spec s-lobby move room to den written as bob as sync member ada acme	denied DENIED 'ada' may not write as 'bob'.
+push spec s-lobby move room to den written as bob as sync member ada all	denied DENIED 'ada' may not write as 'bob'.
+push spec s-lobby move room to den written as bob as sync member ada beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as bob as sync member bob acme	denied DENIED The room_id of spec 's-lobby' is set when it is created and never changes.
+push spec s-lobby move room to den written as bob as sync member bob all	denied DENIED The room_id of spec 's-lobby' is set when it is created and never changes.
+push spec s-lobby move room to den written as bob as sync member bob beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as bob as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as bob as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as bob as sync viewer ada beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as bob as sync viewer anonymous none	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as bob as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as bob as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as bob as sync viewer bob beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync admin root all	denied DENIED 'root' may not write as 'claude/019fee00-0000-7000-8000-0000000ada01'.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member ada acme	denied DENIED The room_id of spec 's-lobby' is set when it is created and never changes.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member ada all	denied DENIED The room_id of spec 's-lobby' is set when it is created and never changes.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member ada beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member bob acme	denied DENIED 'bob' may not write as 'claude/019fee00-0000-7000-8000-0000000ada01'.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member bob all	denied DENIED 'bob' may not write as 'claude/019fee00-0000-7000-8000-0000000ada01'.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member bob beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer ada beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer anonymous none	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer bob beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync admin root all	denied DENIED 'root' may not write as 'claude/019fee00-0000-7000-8000-0000000b0b01'.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member ada acme	denied DENIED 'ada' may not write as 'claude/019fee00-0000-7000-8000-0000000b0b01'.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member ada all	denied DENIED 'ada' may not write as 'claude/019fee00-0000-7000-8000-0000000b0b01'.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member ada beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member bob acme	denied DENIED The room_id of spec 's-lobby' is set when it is created and never changes.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member bob all	denied DENIED The room_id of spec 's-lobby' is set when it is created and never changes.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member bob beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer ada beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer anonymous none	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer bob beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as sail as sync admin root all	denied DENIED The room_id of spec 's-lobby' is set when it is created and never changes.
+push spec s-lobby move room to den written as sail as sync member ada acme	denied DENIED The room_id of spec 's-lobby' is set when it is created and never changes.
+push spec s-lobby move room to den written as sail as sync member ada all	denied DENIED The room_id of spec 's-lobby' is set when it is created and never changes.
+push spec s-lobby move room to den written as sail as sync member ada beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as sail as sync member bob acme	denied DENIED The room_id of spec 's-lobby' is set when it is created and never changes.
+push spec s-lobby move room to den written as sail as sync member bob all	denied DENIED The room_id of spec 's-lobby' is set when it is created and never changes.
+push spec s-lobby move room to den written as sail as sync member bob beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as sail as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as sail as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as sail as sync viewer ada beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as sail as sync viewer anonymous none	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
+push spec s-lobby move room to den written as sail as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as sail as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-lobby move room to den written as sail as sync viewer bob beta	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
 push spec s-lobby move to beta as sync admin root all	allowed
 push spec s-lobby move to beta as sync member ada acme	denied DENIED Spec 's-lobby' is in no project this FDE is granted.
 push spec s-lobby move to beta as sync member ada all	allowed
@@ -6368,6 +6592,76 @@ push spec s-open-bob move room to den as sync viewer anonymous none	denied DENIE
 push spec s-open-bob move room to den as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
 push spec s-open-bob move room to den as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
 push spec s-open-bob move room to den as sync viewer bob beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as ada as sync admin root all	denied DENIED 'root' may not write as 'ada'.
+push spec s-open-bob move room to den written as ada as sync member ada acme	denied DENIED The room_id of spec 's-open-bob' is set when it is created and never changes.
+push spec s-open-bob move room to den written as ada as sync member ada all	denied DENIED The room_id of spec 's-open-bob' is set when it is created and never changes.
+push spec s-open-bob move room to den written as ada as sync member ada beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as ada as sync member bob acme	denied DENIED 'bob' may not write as 'ada'.
+push spec s-open-bob move room to den written as ada as sync member bob all	denied DENIED 'bob' may not write as 'ada'.
+push spec s-open-bob move room to den written as ada as sync member bob beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as ada as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as ada as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as ada as sync viewer ada beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as ada as sync viewer anonymous none	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as ada as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as ada as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as ada as sync viewer bob beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as bob as sync admin root all	denied DENIED 'root' may not write as 'bob'.
+push spec s-open-bob move room to den written as bob as sync member ada acme	denied DENIED 'ada' may not write as 'bob'.
+push spec s-open-bob move room to den written as bob as sync member ada all	denied DENIED 'ada' may not write as 'bob'.
+push spec s-open-bob move room to den written as bob as sync member ada beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as bob as sync member bob acme	denied DENIED The room_id of spec 's-open-bob' is set when it is created and never changes.
+push spec s-open-bob move room to den written as bob as sync member bob all	denied DENIED The room_id of spec 's-open-bob' is set when it is created and never changes.
+push spec s-open-bob move room to den written as bob as sync member bob beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as bob as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as bob as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as bob as sync viewer ada beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as bob as sync viewer anonymous none	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as bob as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as bob as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as bob as sync viewer bob beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync admin root all	denied DENIED 'root' may not write as 'claude/019fee00-0000-7000-8000-0000000ada01'.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member ada acme	denied DENIED The room_id of spec 's-open-bob' is set when it is created and never changes.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member ada all	denied DENIED The room_id of spec 's-open-bob' is set when it is created and never changes.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member ada beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member bob acme	denied DENIED 'bob' may not write as 'claude/019fee00-0000-7000-8000-0000000ada01'.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member bob all	denied DENIED 'bob' may not write as 'claude/019fee00-0000-7000-8000-0000000ada01'.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync member bob beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer ada beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer anonymous none	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer bob beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync admin root all	denied DENIED 'root' may not write as 'claude/019fee00-0000-7000-8000-0000000b0b01'.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member ada acme	denied DENIED 'ada' may not write as 'claude/019fee00-0000-7000-8000-0000000b0b01'.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member ada all	denied DENIED 'ada' may not write as 'claude/019fee00-0000-7000-8000-0000000b0b01'.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member ada beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member bob acme	denied DENIED The room_id of spec 's-open-bob' is set when it is created and never changes.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member bob all	denied DENIED The room_id of spec 's-open-bob' is set when it is created and never changes.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync member bob beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer ada beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer anonymous none	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as claude/019fee00-0000-7000-8000-0000000b0b01 as sync viewer bob beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as sail as sync admin root all	denied DENIED The room_id of spec 's-open-bob' is set when it is created and never changes.
+push spec s-open-bob move room to den written as sail as sync member ada acme	denied DENIED The room_id of spec 's-open-bob' is set when it is created and never changes.
+push spec s-open-bob move room to den written as sail as sync member ada all	denied DENIED The room_id of spec 's-open-bob' is set when it is created and never changes.
+push spec s-open-bob move room to den written as sail as sync member ada beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as sail as sync member bob acme	denied DENIED The room_id of spec 's-open-bob' is set when it is created and never changes.
+push spec s-open-bob move room to den written as sail as sync member bob all	denied DENIED The room_id of spec 's-open-bob' is set when it is created and never changes.
+push spec s-open-bob move room to den written as sail as sync member bob beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as sail as sync viewer ada acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as sail as sync viewer ada all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as sail as sync viewer ada beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as sail as sync viewer anonymous none	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
+push spec s-open-bob move room to den written as sail as sync viewer bob acme	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as sail as sync viewer bob all	denied DENIED Your credential is read-only and cannot change specs.
+push spec s-open-bob move room to den written as sail as sync viewer bob beta	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
 push spec s-open-bob move to beta as sync admin root all	allowed
 push spec s-open-bob move to beta as sync member ada acme	denied DENIED Spec 's-open-bob' is in no project this FDE is granted.
 push spec s-open-bob move to beta as sync member ada all	denied DENIED Spec 's-open-bob' is unassigned; only bob or an admin may change it.

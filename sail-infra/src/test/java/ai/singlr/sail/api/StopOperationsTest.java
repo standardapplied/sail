@@ -461,6 +461,11 @@ class StopOperationsTest {
             ErrorCode.READ_ONLY_CREDENTIAL,
             ErrorCode.AGENT_LANE_FORBIDDEN,
             ErrorCode.FORBIDDEN_NOT_ASSIGNEE);
+    var messages =
+        List.of(
+            "Your credential is read-only and cannot stop runs.",
+            "Agent principals cannot stop runs.",
+            "Run " + R1 + " belongs to spec 'auth', owned by 'me', not you.");
 
     for (var i = 0; i < asked.size(); i++) {
       var actor = asked.get(i);
@@ -471,6 +476,7 @@ class StopOperationsTest {
                   Actor.call(
                       actor, () -> ops.stop(new StopOperations.RunTarget(R1), "sumesh", false)));
       assertEquals(codes.get(i), refusal.failure().errorCode(), actor.toString());
+      assertEquals(messages.get(i), refusal.getMessage(), actor.toString());
     }
   }
 

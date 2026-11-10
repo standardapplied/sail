@@ -31,9 +31,12 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Refusal.Kind;
+import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.Decidability;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Standing;
 import java.util.List;
 import java.util.Map;
@@ -442,6 +445,103 @@ class SpecAuthorityTest {
         Optional.empty(),
         rule.decide(OWNER_SYNC, "mine", null, with(create, "room_id", "mine")),
         "a room the pusher minted reaches main before its spec");
+  }
+
+  /**
+   * A restore that moves the assignee is a change of the spec first, so who may not change it is
+   * told so before the move it makes.
+   */
+  @Test
+  void aRestoreThatReassignsIsAChangeBeforeTheMove() {
+    var specs = new SpecStore(board.db);
+    Acting.system(
+        () -> {
+          specs.create(
+              new SpecStore.SpecRow(
+                  "gone",
+                  "acme",
+                  "Gone",
+                  SpecStatus.PENDING,
+                  OWNER,
+                  null,
+                  null,
+                  null,
+                  null,
+                  0,
+                  OWNER,
+                  null,
+                  null,
+                  OWNER,
+                  List.of(),
+                  List.of()));
+          specs.delete("gone");
+        });
+    var last = projection("title", "Gone", "assignee", OWNER, "room_id", "gone");
+    var reassigned = with(last, "assignee", OTHER);
+
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Spec 'gone' is assigned to 'ada', not you.",
+                "Ask ada to make this change, or have an admin do it.")),
+        rule.decide(OTHER_API, "gone", last, reassigned));
+    assertEquals(
+        Optional.of(Refusal.readOnly("change specs")),
+        rule.decide(VIEWER, "gone", last, reassigned));
+  }
+
+  /**
+   * A create that names no creator, as the door pre-asks it, is its acting FDE's: an agent creating
+   * over its FDE's own room moves no ownership.
+   */
+  @Test
+  void aCreateWithNoCreatorIsTheActingFdesSoAnAgentMayTakeItsFdesRoom() {
+    assertEquals(
+        Optional.empty(),
+        rule.decide(
+            AGENT,
+            "lobby",
+            null,
+            projection("title", "Lobby", "assignee", null, "room_id", "lobby")));
+  }
+
+  /** Who a push writes as is asked before a spec's fixed room. */
+  @Test
+  void aPushIsToldWhoItMayNotWriteAsBeforeItsFixedRoom() {
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_AUTHOR,
+                "'ada' may not write as 'bob'.",
+                "A box writes as its FDE, its own machinery, or the runs acting for its FDE.")),
+        rule.decide(
+            OWNER_SYNC, SPEC, OWNED, with(with(OWNED, "room_id", "lobby"), "_actor", OTHER)));
+  }
+
+  /**
+   * A pushed create is told who it may not write as before for whom it may not create, and the
+   * creator alone when only the creator is another's.
+   */
+  @Test
+  void aPushedCreateIsToldItsAuthorBeforeItsCreator() {
+    var create = projection("title", "New", "assignee", null, "room_id", "fresh");
+
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_AUTHOR,
+                "'bob' may not write as 'ada'.",
+                "A box writes as its FDE, its own machinery, or the runs acting for its FDE.")),
+        rule.decide(
+            ADMIN_SYNC, "fresh", null, with(with(create, "_actor", OWNER), "_created_by", OWNER)));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_AUTHOR,
+                "'bob' may not create for 'ada'.",
+                "A box creates only as its own FDE.")),
+        rule.decide(ADMIN_SYNC, "fresh", null, with(create, "_created_by", OWNER)));
   }
 
   @Test

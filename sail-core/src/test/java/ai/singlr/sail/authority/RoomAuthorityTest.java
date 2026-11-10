@@ -259,6 +259,30 @@ class RoomAuthorityTest {
         rule.decide(VIEWER, "never-held", null, Map.of()));
   }
 
+  /** A push over another's room is told whose it is before who it may not write as. */
+  @Test
+  void aPushIsToldWhoseTheRoomIsBeforeWhoItMayNotWriteAs() {
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Room 'lobby' belongs to 'ada', not you.",
+                "Ask ada to change it, or have an admin do it.")),
+        rule.decide(OTHER_SYNC, "lobby", LOBBY, with(with(LOBBY, "title", "x"), "_actor", OWNER)));
+  }
+
+  /**
+   * An edit that keeps a room's project is no move into one, so a room whose project this box's
+   * catalog no longer holds is still its owner's to edit.
+   */
+  @Test
+  void anEditThatKeepsTheProjectIsNoMoveIntoAnUnheldOne() {
+    board.db.execute("DELETE FROM projects WHERE name = 'acme'");
+
+    assertEquals(
+        Optional.empty(), rule.decide(OWNER_API, "lobby", LOBBY, with(LOBBY, "title", "x")));
+  }
+
   @Test
   void refusalsSpeakTheTextsClientsSee() {
     assertEquals(

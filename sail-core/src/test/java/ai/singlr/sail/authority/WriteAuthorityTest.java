@@ -217,6 +217,14 @@ class WriteAuthorityTest {
                 Resources.project("acme", OWNER), Action.CONFIGURE, Action.PURGE)));
   }
 
+  /** A table rule's push is told what it may not take before who it may not write as. */
+  @Test
+  void aTablePushIsToldItsRoleBeforeWhoItMayNotWriteAs() {
+    assertEquals(
+        Optional.of(Refusal.readOnly("share files and skills in projects")),
+        files.decide(VIEWER_SYNC, FILE_ID, null, with(FILE, "_actor", OTHER)));
+  }
+
   @Test
   void theJournalAsksNoRuleOfAPushOrOfSailItself() {
     WriteAuthority refusing =

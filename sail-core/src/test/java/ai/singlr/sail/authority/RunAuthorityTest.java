@@ -458,6 +458,21 @@ class RunAuthorityTest {
         rule.decide(OTHERS_AGENT, RUN, RUNNING, session));
   }
 
+  /** A run's principals are its own, said before who a push may not write as. */
+  @Test
+  void aForeignPrincipalIsSaidBeforeWhoAPushMayNotWriteAs() {
+    var stopped = with(RUNNING, "status", "stopped");
+
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_AUTHOR,
+                "Run '" + RUN + "' names '" + OTHER + "' as its principal, which is not its own.",
+                "A run's principals are the ones minted for it.")),
+        rule.decide(
+            OWNER_SYNC, RUN, RUNNING, with(with(stopped, "principal", OTHER), "_actor", OTHER)));
+  }
+
   @Test
   void aDeletedRunIsNeverBroughtBack() {
     var runs = new RunStore(board.db);

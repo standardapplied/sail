@@ -177,6 +177,24 @@ class ReviewAuthorityTest {
   }
 
   /**
+   * A review is approved, and a push of one is told whose it is before who it may not write as; a
+   * viewer is told it may not approve reviews.
+   */
+  @Test
+  void aReviewIsTheSpecOwnersToApproveSaidBeforeWhoAPushWritesAs() {
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Review " + REVIEW + " is for spec 'auth', owned by 'ada', not you.",
+                "Only ada or an admin may approve or dismiss it.")),
+        rule.decide(OTHER_SYNC, REVIEW, null, with(RUNNING, "_actor", OWNER)));
+    assertEquals(
+        Optional.of(Refusal.readOnly("approve reviews")),
+        rule.decide(VIEWER, REVIEW, RUNNING, with(RUNNING, "status", "passed")));
+  }
+
+  /**
    * A scoped member's marked deletion of a review this box holds no head of, asked as the journal
    * and main's commit ask it, behind the scope rule: it names no project, so the scope rule lets it
    * through, and it is decided as main decided it, a review of no spec, so no one's but an admin's,

@@ -424,6 +424,15 @@ class RunDeliveryOperationsTest {
             .asFailure()
             .errorCode(),
         "a member of another project cannot author a conversation into this one's room");
+    assertEquals(
+        "room",
+        Actor.call(
+                new Actor("mallory", Role.MEMBER, Actor.Lane.CLI)
+                    .withScope(ProjectScope.of(List.of("acme"))),
+                () -> operations.recordRoomConversation("room", "claude-code", "abc", null, null))
+            .orThrow()
+            .roomId(),
+        "a member granted the room's project reports a session in it");
     var mallory = new Actor("mallory", Role.MEMBER, Actor.Lane.CLI);
     assertEquals(
         "room",

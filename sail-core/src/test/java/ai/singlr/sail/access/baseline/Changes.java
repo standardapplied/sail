@@ -89,6 +89,21 @@ final class Changes {
     return changes.changes;
   }
 
+  /**
+   * An edit of a room whose project this box's catalog no longer holds ({@link World#uncatalog}).
+   */
+  static List<Change> uncatalogued(World world) {
+    var changes = new Changes(world);
+    changes.edit(
+        "room",
+        "b-room",
+        "edit title in a project the catalog lost",
+        world.snapshot("room", "b-room"),
+        "title",
+        "retitled");
+    return changes.changes;
+  }
+
   /** The revisions of every synced type. */
   static List<Change> all(World world) {
     var changes = new Changes(world);

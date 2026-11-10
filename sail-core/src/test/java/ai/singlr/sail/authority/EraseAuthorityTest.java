@@ -85,21 +85,9 @@ class EraseAuthorityTest {
    */
   private Decision pruned(Actor actor, SpecStore.LastKnown spec) {
     var specs = new SpecStore(board.db);
-    if (spec.live()) {
-      board.db.execute(
-          """
-          INSERT OR REPLACE INTO specs (id, project, title, status, assignee, created_by,
-              created_at, updated_at, room_id)
-          VALUES (?, 'acme', ?, ?, ?, ?, 'now', 'now', ?)""",
-          spec.id(),
-          spec.id(),
-          spec.status().wire(),
-          spec.assignee(),
-          spec.createdBy(),
-          spec.roomId());
-    } else {
-      Acting.system(
-          () -> {
+    Acting.system(
+        () -> {
+          if (specs.findById(spec.id()).isEmpty()) {
             specs.create(
                 new SpecStore.SpecRow(
                     spec.id(),
@@ -118,9 +106,17 @@ class EraseAuthorityTest {
                     spec.createdBy(),
                     List.of(),
                     List.of()));
+          }
+          board.db.execute(
+              "UPDATE specs SET status = ?, assignee = ?, created_by = ? WHERE id = ?",
+              spec.status().wire(),
+              spec.assignee(),
+              spec.createdBy(),
+              spec.id());
+          if (!spec.live()) {
             specs.delete(spec.id());
-          });
-    }
+          }
+        });
     return rule.prune(actor, spec.id());
   }
 
@@ -187,6 +183,11 @@ class EraseAuthorityTest {
     var outsider = VIEWER.withScope(ProjectScope.of(List.of("beta")));
 
     assertEquals(new Decision.NotFound(), pruned(outsider, archived));
+    assertEquals(
+        Optional.of(Kind.READ_ONLY),
+        refused(rule.prune(VIEWER.withScope(ProjectScope.of(List.of("acme"))), "auth"))
+            .map(Refusal::kind),
+        "an actor who reads the spec's project is asked its role");
     assertEquals(
         Optional.of(
             new Refusal(
@@ -342,6 +343,18 @@ class EraseAuthorityTest {
         rule.requested(Actor.sync(OWNER, Role.MEMBER).withScope(scoped.scope()), "spec", "moved")
             .map(Refusal::kind),
         "and main answers a scoped node's request by the same rule");
+    Acting.system(() -> specs.updateStatus("moved", SpecStatus.IN_PROGRESS));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_PRUNABLE,
+                "Spec 'moved' is in_progress: only archived, cancelled or deleted specs are pruned.",
+                Remedy.of(
+                    "Archive it first: ",
+                    Remedy.sail("spec update", "moved", "--status", "archived"),
+                    "."))),
+        refused(rule.prune(scoped, "moved")),
+        "whether it may be pruned at all is said before what it would reach outside the scope");
   }
 
   private static SpecStore.SpecRow row(String id, String project) {

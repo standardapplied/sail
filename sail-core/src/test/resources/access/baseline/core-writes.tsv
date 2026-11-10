@@ -2560,6 +2560,67 @@ write room b-room edit title as sync viewer bob acme	allowed
 write room b-room edit title as sync viewer bob all	allowed
 write room b-room edit title as sync viewer bob beta	allowed
 write room b-room edit title as system admin sail all	allowed
+write room b-room edit title in a project the catalog lost as agent member ada-agent acme	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room edit title in a project the catalog lost as agent member ada-agent all	allowed
+write room b-room edit title in a project the catalog lost as agent member ada-agent beta	allowed
+write room b-room edit title in a project the catalog lost as agent member bob-agent acme	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room edit title in a project the catalog lost as agent member bob-agent all	denied NOT_OWNER Room 'b-room' belongs to 'ada', not you. | Ask ada to change it, or have an admin do it.
+write room b-room edit title in a project the catalog lost as agent member bob-agent beta	denied NOT_OWNER Room 'b-room' belongs to 'ada', not you. | Ask ada to change it, or have an admin do it.
+write room b-room edit title in a project the catalog lost as agent viewer ada-agent acme	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room edit title in a project the catalog lost as agent viewer ada-agent all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as agent viewer ada-agent beta	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as agent viewer bob-agent acme	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room edit title in a project the catalog lost as agent viewer bob-agent all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as agent viewer bob-agent beta	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as api admin root all	allowed
+write room b-room edit title in a project the catalog lost as api member ada acme	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room edit title in a project the catalog lost as api member ada all	allowed
+write room b-room edit title in a project the catalog lost as api member ada beta	allowed
+write room b-room edit title in a project the catalog lost as api member bob acme	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room edit title in a project the catalog lost as api member bob all	denied NOT_OWNER Room 'b-room' belongs to 'ada', not you. | Ask ada to change it, or have an admin do it.
+write room b-room edit title in a project the catalog lost as api member bob beta	denied NOT_OWNER Room 'b-room' belongs to 'ada', not you. | Ask ada to change it, or have an admin do it.
+write room b-room edit title in a project the catalog lost as api member machine all	denied NOT_OWNER Room 'b-room' belongs to 'ada', not you. | Ask ada to change it, or have an admin do it.
+write room b-room edit title in a project the catalog lost as api viewer ada acme	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room edit title in a project the catalog lost as api viewer ada all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as api viewer ada beta	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as api viewer bob acme	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room edit title in a project the catalog lost as api viewer bob all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as api viewer bob beta	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as cli admin root all	allowed
+write room b-room edit title in a project the catalog lost as cli member ada acme	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room edit title in a project the catalog lost as cli member ada all	allowed
+write room b-room edit title in a project the catalog lost as cli member ada beta	allowed
+write room b-room edit title in a project the catalog lost as cli member bob acme	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room edit title in a project the catalog lost as cli member bob all	denied NOT_OWNER Room 'b-room' belongs to 'ada', not you. | Ask ada to change it, or have an admin do it.
+write room b-room edit title in a project the catalog lost as cli member bob beta	denied NOT_OWNER Room 'b-room' belongs to 'ada', not you. | Ask ada to change it, or have an admin do it.
+write room b-room edit title in a project the catalog lost as cli viewer ada acme	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room edit title in a project the catalog lost as cli viewer ada all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as cli viewer ada beta	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as cli viewer bob acme	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room edit title in a project the catalog lost as cli viewer bob all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as cli viewer bob beta	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as main admin bob all	allowed
+write room b-room edit title in a project the catalog lost as room viewer ada-room acme	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room edit title in a project the catalog lost as room viewer ada-room all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as room viewer ada-room beta	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as room viewer bob-room acme	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
+write room b-room edit title in a project the catalog lost as room viewer bob-room all	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as room viewer bob-room beta	denied READ_ONLY Your credential is read-only and cannot change rooms. | Ask an admin for a member or admin credential.
+write room b-room edit title in a project the catalog lost as sync admin root all	allowed
+write room b-room edit title in a project the catalog lost as sync member ada acme	allowed
+write room b-room edit title in a project the catalog lost as sync member ada all	allowed
+write room b-room edit title in a project the catalog lost as sync member ada beta	allowed
+write room b-room edit title in a project the catalog lost as sync member bob acme	allowed
+write room b-room edit title in a project the catalog lost as sync member bob all	allowed
+write room b-room edit title in a project the catalog lost as sync member bob beta	allowed
+write room b-room edit title in a project the catalog lost as sync viewer ada acme	allowed
+write room b-room edit title in a project the catalog lost as sync viewer ada all	allowed
+write room b-room edit title in a project the catalog lost as sync viewer ada beta	allowed
+write room b-room edit title in a project the catalog lost as sync viewer anonymous none	allowed
+write room b-room edit title in a project the catalog lost as sync viewer bob acme	allowed
+write room b-room edit title in a project the catalog lost as sync viewer bob all	allowed
+write room b-room edit title in a project the catalog lost as sync viewer bob beta	allowed
+write room b-room edit title in a project the catalog lost as system admin sail all	allowed
 write room b-room edit wake as agent member ada-agent acme	denied OUT_OF_SCOPE Room 'b-room' already exists. | Pick another id.
 write room b-room edit wake as agent member ada-agent all	allowed
 write room b-room edit wake as agent member ada-agent beta	allowed
