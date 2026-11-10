@@ -441,6 +441,19 @@ class AccessTest {
   }
 
   @Test
+  void resolvingAConflictIsAChangeOfItAtAllSaidAsResolvingIt() {
+    assertEquals(
+        refused(
+            Refusal.Kind.READ_ONLY,
+            "Your credential is read-only and cannot resolve conflicts.",
+            READ_ONLY_FIX),
+        Access.decide(Actors.VIEWER, Action.CHANGE, Resource.Kind.CONFLICT));
+    assertEquals(
+        new Decision.Allowed(),
+        Access.decide(Actors.OTHER_API, Action.CHANGE, Resource.Kind.CONFLICT));
+  }
+
+  @Test
   void seatingAgentsInARoomIsSaidAsManagingItsMembership() {
     assertEquals(
         refused(
