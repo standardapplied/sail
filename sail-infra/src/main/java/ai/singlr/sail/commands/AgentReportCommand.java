@@ -7,11 +7,13 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.ProjectGate;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
@@ -67,6 +69,7 @@ public final class AgentReportCommand implements Runnable {
     var operator = OperatorCommand.here();
     name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
+    ProjectGate.requireReads(CliOperator.current(), name);
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
 

@@ -122,7 +122,6 @@ class OneDecisionSweepTest {
     for (var resolves :
         List.of(
             "commands/SyncServerCommand#principal",
-            "engine/CliOperator#of",
             "engine/HostAccess#actorOf",
             "ssh/SshGateway#authorize")) {
       allowed.put("ai/singlr/sail/" + resolves, EVERY_DOOR);

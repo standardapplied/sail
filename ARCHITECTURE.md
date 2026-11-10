@@ -2397,8 +2397,10 @@ it implies the room rule's Change), stop (Operate a run), posting into a room wi
 `MessageAuthority.post`, the one decision of a rule a door asks, since a post with no message to
 journal still answers to the rule's fact that a post is someone's), serving a stack, restoring a
 snapshot and reading a definition (`ProjectGate`, the one project gate), pruning, resolving a
-conflict. Every door reads the row it acts on in its caller's scope first, or is reached only by
-the box's operator, who sees every project. The checks a door still makes by role, lane or scope (resolving a credential, a run credential's own
+conflict. Every door reads the row it acts on in its caller's scope first, the host CLI's operator
+included, who sees the projects main's roster gives the box's FDE. The terminal opens a session
+only in a project its person holds on the box, whatever their role, as the catalog holds it and
+their scope admits it. The checks a door still makes by role, lane or scope (resolving a credential, a run credential's own
 routes), until `sail-every-door-asks-access` and `sail-agents-act-on-their-own-work`, and the facts
 that read a lane or role to know which applies, are the allowlist of `OneDecisionSweepTest`. It
 sees every such read compiled code makes: of a role, a lane, a scope or whom an actor acts for, a

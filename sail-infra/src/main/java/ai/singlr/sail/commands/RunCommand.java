@@ -23,7 +23,6 @@ import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailWatcher;
@@ -37,6 +36,7 @@ import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.SpecStore;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -299,9 +299,8 @@ public final class RunCommand implements Runnable {
       DispatchOperations.AdhocSession session;
       try {
         session =
-            CliOperator.actingUnlessPreview(
-                describeOnly,
-                operations.identity()::operator,
+            Actor.call(
+                operations.identity().operator(),
                 () ->
                     operations
                         .dispatching()

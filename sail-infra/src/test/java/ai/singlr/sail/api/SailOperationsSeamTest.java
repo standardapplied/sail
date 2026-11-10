@@ -77,6 +77,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -1529,7 +1530,11 @@ class SailOperationsSeamTest {
           List.of(id),
           operations.dispatching().liveRuns("node").stream().map(RunStore.RunRow::id).toList());
       assertEquals(List.of(), operations.dispatching().liveRuns("other"));
-      assertTrue(operations.dispatching().latestRunInLane("proj", "node", Lane.REVIEW).isEmpty());
+      assertTrue(
+          Acting.system(
+                  () ->
+                      operations.dispatching().latestLog("proj", "node", Optional.of(Lane.REVIEW)))
+              .isEmpty());
       Acting.system(() -> runs.complete(id, "completed", 0));
       var reviewer = DateTimeUtils.newId().toString();
       Acting.system(
@@ -1546,12 +1551,31 @@ class SailOperationsSeamTest {
                   List.of()));
       assertEquals(
           reviewer,
-          operations.dispatching().latestRunInLane("proj", "node", Lane.REVIEW).orElseThrow().id());
+          Acting.system(
+                  () ->
+                      operations.dispatching().latestLog("proj", "node", Optional.of(Lane.REVIEW)))
+              .orElseThrow()
+              .id());
       assertEquals(
           id,
-          operations.dispatching().latestRunInLane("proj", "node", Lane.BUILD).orElseThrow().id());
-      assertTrue(operations.dispatching().latestRunInLane("proj", "node", Lane.FIX).isEmpty());
-      assertTrue(operations.dispatching().latestRunInLane("proj", "other", Lane.REVIEW).isEmpty());
+          Acting.system(
+                  () -> operations.dispatching().latestLog("proj", "node", Optional.of(Lane.BUILD)))
+              .orElseThrow()
+              .id());
+      assertTrue(
+          Acting.system(
+                  () -> operations.dispatching().latestLog("proj", "node", Optional.of(Lane.FIX)))
+              .isEmpty());
+      assertTrue(
+          Acting.system(
+                  () ->
+                      operations.dispatching().latestLog("proj", "other", Optional.of(Lane.REVIEW)))
+              .isEmpty());
+      assertEquals(
+          reviewer,
+          Acting.system(() -> operations.dispatching().latestLog("proj", "node", Optional.empty()))
+              .orElseThrow()
+              .id());
     }
   }
 

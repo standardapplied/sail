@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,12 +14,15 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
-import java.util.function.Supplier;
+import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -90,21 +94,24 @@ class CliOperatorTest {
   }
 
   @Test
-  void aPreviewActsAsNoOneSoAnUnsyncedNodeCanStillDescribeIt() {
+  void aScopedNodesOperatorSeesOnlyItsGrantsAsTheBoxCredentialDoes() {
     try (var db = roster()) {
-      Supplier<Actor> operator = () -> CliOperator.of(NODE, new FdeStore(db));
+      var roster = new FdeStore(db);
+      roster.add("mady", null, null, "member");
+      roster.restrict("mady");
+      roster.grant("mady", "acme");
 
-      assertEquals("described", CliOperator.actingUnlessPreview(true, operator, () -> "described"));
-      var refused =
-          assertThrows(
-              ApiException.class,
-              () -> CliOperator.actingUnlessPreview(false, operator, () -> "launched"));
-      assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
+      var operator = CliOperator.of(NODE, roster);
 
-      new FdeStore(db).add("mady", null, null, "member");
       assertEquals(
-          new Actor("mady", Role.MEMBER, Actor.Lane.CLI),
-          CliOperator.actingUnlessPreview(false, operator, Actor::current));
+          new Actor("mady", Role.MEMBER, Actor.Lane.CLI)
+              .withScope(ProjectScope.of(List.of("acme"))),
+          operator);
+      assertTrue(operator.scope().admits("acme"));
+      assertFalse(operator.scope().admits("beta"));
+      assertEquals(
+          new RoleRule(() -> NODE, roster).principal(RoleRule.Credential.box(Actor.Lane.CLI)),
+          Optional.of(operator));
     }
   }
 
