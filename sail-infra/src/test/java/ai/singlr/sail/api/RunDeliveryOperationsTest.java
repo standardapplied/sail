@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -419,14 +420,17 @@ class RunDeliveryOperationsTest {
             .roomId(),
         "a member of the project may, whoever owns the room");
     var viewer = new Actor("ada", Role.VIEWER, Actor.Lane.CLI);
+    var readOnly =
+        assertInstanceOf(
+            Result.Failure.class,
+            Actor.call(
+                viewer,
+                () -> operations.recordRoomConversation("room", "claude-code", "abc", null, null)));
     assertEquals(
         ErrorCode.READ_ONLY_CREDENTIAL,
-        Actor.call(
-                viewer,
-                () -> operations.recordRoomConversation("room", "claude-code", "abc", null, null))
-            .asFailure()
-            .errorCode(),
+        readOnly.errorCode(),
         "a read-only credential writes nothing, even into its own room");
+    assertEquals("Your credential is read-only and cannot post in rooms.", readOnly.errorMessage());
     var admin = new Actor("ops", Role.ADMIN, Actor.Lane.CLI);
     assertEquals(
         "room",

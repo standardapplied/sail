@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -24,6 +25,7 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
@@ -265,6 +267,17 @@ class HomeRoomTest {
                 + " room"),
         outcome);
     assertTrue(roomStore.listAll().isEmpty());
+  }
+
+  @Test
+  void aHomeRoomIsHadByWhoeverMayCreateARoomInAProjectTheyRead() {
+    var member = new Actor("ada", Role.MEMBER, Actor.Lane.CLI);
+
+    assertTrue(HomeRoom.has(member, "acme", "ada"));
+    assertFalse(HomeRoom.has(new Actor("ada", Role.VIEWER, Actor.Lane.CLI), "acme", "ada"));
+    assertFalse(
+        HomeRoom.has(member.withScope(ProjectScope.of(List.of("beta"))), "acme", "ada"),
+        "nor has anyone in a project they may not read");
   }
 
   @Test
