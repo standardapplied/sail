@@ -328,6 +328,8 @@ class ApiRouterTest {
       assertTrue(operations.files.containsKey("dir/ /config"));
       assertEquals(content, get(server, "/v1/projects/acme/files/dir/%20/config", "token").body());
       assertEquals(422, get(server, "/v1//projects/acme/files/config", "token").statusCode());
+      assertEquals(422, get(server, "/v1//projects/acme/files", "token").statusCode());
+      assertEquals(422, get(server, "/v1/projects/acme/files//", "token").statusCode());
       assertFalse(operations.files.containsKey("large"));
       assertEquals(200, delete(server, "/v1/projects/acme/files/dir/config", "token").statusCode());
       assertEquals(404, delete(server, "/v1/projects/acme/files/dir/config", "token").statusCode());
@@ -784,6 +786,15 @@ class ApiRouterTest {
       assertEquals(405, put(server, "/v1/specs/board", "token", "{}").statusCode());
       assertEquals(405, delete(server, "/v1/specs/board", "token").statusCode());
       assertEquals(405, post(server, "/v1/conflicts/resolve", "token", "{}").statusCode());
+    }
+  }
+
+  @Test
+  void aPathIsMatchedWithoutItsBlankSegmentsAndItsNamesAreCheckedFirst() throws Exception {
+    try (var server = serverWith(new FakeOperations(), true)) {
+      assertEquals(200, get(server, "/v1/%20/specs//board/", "token").statusCode());
+      assertEquals(422, get(server, "/v1/projects/Bad_Name/dispatch/extra", "token").statusCode());
+      assertEquals(422, post(server, "/v1/rooms/Bad_Name/invite", "token", "{}").statusCode());
     }
   }
 

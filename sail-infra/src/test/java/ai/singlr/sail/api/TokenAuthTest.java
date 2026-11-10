@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
@@ -135,6 +136,31 @@ class TokenAuthTest {
     assertEquals(new Actor(null, Role.MEMBER, Actor.Lane.API), actor.withScope(ProjectScope.all()));
     assertEquals(
         List.of(true, false), List.of(actor.scope().admits("acme"), actor.scope().admits("beta")));
+  }
+
+  @Test
+  void theHostTokenActsAsTheBoxsPersonAndAnFdeTokenAsItsFdeCappedByItsMint() throws Exception {
+    var roster = new FdeStore(db);
+    var client = roster.add("client", null, null, "member");
+    roster.restrict("client");
+    roster.grant("client", "acme");
+    var mady = roster.add("mady", null, null, "admin");
+    var auth =
+        new TokenAuth(
+            tokenStore, TestAuth.roles(db, new SyncConfig("node", "main", "client", "client-box")));
+    var host = tokenStore.create(HostToken.NAME, "admin").token();
+    var capped = tokenStore.create("mady-dashboard", "viewer", mady.id(), null).token();
+
+    var box = resolved(auth, host);
+
+    assertEquals(
+        new Actor("client", Role.MEMBER, Actor.Lane.API), box.withScope(ProjectScope.all()));
+    assertEquals(
+        List.of(true, false), List.of(box.scope().admits("acme"), box.scope().admits("beta")));
+    assertEquals(
+        new Actor("mady", Role.VIEWER, Actor.Lane.API),
+        resolved(new TokenAuth(tokenStore, TestAuth.roles(db)), capped));
+    assertEquals(client.handle(), box.handle());
   }
 
   /** The principal {@code auth} stamps for a request bearing {@code token}. */
