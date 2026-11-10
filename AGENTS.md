@@ -86,6 +86,12 @@ tests bite, and the deletion count in the body.
   `MessageAuthority.post`: a post with no message to journal (the terminal's room pin, a room
   session's report) still answers to the message rule's own fact that a post is someone's, so
   those two doors ask the rule's post decision (`OneDecisionPointTest` pins them).
+- The permission snapshot (`ai.singlr.sail.access.baseline`, the `*BaselineTest` corpora and
+  their `access/baseline/*.tsv`) records every answer a cast of principals gets at the journal,
+  main's commit, the event rule, the read paths and the doors, and each test fails on any cell that
+  answers otherwise. A change that alters an answer on purpose re-records it with
+  `-Dsail.access.baseline=record` (the command is in `Baseline`'s Javadoc), and the `.tsv` diff in
+  its pull request is the list of what changed, cell by cell.
 - Prefer deleting over adding. The smallest change in the right place; a duplicated seam is
   a finding to fix in the same change.
 

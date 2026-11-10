@@ -23,15 +23,14 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 
 /**
- * A1's differential, main half: every offer a node pushes and every request to erase is answered as
- * main's rules at {@code fd091a53} answered it ({@link Baseline}, {@code core-pushes}). Each sync
- * session of the {@link Cast} opens a session over the wire and pushes one offer of every revision
- * {@link Changes} names, authored as the box that pushes it authors its own, then as each other
- * author an offer could name, having first fetched main's rows of the type, as a node holds what
- * main served it before it changes it; and asks main to erase each spec and project, and what is
- * not erased on request. The whole admission is asked: the scope rule a scoped pusher meets first,
- * main's standing checks, and the type's rule inside the commit. Each session is rehearsed, so main
- * is left as it was.
+ * A1's snapshot, main half: every offer a node pushes and every request to erase is answered as the
+ * snapshot records it ({@link Baseline}, {@code core-pushes}). Each sync session of the {@link
+ * Cast} opens a session over the wire and pushes one offer of every revision {@link Changes} names,
+ * authored as the box that pushes it authors its own, then as each other author an offer could
+ * name, having first fetched main's rows of the type, as a node holds what main served it before it
+ * changes it; and asks main to erase each spec and project, and what is not erased on request. The
+ * whole admission is asked: the scope rule a scoped pusher meets first, main's standing checks, and
+ * the type's rule inside the commit. Each session is rehearsed, so main is left as it was.
  */
 class PushesBaselineTest {
 

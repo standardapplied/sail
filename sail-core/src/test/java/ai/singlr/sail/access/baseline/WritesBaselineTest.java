@@ -23,12 +23,11 @@ import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
 /**
- * A1's differential, box half: every write a box makes of its own is decided as main's rules at
- * {@code fd091a53} decided it ({@link Baseline}, {@code core-writes}). Each member of the {@link
- * Cast} asks every revision of a spec, room and project the way a door pre-asks it, through the
- * store's own {@code decide} — the journal's decision as it records the revision — and makes every
- * write of a run, review, file and message through the store method a door calls, rehearsed so the
- * box is left as it was.
+ * A1's snapshot, box half: every write a box makes of its own is decided as the snapshot records it
+ * ({@link Baseline}, {@code core-writes}). Each member of the {@link Cast} asks every revision of a
+ * spec, room and project the way a door pre-asks it, through the store's own {@code decide} — the
+ * journal's decision as it records the revision — and makes every write of a run, review, file and
+ * message through the store method a door calls, rehearsed so the box is left as it was.
  */
 class WritesBaselineTest {
 

@@ -18,11 +18,11 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 /**
- * A4, A5 and A6's differential: what each reader is shown is what main's rules at {@code fd091a53}
- * showed it ({@link Baseline}, {@code core-reads}). Each member of the {@link Cast} reads every
- * conversation's messages through the store, so an agent's steering filter and a scoped reader's
- * audience both apply; and each sync session pulls a full round from main into a box of its own,
- * which then holds, or lacks, each row main holds.
+ * A4, A5 and A6's snapshot: what each reader is shown is what the snapshot records ({@link
+ * Baseline}, {@code core-reads}). Each member of the {@link Cast} reads every conversation's
+ * messages through the store, so an agent's steering filter and a scoped reader's audience both
+ * apply; and each sync session pulls a full round from main into a box of its own, which then
+ * holds, or lacks, each row main holds.
  */
 class ReadsBaselineTest {
 

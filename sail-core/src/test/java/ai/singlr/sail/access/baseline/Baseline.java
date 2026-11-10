@@ -14,34 +14,19 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 /**
- * The differential proof that moving every permission rule onto one decision changes no answer it
- * does not name. A baseline is a corpus's answers as main's rules gave them at {@code fd091a53},
- * recorded by a commit that changed no rule, at {@code access/baseline/<name>.tsv}: one cell per
- * line, its key, a tab, its answer, sorted by key. Its companion {@code <name>.moved.tsv} lists the
- * cells whose answer is agreed to change, one per line: the key, the answer now, and one line of
- * why, tab-separated, naming its cause; a line starting with {@code #} is a note. There are three
- * causes: (a) a reason moved earlier in the decision's order; (b) a refusal that had several
- * wordings now has the one it is worded in; (c) a refusal that named no fix now names one (A12).
+ * The permission snapshot: every answer a corpus gives, recorded at {@code
+ * access/baseline/<name>.tsv}, one cell per line, its key, a tab, its answer, sorted by key. The
+ * live corpus must answer every cell exactly as the snapshot does; any difference fails, naming the
+ * cell and both answers.
  *
- * <p>The live corpus must answer every cell exactly as the baseline does, but for the moved cells,
- * which must answer what their line says. A moved cell is one the baseline denies and that is still
- * denied, for a reason other than the baseline's: allowed never becomes denied, nor denied allowed,
- * and a cell not found is never answered by a refusal ({@link #notFound}). A moved line the corpus
- * does not answer, or answers as the baseline does, is stale and fails.
- *
- * <p>A baseline is regenerated only on purpose, from untouched rules: {@code
- * -Dsail.access.baseline=record} writes the live corpus over {@code
- * src/test/resources/access/baseline/<name>.tsv} of the module under test, and is refused while any
- * cell is listed as moved, since the rules it would record are no longer today's:
+ * <p>A change that alters an answer re-records the snapshot, and the diff of the {@code .tsv} files
+ * in its pull request is the list of what changed, cell by cell, for its review:
  *
  * <pre>
  * mvn -o -pl sail-core test -Dtest='*BaselineTest' -Dsail.access.baseline=record
@@ -51,7 +36,7 @@ import java.util.stream.Collectors;
  */
 public final class Baseline {
 
-  /** The system property whose value {@value #RECORD} records the live corpus as the baseline. */
+  /** The system property whose value {@value #RECORD} records the live corpus as the snapshot. */
   public static final String SWITCH = "sail.access.baseline";
 
   /** The value of {@link #SWITCH} that records. */
@@ -60,68 +45,32 @@ public final class Baseline {
   private static final String DIRECTORY = "access/baseline/";
   private static final Path SOURCES = Path.of("src", "test", "resources");
   private static final int SHOWN = 40;
-  private static final String GONE = " (gone)";
-
-  /**
-   * The kinds and door codes of a not-found answer: outside the asker's audience, a project or a
-   * conversation this box does not hold, and the doors' 404s for an id that is not there. A project
-   * whose container this box has not created is there, and the dispatch admission's placement says
-   * so last ({@code PROJECT_NOT_CREATED}), so it is not one. A push's answer names no kind, so its
-   * corpus is held to this through the rules it shares with the writes'.
-   */
-  private static final Set<String> NOT_FOUND =
-      Set.of(
-          "OUT_OF_SCOPE",
-          "UNHELD_PROJECT",
-          "NO_CONVERSATION",
-          "NOT_FOUND",
-          "SPEC_NOT_FOUND",
-          "ROOM_NOT_FOUND",
-          "RUN_NOT_FOUND",
-          "PROJECT_NOT_IN_CATALOG");
 
   private Baseline() {}
 
-  /** A cell whose reason moved: its answer now, and why. */
-  public record Moved(String cell, String answer, String why) {}
-
   /**
-   * Asserts that {@code corpus} answers as baseline {@code name} with its moved cells applied, or,
-   * under {@code -Dsail.access.baseline=record}, records it as that baseline.
+   * Asserts that {@code corpus} answers exactly as snapshot {@code name}, or, under {@code
+   * -Dsail.access.baseline=record}, records it as that snapshot.
    */
   public static void check(String name, Corpus corpus) {
     if (RECORD.equals(System.getProperty(SWITCH))) {
       record(name, corpus);
       return;
     }
-    var problems = differences(baseline(name), moved(name), corpus.answers());
+    var problems = differences(baseline(name), corpus.answers());
     if (!problems.isEmpty()) {
       fail(report(name, problems));
     }
   }
 
-  /**
-   * Every way {@code now} departs from {@code baseline} once {@code moved} is applied, each as the
-   * cell and its two answers ({@link #difference}), after every moved line that breaks the rules of
-   * a move.
-   */
+  /** Every cell {@code now} answers otherwise than {@code baseline}, missing or new included. */
   static List<String> differences(
-      SortedMap<String, String> baseline, List<Moved> moved, SortedMap<String, String> now) {
+      SortedMap<String, String> baseline, SortedMap<String, String> now) {
     var problems = new ArrayList<String>();
-    var expected = new TreeMap<>(baseline);
-    var listed = new TreeSet<String>();
-    for (var cell : moved) {
-      var refusal = misfit(cell, baseline, listed);
-      if (refusal != null) {
-        problems.add(cell.cell() + "\n  moved:    " + refusal);
-      } else {
-        expected.put(cell.cell(), cell.answer());
-      }
-    }
-    var cells = new TreeSet<>(expected.keySet());
+    var cells = new TreeSet<>(baseline.keySet());
     cells.addAll(now.keySet());
     for (var cell : cells) {
-      var want = expected.getOrDefault(cell, "(absent)");
+      var want = baseline.getOrDefault(cell, "(absent)");
       var got = now.getOrDefault(cell, "(absent)");
       if (!want.equals(got)) {
         problems.add(difference(cell, want, got));
@@ -135,128 +84,26 @@ public final class Baseline {
     return cell + "\n  baseline: " + baseline + "\n  now:      " + now;
   }
 
-  /** Why {@code cell} is not a move the proof admits; null when it is one. */
-  private static String misfit(Moved cell, Map<String, String> baseline, TreeSet<String> listed) {
-    var before = baseline.get(cell.cell());
-    if (!listed.add(cell.cell())) {
-      return "listed twice";
-    }
-    if (cell.why().isBlank()) {
-      return "names no why";
-    }
-    if (before == null) {
-      return "the baseline answers no such cell";
-    }
-    if (!denied(before) || !denied(cell.answer())) {
-      return "a move keeps a cell denied, and this one goes from '"
-          + before
-          + "' to '"
-          + cell.answer()
-          + "'";
-    }
-    if (before.equals(cell.answer())) {
-      return "it answers what the baseline answers";
-    }
-    if (notFound(before) && !notFound(cell.answer())) {
-      return "a cell not found stays not found, and this one goes from '"
-          + before
-          + "' to '"
-          + cell.answer()
-          + "'";
-    }
-    if (!fix(before).isEmpty() && fix(cell.answer()).isEmpty() && !notFound(cell.answer())) {
-      return "a refusal names its fix, and this one loses it: '" + before + "'";
-    }
-    return causeMisfit(cell, before);
-  }
-
-  /**
-   * Why {@code cell}'s cause does not fit how its answer moved from {@code before}; null when it
-   * does. Every cause is checked as far as two answers show it: (c) keeps the message and gains the
-   * fix it lacked; (b) keeps the class of refusal, worded otherwise — a door's status, or else its
-   * kind; (a) is any other denial, its reason said earlier in the order.
-   */
-  private static String causeMisfit(Moved cell, String before) {
-    var why = cell.why();
-    if (why.startsWith("(c)")) {
-      return gainsFix(before, cell.answer())
-          ? null
-          : "cause (c) keeps the message and gains a fix, and this one goes from '" + before + "'";
-    }
-    if (why.startsWith("(b)")) {
-      return refusalClass(before).equals(refusalClass(cell.answer()))
-          ? null
-          : "cause (b) keeps the class of refusal, and this one goes from '" + before + "'";
-    }
-    return why.startsWith("(a)") ? null : "names no cause (a), (b) or (c)";
-  }
-
-  /**
-   * Whether {@code now} says what {@code before} says and names the fix it lacked: in its own
-   * field, or, where a corpus shows the fix as part of the message (a push's denial), after it.
-   */
-  private static boolean gainsFix(String before, String now) {
-    if (!before.contains(" | ") && !now.contains(" | ")) {
-      var said = before.replace(GONE, "");
-      var says = now.replace(GONE, "");
-      return says.startsWith(said) && says.length() > said.length();
-    }
-    return message(before).equals(message(now)) && fix(before).isEmpty() && !fix(now).isEmpty();
-  }
-
-  /**
-   * The class of refusal a denial names: a door's HTTP status where it shows one, its third word,
-   * and otherwise its kind, its second.
-   */
-  private static String refusalClass(String answer) {
-    var words = answer.split(" ", 4);
-    if (words.length > 2 && words[2].matches("[1-5][0-9][0-9]")) {
-      return words[2];
-    }
-    return words.length > 1 ? words[1] : "";
-  }
-
-  /** What a denial says, its fix left out. */
-  private static String message(String answer) {
-    var bar = answer.indexOf(" | ");
-    return bar < 0 ? answer : answer.substring(0, bar);
-  }
-
-  /** The fix a denial names; empty when it names none, or its corpus shows none. */
-  private static String fix(String answer) {
-    var bar = answer.indexOf(" | ");
-    return bar < 0 ? "" : answer.substring(bar + 3).strip();
-  }
-
-  private static boolean denied(String answer) {
-    return answer.startsWith("denied ");
-  }
-
-  /**
-   * Whether {@code answer} says what was asked about is not there ({@link #NOT_FOUND}): an answer
-   * that may only move earlier, so no refusal ever takes its place and tells the asker it exists.
-   */
-  private static boolean notFound(String answer) {
-    var words = answer.split(" ", 3);
-    return words.length > 1 && NOT_FOUND.contains(words[1]);
-  }
-
   private static String report(String name, List<String> problems) {
     var shown = problems.stream().limit(SHOWN).collect(Collectors.joining("\n"));
     return name
         + ": "
         + problems.size()
-        + " cells differ from the baseline; the first "
+        + " cells differ from the snapshot; the first "
         + Math.min(SHOWN, problems.size())
-        + ", each as its cell, the baseline's answer and the answer now:\n"
+        + ", each as its cell, the snapshot's answer and the answer now:\n"
         + shown
-        + "\nA cell whose reason moved toward the agreed order is listed in "
+        + "\nA change that alters an answer on purpose re-records "
         + DIRECTORY
         + name
-        + ".moved.tsv; any other difference is a change of behaviour.";
+        + ".tsv with -D"
+        + SWITCH
+        + "="
+        + RECORD
+        + "; any other difference is a change of behaviour.";
   }
 
-  /** The baseline {@code name} as recorded, sorted by cell. */
+  /** The snapshot {@code name} as recorded, sorted by cell. */
   static SortedMap<String, String> baseline(String name) {
     var answers = new TreeMap<String, String>();
     for (var line : required(name + ".tsv")) {
@@ -269,61 +116,26 @@ public final class Baseline {
     return answers;
   }
 
-  /** The moved cells of baseline {@code name}, in the order listed. */
-  static List<Moved> moved(String name) {
-    return moved(name, required(name + ".moved.tsv"));
-  }
-
-  private static List<Moved> moved(String name, List<String> lines) {
-    var moved = new ArrayList<Moved>();
-    for (var line : lines) {
-      if (line.startsWith("#") || line.isBlank()) {
-        continue;
-      }
-      var fields = line.split("\t", -1);
-      if (fields.length != 3) {
-        throw new IllegalStateException(
-            name + ".moved.tsv: a line is cell, answer and why, tab-separated: " + line);
-      }
-      moved.add(new Moved(fields[0], fields[1], fields[2]));
-    }
-    return moved;
-  }
-
   private static List<String> required(String file) {
-    return lines(file)
-        .orElseThrow(
-            () ->
-                new IllegalStateException(
-                    "No "
-                        + DIRECTORY
-                        + file
-                        + " on the test classpath: record it from untouched rules with -D"
-                        + SWITCH
-                        + "="
-                        + RECORD
-                        + "."));
-  }
-
-  private static Optional<List<String>> lines(String file) {
     try (var in = Baseline.class.getClassLoader().getResourceAsStream(DIRECTORY + file)) {
-      return in == null
-          ? Optional.empty()
-          : Optional.of(new String(in.readAllBytes(), StandardCharsets.UTF_8).lines().toList());
+      if (in == null) {
+        throw new IllegalStateException(
+            "No "
+                + DIRECTORY
+                + file
+                + " on the test classpath: record it with -D"
+                + SWITCH
+                + "="
+                + RECORD
+                + ".");
+      }
+      return new String(in.readAllBytes(), StandardCharsets.UTF_8).lines().toList();
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
   }
 
   private static void record(String name, Corpus corpus) {
-    var moved = lines(name + ".moved.tsv").map(lines -> moved(name, lines)).orElse(List.of());
-    if (!moved.isEmpty()) {
-      fail(
-          name
-              + ".moved.tsv lists "
-              + moved.size()
-              + " moved cells, so these rules are no longer the ones the baseline records.");
-    }
     if (!Files.isDirectory(SOURCES)) {
       fail("Record from the module's own directory, where " + SOURCES + " is.");
     }
@@ -335,15 +147,8 @@ public final class Baseline {
       var file = SOURCES.resolve(DIRECTORY + name + ".tsv");
       Files.createDirectories(file.getParent());
       Files.writeString(file, text, StandardCharsets.UTF_8);
-      var companion = SOURCES.resolve(DIRECTORY + name + ".moved.tsv");
-      if (!Files.exists(companion)) {
-        Files.writeString(companion, MOVED_HEADER, StandardCharsets.UTF_8);
-      }
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
   }
-
-  private static final String MOVED_HEADER =
-      "# cell\tanswer now\twhy: a cell whose reason moved toward the agreed order (Baseline)\n";
 }

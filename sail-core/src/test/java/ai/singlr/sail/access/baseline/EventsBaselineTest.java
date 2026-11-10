@@ -14,10 +14,10 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * A7's differential: who may publish each event type, about each kind of work, first-hand or
- * retold, is answered as main's rules at {@code fd091a53} answered it ({@link Baseline}, {@code
- * core-events}), on ada's box, which executed her runs and none of bob's. The rule reads no scope,
- * so the cast is asked at one; the door's own scope step is {@code infra-doors}'.
+ * A7's snapshot: who may publish each event type, about each kind of work, first-hand or retold, is
+ * answered as the snapshot records it ({@link Baseline}, {@code core-events}), on ada's box, which
+ * executed her runs and none of bob's. The rule reads no scope, so the cast is asked at one; the
+ * door's own scope step is {@code infra-doors}'.
  */
 class EventsBaselineTest {
 

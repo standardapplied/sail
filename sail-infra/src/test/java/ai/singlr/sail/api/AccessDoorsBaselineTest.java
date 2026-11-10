@@ -39,16 +39,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * A1's differential, door half: every check a door makes before, beside or instead of the journal
- * answers as main's doors at {@code fd091a53} answered it ({@link Baseline}, {@code infra-doors}).
- * The {@link World} of the core corpora is served by the operations every router calls, built as
- * production builds them, on ada's box, whose shell lists no container and runs nothing else; each
- * member of the {@link Cast} a door binds — the host CLI and box credential, an HTTP token, a run's
- * and a room's agent — asks each door, rehearsed so the box is left as it was. A door that takes
- * the box it answers on is asked on ada's box and on bob's. A refusal is its door's code, HTTP
- * status, message and remedy; a success its response type and every id it shows, so a read's
- * audience is recorded with it ({@link #shown}). A door asked directly, rather than through the
- * operations, is asked only by whom production lets reach it ({@link Door#reaches}).
+ * A1's snapshot, door half: every check a door makes before, beside or instead of the journal
+ * answers as the snapshot records it ({@link Baseline}, {@code infra-doors}). The {@link World} of
+ * the core corpora is served by the operations every router calls, built as production builds them,
+ * on ada's box, whose shell lists no container and runs nothing else; each member of the {@link
+ * Cast} a door binds — the host CLI and box credential, an HTTP token, a run's and a room's agent —
+ * asks each door, rehearsed so the box is left as it was. A door that takes the box it answers on
+ * is asked on ada's box and on bob's. A refusal is its door's code, HTTP status, message and
+ * remedy; a success its response type and every id it shows, so a read's audience is recorded with
+ * it ({@link #shown}). A door asked directly, rather than through the operations, is asked only by
+ * whom production lets reach it ({@link Door#reaches}).
  *
  * <p>It lives beside the routers because the requests they parse are theirs alone; each is built by
  * the router's own parser.

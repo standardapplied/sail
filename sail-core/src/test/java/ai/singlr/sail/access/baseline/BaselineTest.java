@@ -15,13 +15,12 @@ import java.util.TreeMap;
 import org.junit.jupiter.api.Test;
 
 /**
- * The differential's own rules: a corpus answers as its baseline does, but for the cells listed as
- * moved, each of which stays denied, answers what its line says, and is still answered.
+ * The snapshot's own rules: a corpus answers every cell exactly as its snapshot does, each cell is
+ * answered once, and an ask that fails other than by a refusal fails the corpus.
  */
 class BaselineTest {
 
   private static final String READ_ONLY = "denied READ_ONLY read-only | Ask an admin.";
-  private static final String NOT_FOUND = "denied OUT_OF_SCOPE not found | Ask for a grant.";
 
   private static SortedMap<String, String> answers(String... cells) {
     var answers = new TreeMap<String, String>();
@@ -36,7 +35,7 @@ class BaselineTest {
 
   @Test
   void aCorpusThatAnswersAsItsBaselineDiffersNowhere() {
-    assertEquals(List.of(), Baseline.differences(BASELINE, List.of(), BASELINE));
+    assertEquals(List.of(), Baseline.differences(BASELINE, BASELINE));
   }
 
   @Test
@@ -48,133 +47,7 @@ class BaselineTest {
             Baseline.difference("a", Corpus.ALLOWED, READ_ONLY),
             Baseline.difference("c", READ_ONLY, "(absent)"),
             Baseline.difference("d", "(absent)", Corpus.ALLOWED)),
-        Baseline.differences(BASELINE, List.of(), now));
-  }
-
-  @Test
-  void aCellWhoseReasonMovedAnswersWhatItsLineSays() {
-    var moved = List.of(new Baseline.Moved("b", NOT_FOUND, "(a) audience before role"));
-
-    assertEquals(
-        List.of(),
-        Baseline.differences(
-            BASELINE, moved, answers("a", "allowed", "b", NOT_FOUND, "c", READ_ONLY)));
-    assertEquals(
-        List.of(Baseline.difference("b", NOT_FOUND, READ_ONLY)),
-        Baseline.differences(BASELINE, moved, BASELINE),
-        "a moved line the corpus answers as the baseline does is stale");
-  }
-
-  @Test
-  void aMoveNeverChangesAVerdict() {
-    var moved =
-        List.of(
-            new Baseline.Moved("a", NOT_FOUND, "would deny what was allowed"),
-            new Baseline.Moved("b", Corpus.ALLOWED, "would allow what was denied"));
-    var now = answers("a", NOT_FOUND, "b", Corpus.ALLOWED, "c", READ_ONLY);
-
-    assertEquals(
-        List.of(
-            "a\n  moved:    a move keeps a cell denied, and this one goes from 'allowed' to '"
-                + NOT_FOUND
-                + "'",
-            "b\n  moved:    a move keeps a cell denied, and this one goes from '"
-                + READ_ONLY
-                + "' to 'allowed'",
-            Baseline.difference("a", Corpus.ALLOWED, NOT_FOUND),
-            Baseline.difference("b", READ_ONLY, Corpus.ALLOWED)),
-        Baseline.differences(BASELINE, moved, now));
-  }
-
-  @Test
-  void aCellNotFoundIsNeverAnsweredByARefusal() {
-    var baseline =
-        answers(
-            "scope", NOT_FOUND,
-            "door", "denied SPEC_NOT_FOUND 404 Spec 's' was not found.",
-            "box", "denied UNHELD_PROJECT Project 'p' isn't on this box.");
-    var moved =
-        List.of(
-            new Baseline.Moved("scope", READ_ONLY, "(a) a refusal before the audience"),
-            new Baseline.Moved(
-                "door", "denied ROOM_NOT_FOUND 404 Room 'r' was not found.", "(a) x"),
-            new Baseline.Moved("box", NOT_FOUND, "(a) the actor's audience before the box's"));
-    var now =
-        answers(
-            "scope", READ_ONLY,
-            "door", "denied ROOM_NOT_FOUND 404 Room 'r' was not found.",
-            "box", NOT_FOUND);
-
-    assertEquals(
-        List.of(
-            "scope\n  moved:    a cell not found stays not found, and this one goes from '"
-                + NOT_FOUND
-                + "' to '"
-                + READ_ONLY
-                + "'",
-            Baseline.difference("scope", NOT_FOUND, READ_ONLY)),
-        Baseline.differences(baseline, moved, now));
-  }
-
-  @Test
-  void aMoveKeepsItsFixAndItsCauseFitsHowItsAnswerMoved() {
-    var bare = "denied UNHELD_PROJECT gone | ";
-    var named = "denied UNHELD_PROJECT gone | Create it.";
-    var reworded = "denied READ_ONLY read-only now | Ask an admin.";
-    var baseline =
-        answers(
-            "lost", READ_ONLY, "hidden", READ_ONLY, "c", bare, "b", READ_ONLY, "kind", READ_ONLY,
-            "x", bare);
-    var moved =
-        List.of(
-            new Baseline.Moved("lost", "denied ADMIN_ONLY admins | ", "(a) admins first"),
-            new Baseline.Moved("hidden", bare, "(a) not held before the role"),
-            new Baseline.Moved("c", named, "(c) a refusal names its fix"),
-            new Baseline.Moved("b", reworded, "(b) one wording"),
-            new Baseline.Moved("kind", NOT_FOUND, "(b) one wording"),
-            new Baseline.Moved("x", "denied UNHELD_PROJECT went | Create it.", "(c) a fix"));
-
-    assertEquals(
-        List.of(
-            "lost\n  moved:    a refusal names its fix, and this one loses it: '" + READ_ONLY + "'",
-            "kind\n  moved:    cause (b) keeps the class of refusal, and this one goes from '"
-                + READ_ONLY
-                + "'",
-            "x\n  moved:    cause (c) keeps the message and gains a fix, and this one goes from '"
-                + bare
-                + "'"),
-        Baseline.differences(
-            baseline,
-            moved,
-            answers(
-                "lost", READ_ONLY, "hidden", bare, "c", named, "b", reworded, "kind", READ_ONLY,
-                "x", bare)));
-  }
-
-  @Test
-  void aMovedLineNamesItsCause() {
-    assertEquals(
-        List.of("b\n  moved:    names no cause (a), (b) or (c)"),
-        Baseline.differences(
-            BASELINE, List.of(new Baseline.Moved("b", NOT_FOUND, "because")), BASELINE));
-  }
-
-  @Test
-  void aMovedLineNamesACellOfTheBaselineOnceWithANewAnswerAndAWhy() {
-    var moved =
-        List.of(
-            new Baseline.Moved("z", NOT_FOUND, "no such cell"),
-            new Baseline.Moved("b", READ_ONLY, "the same answer"),
-            new Baseline.Moved("c", NOT_FOUND, " "),
-            new Baseline.Moved("b", NOT_FOUND, "(a) audience before role"));
-
-    assertEquals(
-        List.of(
-            "z\n  moved:    the baseline answers no such cell",
-            "b\n  moved:    it answers what the baseline answers",
-            "c\n  moved:    names no why",
-            "b\n  moved:    listed twice"),
-        Baseline.differences(BASELINE, moved, BASELINE));
+        Baseline.differences(BASELINE, now));
   }
 
   @Test
