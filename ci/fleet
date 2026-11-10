@@ -403,6 +403,21 @@ http_door() {
   grep -q "^HTTP $expected$" <<< "$out" && grep -qF "$says" <<< "$out"
 }
 
+readonly TOKEN_DOOR='set -u
+handle=$1 method=$2 path=$3
+token=$(sudo sail server token create "door-$handle" member --fde "$handle" 2>/dev/null | sed -n 2p | tr -d " ")
+[ -n "$token" ] || { echo "no token"; exit 1; }
+status=$(curl -s -o /tmp/door.json -w "%{http_code}" -X "$method" -H "Authorization: Bearer $token" "http://127.0.0.1:7070$path")
+sudo sail server token revoke "door-$handle" > /dev/null 2>&1
+echo "HTTP $status"; head -c 400 /tmp/door.json; echo'
+
+token_door() {
+  local run=$1 handle=$2 expected=$3 method=$4 path=$5 says=${6:-} out
+  out=$(on "$run" main "cat > /tmp/sail-token-door && bash /tmp/sail-token-door $handle $method '$path'" <<< "$TOKEN_DOOR")
+  echo "$out"
+  grep -q "^HTTP $expected$" <<< "$out" && grep -qF "$says" <<< "$out"
+}
+
 apply_project() {
   on "$1" "$2" "sudo sail project apply $3 --yes"
 }
@@ -583,7 +598,9 @@ access() {
   check "$run" "every node syncs twice" sync_all "$run"
   check "$run" "matrix 1: obs reads e1 inside its acme [socket]" container_allows "$run" observer acme "spec show e1 > /dev/null"
   check "$run" "matrix 3: client reads beta's b1 on main, which holds it, and it is not found [HTTP]" \
-    http_door "$run" main client 404 GET /v1/specs/b1 '' "Spec 'b1' was not found."
+    token_door "$run" client 404 GET /v1/specs/b1 "Spec 'b1' was not found."
+  check "$run" "client reads acme's e1 on main with the same token [HTTP]" \
+    token_door "$run" client 200 GET /v1/specs/e1 '"id": "e1"'
   check "$run" "client's box holds nothing of beta's b1 [CLI]" refused "$run" client "Spec 'b1' was not found." "sudo sail spec show b1"
   check "$run" "client's box holds nothing of beta's b1 [HTTP]" \
     http_door "$run" client client 404 GET /v1/specs/b1 '' "Spec 'b1' was not found."
