@@ -464,6 +464,70 @@ class WebauthnAuthHandlerTest {
     assertEquals("uday", YamlUtil.parseMap(loginFinish.body()).get("fde"));
   }
 
+  @Test
+  void aDisabledPersonsTicketStartsNoEnrollment() throws Exception {
+    new FdeStore(db).add("uday", null, null);
+    startWithRealEnrollment();
+    var ticket = mintTicket("uday");
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'uday'");
+
+    for (var refused :
+        List.of(
+            postWithTicket("/v1/auth/register/start", ticket, "{}"),
+            post("/v1/auth/register/ticket", adminToken, "{\"fde\":\"uday\"}"))) {
+      assertEquals(401, refused.statusCode());
+      var error = (Map<?, ?>) YamlUtil.parseMap(refused.body()).get("error");
+      assertEquals("authentication_failed", error.get("code"));
+      assertEquals("FDE 'uday' is disabled. Ask an admin to re-enable it.", error.get("message"));
+    }
+  }
+
+  @Test
+  void aTicketFinishesNoOtherFdesRegistration() throws Exception {
+    new FdeStore(db).add("uday", null, null);
+    new FdeStore(db).add("ada", null, null);
+    startWithRealEnrollment();
+    var adasTicket = mintTicket("ada");
+    var udays =
+        YamlUtil.parseMap(post("/v1/auth/register/start", adminToken, "{\"fde\":\"uday\"}").body());
+    var registration = new TestAuthenticator(RP_ID).register(challengeOf(udays), ORIGIN);
+
+    var refused =
+        postWithTicket(
+            "/v1/auth/register/finish", adasTicket, registerFinishBody(udays, registration));
+
+    assertEquals(422, refused.statusCode());
+    var error = (Map<?, ?>) YamlUtil.parseMap(refused.body()).get("error");
+    assertEquals("invalid_request", error.get("code"));
+    assertEquals(
+        "Registration challenge is not for the FDE this enrollment ticket enrolls.",
+        error.get("message"));
+    assertTrue(new WebauthnCredentialStore(db).listForFde(fdeId("uday")).isEmpty());
+  }
+
+  private void startWithRealEnrollment() throws Exception {
+    startWith(
+        new PasskeyService(
+            new RelyingParty(RP_ID, "Sail", Set.of(ORIGIN)),
+            new FdeStore(db),
+            new WebauthnCredentialStore(db),
+            new AuthSessionStore(db),
+            new PendingChallengeStore(db),
+            Duration.ofDays(30)),
+        new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db)),
+        List.of(ORIGIN));
+  }
+
+  private String mintTicket(String handle) throws Exception {
+    var minted = post("/v1/auth/register/ticket", adminToken, "{\"fde\":\"" + handle + "\"}");
+    assertEquals(200, minted.statusCode(), minted.body());
+    return (String) YamlUtil.parseMap(minted.body()).get("ticket");
+  }
+
+  private String fdeId(String handle) {
+    return new FdeStore(db).byHandle(handle).orElseThrow().id();
+  }
+
   private HttpResponse<String> postWithTicket(String path, String ticket, String body)
       throws Exception {
     var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path));
@@ -542,7 +606,11 @@ class WebauthnAuthHandlerTest {
 
     @Override
     public Registration finishRegistration(
-        String challengeId, byte[] clientDataJson, byte[] attestationObject, String label) {
+        String challengeId,
+        String enrolling,
+        byte[] clientDataJson,
+        byte[] attestationObject,
+        String label) {
       if ("dup".equals(label)) {
         throw new PasskeyException(PasskeyException.Kind.BAD_REQUEST, "already registered");
       }

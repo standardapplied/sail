@@ -140,16 +140,14 @@ public final class WebauthnAuthHandler implements HttpHandler {
   private ApiResponse registerFinish(HttpExchange exchange) throws IOException {
     var body = JsonBody.readMap(exchange);
     var ticket = enrollmentTicket(exchange);
-    if (ticket != null) {
-      if (!enrollment.consume(ticket)) {
-        throw ticketDenied();
-      }
-    } else {
+    var enrolling = ticket == null ? null : spent(ticket);
+    if (ticket == null) {
       requireAdmin(exchange);
     }
     var registration =
         ceremonies.finishRegistration(
             requireString(body, "challenge_id"),
+            enrolling,
             decode(body, "client_data_json"),
             decode(body, "attestation_object"),
             optionalString(body, "label"));
@@ -172,6 +170,14 @@ public final class WebauthnAuthHandler implements HttpHandler {
     }
     requireAdmin(exchange);
     return requireString(body, "fde");
+  }
+
+  /** The FDE {@code ticket} enrolls, the ticket spent on this registration; refused once spent. */
+  private String spent(String ticket) {
+    return enrollment
+        .authorize(ticket)
+        .filter(enrolls -> enrollment.consume(ticket))
+        .orElseThrow(WebauthnAuthHandler::ticketDenied);
   }
 
   private static String enrollmentTicket(HttpExchange exchange) {
