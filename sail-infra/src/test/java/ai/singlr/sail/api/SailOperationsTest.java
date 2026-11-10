@@ -15,6 +15,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ConnectEnvironment;
@@ -24,11 +25,13 @@ import ai.singlr.sail.engine.SailSkills;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.store.BoxCredentialStore;
@@ -56,6 +59,7 @@ import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -1852,43 +1856,112 @@ class SailOperationsTest {
     assertTrue(result.isSuccess());
   }
 
-  @Test
-  void boxCredentialResolvesToTheRosterFdeAndFailsClosed() throws Exception {
+  /**
+   * Operations on a node whose FDE {@code handle} names when asked, over {@code db}, whose roster
+   * holds uday, an admin, and ada, a member granted acme alone.
+   */
+  private SailOperations nodeOf(Sqlite db, Supplier<String> handle) throws IOException {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, baseYaml());
-    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var fdeStore = new FdeStore(db);
-    fdeStore.add("uday", "Uday", "uday@example.dev", "admin");
+    Acting.system(
+        () -> {
+          fdeStore.add("uday", "Uday", "uday@example.dev", "admin");
+          fdeStore.add("ada", "Ada", "ada@example.dev", "member");
+          fdeStore.restrict("ada");
+          fdeStore.grant("ada", "acme");
+        });
+    return new SailOperations(
+            shell(),
+            TestProjects.reading(yaml),
+            new EventBus(),
+            null,
+            new SpecStore(db),
+            new ReviewStore(db),
+            new RunStore(db),
+            new ProjectStore(db),
+            SyncScheduler.disabled(),
+            fdeStore,
+            SessionYield.NONE)
+        .useBoxCredentials(new BoxCredentialStore(db))
+        .useControlPlane(
+            db,
+            tempDir,
+            new SyncOperations(
+                db,
+                "box",
+                tempDir,
+                () -> new SyncConfig("node", "main", handle.get(), "box"),
+                target -> {
+                  throw new IOException("main unavailable");
+                }));
+  }
+
+  @Test
+  void boxCredentialResolvesToTheBoxsOwnPersonWhenAskedAndFailsClosed() throws Exception {
+    var box = new AtomicReference<>("uday");
+    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    var operations = nodeOf(db, box::get);
     var boxStore = new BoxCredentialStore(db);
-    var operations =
-        new SailOperations(
-                shell(),
-                TestProjects.reading(yaml),
-                new EventBus(),
-                null,
-                new SpecStore(db),
-                new ReviewStore(db),
-                new RunStore(db),
-                new ProjectStore(db),
-                SyncScheduler.disabled(),
-                fdeStore,
-                SessionYield.NONE)
-            .useBoxCredentials(boxStore);
 
-    var credential = boxStore.replace("uday");
-    var actor = operations.boxActorForCredential(credential).orElseThrow();
-    assertEquals("uday", actor.handle());
-    assertEquals(Role.ADMIN, actor.role());
-    assertEquals(Actor.Lane.CLI, actor.lane());
-
+    var udays = boxStore.replace("uday");
+    assertEquals(
+        Optional.of(new Actor("uday", Role.ADMIN, Actor.Lane.CLI)),
+        operations.boxActorForCredential(udays));
     assertTrue(operations.boxActorForCredential("sailbox_wrong").isEmpty());
 
-    var ghost = boxStore.replace("departed");
+    box.set("ada");
+    assertEquals(
+        Optional.empty(),
+        operations.boxActorForCredential(udays),
+        "a credential minted for an FDE the box no longer is stands for no one");
+    assertEquals(
+        Optional.of(
+            new Actor("ada", Role.MEMBER, Actor.Lane.CLI)
+                .withScope(ProjectScope.of(List.of("acme")))),
+        operations.boxActorForCredential(boxStore.replace("ada")),
+        "the box's person, with their role and scope");
+
+    box.set("departed");
     assertTrue(
-        operations.boxActorForCredential(ghost).isEmpty(),
+        operations.boxActorForCredential(boxStore.replace("departed")).isEmpty(),
         "a handle absent from the roster must refuse");
+  }
+
+  @Test
+  void aRunActingForNoFdeSeesWhatTheBoxsPersonSees() throws Exception {
+    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    var operations = nodeOf(db, () -> "ada");
+    var ownerless =
+        new RunStore.RunRow(
+            "run-1",
+            "acme",
+            "auth",
+            "ada",
+            "build",
+            "claude-code",
+            "feat/auth",
+            "task",
+            null,
+            null,
+            "running",
+            null,
+            null,
+            null,
+            Instant.EPOCH,
+            null,
+            List.of(),
+            null,
+            "claude/r1",
+            null);
+
+    assertEquals(
+        Optional.of(
+            new Actor("claude/r1", Role.MEMBER, Actor.Lane.AGENT, null)
+                .withScope(ProjectScope.of(List.of("acme")))),
+        operations.runActor(ownerless));
   }
 
   @Test

@@ -45,10 +45,10 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * A node's writes speak for its FDE. On Ada's node, Raj — an admin on main — reads through every
  * door and writes through none: his API token, his passkey session, a session his gateway key
- * mints, his box credential, a run acting for him and his terminal. Every door but the terminal,
- * which keeps its own text, answers the spec rule's one refusal — the same kind, code, message and
- * fix — and so does a room run of Ada's own. Ada, the runs acting for her, and a credential naming
- * no FDE write as before.
+ * mints, a run acting for him and his terminal. Every door but the terminal, which keeps its own
+ * text, answers the spec rule's one refusal — the same kind, code, message and fix — and so does a
+ * room run of Ada's own. The box credential is never his: one minted for him on Ada's box is
+ * refused. Ada, the runs acting for her, and a credential naming no FDE write as before.
  */
 class NodeWritesTest {
 
@@ -153,11 +153,16 @@ class NodeWritesTest {
       assertEquals(403, write.statusCode(), write.body());
       assertEquals(READ_ONLY, YamlUtil.parseMap(write.body()).get("error"), "over HTTP");
     }
-    for (var credential : List.of(boxCredential, reserveRun("raj", "build"))) {
-      assertEquals(200, socket("GET", "/v1/specs", credential, "").status());
-      var write = socket("POST", "/v1/specs", credential, form());
-      assertEquals(403, write.status(), write.body().toString());
-      assertEquals(READ_ONLY, write.body().get("error"), "the same refusal on the socket");
+    var run = reserveRun("raj", "build");
+    assertEquals(200, socket("GET", "/v1/specs", run, "").status());
+    var write = socket("POST", "/v1/specs", run, form());
+    assertEquals(403, write.status(), write.body().toString());
+    assertEquals(READ_ONLY, write.body().get("error"), "the same refusal on the socket");
+    for (var method : List.of("GET", "POST")) {
+      assertEquals(
+          401,
+          socket(method, "/v1/specs", boxCredential, form()).status(),
+          "a box credential is the box's own person's, never another FDE's");
     }
     var roomRun = socket("POST", "/v1/specs", reserveRun("ada", "room"), form());
     assertEquals(403, roomRun.status(), roomRun.body().toString());

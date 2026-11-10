@@ -45,9 +45,10 @@ public interface LocalLaneOperations {
   }
 
   /**
-   * The actor {@code run}'s credential acts as: its principal, for the FDE the run acts for, on the
-   * agent lane or, for a read-only lane, the room lane — with the role the role rule gives that
-   * FDE, capped by the lane's. Empty when that FDE is disabled or unknown.
+   * The actor {@code run}'s credential acts as, as the role rule resolves a run's credential: its
+   * principal, for the FDE the run acts for (the box's FDE when it names none), on the agent lane
+   * or, for a read-only lane, the room lane, with that FDE's role capped by the lane's and that
+   * FDE's scope. Empty when that FDE is disabled or unknown.
    */
   Optional<Actor> runActor(RunStore.RunRow run);
 
@@ -64,9 +65,10 @@ public interface LocalLaneOperations {
   StackOperations stack();
 
   /**
-   * Resolves the box's ambient credential to the FDE actor it stands for, or empty when the
-   * credential is unknown or its handle has left the roster. Serves the local socket's interactive
-   * lane; run credentials are resolved first and never reach this.
+   * Resolves the box's ambient credential to the box's own person, as the role rule resolves the
+   * box: the FDE this box is when asked, on the CLI lane. Empty when the credential is unknown, was
+   * minted for an FDE the box no longer is, or that FDE has left the roster. Serves the local
+   * socket's interactive lane; run credentials are resolved first and never reach this.
    */
   default Optional<Actor> boxActorForCredential(String credential) {
     return Optional.empty();

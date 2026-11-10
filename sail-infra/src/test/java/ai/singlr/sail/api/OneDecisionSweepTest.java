@@ -111,8 +111,6 @@ class OneDecisionSweepTest {
             "LocalApiRouter#whoami",
             "LocalApiRouter#requirePerson",
             "LocalApiRouter#runSession",
-            "SailOperations#runActor",
-            "SailOperations#boxActorForCredential",
             "SessionAwareAuth#authenticateSession",
             "TokenAuth#require",
             "TokenAuth#roleOf",

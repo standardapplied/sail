@@ -40,6 +40,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -80,22 +81,27 @@ class UnassignedSpecTest {
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     specs = new SpecStore(db);
-    operations =
-        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
-            .useControlPlane(
-                db,
-                tempDir,
-                new SyncOperations(
-                    db,
-                    "box",
-                    tempDir,
-                    SyncConfig::unset,
-                    target -> {
-                      throw new IOException("main unavailable");
-                    }));
+    operations = box(SyncConfig::unset);
     var auth = TestAuth.sessions(db);
     server = new SailApiServer("127.0.0.1", 0, operations, auth, new EventBus(), null, null, null);
     server.start();
+  }
+
+  /** Operations over this database on a box {@code config} names. */
+  private SailOperations box(Supplier<SyncConfig> config) {
+    return OperationsFactory.create(
+            db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+        .useControlPlane(
+            db,
+            tempDir,
+            new SyncOperations(
+                db,
+                "box",
+                tempDir,
+                config,
+                target -> {
+                  throw new IOException("main unavailable");
+                }));
   }
 
   @AfterEach
@@ -288,12 +294,13 @@ class UnassignedSpecTest {
   void theBoxCredentialCreatesItForTheBoxFde() {
     new FdeStore(db).add("uday", null, null, "member");
     var credential = new BoxCredentialStore(db).replace("uday");
-    var router = new LocalApiRouter(operations);
+    try (var udays = box(() -> new SyncConfig("node", "main", "uday", "box"))) {
+      var created =
+          new LocalApiRouter(udays)
+              .handle(form("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme"));
 
-    var created =
-        router.handle(form("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme"));
-
-    assertEquals(201, created.status(), created.body().toString());
+      assertEquals(201, created.status(), created.body().toString());
+    }
     assertUnassignedAndCreatedBy("draft", "uday");
   }
 

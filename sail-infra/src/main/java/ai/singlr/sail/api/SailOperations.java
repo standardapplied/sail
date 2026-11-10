@@ -43,7 +43,6 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.BoxCredentialStore;
@@ -491,18 +490,22 @@ public final class SailOperations implements HostOperations {
   }
 
   /**
-   * The FDE actor the box credential stands for, with the role {@link RoleRule} gives that FDE: a
-   * disabled FDE, or one the roster does not know, refuses. Empty when the box store is not wired
-   * (a lane that never authenticates is a lane that fails closed).
+   * The box's own person the box credential stands for, resolved when asked: the FDE this box is
+   * now, with the role and scope {@link RoleRule} gives them on the CLI lane, as the host CLI's
+   * root. The credential proves only that it was minted for that FDE, so one minted for an FDE the
+   * box no longer is refuses, and so does a disabled FDE or one the roster does not know. Empty
+   * when the box store is not wired (a lane that never authenticates is a lane that fails closed).
    */
   @Override
   public Optional<Actor> boxActorForCredential(String credential) {
     if (boxCredentialStore == null) {
       return Optional.empty();
     }
+    var roles = roles();
     return boxCredentialStore
         .resolve(credential)
-        .flatMap(handle -> roles().actorOf(handle, Role.ADMIN, Actor.Lane.CLI));
+        .filter(minted -> roles.boxFde().filter(minted::equals).isPresent())
+        .flatMap(minted -> roles.principal(RoleRule.Credential.box(Actor.Lane.CLI)));
   }
 
   SailOperations(
@@ -1329,19 +1332,11 @@ public final class SailOperations implements HostOperations {
   /**
    * A run acting for no FDE acts for this box's, so a run credential never outranks the FDE whose
    * box launched it; and it sees the projects that FDE does, so a run a scoped FDE started on main
-   * reads no more than its owner may.
+   * reads no more than its owner may, and an ownerless run no more than the box's person.
    */
   @Override
   public Optional<Actor> runActor(RunStore.RunRow run) {
-    var lane = run.principalActor();
-    var role =
-        Strings.isBlank(run.owner())
-            ? roles().roleOfUnbound(lane.role())
-            : roles().roleOf(run.owner(), lane.role());
-    return role.map(
-        granted ->
-            new Actor(lane.handle(), granted, lane.lane(), lane.owner())
-                .withScope(roles().scopeOf(run.owner())));
+    return roles().principal(RoleRule.Credential.run(run));
   }
 
   @Override

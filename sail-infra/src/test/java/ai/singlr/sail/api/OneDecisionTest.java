@@ -85,6 +85,7 @@ class OneDecisionTest {
   @TempDir Path tempDir;
   private Sqlite db;
   private SailOperations operations;
+  private SailOperations adasBox;
   private SailApiServer server;
   private String token;
   private String session;
@@ -114,19 +115,8 @@ class OneDecisionTest {
     Acting.as("ada", () -> new SpecStore(db).create(spec("mine", "ada")));
     agentRun = reserve("mine", null, "build");
     roomRun = reserve(null, "den", DispatchGate.ROOM_ROLE);
-    operations =
-        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
-            .useControlPlane(
-                db,
-                tempDir,
-                new SyncOperations(
-                    db,
-                    "box",
-                    tempDir,
-                    () -> MAIN,
-                    target -> {
-                      throw new IOException("main unavailable");
-                    }));
+    operations = box(MAIN);
+    adasBox = box(ADAS_NODE);
     server =
         new SailApiServer(
             "127.0.0.1",
@@ -144,7 +134,30 @@ class OneDecisionTest {
   void tearDown() {
     server.close();
     operations.close();
+    adasBox.close();
     db.close();
+  }
+
+  /** Operations over this database on a box {@code config} names. */
+  private SailOperations box(SyncConfig config) {
+    return OperationsFactory.create(
+            db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+        .useControlPlane(
+            db,
+            tempDir,
+            new SyncOperations(
+                db,
+                config.boxId(),
+                tempDir,
+                () -> config,
+                target -> {
+                  throw new IOException("main unavailable");
+                }));
+  }
+
+  /** The socket doors ada reaches: her box's credential on her box, and her run on main. */
+  private List<Map.Entry<LocalLaneOperations, String>> adasSocketDoors() {
+    return List.of(Map.entry(adasBox, boxCredential), Map.entry(operations, agentRun));
   }
 
   private static RoomStore.RoomRow room(String id, String owner) {
@@ -184,9 +197,9 @@ class OneDecisionTest {
     var failure = assertInstanceOf(Result.Failure.class, cli, "the host CLI");
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, failure.errorCode());
     assertEquals(NOT_ADAS_SPEC, failure.errorMessage());
-    for (var credential : List.of(boxCredential, agentRun)) {
+    for (var door : adasSocketDoors()) {
       assertRefusedOnSocket(
-          socket("PUT", "/v1/specs/theirs", credential, "title=x"),
+          socket(door.getKey(), "PUT", "/v1/specs/theirs", door.getValue(), "title=x"),
           "forbidden_not_assignee",
           NOT_ADAS_SPEC);
     }
@@ -242,8 +255,14 @@ class OneDecisionTest {
                     new SpecMessageRequest("by the host CLI", null, MessageStore.Mark.PLAIN),
                     "ada"));
     assertTrue(cli.isSuccess(), "the host CLI: " + cli);
-    for (var credential : List.of(boxCredential, agentRun)) {
-      var answered = socket("POST", "/v1/specs/den/messages", credential, "body=on the socket");
+    for (var door : adasSocketDoors()) {
+      var answered =
+          socket(
+              door.getKey(),
+              "POST",
+              "/v1/specs/den/messages",
+              door.getValue(),
+              "body=on the socket");
       assertEquals(201, answered.status(), answered.body().toString());
     }
     assertRefusedOnSocket(
@@ -321,7 +340,12 @@ class OneDecisionTest {
   }
 
   private ApiResponse socket(String method, String path, String credential, String form) {
-    return new LocalApiRouter(operations)
+    return socket(operations, method, path, credential, form);
+  }
+
+  private static ApiResponse socket(
+      LocalLaneOperations lane, String method, String path, String credential, String form) {
+    return new LocalApiRouter(lane)
         .handle(
             new LocalApiRequest(
                 method,
