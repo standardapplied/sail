@@ -597,6 +597,18 @@ class AccessTest {
   }
 
   @Test
+  void aRowAsAReadDecidesItIsWhereItIsFiledAndNoOnesToOwn() {
+    var review = Resources.filed(Resource.Kind.REVIEW, "rv-1", "beta");
+
+    assertEquals(new Resource(Resource.Kind.REVIEW, "rv-1", "beta", List.of(), null, null), review);
+    assertEquals(new Decision.Allowed(), Access.decide(Actors.VIEWER, Action.READ, review));
+    assertEquals(
+        new Decision.NotFound(),
+        Access.decide(
+            Actors.VIEWER.withScope(ProjectScope.of(List.of("acme"))), Action.READ, review));
+  }
+
+  @Test
   void aMessageIsFiledUnderItsOwnProjectAndOwnedByItsConversation() {
     var message = Resources.message("m-1", "beta", LOBBY);
 

@@ -110,6 +110,16 @@ public final class Resources {
     return new Resource(Resource.Kind.PROJECT, name, name, one(createdBy), null, null);
   }
 
+  /**
+   * Row {@code id} of {@code kind}, filed under {@code project}, as a read decides it: by where it
+   * is filed alone, so a list builds one per row from what the row carries and looks up no owner.
+   * Read asks no owner of anyone ({@link Policy}); every other action is decided on its kind's own
+   * factory.
+   */
+  public static Resource filed(Resource.Kind kind, String id, String project) {
+    return new Resource(kind, id, project, List.of(), null, null);
+  }
+
   /** The box of {@code fde}: its sync health, bus stats and main, which are its person's. */
   public static Resource box(String fde) {
     return new Resource(Resource.Kind.BOX, fde, null, one(fde), null, null);
