@@ -7,7 +7,9 @@ package ai.singlr.sail.identity;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.RunStore;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -36,6 +38,112 @@ public final class RoleRule {
   public RoleRule(Supplier<SyncConfig> box, FdeStore roster) {
     this.box = Objects.requireNonNull(box, "box");
     this.roster = roster;
+  }
+
+  /**
+   * What a door's credential code found: whom the credential names and the lane it came in by,
+   * never the role it acts with, which only {@link #principal} resolves, so a door names no role. A
+   * credential that names no person (the box's own, the host token, a machine token, a run acting
+   * for no FDE) acts for the box's FDE ({@link #boxFde}): it takes that FDE's role and scope, so no
+   * credential on a box reaches beyond the person whose box it is.
+   */
+  public sealed interface Credential {
+
+    /**
+     * A person's own credential naming FDE {@code handle}, on {@code lane}, with their full role:
+     * the SSH gateway's key.
+     */
+    static Credential person(String handle, Actor.Lane lane) {
+      return new Person(handle, Role.ADMIN, lane);
+    }
+
+    /** An API token bound to FDE {@code handle}, minted with the role {@code minted} names. */
+    static Credential token(String handle, String minted) {
+      return new Person(handle, Role.fromAttribute(minted), Actor.Lane.API);
+    }
+
+    /** A login session the door has validated, on {@code lane}: the FDE it was opened for. */
+    static Credential session(AuthSessionStore.SessionInfo session, Actor.Lane lane) {
+      return new Session(Objects.requireNonNull(session, "session"), lane);
+    }
+
+    /**
+     * The box's own person on {@code lane}, with their full role: the host CLI's root, the box
+     * credential in a project container, the terminal's blank token.
+     */
+    static Credential box(Actor.Lane lane) {
+      return new Box(Role.ADMIN, lane);
+    }
+
+    /** The host CLI's API token, minted with the role {@code minted} names: the box's person. */
+    static Credential hostToken(String minted) {
+      return new Box(Role.fromAttribute(minted), Actor.Lane.API);
+    }
+
+    /**
+     * An API token bound to no FDE, minted with the role {@code minted} names: it acts as no one,
+     * with the role and scope of the box's FDE, and so is never the owner of anything.
+     */
+    static Credential machine(String minted) {
+      return new Machine(Role.fromAttribute(minted));
+    }
+
+    /** A run's credential: its principal, for the FDE the run acts for. */
+    static Credential run(RunStore.RunRow run) {
+      return new Run(Objects.requireNonNull(run, "run"));
+    }
+
+    /** FDE {@code handle}, whose role {@code cap} caps. */
+    record Person(String handle, Role cap, Actor.Lane lane) implements Credential {}
+
+    /** The FDE a validated login session was opened for. */
+    record Session(AuthSessionStore.SessionInfo session, Actor.Lane lane) implements Credential {}
+
+    /** The box's FDE, whose role {@code cap} caps. */
+    record Box(Role cap, Actor.Lane lane) implements Credential {}
+
+    /** No FDE, acting with the box's FDE's role, which {@code cap} caps. */
+    record Machine(Role cap) implements Credential {}
+
+    /** A run's principal. */
+    record Run(RunStore.RunRow run) implements Credential {}
+  }
+
+  /**
+   * The principal {@code credential} stands for: its handle, its role capped by what the credential
+   * was minted with, its lane, and its scope, always the resolved person's; empty when the
+   * credential is refused — an FDE disabled or unknown here, a session whose FDE is gone, or a box
+   * that cannot place its own FDE.
+   */
+  public Optional<Actor> principal(Credential credential) {
+    return switch (Objects.requireNonNull(credential, "credential")) {
+      case Credential.Person(var handle, var cap, var lane) -> actorOf(handle, cap, lane);
+      case Credential.Session(var session, var lane) ->
+          Optional.ofNullable(roster)
+              .flatMap(known -> known.byId(session.fdeId()))
+              .flatMap(fde -> actorOf(fde.handle(), Role.ADMIN, lane));
+      case Credential.Box(var cap, var lane) ->
+          actingFor(null, boxFde().orElse(null), cap, lane, null);
+      case Credential.Machine(var cap) -> actingFor(null, null, cap, Actor.Lane.API, null);
+      case Credential.Run(var run) -> {
+        var principal = run.principalActor();
+        yield actingFor(
+            run.owner(), principal.handle(), principal.role(), principal.lane(), principal.owner());
+      }
+    };
+  }
+
+  /**
+   * An actor showing {@code handle} on {@code lane}, for {@code owner}, acting as FDE {@code
+   * person} or, when that is blank, as the box's FDE: that FDE's role capped by {@code cap}, and
+   * its scope.
+   */
+  private Optional<Actor> actingFor(
+      String person, String handle, Role cap, Actor.Lane lane, String owner) {
+    var unbound = Strings.isBlank(person);
+    var role = unbound ? roleOfUnbound(cap) : roleOf(person, cap);
+    var scope = scopeOf(unbound ? boxFde().orElse(null) : person);
+    return role.map(granted -> new Actor(handle, granted, lane, owner).withScope(scope));
   }
 
   /**

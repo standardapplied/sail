@@ -6,11 +6,16 @@
 package ai.singlr.sail.identity;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.identity.RoleRule.Credential;
+import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
@@ -21,6 +26,7 @@ class RoleRuleTest {
 
   private static final SyncConfig MAIN = new SyncConfig("main", null, "uday", "main-box");
   private static final SyncConfig NODE = new SyncConfig("node", "sail@main", "uday", "node-box");
+  private static final Duration MINUTE = Duration.ofMinutes(1);
   private static final SyncConfig STANDALONE = new SyncConfig(null, null, "uday", null);
 
   private Sqlite db;
@@ -178,5 +184,131 @@ class RoleRuleTest {
         rule.actorOf("mady", Role.ADMIN, Actor.Lane.SYNC));
     assertEquals(Optional.empty(), rule.actorOf("nobody", Role.ADMIN, Actor.Lane.API));
     assertEquals(ProjectScope.all(), new RoleRule(() -> MAIN, null).scopeOf("mady"));
+  }
+
+  @Test
+  void aPersonATokenAndASessionActAsTheFdeTheyNameWithItsRoleCappedAndItsScope() {
+    roster.restrict("mady");
+    roster.grant("mady", "alpha");
+    var rule = new RoleRule(() -> MAIN, roster);
+    var alpha = ProjectScope.of(List.of("alpha"));
+    var sessions = new AuthSessionStore(db);
+    var session =
+        sessions
+            .validate(sessions.create(roster.byHandle("mady").orElseThrow().id(), MINUTE).token())
+            .orElseThrow();
+
+    assertEquals(
+        Optional.of(new Actor("mady", Role.MEMBER, Actor.Lane.SYNC).withScope(alpha)),
+        rule.principal(Credential.person("mady", Actor.Lane.SYNC)));
+    assertEquals(
+        Optional.of(new Actor("mady", Role.VIEWER, Actor.Lane.API).withScope(alpha)),
+        rule.principal(Credential.token("mady", "viewer")));
+    assertEquals(
+        Optional.of(new Actor("mady", Role.MEMBER, Actor.Lane.SYNC).withScope(alpha)),
+        rule.principal(Credential.session(session, Actor.Lane.SYNC)));
+    assertEquals(
+        Optional.of(new Actor("raj", Role.ADMIN, Actor.Lane.API)),
+        rule.principal(Credential.token("raj", "admin")));
+    assertEquals(
+        Optional.of(new Actor("raj", Role.ADMIN, Actor.Lane.CLI)),
+        rule.principal(Credential.person("raj", Actor.Lane.CLI)));
+    var raj = sessions.create(roster.byHandle("raj").orElseThrow().id(), MINUTE).token();
+    assertEquals(
+        Optional.of(new Actor("raj", Role.ADMIN, Actor.Lane.API)),
+        rule.principal(Credential.session(sessions.validate(raj).orElseThrow(), Actor.Lane.API)),
+        "a session carries its person's whole role");
+  }
+
+  @Test
+  void aCredentialNamingNoOneHereIsRefused() {
+    var rule = new RoleRule(() -> MAIN, roster);
+    var gone = new AuthSessionStore.SessionInfo("no-such-fde", null, null);
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'mady'");
+
+    assertEquals(Optional.empty(), rule.principal(Credential.person(" ", Actor.Lane.API)));
+    assertEquals(Optional.empty(), rule.principal(Credential.token("mady", "member")));
+    assertEquals(Optional.empty(), rule.principal(Credential.session(gone, Actor.Lane.SYNC)));
+    var stranger = roster.add("stranger", null, null, "admin");
+    assertEquals(
+        Optional.empty(),
+        new RoleRule(() -> MAIN, null)
+            .principal(
+                Credential.session(
+                    new AuthSessionStore.SessionInfo(stranger.id(), null, null), Actor.Lane.API)),
+        "a box that keeps no roster knows no session's FDE");
+    assertThrows(NullPointerException.class, () -> rule.principal(null));
+    assertThrows(NullPointerException.class, () -> Credential.session(null, Actor.Lane.API));
+    assertThrows(NullPointerException.class, () -> Credential.run(null));
+  }
+
+  @Test
+  void theBoxsOwnCredentialsAndAMachineTokenActWithTheBoxFdesRoleAndScope() {
+    roster.restrict("uday");
+    roster.grant("uday", "alpha");
+    var node = new RoleRule(() -> NODE, roster);
+    var alpha = ProjectScope.of(List.of("alpha"));
+
+    assertEquals(
+        Optional.of(new Actor("uday", Role.MEMBER, Actor.Lane.CLI).withScope(alpha)),
+        node.principal(Credential.box(Actor.Lane.CLI)));
+    assertEquals(
+        Optional.of(new Actor("uday", Role.VIEWER, Actor.Lane.API).withScope(alpha)),
+        node.principal(Credential.hostToken("viewer")));
+    assertEquals(
+        Optional.of(new Actor(null, Role.MEMBER, Actor.Lane.API).withScope(alpha)),
+        node.principal(Credential.machine("admin")),
+        "a machine token acts as no one, seeing no more than the box's FDE");
+    assertEquals(
+        Optional.of(new Actor("uday", Role.ADMIN, Actor.Lane.CLI)),
+        new RoleRule(() -> MAIN, roster).principal(Credential.box(Actor.Lane.CLI)),
+        "main's own FDE is its admin, never scoped");
+    assertEquals(
+        Optional.of(new Actor(null, Role.ADMIN, Actor.Lane.CLI)),
+        new RoleRule(SyncConfig::unset, roster).principal(Credential.box(Actor.Lane.CLI)),
+        "a box with no sync handle has no FDE to be, and its root is an admin");
+    var anonymous = new RoleRule(() -> new SyncConfig("node", "sail@main", null, "n"), roster);
+    assertEquals(Optional.empty(), anonymous.principal(Credential.box(Actor.Lane.CLI)));
+    assertEquals(Optional.empty(), anonymous.principal(Credential.machine("member")));
+  }
+
+  @Test
+  void aRunIsItsPrincipalForTheFdeItActsForOrForTheBoxsFde() {
+    roster.restrict("uday");
+    roster.grant("uday", "alpha");
+    roster.restrict("mady");
+    roster.grant("mady", "beta");
+    var main = new RoleRule(() -> MAIN, roster);
+    var build = run("019fee00-0000-7000-8000-000000000001", "mady", "build");
+    var room = run("019fee00-0000-7000-8000-000000000002", "mady", "room");
+    var ownerless = run("019fee00-0000-7000-8000-000000000003", null, "build");
+
+    assertEquals(
+        Optional.of(
+            Actor.agentPrincipal(build.principal(), "mady")
+                .withScope(ProjectScope.of(List.of("beta")))),
+        main.principal(Credential.run(build)));
+    assertEquals(
+        Optional.of(
+            Actor.roomPrincipal(room.principal(), "mady")
+                .withScope(ProjectScope.of(List.of("beta")))),
+        main.principal(Credential.run(room)));
+    assertEquals(
+        Optional.of(
+            new Actor(ownerless.principal(), Role.MEMBER, Actor.Lane.AGENT, null)
+                .withScope(ProjectScope.of(List.of("alpha")))),
+        new RoleRule(() -> NODE, roster).principal(Credential.run(ownerless)),
+        "a run acting for no FDE sees what the box's FDE sees, never every project");
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'mady'");
+    assertEquals(Optional.empty(), main.principal(Credential.run(build)));
+  }
+
+  private RunStore.RunRow run(String id, String owner, String lane) {
+    var runs = new RunStore(db);
+    Acting.system(
+        () ->
+            runs.create(
+                id, "acme", null, owner, lane, "claude-code", "b", "t", null, null, "/l", "u"));
+    return runs.findById(id).orElseThrow();
   }
 }
