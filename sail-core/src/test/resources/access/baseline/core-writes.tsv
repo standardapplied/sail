@@ -54,7 +54,6 @@ write file acme/new.md create as sync member bob beta	allowed
 write file acme/new.md create as sync viewer ada acme	allowed
 write file acme/new.md create as sync viewer ada all	allowed
 write file acme/new.md create as sync viewer ada beta	allowed
-write file acme/new.md create as sync viewer anonymous none	allowed
 write file acme/new.md create as sync viewer bob acme	allowed
 write file acme/new.md create as sync viewer bob all	allowed
 write file acme/new.md create as sync viewer bob beta	allowed
@@ -115,7 +114,6 @@ write file acme/notes.md delete as sync member bob beta	allowed
 write file acme/notes.md delete as sync viewer ada acme	allowed
 write file acme/notes.md delete as sync viewer ada all	allowed
 write file acme/notes.md delete as sync viewer ada beta	allowed
-write file acme/notes.md delete as sync viewer anonymous none	allowed
 write file acme/notes.md delete as sync viewer bob acme	allowed
 write file acme/notes.md delete as sync viewer bob all	allowed
 write file acme/notes.md delete as sync viewer bob beta	allowed
@@ -176,7 +174,6 @@ write file beta/new.md create as sync member bob beta	allowed
 write file beta/new.md create as sync viewer ada acme	allowed
 write file beta/new.md create as sync viewer ada all	allowed
 write file beta/new.md create as sync viewer ada beta	allowed
-write file beta/new.md create as sync viewer anonymous none	allowed
 write file beta/new.md create as sync viewer bob acme	allowed
 write file beta/new.md create as sync viewer bob all	allowed
 write file beta/new.md create as sync viewer bob beta	allowed
@@ -237,7 +234,6 @@ write file beta/notes.md delete as sync member bob beta	allowed
 write file beta/notes.md delete as sync viewer ada acme	allowed
 write file beta/notes.md delete as sync viewer ada all	allowed
 write file beta/notes.md delete as sync viewer ada beta	allowed
-write file beta/notes.md delete as sync viewer anonymous none	allowed
 write file beta/notes.md delete as sync viewer bob acme	allowed
 write file beta/notes.md delete as sync viewer bob all	allowed
 write file beta/notes.md delete as sync viewer bob beta	allowed
@@ -298,7 +294,6 @@ write file omega/new.md create as sync member bob beta	allowed
 write file omega/new.md create as sync viewer ada acme	allowed
 write file omega/new.md create as sync viewer ada all	allowed
 write file omega/new.md create as sync viewer ada beta	allowed
-write file omega/new.md create as sync viewer anonymous none	allowed
 write file omega/new.md create as sync viewer bob acme	allowed
 write file omega/new.md create as sync viewer bob all	allowed
 write file omega/new.md create as sync viewer bob beta	allowed
@@ -359,7 +354,6 @@ write message post in attic as the poster as sync member bob beta	allowed
 write message post in attic as the poster as sync viewer ada acme	allowed
 write message post in attic as the poster as sync viewer ada all	allowed
 write message post in attic as the poster as sync viewer ada beta	allowed
-write message post in attic as the poster as sync viewer anonymous none	allowed
 write message post in attic as the poster as sync viewer bob acme	allowed
 write message post in attic as the poster as sync viewer bob all	allowed
 write message post in attic as the poster as sync viewer bob beta	allowed
@@ -420,7 +414,6 @@ write message post in b-room as the poster as sync member bob beta	allowed
 write message post in b-room as the poster as sync viewer ada acme	allowed
 write message post in b-room as the poster as sync viewer ada all	allowed
 write message post in b-room as the poster as sync viewer ada beta	allowed
-write message post in b-room as the poster as sync viewer anonymous none	allowed
 write message post in b-room as the poster as sync viewer bob acme	allowed
 write message post in b-room as the poster as sync viewer bob all	allowed
 write message post in b-room as the poster as sync viewer bob beta	allowed
@@ -481,7 +474,6 @@ write message post in den as the poster as sync member bob beta	allowed
 write message post in den as the poster as sync viewer ada acme	allowed
 write message post in den as the poster as sync viewer ada all	allowed
 write message post in den as the poster as sync viewer ada beta	allowed
-write message post in den as the poster as sync viewer anonymous none	allowed
 write message post in den as the poster as sync viewer bob acme	allowed
 write message post in den as the poster as sync viewer bob all	allowed
 write message post in den as the poster as sync viewer bob beta	allowed
@@ -542,7 +534,6 @@ write message post in ghost as the poster as sync member bob beta	allowed
 write message post in ghost as the poster as sync viewer ada acme	allowed
 write message post in ghost as the poster as sync viewer ada all	allowed
 write message post in ghost as the poster as sync viewer ada beta	allowed
-write message post in ghost as the poster as sync viewer anonymous none	allowed
 write message post in ghost as the poster as sync viewer bob acme	allowed
 write message post in ghost as the poster as sync viewer bob all	allowed
 write message post in ghost as the poster as sync viewer bob beta	allowed
@@ -603,7 +594,6 @@ write message post in hall as the poster as sync member bob beta	allowed
 write message post in hall as the poster as sync viewer ada acme	allowed
 write message post in hall as the poster as sync viewer ada all	allowed
 write message post in hall as the poster as sync viewer ada beta	allowed
-write message post in hall as the poster as sync viewer anonymous none	allowed
 write message post in hall as the poster as sync viewer bob acme	allowed
 write message post in hall as the poster as sync viewer bob all	allowed
 write message post in hall as the poster as sync viewer bob beta	allowed
@@ -664,7 +654,6 @@ write message post in lobby as ada as sync member bob beta	allowed
 write message post in lobby as ada as sync viewer ada acme	allowed
 write message post in lobby as ada as sync viewer ada all	allowed
 write message post in lobby as ada as sync viewer ada beta	allowed
-write message post in lobby as ada as sync viewer anonymous none	allowed
 write message post in lobby as ada as sync viewer bob acme	allowed
 write message post in lobby as ada as sync viewer bob all	allowed
 write message post in lobby as ada as sync viewer bob beta	allowed
@@ -725,7 +714,6 @@ write message post in lobby as claude/019fee00-0000-7000-8000-0000000ada01 as sy
 write message post in lobby as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer ada acme	allowed
 write message post in lobby as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer ada all	allowed
 write message post in lobby as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer ada beta	allowed
-write message post in lobby as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer anonymous none	allowed
 write message post in lobby as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer bob acme	allowed
 write message post in lobby as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer bob all	allowed
 write message post in lobby as claude/019fee00-0000-7000-8000-0000000ada01 as sync viewer bob beta	allowed
@@ -786,7 +774,6 @@ write message post in lobby as sail as sync member bob beta	allowed
 write message post in lobby as sail as sync viewer ada acme	allowed
 write message post in lobby as sail as sync viewer ada all	allowed
 write message post in lobby as sail as sync viewer ada beta	allowed
-write message post in lobby as sail as sync viewer anonymous none	allowed
 write message post in lobby as sail as sync viewer bob acme	allowed
 write message post in lobby as sail as sync viewer bob all	allowed
 write message post in lobby as sail as sync viewer bob beta	allowed
@@ -847,7 +834,6 @@ write message post in lobby as the poster as sync member bob beta	allowed
 write message post in lobby as the poster as sync viewer ada acme	allowed
 write message post in lobby as the poster as sync viewer ada all	allowed
 write message post in lobby as the poster as sync viewer ada beta	allowed
-write message post in lobby as the poster as sync viewer anonymous none	allowed
 write message post in lobby as the poster as sync viewer bob acme	allowed
 write message post in lobby as the poster as sync viewer bob all	allowed
 write message post in lobby as the poster as sync viewer bob beta	allowed
@@ -908,7 +894,6 @@ write message post in s-ada as the poster as sync member bob beta	allowed
 write message post in s-ada as the poster as sync viewer ada acme	allowed
 write message post in s-ada as the poster as sync viewer ada all	allowed
 write message post in s-ada as the poster as sync viewer ada beta	allowed
-write message post in s-ada as the poster as sync viewer anonymous none	allowed
 write message post in s-ada as the poster as sync viewer bob acme	allowed
 write message post in s-ada as the poster as sync viewer bob all	allowed
 write message post in s-ada as the poster as sync viewer bob beta	allowed
@@ -969,7 +954,6 @@ write message post in s-bob as the poster as sync member bob beta	allowed
 write message post in s-bob as the poster as sync viewer ada acme	allowed
 write message post in s-bob as the poster as sync viewer ada all	allowed
 write message post in s-bob as the poster as sync viewer ada beta	allowed
-write message post in s-bob as the poster as sync viewer anonymous none	allowed
 write message post in s-bob as the poster as sync viewer bob acme	allowed
 write message post in s-bob as the poster as sync viewer bob all	allowed
 write message post in s-bob as the poster as sync viewer bob beta	allowed
@@ -1030,7 +1014,6 @@ write message post in s-lobby as the poster as sync member bob beta	allowed
 write message post in s-lobby as the poster as sync viewer ada acme	allowed
 write message post in s-lobby as the poster as sync viewer ada all	allowed
 write message post in s-lobby as the poster as sync viewer ada beta	allowed
-write message post in s-lobby as the poster as sync viewer anonymous none	allowed
 write message post in s-lobby as the poster as sync viewer bob acme	allowed
 write message post in s-lobby as the poster as sync viewer bob all	allowed
 write message post in s-lobby as the poster as sync viewer bob beta	allowed
@@ -1091,7 +1074,6 @@ write project acme delete as sync member bob beta	allowed
 write project acme delete as sync viewer ada acme	allowed
 write project acme delete as sync viewer ada all	allowed
 write project acme delete as sync viewer ada beta	allowed
-write project acme delete as sync viewer anonymous none	allowed
 write project acme delete as sync viewer bob acme	allowed
 write project acme delete as sync viewer bob all	allowed
 write project acme delete as sync viewer bob beta	allowed
@@ -1152,7 +1134,6 @@ write project acme edit definition as sync member bob beta	allowed
 write project acme edit definition as sync viewer ada acme	allowed
 write project acme edit definition as sync viewer ada all	allowed
 write project acme edit definition as sync viewer ada beta	allowed
-write project acme edit definition as sync viewer anonymous none	allowed
 write project acme edit definition as sync viewer bob acme	allowed
 write project acme edit definition as sync viewer bob all	allowed
 write project acme edit definition as sync viewer bob beta	allowed
@@ -1213,7 +1194,6 @@ write project acme rename as sync member bob beta	allowed
 write project acme rename as sync viewer ada acme	allowed
 write project acme rename as sync viewer ada all	allowed
 write project acme rename as sync viewer ada beta	allowed
-write project acme rename as sync viewer anonymous none	allowed
 write project acme rename as sync viewer bob acme	allowed
 write project acme rename as sync viewer bob all	allowed
 write project acme rename as sync viewer bob beta	allowed
@@ -1274,7 +1254,6 @@ write project beta delete as sync member bob beta	allowed
 write project beta delete as sync viewer ada acme	allowed
 write project beta delete as sync viewer ada all	allowed
 write project beta delete as sync viewer ada beta	allowed
-write project beta delete as sync viewer anonymous none	allowed
 write project beta delete as sync viewer bob acme	allowed
 write project beta delete as sync viewer bob all	allowed
 write project beta delete as sync viewer bob beta	allowed
@@ -1335,7 +1314,6 @@ write project beta edit definition as sync member bob beta	allowed
 write project beta edit definition as sync viewer ada acme	allowed
 write project beta edit definition as sync viewer ada all	allowed
 write project beta edit definition as sync viewer ada beta	allowed
-write project beta edit definition as sync viewer anonymous none	allowed
 write project beta edit definition as sync viewer bob acme	allowed
 write project beta edit definition as sync viewer bob all	allowed
 write project beta edit definition as sync viewer bob beta	allowed
@@ -1396,7 +1374,6 @@ write project beta rename as sync member bob beta	allowed
 write project beta rename as sync viewer ada acme	allowed
 write project beta rename as sync viewer ada all	allowed
 write project beta rename as sync viewer ada beta	allowed
-write project beta rename as sync viewer anonymous none	allowed
 write project beta rename as sync viewer bob acme	allowed
 write project beta rename as sync viewer bob all	allowed
 write project beta rename as sync viewer bob beta	allowed
@@ -1457,7 +1434,6 @@ write project delta delete as sync member bob beta	allowed
 write project delta delete as sync viewer ada acme	allowed
 write project delta delete as sync viewer ada all	allowed
 write project delta delete as sync viewer ada beta	allowed
-write project delta delete as sync viewer anonymous none	allowed
 write project delta delete as sync viewer bob acme	allowed
 write project delta delete as sync viewer bob all	allowed
 write project delta delete as sync viewer bob beta	allowed
@@ -1518,7 +1494,6 @@ write project delta edit definition as sync member bob beta	allowed
 write project delta edit definition as sync viewer ada acme	allowed
 write project delta edit definition as sync viewer ada all	allowed
 write project delta edit definition as sync viewer ada beta	allowed
-write project delta edit definition as sync viewer anonymous none	allowed
 write project delta edit definition as sync viewer bob acme	allowed
 write project delta edit definition as sync viewer bob all	allowed
 write project delta edit definition as sync viewer bob beta	allowed
@@ -1579,7 +1554,6 @@ write project delta rename as sync member bob beta	allowed
 write project delta rename as sync viewer ada acme	allowed
 write project delta rename as sync viewer ada all	allowed
 write project delta rename as sync viewer ada beta	allowed
-write project delta rename as sync viewer anonymous none	allowed
 write project delta rename as sync viewer bob acme	allowed
 write project delta rename as sync viewer bob all	allowed
 write project delta rename as sync viewer bob beta	allowed
@@ -1640,7 +1614,6 @@ write project omega create as sync member bob beta	allowed
 write project omega create as sync viewer ada acme	allowed
 write project omega create as sync viewer ada all	allowed
 write project omega create as sync viewer ada beta	allowed
-write project omega create as sync viewer anonymous none	allowed
 write project omega create as sync viewer bob acme	allowed
 write project omega create as sync viewer bob all	allowed
 write project omega create as sync viewer bob beta	allowed
@@ -1701,7 +1674,6 @@ write project p-new create as sync member bob beta	allowed
 write project p-new create as sync viewer ada acme	allowed
 write project p-new create as sync viewer ada all	allowed
 write project p-new create as sync viewer ada beta	allowed
-write project p-new create as sync viewer anonymous none	allowed
 write project p-new create as sync viewer bob acme	allowed
 write project p-new create as sync viewer bob all	allowed
 write project p-new create as sync viewer bob beta	allowed
@@ -1762,7 +1734,6 @@ write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as 
 write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer ada acme	allowed
 write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer ada all	allowed
 write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer ada beta	allowed
-write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer anonymous none	allowed
 write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer bob acme	allowed
 write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer bob all	allowed
 write review 019fee00-0000-7000-8000-0000000c0c02 marked deletion never held as sync viewer bob beta	allowed
@@ -1823,7 +1794,6 @@ write review create of s-ada as sync member bob beta	allowed
 write review create of s-ada as sync viewer ada acme	allowed
 write review create of s-ada as sync viewer ada all	allowed
 write review create of s-ada as sync viewer ada beta	allowed
-write review create of s-ada as sync viewer anonymous none	allowed
 write review create of s-ada as sync viewer bob acme	allowed
 write review create of s-ada as sync viewer bob all	allowed
 write review create of s-ada as sync viewer bob beta	allowed
@@ -1884,7 +1854,6 @@ write review create of s-beta as sync member bob beta	allowed
 write review create of s-beta as sync viewer ada acme	allowed
 write review create of s-beta as sync viewer ada all	allowed
 write review create of s-beta as sync viewer ada beta	allowed
-write review create of s-beta as sync viewer anonymous none	allowed
 write review create of s-beta as sync viewer bob acme	allowed
 write review create of s-beta as sync viewer bob all	allowed
 write review create of s-beta as sync viewer bob beta	allowed
@@ -1945,7 +1914,6 @@ write review create of s-bob as sync member bob beta	allowed
 write review create of s-bob as sync viewer ada acme	allowed
 write review create of s-bob as sync viewer ada all	allowed
 write review create of s-bob as sync viewer ada beta	allowed
-write review create of s-bob as sync viewer anonymous none	allowed
 write review create of s-bob as sync viewer bob acme	allowed
 write review create of s-bob as sync viewer bob all	allowed
 write review create of s-bob as sync viewer bob beta	allowed
@@ -2006,7 +1974,6 @@ write review create of s-open-bob as sync member bob beta	allowed
 write review create of s-open-bob as sync viewer ada acme	allowed
 write review create of s-open-bob as sync viewer ada all	allowed
 write review create of s-open-bob as sync viewer ada beta	allowed
-write review create of s-open-bob as sync viewer anonymous none	allowed
 write review create of s-open-bob as sync viewer bob acme	allowed
 write review create of s-open-bob as sync viewer bob all	allowed
 write review create of s-open-bob as sync viewer bob beta	allowed
@@ -2067,7 +2034,6 @@ write review review-ada approve as sync member bob beta	allowed
 write review review-ada approve as sync viewer ada acme	allowed
 write review review-ada approve as sync viewer ada all	allowed
 write review review-ada approve as sync viewer ada beta	allowed
-write review review-ada approve as sync viewer anonymous none	allowed
 write review review-ada approve as sync viewer bob acme	allowed
 write review review-ada approve as sync viewer bob all	allowed
 write review review-ada approve as sync viewer bob beta	allowed
@@ -2128,7 +2094,6 @@ write review review-ada dismiss finding-ada as sync member bob beta	allowed
 write review review-ada dismiss finding-ada as sync viewer ada acme	allowed
 write review review-ada dismiss finding-ada as sync viewer ada all	allowed
 write review review-ada dismiss finding-ada as sync viewer ada beta	allowed
-write review review-ada dismiss finding-ada as sync viewer anonymous none	allowed
 write review review-ada dismiss finding-ada as sync viewer bob acme	allowed
 write review review-ada dismiss finding-ada as sync viewer bob all	allowed
 write review review-ada dismiss finding-ada as sync viewer bob beta	allowed
@@ -2189,7 +2154,6 @@ write review review-ada marked deletion with no head as sync member bob beta	all
 write review review-ada marked deletion with no head as sync viewer ada acme	allowed
 write review review-ada marked deletion with no head as sync viewer ada all	allowed
 write review review-ada marked deletion with no head as sync viewer ada beta	allowed
-write review review-ada marked deletion with no head as sync viewer anonymous none	allowed
 write review review-ada marked deletion with no head as sync viewer bob acme	allowed
 write review review-ada marked deletion with no head as sync viewer bob all	allowed
 write review review-ada marked deletion with no head as sync viewer bob beta	allowed
@@ -2250,7 +2214,6 @@ write review review-bob approve as sync member bob beta	allowed
 write review review-bob approve as sync viewer ada acme	allowed
 write review review-bob approve as sync viewer ada all	allowed
 write review review-bob approve as sync viewer ada beta	allowed
-write review review-bob approve as sync viewer anonymous none	allowed
 write review review-bob approve as sync viewer bob acme	allowed
 write review review-bob approve as sync viewer bob all	allowed
 write review review-bob approve as sync viewer bob beta	allowed
@@ -2311,7 +2274,6 @@ write review review-bob dismiss finding-bob as sync member bob beta	allowed
 write review review-bob dismiss finding-bob as sync viewer ada acme	allowed
 write review review-bob dismiss finding-bob as sync viewer ada all	allowed
 write review review-bob dismiss finding-bob as sync viewer ada beta	allowed
-write review review-bob dismiss finding-bob as sync viewer anonymous none	allowed
 write review review-bob dismiss finding-bob as sync viewer bob acme	allowed
 write review review-bob dismiss finding-bob as sync viewer bob all	allowed
 write review review-bob dismiss finding-bob as sync viewer bob beta	allowed
@@ -2372,7 +2334,6 @@ write room attic restore as sync member bob beta	allowed
 write room attic restore as sync viewer ada acme	allowed
 write room attic restore as sync viewer ada all	allowed
 write room attic restore as sync viewer ada beta	allowed
-write room attic restore as sync viewer anonymous none	allowed
 write room attic restore as sync viewer bob acme	allowed
 write room attic restore as sync viewer bob all	allowed
 write room attic restore as sync viewer bob beta	allowed
@@ -2433,7 +2394,6 @@ write room b-room assign bob as sync member bob beta	allowed
 write room b-room assign bob as sync viewer ada acme	allowed
 write room b-room assign bob as sync viewer ada all	allowed
 write room b-room assign bob as sync viewer ada beta	allowed
-write room b-room assign bob as sync viewer anonymous none	allowed
 write room b-room assign bob as sync viewer bob acme	allowed
 write room b-room assign bob as sync viewer bob all	allowed
 write room b-room assign bob as sync viewer bob beta	allowed
@@ -2494,7 +2454,6 @@ write room b-room delete as sync member bob beta	allowed
 write room b-room delete as sync viewer ada acme	allowed
 write room b-room delete as sync viewer ada all	allowed
 write room b-room delete as sync viewer ada beta	allowed
-write room b-room delete as sync viewer anonymous none	allowed
 write room b-room delete as sync viewer bob acme	allowed
 write room b-room delete as sync viewer bob all	allowed
 write room b-room delete as sync viewer bob beta	allowed
@@ -2555,7 +2514,6 @@ write room b-room edit title as sync member bob beta	allowed
 write room b-room edit title as sync viewer ada acme	allowed
 write room b-room edit title as sync viewer ada all	allowed
 write room b-room edit title as sync viewer ada beta	allowed
-write room b-room edit title as sync viewer anonymous none	allowed
 write room b-room edit title as sync viewer bob acme	allowed
 write room b-room edit title as sync viewer bob all	allowed
 write room b-room edit title as sync viewer bob beta	allowed
@@ -2616,7 +2574,6 @@ write room b-room edit title in a project the catalog lost as sync member bob be
 write room b-room edit title in a project the catalog lost as sync viewer ada acme	allowed
 write room b-room edit title in a project the catalog lost as sync viewer ada all	allowed
 write room b-room edit title in a project the catalog lost as sync viewer ada beta	allowed
-write room b-room edit title in a project the catalog lost as sync viewer anonymous none	allowed
 write room b-room edit title in a project the catalog lost as sync viewer bob acme	allowed
 write room b-room edit title in a project the catalog lost as sync viewer bob all	allowed
 write room b-room edit title in a project the catalog lost as sync viewer bob beta	allowed
@@ -2677,7 +2634,6 @@ write room b-room edit wake as sync member bob beta	allowed
 write room b-room edit wake as sync viewer ada acme	allowed
 write room b-room edit wake as sync viewer ada all	allowed
 write room b-room edit wake as sync viewer ada beta	allowed
-write room b-room edit wake as sync viewer anonymous none	allowed
 write room b-room edit wake as sync viewer bob acme	allowed
 write room b-room edit wake as sync viewer bob all	allowed
 write room b-room edit wake as sync viewer bob beta	allowed
@@ -2738,7 +2694,6 @@ write room b-room re-create in acme over a deletion filed there as sync member b
 write room b-room re-create in acme over a deletion filed there as sync viewer ada acme	allowed
 write room b-room re-create in acme over a deletion filed there as sync viewer ada all	allowed
 write room b-room re-create in acme over a deletion filed there as sync viewer ada beta	allowed
-write room b-room re-create in acme over a deletion filed there as sync viewer anonymous none	allowed
 write room b-room re-create in acme over a deletion filed there as sync viewer bob acme	allowed
 write room b-room re-create in acme over a deletion filed there as sync viewer bob all	allowed
 write room b-room re-create in acme over a deletion filed there as sync viewer bob beta	allowed
@@ -2799,7 +2754,6 @@ write room den assign bob as sync member bob beta	allowed
 write room den assign bob as sync viewer ada acme	allowed
 write room den assign bob as sync viewer ada all	allowed
 write room den assign bob as sync viewer ada beta	allowed
-write room den assign bob as sync viewer anonymous none	allowed
 write room den assign bob as sync viewer bob acme	allowed
 write room den assign bob as sync viewer bob all	allowed
 write room den assign bob as sync viewer bob beta	allowed
@@ -2860,7 +2814,6 @@ write room den delete as sync member bob beta	allowed
 write room den delete as sync viewer ada acme	allowed
 write room den delete as sync viewer ada all	allowed
 write room den delete as sync viewer ada beta	allowed
-write room den delete as sync viewer anonymous none	allowed
 write room den delete as sync viewer bob acme	allowed
 write room den delete as sync viewer bob all	allowed
 write room den delete as sync viewer bob beta	allowed
@@ -2921,7 +2874,6 @@ write room den edit title as sync member bob beta	allowed
 write room den edit title as sync viewer ada acme	allowed
 write room den edit title as sync viewer ada all	allowed
 write room den edit title as sync viewer ada beta	allowed
-write room den edit title as sync viewer anonymous none	allowed
 write room den edit title as sync viewer bob acme	allowed
 write room den edit title as sync viewer bob all	allowed
 write room den edit title as sync viewer bob beta	allowed
@@ -2982,7 +2934,6 @@ write room den edit wake as sync member bob beta	allowed
 write room den edit wake as sync viewer ada acme	allowed
 write room den edit wake as sync viewer ada all	allowed
 write room den edit wake as sync viewer ada beta	allowed
-write room den edit wake as sync viewer anonymous none	allowed
 write room den edit wake as sync viewer bob acme	allowed
 write room den edit wake as sync viewer bob all	allowed
 write room den edit wake as sync viewer bob beta	allowed
@@ -3043,7 +2994,6 @@ write room hall assign bob as sync member bob beta	allowed
 write room hall assign bob as sync viewer ada acme	allowed
 write room hall assign bob as sync viewer ada all	allowed
 write room hall assign bob as sync viewer ada beta	allowed
-write room hall assign bob as sync viewer anonymous none	allowed
 write room hall assign bob as sync viewer bob acme	allowed
 write room hall assign bob as sync viewer bob all	allowed
 write room hall assign bob as sync viewer bob beta	allowed
@@ -3104,7 +3054,6 @@ write room hall delete as sync member bob beta	allowed
 write room hall delete as sync viewer ada acme	allowed
 write room hall delete as sync viewer ada all	allowed
 write room hall delete as sync viewer ada beta	allowed
-write room hall delete as sync viewer anonymous none	allowed
 write room hall delete as sync viewer bob acme	allowed
 write room hall delete as sync viewer bob all	allowed
 write room hall delete as sync viewer bob beta	allowed
@@ -3165,7 +3114,6 @@ write room hall edit title as sync member bob beta	allowed
 write room hall edit title as sync viewer ada acme	allowed
 write room hall edit title as sync viewer ada all	allowed
 write room hall edit title as sync viewer ada beta	allowed
-write room hall edit title as sync viewer anonymous none	allowed
 write room hall edit title as sync viewer bob acme	allowed
 write room hall edit title as sync viewer bob all	allowed
 write room hall edit title as sync viewer bob beta	allowed
@@ -3226,7 +3174,6 @@ write room hall edit wake as sync member bob beta	allowed
 write room hall edit wake as sync viewer ada acme	allowed
 write room hall edit wake as sync viewer ada all	allowed
 write room hall edit wake as sync viewer ada beta	allowed
-write room hall edit wake as sync viewer anonymous none	allowed
 write room hall edit wake as sync viewer bob acme	allowed
 write room hall edit wake as sync viewer bob all	allowed
 write room hall edit wake as sync viewer bob beta	allowed
@@ -3287,7 +3234,6 @@ write room lobby assign bob as sync member bob beta	allowed
 write room lobby assign bob as sync viewer ada acme	allowed
 write room lobby assign bob as sync viewer ada all	allowed
 write room lobby assign bob as sync viewer ada beta	allowed
-write room lobby assign bob as sync viewer anonymous none	allowed
 write room lobby assign bob as sync viewer bob acme	allowed
 write room lobby assign bob as sync viewer bob all	allowed
 write room lobby assign bob as sync viewer bob beta	allowed
@@ -3348,7 +3294,6 @@ write room lobby delete as sync member bob beta	allowed
 write room lobby delete as sync viewer ada acme	allowed
 write room lobby delete as sync viewer ada all	allowed
 write room lobby delete as sync viewer ada beta	allowed
-write room lobby delete as sync viewer anonymous none	allowed
 write room lobby delete as sync viewer bob acme	allowed
 write room lobby delete as sync viewer bob all	allowed
 write room lobby delete as sync viewer bob beta	allowed
@@ -3409,7 +3354,6 @@ write room lobby edit title as sync member bob beta	allowed
 write room lobby edit title as sync viewer ada acme	allowed
 write room lobby edit title as sync viewer ada all	allowed
 write room lobby edit title as sync viewer ada beta	allowed
-write room lobby edit title as sync viewer anonymous none	allowed
 write room lobby edit title as sync viewer bob acme	allowed
 write room lobby edit title as sync viewer bob all	allowed
 write room lobby edit title as sync viewer bob beta	allowed
@@ -3470,7 +3414,6 @@ write room lobby edit wake as sync member bob beta	allowed
 write room lobby edit wake as sync viewer ada acme	allowed
 write room lobby edit wake as sync viewer ada all	allowed
 write room lobby edit wake as sync viewer ada beta	allowed
-write room lobby edit wake as sync viewer anonymous none	allowed
 write room lobby edit wake as sync viewer bob acme	allowed
 write room lobby edit wake as sync viewer bob all	allowed
 write room lobby edit wake as sync viewer bob beta	allowed
@@ -3531,7 +3474,6 @@ write room lobby marked deletion with no head as sync member bob beta	allowed
 write room lobby marked deletion with no head as sync viewer ada acme	allowed
 write room lobby marked deletion with no head as sync viewer ada all	allowed
 write room lobby marked deletion with no head as sync viewer ada beta	allowed
-write room lobby marked deletion with no head as sync viewer anonymous none	allowed
 write room lobby marked deletion with no head as sync viewer bob acme	allowed
 write room lobby marked deletion with no head as sync viewer bob all	allowed
 write room lobby marked deletion with no head as sync viewer bob beta	allowed
@@ -3592,7 +3534,6 @@ write room lobby move to beta as sync member bob beta	allowed
 write room lobby move to beta as sync viewer ada acme	allowed
 write room lobby move to beta as sync viewer ada all	allowed
 write room lobby move to beta as sync viewer ada beta	allowed
-write room lobby move to beta as sync viewer anonymous none	allowed
 write room lobby move to beta as sync viewer bob acme	allowed
 write room lobby move to beta as sync viewer bob all	allowed
 write room lobby move to beta as sync viewer bob beta	allowed
@@ -3653,7 +3594,6 @@ write room r-never marked deletion never held as sync member bob beta	allowed
 write room r-never marked deletion never held as sync viewer ada acme	allowed
 write room r-never marked deletion never held as sync viewer ada all	allowed
 write room r-never marked deletion never held as sync viewer ada beta	allowed
-write room r-never marked deletion never held as sync viewer anonymous none	allowed
 write room r-never marked deletion never held as sync viewer bob acme	allowed
 write room r-never marked deletion never held as sync viewer bob all	allowed
 write room r-never marked deletion never held as sync viewer bob beta	allowed
@@ -3714,7 +3654,6 @@ write room r-new create by ada as sync member bob beta	allowed
 write room r-new create by ada as sync viewer ada acme	allowed
 write room r-new create by ada as sync viewer ada all	allowed
 write room r-new create by ada as sync viewer ada beta	allowed
-write room r-new create by ada as sync viewer anonymous none	allowed
 write room r-new create by ada as sync viewer bob acme	allowed
 write room r-new create by ada as sync viewer bob all	allowed
 write room r-new create by ada as sync viewer bob beta	allowed
@@ -3775,7 +3714,6 @@ write room r-new create by bob as sync member bob beta	allowed
 write room r-new create by bob as sync viewer ada acme	allowed
 write room r-new create by bob as sync viewer ada all	allowed
 write room r-new create by bob as sync viewer ada beta	allowed
-write room r-new create by bob as sync viewer anonymous none	allowed
 write room r-new create by bob as sync viewer bob acme	allowed
 write room r-new create by bob as sync viewer bob all	allowed
 write room r-new create by bob as sync viewer bob beta	allowed
@@ -3836,7 +3774,6 @@ write room r-new create by null as sync member bob beta	allowed
 write room r-new create by null as sync viewer ada acme	allowed
 write room r-new create by null as sync viewer ada all	allowed
 write room r-new create by null as sync viewer ada beta	allowed
-write room r-new create by null as sync viewer anonymous none	allowed
 write room r-new create by null as sync viewer bob acme	allowed
 write room r-new create by null as sync viewer bob all	allowed
 write room r-new create by null as sync viewer bob beta	allowed
@@ -3897,7 +3834,6 @@ write room r-new create in beta as sync member bob beta	allowed
 write room r-new create in beta as sync viewer ada acme	allowed
 write room r-new create in beta as sync viewer ada all	allowed
 write room r-new create in beta as sync viewer ada beta	allowed
-write room r-new create in beta as sync viewer anonymous none	allowed
 write room r-new create in beta as sync viewer bob acme	allowed
 write room r-new create in beta as sync viewer bob all	allowed
 write room r-new create in beta as sync viewer bob beta	allowed
@@ -3958,7 +3894,6 @@ write room r-new create in omega as sync member bob beta	allowed
 write room r-new create in omega as sync viewer ada acme	allowed
 write room r-new create in omega as sync viewer ada all	allowed
 write room r-new create in omega as sync viewer ada beta	allowed
-write room r-new create in omega as sync viewer anonymous none	allowed
 write room r-new create in omega as sync viewer bob acme	allowed
 write room r-new create in omega as sync viewer bob all	allowed
 write room r-new create in omega as sync viewer bob beta	allowed
@@ -4019,7 +3954,6 @@ write room s-ada assign bob as sync member bob beta	allowed
 write room s-ada assign bob as sync viewer ada acme	allowed
 write room s-ada assign bob as sync viewer ada all	allowed
 write room s-ada assign bob as sync viewer ada beta	allowed
-write room s-ada assign bob as sync viewer anonymous none	allowed
 write room s-ada assign bob as sync viewer bob acme	allowed
 write room s-ada assign bob as sync viewer bob all	allowed
 write room s-ada assign bob as sync viewer bob beta	allowed
@@ -4080,7 +4014,6 @@ write room s-ada delete as sync member bob beta	allowed
 write room s-ada delete as sync viewer ada acme	allowed
 write room s-ada delete as sync viewer ada all	allowed
 write room s-ada delete as sync viewer ada beta	allowed
-write room s-ada delete as sync viewer anonymous none	allowed
 write room s-ada delete as sync viewer bob acme	allowed
 write room s-ada delete as sync viewer bob all	allowed
 write room s-ada delete as sync viewer bob beta	allowed
@@ -4141,7 +4074,6 @@ write room s-ada edit title as sync member bob beta	allowed
 write room s-ada edit title as sync viewer ada acme	allowed
 write room s-ada edit title as sync viewer ada all	allowed
 write room s-ada edit title as sync viewer ada beta	allowed
-write room s-ada edit title as sync viewer anonymous none	allowed
 write room s-ada edit title as sync viewer bob acme	allowed
 write room s-ada edit title as sync viewer bob all	allowed
 write room s-ada edit title as sync viewer bob beta	allowed
@@ -4202,7 +4134,6 @@ write room s-ada edit wake as sync member bob beta	allowed
 write room s-ada edit wake as sync viewer ada acme	allowed
 write room s-ada edit wake as sync viewer ada all	allowed
 write room s-ada edit wake as sync viewer ada beta	allowed
-write room s-ada edit wake as sync viewer anonymous none	allowed
 write room s-ada edit wake as sync viewer bob acme	allowed
 write room s-ada edit wake as sync viewer bob all	allowed
 write room s-ada edit wake as sync viewer bob beta	allowed
@@ -4263,7 +4194,6 @@ write room s-beta create over the spec as sync member bob beta	allowed
 write room s-beta create over the spec as sync viewer ada acme	allowed
 write room s-beta create over the spec as sync viewer ada all	allowed
 write room s-beta create over the spec as sync viewer ada beta	allowed
-write room s-beta create over the spec as sync viewer anonymous none	allowed
 write room s-beta create over the spec as sync viewer bob acme	allowed
 write room s-beta create over the spec as sync viewer bob all	allowed
 write room s-beta create over the spec as sync viewer bob beta	allowed
@@ -4324,7 +4254,6 @@ write room s-gone create over the spec as sync member bob beta	allowed
 write room s-gone create over the spec as sync viewer ada acme	allowed
 write room s-gone create over the spec as sync viewer ada all	allowed
 write room s-gone create over the spec as sync viewer ada beta	allowed
-write room s-gone create over the spec as sync viewer anonymous none	allowed
 write room s-gone create over the spec as sync viewer bob acme	allowed
 write room s-gone create over the spec as sync viewer bob all	allowed
 write room s-gone create over the spec as sync viewer bob beta	allowed
@@ -4385,7 +4314,6 @@ write room s-open-bob create over the spec as sync member bob beta	allowed
 write room s-open-bob create over the spec as sync viewer ada acme	allowed
 write room s-open-bob create over the spec as sync viewer ada all	allowed
 write room s-open-bob create over the spec as sync viewer ada beta	allowed
-write room s-open-bob create over the spec as sync viewer anonymous none	allowed
 write room s-open-bob create over the spec as sync viewer bob acme	allowed
 write room s-open-bob create over the spec as sync viewer bob all	allowed
 write room s-open-bob create over the spec as sync viewer bob beta	allowed
@@ -4446,7 +4374,6 @@ write run 019fee00-0000-7000-8000-0000000ada01 complete as sync member bob beta	
 write run 019fee00-0000-7000-8000-0000000ada01 complete as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 complete as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 complete as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada01 complete as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 complete as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 complete as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 complete as sync viewer bob beta	allowed
@@ -4507,7 +4434,6 @@ write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as s
 write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 marked deletion with no head as sync viewer bob beta	allowed
@@ -4568,7 +4494,6 @@ write run 019fee00-0000-7000-8000-0000000ada01 report session as sync member bob
 write run 019fee00-0000-7000-8000-0000000ada01 report session as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 report session as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 report session as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada01 report session as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 report session as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 report session as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 report session as sync viewer bob beta	allowed
@@ -4629,7 +4554,6 @@ write run 019fee00-0000-7000-8000-0000000ada01 stop as sync member bob beta	allo
 write run 019fee00-0000-7000-8000-0000000ada01 stop as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 stop as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 stop as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada01 stop as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 stop as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 stop as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada01 stop as sync viewer bob beta	allowed
@@ -4690,7 +4614,6 @@ write run 019fee00-0000-7000-8000-0000000ada02 complete as sync member bob beta	
 write run 019fee00-0000-7000-8000-0000000ada02 complete as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada02 complete as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada02 complete as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada02 complete as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada02 complete as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada02 complete as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada02 complete as sync viewer bob beta	allowed
@@ -4751,7 +4674,6 @@ write run 019fee00-0000-7000-8000-0000000ada02 report session as sync member bob
 write run 019fee00-0000-7000-8000-0000000ada02 report session as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada02 report session as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada02 report session as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada02 report session as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada02 report session as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada02 report session as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada02 report session as sync viewer bob beta	allowed
@@ -4812,7 +4734,6 @@ write run 019fee00-0000-7000-8000-0000000ada02 stop as sync member bob beta	allo
 write run 019fee00-0000-7000-8000-0000000ada02 stop as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada02 stop as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada02 stop as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada02 stop as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada02 stop as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada02 stop as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada02 stop as sync viewer bob beta	allowed
@@ -4873,7 +4794,6 @@ write run 019fee00-0000-7000-8000-0000000ada03 complete as sync member bob beta	
 write run 019fee00-0000-7000-8000-0000000ada03 complete as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada03 complete as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada03 complete as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada03 complete as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada03 complete as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada03 complete as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada03 complete as sync viewer bob beta	allowed
@@ -4934,7 +4854,6 @@ write run 019fee00-0000-7000-8000-0000000ada03 report session as sync member bob
 write run 019fee00-0000-7000-8000-0000000ada03 report session as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada03 report session as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada03 report session as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada03 report session as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada03 report session as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada03 report session as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada03 report session as sync viewer bob beta	allowed
@@ -4995,7 +4914,6 @@ write run 019fee00-0000-7000-8000-0000000ada03 stop as sync member bob beta	allo
 write run 019fee00-0000-7000-8000-0000000ada03 stop as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada03 stop as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada03 stop as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada03 stop as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada03 stop as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada03 stop as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada03 stop as sync viewer bob beta	allowed
@@ -5056,7 +4974,6 @@ write run 019fee00-0000-7000-8000-0000000ada05 complete as sync member bob beta	
 write run 019fee00-0000-7000-8000-0000000ada05 complete as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada05 complete as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada05 complete as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada05 complete as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada05 complete as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada05 complete as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada05 complete as sync viewer bob beta	allowed
@@ -5117,7 +5034,6 @@ write run 019fee00-0000-7000-8000-0000000ada05 report session as sync member bob
 write run 019fee00-0000-7000-8000-0000000ada05 report session as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada05 report session as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada05 report session as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada05 report session as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada05 report session as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada05 report session as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada05 report session as sync viewer bob beta	allowed
@@ -5178,7 +5094,6 @@ write run 019fee00-0000-7000-8000-0000000ada05 stop as sync member bob beta	allo
 write run 019fee00-0000-7000-8000-0000000ada05 stop as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada05 stop as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada05 stop as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada05 stop as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada05 stop as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada05 stop as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada05 stop as sync viewer bob beta	allowed
@@ -5239,7 +5154,6 @@ write run 019fee00-0000-7000-8000-0000000ada06 complete as sync member bob beta	
 write run 019fee00-0000-7000-8000-0000000ada06 complete as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada06 complete as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada06 complete as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada06 complete as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada06 complete as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada06 complete as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada06 complete as sync viewer bob beta	allowed
@@ -5300,7 +5214,6 @@ write run 019fee00-0000-7000-8000-0000000ada06 report session as sync member bob
 write run 019fee00-0000-7000-8000-0000000ada06 report session as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada06 report session as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada06 report session as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada06 report session as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada06 report session as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada06 report session as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada06 report session as sync viewer bob beta	allowed
@@ -5361,7 +5274,6 @@ write run 019fee00-0000-7000-8000-0000000ada06 stop as sync member bob beta	allo
 write run 019fee00-0000-7000-8000-0000000ada06 stop as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada06 stop as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000ada06 stop as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000ada06 stop as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000ada06 stop as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000ada06 stop as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000ada06 stop as sync viewer bob beta	allowed
@@ -5422,7 +5334,6 @@ write run 019fee00-0000-7000-8000-0000000b0b01 complete as sync member bob beta	
 write run 019fee00-0000-7000-8000-0000000b0b01 complete as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 complete as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 complete as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000b0b01 complete as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 complete as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 complete as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 complete as sync viewer bob beta	allowed
@@ -5483,7 +5394,6 @@ write run 019fee00-0000-7000-8000-0000000b0b01 report session as sync member bob
 write run 019fee00-0000-7000-8000-0000000b0b01 report session as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 report session as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 report session as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000b0b01 report session as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 report session as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 report session as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 report session as sync viewer bob beta	allowed
@@ -5544,7 +5454,6 @@ write run 019fee00-0000-7000-8000-0000000b0b01 stop as sync member bob beta	allo
 write run 019fee00-0000-7000-8000-0000000b0b01 stop as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 stop as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 stop as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000b0b01 stop as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 stop as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 stop as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000b0b01 stop as sync viewer bob beta	allowed
@@ -5605,7 +5514,6 @@ write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as syn
 write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer ada acme	allowed
 write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer ada all	allowed
 write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer ada beta	allowed
-write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer anonymous none	allowed
 write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer bob acme	allowed
 write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer bob all	allowed
 write run 019fee00-0000-7000-8000-0000000c0c01 marked deletion never held as sync viewer bob beta	allowed
@@ -5666,7 +5574,6 @@ write run create ad-hoc on ada's box as sync member bob beta	allowed
 write run create ad-hoc on ada's box as sync viewer ada acme	allowed
 write run create ad-hoc on ada's box as sync viewer ada all	allowed
 write run create ad-hoc on ada's box as sync viewer ada beta	allowed
-write run create ad-hoc on ada's box as sync viewer anonymous none	allowed
 write run create ad-hoc on ada's box as sync viewer bob acme	allowed
 write run create ad-hoc on ada's box as sync viewer bob all	allowed
 write run create ad-hoc on ada's box as sync viewer bob beta	allowed
@@ -5727,7 +5634,6 @@ write run create ad-hoc on bob's box as sync member bob beta	allowed
 write run create ad-hoc on bob's box as sync viewer ada acme	allowed
 write run create ad-hoc on bob's box as sync viewer ada all	allowed
 write run create ad-hoc on bob's box as sync viewer ada beta	allowed
-write run create ad-hoc on bob's box as sync viewer anonymous none	allowed
 write run create ad-hoc on bob's box as sync viewer bob acme	allowed
 write run create ad-hoc on bob's box as sync viewer bob all	allowed
 write run create ad-hoc on bob's box as sync viewer bob beta	allowed
@@ -5788,7 +5694,6 @@ write run create in den on ada's box as sync member bob beta	allowed
 write run create in den on ada's box as sync viewer ada acme	allowed
 write run create in den on ada's box as sync viewer ada all	allowed
 write run create in den on ada's box as sync viewer ada beta	allowed
-write run create in den on ada's box as sync viewer anonymous none	allowed
 write run create in den on ada's box as sync viewer bob acme	allowed
 write run create in den on ada's box as sync viewer bob all	allowed
 write run create in den on ada's box as sync viewer bob beta	allowed
@@ -5849,7 +5754,6 @@ write run create in den on bob's box as sync member bob beta	allowed, declined: 
 write run create in den on bob's box as sync viewer ada acme	allowed, declined: Conflicted[conflict=Conflict[run=RunningRun[runId=019fee00-0000-7000-8000-0000000b0b02, specId=den, role=room, repos=[]], overlap=[]]]
 write run create in den on bob's box as sync viewer ada all	allowed, declined: Conflicted[conflict=Conflict[run=RunningRun[runId=019fee00-0000-7000-8000-0000000b0b02, specId=den, role=room, repos=[]], overlap=[]]]
 write run create in den on bob's box as sync viewer ada beta	allowed, declined: Conflicted[conflict=Conflict[run=RunningRun[runId=019fee00-0000-7000-8000-0000000b0b02, specId=den, role=room, repos=[]], overlap=[]]]
-write run create in den on bob's box as sync viewer anonymous none	allowed, declined: Conflicted[conflict=Conflict[run=RunningRun[runId=019fee00-0000-7000-8000-0000000b0b02, specId=den, role=room, repos=[]], overlap=[]]]
 write run create in den on bob's box as sync viewer bob acme	allowed, declined: Conflicted[conflict=Conflict[run=RunningRun[runId=019fee00-0000-7000-8000-0000000b0b02, specId=den, role=room, repos=[]], overlap=[]]]
 write run create in den on bob's box as sync viewer bob all	allowed, declined: Conflicted[conflict=Conflict[run=RunningRun[runId=019fee00-0000-7000-8000-0000000b0b02, specId=den, role=room, repos=[]], overlap=[]]]
 write run create in den on bob's box as sync viewer bob beta	allowed, declined: Conflicted[conflict=Conflict[run=RunningRun[runId=019fee00-0000-7000-8000-0000000b0b02, specId=den, role=room, repos=[]], overlap=[]]]
@@ -5910,7 +5814,6 @@ write run create in hall on ada's box as sync member bob beta	allowed
 write run create in hall on ada's box as sync viewer ada acme	allowed
 write run create in hall on ada's box as sync viewer ada all	allowed
 write run create in hall on ada's box as sync viewer ada beta	allowed
-write run create in hall on ada's box as sync viewer anonymous none	allowed
 write run create in hall on ada's box as sync viewer bob acme	allowed
 write run create in hall on ada's box as sync viewer bob all	allowed
 write run create in hall on ada's box as sync viewer bob beta	allowed
@@ -5971,7 +5874,6 @@ write run create in hall on bob's box as sync member bob beta	allowed
 write run create in hall on bob's box as sync viewer ada acme	allowed
 write run create in hall on bob's box as sync viewer ada all	allowed
 write run create in hall on bob's box as sync viewer ada beta	allowed
-write run create in hall on bob's box as sync viewer anonymous none	allowed
 write run create in hall on bob's box as sync viewer bob acme	allowed
 write run create in hall on bob's box as sync viewer bob all	allowed
 write run create in hall on bob's box as sync viewer bob beta	allowed
@@ -6032,7 +5934,6 @@ write run create in lobby on ada's box as sync member bob beta	allowed, declined
 write run create in lobby on ada's box as sync viewer ada acme	allowed, declined: Conflicted[conflict=Conflict[run=RunningRun[runId=019fee00-0000-7000-8000-0000000ada02, specId=lobby, role=room, repos=[]], overlap=[]]]
 write run create in lobby on ada's box as sync viewer ada all	allowed, declined: Conflicted[conflict=Conflict[run=RunningRun[runId=019fee00-0000-7000-8000-0000000ada02, specId=lobby, role=room, repos=[]], overlap=[]]]
 write run create in lobby on ada's box as sync viewer ada beta	allowed, declined: Conflicted[conflict=Conflict[run=RunningRun[runId=019fee00-0000-7000-8000-0000000ada02, specId=lobby, role=room, repos=[]], overlap=[]]]
-write run create in lobby on ada's box as sync viewer anonymous none	allowed, declined: Conflicted[conflict=Conflict[run=RunningRun[runId=019fee00-0000-7000-8000-0000000ada02, specId=lobby, role=room, repos=[]], overlap=[]]]
 write run create in lobby on ada's box as sync viewer bob acme	allowed, declined: Conflicted[conflict=Conflict[run=RunningRun[runId=019fee00-0000-7000-8000-0000000ada02, specId=lobby, role=room, repos=[]], overlap=[]]]
 write run create in lobby on ada's box as sync viewer bob all	allowed, declined: Conflicted[conflict=Conflict[run=RunningRun[runId=019fee00-0000-7000-8000-0000000ada02, specId=lobby, role=room, repos=[]], overlap=[]]]
 write run create in lobby on ada's box as sync viewer bob beta	allowed, declined: Conflicted[conflict=Conflict[run=RunningRun[runId=019fee00-0000-7000-8000-0000000ada02, specId=lobby, role=room, repos=[]], overlap=[]]]
@@ -6093,7 +5994,6 @@ write run create in lobby on bob's box as sync member bob beta	allowed
 write run create in lobby on bob's box as sync viewer ada acme	allowed
 write run create in lobby on bob's box as sync viewer ada all	allowed
 write run create in lobby on bob's box as sync viewer ada beta	allowed
-write run create in lobby on bob's box as sync viewer anonymous none	allowed
 write run create in lobby on bob's box as sync viewer bob acme	allowed
 write run create in lobby on bob's box as sync viewer bob all	allowed
 write run create in lobby on bob's box as sync viewer bob beta	allowed
@@ -6154,7 +6054,6 @@ write run create of s-ada on ada's box as sync member bob beta	allowed
 write run create of s-ada on ada's box as sync viewer ada acme	allowed
 write run create of s-ada on ada's box as sync viewer ada all	allowed
 write run create of s-ada on ada's box as sync viewer ada beta	allowed
-write run create of s-ada on ada's box as sync viewer anonymous none	allowed
 write run create of s-ada on ada's box as sync viewer bob acme	allowed
 write run create of s-ada on ada's box as sync viewer bob all	allowed
 write run create of s-ada on ada's box as sync viewer bob beta	allowed
@@ -6215,7 +6114,6 @@ write run create of s-ada on bob's box as sync member bob beta	allowed
 write run create of s-ada on bob's box as sync viewer ada acme	allowed
 write run create of s-ada on bob's box as sync viewer ada all	allowed
 write run create of s-ada on bob's box as sync viewer ada beta	allowed
-write run create of s-ada on bob's box as sync viewer anonymous none	allowed
 write run create of s-ada on bob's box as sync viewer bob acme	allowed
 write run create of s-ada on bob's box as sync viewer bob all	allowed
 write run create of s-ada on bob's box as sync viewer bob beta	allowed
@@ -6276,7 +6174,6 @@ write run create of s-beta on ada's box as sync member bob beta	allowed
 write run create of s-beta on ada's box as sync viewer ada acme	allowed
 write run create of s-beta on ada's box as sync viewer ada all	allowed
 write run create of s-beta on ada's box as sync viewer ada beta	allowed
-write run create of s-beta on ada's box as sync viewer anonymous none	allowed
 write run create of s-beta on ada's box as sync viewer bob acme	allowed
 write run create of s-beta on ada's box as sync viewer bob all	allowed
 write run create of s-beta on ada's box as sync viewer bob beta	allowed
@@ -6337,7 +6234,6 @@ write run create of s-beta on bob's box as sync member bob beta	allowed
 write run create of s-beta on bob's box as sync viewer ada acme	allowed
 write run create of s-beta on bob's box as sync viewer ada all	allowed
 write run create of s-beta on bob's box as sync viewer ada beta	allowed
-write run create of s-beta on bob's box as sync viewer anonymous none	allowed
 write run create of s-beta on bob's box as sync viewer bob acme	allowed
 write run create of s-beta on bob's box as sync viewer bob all	allowed
 write run create of s-beta on bob's box as sync viewer bob beta	allowed
@@ -6398,7 +6294,6 @@ write run create of s-bob on ada's box as sync member bob beta	allowed
 write run create of s-bob on ada's box as sync viewer ada acme	allowed
 write run create of s-bob on ada's box as sync viewer ada all	allowed
 write run create of s-bob on ada's box as sync viewer ada beta	allowed
-write run create of s-bob on ada's box as sync viewer anonymous none	allowed
 write run create of s-bob on ada's box as sync viewer bob acme	allowed
 write run create of s-bob on ada's box as sync viewer bob all	allowed
 write run create of s-bob on ada's box as sync viewer bob beta	allowed
@@ -6459,7 +6354,6 @@ write run create of s-bob on bob's box as sync member bob beta	allowed
 write run create of s-bob on bob's box as sync viewer ada acme	allowed
 write run create of s-bob on bob's box as sync viewer ada all	allowed
 write run create of s-bob on bob's box as sync viewer ada beta	allowed
-write run create of s-bob on bob's box as sync viewer anonymous none	allowed
 write run create of s-bob on bob's box as sync viewer bob acme	allowed
 write run create of s-bob on bob's box as sync viewer bob all	allowed
 write run create of s-bob on bob's box as sync viewer bob beta	allowed
@@ -6520,7 +6414,6 @@ write run create of s-open-ada on ada's box as sync member bob beta	allowed
 write run create of s-open-ada on ada's box as sync viewer ada acme	allowed
 write run create of s-open-ada on ada's box as sync viewer ada all	allowed
 write run create of s-open-ada on ada's box as sync viewer ada beta	allowed
-write run create of s-open-ada on ada's box as sync viewer anonymous none	allowed
 write run create of s-open-ada on ada's box as sync viewer bob acme	allowed
 write run create of s-open-ada on ada's box as sync viewer bob all	allowed
 write run create of s-open-ada on ada's box as sync viewer bob beta	allowed
@@ -6581,7 +6474,6 @@ write run create of s-open-ada on bob's box as sync member bob beta	allowed
 write run create of s-open-ada on bob's box as sync viewer ada acme	allowed
 write run create of s-open-ada on bob's box as sync viewer ada all	allowed
 write run create of s-open-ada on bob's box as sync viewer ada beta	allowed
-write run create of s-open-ada on bob's box as sync viewer anonymous none	allowed
 write run create of s-open-ada on bob's box as sync viewer bob acme	allowed
 write run create of s-open-ada on bob's box as sync viewer bob all	allowed
 write run create of s-open-ada on bob's box as sync viewer bob beta	allowed
@@ -6642,7 +6534,6 @@ write spec attic create over the room as sync member bob beta	allowed
 write spec attic create over the room as sync viewer ada acme	allowed
 write spec attic create over the room as sync viewer ada all	allowed
 write spec attic create over the room as sync viewer ada beta	allowed
-write spec attic create over the room as sync viewer anonymous none	allowed
 write spec attic create over the room as sync viewer bob acme	allowed
 write spec attic create over the room as sync viewer bob all	allowed
 write spec attic create over the room as sync viewer bob beta	allowed
@@ -6703,7 +6594,6 @@ write spec attic create over the room assigned ada as sync member bob beta	allow
 write spec attic create over the room assigned ada as sync viewer ada acme	allowed
 write spec attic create over the room assigned ada as sync viewer ada all	allowed
 write spec attic create over the room assigned ada as sync viewer ada beta	allowed
-write spec attic create over the room assigned ada as sync viewer anonymous none	allowed
 write spec attic create over the room assigned ada as sync viewer bob acme	allowed
 write spec attic create over the room assigned ada as sync viewer bob all	allowed
 write spec attic create over the room assigned ada as sync viewer bob beta	allowed
@@ -6764,7 +6654,6 @@ write spec b-room create over the room as sync member bob beta	allowed
 write spec b-room create over the room as sync viewer ada acme	allowed
 write spec b-room create over the room as sync viewer ada all	allowed
 write spec b-room create over the room as sync viewer ada beta	allowed
-write spec b-room create over the room as sync viewer anonymous none	allowed
 write spec b-room create over the room as sync viewer bob acme	allowed
 write spec b-room create over the room as sync viewer bob all	allowed
 write spec b-room create over the room as sync viewer bob beta	allowed
@@ -6825,7 +6714,6 @@ write spec b-room create over the room assigned ada as sync member bob beta	allo
 write spec b-room create over the room assigned ada as sync viewer ada acme	allowed
 write spec b-room create over the room assigned ada as sync viewer ada all	allowed
 write spec b-room create over the room assigned ada as sync viewer ada beta	allowed
-write spec b-room create over the room assigned ada as sync viewer anonymous none	allowed
 write spec b-room create over the room assigned ada as sync viewer bob acme	allowed
 write spec b-room create over the room assigned ada as sync viewer bob all	allowed
 write spec b-room create over the room assigned ada as sync viewer bob beta	allowed
@@ -6886,7 +6774,6 @@ write spec den create over the room as sync member bob beta	allowed
 write spec den create over the room as sync viewer ada acme	allowed
 write spec den create over the room as sync viewer ada all	allowed
 write spec den create over the room as sync viewer ada beta	allowed
-write spec den create over the room as sync viewer anonymous none	allowed
 write spec den create over the room as sync viewer bob acme	allowed
 write spec den create over the room as sync viewer bob all	allowed
 write spec den create over the room as sync viewer bob beta	allowed
@@ -6947,7 +6834,6 @@ write spec den create over the room assigned ada as sync member bob beta	allowed
 write spec den create over the room assigned ada as sync viewer ada acme	allowed
 write spec den create over the room assigned ada as sync viewer ada all	allowed
 write spec den create over the room assigned ada as sync viewer ada beta	allowed
-write spec den create over the room assigned ada as sync viewer anonymous none	allowed
 write spec den create over the room assigned ada as sync viewer bob acme	allowed
 write spec den create over the room assigned ada as sync viewer bob all	allowed
 write spec den create over the room assigned ada as sync viewer bob beta	allowed
@@ -7008,7 +6894,6 @@ write spec hall create over the room as sync member bob beta	allowed
 write spec hall create over the room as sync viewer ada acme	allowed
 write spec hall create over the room as sync viewer ada all	allowed
 write spec hall create over the room as sync viewer ada beta	allowed
-write spec hall create over the room as sync viewer anonymous none	allowed
 write spec hall create over the room as sync viewer bob acme	allowed
 write spec hall create over the room as sync viewer bob all	allowed
 write spec hall create over the room as sync viewer bob beta	allowed
@@ -7069,7 +6954,6 @@ write spec hall create over the room assigned ada as sync member bob beta	allowe
 write spec hall create over the room assigned ada as sync viewer ada acme	allowed
 write spec hall create over the room assigned ada as sync viewer ada all	allowed
 write spec hall create over the room assigned ada as sync viewer ada beta	allowed
-write spec hall create over the room assigned ada as sync viewer anonymous none	allowed
 write spec hall create over the room assigned ada as sync viewer bob acme	allowed
 write spec hall create over the room assigned ada as sync viewer bob all	allowed
 write spec hall create over the room assigned ada as sync viewer bob beta	allowed
@@ -7130,7 +7014,6 @@ write spec lobby create over the room as sync member bob beta	allowed
 write spec lobby create over the room as sync viewer ada acme	allowed
 write spec lobby create over the room as sync viewer ada all	allowed
 write spec lobby create over the room as sync viewer ada beta	allowed
-write spec lobby create over the room as sync viewer anonymous none	allowed
 write spec lobby create over the room as sync viewer bob acme	allowed
 write spec lobby create over the room as sync viewer bob all	allowed
 write spec lobby create over the room as sync viewer bob beta	allowed
@@ -7191,7 +7074,6 @@ write spec lobby create over the room assigned ada as sync member bob beta	allow
 write spec lobby create over the room assigned ada as sync viewer ada acme	allowed
 write spec lobby create over the room assigned ada as sync viewer ada all	allowed
 write spec lobby create over the room assigned ada as sync viewer ada beta	allowed
-write spec lobby create over the room assigned ada as sync viewer anonymous none	allowed
 write spec lobby create over the room assigned ada as sync viewer bob acme	allowed
 write spec lobby create over the room assigned ada as sync viewer bob all	allowed
 write spec lobby create over the room assigned ada as sync viewer bob beta	allowed
@@ -7252,7 +7134,6 @@ write spec s-ada assign bob as sync member bob beta	allowed
 write spec s-ada assign bob as sync viewer ada acme	allowed
 write spec s-ada assign bob as sync viewer ada all	allowed
 write spec s-ada assign bob as sync viewer ada beta	allowed
-write spec s-ada assign bob as sync viewer anonymous none	allowed
 write spec s-ada assign bob as sync viewer bob acme	allowed
 write spec s-ada assign bob as sync viewer bob all	allowed
 write spec s-ada assign bob as sync viewer bob beta	allowed
@@ -7313,7 +7194,6 @@ write spec s-ada assign null as sync member bob beta	allowed
 write spec s-ada assign null as sync viewer ada acme	allowed
 write spec s-ada assign null as sync viewer ada all	allowed
 write spec s-ada assign null as sync viewer ada beta	allowed
-write spec s-ada assign null as sync viewer anonymous none	allowed
 write spec s-ada assign null as sync viewer bob acme	allowed
 write spec s-ada assign null as sync viewer bob all	allowed
 write spec s-ada assign null as sync viewer bob beta	allowed
@@ -7374,7 +7254,6 @@ write spec s-ada delete as sync member bob beta	allowed
 write spec s-ada delete as sync viewer ada acme	allowed
 write spec s-ada delete as sync viewer ada all	allowed
 write spec s-ada delete as sync viewer ada beta	allowed
-write spec s-ada delete as sync viewer anonymous none	allowed
 write spec s-ada delete as sync viewer bob acme	allowed
 write spec s-ada delete as sync viewer bob all	allowed
 write spec s-ada delete as sync viewer bob beta	allowed
@@ -7435,7 +7314,6 @@ write spec s-ada edit content as sync member bob beta	allowed
 write spec s-ada edit content as sync viewer ada acme	allowed
 write spec s-ada edit content as sync viewer ada all	allowed
 write spec s-ada edit content as sync viewer ada beta	allowed
-write spec s-ada edit content as sync viewer anonymous none	allowed
 write spec s-ada edit content as sync viewer bob acme	allowed
 write spec s-ada edit content as sync viewer bob all	allowed
 write spec s-ada edit content as sync viewer bob beta	allowed
@@ -7496,7 +7374,6 @@ write spec s-ada edit title as sync member bob beta	allowed
 write spec s-ada edit title as sync viewer ada acme	allowed
 write spec s-ada edit title as sync viewer ada all	allowed
 write spec s-ada edit title as sync viewer ada beta	allowed
-write spec s-ada edit title as sync viewer anonymous none	allowed
 write spec s-ada edit title as sync viewer bob acme	allowed
 write spec s-ada edit title as sync viewer bob all	allowed
 write spec s-ada edit title as sync viewer bob beta	allowed
@@ -7557,7 +7434,6 @@ write spec s-ada marked deletion with no head as sync member bob beta	allowed
 write spec s-ada marked deletion with no head as sync viewer ada acme	allowed
 write spec s-ada marked deletion with no head as sync viewer ada all	allowed
 write spec s-ada marked deletion with no head as sync viewer ada beta	allowed
-write spec s-ada marked deletion with no head as sync viewer anonymous none	allowed
 write spec s-ada marked deletion with no head as sync viewer bob acme	allowed
 write spec s-ada marked deletion with no head as sync viewer bob all	allowed
 write spec s-ada marked deletion with no head as sync viewer bob beta	allowed
@@ -7618,7 +7494,6 @@ write spec s-ada move room to den as sync member bob beta	allowed
 write spec s-ada move room to den as sync viewer ada acme	allowed
 write spec s-ada move room to den as sync viewer ada all	allowed
 write spec s-ada move room to den as sync viewer ada beta	allowed
-write spec s-ada move room to den as sync viewer anonymous none	allowed
 write spec s-ada move room to den as sync viewer bob acme	allowed
 write spec s-ada move room to den as sync viewer bob all	allowed
 write spec s-ada move room to den as sync viewer bob beta	allowed
@@ -7679,7 +7554,6 @@ write spec s-ada move to beta as sync member bob beta	allowed
 write spec s-ada move to beta as sync viewer ada acme	allowed
 write spec s-ada move to beta as sync viewer ada all	allowed
 write spec s-ada move to beta as sync viewer ada beta	allowed
-write spec s-ada move to beta as sync viewer anonymous none	allowed
 write spec s-ada move to beta as sync viewer bob acme	allowed
 write spec s-ada move to beta as sync viewer bob all	allowed
 write spec s-ada move to beta as sync viewer bob beta	allowed
@@ -7740,7 +7614,6 @@ write spec s-ada move to omega as sync member bob beta	allowed
 write spec s-ada move to omega as sync viewer ada acme	allowed
 write spec s-ada move to omega as sync viewer ada all	allowed
 write spec s-ada move to omega as sync viewer ada beta	allowed
-write spec s-ada move to omega as sync viewer anonymous none	allowed
 write spec s-ada move to omega as sync viewer bob acme	allowed
 write spec s-ada move to omega as sync viewer bob all	allowed
 write spec s-ada move to omega as sync viewer bob beta	allowed
@@ -7801,7 +7674,6 @@ write spec s-ada status archived as sync member bob beta	allowed
 write spec s-ada status archived as sync viewer ada acme	allowed
 write spec s-ada status archived as sync viewer ada all	allowed
 write spec s-ada status archived as sync viewer ada beta	allowed
-write spec s-ada status archived as sync viewer anonymous none	allowed
 write spec s-ada status archived as sync viewer bob acme	allowed
 write spec s-ada status archived as sync viewer bob all	allowed
 write spec s-ada status archived as sync viewer bob beta	allowed
@@ -7862,7 +7734,6 @@ write spec s-ada status cancelled as sync member bob beta	allowed
 write spec s-ada status cancelled as sync viewer ada acme	allowed
 write spec s-ada status cancelled as sync viewer ada all	allowed
 write spec s-ada status cancelled as sync viewer ada beta	allowed
-write spec s-ada status cancelled as sync viewer anonymous none	allowed
 write spec s-ada status cancelled as sync viewer bob acme	allowed
 write spec s-ada status cancelled as sync viewer bob all	allowed
 write spec s-ada status cancelled as sync viewer bob beta	allowed
@@ -7923,7 +7794,6 @@ write spec s-ada status done as sync member bob beta	allowed
 write spec s-ada status done as sync viewer ada acme	allowed
 write spec s-ada status done as sync viewer ada all	allowed
 write spec s-ada status done as sync viewer ada beta	allowed
-write spec s-ada status done as sync viewer anonymous none	allowed
 write spec s-ada status done as sync viewer bob acme	allowed
 write spec s-ada status done as sync viewer bob all	allowed
 write spec s-ada status done as sync viewer bob beta	allowed
@@ -7984,7 +7854,6 @@ write spec s-archived assign bob as sync member bob beta	allowed
 write spec s-archived assign bob as sync viewer ada acme	allowed
 write spec s-archived assign bob as sync viewer ada all	allowed
 write spec s-archived assign bob as sync viewer ada beta	allowed
-write spec s-archived assign bob as sync viewer anonymous none	allowed
 write spec s-archived assign bob as sync viewer bob acme	allowed
 write spec s-archived assign bob as sync viewer bob all	allowed
 write spec s-archived assign bob as sync viewer bob beta	allowed
@@ -8045,7 +7914,6 @@ write spec s-archived assign null as sync member bob beta	allowed
 write spec s-archived assign null as sync viewer ada acme	allowed
 write spec s-archived assign null as sync viewer ada all	allowed
 write spec s-archived assign null as sync viewer ada beta	allowed
-write spec s-archived assign null as sync viewer anonymous none	allowed
 write spec s-archived assign null as sync viewer bob acme	allowed
 write spec s-archived assign null as sync viewer bob all	allowed
 write spec s-archived assign null as sync viewer bob beta	allowed
@@ -8106,7 +7974,6 @@ write spec s-archived delete as sync member bob beta	allowed
 write spec s-archived delete as sync viewer ada acme	allowed
 write spec s-archived delete as sync viewer ada all	allowed
 write spec s-archived delete as sync viewer ada beta	allowed
-write spec s-archived delete as sync viewer anonymous none	allowed
 write spec s-archived delete as sync viewer bob acme	allowed
 write spec s-archived delete as sync viewer bob all	allowed
 write spec s-archived delete as sync viewer bob beta	allowed
@@ -8167,7 +8034,6 @@ write spec s-archived edit content as sync member bob beta	allowed
 write spec s-archived edit content as sync viewer ada acme	allowed
 write spec s-archived edit content as sync viewer ada all	allowed
 write spec s-archived edit content as sync viewer ada beta	allowed
-write spec s-archived edit content as sync viewer anonymous none	allowed
 write spec s-archived edit content as sync viewer bob acme	allowed
 write spec s-archived edit content as sync viewer bob all	allowed
 write spec s-archived edit content as sync viewer bob beta	allowed
@@ -8228,7 +8094,6 @@ write spec s-archived edit title as sync member bob beta	allowed
 write spec s-archived edit title as sync viewer ada acme	allowed
 write spec s-archived edit title as sync viewer ada all	allowed
 write spec s-archived edit title as sync viewer ada beta	allowed
-write spec s-archived edit title as sync viewer anonymous none	allowed
 write spec s-archived edit title as sync viewer bob acme	allowed
 write spec s-archived edit title as sync viewer bob all	allowed
 write spec s-archived edit title as sync viewer bob beta	allowed
@@ -8289,7 +8154,6 @@ write spec s-archived status cancelled as sync member bob beta	allowed
 write spec s-archived status cancelled as sync viewer ada acme	allowed
 write spec s-archived status cancelled as sync viewer ada all	allowed
 write spec s-archived status cancelled as sync viewer ada beta	allowed
-write spec s-archived status cancelled as sync viewer anonymous none	allowed
 write spec s-archived status cancelled as sync viewer bob acme	allowed
 write spec s-archived status cancelled as sync viewer bob all	allowed
 write spec s-archived status cancelled as sync viewer bob beta	allowed
@@ -8350,7 +8214,6 @@ write spec s-archived status done as sync member bob beta	allowed
 write spec s-archived status done as sync viewer ada acme	allowed
 write spec s-archived status done as sync viewer ada all	allowed
 write spec s-archived status done as sync viewer ada beta	allowed
-write spec s-archived status done as sync viewer anonymous none	allowed
 write spec s-archived status done as sync viewer bob acme	allowed
 write spec s-archived status done as sync viewer bob all	allowed
 write spec s-archived status done as sync viewer bob beta	allowed
@@ -8411,7 +8274,6 @@ write spec s-archived status pending as sync member bob beta	allowed
 write spec s-archived status pending as sync viewer ada acme	allowed
 write spec s-archived status pending as sync viewer ada all	allowed
 write spec s-archived status pending as sync viewer ada beta	allowed
-write spec s-archived status pending as sync viewer anonymous none	allowed
 write spec s-archived status pending as sync viewer bob acme	allowed
 write spec s-archived status pending as sync viewer bob all	allowed
 write spec s-archived status pending as sync viewer bob beta	allowed
@@ -8472,7 +8334,6 @@ write spec s-archived-bob assign ada as sync member bob beta	allowed
 write spec s-archived-bob assign ada as sync viewer ada acme	allowed
 write spec s-archived-bob assign ada as sync viewer ada all	allowed
 write spec s-archived-bob assign ada as sync viewer ada beta	allowed
-write spec s-archived-bob assign ada as sync viewer anonymous none	allowed
 write spec s-archived-bob assign ada as sync viewer bob acme	allowed
 write spec s-archived-bob assign ada as sync viewer bob all	allowed
 write spec s-archived-bob assign ada as sync viewer bob beta	allowed
@@ -8533,7 +8394,6 @@ write spec s-archived-bob assign null as sync member bob beta	allowed
 write spec s-archived-bob assign null as sync viewer ada acme	allowed
 write spec s-archived-bob assign null as sync viewer ada all	allowed
 write spec s-archived-bob assign null as sync viewer ada beta	allowed
-write spec s-archived-bob assign null as sync viewer anonymous none	allowed
 write spec s-archived-bob assign null as sync viewer bob acme	allowed
 write spec s-archived-bob assign null as sync viewer bob all	allowed
 write spec s-archived-bob assign null as sync viewer bob beta	allowed
@@ -8594,7 +8454,6 @@ write spec s-archived-bob delete as sync member bob beta	allowed
 write spec s-archived-bob delete as sync viewer ada acme	allowed
 write spec s-archived-bob delete as sync viewer ada all	allowed
 write spec s-archived-bob delete as sync viewer ada beta	allowed
-write spec s-archived-bob delete as sync viewer anonymous none	allowed
 write spec s-archived-bob delete as sync viewer bob acme	allowed
 write spec s-archived-bob delete as sync viewer bob all	allowed
 write spec s-archived-bob delete as sync viewer bob beta	allowed
@@ -8655,7 +8514,6 @@ write spec s-archived-bob edit content as sync member bob beta	allowed
 write spec s-archived-bob edit content as sync viewer ada acme	allowed
 write spec s-archived-bob edit content as sync viewer ada all	allowed
 write spec s-archived-bob edit content as sync viewer ada beta	allowed
-write spec s-archived-bob edit content as sync viewer anonymous none	allowed
 write spec s-archived-bob edit content as sync viewer bob acme	allowed
 write spec s-archived-bob edit content as sync viewer bob all	allowed
 write spec s-archived-bob edit content as sync viewer bob beta	allowed
@@ -8716,7 +8574,6 @@ write spec s-archived-bob edit title as sync member bob beta	allowed
 write spec s-archived-bob edit title as sync viewer ada acme	allowed
 write spec s-archived-bob edit title as sync viewer ada all	allowed
 write spec s-archived-bob edit title as sync viewer ada beta	allowed
-write spec s-archived-bob edit title as sync viewer anonymous none	allowed
 write spec s-archived-bob edit title as sync viewer bob acme	allowed
 write spec s-archived-bob edit title as sync viewer bob all	allowed
 write spec s-archived-bob edit title as sync viewer bob beta	allowed
@@ -8777,7 +8634,6 @@ write spec s-archived-bob status cancelled as sync member bob beta	allowed
 write spec s-archived-bob status cancelled as sync viewer ada acme	allowed
 write spec s-archived-bob status cancelled as sync viewer ada all	allowed
 write spec s-archived-bob status cancelled as sync viewer ada beta	allowed
-write spec s-archived-bob status cancelled as sync viewer anonymous none	allowed
 write spec s-archived-bob status cancelled as sync viewer bob acme	allowed
 write spec s-archived-bob status cancelled as sync viewer bob all	allowed
 write spec s-archived-bob status cancelled as sync viewer bob beta	allowed
@@ -8838,7 +8694,6 @@ write spec s-archived-bob status done as sync member bob beta	allowed
 write spec s-archived-bob status done as sync viewer ada acme	allowed
 write spec s-archived-bob status done as sync viewer ada all	allowed
 write spec s-archived-bob status done as sync viewer ada beta	allowed
-write spec s-archived-bob status done as sync viewer anonymous none	allowed
 write spec s-archived-bob status done as sync viewer bob acme	allowed
 write spec s-archived-bob status done as sync viewer bob all	allowed
 write spec s-archived-bob status done as sync viewer bob beta	allowed
@@ -8899,7 +8754,6 @@ write spec s-archived-bob status pending as sync member bob beta	allowed
 write spec s-archived-bob status pending as sync viewer ada acme	allowed
 write spec s-archived-bob status pending as sync viewer ada all	allowed
 write spec s-archived-bob status pending as sync viewer ada beta	allowed
-write spec s-archived-bob status pending as sync viewer anonymous none	allowed
 write spec s-archived-bob status pending as sync viewer bob acme	allowed
 write spec s-archived-bob status pending as sync viewer bob all	allowed
 write spec s-archived-bob status pending as sync viewer bob beta	allowed
@@ -8960,7 +8814,6 @@ write spec s-archived-busy assign bob as sync member bob beta	allowed
 write spec s-archived-busy assign bob as sync viewer ada acme	allowed
 write spec s-archived-busy assign bob as sync viewer ada all	allowed
 write spec s-archived-busy assign bob as sync viewer ada beta	allowed
-write spec s-archived-busy assign bob as sync viewer anonymous none	allowed
 write spec s-archived-busy assign bob as sync viewer bob acme	allowed
 write spec s-archived-busy assign bob as sync viewer bob all	allowed
 write spec s-archived-busy assign bob as sync viewer bob beta	allowed
@@ -9021,7 +8874,6 @@ write spec s-archived-busy assign null as sync member bob beta	allowed
 write spec s-archived-busy assign null as sync viewer ada acme	allowed
 write spec s-archived-busy assign null as sync viewer ada all	allowed
 write spec s-archived-busy assign null as sync viewer ada beta	allowed
-write spec s-archived-busy assign null as sync viewer anonymous none	allowed
 write spec s-archived-busy assign null as sync viewer bob acme	allowed
 write spec s-archived-busy assign null as sync viewer bob all	allowed
 write spec s-archived-busy assign null as sync viewer bob beta	allowed
@@ -9082,7 +8934,6 @@ write spec s-archived-busy delete as sync member bob beta	allowed
 write spec s-archived-busy delete as sync viewer ada acme	allowed
 write spec s-archived-busy delete as sync viewer ada all	allowed
 write spec s-archived-busy delete as sync viewer ada beta	allowed
-write spec s-archived-busy delete as sync viewer anonymous none	allowed
 write spec s-archived-busy delete as sync viewer bob acme	allowed
 write spec s-archived-busy delete as sync viewer bob all	allowed
 write spec s-archived-busy delete as sync viewer bob beta	allowed
@@ -9143,7 +8994,6 @@ write spec s-archived-busy edit content as sync member bob beta	allowed
 write spec s-archived-busy edit content as sync viewer ada acme	allowed
 write spec s-archived-busy edit content as sync viewer ada all	allowed
 write spec s-archived-busy edit content as sync viewer ada beta	allowed
-write spec s-archived-busy edit content as sync viewer anonymous none	allowed
 write spec s-archived-busy edit content as sync viewer bob acme	allowed
 write spec s-archived-busy edit content as sync viewer bob all	allowed
 write spec s-archived-busy edit content as sync viewer bob beta	allowed
@@ -9204,7 +9054,6 @@ write spec s-archived-busy edit title as sync member bob beta	allowed
 write spec s-archived-busy edit title as sync viewer ada acme	allowed
 write spec s-archived-busy edit title as sync viewer ada all	allowed
 write spec s-archived-busy edit title as sync viewer ada beta	allowed
-write spec s-archived-busy edit title as sync viewer anonymous none	allowed
 write spec s-archived-busy edit title as sync viewer bob acme	allowed
 write spec s-archived-busy edit title as sync viewer bob all	allowed
 write spec s-archived-busy edit title as sync viewer bob beta	allowed
@@ -9265,7 +9114,6 @@ write spec s-archived-busy status cancelled as sync member bob beta	allowed
 write spec s-archived-busy status cancelled as sync viewer ada acme	allowed
 write spec s-archived-busy status cancelled as sync viewer ada all	allowed
 write spec s-archived-busy status cancelled as sync viewer ada beta	allowed
-write spec s-archived-busy status cancelled as sync viewer anonymous none	allowed
 write spec s-archived-busy status cancelled as sync viewer bob acme	allowed
 write spec s-archived-busy status cancelled as sync viewer bob all	allowed
 write spec s-archived-busy status cancelled as sync viewer bob beta	allowed
@@ -9326,7 +9174,6 @@ write spec s-archived-busy status done as sync member bob beta	allowed
 write spec s-archived-busy status done as sync viewer ada acme	allowed
 write spec s-archived-busy status done as sync viewer ada all	allowed
 write spec s-archived-busy status done as sync viewer ada beta	allowed
-write spec s-archived-busy status done as sync viewer anonymous none	allowed
 write spec s-archived-busy status done as sync viewer bob acme	allowed
 write spec s-archived-busy status done as sync viewer bob all	allowed
 write spec s-archived-busy status done as sync viewer bob beta	allowed
@@ -9387,7 +9234,6 @@ write spec s-archived-busy status pending as sync member bob beta	allowed
 write spec s-archived-busy status pending as sync viewer ada acme	allowed
 write spec s-archived-busy status pending as sync viewer ada all	allowed
 write spec s-archived-busy status pending as sync viewer ada beta	allowed
-write spec s-archived-busy status pending as sync viewer anonymous none	allowed
 write spec s-archived-busy status pending as sync viewer bob acme	allowed
 write spec s-archived-busy status pending as sync viewer bob all	allowed
 write spec s-archived-busy status pending as sync viewer bob beta	allowed
@@ -9448,7 +9294,6 @@ write spec s-beta assign bob as sync member bob beta	allowed
 write spec s-beta assign bob as sync viewer ada acme	allowed
 write spec s-beta assign bob as sync viewer ada all	allowed
 write spec s-beta assign bob as sync viewer ada beta	allowed
-write spec s-beta assign bob as sync viewer anonymous none	allowed
 write spec s-beta assign bob as sync viewer bob acme	allowed
 write spec s-beta assign bob as sync viewer bob all	allowed
 write spec s-beta assign bob as sync viewer bob beta	allowed
@@ -9509,7 +9354,6 @@ write spec s-beta assign null as sync member bob beta	allowed
 write spec s-beta assign null as sync viewer ada acme	allowed
 write spec s-beta assign null as sync viewer ada all	allowed
 write spec s-beta assign null as sync viewer ada beta	allowed
-write spec s-beta assign null as sync viewer anonymous none	allowed
 write spec s-beta assign null as sync viewer bob acme	allowed
 write spec s-beta assign null as sync viewer bob all	allowed
 write spec s-beta assign null as sync viewer bob beta	allowed
@@ -9570,7 +9414,6 @@ write spec s-beta delete as sync member bob beta	allowed
 write spec s-beta delete as sync viewer ada acme	allowed
 write spec s-beta delete as sync viewer ada all	allowed
 write spec s-beta delete as sync viewer ada beta	allowed
-write spec s-beta delete as sync viewer anonymous none	allowed
 write spec s-beta delete as sync viewer bob acme	allowed
 write spec s-beta delete as sync viewer bob all	allowed
 write spec s-beta delete as sync viewer bob beta	allowed
@@ -9631,7 +9474,6 @@ write spec s-beta edit content as sync member bob beta	allowed
 write spec s-beta edit content as sync viewer ada acme	allowed
 write spec s-beta edit content as sync viewer ada all	allowed
 write spec s-beta edit content as sync viewer ada beta	allowed
-write spec s-beta edit content as sync viewer anonymous none	allowed
 write spec s-beta edit content as sync viewer bob acme	allowed
 write spec s-beta edit content as sync viewer bob all	allowed
 write spec s-beta edit content as sync viewer bob beta	allowed
@@ -9692,7 +9534,6 @@ write spec s-beta edit title as sync member bob beta	allowed
 write spec s-beta edit title as sync viewer ada acme	allowed
 write spec s-beta edit title as sync viewer ada all	allowed
 write spec s-beta edit title as sync viewer ada beta	allowed
-write spec s-beta edit title as sync viewer anonymous none	allowed
 write spec s-beta edit title as sync viewer bob acme	allowed
 write spec s-beta edit title as sync viewer bob all	allowed
 write spec s-beta edit title as sync viewer bob beta	allowed
@@ -9753,7 +9594,6 @@ write spec s-beta re-create in acme over a deletion filed there as sync member b
 write spec s-beta re-create in acme over a deletion filed there as sync viewer ada acme	allowed
 write spec s-beta re-create in acme over a deletion filed there as sync viewer ada all	allowed
 write spec s-beta re-create in acme over a deletion filed there as sync viewer ada beta	allowed
-write spec s-beta re-create in acme over a deletion filed there as sync viewer anonymous none	allowed
 write spec s-beta re-create in acme over a deletion filed there as sync viewer bob acme	allowed
 write spec s-beta re-create in acme over a deletion filed there as sync viewer bob all	allowed
 write spec s-beta re-create in acme over a deletion filed there as sync viewer bob beta	allowed
@@ -9814,7 +9654,6 @@ write spec s-beta status archived as sync member bob beta	allowed
 write spec s-beta status archived as sync viewer ada acme	allowed
 write spec s-beta status archived as sync viewer ada all	allowed
 write spec s-beta status archived as sync viewer ada beta	allowed
-write spec s-beta status archived as sync viewer anonymous none	allowed
 write spec s-beta status archived as sync viewer bob acme	allowed
 write spec s-beta status archived as sync viewer bob all	allowed
 write spec s-beta status archived as sync viewer bob beta	allowed
@@ -9875,7 +9714,6 @@ write spec s-beta status cancelled as sync member bob beta	allowed
 write spec s-beta status cancelled as sync viewer ada acme	allowed
 write spec s-beta status cancelled as sync viewer ada all	allowed
 write spec s-beta status cancelled as sync viewer ada beta	allowed
-write spec s-beta status cancelled as sync viewer anonymous none	allowed
 write spec s-beta status cancelled as sync viewer bob acme	allowed
 write spec s-beta status cancelled as sync viewer bob all	allowed
 write spec s-beta status cancelled as sync viewer bob beta	allowed
@@ -9936,7 +9774,6 @@ write spec s-beta status done as sync member bob beta	allowed
 write spec s-beta status done as sync viewer ada acme	allowed
 write spec s-beta status done as sync viewer ada all	allowed
 write spec s-beta status done as sync viewer ada beta	allowed
-write spec s-beta status done as sync viewer anonymous none	allowed
 write spec s-beta status done as sync viewer bob acme	allowed
 write spec s-beta status done as sync viewer bob all	allowed
 write spec s-beta status done as sync viewer bob beta	allowed
@@ -9997,7 +9834,6 @@ write spec s-bob assign ada as sync member bob beta	allowed
 write spec s-bob assign ada as sync viewer ada acme	allowed
 write spec s-bob assign ada as sync viewer ada all	allowed
 write spec s-bob assign ada as sync viewer ada beta	allowed
-write spec s-bob assign ada as sync viewer anonymous none	allowed
 write spec s-bob assign ada as sync viewer bob acme	allowed
 write spec s-bob assign ada as sync viewer bob all	allowed
 write spec s-bob assign ada as sync viewer bob beta	allowed
@@ -10058,7 +9894,6 @@ write spec s-bob assign null as sync member bob beta	allowed
 write spec s-bob assign null as sync viewer ada acme	allowed
 write spec s-bob assign null as sync viewer ada all	allowed
 write spec s-bob assign null as sync viewer ada beta	allowed
-write spec s-bob assign null as sync viewer anonymous none	allowed
 write spec s-bob assign null as sync viewer bob acme	allowed
 write spec s-bob assign null as sync viewer bob all	allowed
 write spec s-bob assign null as sync viewer bob beta	allowed
@@ -10119,7 +9954,6 @@ write spec s-bob delete as sync member bob beta	allowed
 write spec s-bob delete as sync viewer ada acme	allowed
 write spec s-bob delete as sync viewer ada all	allowed
 write spec s-bob delete as sync viewer ada beta	allowed
-write spec s-bob delete as sync viewer anonymous none	allowed
 write spec s-bob delete as sync viewer bob acme	allowed
 write spec s-bob delete as sync viewer bob all	allowed
 write spec s-bob delete as sync viewer bob beta	allowed
@@ -10180,7 +10014,6 @@ write spec s-bob edit content as sync member bob beta	allowed
 write spec s-bob edit content as sync viewer ada acme	allowed
 write spec s-bob edit content as sync viewer ada all	allowed
 write spec s-bob edit content as sync viewer ada beta	allowed
-write spec s-bob edit content as sync viewer anonymous none	allowed
 write spec s-bob edit content as sync viewer bob acme	allowed
 write spec s-bob edit content as sync viewer bob all	allowed
 write spec s-bob edit content as sync viewer bob beta	allowed
@@ -10241,7 +10074,6 @@ write spec s-bob edit title as sync member bob beta	allowed
 write spec s-bob edit title as sync viewer ada acme	allowed
 write spec s-bob edit title as sync viewer ada all	allowed
 write spec s-bob edit title as sync viewer ada beta	allowed
-write spec s-bob edit title as sync viewer anonymous none	allowed
 write spec s-bob edit title as sync viewer bob acme	allowed
 write spec s-bob edit title as sync viewer bob all	allowed
 write spec s-bob edit title as sync viewer bob beta	allowed
@@ -10302,7 +10134,6 @@ write spec s-bob status archived as sync member bob beta	allowed
 write spec s-bob status archived as sync viewer ada acme	allowed
 write spec s-bob status archived as sync viewer ada all	allowed
 write spec s-bob status archived as sync viewer ada beta	allowed
-write spec s-bob status archived as sync viewer anonymous none	allowed
 write spec s-bob status archived as sync viewer bob acme	allowed
 write spec s-bob status archived as sync viewer bob all	allowed
 write spec s-bob status archived as sync viewer bob beta	allowed
@@ -10363,7 +10194,6 @@ write spec s-bob status cancelled as sync member bob beta	allowed
 write spec s-bob status cancelled as sync viewer ada acme	allowed
 write spec s-bob status cancelled as sync viewer ada all	allowed
 write spec s-bob status cancelled as sync viewer ada beta	allowed
-write spec s-bob status cancelled as sync viewer anonymous none	allowed
 write spec s-bob status cancelled as sync viewer bob acme	allowed
 write spec s-bob status cancelled as sync viewer bob all	allowed
 write spec s-bob status cancelled as sync viewer bob beta	allowed
@@ -10424,7 +10254,6 @@ write spec s-bob status done as sync member bob beta	allowed
 write spec s-bob status done as sync viewer ada acme	allowed
 write spec s-bob status done as sync viewer ada all	allowed
 write spec s-bob status done as sync viewer ada beta	allowed
-write spec s-bob status done as sync viewer anonymous none	allowed
 write spec s-bob status done as sync viewer bob acme	allowed
 write spec s-bob status done as sync viewer bob all	allowed
 write spec s-bob status done as sync viewer bob beta	allowed
@@ -10485,7 +10314,6 @@ write spec s-busy assign bob as sync member bob beta	allowed
 write spec s-busy assign bob as sync viewer ada acme	allowed
 write spec s-busy assign bob as sync viewer ada all	allowed
 write spec s-busy assign bob as sync viewer ada beta	allowed
-write spec s-busy assign bob as sync viewer anonymous none	allowed
 write spec s-busy assign bob as sync viewer bob acme	allowed
 write spec s-busy assign bob as sync viewer bob all	allowed
 write spec s-busy assign bob as sync viewer bob beta	allowed
@@ -10546,7 +10374,6 @@ write spec s-busy assign null as sync member bob beta	allowed
 write spec s-busy assign null as sync viewer ada acme	allowed
 write spec s-busy assign null as sync viewer ada all	allowed
 write spec s-busy assign null as sync viewer ada beta	allowed
-write spec s-busy assign null as sync viewer anonymous none	allowed
 write spec s-busy assign null as sync viewer bob acme	allowed
 write spec s-busy assign null as sync viewer bob all	allowed
 write spec s-busy assign null as sync viewer bob beta	allowed
@@ -10607,7 +10434,6 @@ write spec s-busy delete as sync member bob beta	allowed
 write spec s-busy delete as sync viewer ada acme	allowed
 write spec s-busy delete as sync viewer ada all	allowed
 write spec s-busy delete as sync viewer ada beta	allowed
-write spec s-busy delete as sync viewer anonymous none	allowed
 write spec s-busy delete as sync viewer bob acme	allowed
 write spec s-busy delete as sync viewer bob all	allowed
 write spec s-busy delete as sync viewer bob beta	allowed
@@ -10668,7 +10494,6 @@ write spec s-busy edit content as sync member bob beta	allowed
 write spec s-busy edit content as sync viewer ada acme	allowed
 write spec s-busy edit content as sync viewer ada all	allowed
 write spec s-busy edit content as sync viewer ada beta	allowed
-write spec s-busy edit content as sync viewer anonymous none	allowed
 write spec s-busy edit content as sync viewer bob acme	allowed
 write spec s-busy edit content as sync viewer bob all	allowed
 write spec s-busy edit content as sync viewer bob beta	allowed
@@ -10729,7 +10554,6 @@ write spec s-busy edit title as sync member bob beta	allowed
 write spec s-busy edit title as sync viewer ada acme	allowed
 write spec s-busy edit title as sync viewer ada all	allowed
 write spec s-busy edit title as sync viewer ada beta	allowed
-write spec s-busy edit title as sync viewer anonymous none	allowed
 write spec s-busy edit title as sync viewer bob acme	allowed
 write spec s-busy edit title as sync viewer bob all	allowed
 write spec s-busy edit title as sync viewer bob beta	allowed
@@ -10790,7 +10614,6 @@ write spec s-busy status archived as sync member bob beta	allowed
 write spec s-busy status archived as sync viewer ada acme	allowed
 write spec s-busy status archived as sync viewer ada all	allowed
 write spec s-busy status archived as sync viewer ada beta	allowed
-write spec s-busy status archived as sync viewer anonymous none	allowed
 write spec s-busy status archived as sync viewer bob acme	allowed
 write spec s-busy status archived as sync viewer bob all	allowed
 write spec s-busy status archived as sync viewer bob beta	allowed
@@ -10851,7 +10674,6 @@ write spec s-busy status cancelled as sync member bob beta	allowed
 write spec s-busy status cancelled as sync viewer ada acme	allowed
 write spec s-busy status cancelled as sync viewer ada all	allowed
 write spec s-busy status cancelled as sync viewer ada beta	allowed
-write spec s-busy status cancelled as sync viewer anonymous none	allowed
 write spec s-busy status cancelled as sync viewer bob acme	allowed
 write spec s-busy status cancelled as sync viewer bob all	allowed
 write spec s-busy status cancelled as sync viewer bob beta	allowed
@@ -10912,7 +10734,6 @@ write spec s-busy status done as sync member bob beta	allowed
 write spec s-busy status done as sync viewer ada acme	allowed
 write spec s-busy status done as sync viewer ada all	allowed
 write spec s-busy status done as sync viewer ada beta	allowed
-write spec s-busy status done as sync viewer anonymous none	allowed
 write spec s-busy status done as sync viewer bob acme	allowed
 write spec s-busy status done as sync viewer bob all	allowed
 write spec s-busy status done as sync viewer bob beta	allowed
@@ -10973,7 +10794,6 @@ write spec s-busy status pending as sync member bob beta	allowed
 write spec s-busy status pending as sync viewer ada acme	allowed
 write spec s-busy status pending as sync viewer ada all	allowed
 write spec s-busy status pending as sync viewer ada beta	allowed
-write spec s-busy status pending as sync viewer anonymous none	allowed
 write spec s-busy status pending as sync viewer bob acme	allowed
 write spec s-busy status pending as sync viewer bob all	allowed
 write spec s-busy status pending as sync viewer bob beta	allowed
@@ -11034,7 +10854,6 @@ write spec s-den assign ada as sync member bob beta	allowed
 write spec s-den assign ada as sync viewer ada acme	allowed
 write spec s-den assign ada as sync viewer ada all	allowed
 write spec s-den assign ada as sync viewer ada beta	allowed
-write spec s-den assign ada as sync viewer anonymous none	allowed
 write spec s-den assign ada as sync viewer bob acme	allowed
 write spec s-den assign ada as sync viewer bob all	allowed
 write spec s-den assign ada as sync viewer bob beta	allowed
@@ -11095,7 +10914,6 @@ write spec s-den assign bob as sync member bob beta	allowed
 write spec s-den assign bob as sync viewer ada acme	allowed
 write spec s-den assign bob as sync viewer ada all	allowed
 write spec s-den assign bob as sync viewer ada beta	allowed
-write spec s-den assign bob as sync viewer anonymous none	allowed
 write spec s-den assign bob as sync viewer bob acme	allowed
 write spec s-den assign bob as sync viewer bob all	allowed
 write spec s-den assign bob as sync viewer bob beta	allowed
@@ -11156,7 +10974,6 @@ write spec s-den delete as sync member bob beta	allowed
 write spec s-den delete as sync viewer ada acme	allowed
 write spec s-den delete as sync viewer ada all	allowed
 write spec s-den delete as sync viewer ada beta	allowed
-write spec s-den delete as sync viewer anonymous none	allowed
 write spec s-den delete as sync viewer bob acme	allowed
 write spec s-den delete as sync viewer bob all	allowed
 write spec s-den delete as sync viewer bob beta	allowed
@@ -11217,7 +11034,6 @@ write spec s-den edit content as sync member bob beta	allowed
 write spec s-den edit content as sync viewer ada acme	allowed
 write spec s-den edit content as sync viewer ada all	allowed
 write spec s-den edit content as sync viewer ada beta	allowed
-write spec s-den edit content as sync viewer anonymous none	allowed
 write spec s-den edit content as sync viewer bob acme	allowed
 write spec s-den edit content as sync viewer bob all	allowed
 write spec s-den edit content as sync viewer bob beta	allowed
@@ -11278,7 +11094,6 @@ write spec s-den edit title as sync member bob beta	allowed
 write spec s-den edit title as sync viewer ada acme	allowed
 write spec s-den edit title as sync viewer ada all	allowed
 write spec s-den edit title as sync viewer ada beta	allowed
-write spec s-den edit title as sync viewer anonymous none	allowed
 write spec s-den edit title as sync viewer bob acme	allowed
 write spec s-den edit title as sync viewer bob all	allowed
 write spec s-den edit title as sync viewer bob beta	allowed
@@ -11339,7 +11154,6 @@ write spec s-den status archived as sync member bob beta	allowed
 write spec s-den status archived as sync viewer ada acme	allowed
 write spec s-den status archived as sync viewer ada all	allowed
 write spec s-den status archived as sync viewer ada beta	allowed
-write spec s-den status archived as sync viewer anonymous none	allowed
 write spec s-den status archived as sync viewer bob acme	allowed
 write spec s-den status archived as sync viewer bob all	allowed
 write spec s-den status archived as sync viewer bob beta	allowed
@@ -11400,7 +11214,6 @@ write spec s-den status cancelled as sync member bob beta	allowed
 write spec s-den status cancelled as sync viewer ada acme	allowed
 write spec s-den status cancelled as sync viewer ada all	allowed
 write spec s-den status cancelled as sync viewer ada beta	allowed
-write spec s-den status cancelled as sync viewer anonymous none	allowed
 write spec s-den status cancelled as sync viewer bob acme	allowed
 write spec s-den status cancelled as sync viewer bob all	allowed
 write spec s-den status cancelled as sync viewer bob beta	allowed
@@ -11461,7 +11274,6 @@ write spec s-den status done as sync member bob beta	allowed
 write spec s-den status done as sync viewer ada acme	allowed
 write spec s-den status done as sync viewer ada all	allowed
 write spec s-den status done as sync viewer ada beta	allowed
-write spec s-den status done as sync viewer anonymous none	allowed
 write spec s-den status done as sync viewer bob acme	allowed
 write spec s-den status done as sync viewer bob all	allowed
 write spec s-den status done as sync viewer bob beta	allowed
@@ -11522,7 +11334,6 @@ write spec s-done assign bob as sync member bob beta	allowed
 write spec s-done assign bob as sync viewer ada acme	allowed
 write spec s-done assign bob as sync viewer ada all	allowed
 write spec s-done assign bob as sync viewer ada beta	allowed
-write spec s-done assign bob as sync viewer anonymous none	allowed
 write spec s-done assign bob as sync viewer bob acme	allowed
 write spec s-done assign bob as sync viewer bob all	allowed
 write spec s-done assign bob as sync viewer bob beta	allowed
@@ -11583,7 +11394,6 @@ write spec s-done assign null as sync member bob beta	allowed
 write spec s-done assign null as sync viewer ada acme	allowed
 write spec s-done assign null as sync viewer ada all	allowed
 write spec s-done assign null as sync viewer ada beta	allowed
-write spec s-done assign null as sync viewer anonymous none	allowed
 write spec s-done assign null as sync viewer bob acme	allowed
 write spec s-done assign null as sync viewer bob all	allowed
 write spec s-done assign null as sync viewer bob beta	allowed
@@ -11644,7 +11454,6 @@ write spec s-done delete as sync member bob beta	allowed
 write spec s-done delete as sync viewer ada acme	allowed
 write spec s-done delete as sync viewer ada all	allowed
 write spec s-done delete as sync viewer ada beta	allowed
-write spec s-done delete as sync viewer anonymous none	allowed
 write spec s-done delete as sync viewer bob acme	allowed
 write spec s-done delete as sync viewer bob all	allowed
 write spec s-done delete as sync viewer bob beta	allowed
@@ -11705,7 +11514,6 @@ write spec s-done edit content as sync member bob beta	allowed
 write spec s-done edit content as sync viewer ada acme	allowed
 write spec s-done edit content as sync viewer ada all	allowed
 write spec s-done edit content as sync viewer ada beta	allowed
-write spec s-done edit content as sync viewer anonymous none	allowed
 write spec s-done edit content as sync viewer bob acme	allowed
 write spec s-done edit content as sync viewer bob all	allowed
 write spec s-done edit content as sync viewer bob beta	allowed
@@ -11766,7 +11574,6 @@ write spec s-done edit title as sync member bob beta	allowed
 write spec s-done edit title as sync viewer ada acme	allowed
 write spec s-done edit title as sync viewer ada all	allowed
 write spec s-done edit title as sync viewer ada beta	allowed
-write spec s-done edit title as sync viewer anonymous none	allowed
 write spec s-done edit title as sync viewer bob acme	allowed
 write spec s-done edit title as sync viewer bob all	allowed
 write spec s-done edit title as sync viewer bob beta	allowed
@@ -11827,7 +11634,6 @@ write spec s-done status archived as sync member bob beta	allowed
 write spec s-done status archived as sync viewer ada acme	allowed
 write spec s-done status archived as sync viewer ada all	allowed
 write spec s-done status archived as sync viewer ada beta	allowed
-write spec s-done status archived as sync viewer anonymous none	allowed
 write spec s-done status archived as sync viewer bob acme	allowed
 write spec s-done status archived as sync viewer bob all	allowed
 write spec s-done status archived as sync viewer bob beta	allowed
@@ -11888,7 +11694,6 @@ write spec s-done status cancelled as sync member bob beta	allowed
 write spec s-done status cancelled as sync viewer ada acme	allowed
 write spec s-done status cancelled as sync viewer ada all	allowed
 write spec s-done status cancelled as sync viewer ada beta	allowed
-write spec s-done status cancelled as sync viewer anonymous none	allowed
 write spec s-done status cancelled as sync viewer bob acme	allowed
 write spec s-done status cancelled as sync viewer bob all	allowed
 write spec s-done status cancelled as sync viewer bob beta	allowed
@@ -11949,7 +11754,6 @@ write spec s-done status pending as sync member bob beta	allowed
 write spec s-done status pending as sync viewer ada acme	allowed
 write spec s-done status pending as sync viewer ada all	allowed
 write spec s-done status pending as sync viewer ada beta	allowed
-write spec s-done status pending as sync viewer anonymous none	allowed
 write spec s-done status pending as sync viewer bob acme	allowed
 write spec s-done status pending as sync viewer bob all	allowed
 write spec s-done status pending as sync viewer bob beta	allowed
@@ -12010,7 +11814,6 @@ write spec s-draft assign bob as sync member bob beta	allowed
 write spec s-draft assign bob as sync viewer ada acme	allowed
 write spec s-draft assign bob as sync viewer ada all	allowed
 write spec s-draft assign bob as sync viewer ada beta	allowed
-write spec s-draft assign bob as sync viewer anonymous none	allowed
 write spec s-draft assign bob as sync viewer bob acme	allowed
 write spec s-draft assign bob as sync viewer bob all	allowed
 write spec s-draft assign bob as sync viewer bob beta	allowed
@@ -12071,7 +11874,6 @@ write spec s-draft assign null as sync member bob beta	allowed
 write spec s-draft assign null as sync viewer ada acme	allowed
 write spec s-draft assign null as sync viewer ada all	allowed
 write spec s-draft assign null as sync viewer ada beta	allowed
-write spec s-draft assign null as sync viewer anonymous none	allowed
 write spec s-draft assign null as sync viewer bob acme	allowed
 write spec s-draft assign null as sync viewer bob all	allowed
 write spec s-draft assign null as sync viewer bob beta	allowed
@@ -12132,7 +11934,6 @@ write spec s-draft delete as sync member bob beta	allowed
 write spec s-draft delete as sync viewer ada acme	allowed
 write spec s-draft delete as sync viewer ada all	allowed
 write spec s-draft delete as sync viewer ada beta	allowed
-write spec s-draft delete as sync viewer anonymous none	allowed
 write spec s-draft delete as sync viewer bob acme	allowed
 write spec s-draft delete as sync viewer bob all	allowed
 write spec s-draft delete as sync viewer bob beta	allowed
@@ -12193,7 +11994,6 @@ write spec s-draft edit content as sync member bob beta	allowed
 write spec s-draft edit content as sync viewer ada acme	allowed
 write spec s-draft edit content as sync viewer ada all	allowed
 write spec s-draft edit content as sync viewer ada beta	allowed
-write spec s-draft edit content as sync viewer anonymous none	allowed
 write spec s-draft edit content as sync viewer bob acme	allowed
 write spec s-draft edit content as sync viewer bob all	allowed
 write spec s-draft edit content as sync viewer bob beta	allowed
@@ -12254,7 +12054,6 @@ write spec s-draft edit title as sync member bob beta	allowed
 write spec s-draft edit title as sync viewer ada acme	allowed
 write spec s-draft edit title as sync viewer ada all	allowed
 write spec s-draft edit title as sync viewer ada beta	allowed
-write spec s-draft edit title as sync viewer anonymous none	allowed
 write spec s-draft edit title as sync viewer bob acme	allowed
 write spec s-draft edit title as sync viewer bob all	allowed
 write spec s-draft edit title as sync viewer bob beta	allowed
@@ -12315,7 +12114,6 @@ write spec s-draft status archived as sync member bob beta	allowed
 write spec s-draft status archived as sync viewer ada acme	allowed
 write spec s-draft status archived as sync viewer ada all	allowed
 write spec s-draft status archived as sync viewer ada beta	allowed
-write spec s-draft status archived as sync viewer anonymous none	allowed
 write spec s-draft status archived as sync viewer bob acme	allowed
 write spec s-draft status archived as sync viewer bob all	allowed
 write spec s-draft status archived as sync viewer bob beta	allowed
@@ -12376,7 +12174,6 @@ write spec s-draft status cancelled as sync member bob beta	allowed
 write spec s-draft status cancelled as sync viewer ada acme	allowed
 write spec s-draft status cancelled as sync viewer ada all	allowed
 write spec s-draft status cancelled as sync viewer ada beta	allowed
-write spec s-draft status cancelled as sync viewer anonymous none	allowed
 write spec s-draft status cancelled as sync viewer bob acme	allowed
 write spec s-draft status cancelled as sync viewer bob all	allowed
 write spec s-draft status cancelled as sync viewer bob beta	allowed
@@ -12437,7 +12234,6 @@ write spec s-draft status done as sync member bob beta	allowed
 write spec s-draft status done as sync viewer ada acme	allowed
 write spec s-draft status done as sync viewer ada all	allowed
 write spec s-draft status done as sync viewer ada beta	allowed
-write spec s-draft status done as sync viewer anonymous none	allowed
 write spec s-draft status done as sync viewer bob acme	allowed
 write spec s-draft status done as sync viewer bob all	allowed
 write spec s-draft status done as sync viewer bob beta	allowed
@@ -12498,7 +12294,6 @@ write spec s-draft status pending as sync member bob beta	allowed
 write spec s-draft status pending as sync viewer ada acme	allowed
 write spec s-draft status pending as sync viewer ada all	allowed
 write spec s-draft status pending as sync viewer ada beta	allowed
-write spec s-draft status pending as sync viewer anonymous none	allowed
 write spec s-draft status pending as sync viewer bob acme	allowed
 write spec s-draft status pending as sync viewer bob all	allowed
 write spec s-draft status pending as sync viewer bob beta	allowed
@@ -12559,7 +12354,6 @@ write spec s-draft-new create draft as sync member bob beta	allowed
 write spec s-draft-new create draft as sync viewer ada acme	allowed
 write spec s-draft-new create draft as sync viewer ada all	allowed
 write spec s-draft-new create draft as sync viewer ada beta	allowed
-write spec s-draft-new create draft as sync viewer anonymous none	allowed
 write spec s-draft-new create draft as sync viewer bob acme	allowed
 write spec s-draft-new create draft as sync viewer bob all	allowed
 write spec s-draft-new create draft as sync viewer bob beta	allowed
@@ -12620,7 +12414,6 @@ write spec s-gone restore as sync member bob beta	allowed
 write spec s-gone restore as sync viewer ada acme	allowed
 write spec s-gone restore as sync viewer ada all	allowed
 write spec s-gone restore as sync viewer ada beta	allowed
-write spec s-gone restore as sync viewer anonymous none	allowed
 write spec s-gone restore as sync viewer bob acme	allowed
 write spec s-gone restore as sync viewer bob all	allowed
 write spec s-gone restore as sync viewer bob beta	allowed
@@ -12681,7 +12474,6 @@ write spec s-gone restore assigned bob as sync member bob beta	allowed
 write spec s-gone restore assigned bob as sync viewer ada acme	allowed
 write spec s-gone restore assigned bob as sync viewer ada all	allowed
 write spec s-gone restore assigned bob as sync viewer ada beta	allowed
-write spec s-gone restore assigned bob as sync viewer anonymous none	allowed
 write spec s-gone restore assigned bob as sync viewer bob acme	allowed
 write spec s-gone restore assigned bob as sync viewer bob all	allowed
 write spec s-gone restore assigned bob as sync viewer bob beta	allowed
@@ -12742,7 +12534,6 @@ write spec s-lobby assign ada as sync member bob beta	allowed
 write spec s-lobby assign ada as sync viewer ada acme	allowed
 write spec s-lobby assign ada as sync viewer ada all	allowed
 write spec s-lobby assign ada as sync viewer ada beta	allowed
-write spec s-lobby assign ada as sync viewer anonymous none	allowed
 write spec s-lobby assign ada as sync viewer bob acme	allowed
 write spec s-lobby assign ada as sync viewer bob all	allowed
 write spec s-lobby assign ada as sync viewer bob beta	allowed
@@ -12803,7 +12594,6 @@ write spec s-lobby assign bob as sync member bob beta	allowed
 write spec s-lobby assign bob as sync viewer ada acme	allowed
 write spec s-lobby assign bob as sync viewer ada all	allowed
 write spec s-lobby assign bob as sync viewer ada beta	allowed
-write spec s-lobby assign bob as sync viewer anonymous none	allowed
 write spec s-lobby assign bob as sync viewer bob acme	allowed
 write spec s-lobby assign bob as sync viewer bob all	allowed
 write spec s-lobby assign bob as sync viewer bob beta	allowed
@@ -12864,7 +12654,6 @@ write spec s-lobby delete as sync member bob beta	allowed
 write spec s-lobby delete as sync viewer ada acme	allowed
 write spec s-lobby delete as sync viewer ada all	allowed
 write spec s-lobby delete as sync viewer ada beta	allowed
-write spec s-lobby delete as sync viewer anonymous none	allowed
 write spec s-lobby delete as sync viewer bob acme	allowed
 write spec s-lobby delete as sync viewer bob all	allowed
 write spec s-lobby delete as sync viewer bob beta	allowed
@@ -12925,7 +12714,6 @@ write spec s-lobby edit content as sync member bob beta	allowed
 write spec s-lobby edit content as sync viewer ada acme	allowed
 write spec s-lobby edit content as sync viewer ada all	allowed
 write spec s-lobby edit content as sync viewer ada beta	allowed
-write spec s-lobby edit content as sync viewer anonymous none	allowed
 write spec s-lobby edit content as sync viewer bob acme	allowed
 write spec s-lobby edit content as sync viewer bob all	allowed
 write spec s-lobby edit content as sync viewer bob beta	allowed
@@ -12986,7 +12774,6 @@ write spec s-lobby edit title as sync member bob beta	allowed
 write spec s-lobby edit title as sync viewer ada acme	allowed
 write spec s-lobby edit title as sync viewer ada all	allowed
 write spec s-lobby edit title as sync viewer ada beta	allowed
-write spec s-lobby edit title as sync viewer anonymous none	allowed
 write spec s-lobby edit title as sync viewer bob acme	allowed
 write spec s-lobby edit title as sync viewer bob all	allowed
 write spec s-lobby edit title as sync viewer bob beta	allowed
@@ -13047,7 +12834,6 @@ write spec s-lobby move room to den as sync member bob beta	allowed
 write spec s-lobby move room to den as sync viewer ada acme	allowed
 write spec s-lobby move room to den as sync viewer ada all	allowed
 write spec s-lobby move room to den as sync viewer ada beta	allowed
-write spec s-lobby move room to den as sync viewer anonymous none	allowed
 write spec s-lobby move room to den as sync viewer bob acme	allowed
 write spec s-lobby move room to den as sync viewer bob all	allowed
 write spec s-lobby move room to den as sync viewer bob beta	allowed
@@ -13108,7 +12894,6 @@ write spec s-lobby move to beta as sync member bob beta	allowed
 write spec s-lobby move to beta as sync viewer ada acme	allowed
 write spec s-lobby move to beta as sync viewer ada all	allowed
 write spec s-lobby move to beta as sync viewer ada beta	allowed
-write spec s-lobby move to beta as sync viewer anonymous none	allowed
 write spec s-lobby move to beta as sync viewer bob acme	allowed
 write spec s-lobby move to beta as sync viewer bob all	allowed
 write spec s-lobby move to beta as sync viewer bob beta	allowed
@@ -13169,7 +12954,6 @@ write spec s-lobby move to omega as sync member bob beta	allowed
 write spec s-lobby move to omega as sync viewer ada acme	allowed
 write spec s-lobby move to omega as sync viewer ada all	allowed
 write spec s-lobby move to omega as sync viewer ada beta	allowed
-write spec s-lobby move to omega as sync viewer anonymous none	allowed
 write spec s-lobby move to omega as sync viewer bob acme	allowed
 write spec s-lobby move to omega as sync viewer bob all	allowed
 write spec s-lobby move to omega as sync viewer bob beta	allowed
@@ -13230,7 +13014,6 @@ write spec s-lobby status archived as sync member bob beta	allowed
 write spec s-lobby status archived as sync viewer ada acme	allowed
 write spec s-lobby status archived as sync viewer ada all	allowed
 write spec s-lobby status archived as sync viewer ada beta	allowed
-write spec s-lobby status archived as sync viewer anonymous none	allowed
 write spec s-lobby status archived as sync viewer bob acme	allowed
 write spec s-lobby status archived as sync viewer bob all	allowed
 write spec s-lobby status archived as sync viewer bob beta	allowed
@@ -13291,7 +13074,6 @@ write spec s-lobby status cancelled as sync member bob beta	allowed
 write spec s-lobby status cancelled as sync viewer ada acme	allowed
 write spec s-lobby status cancelled as sync viewer ada all	allowed
 write spec s-lobby status cancelled as sync viewer ada beta	allowed
-write spec s-lobby status cancelled as sync viewer anonymous none	allowed
 write spec s-lobby status cancelled as sync viewer bob acme	allowed
 write spec s-lobby status cancelled as sync viewer bob all	allowed
 write spec s-lobby status cancelled as sync viewer bob beta	allowed
@@ -13352,7 +13134,6 @@ write spec s-lobby status done as sync member bob beta	allowed
 write spec s-lobby status done as sync viewer ada acme	allowed
 write spec s-lobby status done as sync viewer ada all	allowed
 write spec s-lobby status done as sync viewer ada beta	allowed
-write spec s-lobby status done as sync viewer anonymous none	allowed
 write spec s-lobby status done as sync viewer bob acme	allowed
 write spec s-lobby status done as sync viewer bob all	allowed
 write spec s-lobby status done as sync viewer bob beta	allowed
@@ -13413,7 +13194,6 @@ write spec s-never marked deletion never held as sync member bob beta	allowed
 write spec s-never marked deletion never held as sync viewer ada acme	allowed
 write spec s-never marked deletion never held as sync viewer ada all	allowed
 write spec s-never marked deletion never held as sync viewer ada beta	allowed
-write spec s-never marked deletion never held as sync viewer anonymous none	allowed
 write spec s-never marked deletion never held as sync viewer bob acme	allowed
 write spec s-never marked deletion never held as sync viewer bob all	allowed
 write spec s-never marked deletion never held as sync viewer bob beta	allowed
@@ -13474,7 +13254,6 @@ write spec s-new create as sync member bob beta	allowed
 write spec s-new create as sync viewer ada acme	allowed
 write spec s-new create as sync viewer ada all	allowed
 write spec s-new create as sync viewer ada beta	allowed
-write spec s-new create as sync viewer anonymous none	allowed
 write spec s-new create as sync viewer bob acme	allowed
 write spec s-new create as sync viewer bob all	allowed
 write spec s-new create as sync viewer bob beta	allowed
@@ -13535,7 +13314,6 @@ write spec s-new create assigned ada as sync member bob beta	allowed
 write spec s-new create assigned ada as sync viewer ada acme	allowed
 write spec s-new create assigned ada as sync viewer ada all	allowed
 write spec s-new create assigned ada as sync viewer ada beta	allowed
-write spec s-new create assigned ada as sync viewer anonymous none	allowed
 write spec s-new create assigned ada as sync viewer bob acme	allowed
 write spec s-new create assigned ada as sync viewer bob all	allowed
 write spec s-new create assigned ada as sync viewer bob beta	allowed
@@ -13596,7 +13374,6 @@ write spec s-new create assigned bob as sync member bob beta	allowed
 write spec s-new create assigned bob as sync viewer ada acme	allowed
 write spec s-new create assigned bob as sync viewer ada all	allowed
 write spec s-new create assigned bob as sync viewer ada beta	allowed
-write spec s-new create assigned bob as sync viewer anonymous none	allowed
 write spec s-new create assigned bob as sync viewer bob acme	allowed
 write spec s-new create assigned bob as sync viewer bob all	allowed
 write spec s-new create assigned bob as sync viewer bob beta	allowed
@@ -13657,7 +13434,6 @@ write spec s-new create born in attic as sync member bob beta	allowed
 write spec s-new create born in attic as sync viewer ada acme	allowed
 write spec s-new create born in attic as sync viewer ada all	allowed
 write spec s-new create born in attic as sync viewer ada beta	allowed
-write spec s-new create born in attic as sync viewer anonymous none	allowed
 write spec s-new create born in attic as sync viewer bob acme	allowed
 write spec s-new create born in attic as sync viewer bob all	allowed
 write spec s-new create born in attic as sync viewer bob beta	allowed
@@ -13718,7 +13494,6 @@ write spec s-new create born in b-room as sync member bob beta	allowed
 write spec s-new create born in b-room as sync viewer ada acme	allowed
 write spec s-new create born in b-room as sync viewer ada all	allowed
 write spec s-new create born in b-room as sync viewer ada beta	allowed
-write spec s-new create born in b-room as sync viewer anonymous none	allowed
 write spec s-new create born in b-room as sync viewer bob acme	allowed
 write spec s-new create born in b-room as sync viewer bob all	allowed
 write spec s-new create born in b-room as sync viewer bob beta	allowed
@@ -13779,7 +13554,6 @@ write spec s-new create born in den as sync member bob beta	allowed
 write spec s-new create born in den as sync viewer ada acme	allowed
 write spec s-new create born in den as sync viewer ada all	allowed
 write spec s-new create born in den as sync viewer ada beta	allowed
-write spec s-new create born in den as sync viewer anonymous none	allowed
 write spec s-new create born in den as sync viewer bob acme	allowed
 write spec s-new create born in den as sync viewer bob all	allowed
 write spec s-new create born in den as sync viewer bob beta	allowed
@@ -13840,7 +13614,6 @@ write spec s-new create born in den assigned ada as sync member bob beta	allowed
 write spec s-new create born in den assigned ada as sync viewer ada acme	allowed
 write spec s-new create born in den assigned ada as sync viewer ada all	allowed
 write spec s-new create born in den assigned ada as sync viewer ada beta	allowed
-write spec s-new create born in den assigned ada as sync viewer anonymous none	allowed
 write spec s-new create born in den assigned ada as sync viewer bob acme	allowed
 write spec s-new create born in den assigned ada as sync viewer bob all	allowed
 write spec s-new create born in den assigned ada as sync viewer bob beta	allowed
@@ -13901,7 +13674,6 @@ write spec s-new create born in ghost as sync member bob beta	allowed
 write spec s-new create born in ghost as sync viewer ada acme	allowed
 write spec s-new create born in ghost as sync viewer ada all	allowed
 write spec s-new create born in ghost as sync viewer ada beta	allowed
-write spec s-new create born in ghost as sync viewer anonymous none	allowed
 write spec s-new create born in ghost as sync viewer bob acme	allowed
 write spec s-new create born in ghost as sync viewer bob all	allowed
 write spec s-new create born in ghost as sync viewer bob beta	allowed
@@ -13962,7 +13734,6 @@ write spec s-new create born in hall as sync member bob beta	allowed
 write spec s-new create born in hall as sync viewer ada acme	allowed
 write spec s-new create born in hall as sync viewer ada all	allowed
 write spec s-new create born in hall as sync viewer ada beta	allowed
-write spec s-new create born in hall as sync viewer anonymous none	allowed
 write spec s-new create born in hall as sync viewer bob acme	allowed
 write spec s-new create born in hall as sync viewer bob all	allowed
 write spec s-new create born in hall as sync viewer bob beta	allowed
@@ -14023,7 +13794,6 @@ write spec s-new create born in lobby as sync member bob beta	allowed
 write spec s-new create born in lobby as sync viewer ada acme	allowed
 write spec s-new create born in lobby as sync viewer ada all	allowed
 write spec s-new create born in lobby as sync viewer ada beta	allowed
-write spec s-new create born in lobby as sync viewer anonymous none	allowed
 write spec s-new create born in lobby as sync viewer bob acme	allowed
 write spec s-new create born in lobby as sync viewer bob all	allowed
 write spec s-new create born in lobby as sync viewer bob beta	allowed
@@ -14084,7 +13854,6 @@ write spec s-new create born in lobby assigned ada as sync member bob beta	allow
 write spec s-new create born in lobby assigned ada as sync viewer ada acme	allowed
 write spec s-new create born in lobby assigned ada as sync viewer ada all	allowed
 write spec s-new create born in lobby assigned ada as sync viewer ada beta	allowed
-write spec s-new create born in lobby assigned ada as sync viewer anonymous none	allowed
 write spec s-new create born in lobby assigned ada as sync viewer bob acme	allowed
 write spec s-new create born in lobby assigned ada as sync viewer bob all	allowed
 write spec s-new create born in lobby assigned ada as sync viewer bob beta	allowed
@@ -14145,7 +13914,6 @@ write spec s-new create in beta as sync member bob beta	allowed
 write spec s-new create in beta as sync viewer ada acme	allowed
 write spec s-new create in beta as sync viewer ada all	allowed
 write spec s-new create in beta as sync viewer ada beta	allowed
-write spec s-new create in beta as sync viewer anonymous none	allowed
 write spec s-new create in beta as sync viewer bob acme	allowed
 write spec s-new create in beta as sync viewer bob all	allowed
 write spec s-new create in beta as sync viewer bob beta	allowed
@@ -14206,7 +13974,6 @@ write spec s-new create in omega as sync member bob beta	allowed
 write spec s-new create in omega as sync viewer ada acme	allowed
 write spec s-new create in omega as sync viewer ada all	allowed
 write spec s-new create in omega as sync viewer ada beta	allowed
-write spec s-new create in omega as sync viewer anonymous none	allowed
 write spec s-new create in omega as sync viewer bob acme	allowed
 write spec s-new create in omega as sync viewer bob all	allowed
 write spec s-new create in omega as sync viewer bob beta	allowed
@@ -14267,7 +14034,6 @@ write spec s-open-ada assign ada as sync member bob beta	allowed
 write spec s-open-ada assign ada as sync viewer ada acme	allowed
 write spec s-open-ada assign ada as sync viewer ada all	allowed
 write spec s-open-ada assign ada as sync viewer ada beta	allowed
-write spec s-open-ada assign ada as sync viewer anonymous none	allowed
 write spec s-open-ada assign ada as sync viewer bob acme	allowed
 write spec s-open-ada assign ada as sync viewer bob all	allowed
 write spec s-open-ada assign ada as sync viewer bob beta	allowed
@@ -14328,7 +14094,6 @@ write spec s-open-ada assign bob as sync member bob beta	allowed
 write spec s-open-ada assign bob as sync viewer ada acme	allowed
 write spec s-open-ada assign bob as sync viewer ada all	allowed
 write spec s-open-ada assign bob as sync viewer ada beta	allowed
-write spec s-open-ada assign bob as sync viewer anonymous none	allowed
 write spec s-open-ada assign bob as sync viewer bob acme	allowed
 write spec s-open-ada assign bob as sync viewer bob all	allowed
 write spec s-open-ada assign bob as sync viewer bob beta	allowed
@@ -14389,7 +14154,6 @@ write spec s-open-ada delete as sync member bob beta	allowed
 write spec s-open-ada delete as sync viewer ada acme	allowed
 write spec s-open-ada delete as sync viewer ada all	allowed
 write spec s-open-ada delete as sync viewer ada beta	allowed
-write spec s-open-ada delete as sync viewer anonymous none	allowed
 write spec s-open-ada delete as sync viewer bob acme	allowed
 write spec s-open-ada delete as sync viewer bob all	allowed
 write spec s-open-ada delete as sync viewer bob beta	allowed
@@ -14450,7 +14214,6 @@ write spec s-open-ada edit content as sync member bob beta	allowed
 write spec s-open-ada edit content as sync viewer ada acme	allowed
 write spec s-open-ada edit content as sync viewer ada all	allowed
 write spec s-open-ada edit content as sync viewer ada beta	allowed
-write spec s-open-ada edit content as sync viewer anonymous none	allowed
 write spec s-open-ada edit content as sync viewer bob acme	allowed
 write spec s-open-ada edit content as sync viewer bob all	allowed
 write spec s-open-ada edit content as sync viewer bob beta	allowed
@@ -14511,7 +14274,6 @@ write spec s-open-ada edit title as sync member bob beta	allowed
 write spec s-open-ada edit title as sync viewer ada acme	allowed
 write spec s-open-ada edit title as sync viewer ada all	allowed
 write spec s-open-ada edit title as sync viewer ada beta	allowed
-write spec s-open-ada edit title as sync viewer anonymous none	allowed
 write spec s-open-ada edit title as sync viewer bob acme	allowed
 write spec s-open-ada edit title as sync viewer bob all	allowed
 write spec s-open-ada edit title as sync viewer bob beta	allowed
@@ -14572,7 +14334,6 @@ write spec s-open-ada status archived as sync member bob beta	allowed
 write spec s-open-ada status archived as sync viewer ada acme	allowed
 write spec s-open-ada status archived as sync viewer ada all	allowed
 write spec s-open-ada status archived as sync viewer ada beta	allowed
-write spec s-open-ada status archived as sync viewer anonymous none	allowed
 write spec s-open-ada status archived as sync viewer bob acme	allowed
 write spec s-open-ada status archived as sync viewer bob all	allowed
 write spec s-open-ada status archived as sync viewer bob beta	allowed
@@ -14633,7 +14394,6 @@ write spec s-open-ada status cancelled as sync member bob beta	allowed
 write spec s-open-ada status cancelled as sync viewer ada acme	allowed
 write spec s-open-ada status cancelled as sync viewer ada all	allowed
 write spec s-open-ada status cancelled as sync viewer ada beta	allowed
-write spec s-open-ada status cancelled as sync viewer anonymous none	allowed
 write spec s-open-ada status cancelled as sync viewer bob acme	allowed
 write spec s-open-ada status cancelled as sync viewer bob all	allowed
 write spec s-open-ada status cancelled as sync viewer bob beta	allowed
@@ -14694,7 +14454,6 @@ write spec s-open-ada status done as sync member bob beta	allowed
 write spec s-open-ada status done as sync viewer ada acme	allowed
 write spec s-open-ada status done as sync viewer ada all	allowed
 write spec s-open-ada status done as sync viewer ada beta	allowed
-write spec s-open-ada status done as sync viewer anonymous none	allowed
 write spec s-open-ada status done as sync viewer bob acme	allowed
 write spec s-open-ada status done as sync viewer bob all	allowed
 write spec s-open-ada status done as sync viewer bob beta	allowed
@@ -14755,7 +14514,6 @@ write spec s-open-bob assign ada as sync member bob beta	allowed
 write spec s-open-bob assign ada as sync viewer ada acme	allowed
 write spec s-open-bob assign ada as sync viewer ada all	allowed
 write spec s-open-bob assign ada as sync viewer ada beta	allowed
-write spec s-open-bob assign ada as sync viewer anonymous none	allowed
 write spec s-open-bob assign ada as sync viewer bob acme	allowed
 write spec s-open-bob assign ada as sync viewer bob all	allowed
 write spec s-open-bob assign ada as sync viewer bob beta	allowed
@@ -14816,7 +14574,6 @@ write spec s-open-bob assign bob as sync member bob beta	allowed
 write spec s-open-bob assign bob as sync viewer ada acme	allowed
 write spec s-open-bob assign bob as sync viewer ada all	allowed
 write spec s-open-bob assign bob as sync viewer ada beta	allowed
-write spec s-open-bob assign bob as sync viewer anonymous none	allowed
 write spec s-open-bob assign bob as sync viewer bob acme	allowed
 write spec s-open-bob assign bob as sync viewer bob all	allowed
 write spec s-open-bob assign bob as sync viewer bob beta	allowed
@@ -14877,7 +14634,6 @@ write spec s-open-bob delete as sync member bob beta	allowed
 write spec s-open-bob delete as sync viewer ada acme	allowed
 write spec s-open-bob delete as sync viewer ada all	allowed
 write spec s-open-bob delete as sync viewer ada beta	allowed
-write spec s-open-bob delete as sync viewer anonymous none	allowed
 write spec s-open-bob delete as sync viewer bob acme	allowed
 write spec s-open-bob delete as sync viewer bob all	allowed
 write spec s-open-bob delete as sync viewer bob beta	allowed
@@ -14938,7 +14694,6 @@ write spec s-open-bob edit content as sync member bob beta	allowed
 write spec s-open-bob edit content as sync viewer ada acme	allowed
 write spec s-open-bob edit content as sync viewer ada all	allowed
 write spec s-open-bob edit content as sync viewer ada beta	allowed
-write spec s-open-bob edit content as sync viewer anonymous none	allowed
 write spec s-open-bob edit content as sync viewer bob acme	allowed
 write spec s-open-bob edit content as sync viewer bob all	allowed
 write spec s-open-bob edit content as sync viewer bob beta	allowed
@@ -14999,7 +14754,6 @@ write spec s-open-bob edit title as sync member bob beta	allowed
 write spec s-open-bob edit title as sync viewer ada acme	allowed
 write spec s-open-bob edit title as sync viewer ada all	allowed
 write spec s-open-bob edit title as sync viewer ada beta	allowed
-write spec s-open-bob edit title as sync viewer anonymous none	allowed
 write spec s-open-bob edit title as sync viewer bob acme	allowed
 write spec s-open-bob edit title as sync viewer bob all	allowed
 write spec s-open-bob edit title as sync viewer bob beta	allowed
@@ -15060,7 +14814,6 @@ write spec s-open-bob move room to den as sync member bob beta	allowed
 write spec s-open-bob move room to den as sync viewer ada acme	allowed
 write spec s-open-bob move room to den as sync viewer ada all	allowed
 write spec s-open-bob move room to den as sync viewer ada beta	allowed
-write spec s-open-bob move room to den as sync viewer anonymous none	allowed
 write spec s-open-bob move room to den as sync viewer bob acme	allowed
 write spec s-open-bob move room to den as sync viewer bob all	allowed
 write spec s-open-bob move room to den as sync viewer bob beta	allowed
@@ -15121,7 +14874,6 @@ write spec s-open-bob move to beta as sync member bob beta	allowed
 write spec s-open-bob move to beta as sync viewer ada acme	allowed
 write spec s-open-bob move to beta as sync viewer ada all	allowed
 write spec s-open-bob move to beta as sync viewer ada beta	allowed
-write spec s-open-bob move to beta as sync viewer anonymous none	allowed
 write spec s-open-bob move to beta as sync viewer bob acme	allowed
 write spec s-open-bob move to beta as sync viewer bob all	allowed
 write spec s-open-bob move to beta as sync viewer bob beta	allowed
@@ -15182,7 +14934,6 @@ write spec s-open-bob move to omega as sync member bob beta	allowed
 write spec s-open-bob move to omega as sync viewer ada acme	allowed
 write spec s-open-bob move to omega as sync viewer ada all	allowed
 write spec s-open-bob move to omega as sync viewer ada beta	allowed
-write spec s-open-bob move to omega as sync viewer anonymous none	allowed
 write spec s-open-bob move to omega as sync viewer bob acme	allowed
 write spec s-open-bob move to omega as sync viewer bob all	allowed
 write spec s-open-bob move to omega as sync viewer bob beta	allowed
@@ -15243,7 +14994,6 @@ write spec s-open-bob status archived as sync member bob beta	allowed
 write spec s-open-bob status archived as sync viewer ada acme	allowed
 write spec s-open-bob status archived as sync viewer ada all	allowed
 write spec s-open-bob status archived as sync viewer ada beta	allowed
-write spec s-open-bob status archived as sync viewer anonymous none	allowed
 write spec s-open-bob status archived as sync viewer bob acme	allowed
 write spec s-open-bob status archived as sync viewer bob all	allowed
 write spec s-open-bob status archived as sync viewer bob beta	allowed
@@ -15304,7 +15054,6 @@ write spec s-open-bob status cancelled as sync member bob beta	allowed
 write spec s-open-bob status cancelled as sync viewer ada acme	allowed
 write spec s-open-bob status cancelled as sync viewer ada all	allowed
 write spec s-open-bob status cancelled as sync viewer ada beta	allowed
-write spec s-open-bob status cancelled as sync viewer anonymous none	allowed
 write spec s-open-bob status cancelled as sync viewer bob acme	allowed
 write spec s-open-bob status cancelled as sync viewer bob all	allowed
 write spec s-open-bob status cancelled as sync viewer bob beta	allowed
@@ -15365,7 +15114,6 @@ write spec s-open-bob status done as sync member bob beta	allowed
 write spec s-open-bob status done as sync viewer ada acme	allowed
 write spec s-open-bob status done as sync viewer ada all	allowed
 write spec s-open-bob status done as sync viewer ada beta	allowed
-write spec s-open-bob status done as sync viewer anonymous none	allowed
 write spec s-open-bob status done as sync viewer bob acme	allowed
 write spec s-open-bob status done as sync viewer bob all	allowed
 write spec s-open-bob status done as sync viewer bob beta	allowed
