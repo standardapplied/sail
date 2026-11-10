@@ -5,6 +5,11 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.PostingRule;
 import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.authority.WriteRefused;
@@ -804,11 +809,13 @@ public final class SailOperations implements HostOperations {
   }
 
   /**
-   * The roster as the caller may read it ({@link FdeStore#visibleTo}), each FDE's scope named to an
-   * admin alone.
+   * The roster as the caller may read it ({@link FdeStore#visibleTo}), each FDE's scope named only
+   * to a caller who manages people ({@link Action#MANAGE_PEOPLE}).
    */
   private FdesResponse fdesValue() {
     var reader = Actor.current();
+    var grants =
+        Access.decide(reader, Action.MANAGE_PEOPLE, Resources.people()) instanceof Decision.Allowed;
     var roster =
         fdeStore.visibleTo(reader.actingFde(), reader.scope()).stream()
             .map(
@@ -818,7 +825,7 @@ public final class SailOperations implements HostOperations {
                         fde.displayName(),
                         fde.email(),
                         fde.role(),
-                        reader.isAdmin() ? fdeStore.scopeOf(fde.handle()) : null))
+                        grants ? fdeStore.scopeOf(fde.handle()) : null))
             .toList();
     return new FdesResponse(roster);
   }
@@ -948,7 +955,12 @@ public final class SailOperations implements HostOperations {
    * to post in; {@code ROOM_NOT_FOUND} when there is none, or none the caller's scope admits.
    */
   private RoomStore.RoomRow requireRoomOrSpec(String roomId) {
-    return Scoped.row(Actor.reader(), roomOrSpec(roomId), RoomStore.RoomRow::project)
+    return Refusals.readable(
+            Actor.reader(),
+            roomOrSpec(roomId),
+            Resource.Kind.ROOM,
+            RoomStore.RoomRow::id,
+            RoomStore.RoomRow::project)
         .orElseThrow(() -> Refusals.roomNotFound(roomId));
   }
 
@@ -1063,9 +1075,11 @@ public final class SailOperations implements HostOperations {
         () -> {
           var store = requireRoomStore();
           var rows =
-              Scoped.rows(
+              Refusals.readable(
                   Actor.reader(),
                   project == null || project.isBlank() ? store.listAll() : store.list(project),
+                  Resource.Kind.ROOM,
+                  RoomStore.RoomRow::id,
                   RoomStore.RoomRow::project);
           var views = rows.stream().map(this::viewOf).toList();
           if (messageStore == null) {
@@ -1085,7 +1099,12 @@ public final class SailOperations implements HostOperations {
   private <T> Map<String, T> ofReadableRooms(Map<String, T> byRoom) {
     var readable = new LinkedHashMap<String, T>();
     for (var room :
-        Scoped.rows(Actor.reader(), List.copyOf(byRoom.keySet()), this::projectOfRoom)) {
+        Refusals.readable(
+            Actor.reader(),
+            List.copyOf(byRoom.keySet()),
+            Resource.Kind.ROOM,
+            room -> room,
+            this::projectOfRoom)) {
       readable.put(room, byRoom.get(room));
     }
     return readable;
@@ -1108,7 +1127,12 @@ public final class SailOperations implements HostOperations {
         () -> {
           var store = requireRoomStore();
           return detailOf(
-              Scoped.row(Actor.reader(), store.findById(roomId), RoomStore.RoomRow::project)
+              Refusals.readable(
+                      Actor.reader(),
+                      store.findById(roomId),
+                      Resource.Kind.ROOM,
+                      RoomStore.RoomRow::id,
+                      RoomStore.RoomRow::project)
                   .orElseThrow(() -> Refusals.roomNotFound(roomId)));
         });
   }
@@ -1122,10 +1146,21 @@ public final class SailOperations implements HostOperations {
               var store = requireRoomStore();
               return store.atomically(
                   () -> {
-                    Scoped.row(Actor.reader(), store.findById(roomId), RoomStore.RoomRow::project)
+                    Refusals.readable(
+                            Actor.reader(),
+                            store.findById(roomId),
+                            Resource.Kind.ROOM,
+                            RoomStore.RoomRow::id,
+                            RoomStore.RoomRow::project)
                         .orElseThrow(() -> Refusals.roomNotFound(roomId));
                     var attached = specsIn(roomId);
-                    var seen = Scoped.rows(Actor.reader(), attached, SpecStore.SpecRow::project);
+                    var seen =
+                        Refusals.readable(
+                            Actor.reader(),
+                            attached,
+                            Resource.Kind.SPEC,
+                            SpecStore.SpecRow::id,
+                            SpecStore.SpecRow::project);
                     if (!attached.isEmpty()) {
                       throw new ApiException(
                           ErrorCode.CONFLICT,
@@ -1157,7 +1192,13 @@ public final class SailOperations implements HostOperations {
 
   /** The room as its reader sees it, naming the specs attached to it that the reader may see. */
   private RoomView viewOf(RoomStore.RoomRow row) {
-    var specs = Scoped.rows(Actor.reader(), specsIn(row.id()), SpecStore.SpecRow::project);
+    var specs =
+        Refusals.readable(
+            Actor.reader(),
+            specsIn(row.id()),
+            Resource.Kind.SPEC,
+            SpecStore.SpecRow::id,
+            SpecStore.SpecRow::project);
     return RoomView.from(row, specs.stream().map(SpecStore.SpecRow::id).toList());
   }
 
@@ -1270,12 +1311,15 @@ public final class SailOperations implements HostOperations {
   @Override
   public Result<SnapshotActionResponse> restoreSnapshot(
       String project, String label, String localHandle) {
-    return safe(() -> snapshotOps.restore(readable(project), label, localHandle));
+    return safe(
+        () ->
+            snapshotOps.restore(
+                held(Actor.current(), Action.RESTORE, project), label, localHandle));
   }
 
   @Override
   public Result<SnapshotActionResponse> deleteSnapshot(String project, String label) {
-    return safe(() -> snapshotOps.delete(readable(project), label));
+    return safe(() -> snapshotOps.delete(held(Actor.current(), Action.RESTORE, project), label));
   }
 
   @Override
@@ -1297,17 +1341,28 @@ public final class SailOperations implements HostOperations {
     return new ApiException(ErrorCode.INTERNAL, store + " not available.", START_SERVER);
   }
 
-  /**
-   * {@code project} as a route addresses it, to read or to act on: one this box's catalog does not
-   * hold is refused, never answered as empty, and one outside the caller's scope is answered the
-   * same, so a caller cannot tell a project it was not granted from one that does not exist.
-   */
+  /** {@code project} as a route addresses it to read, by {@link #held}. */
   private String readable(String project) {
+    return held(Actor.reader(), Action.READ, project);
+  }
+
+  /**
+   * {@code project} as a route addresses it for {@code actor} to take {@code action} on: one this
+   * box's catalog does not hold is refused, never answered as empty, and one {@code actor} may not
+   * read is answered the same, so a caller cannot tell a project it was not granted from one that
+   * does not exist; otherwise the decision's refusal, if any.
+   */
+  private String held(Actor actor, Action action, String project) {
     NameValidator.requireValidProjectName(project);
-    if (!Actor.reader().scope().admits(project)
-        || (projectStore != null && projectStore.findByName(project).isEmpty())) {
+    var row = projectStore == null ? null : projectStore.findByName(project).orElse(null);
+    if (projectStore != null && row == null) {
       throw ProjectReader.absent(project);
     }
+    Refusals.require(
+        actor,
+        action,
+        Resources.project(project, row == null ? null : row.createdBy()),
+        () -> ProjectReader.absent(project));
     return project;
   }
 
@@ -1340,8 +1395,12 @@ public final class SailOperations implements HostOperations {
         () -> {
           syncScheduler.freshenRead();
           var rows =
-              Scoped.rows(
-                  Actor.reader(), requireRunStore().list(project, spec), RunStore.RunRow::project);
+              Refusals.readable(
+                  Actor.reader(),
+                  requireRunStore().list(project, spec),
+                  Resource.Kind.RUN,
+                  RunStore.RunRow::id,
+                  RunStore.RunRow::project);
           return new RunListResponse(project, spec, rows.stream().map(RunView::from).toList());
         });
   }
@@ -1352,8 +1411,12 @@ public final class SailOperations implements HostOperations {
         () -> {
           syncScheduler.freshenRead();
           var run =
-              Scoped.row(
-                      Actor.reader(), requireRunStore().findById(runId), RunStore.RunRow::project)
+              Refusals.readable(
+                      Actor.reader(),
+                      requireRunStore().findById(runId),
+                      Resource.Kind.RUN,
+                      RunStore.RunRow::id,
+                      RunStore.RunRow::project)
                   .orElseThrow(() -> runNotFound(runId));
           return new RunDetailResponse(RunView.from(run));
         });
@@ -1411,7 +1474,13 @@ public final class SailOperations implements HostOperations {
       return storeUnavailable("Run store").failure().asFailure();
     }
     var run =
-        Scoped.row(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project).orElse(null);
+        Refusals.readable(
+                Actor.reader(),
+                runStore.findById(runId),
+                Resource.Kind.RUN,
+                RunStore.RunRow::id,
+                RunStore.RunRow::project)
+            .orElse(null);
     if (run == null) {
       return Result.failure(ErrorCode.RUN_NOT_FOUND, "No run '" + runId + "'.");
     }
@@ -1487,7 +1556,7 @@ public final class SailOperations implements HostOperations {
     var reader = Actor.reader();
     var handle = reader.actingFde();
     var homeRoom =
-        member == null || Strings.isBlank(handle) || !reader.canWrite()
+        member == null || Strings.isBlank(handle) || !HomeRoom.has(reader, project, handle)
             ? null
             : HomeRoom.idOf(project, handle);
     return new ProjectResponse(project, statusName(loaded.state()), agent, member, homeRoom);
@@ -1509,11 +1578,13 @@ public final class SailOperations implements HostOperations {
       statuses.put(container.name(), statusName(container.state()));
     }
     return new ProjectListResponse(
-        Scoped.rows(
+        Refusals.readable(
             Actor.reader(),
             statuses.entrySet().stream()
                 .map(entry -> new ProjectListItemView(entry.getKey(), entry.getValue()))
                 .toList(),
+            Resource.Kind.PROJECT,
+            ProjectListItemView::name,
             ProjectListItemView::name));
   }
 
@@ -1771,8 +1842,11 @@ public final class SailOperations implements HostOperations {
     }
     return safe(
         () -> {
-          var scope = Actor.reader().scope();
-          var events = auditPersister.recent(limit, event -> scope.admits(event.project()));
+          var events =
+              auditPersister.recent(
+                  limit,
+                  Refusals.readable(
+                      Actor.reader(), Resource.Kind.PROJECT, Event::project, Event::project));
           var maps = events.stream().map(Event::toMap).toList();
           return new RecentEventsResponse(limit, maps.size(), maps);
         });
@@ -2022,7 +2096,12 @@ public final class SailOperations implements HostOperations {
           for (var messageId : delivered) {
             var onSpec =
                 !Strings.isBlank(messageId)
-                    && Scoped.row(Actor.reader(), store.findById(messageId), store::projectOf)
+                    && Refusals.readable(
+                            Actor.reader(),
+                            store.findById(messageId),
+                            Resource.Kind.MESSAGE,
+                            MessageStore.MessageRow::id,
+                            store::projectOf)
                         .filter(message -> message.roomId().equals(runRoomId(run)))
                         .isPresent();
             if (!onSpec) {
@@ -2101,7 +2180,12 @@ public final class SailOperations implements HostOperations {
     if (runStore == null) {
       throw storeUnavailable("Run store");
     }
-    return Scoped.row(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project)
+    return Refusals.readable(
+            Actor.reader(),
+            runStore.findById(runId),
+            Resource.Kind.RUN,
+            RunStore.RunRow::id,
+            RunStore.RunRow::project)
         .orElseThrow(
             () -> new ApiException(ErrorCode.RUN_NOT_FOUND, "Run '" + runId + "' was not found."));
   }

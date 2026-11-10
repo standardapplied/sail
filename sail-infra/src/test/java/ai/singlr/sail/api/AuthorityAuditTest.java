@@ -179,10 +179,14 @@ class AuthorityAuditTest {
             List.of()),
         YamlUtil.parseMap(file.body()).get("error"));
     assertEquals(403, snapshot.statusCode(), snapshot.body());
-    assertTrue(snapshot.body().contains("read-only and cannot delete snapshots"), snapshot.body());
+    assertTrue(
+        snapshot.body().contains("read-only and cannot restore the snapshots of projects"),
+        snapshot.body());
     assertTrue(snapshot.body().contains("\"read_only_credential\""), snapshot.body());
     assertEquals(403, restore.statusCode(), restore.body());
-    assertTrue(restore.body().contains("read-only and cannot restore snapshots"), restore.body());
+    assertTrue(
+        restore.body().contains("read-only and cannot restore the snapshots of projects"),
+        restore.body());
   }
 
   /**

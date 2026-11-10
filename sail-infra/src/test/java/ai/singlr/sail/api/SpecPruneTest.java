@@ -373,6 +373,28 @@ class SpecPruneTest {
   }
 
   @Test
+  void aPrunedSpecIsNothingToDoForAnyMemberAndStillRefusedToAViewerOrAnAgent() {
+    archived("old", "uday");
+    Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("old"), false)));
+
+    var again = Acting.by(MADY, () -> pruner.prune(PruneRequest.ids(List.of("old"), false)));
+
+    assertEquals(List.of(), again.entries());
+    assertRefused(
+        ErrorCode.READ_ONLY_CREDENTIAL,
+        () ->
+            Acting.by(
+                new Actor("uday", Role.VIEWER, Actor.Lane.API),
+                () -> pruner.prune(PruneRequest.ids(List.of("old"), false))));
+    assertRefused(
+        ErrorCode.AGENT_LANE_FORBIDDEN,
+        () ->
+            Acting.by(
+                Actor.agentPrincipal("claude/r", "uday"),
+                () -> pruner.prune(PruneRequest.ids(List.of("old"), false))));
+  }
+
+  @Test
   void onANodeAnApplyIsAskedOfMainAndNothingIsErasedHereYet() {
     authoritative.set(false);
     archived("old", "uday");

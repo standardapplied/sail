@@ -84,8 +84,8 @@ final class SnapshotOperations {
     return new SnapshotListResponse(views);
   }
 
+  /** Restores {@code project}, one the caller may restore the snapshots of, to {@code label}. */
   SnapshotActionResponse restore(String project, String label, String localHandle) {
-    Refusals.requireWriter("restore snapshots");
     NameValidator.requireValidSnapshotLabel(label);
     projects.loadCreated(project);
     requireSnapshotExists(project, label);
@@ -100,8 +100,8 @@ final class SnapshotOperations {
     return new SnapshotActionResponse(project, label, RESTORE_ACTION, "accepted");
   }
 
+  /** Deletes snapshot {@code label} of {@code project}, one the caller may restore. */
   SnapshotActionResponse delete(String project, String label) {
-    Refusals.requireWriter("delete snapshots");
     NameValidator.requireValidSnapshotLabel(label);
     projects.requireExists(project);
     requireSnapshotExists(project, label);

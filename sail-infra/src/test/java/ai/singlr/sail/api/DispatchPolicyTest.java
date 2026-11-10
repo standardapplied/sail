@@ -11,12 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.Role;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
-/** Table tests for the pure dispatch-authorization policy: every rule × role × assignee shape. */
+/** Table tests for the pure dispatch placement: where a spec runs, whoever asks. */
 class DispatchPolicyTest {
 
   private static final String NODE = "sumesh";
@@ -36,26 +34,21 @@ class DispatchPolicyTest {
         null);
   }
 
-  private static Actor member(String handle) {
-    return new Actor(handle, Role.MEMBER, Actor.Lane.API);
-  }
-
-  private static DispatchDecision.Refused refuse(Actor actor, Spec spec, String localHandle) {
+  private static DispatchDecision.Refused refuse(Spec spec, String localHandle) {
     return assertInstanceOf(
-        DispatchDecision.Refused.class,
-        Actor.call(actor, () -> DispatchPolicy.check(spec, localHandle)));
+        DispatchDecision.Refused.class, DispatchPolicy.check(spec, localHandle));
   }
 
   @Test
   void blankLocalHandleRefusesNodeHandleUnset() {
-    var refused = refuse(member(NODE), spec(NODE), "");
+    var refused = refuse(spec(NODE), "");
     assertEquals(ErrorCode.NODE_HANDLE_UNSET, refused.code());
     assertTrue(refused.fix().plain().contains("sync-handle"), refused.fix().plain());
   }
 
   @Test
   void nullLocalHandleRefusesNodeHandleUnset() {
-    assertEquals(ErrorCode.NODE_HANDLE_UNSET, refuse(member(NODE), spec(NODE), null).code());
+    assertEquals(ErrorCode.NODE_HANDLE_UNSET, refuse(spec(NODE), null).code());
   }
 
   @Test
@@ -67,7 +60,7 @@ class DispatchPolicyTest {
 
   @Test
   void specAssignedToAnotherNodeRefusesRunsOnOtherNode() {
-    var refused = refuse(member(NODE), spec("raj"), NODE);
+    var refused = refuse(spec("raj"), NODE);
     assertEquals(ErrorCode.RUNS_ON_OTHER_NODE, refused.code());
     assertTrue(refused.message().contains("'raj'"), refused.message());
     assertTrue(refused.fix().plain().contains("--assignee " + NODE), refused.fix().plain());
@@ -75,61 +68,14 @@ class DispatchPolicyTest {
 
   @Test
   void unassignedSpecRefusesRunsOnOtherNodeNamingUnassigned() {
-    var refused = refuse(member(NODE), spec(null), NODE);
+    var refused = refuse(spec(null), NODE);
     assertEquals(ErrorCode.RUNS_ON_OTHER_NODE, refused.code());
     assertTrue(refused.message().contains("unassigned"), refused.message());
     assertTrue(refused.fix().plain().contains("--assignee " + NODE), refused.fix().plain());
   }
 
   @Test
-  void viewerCredentialRefusesReadOnly() {
-    var viewer = new Actor(NODE, Role.VIEWER, Actor.Lane.API);
-    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, refuse(viewer, spec(NODE), NODE).code());
-  }
-
-  @Test
-  void memberDispatchingSomeoneElsesLocalSpecRefusesNotYourSpec() {
-    var refused = refuse(member("raj"), spec(NODE), NODE);
-    assertEquals(ErrorCode.NOT_YOUR_SPEC, refused.code());
-    assertTrue(refused.message().contains("'raj'"), refused.message());
-    assertTrue(refused.message().contains("'" + NODE + "'"), refused.message());
-  }
-
-  @Test
-  void memberDispatchingOwnLocalSpecIsAllowed() {
-    assertInstanceOf(
-        DispatchDecision.Allowed.class,
-        Actor.call(member(NODE), () -> DispatchPolicy.check(spec(NODE), NODE)));
-  }
-
-  @Test
-  void adminMayDispatchAnyLocalSpecEvenWithoutMatchingHandle() {
-    var admin = new Actor("ops", Role.ADMIN, Actor.Lane.API);
-    assertInstanceOf(
-        DispatchDecision.Allowed.class,
-        Actor.call(admin, () -> DispatchPolicy.check(spec(NODE), NODE)));
-  }
-
-  @Test
-  void adminIsStillBoundByExecutionLocality() {
-    var admin = new Actor("ops", Role.ADMIN, Actor.Lane.API);
-    assertEquals(ErrorCode.RUNS_ON_OTHER_NODE, refuse(admin, spec("raj"), NODE).code());
-  }
-
-  @Test
-  void cliOperatorDispatchingOwnSpecIsAllowed() {
-    assertInstanceOf(
-        DispatchDecision.Allowed.class,
-        Actor.call(Actor.cliOperator(NODE), () -> DispatchPolicy.check(spec(NODE), NODE)));
-  }
-
-  @Test
-  void agentLaneIsRefusedOutrightEvenForItsOwnersSpec() {
-    var agent = Actor.agentPrincipal("claude/a1b2c3", NODE);
-
-    var refused = refuse(agent, spec(NODE), NODE);
-
-    assertEquals(ErrorCode.AGENT_LANE_FORBIDDEN, refused.code());
-    assertTrue(refused.message().contains("dispatch"));
+  void aSpecAssignedToThisNodeRunsHere() {
+    assertInstanceOf(DispatchDecision.Allowed.class, DispatchPolicy.check(spec(NODE), NODE));
   }
 }

@@ -474,18 +474,6 @@ class AccessTest {
   }
 
   @Test
-  void aRowReadByItsHeadAloneIsDecidedByItsAudience() {
-    var head = Resources.filed(Resource.Kind.MESSAGE, "m-1", "beta");
-
-    assertEquals(List.of(), head.owners());
-    assertEquals(new Decision.Allowed(), Access.decide(Actors.VIEWER, Action.READ, head));
-    assertEquals(
-        new Decision.NotFound(),
-        Access.decide(
-            Actors.OWNER_SYNC.withScope(ProjectScope.of(List.of("acme"))), Action.READ, head));
-  }
-
-  @Test
   void theAudienceAFilterReadsIsTheOneDecideReads() {
     var acme = ProjectScope.of(List.of("acme"));
 
@@ -648,6 +636,18 @@ class AccessTest {
         Access.decide(
             Actors.ADMIN.withScope(ProjectScope.of(List.of("acme"))), Action.READ, placeless));
     assertEquals(new Decision.Allowed(), Access.decide(Actors.VIEWER, Action.READ, placeless));
+  }
+
+  @Test
+  void aRowAsAReadDecidesItIsWhereItIsFiledAndNoOnesToOwn() {
+    var review = Resources.filed(Resource.Kind.REVIEW, "rv-1", "beta");
+
+    assertEquals(new Resource(Resource.Kind.REVIEW, "rv-1", "beta", List.of(), null, null), review);
+    assertEquals(new Decision.Allowed(), Access.decide(Actors.VIEWER, Action.READ, review));
+    assertEquals(
+        new Decision.NotFound(),
+        Access.decide(
+            Actors.VIEWER.withScope(ProjectScope.of(List.of("acme"))), Action.READ, review));
   }
 
   @Test

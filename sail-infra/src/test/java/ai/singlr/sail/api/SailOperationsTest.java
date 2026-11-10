@@ -928,7 +928,7 @@ class SailOperationsTest {
   }
 
   @Test
-  void anotherFdesSpecIsRefusedNotYourSpec() throws Exception {
+  void anotherFdesSpecIsRefusedAsNotTheirs() throws Exception {
     var operations =
         operationsWithStore(
             baseYaml(), idleShell(), store -> seedAssigned(store, "auth", "pending", LOCAL_HANDLE));
@@ -937,7 +937,9 @@ class SailOperationsTest {
     var error =
         Actor.call(otherFde, () -> operations.dispatch("acme", request("auth"), LOCAL_HANDLE));
 
-    assertError(ErrorCode.NOT_YOUR_SPEC, error);
+    assertError(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, error);
+    assertEquals(
+        "Spec 'auth' is assigned to '" + LOCAL_HANDLE + "', not you.", error.errorMessage());
   }
 
   @Test

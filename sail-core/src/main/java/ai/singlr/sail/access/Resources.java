@@ -107,8 +107,9 @@ public final class Resources {
   }
 
   /**
-   * A row of {@code kind} as a read that holds only its head decides it: {@code id}, filed under
-   * {@code project}. Its owners are not read, since reading asks none.
+   * Row {@code id} of {@code kind}, filed under {@code project}, as a read decides it from the
+   * row's head alone: a list builds one per row from what the row carries and looks up no owner,
+   * since Read asks none ({@link Policy}). Every other action is decided on its kind's own factory.
    */
   public static Resource filed(Resource.Kind kind, String id, String project) {
     return new Resource(kind, id, project, List.of(), null, null);
