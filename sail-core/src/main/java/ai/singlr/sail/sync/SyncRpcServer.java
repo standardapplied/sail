@@ -5,6 +5,10 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.EraseAuthority;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.ScopeRule;
@@ -316,24 +320,31 @@ public final class SyncRpcServer {
   }
 
   /**
-   * Whether the session may see what main holds of {@code id}: its head's project is in the
-   * session's scope. An unscoped session sees every id, as it always has.
+   * Whether the session may see what main holds of {@code id}: the session's FDE may read it as its
+   * head files it ({@link #reads}).
    */
   private boolean admits(String type, String id) {
-    var scope = principal.scope();
-    return scope.unrestricted() || scope.admits(headProject(type, id));
+    return reads(type, id, headProject(type, id));
   }
 
   /**
    * Whether the session may see {@code version}, an earlier state main holds of {@code id}: the
-   * project that state names is in the session's scope, wherever the id's head has moved since. A
+   * session's FDE may read it as that state files it, wherever the id's head has moved since. A
    * version that kept no state names no project and says nothing of one.
    */
   private boolean admits(String type, String id, MainReplica.State version) {
-    var scope = principal.scope();
-    return scope.unrestricted()
-        || version.snapshot() == null
-        || scope.admits(changeLog.projectOf(type, id, version.snapshot()));
+    return version.snapshot() == null
+        || reads(
+            type, id, changeLog == null ? null : changeLog.projectOf(type, id, version.snapshot()));
+  }
+
+  /**
+   * Whether the session's FDE may read row {@code id} of {@code type} filed under {@code project}:
+   * A5, a box receives a row only when its person may read it ({@link Access#decide}).
+   */
+  private boolean reads(String type, String id, String project) {
+    var row = Resources.filed(SyncedEntities.require(type).kind(), id, project);
+    return Access.decide(principal, Action.READ, row) instanceof Decision.Allowed;
   }
 
   /** The project main's head of {@code id} carries, null when unknown or main keeps no journal. */
@@ -596,8 +607,8 @@ public final class SyncRpcServer {
 
   /**
    * Every type's high-water, and each type whose mark main's log no longer holds ({@link
-   * ChangeLog#holds}), read for the session's scope. A server with no database behind it names
-   * none.
+   * ChangeLog#holds}), read for what the session's FDE may read ({@link Access#audience}). A server
+   * with no database behind it names none.
    */
   private SyncWire.Response tips(SyncWire.Heads heads) {
     var tips = new LinkedHashMap<String, Long>();
@@ -608,7 +619,7 @@ public final class SyncRpcServer {
           var mark = heads.marks().get(type);
           if (mark != null
               && changeLog != null
-              && !changeLog.holds(type, mark, principal.scope())) {
+              && !changeLog.holds(type, mark, Access.audience(principal))) {
             rewound.add(type);
           }
         });
@@ -618,8 +629,8 @@ public final class SyncRpcServer {
   /**
    * One page of {@code pull.type()}'s change log after {@code pull.since()}: the heads in seq
    * order, each read as its current row, until {@code limit} entries or the frame is full. {@code
-   * next} is the last seq included, so the node checkpoints exactly what it has seen. A head whose
-   * project the session's scope does not admit is passed over by its head alone, no row read, and
+   * next} is the last seq included, so the node checkpoints exactly what it has seen. A head the
+   * session's FDE may not read ({@link #reads}) is passed over by its head alone, no row read, and
    * {@code next} moves past it all the same: a scoped node's checkpoint reaches main's tip having
    * seen only its own projects, and a page may be empty yet not the last. The whole page is read as
    * one snapshot of main, so it is internally consistent and no writer waits on it.
@@ -641,7 +652,7 @@ public final class SyncRpcServer {
     var entries = new ArrayList<SyncWire.Entry>();
     var next = pull.since();
     for (var head : heads.after(pull.type(), pull.since(), pull.limit())) {
-      if (!principal.scope().admits(head.project())) {
+      if (!reads(pull.type(), head.entityId(), head.project())) {
         next = head.seq();
         continue;
       }
