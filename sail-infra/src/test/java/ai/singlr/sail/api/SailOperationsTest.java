@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -974,6 +975,44 @@ class SailOperationsTest {
     assertTrue(fullError(error).contains("raj"), fullError(error));
   }
 
+  /**
+   * Who may dispatch a spec, and on which box it runs, is decided before the container is asked
+   * whether it runs, so the answer does not depend on the container's state: another box's spec is
+   * placement and another FDE's spec is theirs, a stopped container or not.
+   */
+  @Test
+  void aDispatchIsDecidedBeforeTheContainerIsAskedWhetherItRuns() throws Exception {
+    var operations =
+        operationsWithStore(
+            baseYaml(),
+            shell().on("incus list ^acme$", STOPPED_JSON),
+            store -> seedAssigned(store, "auth", "pending", "raj"));
+
+    var placement =
+        Actor.call(ADMIN, () -> operations.dispatch("acme", request("auth"), LOCAL_HANDLE));
+    var theirs =
+        Actor.call(
+            new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.API),
+            () -> operations.dispatch("acme", request("auth"), LOCAL_HANDLE));
+    var stopped =
+        Actor.call(
+            new Actor("raj", Role.MEMBER, Actor.Lane.API),
+            () -> operations.dispatch("acme", request("auth"), "raj"));
+
+    assertError(ErrorCode.RUNS_ON_OTHER_NODE, placement);
+    assertEquals(
+        "Spec 'auth' is assigned to 'raj', which runs on that FDE's devbox, not this node ('"
+            + LOCAL_HANDLE
+            + "').",
+        placement.errorMessage());
+    assertEquals(
+        "Reassign it to dispatch here: sail spec update auth --assignee " + LOCAL_HANDLE,
+        placement.remedy().plain());
+    assertError(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, theirs);
+    assertEquals("Spec 'auth' is assigned to 'raj', not you.", theirs.errorMessage());
+    assertError(ErrorCode.PROJECT_STOPPED, stopped);
+  }
+
   @Test
   void viewerCredentialIsRefusedReadOnly() throws Exception {
     var operations =
@@ -1236,6 +1275,72 @@ class SailOperationsTest {
     assertError(
         ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
         Acting.by(other, () -> operations.runLog(R1, 200, "node-a")));
+  }
+
+  /**
+   * Reading a run's log is operating it, as a stop is: the person the run works for reads it only
+   * with a credential that may stop it, so a viewer and the run's own agent are refused as a stop
+   * refuses them.
+   */
+  @Test
+  void runLogRefusesTheRunsOwnViewerAndAgentAsAStopDoes() throws Exception {
+    var operations =
+        opsWithLocalRunAndSpec(
+            shell()
+                .on("incus list ^acme$", RUNNING_JSON)
+                .on("tail -n 2 -- " + RUN_LOG, "one\ntwo\n"));
+    var asked =
+        List.of(
+            new Actor(LOCAL_HANDLE, Role.VIEWER, Actor.Lane.API),
+            Actor.agentPrincipal("claude/" + R1, LOCAL_HANDLE));
+    var codes = List.of(ErrorCode.READ_ONLY_CREDENTIAL, ErrorCode.AGENT_LANE_FORBIDDEN);
+    var messages =
+        List.of(
+            "Your credential is read-only and cannot stop runs or read their logs.",
+            "Agent principals cannot stop runs or read their logs.");
+    var fixes =
+        List.of(
+            "Ask an admin for a member or admin credential.",
+            "Only an operator lane (CLI or API token) may do this.");
+
+    for (var i = 0; i < asked.size(); i++) {
+      var actor = asked.get(i);
+      var refused =
+          assertInstanceOf(
+              Result.Failure.class, Acting.by(actor, () -> operations.runLog(R1, 2, "node-a")));
+      assertEquals(codes.get(i), refused.errorCode(), actor.toString());
+      assertEquals(messages.get(i), refused.errorMessage(), actor.toString());
+      assertEquals(fixes.get(i), refused.remedy().plain(), actor.toString());
+    }
+  }
+
+  /**
+   * Whether the caller may read a run's log is asked before where the run executed, as a stop asks
+   * it: a viewer and a member the run is not for hear why, not that another box holds the log.
+   */
+  @Test
+  void aForeignRunsLogTellsWhoMayNotReadItWhyBeforeWhereItRuns() throws Exception {
+    var operations = opsWithLocalRunAndSpec(shell().on("incus list ^acme$", RUNNING_JSON));
+
+    var viewer =
+        assertInstanceOf(
+            Result.Failure.class,
+            Acting.by(
+                new Actor(LOCAL_HANDLE, Role.VIEWER, Actor.Lane.API),
+                () -> operations.runLog(R1, 2, "sumesh")));
+    var other =
+        assertInstanceOf(
+            Result.Failure.class,
+            Acting.by(
+                new Actor("raj", Role.MEMBER, Actor.Lane.API),
+                () -> operations.runLog(R1, 2, "sumesh")));
+
+    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, viewer.errorCode());
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, other.errorCode());
+    assertEquals(
+        "Run " + R1 + " belongs to spec 'auth', owned by 'node-a' and 'me', not you.",
+        other.errorMessage());
+    assertEquals("Only node-a or me or an admin may access this run.", other.remedy().plain());
   }
 
   @Test

@@ -182,7 +182,7 @@ class AgentLogStreamerTest {
 
   @Test
   void handleRefusesAForeignRunWithA409AndNames() throws Exception {
-    var out = new CapturingExchange("/v1/runs/r1/stream");
+    var out = new CapturingExchange("/v1/runs/r1/stream").as("ops", "admin");
 
     streamer(id -> Optional.of(runOn("node-b")), "node-a").handle(out);
 
@@ -196,7 +196,7 @@ class AgentLogStreamerTest {
 
   @Test
   void foreignReviewRunUsesTheSameProvenanceGuard() throws Exception {
-    var out = new CapturingExchange("/v1/runs/r1/stream");
+    var out = new CapturingExchange("/v1/runs/r1/stream").as("ops", "admin");
 
     streamer(
             id -> Optional.of(run("node-b", "review", "/home/dev/.sail/runs/r1/agent.log")),
@@ -278,7 +278,7 @@ class AgentLogStreamerTest {
 
   @Test
   void handleFailsClosedOnABlankNodeRun() throws Exception {
-    var out = new CapturingExchange("/v1/runs/r1/stream");
+    var out = new CapturingExchange("/v1/runs/r1/stream").as("ops", "admin");
 
     streamer(id -> Optional.of(runOn("")), "node-a").handle(out);
 

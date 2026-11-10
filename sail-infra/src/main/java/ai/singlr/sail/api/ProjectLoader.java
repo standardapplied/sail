@@ -31,7 +31,10 @@ final class ProjectLoader {
   }
 
   LoadedProject load(String project) {
-    var config = definition(project);
+    return load(project, definition(project));
+  }
+
+  private LoadedProject load(String project, ProjectDefinition config) {
     try {
       var state = new ContainerManager(shell).queryState(project);
       return new LoadedProject(config, state);
@@ -49,7 +52,12 @@ final class ProjectLoader {
   }
 
   LoadedProject loadRunning(String project) {
-    var loaded = load(project);
+    return running(project, definition(project));
+  }
+
+  /** {@code project}, whose definition is {@code config}, when its container is running. */
+  LoadedProject running(String project, ProjectDefinition config) {
+    var loaded = load(project, config);
     switch (loaded.state()) {
       case ContainerState.Running ignored -> {
         return loaded;
