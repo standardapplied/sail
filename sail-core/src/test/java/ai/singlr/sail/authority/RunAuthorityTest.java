@@ -439,65 +439,7 @@ class RunAuthorityTest {
   void aRowsOwnersAreItsRunsAsTheDoorsSeeItsSpec() {
     var run = new RunStore(board.db).findById(RUN).orElseThrow();
 
-    assertEquals(
-        List.of(OWNER, "carol"), RunAuthority.run(run, spec -> Optional.of("carol")).owners());
-    assertEquals(List.of(OWNER), RunAuthority.run(run, spec -> Optional.empty()).owners());
-  }
-
-  @Test
-  void accessIsAnAdminsOrAnOwnersOrOneActingForAnOwnerReadOnlyIncluded() {
-    assertEquals(
-        Optional.empty(),
-        RunAuthority.access(ADMIN, Resources.run("r1", "acme", null, "auth", null, null)));
-    assertEquals(
-        Optional.empty(),
-        RunAuthority.access(OWNER_API, Resources.run("r1", "acme", OWNER, "auth", null, "carol")));
-    assertEquals(
-        Optional.empty(),
-        RunAuthority.access(VIEWER, Resources.run("r1", "acme", OWNER, "auth", null, "carol")));
-    assertEquals(
-        Optional.empty(),
-        RunAuthority.access(ROOM, Resources.run("r1", "acme", OWNER, "auth", null, "carol")));
-    assertEquals(
-        Optional.of(Kind.NOT_OWNER),
-        RunAuthority.access(MACHINE, Resources.run("r1", "acme", OWNER, "auth", null, "carol"))
-            .map(Refusal::kind));
-    assertEquals(
-        Optional.of(Kind.NOT_OWNER),
-        RunAuthority.access(OTHERS_AGENT, Resources.run("r1", "acme", OWNER, "auth", null, "carol"))
-            .map(Refusal::kind));
-  }
-
-  @Test
-  void accessSpeaksTheTextsClientsSee() {
-    assertEquals(
-        Optional.of(
-            new Refusal(
-                Kind.NOT_OWNER,
-                "Run r1 belongs to spec 'auth', owned by 'ada' and 'carol', not you.",
-                "Only ada or carol or an admin may access this run.")),
-        RunAuthority.access(OTHER_API, Resources.run("r1", "acme", OWNER, "auth", null, "carol")));
-    assertEquals(
-        Optional.of(
-            new Refusal(
-                Kind.NOT_OWNER,
-                "Run r1 is an ad-hoc session launched by 'ada', not you.",
-                "Only ada or an admin may access this run.")),
-        RunAuthority.access(OTHER_API, Resources.run("r1", "acme", OWNER, null, null, null)));
-    assertEquals(
-        Optional.of(
-            new Refusal(
-                Kind.NOT_OWNER,
-                "Run r1 belongs to spec 'auth', which has no owner.",
-                "Only its owner or an admin may access this run.")),
-        RunAuthority.access(OTHER_API, Resources.run("r1", "acme", null, "auth", null, null)));
-    assertEquals(
-        "Run r1 is an ad-hoc session.",
-        RunAuthority.access(OTHER_API, Resources.run("r1", "acme", null, null, null, null))
-            .orElseThrow()
-            .message());
-    assertEquals(
-        Optional.empty(),
-        RunAuthority.access(AGENT, Resources.run("r1", "acme", OWNER, null, null, null)));
+    assertEquals(List.of(OWNER, "carol"), run.resource(spec -> Optional.of("carol")).owners());
+    assertEquals(List.of(OWNER), run.resource(spec -> Optional.empty()).owners());
   }
 }

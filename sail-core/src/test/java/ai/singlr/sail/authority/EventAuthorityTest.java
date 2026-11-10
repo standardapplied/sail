@@ -25,7 +25,6 @@ import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Refusal.Kind;
 import ai.singlr.sail.authority.EventAuthority.Subject;
-import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -603,7 +602,7 @@ class EventAuthorityTest {
                 Kind.NOT_OWNER,
                 "Event type 'board_updated' speaks for this box, and you may not drive what it"
                     + " does: only this box's FDE or an admin publishes it.",
-                Remedy.NONE)),
+                "Ask this box's FDE or an admin to publish it.")),
         box);
     assertEquals(
         Optional.of(
@@ -614,7 +613,7 @@ class EventAuthorityTest {
                     + " of 'auth' (owned by 'carol'), and '"
                     + Actors.AGENT_HANDLE
                     + "' may narrate only its own run.",
-                Remedy.NONE)),
+                "An agent narrates only the run sail launched it for.")),
         agent);
     assertEquals(Refusal.readOnly("publish events"), viewer);
   }

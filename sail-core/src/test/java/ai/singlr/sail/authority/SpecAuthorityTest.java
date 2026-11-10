@@ -491,7 +491,7 @@ class SpecAuthorityTest {
         new Refusal(
             Kind.NOT_OWNER,
             "'lobby' belongs to ada: only ada or an admin may start work there, not you.",
-            "Ask ada to create it there, or have an admin do it."),
+            "Ask an admin to assign it to you."),
         rule.decide(OTHER_API, SPEC, BORN_IN_LOBBY, with(BORN_IN_LOBBY, "assignee", OTHER))
             .orElseThrow());
     assertEquals(

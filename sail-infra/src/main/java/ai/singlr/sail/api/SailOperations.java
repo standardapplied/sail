@@ -9,8 +9,8 @@ import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
-import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
@@ -300,14 +300,33 @@ public final class SailOperations implements HostOperations {
   /**
    * Settles a parked conflict. Keeping this box's side or merging is an edit, decided by the type's
    * rule as the journal records it ({@link WriteRefused}). Adopting main's side decides no row, yet
-   * gives up what this box parked, so a read-only credential is refused that as well.
+   * gives up what this box parked, so the conflict, once found, is settled only by whoever may
+   * change a row of its type at all ({@link Access#decide(Actor, Action, Resource.Kind)}): a
+   * conflict that is not there is not found first, as any id is.
    */
   @Override
   public SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution) {
-    Refusals.requireWriter("resolve conflicts");
-    var resolved = new ConflictOperations(controlPlane).resolve(type, id, resolution);
+    var operations = new ConflictOperations(controlPlane);
+    var conflict = operations.find(type, id);
+    if (conflict != null
+        && Access.decide(Actor.current(), Action.CHANGE, kindOf(conflict.entityType()))
+            instanceof Decision.Refused refused) {
+      throw Refusals.exception(refused.refusal());
+    }
+    var resolved = operations.resolve(type, id, resolution);
     triggerSyncAfterWrite();
     return resolved;
+  }
+
+  /** The kind of a row of synced {@code type}: its own, or for a file the project it is in. */
+  private static Resource.Kind kindOf(String type) {
+    return switch (type) {
+      case "spec" -> Resource.Kind.SPEC;
+      case "room" -> Resource.Kind.ROOM;
+      case "run" -> Resource.Kind.RUN;
+      case "review" -> Resource.Kind.REVIEW;
+      default -> Resource.Kind.PROJECT;
+    };
   }
 
   @Override
@@ -816,7 +835,7 @@ public final class SailOperations implements HostOperations {
     var grants =
         Access.decide(reader, Action.MANAGE_PEOPLE, Resources.people()) instanceof Decision.Allowed;
     var roster =
-        fdeStore.visibleTo(reader.actingFde(), reader.scope()).stream()
+        fdeStore.visibleTo(reader.actingFde(), Access.audience(reader)).stream()
             .map(
                 fde ->
                     new FdeSummaryView(
@@ -1326,11 +1345,7 @@ public final class SailOperations implements HostOperations {
     if (projectStore != null && row == null) {
       throw ProjectReader.absent(project);
     }
-    Refusals.require(
-        actor,
-        action,
-        Resources.project(project, row == null ? null : row.createdBy()),
-        () -> ProjectReader.absent(project));
+    Refusals.requireProject(actor, action, project, row == null ? null : row.createdBy());
     return project;
   }
 
@@ -1421,12 +1436,12 @@ public final class SailOperations implements HostOperations {
   }
 
   /**
-   * Resolves a run, applies the provenance guard, then the run-owner rule ({@link
-   * RunAuthority#access}) before handing it to {@code served}: an absent store is an internal
-   * error, an unknown run a 404, a run that executed elsewhere a structured {@code
-   * run_on_other_node} refusal, and a caller who is neither the run's spec assignee nor an admin a
-   * {@code forbidden_not_assignee}. The served branch only ever sees a local run the caller may
-   * access — one guard for both the log tail and stop.
+   * Resolves a run, applies the provenance guard, then the ownership step ({@link Access#owned})
+   * before handing it to {@code served}: an absent store is an internal error, an unknown run a
+   * 404, a run that executed elsewhere a structured {@code run_on_other_node} refusal, and a caller
+   * who is neither the run's spec assignee nor an admin a {@code forbidden_not_assignee}. The
+   * served branch only ever sees a local run the caller may access — one guard for both the log
+   * tail and stop.
    */
   private <T> Result<T> onLocalRun(
       String runId, String localHandle, Function<RunStore.RunRow, Result<T>> served) {
@@ -1442,9 +1457,9 @@ public final class SailOperations implements HostOperations {
     if (isForeign(run, localHandle)) {
       return foreignRun(run);
     }
-    var refused = RunAuthority.access(Actor.current(), RunAuthority.run(run, this::specOwner));
-    if (refused.isPresent()) {
-      return Refusals.failure(refused.get());
+    if (Access.owned(Actor.current(), run.resource(this::specOwner))
+        instanceof Decision.Refused refused) {
+      return Refusals.failure(refused.refusal());
     }
     return served.apply(run);
   }
@@ -2085,7 +2100,13 @@ public final class SailOperations implements HostOperations {
             throw new ApiException(ErrorCode.BAD_REQUEST, "session_id must not be blank.");
           }
           var room = requireRoomOrSpec(roomId);
-          Refusals.enforce(requireMessageStore().posting(actor, room.id(), room.project()));
+          Refusals.require(
+              Access.decide(
+                  actor,
+                  Action.POST,
+                  Resources.conversation(
+                      room.id(), room.project(), requireRoomStore().owners(room.id()))),
+              () -> Refusals.roomNotFound(roomId));
           var cli = Strings.isBlank(agent) ? null : agent.strip();
           var data = new LinkedHashMap<String, Object>();
           data.put("room_id", room.id());

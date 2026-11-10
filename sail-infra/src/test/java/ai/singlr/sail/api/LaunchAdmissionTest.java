@@ -177,6 +177,44 @@ class LaunchAdmissionTest {
   }
 
   @Test
+  void placementRunsASpecOnlyOnItsAssigneesBox() {
+    var admin = new Actor("ops", Role.ADMIN, Actor.Lane.API);
+    for (var unset : new String[] {"", null}) {
+      var refused =
+          assertThrows(
+              ApiException.class,
+              () -> Actor.run(admin, () -> LaunchAdmission.requireAllowed(spec("uday"), unset)));
+      assertEquals(ErrorCode.NODE_HANDLE_UNSET, refused.failure().errorCode());
+      assertEquals(
+          "This node has no sync-handle, so it cannot be any spec's execution node.",
+          refused.getMessage());
+      assertEquals(
+          "Set it once: sail host config set sync-handle <handle> (a node gets it from 'sail"
+              + " join').",
+          refused.remedy().plain());
+    }
+    var elsewhere =
+        assertThrows(
+            ApiException.class,
+            () -> Actor.run(admin, () -> LaunchAdmission.requireAllowed(spec("raj"), "uday")));
+    assertEquals(
+        "Spec 'auth' is assigned to 'raj', which runs on that FDE's devbox, not this node"
+            + " ('uday').",
+        elsewhere.getMessage());
+    assertEquals(
+        "Reassign it to dispatch here: sail spec update auth --assignee uday",
+        elsewhere.remedy().plain());
+    var unassigned =
+        assertThrows(
+            ApiException.class,
+            () -> Actor.run(admin, () -> LaunchAdmission.requireAllowed(spec(null), "uday")));
+    assertEquals(ErrorCode.RUNS_ON_OTHER_NODE, unassigned.failure().errorCode());
+    assertEquals("Spec 'auth' is unassigned, so no node may dispatch it.", unassigned.getMessage());
+    assertEquals(
+        "Claim it first: sail spec update auth --assignee uday", unassigned.remedy().plain());
+  }
+
+  @Test
   void requireTrustedRosterSkipsWhenTheBoxKeepsNoRoster() {
     var admission = new LaunchAdmission(shellExiting(0), null);
     assertDoesNotThrow(() -> admission.requireTrustedRoster("anyone"));
@@ -272,7 +310,7 @@ class LaunchAdmissionTest {
                     Actor.agentPrincipal("claude/x", "uday"),
                     () -> LaunchAdmission.requireAllowedForRoom("chat", "acme", "uday", "uday")));
     assertEquals(ErrorCode.AGENT_LANE_FORBIDDEN, agent.failure().errorCode());
-    assertEquals("Agent principals cannot dispatch rooms.", agent.getMessage());
+    assertEquals("Agent principals cannot manage room membership.", agent.getMessage());
 
     var viewer =
         assertThrows(
@@ -282,7 +320,8 @@ class LaunchAdmissionTest {
                     new Actor("uday", Role.VIEWER, Actor.Lane.API),
                     () -> LaunchAdmission.requireAllowedForRoom("chat", "acme", "uday", " ")));
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, viewer.failure().errorCode());
-    assertEquals("Your credential is read-only and cannot dispatch rooms.", viewer.getMessage());
+    assertEquals(
+        "Your credential is read-only and cannot manage room membership.", viewer.getMessage());
 
     var outside =
         assertThrows(

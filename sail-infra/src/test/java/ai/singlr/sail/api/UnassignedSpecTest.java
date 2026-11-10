@@ -170,7 +170,7 @@ class UnassignedSpecTest {
             "message",
             "'design' belongs to uday: only uday or an admin may start work there, not you.",
             "action",
-            "Ask uday to create it there, or have an admin do it.",
+            "Ask an admin to assign it to you.",
             "field_errors",
             List.of()),
         YamlUtil.parseMap(claim.body()).get("error"));

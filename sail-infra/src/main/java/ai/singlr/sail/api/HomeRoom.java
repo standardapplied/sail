@@ -69,10 +69,10 @@ public final class HomeRoom {
 
   /**
    * Whether {@code actor}, acting as {@code handle}, has a home room in {@code project}: whether it
-   * may create one there ({@link Action#CREATE}). A viewer posts in no room, so it has a home room
-   * in none; nor has anyone in a project it may not read, though no caller asks of one: a project
-   * is read in its reader's scope before its home room is named, and the box's operator, who
-   * ensures one, sees every project.
+   * may create the room an apply makes it there ({@link Action#CREATE}), its own. A read-only
+   * credential creates no room, so it has a home room in none; nor has anyone in a project it may
+   * not read, though no caller asks of one: a project is read in its reader's scope before its home
+   * room is named, and the box's operator, who ensures one, sees every project.
    */
   static boolean has(Actor actor, String project, String handle) {
     return Access.decide(

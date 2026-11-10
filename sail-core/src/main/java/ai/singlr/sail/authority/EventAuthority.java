@@ -11,7 +11,6 @@ import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
-import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.PrincipalHandle;
@@ -49,7 +48,8 @@ import java.util.stream.Stream;
  * never taken at their word for what this box observed, and a run another box executed is never a
  * key to the spec it names: its pusher wrote that row, and only the spec's own owner speaks for the
  * spec. A run's own principal publishes only the narration of its own run, a fact of its lane until
- * its actor carries its work.
+ * its actor carries its work (sail-agents-act-on-their-own-work). Every refusal names its fix: who
+ * may publish the event, to ask.
  */
 public final class EventAuthority {
 
@@ -136,9 +136,7 @@ public final class EventAuthority {
         held.project(),
         worked.conversation(),
         held.id(),
-        worked.conversation() == null
-            ? RunAuthority.run(held, this::specOwner).owners()
-            : worked.owners(),
+        worked.conversation() == null ? held.resource(this::specOwner).owners() : worked.owners(),
         held.ownedBy(boxFde.get()));
   }
 
@@ -148,12 +146,12 @@ public final class EventAuthority {
     }
     var spec = specs.findById(conversation);
     if (spec.isPresent()) {
-      var owner = spec.get().owner();
+      var row = spec.get();
       return new Subject(
-          spec.get().project(),
+          row.project(),
           conversation,
           null,
-          Strings.isBlank(owner) ? List.of() : List.of(owner),
+          Resources.spec(row.id(), row.project(), row.assignee(), row.createdBy()).owners(),
           false);
     }
     return rooms
@@ -201,7 +199,8 @@ public final class EventAuthority {
    * executed it, so a run another box executed has no narrator here but an admin.
    */
   private Resource resource(Action action, Subject subject) {
-    var executed = subject.executedHere() ? box() : List.<String>of();
+    var executed =
+        subject.executedHere() ? Resources.box(boxFde.get()).owners() : List.<String>of();
     return switch (action) {
       case OPERATE_BOX -> Resources.box(boxFde.get());
       case NARRATE -> work(subject, executed);
@@ -259,7 +258,7 @@ public final class EventAuthority {
               + type
               + "' speaks for this box, and you may not drive what it does: only this box's FDE or"
               + " an admin publishes it.",
-          Remedy.NONE);
+          "Ask this box's FDE or an admin to publish it.");
     }
     if (action == Action.NARRATE
         || subject.executedHere()
@@ -289,11 +288,6 @@ public final class EventAuthority {
         instanceof Decision.Allowed;
   }
 
-  private List<String> box() {
-    var fde = boxFde.get();
-    return Strings.isBlank(fde) ? List.of() : List.of(fde);
-  }
-
   /**
    * The answer for an event about work its sender may not read: as for work this box does not hold,
    * so it says nothing of whose it is.
@@ -315,7 +309,7 @@ public final class EventAuthority {
       return Refusal.of(
           Refusal.Kind.NOT_PUBLISHABLE,
           "Event type '" + type + "' is not available to agent principals.",
-          Remedy.NONE);
+          "Ask the FDE the agent works for, or an admin, to publish it.");
     }
     if (PrincipalHandle.namesRun(actor.handle(), subject.runId())) {
       return Optional.empty();
@@ -329,7 +323,7 @@ public final class EventAuthority {
             + ", and '"
             + actor.handle()
             + "' may narrate only its own run.",
-        Remedy.NONE);
+        "An agent narrates only the run sail launched it for.");
   }
 
   private Optional<String> specOwner(String specId) {

@@ -33,7 +33,7 @@ import java.util.function.Supplier;
 
 /**
  * The build lane — {@code sail dispatch}: the spec → review → fix loop's entry point. Resolves the
- * spec (honoring {@code restart} and {@link DispatchPolicy}), atomically reserves the run against
+ * spec (honoring {@code restart} and {@link LaunchAdmission}), atomically reserves the run against
  * its target repos through {@link RunReservation}, claims the spec {@code in_progress} with its
  * repos and branch, supersedes stale reviews, publishes the lifecycle events, snapshots and checks
  * out the work branch, and launches through {@link RunLauncher}. The one lane that mutates spec
@@ -107,7 +107,7 @@ public final class BuildDispatch {
 
   /**
    * Executes one dispatch: resolve the spec (honoring {@code restart}), enforce {@link
-   * DispatchPolicy}, refuse while an ad-hoc agent is live, atomically reserve the run against the
+   * LaunchAdmission}, refuse while an ad-hoc agent is live, atomically reserve the run against the
    * target repo set (the binding concurrency gate) and, in the same transaction, claim the spec
    * {@code in_progress} with its resolved repos and branch persisted, then publish the lifecycle
    * events, snapshot and branch as configured, launch, and arm the guardrail watcher. Every refusal
@@ -121,7 +121,7 @@ public final class BuildDispatch {
           ErrorCode.INVALID_MODE, "Dispatch mode must be background or foreground.");
     }
     if (Strings.isBlank(localHandle)) {
-      throw refusal(DispatchPolicy.nodeHandleUnset());
+      throw LaunchAdmission.nodeHandleUnset();
     }
     admission.requireTrustedRoster(localHandle);
     if (loaded.config().agent() == null) {
@@ -353,7 +353,7 @@ public final class BuildDispatch {
    * Picks the spec to dispatch. Without {@code specId}, the next ready spec assigned to this box's
    * FDE (or none) — unless {@code restart} is set, which {@link RestartResolution} refuses because
    * a restart must name its target. With {@code specId}, the spec must exist and pass {@link
-   * DispatchPolicy}; {@link RestartResolution} then decides how its status is treated. Pure: every
+   * LaunchAdmission}; {@link RestartResolution} then decides how its status is treated. Pure: every
    * refusal fires before any mutation, so a refused caller can never reset a status.
    */
   static SpecResolution resolveSpec(
@@ -564,10 +564,6 @@ public final class BuildDispatch {
 
   private void publish(String project, String specId, String type, Map<String, Object> data) {
     events.publish(Event.of(project, specId, type, Event.SAIL_AGENT, HostInfo.hostname(), data));
-  }
-
-  private static ApiException refusal(DispatchDecision.Refused refused) {
-    return new ApiException(refused.code(), refused.message(), refused.fix());
   }
 
   private static ApiException refusal(RestartResolution.Refused refused) {

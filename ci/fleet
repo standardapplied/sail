@@ -310,7 +310,7 @@ readonly VIEWER_FIX='Ask an admin for a member or admin credential.'
 readonly E1_IS_ENGS="Spec 'e1' is assigned to 'eng', not you."
 readonly ASK_ENG='Ask eng to make this change, or have an admin do it.'
 readonly R1_IS_ENGS="'r1' belongs to eng: only eng or an admin may start work there, not you."
-readonly ASK_ENG_IN_R1='Ask eng to create it there, or have an admin do it.'
+readonly ASK_ADMIN_TO_ASSIGN='Ask an admin to assign it to you.'
 readonly E1_ADMIN_ONLY="Reassigning spec 'e1' moves work between FDEs and is an admin-only action (currently 'eng')."
 readonly ASK_AN_ADMIN='Ask an admin to reassign it. You may grab a spec only while it is unassigned.'
 readonly E1_NOT_CLIENTS="Event type 'review_completed' makes this box act on 'e1' (owned by 'eng'), which you may not drive."
@@ -599,11 +599,11 @@ access() {
   check "$run" "matrix 8: client claims open-socket, unassigned [socket]" \
     container_allows "$run" client acme "spec update open-socket --assignee client"
   check "$run" "matrix 8: client claims r1-task, born in r1, refused naming eng [CLI]" \
-    naming "$ASK_ENG_IN_R1" refused "$run" client "$R1_IS_ENGS" "sudo sail spec update r1-task --assignee client"
+    naming "$ASK_ADMIN_TO_ASSIGN" refused "$run" client "$R1_IS_ENGS" "sudo sail spec update r1-task --assignee client"
   check "$run" "matrix 8: client claims r1-task, born in r1, refused naming eng [HTTP]" \
-    naming "$ASK_ENG_IN_R1" http_door "$run" client client 403 PUT /v1/specs/r1-task '{"assignee":"client"}' "$R1_IS_ENGS"
+    naming "$ASK_ADMIN_TO_ASSIGN" http_door "$run" client client 403 PUT /v1/specs/r1-task '{"assignee":"client"}' "$R1_IS_ENGS"
   check "$run" "matrix 8: client claims r1-task, born in r1, refused naming eng [socket]" \
-    naming "$ASK_ENG_IN_R1" container_refuses "$run" client acme "$R1_IS_ENGS" "spec update r1-task --assignee client"
+    naming "$ASK_ADMIN_TO_ASSIGN" container_refuses "$run" client acme "$R1_IS_ENGS" "spec update r1-task --assignee client"
   check "$run" "matrix 9: client reassigns e1 to itself, refused admin-only [CLI]" \
     naming "$ASK_AN_ADMIN" refused "$run" client "$E1_ADMIN_ONLY" "sudo sail spec update e1 --assignee client"
   check "$run" "matrix 9: client reassigns e1 to itself, refused admin-only [HTTP]" \

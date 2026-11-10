@@ -147,7 +147,7 @@ class ProjectDefinitionOperationsTest {
 
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, refused.failure().errorCode());
     assertEquals(
-        "Your credential is read-only and cannot read the definitions of projects.",
+        "Your credential is read-only and cannot read a project's definition, which holds its services' secrets.",
         refused.getMessage());
   }
 

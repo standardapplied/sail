@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -128,7 +129,7 @@ class AccessTest {
               Action.READ_DEFINITION,
               PROJECT_ADA,
               PROJECT_BOB,
-              "read the definitions of projects",
+              "read a project's definition, which holds its services' secrets",
               List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY),
               null,
               null),
@@ -203,7 +204,7 @@ class AccessTest {
               Action.OPERATE_RUN,
               RUN_ADA,
               RUN_BOB,
-              "operate runs",
+              "stop runs",
               List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY),
               RUN_NOT_OWNER,
               null),
@@ -235,7 +236,7 @@ class AccessTest {
               Action.SERVE,
               PROJECT_ADA,
               PROJECT_BOB,
-              "serve projects",
+              "start or stop a project's processes",
               List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY),
               null,
               null),
@@ -243,7 +244,7 @@ class AccessTest {
               Action.RESTORE,
               PROJECT_ADA,
               PROJECT_BOB,
-              "restore the snapshots of projects",
+              "restore or delete snapshots",
               List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY),
               null,
               null),
@@ -295,7 +296,7 @@ class AccessTest {
               refusal(
                   Refusal.Kind.NOT_OWNER,
                   "Box 'bob' belongs to 'bob', not you.",
-                  "Ask bob to change it, or have an admin do it."),
+                  "Ask bob to operate it, or have an admin do it."),
               null));
 
   /** The principals of each column, on every lane its kind comes in by. */
@@ -387,21 +388,22 @@ class AccessTest {
 
   @Test
   void aSpecBornInARoomTakesThatRoomsOwnersToBeCreatedOrClaimed() {
-    var inDen = Resources.spec("brief", "acme", null, "ada").withParent(DEN);
-    var seated =
-        refused(
-            Refusal.Kind.NOT_OWNER,
-            "'den' belongs to bob: only bob or an admin may start work there, not you.",
-            "Ask bob to create it there, or have an admin do it.");
+    var inDen = Resources.spec("brief", "acme", null, "ada").withBornIn(DEN);
+    var seated = "'den' belongs to bob: only bob or an admin may start work there, not you.";
 
-    assertEquals(seated, Access.decide(Actors.OWNER_API, Action.CREATE, inDen));
-    assertEquals(seated, Access.decide(Actors.OWNER_API, Action.CLAIM, inDen));
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER, seated, "Ask bob to create it there, or have an admin do it."),
+        Access.decide(Actors.OWNER_API, Action.CREATE, inDen));
+    assertEquals(
+        refused(Refusal.Kind.NOT_OWNER, seated, "Ask an admin to assign it to you."),
+        Access.decide(Actors.OWNER_API, Action.CLAIM, inDen));
     assertEquals(new Decision.Allowed(), Access.decide(Actors.OWNER_API, Action.CHANGE, inDen));
     assertEquals(new Decision.Allowed(), Access.decide(Actors.ADMIN, Action.CLAIM, inDen));
     assertEquals(new Decision.Allowed(), Access.decide(Actors.OTHER_API, Action.CLAIM, inDen));
     assertEquals(
         new Decision.Allowed(),
-        Access.decide(Actors.OWNER_API, Action.CREATE, inDen.withParent(LOBBY)));
+        Access.decide(Actors.OWNER_API, Action.CREATE, inDen.withBornIn(LOBBY)));
     assertEquals(
         refused(
             Refusal.Kind.NOT_OWNER,
@@ -410,12 +412,12 @@ class AccessTest {
         Access.decide(
             Actors.OWNER_API,
             Action.CREATE,
-            inDen.withParent(Resources.conversation("den", "acme", List.of()))));
+            inDen.withBornIn(Resources.conversation("den", "acme", List.of()))));
   }
 
   @Test
   void aSpecIsDispatchedByItsOwnerWhereverItWasBornAndAnUnassignedOneByNoOneYet() {
-    var inDen = Resources.spec("brief", "acme", "ada", "ada").withParent(DEN);
+    var inDen = Resources.spec("brief", "acme", "ada", "ada").withBornIn(DEN);
 
     assertEquals(new Decision.Allowed(), Access.decide(Actors.OWNER_API, Action.DISPATCH, inDen));
     assertEquals(
@@ -426,6 +428,16 @@ class AccessTest {
         Access.decide(Actors.OTHER_API, Action.DISPATCH, UNASSIGNED_ADA));
     assertEquals(
         new Decision.Allowed(), Access.decide(Actors.OWNER_API, Action.DISPATCH, UNASSIGNED_ADA));
+  }
+
+  @Test
+  void aRunsSpecIsNoRoomSoItsOwnerDispatchesWorkOnIt() {
+    assertEquals(
+        new Decision.Allowed(),
+        Access.decide(
+            new Actor("eng", Role.MEMBER, Actor.Lane.API),
+            Action.DISPATCH,
+            Resources.launched("r1", "acme", "s1", "eng")));
   }
 
   @Test
@@ -529,12 +541,12 @@ class AccessTest {
     assertEquals(
         refused(
             Refusal.Kind.NOT_OWNER,
-            "Project 'acme' belongs to 'bob' or 'cy', not you.",
+            "Room 'lobby' belongs to 'bob' or 'cy', not you.",
             "Ask bob or cy to change it, or have an admin do it."),
         Access.decide(
             Actors.OWNER_API,
             Action.CHANGE,
-            new Resource(Resource.Kind.PROJECT, "acme", "acme", List.of("bob", "cy"), null, null)));
+            Resources.conversation("lobby", "acme", List.of("bob", "cy"))));
   }
 
   @Test
@@ -600,7 +612,11 @@ class AccessTest {
     assertEquals(
         new Decision.Allowed(), Access.decide(Actor.system(), Action.PURGE, Resource.Kind.PROJECT));
     assertEquals(
-        new Decision.Allowed(), Access.decide(Actors.ROOM, Action.POST, Resource.Kind.ROOM));
+        "POST is ROOM's on its own work alone, which a kind does not name.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> Access.decide(Actors.ROOM, Action.POST, Resource.Kind.ROOM))
+            .getMessage());
     assertEquals(
         refused(
             Refusal.Kind.READ_ONLY,
@@ -658,29 +674,97 @@ class AccessTest {
   }
 
   @Test
-  void aMessageIsFiledUnderItsOwnProjectAndOwnedByItsConversation() {
-    var message = Resources.message("m-1", "beta", LOBBY);
-
-    assertEquals(List.of("ada"), message.owners());
-    assertEquals(LOBBY, message.parent());
-    assertEquals(new Decision.Allowed(), Access.decide(Actors.VIEWER, Action.READ, message));
-    assertEquals(
-        new Decision.NotFound(),
-        Access.decide(
-            Actors.VIEWER.withScope(ProjectScope.of(List.of("acme"))), Action.READ, message));
-  }
-
-  @Test
   void aResourceNamesEachOwnerOnceAndNeverBlank() {
     var resource =
         new Resource(
-            Resource.Kind.SPEC, "auth", "acme", List.of("ada", " ", "ada", "bob"), null, null);
+            Resource.Kind.SPEC,
+            "auth",
+            "acme",
+            List.of("ada", " ", "ada", "bob"),
+            null,
+            null,
+            null);
 
     assertEquals(List.of("ada", "bob"), resource.owners());
     assertThrows(
         NullPointerException.class,
-        () -> new Resource(null, "auth", "acme", List.of(), null, null));
+        () -> new Resource(null, "auth", "acme", List.of(), null, null, null));
+    assertEquals(
+        "Only a spec is born in a room, not RUN r-1",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> Resources.launched("r-1", "acme", "auth", "ada").withBornIn(DEN))
+            .getMessage());
     assertThrows(NullPointerException.class, () -> new Decision.Refused(null));
+    assertEquals(
+        "A refusal names its fix: no.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> new Decision.Refused(new Refusal(Refusal.Kind.NOT_OWNER, "no.", Remedy.NONE)))
+            .getMessage());
+  }
+
+  @Test
+  void theOwnershipStepIsAnAdminsOrAnOwnersOrOneActingForAnOwnerReadOnlyIncluded() {
+    assertEquals(
+        Optional.empty(),
+        owned(Actors.ADMIN, Resources.run("r1", "acme", null, "auth", null, null)));
+    assertEquals(
+        Optional.empty(),
+        owned(Actors.OWNER_API, Resources.run("r1", "acme", Actors.OWNER, "auth", null, "carol")));
+    assertEquals(
+        Optional.empty(),
+        owned(Actors.VIEWER, Resources.run("r1", "acme", Actors.OWNER, "auth", null, "carol")));
+    assertEquals(
+        Optional.empty(),
+        owned(Actors.ROOM, Resources.run("r1", "acme", Actors.OWNER, "auth", null, "carol")));
+    assertEquals(
+        Optional.of(Refusal.Kind.NOT_OWNER),
+        owned(Actors.MACHINE, Resources.run("r1", "acme", Actors.OWNER, "auth", null, "carol"))
+            .map(Refusal::kind));
+    assertEquals(
+        Optional.of(Refusal.Kind.NOT_OWNER),
+        owned(Actors.OTHERS_AGENT, Resources.run("r1", "acme", Actors.OWNER, "auth", null, "carol"))
+            .map(Refusal::kind));
+  }
+
+  @Test
+  void theOwnershipStepOfARunSpeaksTheTextsClientsSee() {
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.NOT_OWNER,
+                "Run r1 belongs to spec 'auth', owned by 'ada' and 'carol', not you.",
+                "Only ada or carol or an admin may access this run.")),
+        owned(Actors.OTHER_API, Resources.run("r1", "acme", Actors.OWNER, "auth", null, "carol")));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.NOT_OWNER,
+                "Run r1 is an ad-hoc session launched by 'ada', not you.",
+                "Only ada or an admin may access this run.")),
+        owned(Actors.OTHER_API, Resources.run("r1", "acme", Actors.OWNER, null, null, null)));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.NOT_OWNER,
+                "Run r1 belongs to spec 'auth', which has no owner.",
+                "Only its owner or an admin may access this run.")),
+        owned(Actors.OTHER_API, Resources.run("r1", "acme", null, "auth", null, null)));
+    assertEquals(
+        "Run r1 is an ad-hoc session.",
+        owned(Actors.OTHER_API, Resources.run("r1", "acme", null, null, null, null))
+            .orElseThrow()
+            .message());
+    assertEquals(
+        Optional.empty(),
+        owned(Actors.AGENT, Resources.run("r1", "acme", Actors.OWNER, null, null, null)));
+  }
+
+  private static Optional<Refusal> owned(Actor actor, Resource run) {
+    return Access.owned(actor, run) instanceof Decision.Refused(var refusal)
+        ? Optional.of(refusal)
+        : Optional.empty();
   }
 
   private static void add(

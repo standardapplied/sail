@@ -103,7 +103,7 @@ public interface WriteAuthority {
       switch (Access.decide(actor, action, resource)) {
         case Decision.Allowed ignored -> {}
         case Decision.NotFound ignored -> {
-          return ScopeRule.unplaced(resource.kind().title() + " '" + resource.id() + "'");
+          return ScopeRule.unplaced(resource.named());
         }
         case Decision.Refused refused -> {
           return Optional.of(refused.refusal());

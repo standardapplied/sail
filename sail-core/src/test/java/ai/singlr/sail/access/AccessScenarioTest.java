@@ -179,7 +179,7 @@ class AccessScenarioTest {
             new Refusal(
                 Refusal.Kind.NOT_OWNER,
                 "'r1' belongs to eng: only eng or an admin may start work there, not you.",
-                "Ask eng to create it there, or have an admin do it.")),
+                "Ask an admin to assign it to you.")),
         Actor.call(CLIENT, () -> specs.decide("in-r1", edited("in-r1", "assignee", "client"))));
   }
 
@@ -224,7 +224,7 @@ class AccessScenarioTest {
     assertEquals(
         refused(
             Refusal.Kind.LANE_FORBIDDEN,
-            "Agent principals cannot operate runs.",
+            "Agent principals cannot stop runs.",
             "Only an operator lane (CLI or API token) may do this."),
         Access.decide(ENGS_AGENT, Action.OPERATE_RUN, ENGS_RUN));
   }

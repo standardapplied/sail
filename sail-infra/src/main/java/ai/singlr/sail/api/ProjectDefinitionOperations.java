@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Action;
-import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.ProjectDefinition.Section;
@@ -84,11 +83,7 @@ final class ProjectDefinitionOperations {
    */
   private ProjectStore.ProjectRow held(Actor actor, Action action, String project) {
     var row = projects.findByName(project).orElseThrow(() -> ProjectReader.absent(project));
-    Refusals.require(
-        actor,
-        action,
-        Resources.project(row.name(), row.createdBy()),
-        () -> ProjectReader.absent(project));
+    Refusals.requireProject(actor, action, row.name(), row.createdBy());
     return row;
   }
 

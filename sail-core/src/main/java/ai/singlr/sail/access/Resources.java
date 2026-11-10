@@ -11,15 +11,15 @@ import java.util.List;
 import java.util.stream.Stream;
 
 /**
- * Every {@link Resource}, built from the row already in hand, so deciding a list costs no query per
- * row. Every owner a decision reads is derived here, by the one rule for it: whose a spec is
- * ({@link Ownership#ownerOf}), whose a run is ({@link #run}), whose a project is (its creator).
- * Where today's rules genuinely derive owners differently, each derivation is its own factory,
- * never a flag: a room's settings answer to its owner ({@link #room}) while its conversation
- * answers to every owner of the work in it ({@link #conversation}); a run answers to the people it
- * works for ({@link #run}) while a run being created answers to whoever's box runs its work ({@link
- * #launched}). What a caller looks up before it calls (the spec owner a door may see, a room's
- * owner, the conversation's owners) is its own, so a door that sees less passes less.
+ * Every {@link Resource}, and the one place its owners are built: a caller selects the facts a row
+ * carries — the assignee and creator, the owner of the spec a run works, the owners of a
+ * conversation ({@code RoomStore.owners}), whoever's box runs a run being created — and the factory
+ * here turns them into the owners {@link Access} decides by, so deciding a list costs no query per
+ * row. Whose a spec is ({@link Ownership#ownerOf}), whose a run is ({@link #run}), whose a project
+ * is (its creator). Where today's rules genuinely derive owners differently, each derivation is its
+ * own factory, never a flag: a room's settings answer to its owner ({@link #room}) while its
+ * conversation answers to every owner of the work in it ({@link #conversation}). What a caller
+ * selects is its own to see, so a door that sees less passes less.
  */
 public final class Resources {
 
@@ -35,6 +35,7 @@ public final class Resources {
         project,
         one(Ownership.ownerOf(assignee, createdBy)),
         Strings.isBlank(assignee) ? null : assignee,
+        null,
         null);
   }
 
@@ -45,7 +46,7 @@ public final class Resources {
    * the box can tell which row a room answers to.
    */
   public static Resource room(String id, String project, String owner) {
-    return new Resource(Resource.Kind.ROOM, id, project, one(owner), null, null);
+    return new Resource(Resource.Kind.ROOM, id, project, one(owner), null, null, null);
   }
 
   /**
@@ -54,22 +55,12 @@ public final class Resources {
    * room's own.
    */
   public static Resource conversation(String id, String project, List<String> owners) {
-    return new Resource(Resource.Kind.ROOM, id, project, owners, null, null);
-  }
-
-  /**
-   * Message {@code id}, filed under {@code project}, the project of its first write, and owned by
-   * the owners of {@code conversation}, the conversation it was posted in.
-   */
-  public static Resource message(String id, String project, Resource conversation) {
-    return new Resource(
-        Resource.Kind.MESSAGE, id, project, conversation.owners(), null, conversation);
+    return new Resource(Resource.Kind.ROOM, id, project, owners, null, null, null);
   }
 
   /** Review {@code id} of spec {@code specId}, in {@code project}: its spec's owner's. */
   public static Resource review(String id, String project, String specId, String specOwner) {
-    return new Resource(
-        Resource.Kind.REVIEW, id, project, one(specOwner), null, named(specId, project, specOwner));
+    return new Resource(Resource.Kind.REVIEW, id, project, one(specOwner), null, specId, null);
   }
 
   /**
@@ -87,14 +78,15 @@ public final class Resources {
         project,
         Stream.of(owner, adHoc ? node : specOwner).toList(),
         null,
-        adHoc ? null : named(specId, project, specOwner));
+        adHoc ? null : specId,
+        null);
   }
 
   /**
-   * Run {@code id} of {@code project} as it is created to work spec {@code specId} (null for none):
-   * it answers only to {@code worker}, whoever's box runs the work it names — its spec's assignee,
-   * the owner of the room it works, or else the FDE it acts for. A spec's creator does not count: a
-   * spec executes only on its assignee's box.
+   * Run {@code id} of {@code project} as it is created to work spec {@code specId} (blank for
+   * none): it answers only to {@code worker}, whoever's box runs the work it names as its rule
+   * selects it — its spec's assignee, the owner of the room it works, or else the FDE it acts for.
+   * A spec's creator does not count: a spec executes only on its assignee's box.
    */
   public static Resource launched(String id, String project, String specId, String worker) {
     return new Resource(
@@ -103,26 +95,23 @@ public final class Resources {
         project,
         one(worker),
         null,
-        Strings.isBlank(specId) ? null : named(specId, project, null));
+        Strings.isBlank(specId) ? null : specId,
+        null);
   }
 
   /** Project {@code name}, filed under itself: its creator's ({@code projects.created_by}). */
   public static Resource project(String name, String createdBy) {
-    return new Resource(Resource.Kind.PROJECT, name, name, one(createdBy), null, null);
+    return new Resource(Resource.Kind.PROJECT, name, name, one(createdBy), null, null, null);
   }
 
   /** The box of {@code fde}: its sync health, bus stats and main, which are its person's. */
   public static Resource box(String fde) {
-    return new Resource(Resource.Kind.BOX, fde, null, one(fde), null, null);
+    return new Resource(Resource.Kind.BOX, fde, null, one(fde), null, null, null);
   }
 
   /** The org's people, tokens and pairings, which no one owns: an admin's alone. */
   public static Resource people() {
-    return new Resource(Resource.Kind.PEOPLE, "people", null, List.of(), null, null);
-  }
-
-  private static Resource named(String specId, String project, String owner) {
-    return new Resource(Resource.Kind.SPEC, specId, project, one(owner), null, null);
+    return new Resource(Resource.Kind.PEOPLE, "people", null, List.of(), null, null, null);
   }
 
   private static List<String> one(String owner) {

@@ -184,7 +184,7 @@ class AuthorityAuditTest {
             "code",
             "read_only_credential",
             "message",
-            "Your credential is read-only and cannot restore the snapshots of projects.",
+            "Your credential is read-only and cannot restore or delete snapshots.",
             "action",
             "Ask an admin for a member or admin credential.",
             "field_errors",

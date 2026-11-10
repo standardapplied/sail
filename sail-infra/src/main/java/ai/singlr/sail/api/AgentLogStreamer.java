@@ -5,8 +5,9 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.ReadFilter;
-import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
@@ -38,12 +39,12 @@ import java.util.function.Supplier;
  * it resolves the run, which a caller whose scope does not admit its project is told does not
  * exist, applies the same provenance guard as the buffered log/stop endpoints — a run whose {@code
  * node} is not this box is refused with a structured {@code run_on_other_node} error rather than
- * tailing a foreign box's local file — then applies the same run-owner rule ({@link
- * RunAuthority#access}) the buffered log endpoint does (the run's spec assignee or an admin, else
- * {@code forbidden_not_assignee}), and finally tails the run's own {@code
- * ~/.sail/runs/<id>/agent.log} via {@code incus exec}, sending each line as an SSE {@code data:}
- * event. Because REST and SSE call the one pure policy, they return an identical verdict for an
- * identical caller. {@code ?since=N} replays from a line number for client reconnection.
+ * tailing a foreign box's local file — then applies the same run-owner rule ({@link Access#owned})
+ * the buffered log endpoint does (the run's spec assignee or an admin, else {@code
+ * forbidden_not_assignee}), and finally tails the run's own {@code ~/.sail/runs/<id>/agent.log} via
+ * {@code incus exec}, sending each line as an SSE {@code data:} event. Because REST and SSE call
+ * the one pure policy, they return an identical verdict for an identical caller. {@code ?since=N}
+ * replays from a line number for client reconnection.
  *
  * <p>Mounted by {@link ApiRouter}, which delegates the stream path straight to this handler so the
  * long-lived connection never runs through the buffered request/response path. It is not registered
@@ -190,7 +191,7 @@ public final class AgentLogStreamer implements HttpHandler {
   /**
    * The run {@code runId} when the authenticated caller may read its log, else why not: a run its
    * scope does not admit does not exist for it, a run of another box is that box's to stream, and
-   * the run-owner rule ({@link RunAuthority#access}) decides the rest.
+   * the ownership step ({@link Access#owned}) decides the rest.
    */
   private Admission admit(HttpExchange exchange, String runId) {
     var actor = ApiRouter.actorOf(exchange);
@@ -202,17 +203,11 @@ public final class AgentLogStreamer implements HttpHandler {
     if (SailOperations.isForeign(run, localHandle.get())) {
       return foreign(run);
     }
-    var refusal =
-        RunAuthority.access(
-            actor,
-            RunAuthority.run(run, spec -> StopOperations.ownerSeen(actor, specLookup.apply(spec))));
-    if (refusal.isPresent()) {
-      var refused = refusal.get();
+    if (Access.owned(
+            actor, run.resource(spec -> StopOperations.ownerSeen(actor, specLookup.apply(spec))))
+        instanceof Decision.Refused(var refused)) {
       var code = Refusals.code(refused.kind());
-      var fix =
-          refused.fix().isEmpty()
-              ? null
-              : ", \"fix\": \"" + jsonEscape(refused.fix().described()) + "\"";
+      var fix = ", \"fix\": \"" + jsonEscape(refused.fix().described()) + "\"";
       return new Refused(code.httpCode(), code.code(), refused.message(), fix);
     }
     return new Admitted(run);

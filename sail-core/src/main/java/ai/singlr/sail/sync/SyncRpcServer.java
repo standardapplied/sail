@@ -184,7 +184,7 @@ public final class SyncRpcServer {
 
   void serve(InputStream in, OutputStream out, int frame) throws IOException {
     if (blobs == null) {
-      if (!principal.scope().unrestricted()) {
+      if (!Access.audience(principal).unrestricted()) {
         throw new IllegalStateException(
             "A scoped session is decided from main's change heads: serve it over main's database"
                 + " (SyncRpcServer.over).");
@@ -286,7 +286,7 @@ public final class SyncRpcServer {
    * unscoped session fetches by hash as it always has.
    */
   private void requireServed(String what, List<String> hashes, Set<String> served) {
-    if (principal.scope().unrestricted()) {
+    if (Access.audience(principal).unrestricted()) {
       return;
     }
     for (var hash : hashes) {
@@ -303,7 +303,7 @@ public final class SyncRpcServer {
    * here.
    */
   private void serving(String type, List<Map<String, Object>> snapshots) {
-    if (principal.scope().unrestricted()) {
+    if (Access.audience(principal).unrestricted()) {
       return;
     }
     sharedBlobs.addAll(
@@ -349,7 +349,7 @@ public final class SyncRpcServer {
    */
   private void receiveContent(
       SyncWire.Announce announce, InputStream in, OutputStream out, int frame) throws IOException {
-    var scoped = !principal.scope().unrestricted();
+    var scoped = !Access.audience(principal).unrestricted();
     var missing =
         scoped ? without(announce.hashes(), sharedBlobs) : blobs.missing(announce.hashes());
     reply(out, new SyncWire.Lack(List.copyOf(missing)));
@@ -404,7 +404,7 @@ public final class SyncRpcServer {
    * offer main's own rule denies.
    */
   private Set<String> unshared(String type, MainReplica.Offer offer) {
-    if (principal.scope().unrestricted() || !principal.canWrite()) {
+    if (Access.audience(principal).unrestricted() || !principal.canWrite()) {
       return Set.of();
     }
     return without(
@@ -543,7 +543,7 @@ public final class SyncRpcServer {
         mainId(),
         Objects.toString(principal.handle(), ""),
         limits.fileMax(),
-        principal.scope(),
+        Access.audience(principal),
         db == null ? null : new DatabaseCatalog(db).id());
   }
 
@@ -809,7 +809,7 @@ public final class SyncRpcServer {
    */
   private SyncWire.Result result(String type, MainReplica main, MainReplica.Offer offer) {
     var outside =
-        principal.scope().unrestricted()
+        Access.audience(principal).unrestricted()
             ? Optional.<Refusal>empty()
             : new ScopeRule(changeLog, type).pushed(principal, offer.id(), offer.snapshot());
     if (outside.isPresent()) {

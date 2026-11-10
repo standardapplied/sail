@@ -5,7 +5,11 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
@@ -15,7 +19,6 @@ import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
@@ -69,9 +72,10 @@ public record HostAccess(Sqlite db, RoleRule roles) {
               + room.project()
               + ".");
     }
-    var refused = new MessageStore(db).posting(actor, room.id(), room.project());
-    if (refused.isPresent()) {
-      throw Remedied.io(refused.get().message(), refused.get().fix());
+    var conversation =
+        Resources.conversation(room.id(), room.project(), new RoomStore(db).owners(room.id()));
+    if (Access.decide(actor, Action.POST, conversation) instanceof Decision.Refused(var refused)) {
+      throw Remedied.io(refused.message(), refused.fix());
     }
   }
 

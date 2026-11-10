@@ -93,7 +93,9 @@ class RefusalsTest {
             () -> Refusals.require(VIEWER_OF_ALPHA, Action.SERVE, ALPHA, () -> null));
 
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, thrown.failure().errorCode());
-    assertEquals("Your credential is read-only and cannot serve projects.", thrown.getMessage());
+    assertEquals(
+        "Your credential is read-only and cannot start or stop a project's processes.",
+        thrown.getMessage());
     Refusals.require(OF_ALPHA, Action.SERVE, ALPHA, () -> null);
   }
 }

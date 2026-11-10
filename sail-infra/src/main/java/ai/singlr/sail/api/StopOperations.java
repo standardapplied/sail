@@ -7,7 +7,6 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.ReadFilter;
-import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentPresence;
@@ -567,10 +566,10 @@ public final class StopOperations {
 
   /**
    * Refuses a stop the bound actor may not make: operating a run is its owners' ({@link
-   * RunAuthority#run}), its spec's owner as the reader sees it. A stop by run id read the run in
-   * the caller's scope first; a stop of a whole project is the host CLI's, whose operator sees
-   * every project. A dry run writes and signals nothing, so it is described for whoever asks, with
-   * no one bound.
+   * RunStore.RunRow#resource}), its spec's owner as the reader sees it. A stop by run id read the
+   * run in the caller's scope first; a stop of a whole project is the host CLI's, whose operator
+   * sees every project. A dry run writes and signals nothing, so it is described for whoever asks,
+   * with no one bound.
    */
   private void authorize(RunStore.RunRow run, boolean dryRun) {
     if (dryRun) {
@@ -579,7 +578,7 @@ public final class StopOperations {
     Refusals.require(
         Actor.current(),
         Action.OPERATE_RUN,
-        RunAuthority.run(run, spec -> ownerSeen(Actor.reader(), specStore.findById(spec))),
+        run.resource(spec -> ownerSeen(Actor.reader(), specStore.findById(spec))),
         () -> noRun(run.id()));
   }
 

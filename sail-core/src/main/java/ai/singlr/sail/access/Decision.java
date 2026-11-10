@@ -27,11 +27,14 @@ public sealed interface Decision {
 
   /**
    * The principal may read the resource but not take the action: {@code refusal} says why and what
-   * to do.
+   * to do, so a refusal with no fix is refused itself.
    */
   record Refused(Refusal refusal) implements Decision {
     public Refused {
       Objects.requireNonNull(refusal, "refusal");
+      if (refusal.fix().isEmpty()) {
+        throw new IllegalArgumentException("A refusal names its fix: " + refusal.message());
+      }
     }
   }
 }

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
@@ -319,7 +320,7 @@ final class LocalApiRouter implements LocalApiHandler {
     var project = segments[0];
     NameValidator.requireValidProjectName(project);
     if (caller instanceof Caller.Run(var run, _) && !project.equals(run.project())
-        || !caller.actor().scope().admits(project)) {
+        || !ReadFilter.reads(caller.actor(), () -> project)) {
       throw ProjectReader.absent(project);
     }
     return switch (segments[1]) {

@@ -9,19 +9,22 @@ package ai.singlr.sail.access;
  * What a principal asks to do: the nineteen actions that cover every door and sync lane, each a row
  * of {@link Policy}. A type rule names the action, or actions, a revision takes, and every one of
  * them must be allowed. {@code label} and {@code covers} are the row as ARCHITECTURE.md shows it;
- * {@code verb} is how a refusal words it, before the plural of the resource's kind ("change" +
- * "specs").
+ * {@code verb} and {@code object} are how a refusal words it ({@link #act}).
  */
 public enum Action {
   /** Reading a spec, room, message, run, file or project: what scope and every list admit by. */
   READ("Read", "specs, rooms, messages, runs, files, projects", "read"),
   /** Reading a project's definition, which holds its services' settings and secrets. */
-  READ_DEFINITION("Read a definition", "a project's definition", "read the definitions of"),
+  READ_DEFINITION(
+      "Read a definition",
+      "a project's definition",
+      "read",
+      "a project's definition, which holds its services' secrets"),
   /** Posting a message in a conversation: a room, or a spec's own room. */
   POST("Post", "a message in a conversation", "post in"),
   /**
    * Creating a spec, a room or a project. A spec born in another room also takes that room's owners
-   * ({@link Resource#parent}).
+   * ({@link Resource#bornIn}).
    */
   CREATE("Create", "a spec, a room, a project", "create"),
   /**
@@ -47,24 +50,29 @@ public enum Action {
   APPROVE("Approve", "promote a draft to ready; approve or dismiss findings; mark done", "approve"),
   /**
    * Starting work on this box: dispatching or resuming a spec, seating or removing a room's agent.
-   * Seating one for a spec born in another room changes that room's roster, so it also takes that
-   * room's owner ({@link Resource#parent}). Where the work runs (its assignee's box, its room
-   * owner's box) is placement, decided after this, by the dispatch rules.
+   * The roster a seating writes is the journal's to decide, as a change of the room. Where the work
+   * runs (its assignee's box, its room owner's box) is placement, decided after this, by the
+   * dispatch rules.
    */
   DISPATCH("Dispatch", "dispatch or resume a spec; seat or remove a room agent", "dispatch"),
   /** Stopping a run, or reading its log: what the people the run works for may do with it. */
-  OPERATE_RUN("Operate a run", "stop it; read its log", "operate"),
+  OPERATE_RUN("Operate a run", "stop it; read its log", "stop"),
   /**
    * A run's reports about itself: its lifecycle events, its session, the acknowledgements of its
    * inbox. Whether the run executed on this box stays the event rule's own fact.
    */
   NARRATE("Narrate", "a run's reports about itself: events, session, inbox acks", "narrate"),
   /** Adding, changing or removing a project's shared files and skills. */
-  SHARE("Share", "add, change or remove project files and skills", "share files and skills in"),
+  SHARE(
+      "Share",
+      "add, change or remove project files and skills",
+      "share",
+      "files and skills in projects"),
   /** Starting and stopping a project's processes. */
-  SERVE("Serve", "start and stop the project's processes", "serve"),
+  SERVE(
+      "Serve", "start and stop the project's processes", "start or stop", "a project's processes"),
   /** Restoring or deleting one of a project's snapshots. */
-  RESTORE("Restore", "restore or delete a snapshot", "restore the snapshots of"),
+  RESTORE("Restore", "restore or delete a snapshot", "restore or delete", "snapshots"),
   /** Changing a project's definition: its repos, runtimes, agent, processes and resources. */
   CONFIGURE("Configure", "change a project's definition", "configure"),
   /** Erasing a spec everywhere, once it is archived, cancelled or deleted: it cannot come back. */
@@ -84,11 +92,17 @@ public enum Action {
   private final String label;
   private final String covers;
   private final String verb;
+  private final String object;
 
   Action(String label, String covers, String verb) {
+    this(label, covers, verb, null);
+  }
+
+  Action(String label, String covers, String verb, String object) {
     this.label = label;
     this.covers = covers;
     this.verb = verb;
+    this.object = object;
   }
 
   /** The action's name in the permission table. */
@@ -101,8 +115,21 @@ public enum Action {
     return covers;
   }
 
-  /** The verb a refusal of this action uses, before the plural of what it acts on. */
+  /** The verb a refusal of this action uses: "change". */
   public String verb() {
     return verb;
+  }
+
+  /**
+   * What a refusal says a principal cannot do, taking this action on resources of {@code kind}: the
+   * verb before what it acts on, which is the kind's plural unless the action names its own
+   * ("change specs", "restore or delete snapshots"). Taking agents in and out of a room is
+   * dispatching there, and is said as managing its membership.
+   */
+  public String act(Resource.Kind kind) {
+    if (this == DISPATCH && kind == Resource.Kind.ROOM) {
+      return "manage room membership";
+    }
+    return verb + " " + (object != null ? object : kind.plural());
   }
 }

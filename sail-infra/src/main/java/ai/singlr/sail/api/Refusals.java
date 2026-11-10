@@ -10,6 +10,7 @@ import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.identity.Actor;
 import java.util.Optional;
@@ -66,16 +67,6 @@ public final class Refusals {
   }
 
   /**
-   * Refuses a read-only credential a side effect on this box that no synced row's rule decides — to
-   * {@code act} ("resolve conflicts") — with the refusal every rule gives a read-only role.
-   */
-  static void requireWriter(String act) {
-    if (!Actor.current().canWrite()) {
-      throw exception(Refusal.readOnly(act).orElseThrow());
-    }
-  }
-
-  /**
    * Throws unless {@code actor} may take {@code action} on {@code resource}: one it may not read is
    * {@code notFound}, the answer the door gives an id it does not hold, and a refusal is its
    * exception.
@@ -86,6 +77,16 @@ public final class Refusals {
       Resource resource,
       Supplier<? extends RuntimeException> notFound) {
     require(Access.decide(actor, action, resource), notFound);
+  }
+
+  /**
+   * Refuses {@code actor} {@code action} on {@code project}, its creator's ({@code createdBy}): the
+   * one gate of a door that acts on a project. One the actor may not read is one the catalog does
+   * not hold ({@link ProjectReader#absent}), and a refusal is its exception.
+   */
+  static void requireProject(Actor actor, Action action, String project, String createdBy) {
+    Refusals.require(
+        actor, action, Resources.project(project, createdBy), () -> ProjectReader.absent(project));
   }
 
   /**

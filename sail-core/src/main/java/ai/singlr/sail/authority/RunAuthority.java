@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.authority;
 
-import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resource;
@@ -24,7 +23,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Stream;
 
 /**
@@ -55,28 +53,6 @@ public final class RunAuthority implements WriteAuthority {
     this.rooms = new RoomStore(db);
     this.runs = new RunStore(db);
     this.attribution = new Attribution(db);
-  }
-
-  /**
-   * {@code run} as the people it works for may stop it and read its log ({@link Resources#run}):
-   * the owner of the spec it works as {@code specOwner} finds it.
-   */
-  public static Resource run(RunStore.RunRow run, Function<String, Optional<String>> specOwner) {
-    var specOwned =
-        Strings.isBlank(run.specId()) ? null : specOwner.apply(run.specId()).orElse(null);
-    return Resources.run(run.id(), run.project(), run.owner(), run.specId(), run.node(), specOwned);
-  }
-
-  /**
-   * Why {@code actor} may not act on {@code run} ({@link #run}): it is neither an admin nor acting
-   * for an owner, in the words {@link Access} refuses an operation of it with. The doors that read
-   * a run's log ask it, a viewer who owns the run included, until they ask {@link Access} for
-   * {@link Action#OPERATE_RUN} (sail-every-door-asks-access).
-   */
-  public static Optional<Refusal> access(Actor actor, Resource run) {
-    return actor.isAdmin() || run.owners().stream().anyMatch(actor::actsFor)
-        ? Optional.empty()
-        : Optional.of(Access.notOwner(run));
   }
 
   @Override

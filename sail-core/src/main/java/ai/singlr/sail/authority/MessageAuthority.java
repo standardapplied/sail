@@ -25,12 +25,12 @@ import java.util.Optional;
 /**
  * Who may post a message, and as whom. A message is a {@link Action#POST} in its conversation,
  * whose owners are {@link RoomStore#owners}, decided by {@link Access}; messages never change, so
- * there is only ever a create to decide. Then the facts of posting ({@link #posting}), and as whom:
- * on this box's lanes the author is the actor's own handle — a run's principal on the agent and
- * room lanes. On {@link Actor.Lane#SYNC} the pusher posts as itself, as a principal of any run it
- * owns, or as the pipeline ({@link MessageStore#SAIL_AUTHOR}) where a run it owns is in the
- * conversation and it steers the agents there itself ({@link RoomStore#steering}), since the
- * pipeline's words steer them all: a box whose work was reassigned narrates there no more.
+ * there is only ever a create to decide. Then the facts of posting, and as whom: on this box's
+ * lanes the author is the actor's own handle — a run's principal on the agent and room lanes. On
+ * {@link Actor.Lane#SYNC} the pusher posts as itself, as a principal of any run it owns, or as the
+ * pipeline ({@link MessageStore#SAIL_AUTHOR}) where a run it owns is in the conversation and it
+ * steers the agents there itself ({@link RoomStore#steering}), since the pipeline's words steer
+ * them all: a box whose work was reassigned narrates there no more.
  */
 public final class MessageAuthority implements WriteAuthority {
 
@@ -73,10 +73,9 @@ public final class MessageAuthority implements WriteAuthority {
    * {@link Access} refuses the post, or one of two facts holds that bind whoever does not overrule
    * owners ({@link Access#overrulesOwners}): a conversation this box does not hold has no owner
    * here to ask, so it takes no post; and a post is someone's, so a credential acting for no FDE
-   * posts nothing. The journal asks it of every post, and the doors that admit a voice into a room
-   * ask it before anything is said there: the terminal's room pin and a room session's report.
+   * posts nothing.
    */
-  public Optional<Refusal> posting(Actor actor, String roomId, String project) {
+  private Optional<Refusal> posting(Actor actor, String roomId, String project) {
     var conversation = Resources.conversation(roomId, project, rooms.owners(roomId));
     var refused = WriteAuthority.refused(actor, Taking.of(conversation, Action.POST));
     if (refused.isPresent() || Access.overrulesOwners(actor)) {

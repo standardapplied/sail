@@ -28,12 +28,11 @@ import java.util.stream.Stream;
  * here and rendered into ARCHITECTURE.md ({@link #table}) so the doc cannot drift from it.
  *
  * <p>A person reads the column of their role, on whichever lane they came in by: the HTTP API, the
- * host CLI, a push over sync. An agent reads the column of its lane, and its role, its person's
- * capped by that lane, still caps every cell but {@link Cell#OWN_WORK}: own work is the lane's own
- * grant, what a run needs to report on itself and to converse in its room, read-only as a room
- * agent's role is. The in-container credential's column narrows its person's role once its lane
- * exists; until then that credential is its person's on the CLI lane, so no lane reads the column
- * and every cell of it is {@link Cell#YES}.
+ * host CLI, a push over sync. An agent reads its role's column too, its person's capped by its
+ * lane, and its lane's column narrows it: a lane cell is yes (it narrows nothing), no, or {@link
+ * Cell#OWN_WORK}, the lane's own grant whatever the role — what a run needs to report on itself and
+ * to converse in its room, read-only as a room agent's role is. Whose the work is, is the role
+ * column's to say.
  *
  * <p>Behaviour does not change while every rule moves onto this table, so a cell holds today's
  * answer where the agreed table differs, and the spec that changes it is named here:
@@ -46,14 +45,18 @@ import java.util.stream.Stream;
  *   <li>Post, Create, Serve: a work agent may wherever its person may, until
  *       sail-agents-act-on-their-own-work narrows it to its own work. A room agent's own work is,
  *       until then, the conversations its person owns.
- *   <li>Change: a work agent may wherever its person owns the work; Claim, Approve, Share, Restore
- *       and Configure: a work agent may as its person may. sail-agents-act-on-their-own-work
- *       narrows Change to its own work and refuses the rest.
+ *   <li>Change and Approve: a work agent may wherever its person owns the work; Claim, Restore and
+ *       Configure: a work agent may as its person may. sail-agents-act-on-their-own-work narrows
+ *       Change to its own work and refuses the rest.
+ *   <li>Share: a work agent may share files wherever its person may, as the journal decides a file;
+ *       the box's socket refuses every run credential the sharing of skills before it asks, until
+ *       sail-agents-act-on-their-own-work gives that door this cell.
+ *   <li>Every event but a run's narration: refused to an agent by the event rule's own fact of its
+ *       lane ({@code EventAuthority}), whatever this table says of the action, until
+ *       sail-agents-act-on-their-own-work gives an agent's actor its work.
  *   <li>Configure: any member may, until sail-people-are-managed gives it to a project's creator.
  *   <li>Operate the box: a viewer may not, until sail-every-door-asks-access gives a person their
  *       own box.
- *   <li>The in-container credential: every cell, until sail-agents-act-on-their-own-work gives it
- *       its lane and column.
  * </ul>
  */
 public final class Policy {
@@ -92,9 +95,7 @@ public final class Policy {
     /** A build, review or fix run's principal: {@link Actor.Lane#AGENT}. */
     WORK_AGENT("Work agent"),
     /** A read-only room member's principal: {@link Actor.Lane#ROOM}. */
-    ROOM_AGENT("Read-only room agent"),
-    /** The person's credential presented inside a project container. */
-    CONTAINER("In-container credential");
+    ROOM_AGENT("Read-only room agent");
 
     private final String label;
 
@@ -131,23 +132,21 @@ public final class Policy {
 
   /**
    * One action's cells, a column each. A role column never says {@link Cell#OWN_WORK}: own work is
-   * an agent's.
+   * an agent's. A lane column never says {@link Cell#OWNER}: it only narrows a role, whose own cell
+   * says whose the work is.
    */
-  record Row(
-      Action action,
-      Cell viewer,
-      Cell member,
-      Cell admin,
-      Cell workAgent,
-      Cell roomAgent,
-      Cell container) {
+  record Row(Action action, Cell viewer, Cell member, Cell admin, Cell workAgent, Cell roomAgent) {
 
     Row {
-      Stream.of(action, viewer, member, admin, workAgent, roomAgent, container)
+      Stream.of(action, viewer, member, admin, workAgent, roomAgent)
           .forEach(Objects::requireNonNull);
       if (Stream.of(viewer, member, admin).anyMatch(OWN_WORK::equals)) {
         throw new IllegalArgumentException(
             "The row of " + action + " gives a role own work, which only an agent has.");
+      }
+      if (Stream.of(workAgent, roomAgent).anyMatch(OWNER::equals)) {
+        throw new IllegalArgumentException(
+            "The row of " + action + " gives a lane ownership, which only a role decides.");
       }
     }
 
@@ -158,32 +157,31 @@ public final class Policy {
         case ADMIN -> admin;
         case WORK_AGENT -> workAgent;
         case ROOM_AGENT -> roomAgent;
-        case CONTAINER -> container;
       };
     }
   }
 
   private static final List<Row> TABLE =
       List.of(
-          new Row(Action.READ, YES, YES, YES, YES, YES, YES),
-          new Row(Action.READ_DEFINITION, NO, YES, YES, YES, NO, YES),
-          new Row(Action.POST, NO, YES, YES, YES, OWN_WORK, YES),
-          new Row(Action.CREATE, NO, YES, YES, YES, NO, YES),
-          new Row(Action.CHANGE, NO, OWNER, YES, OWNER, NO, YES),
-          new Row(Action.CLAIM, NO, YES, YES, YES, NO, YES),
-          new Row(Action.ASSIGN, NO, NO, YES, NO, NO, YES),
-          new Row(Action.APPROVE, NO, OWNER, YES, OWNER, NO, YES),
-          new Row(Action.DISPATCH, NO, OWNER, YES, NO, NO, YES),
-          new Row(Action.OPERATE_RUN, NO, OWNER, YES, NO, NO, YES),
-          new Row(Action.NARRATE, NO, OWNER, YES, OWN_WORK, OWN_WORK, YES),
-          new Row(Action.SHARE, NO, YES, YES, YES, NO, YES),
-          new Row(Action.SERVE, NO, YES, YES, YES, NO, YES),
-          new Row(Action.RESTORE, NO, YES, YES, YES, NO, YES),
-          new Row(Action.CONFIGURE, NO, YES, YES, YES, NO, YES),
-          new Row(Action.PRUNE, NO, OWNER, YES, NO, NO, YES),
-          new Row(Action.PURGE, NO, NO, YES, NO, NO, YES),
-          new Row(Action.MANAGE_PEOPLE, NO, NO, YES, NO, NO, YES),
-          new Row(Action.OPERATE_BOX, NO, OWNER, YES, NO, NO, YES));
+          new Row(Action.READ, YES, YES, YES, YES, YES),
+          new Row(Action.READ_DEFINITION, NO, YES, YES, YES, NO),
+          new Row(Action.POST, NO, YES, YES, YES, OWN_WORK),
+          new Row(Action.CREATE, NO, YES, YES, YES, NO),
+          new Row(Action.CHANGE, NO, OWNER, YES, YES, NO),
+          new Row(Action.CLAIM, NO, YES, YES, YES, NO),
+          new Row(Action.ASSIGN, NO, NO, YES, NO, NO),
+          new Row(Action.APPROVE, NO, OWNER, YES, YES, NO),
+          new Row(Action.DISPATCH, NO, OWNER, YES, NO, NO),
+          new Row(Action.OPERATE_RUN, NO, OWNER, YES, NO, NO),
+          new Row(Action.NARRATE, NO, OWNER, YES, OWN_WORK, OWN_WORK),
+          new Row(Action.SHARE, NO, YES, YES, YES, NO),
+          new Row(Action.SERVE, NO, YES, YES, YES, NO),
+          new Row(Action.RESTORE, NO, YES, YES, YES, NO),
+          new Row(Action.CONFIGURE, NO, YES, YES, YES, NO),
+          new Row(Action.PRUNE, NO, OWNER, YES, NO, NO),
+          new Row(Action.PURGE, NO, NO, YES, NO, NO),
+          new Row(Action.MANAGE_PEOPLE, NO, NO, YES, NO, NO),
+          new Row(Action.OPERATE_BOX, NO, OWNER, YES, NO, NO));
 
   private static final Map<Action, Row> ROWS = indexed(TABLE);
 

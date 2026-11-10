@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Strings;
@@ -174,7 +175,7 @@ public sealed interface Holdings {
       }
       var pusher = Actor.current();
       if ((!Erasure.SPEC.equals(type) && !Erasure.ROOM.equals(type))
-          || !pusher.scope().admits(project)) {
+          || !ReadFilter.reads(pusher, () -> project)) {
         return Standing.HELD;
       }
       return entries

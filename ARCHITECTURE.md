@@ -2274,41 +2274,43 @@ the row in hand. It is reached in this order, so one principal hears the same re
 4. Lane: an agent's lane says no: refused, naming the lane. An agent's own work is its lane's to
    grant whatever its role, so a room agent, read-only by construction, posts in its room and
    narrates its run.
-5. Ownership: the cell says owner and the principal is neither an admin nor acting for an owner,
-   or it starts work in the room a spec was born in (creates or claims the spec there, or seats an
-   agent there for it) without acting for that room's owners: refused, naming the owners.
+5. Ownership: the role's cell says owner and the principal is neither an admin nor acting for an
+   owner, or it starts work in the room a spec was born in (creates or claims the spec there)
+   without acting for that room's owners: refused, naming the owners.
 6. Otherwise allowed.
 
 After it, a type rule checks the facts only it knows, and a door its placement. The table is
 `Policy`, and this copy of it is generated (`PolicyTableTest`):
 
-| Action | Covers | Viewer | Member | Admin | Work agent | Read-only room agent | In-container credential |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| Read | specs, rooms, messages, runs, files, projects | yes | yes | yes | yes | yes | yes |
-| Read a definition | a project's definition | no | yes | yes | yes | no | yes |
-| Post | a message in a conversation | no | yes | yes | yes | own work | yes |
-| Create | a spec, a room, a project | no | yes | yes | yes | no | yes |
-| Change | edit, delete or restore a spec or room; keep-local or merge its conflict | no | owner | yes | owner | no | yes |
-| Claim | take an unassigned spec; one born in a room also needs that room's owners | no | yes | yes | yes | no | yes |
-| Assign | give or move a spec to someone | no | no | yes | no | no | yes |
-| Approve | promote a draft to ready; approve or dismiss findings; mark done | no | owner | yes | owner | no | yes |
-| Dispatch | dispatch or resume a spec; seat or remove a room agent | no | owner | yes | no | no | yes |
-| Operate a run | stop it; read its log | no | owner | yes | no | no | yes |
-| Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | own work | own work | yes |
-| Share | add, change or remove project files and skills | no | yes | yes | yes | no | yes |
-| Serve | start and stop the project's processes | no | yes | yes | yes | no | yes |
-| Restore | restore or delete a snapshot | no | yes | yes | yes | no | yes |
-| Configure | change a project's definition | no | yes | yes | yes | no | yes |
-| Prune | erase a spec everywhere, once archived, cancelled or deleted | no | owner | yes | no | no | yes |
-| Purge | erase a project everywhere; a retention sweep | no | no | yes | no | no | yes |
-| Manage people | add, change role, grant, remove, pair, mint tokens | no | no | yes | no | no | yes |
-| Operate the box | sync now; read sync health and bus stats; point the box at another main | no | owner | yes | no | no | yes |
+| Action | Covers | Viewer | Member | Admin | Work agent | Read-only room agent |
+| --- | --- | --- | --- | --- | --- | --- |
+| Read | specs, rooms, messages, runs, files, projects | yes | yes | yes | yes | yes |
+| Read a definition | a project's definition | no | yes | yes | yes | no |
+| Post | a message in a conversation | no | yes | yes | yes | own work |
+| Create | a spec, a room, a project | no | yes | yes | yes | no |
+| Change | edit, delete or restore a spec or room; keep-local or merge its conflict | no | owner | yes | yes | no |
+| Claim | take an unassigned spec; one born in a room also needs that room's owners | no | yes | yes | yes | no |
+| Assign | give or move a spec to someone | no | no | yes | no | no |
+| Approve | promote a draft to ready; approve or dismiss findings; mark done | no | owner | yes | yes | no |
+| Dispatch | dispatch or resume a spec; seat or remove a room agent | no | owner | yes | no | no |
+| Operate a run | stop it; read its log | no | owner | yes | no | no |
+| Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | own work | own work |
+| Share | add, change or remove project files and skills | no | yes | yes | yes | no |
+| Serve | start and stop the project's processes | no | yes | yes | yes | no |
+| Restore | restore or delete a snapshot | no | yes | yes | yes | no |
+| Configure | change a project's definition | no | yes | yes | yes | no |
+| Prune | erase a spec everywhere, once archived, cancelled or deleted | no | owner | yes | no | no |
+| Purge | erase a project everywhere; a retention sweep | no | no | yes | no | no |
+| Manage people | add, change role, grant, remove, pair, mint tokens | no | no | yes | no | no |
+| Operate the box | sync now; read sync health and bus stats; point the box at another main | no | owner | yes | no | no |
 
 A person reads the column of their role on every lane they come in by, a push over sync included.
-An agent reads its lane's column, and its role (its person's, capped by the lane) still caps every
-cell but own work. A cell holds today's answer where the agreed design changes it, and `Policy`
-names the spec that does: the in-container credential is its person's on the CLI lane until it has
-a lane of its own, so its column narrows nothing yet. A question asked before there is one
+An agent reads its role's column too (its person's, capped by the lane), and its lane's column
+narrows it: a lane cell is yes (it narrows nothing), no, or own work, the lane's own grant whatever
+the role; whose the work is, is the role column's to say. A cell holds today's answer where the
+agreed design changes it, and `Policy` names the spec that does; the in-container credential is
+its person's on the CLI lane until sail-agents-act-on-their-own-work gives it a lane and a column
+of its own. A question asked before there is one
 resource, a prune by policy or of a whole project, or again once an erased spec has nothing left
 to own, is the role and lane alone (`Access.decide(actor, action, kind)`).
 
@@ -2317,13 +2319,14 @@ it is filed under and its owners, each owner rule once:
 
 - A spec is its assignee's, or its creator's while it is unassigned (`Ownership.ownerOf`). A spec
   born in another room also names that room: its conversation's owners for a create or a claim,
-  which give a voice there, and the room's own owner for seating an agent there.
+  which give a voice there. Seating an agent for it writes that room's roster, which the journal
+  decides as a change of the room (`MembershipService` asks it before anything starts).
 - A room's settings (roster, wake, title, assignee) are its owner's (`RoomStore.ownerOf`): a
   spec's identity room its spec's owner's, as this box last knew the spec, live or deleted; any
   other room its own row's. Its conversation is every owner of the work in it (`RoomStore.owners`):
   the room's owner and the owner of every spec born in it.
-- A message is filed under the project of its first write and owned by its conversation's owners;
-  a review under its own first write's project and owned by its spec's owner.
+- A message is decided as a post in its conversation; a review is filed under its own first
+  write's project and owned by its spec's owner.
 - A run is the FDE it acts for and its spec's owner as the reader sees that spec, or for a
   spec-less run the box that ran it (`Resources.run`), so a run's own FDE keeps it after its spec
   is reassigned. A run being born answers to whoever's box runs the work it names: its spec's
@@ -2375,12 +2378,18 @@ through the voices that steer it (`Policy.hearsOnlySteering`; the filter is `Roo
 query): its owners, an active admin of main's roster, sail and the runs working for them.
 
 **Doors** ask `Access` for the side effects no row's rule decides: dispatch and seating
-(`LaunchAdmission`, then placement in `DispatchPolicy`), stop (Operate a run), serving a stack,
-restoring a snapshot, reading a definition, pruning. Every door reads the row it acts on in its
+(`LaunchAdmission`, then its placement; a seating then asks the journal whether it will take the
+roster), stop (Operate a run), posting into a room without a message (the terminal's room pin, a
+room session's report), serving a stack (`Refusals.requireProject`, the one project gate), restoring
+a snapshot, reading a definition, pruning, resolving a conflict. Every door reads the row it acts on in its
 caller's scope first, or is reached only by the box's operator, who sees every project. The
-checks a door still makes by role or lane, until `sail-every-door-asks-access` and
-`sail-agents-act-on-their-own-work`, and the facts that read a lane to know which applies, are
-the allowlist of `OneDecisionSweepTest`.
+checks a door still makes by role, lane or scope (resolving a credential, a run credential's own
+routes), until `sail-every-door-asks-access` and `sail-agents-act-on-their-own-work`, and the facts
+that read a lane or role to know which applies, are the allowlist of `OneDecisionSweepTest`. It
+sees every such read compiled code makes: of a role, a lane, a scope or whom an actor acts for, a
+role constant, resolver or `switch`, a type check of the socket's run or box caller, and anything
+of `Capability`; it cannot see one read as data, in SQL or from a map, which is why a filter
+inside a query takes its scope from `Access.audience`.
 
 ## Security model
 
@@ -2659,8 +2668,8 @@ no pairing is removed through the gateway as before, and no key file is touched.
   Each entry point binds the actor it acts as, at its edge and nowhere deeper, and that binding
   is the one channel for who is acting: no operation takes an `Actor` argument
   (`OperationsTakeNoActorTest`), and every door reads `Actor.current()` where it decides and
-  hands it to the rule it asks; the admissions for side effects — `DispatchPolicy`,
-  `LaunchAdmission`, `RoomWakePolicy` — read it too. It binds with
+  hands it to the rule it asks; the admissions for side effects — `LaunchAdmission`,
+  `RoomWakePolicy` — read it too. It binds with
   `Actor.run`/`Actor.call` (a `ScopedValue`): `ApiRouter` around routing, `LocalApiRouter`
   per request, a command that writes without the API around its write, the `_sync` session
   around each commit and erase, the node's round as `MAIN`, and each background entry that

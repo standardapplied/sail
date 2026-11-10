@@ -152,7 +152,7 @@ public final class SpecAuthority implements WriteAuthority {
     var bornIn = bornIn(id, next);
     return bornIn == null || !rooms.holds(bornIn, id)
         ? spec
-        : spec.withParent(conversation(bornIn, spec, null));
+        : spec.withBornIn(conversation(bornIn, spec, null));
   }
 
   /**
@@ -164,7 +164,7 @@ public final class SpecAuthority implements WriteAuthority {
         Resources.spec(
             id, projectOf(held), assigneeOf(held), Snapshots.text(held, Snapshots.CREATOR));
     var bornIn = bornIn(id, held);
-    return bornIn == null ? spec : spec.withParent(conversation(bornIn, spec, held));
+    return bornIn == null ? spec : spec.withBornIn(conversation(bornIn, spec, held));
   }
 
   private Resource conversation(String roomId, Resource spec, Map<String, Object> held) {

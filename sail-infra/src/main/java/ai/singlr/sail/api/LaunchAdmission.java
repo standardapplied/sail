@@ -68,8 +68,14 @@ public final class LaunchAdmission {
 
   /**
    * Refuses when the bound actor may not dispatch {@code spec} ({@link Action#DISPATCH}), and then
-   * when it does not run on the box identified by {@code localHandle} ({@link DispatchPolicy}). The
-   * spec is one its caller read in the actor's scope, so one outside it is not found.
+   * when it does not run on the box identified by {@code localHandle}: placement, not permission.
+   * The spec is one its caller read in the actor's scope, so one outside it is not found.
+   *
+   * <p>Placement enforces one invariant: <em>a spec executes only on the node whose handle equals
+   * the spec's assignee</em>. Node identity is {@code SyncConfig.handle} — one FDE, one devbox — so
+   * an FDE dispatching on their own box always matches; anyone, admin included, asking a box to run
+   * another FDE's spec is refused with the owning node named. Moving work is explicit: reassign the
+   * spec, then dispatch. A box with no handle can run nothing.
    */
   public static void requireAllowed(Spec spec, String localHandle) {
     Refusals.require(
@@ -77,9 +83,45 @@ public final class LaunchAdmission {
         Action.DISPATCH,
         Resources.spec(spec.id(), spec.project(), spec.assignee(), spec.createdBy()),
         () -> Refusals.specNotFound(spec.id()));
-    if (DispatchPolicy.check(spec, localHandle) instanceof DispatchDecision.Refused refused) {
-      throw new ApiException(refused.code(), refused.message(), refused.fix());
+    if (Strings.isBlank(localHandle)) {
+      throw nodeHandleUnset();
     }
+    if (!localHandle.equals(spec.assignee())) {
+      throw runsOnOtherNode(spec, localHandle);
+    }
+  }
+
+  /** The refusal of a box with no sync-handle, which can be no spec's execution node. */
+  public static ApiException nodeHandleUnset() {
+    return new ApiException(
+        ErrorCode.NODE_HANDLE_UNSET,
+        "This node has no sync-handle, so it cannot be any spec's execution node.",
+        Remedy.of(
+            "Set it once: ",
+            Remedy.sail("host config set sync-handle", "<handle>"),
+            " (a node gets it from '",
+            Remedy.sail("join"),
+            "')."));
+  }
+
+  static ApiException runsOnOtherNode(Spec spec, String localHandle) {
+    var claim = Remedy.sail("spec update", spec.id(), "--assignee", localHandle);
+    if (Strings.isBlank(spec.assignee())) {
+      return new ApiException(
+          ErrorCode.RUNS_ON_OTHER_NODE,
+          "Spec '" + spec.id() + "' is unassigned, so no node may dispatch it.",
+          Remedy.of("Claim it first: ", claim));
+    }
+    return new ApiException(
+        ErrorCode.RUNS_ON_OTHER_NODE,
+        "Spec '"
+            + spec.id()
+            + "' is assigned to '"
+            + spec.assignee()
+            + "', which runs on that FDE's devbox, not this node ('"
+            + localHandle
+            + "').",
+        Remedy.of("Reassign it to dispatch here: ", claim));
   }
 
   /**

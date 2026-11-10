@@ -12,7 +12,9 @@ import ai.singlr.sail.engine.SpecCliHelper;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Capability;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.RevisionJournal;
+import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.MethodModel;
@@ -34,15 +36,23 @@ import org.junit.jupiter.api.Test;
 
 /**
  * A1, one decision, swept: outside {@code ai.singlr.sail.access}, {@code RoleRule} (which resolves
- * a role) and {@code FdeStore} (the roster's rules), no main class reads a role, a lane or a
- * capability — {@link Actor#isAdmin}, {@link Actor#canWrite}, {@link Actor#role}, {@link
- * Actor#lane}, {@link Actor#agentLane}, {@link Actor#roomLane}, {@link Role#allows}, or anything of
- * {@link Capability} — but the members {@link #ALLOWED} names, each with the spec that deletes it
- * or the fact, not a permission, that needs the lane or role to know which fact applies. Read from
- * the compiled classes of every module, a member at a time, a lambda counted as the member it is
- * written in. {@code Actor}, {@code Role} and {@code Capability} define what is read, so their own
- * members are not swept. An entry that no longer matches a read fails too, so the list shrinks as
- * the later specs land.
+ * a role) and {@code FdeStore} (the roster's rules), no main class reads a role, a lane, a scope or
+ * a capability but the members {@link #ALLOWED} names, each with the spec that deletes it or the
+ * fact, not a permission, that needs it to know which fact applies. Read from the compiled classes
+ * of every module, a member at a time, a lambda counted as the member it is written in, it sees: a
+ * call of {@link Actor#isAdmin}, {@link Actor#canWrite}, {@link Actor#isSail}, {@link Actor#role},
+ * {@link Actor#lane}, {@link Actor#agentLane}, {@link Actor#roomLane}, {@link Actor#scope} or
+ * {@link Actor#actsFor}; of {@code RoleRule}'s resolvers, {@link Role#fromAttribute}, {@link
+ * Role#allows}, {@link Role#cappedBy} or a role's order; a {@link Role} constant (so an {@code
+ * Actor} built with a role literal), a {@code switch} over a role, a type check of one, and any
+ * call that returns one; {@code RunRow#readOnlyLane}; a type check of the socket's run or box
+ * caller; and anything of {@link Capability}, as a call, a field, a type check, a class constant,
+ * or what an {@code invokedynamic} hands its bootstrap (a method reference, the types and constants
+ * a pattern {@code switch} tests). It cannot see a role, a lane or a scope read as data: in SQL,
+ * from a map, or through a type that hides it, so a filter inside a query takes its scope from
+ * {@code Access.audience}. {@code Actor}, {@code Role}, {@code Capability} and the socket's callers
+ * define what is read, so their own members are not swept. An entry that no longer matches a read
+ * fails too, so the list shrinks as the later specs land.
  */
 class OneDecisionSweepTest {
 
@@ -50,16 +60,43 @@ class OneDecisionSweepTest {
   private static final String ACTOR = IDENTITY + "Actor";
   private static final String ROLE = IDENTITY + "Role";
   private static final String CAPABILITY = IDENTITY + "Capability";
-  private static final Set<String> READS =
-      Set.of("isAdmin", "canWrite", "role", "lane", "agentLane", "roomLane");
+  private static final String ROLE_RULE = IDENTITY + "RoleRule";
+  private static final String RUN_ROW = "ai/singlr/sail/store/RunStore$RunRow";
+  private static final String CALLER = "ai/singlr/sail/api/LocalApiRouter$Caller$";
+
+  /** The members whose call reads a role, a lane, a scope or whom an actor acts for. */
+  private static final Map<String, Set<String>> READS =
+      Map.of(
+          ACTOR,
+          Set.of(
+              "isAdmin",
+              "canWrite",
+              "isSail",
+              "role",
+              "lane",
+              "agentLane",
+              "roomLane",
+              "scope",
+              "actsFor"),
+          ROLE,
+          Set.of("allows", "fromAttribute", "cappedBy", "ordinal", "compareTo"),
+          ROLE_RULE,
+          Set.of("roleOf", "roleOfUnbound", "actorOf"),
+          RUN_ROW,
+          Set.of("readOnlyLane"));
+
   private static final List<String> EXEMPT =
       List.of(
           "ai/singlr/sail/access/",
-          IDENTITY + "RoleRule",
+          ROLE_RULE,
           "ai/singlr/sail/store/FdeStore",
           ACTOR,
           ROLE,
-          CAPABILITY);
+          CAPABILITY,
+          CALLER);
+
+  private static final String RETURNS_ROLE = "<returns a role>";
+  private static final String ROLE_SWITCH = "<switch over a role>";
 
   private static final String API = "ai/singlr/sail/api/";
   private static final String RULES = "ai/singlr/sail/authority/";
@@ -73,32 +110,68 @@ class OneDecisionSweepTest {
 
   private static Map<String, String> allowed() {
     var allowed = new TreeMap<String, String>();
-    for (var route : List.of("handleStream", "route", "routeSync", "whoami")) {
+    for (var route : List.of("handleStream", "route", "routeSync", "whoami", "actorOf")) {
       allowed.put(API + "ApiRouter#" + route, EVERY_DOOR);
     }
-    allowed.put(API + "Authorizer#require", EVERY_DOOR);
-    allowed.put(API + "LocalApiRouter#whoami", EVERY_DOOR);
-    allowed.put(API + "Refusals#requireWriter", EVERY_DOOR);
-    allowed.put(API + "SailOperations#runActor", EVERY_DOOR);
-    allowed.put(API + "WebauthnAuthHandler#requireAdmin", EVERY_DOOR);
-    allowed.put("ai/singlr/sail/engine/HostAccess#roleOf", EVERY_DOOR);
-    allowed.put(RULES + "RunAuthority#access", EVERY_DOOR);
-    for (var content : List.of("result", "serveContent", "unshared")) {
-      allowed.put(SYNC_SERVER + "#" + content, EVERY_DOOR);
+    for (var resolves :
+        List.of(
+            "Authorizer#require",
+            "LocalApiRouter#whoami",
+            "LocalApiRouter#requirePerson",
+            "LocalApiRouter#runSession",
+            "SailOperations#runActor",
+            "SailOperations#boxActorForCredential",
+            "SessionAwareAuth#authenticateSession",
+            "TokenAuth#require",
+            "TokenAuth#roleOf",
+            "WebauthnAuthHandler#requireAdmin")) {
+      allowed.put(API + resolves, EVERY_DOOR);
+    }
+    for (var resolves :
+        List.of(
+            "commands/SyncServerCommand#principal",
+            "engine/CliOperator#of",
+            "engine/HostAccess#actorOf",
+            "engine/HostAccess#identity",
+            "engine/HostAccess#roleOf",
+            "ssh/SshGateway#authorize")) {
+      allowed.put("ai/singlr/sail/" + resolves, EVERY_DOOR);
     }
     allowed.put(RULES + "EventAuthority#decide", OWN_WORK);
+    allowed.put(API + "LocalApiRouter#messages", OWN_WORK);
+    allowed.put(API + "LocalApiRouter#project", OWN_WORK);
     allowed.put(
         API + "Event$Publisher#of", "fact: the role and lane an event's publisher acted on");
+    allowed.put(API + "LocalApiRouter#events", "fact: only a run credential has a run to narrate");
+    allowed.put(
+        API + "LocalApiRouter#runMessages", "fact: only a run credential has an inbox to read");
+    allowed.put(
+        API + "LocalApiRouter#markDeliveredOnSelfRead",
+        "fact: a run's read of its own room is a delivery");
+    allowed.put(API + "RoomCommitGuard#guardRoomRun", "fact: which runs are a room's wakes");
     allowed.put(RULES + "Attribution#decide", "fact: a push names only its pusher (attribution)");
     allowed.put(RULES + "MessageAuthority#mayPostAs", "fact: as whom a pusher posts (attribution)");
+    allowed.put(
+        RULES + "EventAuthority#refused", "fact: whose work a refused event's words describe");
     allowed.put(STORES + "Snapshots#creator", "fact: whom a write names its creator (attribution)");
     allowed.put(
         STORES + "Snapshots#adoptedCreator", "fact: whom a write names its creator (attribution)");
     allowed.put(STORES + "RoomStore$RoomSchema#apply", "fact: a room main decided is adopted");
     allowed.put(STORES + "RoomStore$RoomSchema#creatorOf", "fact: a room main decided is adopted");
+    allowed.put(
+        STORES + "RunStore$RunRow#principalActor",
+        "fact: which principal a run's credential stands for, by its lane");
     allowed.put(RULES + "RunAuthority#decide", "fact: which box executed a pushed run");
     allowed.put(RULES + "WriteAuthority#local", "fact: which box decides a write, main a push");
     allowed.put(SYNC_SERVER + "#<init>", "fact: a sync server serves a sync session alone");
+    allowed.put(SYNC_SERVER + "#result", "fact: a writing session's pushed run must name its node");
+    allowed.put(
+        SYNC_SERVER + "#serveContent",
+        "fact: content a read-only session sends is never stored, as main denies every offer it"
+            + " would carry");
+    allowed.put(
+        SYNC_SERVER + "#unshared",
+        "fact: a read-only session's offer is its rule's to deny, not unshared content's");
     return allowed;
   }
 
@@ -141,9 +214,25 @@ class OneDecisionSweepTest {
               leaky + "room",
               leaky + "allows",
               leaky + "capability",
-              leaky + "inALambda"),
+              leaky + "inALambda",
+              leaky + "sail",
+              leaky + "scope",
+              leaky + "actsFor",
+              leaky + "elevated",
+              leaky + "viaRule",
+              leaky + "viaAttribute",
+              leaky + "viaSwitch",
+              leaky + "viaPattern",
+              leaky + "returnsARole",
+              leaky + "roomWake"),
           reads(bytes.readAllBytes()));
     }
+  }
+
+  /** A source of roles that hides where they come from, as a door's resolver might. */
+  @FunctionalInterface
+  private interface Roles {
+    Role of(String handle);
   }
 
   /** What no class outside the access package does. */
@@ -182,6 +271,52 @@ class OneDecisionSweepTest {
 
     boolean inALambda(List<Actor> actors) {
       return actors.stream().anyMatch(Actor::isAdmin);
+    }
+
+    boolean sail(Actor actor) {
+      return actor.isSail();
+    }
+
+    boolean scope(Actor actor) {
+      return actor.scope().admits("acme");
+    }
+
+    boolean actsFor(Actor actor) {
+      return actor.actsFor("ada");
+    }
+
+    Actor elevated(String handle) {
+      return new Actor(handle, Role.ADMIN, Actor.Lane.CLI);
+    }
+
+    Object viaRule(RoleRule roles) {
+      return roles.roleOf("ada", null);
+    }
+
+    Object viaAttribute(String attribute) {
+      return Role.fromAttribute(attribute);
+    }
+
+    int viaSwitch(Role role) {
+      return switch (role) {
+        case VIEWER -> 0;
+        default -> 1;
+      };
+    }
+
+    int viaPattern(Object role) {
+      return switch (role) {
+        case Role found when found.ordinal() > 0 -> 1;
+        default -> 0;
+      };
+    }
+
+    Object returnsARole(Roles roles) {
+      return roles.of("ada");
+    }
+
+    boolean roomWake(RunStore.RunRow run) {
+      return run.readOnlyLane();
     }
   }
 
@@ -232,13 +367,26 @@ class OneDecisionSweepTest {
         && code.get().elementStream().anyMatch(element -> reads(referencesOf(element)));
   }
 
-  /** The members and types an instruction names, each as {@code owner#name} or {@code owner#}. */
+  /**
+   * The members and types an instruction names, each as {@code owner#name} or {@code owner#}: a
+   * call (and a call returning a {@link Role}, as {@code owner#}{@value #RETURNS_ROLE}), a field
+   * ({@link Role}'s constants among them, and the synthetic table a {@code switch} over a role
+   * reads), a type check or class constant, and what an {@code invokedynamic} hands its bootstrap:
+   * a method reference, or the types a pattern {@code switch} tests.
+   */
   private static List<String> referencesOf(Object element) {
     return switch (element) {
       case InvokeInstruction invoke ->
-          List.of(invoke.owner().asInternalName() + "#" + invoke.name().stringValue());
+          invoke.typeSymbol().returnType().descriptorString().equals("L" + ROLE + ";")
+              ? List.of(invoke.owner().asInternalName() + "#" + RETURNS_ROLE)
+              : List.of(invoke.owner().asInternalName() + "#" + invoke.name().stringValue());
       case FieldInstruction field ->
-          List.of(field.owner().asInternalName() + "#" + field.name().stringValue());
+          List.of(
+              field.owner().asInternalName()
+                  + "#"
+                  + (field.name().stringValue().equals("$SwitchMap$" + ROLE.replace('/', '$'))
+                      ? ROLE_SWITCH
+                      : field.name().stringValue()));
       case TypeCheckInstruction check -> List.of(check.type().asInternalName() + "#");
       case NewReferenceArrayInstruction array ->
           List.of(array.componentType().asInternalName() + "#");
@@ -246,9 +394,16 @@ class OneDecisionSweepTest {
           List.of(internal(type) + "#");
       case InvokeDynamicInstruction dynamic ->
           dynamic.bootstrapArgs().stream()
-              .filter(DirectMethodHandleDesc.class::isInstance)
-              .map(DirectMethodHandleDesc.class::cast)
-              .map(handle -> internal(handle.owner()) + "#" + handle.methodName())
+              .<String>mapMulti(
+                  (argument, out) -> {
+                    if (argument instanceof DirectMethodHandleDesc handle) {
+                      out.accept(internal(handle.owner()) + "#" + handle.methodName());
+                    } else if (argument instanceof ClassDesc type) {
+                      out.accept(internal(type) + "#");
+                    } else if (argument instanceof Enum.EnumDesc<?> constant) {
+                      out.accept(internal(constant.constantType()) + "#" + constant.constantName());
+                    }
+                  })
               .toList();
       default -> List.of();
     };
@@ -262,8 +417,12 @@ class OneDecisionSweepTest {
               var owner = reference.substring(0, hash);
               var member = reference.substring(hash + 1);
               return owner.equals(CAPABILITY)
-                  || owner.equals(ACTOR) && READS.contains(member)
-                  || owner.equals(ROLE) && member.equals("allows");
+                  || owner.startsWith(CALLER) && member.isEmpty()
+                  || owner.equals(ROLE)
+                      && (member.isEmpty() || Character.isUpperCase(member.charAt(0)))
+                  || member.equals(ROLE_SWITCH)
+                  || member.equals(RETURNS_ROLE)
+                  || READS.getOrDefault(owner, Set.of()).contains(member);
             });
   }
 

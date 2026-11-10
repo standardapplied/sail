@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Action;
-import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.ProjectServer;
 import ai.singlr.sail.engine.ShellExec;
@@ -92,7 +91,7 @@ public final class StackOperations {
    */
   public Ports serve(String project, Duration timeout)
       throws IOException, InterruptedException, TimeoutException {
-    require(Actor.current(), Action.SERVE, project);
+    Refusals.requireProject(Actor.current(), Action.SERVE, project, null);
     if (timeout.isNegative() || timeout.isZero() || timeout.compareTo(MAX_TIMEOUT) > 0) {
       throw new IllegalArgumentException(
           "A serve's timeout is 1 to "
@@ -106,14 +105,14 @@ public final class StackOperations {
 
   /** Where each declared port of {@code project} stands now, starting nothing. */
   public Ports ports(String project) throws IOException, InterruptedException, TimeoutException {
-    require(Actor.reader(), Action.READ, project);
+    Refusals.requireProject(Actor.reader(), Action.READ, project, null);
     var config = projects.loadRunning(project).config();
     return Ports.of(project, server().ports(project, config));
   }
 
   /** Stops {@code project}'s processes; its services keep running. */
   public Ports stop(String project) throws IOException, InterruptedException, TimeoutException {
-    require(Actor.current(), Action.SERVE, project);
+    Refusals.requireProject(Actor.current(), Action.SERVE, project, null);
     var config = projects.loadRunning(project).config();
     var server = server();
     server.stop(project);
@@ -127,15 +126,5 @@ public final class StackOperations {
             shell, new PrintStream(OutputStream.nullOutputStream(), true, StandardCharsets.UTF_8)),
         pause,
         nanos);
-  }
-
-  /**
-   * Refuses {@code action} on {@code project} unless {@code actor} may take it: a project it may
-   * not read is one the catalog does not hold. Neither Serve nor Read asks an owner, so the
-   * project's creator is not looked up.
-   */
-  private static void require(Actor actor, Action action, String project) {
-    Refusals.require(
-        actor, action, Resources.project(project, null), () -> ProjectReader.absent(project));
   }
 }

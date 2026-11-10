@@ -24,25 +24,29 @@ import org.junit.jupiter.api.Test;
 class PolicyTest {
 
   @Test
-  void aRoleColumnNeverGrantsOwnWork() {
-    var thrown =
+  void aRoleColumnNeverGrantsOwnWorkAndALaneColumnNeverSaysWhoseTheWorkIs() {
+    var ownWork =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new Policy.Row(Action.POST, Cell.NO, Cell.OWN_WORK, Cell.YES, Cell.YES, Cell.NO));
+    var owner =
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                new Policy.Row(
-                    Action.POST, Cell.NO, Cell.OWN_WORK, Cell.YES, Cell.YES, Cell.NO, Cell.YES));
+                new Policy.Row(Action.CHANGE, Cell.NO, Cell.OWNER, Cell.YES, Cell.NO, Cell.OWNER));
 
     assertEquals(
-        "The row of POST gives a role own work, which only an agent has.", thrown.getMessage());
+        "The row of POST gives a role own work, which only an agent has.", ownWork.getMessage());
+    assertEquals(
+        "The row of CHANGE gives a lane ownership, which only a role decides.", owner.getMessage());
     assertThrows(
         NullPointerException.class,
-        () -> new Policy.Row(Action.POST, Cell.NO, Cell.YES, Cell.YES, Cell.YES, Cell.NO, null));
+        () -> new Policy.Row(Action.POST, Cell.NO, Cell.YES, Cell.YES, Cell.YES, null));
   }
 
   @Test
   void theTableHoldsOneRowPerActionInOrder() {
-    var row =
-        new Policy.Row(Action.READ, Cell.YES, Cell.YES, Cell.YES, Cell.YES, Cell.YES, Cell.YES);
+    var row = new Policy.Row(Action.READ, Cell.YES, Cell.YES, Cell.YES, Cell.YES, Cell.YES);
 
     var thrown = assertThrows(IllegalArgumentException.class, () -> Policy.indexed(List.of(row)));
 
@@ -74,17 +78,6 @@ class PolicyTest {
             Actor.Lane.MAIN, false,
             Actor.Lane.SYSTEM, false),
         heard);
-  }
-
-  @Test
-  void theInContainerCredentialNarrowsNothingUntilItHasALane() {
-    assertEquals(
-        Arrays.stream(Action.values())
-            .collect(Collectors.toMap(Function.identity(), action -> Cell.YES)),
-        Arrays.stream(Action.values())
-            .collect(
-                Collectors.toMap(
-                    Function.identity(), action -> Policy.cell(action, Column.CONTAINER))));
   }
 
   @Test
