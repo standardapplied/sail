@@ -7,7 +7,6 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.api.Refusals;
-import ai.singlr.sail.authority.PostingRule;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
@@ -17,6 +16,7 @@ import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
@@ -75,7 +75,7 @@ public record HostAccess(Sqlite db, RoleRule roles) {
               + room.project()
               + ".");
     }
-    var refused = PostingRule.decide(actor, room.id(), true, new RoomStore(db).owners(room.id()));
+    var refused = new MessageStore(db).posting(actor, room.id(), room.project());
     if (refused.isPresent()) {
       throw Remedied.io(refused.get().message(), refused.get().fix());
     }

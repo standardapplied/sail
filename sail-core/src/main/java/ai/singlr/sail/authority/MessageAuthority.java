@@ -24,14 +24,12 @@ import java.util.Optional;
 /**
  * Who may post a message, and as whom. A message is a {@link Action#POST} in its conversation,
  * whose owners are {@link RoomStore#owners}, decided by {@link Access}; messages never change, so
- * there is only ever a create to decide. Then the facts. A conversation this box does not hold has
- * no owner here, so a post in it is refused unless the actor may change what no one owns. A post is
- * someone's: a credential acting for no FDE posts nothing. As whom: on this box's lanes the author
- * is the actor's own handle — a run's principal on the agent and room lanes. On {@link
- * Actor.Lane#SYNC} the pusher posts as itself, as a principal of any run it owns, or as the
- * pipeline ({@link MessageStore#SAIL_AUTHOR}) where a run it owns is in the conversation and it
- * steers the agents there itself ({@link RoomStore#steering}), since the pipeline's words steer
- * them all: a box whose work was reassigned narrates there no more.
+ * there is only ever a create to decide. Then the facts of posting ({@link #posting}), and as whom:
+ * on this box's lanes the author is the actor's own handle — a run's principal on the agent and
+ * room lanes. On {@link Actor.Lane#SYNC} the pusher posts as itself, as a principal of any run it
+ * owns, or as the pipeline ({@link MessageStore#SAIL_AUTHOR}) where a run it owns is in the
+ * conversation and it steers the agents there itself ({@link RoomStore#steering}), since the
+ * pipeline's words steer them all: a box whose work was reassigned narrates there no more.
  */
 public final class MessageAuthority implements WriteAuthority {
 
@@ -51,23 +49,13 @@ public final class MessageAuthority implements WriteAuthority {
   @Override
   public Optional<Refusal> decide(
       Actor actor, String id, Map<String, Object> held, Map<String, Object> next) {
-    if (WriteAuthority.decided(actor) || next == null) {
+    if (next == null) {
       return Optional.empty();
     }
     var roomId = MessageStore.roomIdOf(next);
-    var conversation =
-        Resources.conversation(
-            roomId, changeLog.projectOf("message", id, next), rooms.owners(roomId));
-    var posting = Refusal.of(Access.decide(actor, Action.POST, conversation), conversation);
+    var posting = posting(actor, roomId, changeLog.projectOf("message", id, next));
     if (posting.isPresent()) {
       return posting;
-    }
-    if (!rooms.holds(roomId, null)
-        && !(Access.decide(actor, Action.CHANGE, conversation) instanceof Decision.Allowed)) {
-      return Refusal.noConversation(roomId);
-    }
-    if (Strings.isBlank(actor.actingFde())) {
-      return Refusal.postedByNoOne(roomId);
     }
     var author = Snapshots.text(next, "author");
     if (!mayPostAs(actor, author, roomId)) {
@@ -77,6 +65,36 @@ public final class MessageAuthority implements WriteAuthority {
           "Post as yourself.");
     }
     return Optional.empty();
+  }
+
+  /**
+   * Why {@code actor} may not post in conversation {@code roomId}, filed under {@code project}:
+   * {@link Access} refuses the post, or one of two facts holds that only someone who may change the
+   * conversation itself passes (an admin, as it is ownerless to anyone else here). A conversation
+   * this box does not hold has no owner here, so it takes no post; and a post is someone's, so a
+   * credential acting for no FDE posts nothing. The journal asks it of every post, and the doors
+   * that admit a voice into a room ask it before anything is said there: the terminal's room pin
+   * and a room session's report.
+   */
+  public Optional<Refusal> posting(Actor actor, String roomId, String project) {
+    var conversation = Resources.conversation(roomId, project, rooms.owners(roomId));
+    var refused = WriteAuthority.refused(actor, Taking.of(conversation, Action.POST));
+    if (refused.isPresent()
+        || Access.decide(actor, Action.CHANGE, conversation) instanceof Decision.Allowed) {
+      return refused;
+    }
+    if (!rooms.holds(roomId, null)) {
+      return Refusal.of(
+          Refusal.Kind.NO_CONVERSATION,
+          "No conversation '" + roomId + "' is on this box: it was deleted, or never here.",
+          "Check the spec or room id.");
+    }
+    return Strings.isBlank(actor.actingFde())
+        ? Refusal.of(
+            Refusal.Kind.NOT_AUTHOR,
+            "This credential acts for no FDE, so a post in '" + roomId + "' would be no one's.",
+            "Post with an FDE's own credential.")
+        : Optional.empty();
   }
 
   private boolean mayPostAs(Actor actor, String author, String roomId) {

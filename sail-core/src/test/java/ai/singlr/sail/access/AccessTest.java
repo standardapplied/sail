@@ -14,6 +14,7 @@ import static ai.singlr.sail.access.AccessTest.Outcome.READ_ONLY;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.authority.Actors;
 import ai.singlr.sail.authority.Refusal;
@@ -27,6 +28,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -267,9 +269,9 @@ class AccessTest {
               List.of(READ_ONLY, ADMIN_ONLY, ALLOWED, ADMIN_ONLY, READ_ONLY),
               new Refusal(
                   Refusal.Kind.ADMIN_ONLY,
-                  "Pruning by policy or a whole project is admin-only.",
-                  Remedy.of(
-                      "Name the specs you own by id: ", Remedy.sail("spec prune", "<id...>"), ".")),
+                  "Only an admin may erase the name of project 'acme' everywhere, as purging or"
+                      + " renaming it does.",
+                  "Ask an admin to do it."),
               null),
           new Expected(
               Action.MANAGE_PEOPLE,
@@ -410,6 +412,40 @@ class AccessTest {
   }
 
   @Test
+  void seatingAnAgentForASpecBornInARoomTakesThatRoomsOwner() {
+    var inDen = Resources.spec("brief", "acme", "ada", "ada");
+
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'den' belongs to bob: only bob or an admin may start work there, not you.",
+            "Ask bob to seat it there, or have an admin do it."),
+        Access.decide(
+            Actors.OWNER_API,
+            Action.DISPATCH,
+            inDen.withParent(Resources.room("den", "acme", "bob"))));
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "No one owns 'den' yet, so only an admin may start work there.",
+            "Have an admin seat it."),
+        Access.decide(
+            Actors.OWNER_API,
+            Action.DISPATCH,
+            inDen.withParent(Resources.room("den", "acme", null))));
+    assertEquals(
+        new Decision.Allowed(),
+        Access.decide(
+            Actors.OWNER_API,
+            Action.DISPATCH,
+            inDen.withParent(Resources.room("den", "acme", "ada"))));
+    assertEquals(
+        new Decision.Allowed(),
+        Access.decide(
+            Actors.ADMIN, Action.DISPATCH, inDen.withParent(Resources.room("den", "acme", "bob"))));
+  }
+
+  @Test
   void anUnassignedSpecIsItsCreatorsAndNamesThem() {
     assertEquals(
         refused(
@@ -480,6 +516,26 @@ class AccessTest {
     assertEquals(acme, Access.audience(Actors.VIEWER.withScope(acme)));
     assertEquals(ProjectScope.all(), Access.audience(Actors.SYSTEM.withScope(acme)));
     assertEquals(ProjectScope.all(), Access.audience(Actors.MAIN.withScope(ProjectScope.none())));
+  }
+
+  @Test
+  void aRowIsReadByWhereItIsFiledWhichOnlyARestrictedReaderAsks() {
+    var acme = Actors.VIEWER.withScope(ProjectScope.of(List.of("acme")));
+    var asked = new ArrayList<String>();
+    Supplier<String> beta =
+        () -> {
+          asked.add("beta");
+          return "beta";
+        };
+
+    assertTrue(Access.reads(Actors.VIEWER, Resource.Kind.REVIEW, "rv-1", beta));
+    assertTrue(
+        Access.reads(
+            Actors.SYSTEM.withScope(ProjectScope.none()), Resource.Kind.REVIEW, "rv-1", beta));
+    assertEquals(List.of(), asked, "an unrestricted reader is never asked where a row is filed");
+    assertFalse(Access.reads(acme, Resource.Kind.REVIEW, "rv-1", beta));
+    assertTrue(Access.reads(acme, Resource.Kind.REVIEW, "rv-2", () -> "acme"));
+    assertEquals(List.of("beta"), asked);
   }
 
   @Test

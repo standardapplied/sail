@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -36,7 +37,8 @@ import org.junit.jupiter.api.io.TempDir;
  * and a room's agent — asks each door, rehearsed so the box is left as it was. A door that takes
  * the box it answers on is asked on ada's box and on bob's. A refusal is its door's code, HTTP
  * status, message and remedy; a success its response type and every id it shows, so a read's
- * audience is recorded with it ({@link #shown}).
+ * audience is recorded with it ({@link #shown}). A door asked directly, rather than through the
+ * operations, is asked only by whom production lets reach it ({@link Door#reaches}).
  *
  * <p>It lives beside the routers because the requests they parse are theirs alone; each is built by
  * the router's own parser.
@@ -68,8 +70,18 @@ class AccessDoorsBaselineTest {
 
   @TempDir Path tempDir;
 
-  /** One door: what is asked, and how. */
-  private record Door(String label, Ask ask) {}
+  /**
+   * One door: what is asked, and how, and who {@code reaches} it. A door asked directly is reached
+   * only with a subject its caller reads: production reads the subject in the caller's scope first,
+   * or only the box's operator, who sees every project, asks it. A subject outside the caller's
+   * scope never reaches it, so the corpus holds no such cell.
+   */
+  private record Door(String label, Ask ask, Predicate<Actor> reaches) {
+
+    Door(String label, Ask ask) {
+      this(label, ask, actor -> true);
+    }
+  }
 
   /** A door's question, which may answer, refuse, or fail. */
   @FunctionalInterface
@@ -103,6 +115,9 @@ class AccessDoorsBaselineTest {
                     continue;
                   }
                   for (var door : doors) {
+                    if (!door.reaches().test(member.actor())) {
+                      continue;
+                    }
                     corpus.put(
                         door.label() + " as " + member.label(),
                         world.rehearse(member.actor(), () -> answer(door, operations)));
@@ -171,10 +186,12 @@ class AccessDoorsBaselineTest {
   private static void specs(World world, List<Door> doors) {
     for (var box : BOXES) {
       for (var spec : List.of("s-ada", "s-bob", "s-open-ada", "s-busy", "s-beta")) {
+        var project = world.box.specs.findById(spec).orElseThrow().project();
         doors.add(
             new Door(
                 "dispatch " + spec + " on " + box + "'s box",
-                ops -> dispatchAdmission(world, spec, box)));
+                ops -> dispatchAdmission(world, spec, box),
+                actor -> actor.scope().admits(project)));
       }
     }
     for (var spec :
@@ -295,7 +312,8 @@ class AccessDoorsBaselineTest {
                         ops,
                         TestDefinitions.yaml(
                             "name: " + project + "\nagent:\n  type: claude-code\n"),
-                        handle)));
+                        handle),
+                actor -> actor.scope().admits(project)));
       }
     }
   }
@@ -398,9 +416,9 @@ class AccessDoorsBaselineTest {
   }
 
   /**
-   * The dispatch admission a build dispatch and a room's seating ask of a spec on {@code box}: the
-   * one door asked directly, since a dispatch through the operations first needs a running
-   * container. When the admission moves onto the access decision, this line is the one to re-point.
+   * The dispatch admission a build dispatch and a room's seating ask of a spec on {@code box},
+   * asked directly, since a dispatch through the operations first needs a running container: every
+   * dispatch reads its spec in the caller's scope first.
    */
   private static Object dispatchAdmission(World world, String spec, String box) {
     LaunchAdmission.requireAllowed(world.box.specs.findById(spec).orElseThrow().toSpec(), box);

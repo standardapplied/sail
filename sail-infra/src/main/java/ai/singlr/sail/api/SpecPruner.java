@@ -5,12 +5,7 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.access.Access;
-import ai.singlr.sail.access.Action;
-import ai.singlr.sail.access.Decision;
-import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.EraseAuthority;
-import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.RetentionConfig;
@@ -30,7 +25,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.IntFunction;
@@ -50,10 +44,10 @@ import java.util.function.Supplier;
  * unreferenced. A node never authors an erasure: it asks main for what main acknowledged, which
  * main decides on its own copy, and discards on the spot what it alone ever held.
  *
- * <p>Authority: never an agent, and otherwise the erase rule ({@link EraseAuthority}) main's own
- * decision on a node's request asks too: write capability; for a spec named by id, its owner or an
- * admin, and only once it is archived, cancelled or deleted with no run of it still going; a
- * policy, a project or retention, an admin only.
+ * <p>Authority: the erase rule ({@link EraseAuthority}), which main's own decision on a node's
+ * request asks too: a spec named by id is pruned by its owner or an admin, never an agent, and only
+ * once it is archived, cancelled or deleted with no run of it still going; a policy, a project or
+ * retention, by an admin only.
  */
 final class SpecPruner {
 
@@ -248,47 +242,14 @@ final class SpecPruner {
   }
 
   /**
-   * Refuses a prune that names no spec unless the bound actor may purge what it names: a whole
-   * project, or for a policy's sweep the project it narrows to, or every project. Purging is an
-   * admin's alone and no admin is scoped, so whether the caller sees the project is not asked
-   * ({@link Refusals#refusal}). A prune by id is decided spec by spec, as each is found ({@link
-   * #roots}).
+   * Refuses a prune that names no spec unless the bound actor may purge, which is an admin's alone
+   * ({@link EraseAuthority#request}): a whole project, or a policy's sweep. A prune by id is
+   * decided spec by spec, as each is found ({@link #roots}).
    */
   private void authorize(PruneRequest request) {
-    if (!request.ids().isEmpty()) {
-      return;
+    if (request.ids().isEmpty()) {
+      Refusals.enforce(authority.request(Actor.current(), true));
     }
-    var project = request.policy() == null ? request.project() : request.policy().project();
-    Refusals.enforce(
-        Refusals.refusal(Actor.current(), Action.PURGE, Resources.project(project, null)));
-  }
-
-  /**
-   * Whether spec {@code id} is erased already, once the bound actor may prune it ({@link
-   * Action#PRUNE}) as this box last knew it; one never recorded is not found. An erased spec leaves
-   * nothing to erase and no owner to name, so only a refusal that asks no owner stands for it.
-   */
-  private boolean alreadyErased(String id, Optional<SpecStore.LastKnown> spec) {
-    var erased = erasure.isErased(new Erasure.Target(Erasure.SPEC, id));
-    if (!erased && spec.isEmpty()) {
-      throw Refusals.specNotFound(id);
-    }
-    var known =
-        Resources.spec(
-            id,
-            specs.headProject(id).orElse(null),
-            spec.map(SpecStore.LastKnown::assignee).orElse(null),
-            spec.map(SpecStore.LastKnown::createdBy).orElse(null));
-    switch (Access.decide(Actor.current(), Action.PRUNE, known)) {
-      case Decision.Allowed allowed -> {}
-      case Decision.NotFound absent -> throw Refusals.specNotFound(id);
-      case Decision.Refused refused -> {
-        if (!erased || refused.refusal().kind() != Refusal.Kind.NOT_OWNER) {
-          throw Refusals.exception(refused.refusal());
-        }
-      }
-    }
-    return erased;
   }
 
   /**
@@ -301,12 +262,11 @@ final class SpecPruner {
   private List<Erasure.Target> roots(PruneRequest request, int limit) {
     var roots = new ArrayList<Erasure.Target>();
     for (var id : request.ids()) {
-      var spec = specs.lastKnown(id);
-      if (alreadyErased(id, spec)) {
-        continue;
+      Refusals.require(authority.prune(Actor.current(), id), () -> Refusals.specNotFound(id));
+      var target = new Erasure.Target(Erasure.SPEC, id);
+      if (!erasure.isErased(target)) {
+        roots.add(target);
       }
-      Refusals.enforce(authority.spec(Actor.current(), spec.orElseThrow()));
-      roots.add(new Erasure.Target(Erasure.SPEC, id));
     }
     if (request.policy() != null) {
       var policy = request.policy();

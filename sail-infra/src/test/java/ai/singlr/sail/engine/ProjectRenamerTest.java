@@ -127,7 +127,11 @@ class ProjectRenamerTest {
               () -> new ProjectRenamer(operations, shell, projectsDir).rename("old", "renamed"));
 
       assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, refused.failure().errorCode());
-      assertEquals("Ask an admin to rename it.", refused.failure().remedy().plain());
+      assertEquals(
+          "Only an admin may erase the name of project 'old' everywhere, as purging or renaming it"
+              + " does.",
+          refused.getMessage());
+      assertEquals("Ask an admin to do it.", refused.failure().remedy().plain());
     }
     assertTrue(
         shell.invocations().stream().noneMatch(c -> c.startsWith("incus stop")),

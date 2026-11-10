@@ -20,6 +20,7 @@ import static ai.singlr.sail.authority.Actors.VIEWER;
 import static ai.singlr.sail.authority.Actors.VIEWER_SYNC;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.authority.Refusal.Kind;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
@@ -111,7 +112,8 @@ class EraseAuthorityTest {
   @MethodSource("specs")
   void decidesASpec(Case row) {
     assertEquals(
-        Optional.ofNullable(row.refused()), rule.spec(row.actor(), row.spec()).map(Refusal::kind));
+        Optional.ofNullable(row.refused()),
+        refused(rule.spec(row.actor(), row.spec())).map(Refusal::kind));
   }
 
   @Test
@@ -132,9 +134,7 @@ class EraseAuthorityTest {
     var archived = spec(SpecStatus.ARCHIVED, OWNER, OWNER, true);
     var outsider = VIEWER.withScope(ProjectScope.of(List.of("beta")));
 
-    assertEquals(
-        Optional.of(new Refusal(Kind.OUT_OF_SCOPE, "Spec 'auth' was not found.", Remedy.NONE)),
-        rule.spec(outsider, archived));
+    assertEquals(new Decision.NotFound(), rule.spec(outsider, archived));
     assertEquals(
         Optional.of(
             new Refusal(
@@ -216,16 +216,16 @@ class EraseAuthorityTest {
         });
     var specs = new SpecStore(board.db);
 
-    assertEquals(Optional.empty(), rule.spec(scoped, specs.lastKnown("whole").orElseThrow()));
+    assertEquals(new Decision.Allowed(), rule.spec(scoped, specs.lastKnown("whole").orElseThrow()));
     assertEquals(
         Optional.of(
             new Refusal(
                 Kind.NOT_PRUNABLE,
                 "Pruning spec 'moved' would erase work outside your project scope.",
                 "Ask an admin to prune it.")),
-        rule.spec(scoped, specs.lastKnown("moved").orElseThrow()));
+        refused(rule.spec(scoped, specs.lastKnown("moved").orElseThrow())));
     assertEquals(
-        Optional.empty(),
+        new Decision.Allowed(),
         rule.spec(OWNER_API, specs.lastKnown("moved").orElseThrow()),
         "an owner main never scoped erases it whole");
     assertEquals(
@@ -271,7 +271,7 @@ class EraseAuthorityTest {
                 "Archive it first: ",
                 Remedy.sail("spec update", "auth", "--status", "archived"),
                 ".")),
-        rule.spec(ADMIN, spec(SpecStatus.IN_PROGRESS, OWNER, OWNER, true)).orElseThrow());
+        refused(rule.spec(ADMIN, spec(SpecStatus.IN_PROGRESS, OWNER, OWNER, true))).orElseThrow());
     assertEquals(
         new Refusal(
             Kind.READ_ONLY,
@@ -292,8 +292,14 @@ class EraseAuthorityTest {
         rule.request(OWNER_API, true).orElseThrow());
     assertEquals(
         "Spec 'auth' is assigned to 'ada', not you.",
-        rule.spec(OTHER_API, spec(SpecStatus.ARCHIVED, OWNER, OWNER, true))
+        refused(rule.spec(OTHER_API, spec(SpecStatus.ARCHIVED, OWNER, OWNER, true)))
             .orElseThrow()
             .message());
+  }
+
+  private static Optional<Refusal> refused(Decision decision) {
+    return decision instanceof Decision.Refused refused
+        ? Optional.of(refused.refusal())
+        : Optional.empty();
   }
 }

@@ -10,7 +10,6 @@ import static ai.singlr.sail.authority.Actors.ADMIN_SYNC;
 import static ai.singlr.sail.authority.Actors.AGENT;
 import static ai.singlr.sail.authority.Actors.AGENT_HANDLE;
 import static ai.singlr.sail.authority.Actors.MACHINE;
-import static ai.singlr.sail.authority.Actors.MAIN;
 import static ai.singlr.sail.authority.Actors.OTHER;
 import static ai.singlr.sail.authority.Actors.OTHERS_AGENT;
 import static ai.singlr.sail.authority.Actors.OTHER_API;
@@ -31,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import ai.singlr.sail.authority.Refusal.Kind;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Standing;
@@ -95,7 +95,6 @@ class MessageAuthorityTest {
         new Case("an admin posts anywhere", ADMIN, "den", "root", null),
         new Case("the owner's agent posts as itself", AGENT, "lobby", AGENT_HANDLE, null),
         new Case("the owner's room principal posts as itself", ROOM, "lobby", ROOM_HANDLE, null),
-        new Case("main's post is decided", MAIN, "den", OWNER, null),
         new Case("the pipeline narrates", SYSTEM, "den", "sail", null),
         new Case("another member posts in the owner's room", OTHER_API, "lobby", OTHER, null),
         new Case(
@@ -131,6 +130,12 @@ class MessageAuthorityTest {
             ROOM_HANDLE,
             Kind.NOT_OWNER),
         new Case("a machine credential posts as no one", MACHINE, "lobby", null, Kind.NOT_AUTHOR),
+        new Case(
+            "an admin acting for no FDE posts all the same",
+            new Actor(null, Role.ADMIN, Actor.Lane.CLI),
+            "lobby",
+            null,
+            null),
         new Case("a viewer posts nowhere", VIEWER, "lobby", OWNER, Kind.READ_ONLY),
         new Case("an agent posts as no FDE", AGENT, "lobby", OWNER, Kind.NOT_AUTHOR),
         new Case("a member posts as no one else", OWNER_API, "lobby", OTHER, Kind.NOT_AUTHOR),

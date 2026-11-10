@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
@@ -67,14 +69,15 @@ public final class HomeRoom {
 
   /**
    * Whether {@code actor}, acting as {@code handle}, has a home room in {@code project}: whether it
-   * may create one there ({@link Action#CREATE}), its audience aside ({@link Refusals#refusal}). A
-   * viewer posts in no room, so it has a home room in none, and whether it may see the project is
-   * the room creation's own to answer.
+   * may create one there ({@link Action#CREATE}). A viewer posts in no room, so it has a home room
+   * in none; nor has anyone in a project it may not read, though no caller asks of one: a project
+   * is read in its reader's scope before its home room is named, and the box's operator, who
+   * ensures one, sees every project.
    */
   static boolean has(Actor actor, String project, String handle) {
-    return Refusals.refusal(
+    return Access.decide(
             actor, Action.CREATE, Resources.room(idOf(project, handle), project, handle))
-        .isEmpty();
+        instanceof Decision.Allowed;
   }
 
   /**

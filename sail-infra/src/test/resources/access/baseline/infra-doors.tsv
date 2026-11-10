@@ -1395,632 +1395,436 @@ dismiss finding-ada as room viewer bob-room all	denied READ_ONLY_CREDENTIAL 403 
 dismiss finding-ada as room viewer bob-room beta	denied NOT_FOUND 404 Review 'review-ada' not found. | 
 dispatch s-ada on ada's box as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on ada's box as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-ada on ada's box as agent member ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on ada's box as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on ada's box as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-ada on ada's box as agent member bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on ada's box as agent viewer ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on ada's box as agent viewer ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-ada on ada's box as agent viewer ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on ada's box as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on ada's box as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-ada on ada's box as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on ada's box as api admin root all	ok admitted
 dispatch s-ada on ada's box as api member ada acme	ok admitted
 dispatch s-ada on ada's box as api member ada all	ok admitted
-dispatch s-ada on ada's box as api member ada beta	ok admitted
 dispatch s-ada on ada's box as api member bob acme	denied NOT_YOUR_SPEC 403 Spec 's-ada' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-ada on ada's box as api member bob all	denied NOT_YOUR_SPEC 403 Spec 's-ada' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
-dispatch s-ada on ada's box as api member bob beta	denied NOT_YOUR_SPEC 403 Spec 's-ada' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-ada on ada's box as api member machine all	denied NOT_YOUR_SPEC 403 Spec 's-ada' is assigned to 'ada', not you (''). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-ada on ada's box as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-ada on ada's box as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
-dispatch s-ada on ada's box as api viewer ada beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-ada on ada's box as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-ada on ada's box as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
-dispatch s-ada on ada's box as api viewer bob beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-ada on ada's box as cli admin root all	ok admitted
 dispatch s-ada on ada's box as cli member ada acme	ok admitted
 dispatch s-ada on ada's box as cli member ada all	ok admitted
-dispatch s-ada on ada's box as cli member ada beta	ok admitted
 dispatch s-ada on ada's box as cli member bob acme	denied NOT_YOUR_SPEC 403 Spec 's-ada' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-ada on ada's box as cli member bob all	denied NOT_YOUR_SPEC 403 Spec 's-ada' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
-dispatch s-ada on ada's box as cli member bob beta	denied NOT_YOUR_SPEC 403 Spec 's-ada' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-ada on ada's box as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-ada on ada's box as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
-dispatch s-ada on ada's box as cli viewer ada beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-ada on ada's box as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-ada on ada's box as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
-dispatch s-ada on ada's box as cli viewer bob beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-ada on ada's box as room viewer ada-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on ada's box as room viewer ada-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-ada on ada's box as room viewer ada-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on ada's box as room viewer bob-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on ada's box as room viewer bob-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-ada on ada's box as room viewer bob-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on bob's box as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on bob's box as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-ada on bob's box as agent member ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on bob's box as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on bob's box as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-ada on bob's box as agent member bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on bob's box as agent viewer ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on bob's box as agent viewer ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-ada on bob's box as agent viewer ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on bob's box as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on bob's box as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-ada on bob's box as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on bob's box as api admin root all	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as api member ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as api member ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
-dispatch s-ada on bob's box as api member ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as api member bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as api member bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
-dispatch s-ada on bob's box as api member bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as api member machine all	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as api viewer ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as api viewer ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
-dispatch s-ada on bob's box as api viewer ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as api viewer bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as api viewer bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
-dispatch s-ada on bob's box as api viewer bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as cli admin root all	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as cli member ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as cli member ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
-dispatch s-ada on bob's box as cli member ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as cli member bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as cli member bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
-dispatch s-ada on bob's box as cli member bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as cli viewer ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as cli viewer ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
-dispatch s-ada on bob's box as cli viewer ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as cli viewer bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as cli viewer bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
-dispatch s-ada on bob's box as cli viewer bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-ada' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-ada --assignee bob
 dispatch s-ada on bob's box as room viewer ada-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on bob's box as room viewer ada-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-ada on bob's box as room viewer ada-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on bob's box as room viewer bob-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-ada on bob's box as room viewer bob-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-ada on bob's box as room viewer bob-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-beta on ada's box as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on ada's box as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on ada's box as agent member ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-beta on ada's box as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on ada's box as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on ada's box as agent member bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-beta on ada's box as agent viewer ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on ada's box as agent viewer ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on ada's box as agent viewer ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-beta on ada's box as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on ada's box as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on ada's box as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on ada's box as api admin root all	ok admitted
-dispatch s-beta on ada's box as api member ada acme	ok admitted
 dispatch s-beta on ada's box as api member ada all	ok admitted
 dispatch s-beta on ada's box as api member ada beta	ok admitted
-dispatch s-beta on ada's box as api member bob acme	denied NOT_YOUR_SPEC 403 Spec 's-beta' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-beta on ada's box as api member bob all	denied NOT_YOUR_SPEC 403 Spec 's-beta' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-beta on ada's box as api member bob beta	denied NOT_YOUR_SPEC 403 Spec 's-beta' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-beta on ada's box as api member machine all	denied NOT_YOUR_SPEC 403 Spec 's-beta' is assigned to 'ada', not you (''). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
-dispatch s-beta on ada's box as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-beta on ada's box as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-beta on ada's box as api viewer ada beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
-dispatch s-beta on ada's box as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-beta on ada's box as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-beta on ada's box as api viewer bob beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-beta on ada's box as cli admin root all	ok admitted
-dispatch s-beta on ada's box as cli member ada acme	ok admitted
 dispatch s-beta on ada's box as cli member ada all	ok admitted
 dispatch s-beta on ada's box as cli member ada beta	ok admitted
-dispatch s-beta on ada's box as cli member bob acme	denied NOT_YOUR_SPEC 403 Spec 's-beta' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-beta on ada's box as cli member bob all	denied NOT_YOUR_SPEC 403 Spec 's-beta' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-beta on ada's box as cli member bob beta	denied NOT_YOUR_SPEC 403 Spec 's-beta' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
-dispatch s-beta on ada's box as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-beta on ada's box as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-beta on ada's box as cli viewer ada beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
-dispatch s-beta on ada's box as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-beta on ada's box as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-beta on ada's box as cli viewer bob beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
-dispatch s-beta on ada's box as room viewer ada-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on ada's box as room viewer ada-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on ada's box as room viewer ada-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-beta on ada's box as room viewer bob-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on ada's box as room viewer bob-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on ada's box as room viewer bob-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-beta on bob's box as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on bob's box as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on bob's box as agent member ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-beta on bob's box as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on bob's box as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on bob's box as agent member bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-beta on bob's box as agent viewer ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on bob's box as agent viewer ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on bob's box as agent viewer ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-beta on bob's box as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on bob's box as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on bob's box as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on bob's box as api admin root all	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
-dispatch s-beta on bob's box as api member ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as api member ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as api member ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
-dispatch s-beta on bob's box as api member bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as api member bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as api member bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as api member machine all	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
-dispatch s-beta on bob's box as api viewer ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as api viewer ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as api viewer ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
-dispatch s-beta on bob's box as api viewer bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as api viewer bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as api viewer bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as cli admin root all	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
-dispatch s-beta on bob's box as cli member ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as cli member ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as cli member ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
-dispatch s-beta on bob's box as cli member bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as cli member bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as cli member bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
-dispatch s-beta on bob's box as cli viewer ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as cli viewer ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as cli viewer ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
-dispatch s-beta on bob's box as cli viewer bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as cli viewer bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
 dispatch s-beta on bob's box as cli viewer bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-beta' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-beta --assignee bob
-dispatch s-beta on bob's box as room viewer ada-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on bob's box as room viewer ada-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on bob's box as room viewer ada-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-beta on bob's box as room viewer bob-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on bob's box as room viewer bob-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-beta on bob's box as room viewer bob-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on ada's box as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on ada's box as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-bob on ada's box as agent member ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on ada's box as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on ada's box as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-bob on ada's box as agent member bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on ada's box as agent viewer ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on ada's box as agent viewer ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-bob on ada's box as agent viewer ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on ada's box as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on ada's box as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-bob on ada's box as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on ada's box as api admin root all	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as api member ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as api member ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
-dispatch s-bob on ada's box as api member ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as api member bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as api member bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
-dispatch s-bob on ada's box as api member bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as api member machine all	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as api viewer ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as api viewer ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
-dispatch s-bob on ada's box as api viewer ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as api viewer bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as api viewer bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
-dispatch s-bob on ada's box as api viewer bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as cli admin root all	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as cli member ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as cli member ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
-dispatch s-bob on ada's box as cli member ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as cli member bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as cli member bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
-dispatch s-bob on ada's box as cli member bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as cli viewer ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as cli viewer ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
-dispatch s-bob on ada's box as cli viewer ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as cli viewer bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as cli viewer bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
-dispatch s-bob on ada's box as cli viewer bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-bob' is assigned to 'bob', which runs on that FDE's devbox, not this node ('ada'). | Reassign it to dispatch here: sail spec update s-bob --assignee ada
 dispatch s-bob on ada's box as room viewer ada-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on ada's box as room viewer ada-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-bob on ada's box as room viewer ada-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on ada's box as room viewer bob-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on ada's box as room viewer bob-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-bob on ada's box as room viewer bob-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on bob's box as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on bob's box as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-bob on bob's box as agent member ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on bob's box as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on bob's box as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-bob on bob's box as agent member bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on bob's box as agent viewer ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on bob's box as agent viewer ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-bob on bob's box as agent viewer ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on bob's box as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on bob's box as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-bob on bob's box as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on bob's box as api admin root all	ok admitted
 dispatch s-bob on bob's box as api member ada acme	denied NOT_YOUR_SPEC 403 Spec 's-bob' is assigned to 'bob', not you ('ada'). | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-bob on bob's box as api member ada all	denied NOT_YOUR_SPEC 403 Spec 's-bob' is assigned to 'bob', not you ('ada'). | Ask bob to dispatch it, or have an admin reassign it before dispatching.
-dispatch s-bob on bob's box as api member ada beta	denied NOT_YOUR_SPEC 403 Spec 's-bob' is assigned to 'bob', not you ('ada'). | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-bob on bob's box as api member bob acme	ok admitted
 dispatch s-bob on bob's box as api member bob all	ok admitted
-dispatch s-bob on bob's box as api member bob beta	ok admitted
 dispatch s-bob on bob's box as api member machine all	denied NOT_YOUR_SPEC 403 Spec 's-bob' is assigned to 'bob', not you (''). | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-bob on bob's box as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-bob on bob's box as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
-dispatch s-bob on bob's box as api viewer ada beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-bob on bob's box as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-bob on bob's box as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
-dispatch s-bob on bob's box as api viewer bob beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-bob on bob's box as cli admin root all	ok admitted
 dispatch s-bob on bob's box as cli member ada acme	denied NOT_YOUR_SPEC 403 Spec 's-bob' is assigned to 'bob', not you ('ada'). | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-bob on bob's box as cli member ada all	denied NOT_YOUR_SPEC 403 Spec 's-bob' is assigned to 'bob', not you ('ada'). | Ask bob to dispatch it, or have an admin reassign it before dispatching.
-dispatch s-bob on bob's box as cli member ada beta	denied NOT_YOUR_SPEC 403 Spec 's-bob' is assigned to 'bob', not you ('ada'). | Ask bob to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-bob on bob's box as cli member bob acme	ok admitted
 dispatch s-bob on bob's box as cli member bob all	ok admitted
-dispatch s-bob on bob's box as cli member bob beta	ok admitted
 dispatch s-bob on bob's box as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-bob on bob's box as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
-dispatch s-bob on bob's box as cli viewer ada beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-bob on bob's box as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-bob on bob's box as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
-dispatch s-bob on bob's box as cli viewer bob beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-bob on bob's box as room viewer ada-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on bob's box as room viewer ada-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-bob on bob's box as room viewer ada-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on bob's box as room viewer bob-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-bob on bob's box as room viewer bob-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-bob on bob's box as room viewer bob-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on ada's box as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on ada's box as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-busy on ada's box as agent member ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on ada's box as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on ada's box as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-busy on ada's box as agent member bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on ada's box as agent viewer ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on ada's box as agent viewer ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-busy on ada's box as agent viewer ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on ada's box as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on ada's box as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-busy on ada's box as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on ada's box as api admin root all	ok admitted
 dispatch s-busy on ada's box as api member ada acme	ok admitted
 dispatch s-busy on ada's box as api member ada all	ok admitted
-dispatch s-busy on ada's box as api member ada beta	ok admitted
 dispatch s-busy on ada's box as api member bob acme	denied NOT_YOUR_SPEC 403 Spec 's-busy' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-busy on ada's box as api member bob all	denied NOT_YOUR_SPEC 403 Spec 's-busy' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
-dispatch s-busy on ada's box as api member bob beta	denied NOT_YOUR_SPEC 403 Spec 's-busy' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-busy on ada's box as api member machine all	denied NOT_YOUR_SPEC 403 Spec 's-busy' is assigned to 'ada', not you (''). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-busy on ada's box as api viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-busy on ada's box as api viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
-dispatch s-busy on ada's box as api viewer ada beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-busy on ada's box as api viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-busy on ada's box as api viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
-dispatch s-busy on ada's box as api viewer bob beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-busy on ada's box as cli admin root all	ok admitted
 dispatch s-busy on ada's box as cli member ada acme	ok admitted
 dispatch s-busy on ada's box as cli member ada all	ok admitted
-dispatch s-busy on ada's box as cli member ada beta	ok admitted
 dispatch s-busy on ada's box as cli member bob acme	denied NOT_YOUR_SPEC 403 Spec 's-busy' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-busy on ada's box as cli member bob all	denied NOT_YOUR_SPEC 403 Spec 's-busy' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
-dispatch s-busy on ada's box as cli member bob beta	denied NOT_YOUR_SPEC 403 Spec 's-busy' is assigned to 'ada', not you ('bob'). | Ask ada to dispatch it, or have an admin reassign it before dispatching.
 dispatch s-busy on ada's box as cli viewer ada acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-busy on ada's box as cli viewer ada all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
-dispatch s-busy on ada's box as cli viewer ada beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-busy on ada's box as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-busy on ada's box as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
-dispatch s-busy on ada's box as cli viewer bob beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot dispatch specs. | Ask an admin for a member or admin credential.
 dispatch s-busy on ada's box as room viewer ada-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on ada's box as room viewer ada-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-busy on ada's box as room viewer ada-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on ada's box as room viewer bob-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on ada's box as room viewer bob-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-busy on ada's box as room viewer bob-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on bob's box as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on bob's box as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-busy on bob's box as agent member ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on bob's box as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on bob's box as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-busy on bob's box as agent member bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on bob's box as agent viewer ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on bob's box as agent viewer ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-busy on bob's box as agent viewer ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on bob's box as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on bob's box as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-busy on bob's box as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on bob's box as api admin root all	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as api member ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as api member ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
-dispatch s-busy on bob's box as api member ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as api member bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as api member bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
-dispatch s-busy on bob's box as api member bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as api member machine all	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as api viewer ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as api viewer ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
-dispatch s-busy on bob's box as api viewer ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as api viewer bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as api viewer bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
-dispatch s-busy on bob's box as api viewer bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as cli admin root all	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as cli member ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as cli member ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
-dispatch s-busy on bob's box as cli member ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as cli member bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as cli member bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
-dispatch s-busy on bob's box as cli member bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as cli viewer ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as cli viewer ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
-dispatch s-busy on bob's box as cli viewer ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as cli viewer bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as cli viewer bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
-dispatch s-busy on bob's box as cli viewer bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-busy' is assigned to 'ada', which runs on that FDE's devbox, not this node ('bob'). | Reassign it to dispatch here: sail spec update s-busy --assignee bob
 dispatch s-busy on bob's box as room viewer ada-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on bob's box as room viewer ada-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-busy on bob's box as room viewer ada-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on bob's box as room viewer bob-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-busy on bob's box as room viewer bob-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-busy on bob's box as room viewer bob-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on ada's box as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on ada's box as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-open-ada on ada's box as agent member ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on ada's box as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on ada's box as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-open-ada on ada's box as agent member bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on ada's box as agent viewer ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on ada's box as agent viewer ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-open-ada on ada's box as agent viewer ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on ada's box as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on ada's box as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-open-ada on ada's box as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on ada's box as api admin root all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as api member ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as api member ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
-dispatch s-open-ada on ada's box as api member ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as api member bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as api member bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
-dispatch s-open-ada on ada's box as api member bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as api member machine all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as api viewer ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as api viewer ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
-dispatch s-open-ada on ada's box as api viewer ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as api viewer bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as api viewer bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
-dispatch s-open-ada on ada's box as api viewer bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as cli admin root all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as cli member ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as cli member ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
-dispatch s-open-ada on ada's box as cli member ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as cli member bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as cli member bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
-dispatch s-open-ada on ada's box as cli member bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as cli viewer ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as cli viewer ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
-dispatch s-open-ada on ada's box as cli viewer ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as cli viewer bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as cli viewer bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
-dispatch s-open-ada on ada's box as cli viewer bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee ada
 dispatch s-open-ada on ada's box as room viewer ada-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on ada's box as room viewer ada-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-open-ada on ada's box as room viewer ada-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on ada's box as room viewer bob-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on ada's box as room viewer bob-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-open-ada on ada's box as room viewer bob-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on bob's box as agent member ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on bob's box as agent member ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-open-ada on bob's box as agent member ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on bob's box as agent member bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on bob's box as agent member bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-open-ada on bob's box as agent member bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on bob's box as agent viewer ada-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on bob's box as agent viewer ada-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-open-ada on bob's box as agent viewer ada-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on bob's box as agent viewer bob-agent acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on bob's box as agent viewer bob-agent all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-open-ada on bob's box as agent viewer bob-agent beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on bob's box as api admin root all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as api member ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as api member ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
-dispatch s-open-ada on bob's box as api member ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as api member bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as api member bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
-dispatch s-open-ada on bob's box as api member bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as api member machine all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as api viewer ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as api viewer ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
-dispatch s-open-ada on bob's box as api viewer ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as api viewer bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as api viewer bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
-dispatch s-open-ada on bob's box as api viewer bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as cli admin root all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as cli member ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as cli member ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
-dispatch s-open-ada on bob's box as cli member ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as cli member bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as cli member bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
-dispatch s-open-ada on bob's box as cli member bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as cli viewer ada acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as cli viewer ada all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
-dispatch s-open-ada on bob's box as cli viewer ada beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as cli viewer bob acme	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as cli viewer bob all	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
-dispatch s-open-ada on bob's box as cli viewer bob beta	denied RUNS_ON_OTHER_NODE 403 Spec 's-open-ada' is unassigned, so no node may dispatch it. | Claim it first: sail spec update s-open-ada --assignee bob
 dispatch s-open-ada on bob's box as room viewer ada-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on bob's box as room viewer ada-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-open-ada on bob's box as room viewer ada-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on bob's box as room viewer bob-room acme	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 dispatch s-open-ada on bob's box as room viewer bob-room all	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
-dispatch s-open-ada on bob's box as room viewer bob-room beta	denied AGENT_LANE_FORBIDDEN 403 Agent principals cannot dispatch specs. | Only an operator lane (CLI or API token) may do this.
 ensure the home room of ada in acme as agent member ada-agent acme	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of ada in acme as agent member ada-agent all	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
-ensure the home room of ada in acme as agent member ada-agent beta	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of ada in acme as agent member bob-agent acme	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of ada in acme as agent member bob-agent all	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
-ensure the home room of ada in acme as agent member bob-agent beta	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of ada in acme as agent viewer ada-agent acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in acme as agent viewer ada-agent all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of ada in acme as agent viewer ada-agent beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in acme as agent viewer bob-agent acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in acme as agent viewer bob-agent all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of ada in acme as agent viewer bob-agent beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in acme as api admin root all	denied NOT_YOUR_SPEC 403 Room 'acme--ada' belongs to 'root', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of ada in acme as api member ada acme	denied PROJECT_NOT_CREATED 404 Project 'acme' has no container on this box. | Create it: sail project apply acme
 ensure the home room of ada in acme as api member ada all	denied PROJECT_NOT_CREATED 404 Project 'acme' has no container on this box. | Create it: sail project apply acme
-ensure the home room of ada in acme as api member ada beta	denied PROJECT_NOT_CREATED 404 Project 'acme' has no container on this box. | Create it: sail project apply acme
 ensure the home room of ada in acme as api member bob acme	denied NOT_YOUR_SPEC 403 Room 'acme--ada' belongs to 'bob', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of ada in acme as api member bob all	denied NOT_YOUR_SPEC 403 Room 'acme--ada' belongs to 'bob', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
-ensure the home room of ada in acme as api member bob beta	denied NOT_YOUR_SPEC 403 Room 'acme--ada' belongs to 'bob', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of ada in acme as api member machine all	denied NOT_YOUR_SPEC 403 Room 'acme--ada' belongs to 'null', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of ada in acme as api viewer ada acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in acme as api viewer ada all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of ada in acme as api viewer ada beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in acme as api viewer bob acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in acme as api viewer bob all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of ada in acme as api viewer bob beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in acme as cli admin root all	denied NOT_YOUR_SPEC 403 Room 'acme--ada' belongs to 'root', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of ada in acme as cli member ada acme	denied PROJECT_NOT_CREATED 404 Project 'acme' has no container on this box. | Create it: sail project apply acme
 ensure the home room of ada in acme as cli member ada all	denied PROJECT_NOT_CREATED 404 Project 'acme' has no container on this box. | Create it: sail project apply acme
-ensure the home room of ada in acme as cli member ada beta	denied PROJECT_NOT_CREATED 404 Project 'acme' has no container on this box. | Create it: sail project apply acme
 ensure the home room of ada in acme as cli member bob acme	denied NOT_YOUR_SPEC 403 Room 'acme--ada' belongs to 'bob', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of ada in acme as cli member bob all	denied NOT_YOUR_SPEC 403 Room 'acme--ada' belongs to 'bob', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
-ensure the home room of ada in acme as cli member bob beta	denied NOT_YOUR_SPEC 403 Room 'acme--ada' belongs to 'bob', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of ada in acme as cli viewer ada acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in acme as cli viewer ada all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of ada in acme as cli viewer ada beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in acme as cli viewer bob acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in acme as cli viewer bob all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of ada in acme as cli viewer bob beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in acme as room viewer ada-room acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in acme as room viewer ada-room all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of ada in acme as room viewer ada-room beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in acme as room viewer bob-room acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in acme as room viewer bob-room all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of ada in acme as room viewer bob-room beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of ada in beta as agent member ada-agent acme	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of ada in beta as agent member ada-agent all	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of ada in beta as agent member ada-agent beta	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
-ensure the home room of ada in beta as agent member bob-agent acme	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of ada in beta as agent member bob-agent all	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of ada in beta as agent member bob-agent beta	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
-ensure the home room of ada in beta as agent viewer ada-agent acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as agent viewer ada-agent all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as agent viewer ada-agent beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of ada in beta as agent viewer bob-agent acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as agent viewer bob-agent all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as agent viewer bob-agent beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as api admin root all	denied NOT_YOUR_SPEC 403 Room 'beta--ada' belongs to 'root', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
-ensure the home room of ada in beta as api member ada acme	denied PROJECT_NOT_CREATED 404 Project 'beta' has no container on this box. | Create it: sail project apply beta
 ensure the home room of ada in beta as api member ada all	denied PROJECT_NOT_CREATED 404 Project 'beta' has no container on this box. | Create it: sail project apply beta
 ensure the home room of ada in beta as api member ada beta	denied PROJECT_NOT_CREATED 404 Project 'beta' has no container on this box. | Create it: sail project apply beta
-ensure the home room of ada in beta as api member bob acme	denied NOT_YOUR_SPEC 403 Room 'beta--ada' belongs to 'bob', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of ada in beta as api member bob all	denied NOT_YOUR_SPEC 403 Room 'beta--ada' belongs to 'bob', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of ada in beta as api member bob beta	denied NOT_YOUR_SPEC 403 Room 'beta--ada' belongs to 'bob', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of ada in beta as api member machine all	denied NOT_YOUR_SPEC 403 Room 'beta--ada' belongs to 'null', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
-ensure the home room of ada in beta as api viewer ada acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as api viewer ada all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as api viewer ada beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of ada in beta as api viewer bob acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as api viewer bob all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as api viewer bob beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as cli admin root all	denied NOT_YOUR_SPEC 403 Room 'beta--ada' belongs to 'root', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
-ensure the home room of ada in beta as cli member ada acme	denied PROJECT_NOT_CREATED 404 Project 'beta' has no container on this box. | Create it: sail project apply beta
 ensure the home room of ada in beta as cli member ada all	denied PROJECT_NOT_CREATED 404 Project 'beta' has no container on this box. | Create it: sail project apply beta
 ensure the home room of ada in beta as cli member ada beta	denied PROJECT_NOT_CREATED 404 Project 'beta' has no container on this box. | Create it: sail project apply beta
-ensure the home room of ada in beta as cli member bob acme	denied NOT_YOUR_SPEC 403 Room 'beta--ada' belongs to 'bob', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of ada in beta as cli member bob all	denied NOT_YOUR_SPEC 403 Room 'beta--ada' belongs to 'bob', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of ada in beta as cli member bob beta	denied NOT_YOUR_SPEC 403 Room 'beta--ada' belongs to 'bob', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
-ensure the home room of ada in beta as cli viewer ada acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as cli viewer ada all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as cli viewer ada beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of ada in beta as cli viewer bob acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as cli viewer bob all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as cli viewer bob beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of ada in beta as room viewer ada-room acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as room viewer ada-room all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as room viewer ada-room beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of ada in beta as room viewer bob-room acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as room viewer bob-room all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of ada in beta as room viewer bob-room beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as agent member ada-agent acme	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of bob in acme as agent member ada-agent all	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
-ensure the home room of bob in acme as agent member ada-agent beta	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of bob in acme as agent member bob-agent acme	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of bob in acme as agent member bob-agent all	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
-ensure the home room of bob in acme as agent member bob-agent beta	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of bob in acme as agent viewer ada-agent acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as agent viewer ada-agent all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of bob in acme as agent viewer ada-agent beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as agent viewer bob-agent acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as agent viewer bob-agent all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of bob in acme as agent viewer bob-agent beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as api admin root all	denied NOT_YOUR_SPEC 403 Room 'acme--bob' belongs to 'root', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of bob in acme as api member ada acme	denied NOT_YOUR_SPEC 403 Room 'acme--bob' belongs to 'ada', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of bob in acme as api member ada all	denied NOT_YOUR_SPEC 403 Room 'acme--bob' belongs to 'ada', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
-ensure the home room of bob in acme as api member ada beta	denied NOT_YOUR_SPEC 403 Room 'acme--bob' belongs to 'ada', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of bob in acme as api member bob acme	denied PROJECT_NOT_CREATED 404 Project 'acme' has no container on this box. | Create it: sail project apply acme
 ensure the home room of bob in acme as api member bob all	denied PROJECT_NOT_CREATED 404 Project 'acme' has no container on this box. | Create it: sail project apply acme
-ensure the home room of bob in acme as api member bob beta	denied PROJECT_NOT_CREATED 404 Project 'acme' has no container on this box. | Create it: sail project apply acme
 ensure the home room of bob in acme as api member machine all	denied NOT_YOUR_SPEC 403 Room 'acme--bob' belongs to 'null', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of bob in acme as api viewer ada acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as api viewer ada all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of bob in acme as api viewer ada beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as api viewer bob acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as api viewer bob all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of bob in acme as api viewer bob beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as cli admin root all	denied NOT_YOUR_SPEC 403 Room 'acme--bob' belongs to 'root', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of bob in acme as cli member ada acme	denied NOT_YOUR_SPEC 403 Room 'acme--bob' belongs to 'ada', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of bob in acme as cli member ada all	denied NOT_YOUR_SPEC 403 Room 'acme--bob' belongs to 'ada', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
-ensure the home room of bob in acme as cli member ada beta	denied NOT_YOUR_SPEC 403 Room 'acme--bob' belongs to 'ada', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of bob in acme as cli member bob acme	denied PROJECT_NOT_CREATED 404 Project 'acme' has no container on this box. | Create it: sail project apply acme
 ensure the home room of bob in acme as cli member bob all	denied PROJECT_NOT_CREATED 404 Project 'acme' has no container on this box. | Create it: sail project apply acme
-ensure the home room of bob in acme as cli member bob beta	denied PROJECT_NOT_CREATED 404 Project 'acme' has no container on this box. | Create it: sail project apply acme
 ensure the home room of bob in acme as cli viewer ada acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as cli viewer ada all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of bob in acme as cli viewer ada beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as cli viewer bob acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as cli viewer bob all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of bob in acme as cli viewer bob beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as room viewer ada-room acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as room viewer ada-room all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of bob in acme as room viewer ada-room beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as room viewer bob-room acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in acme as room viewer bob-room all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of bob in acme as room viewer bob-room beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of bob in beta as agent member ada-agent acme	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of bob in beta as agent member ada-agent all	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of bob in beta as agent member ada-agent beta	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
-ensure the home room of bob in beta as agent member bob-agent acme	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of bob in beta as agent member bob-agent all	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
 ensure the home room of bob in beta as agent member bob-agent beta	denied FORBIDDEN 403 Agent credentials cannot manage room membership. | Ask the engineer in the room to do it.
-ensure the home room of bob in beta as agent viewer ada-agent acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as agent viewer ada-agent all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as agent viewer ada-agent beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of bob in beta as agent viewer bob-agent acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as agent viewer bob-agent all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as agent viewer bob-agent beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as api admin root all	denied NOT_YOUR_SPEC 403 Room 'beta--bob' belongs to 'root', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
-ensure the home room of bob in beta as api member ada acme	denied NOT_YOUR_SPEC 403 Room 'beta--bob' belongs to 'ada', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of bob in beta as api member ada all	denied NOT_YOUR_SPEC 403 Room 'beta--bob' belongs to 'ada', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of bob in beta as api member ada beta	denied NOT_YOUR_SPEC 403 Room 'beta--bob' belongs to 'ada', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
-ensure the home room of bob in beta as api member bob acme	denied PROJECT_NOT_CREATED 404 Project 'beta' has no container on this box. | Create it: sail project apply beta
 ensure the home room of bob in beta as api member bob all	denied PROJECT_NOT_CREATED 404 Project 'beta' has no container on this box. | Create it: sail project apply beta
 ensure the home room of bob in beta as api member bob beta	denied PROJECT_NOT_CREATED 404 Project 'beta' has no container on this box. | Create it: sail project apply beta
 ensure the home room of bob in beta as api member machine all	denied NOT_YOUR_SPEC 403 Room 'beta--bob' belongs to 'null', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
-ensure the home room of bob in beta as api viewer ada acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as api viewer ada all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as api viewer ada beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of bob in beta as api viewer bob acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as api viewer bob all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as api viewer bob beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as cli admin root all	denied NOT_YOUR_SPEC 403 Room 'beta--bob' belongs to 'root', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
-ensure the home room of bob in beta as cli member ada acme	denied NOT_YOUR_SPEC 403 Room 'beta--bob' belongs to 'ada', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of bob in beta as cli member ada all	denied NOT_YOUR_SPEC 403 Room 'beta--bob' belongs to 'ada', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
 ensure the home room of bob in beta as cli member ada beta	denied NOT_YOUR_SPEC 403 Room 'beta--bob' belongs to 'ada', whose box serves its agents. | Manage the room from that box, or have an admin reassign it.
-ensure the home room of bob in beta as cli member bob acme	denied PROJECT_NOT_CREATED 404 Project 'beta' has no container on this box. | Create it: sail project apply beta
 ensure the home room of bob in beta as cli member bob all	denied PROJECT_NOT_CREATED 404 Project 'beta' has no container on this box. | Create it: sail project apply beta
 ensure the home room of bob in beta as cli member bob beta	denied PROJECT_NOT_CREATED 404 Project 'beta' has no container on this box. | Create it: sail project apply beta
-ensure the home room of bob in beta as cli viewer ada acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as cli viewer ada all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as cli viewer ada beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of bob in beta as cli viewer bob acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as cli viewer bob all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as cli viewer bob beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of bob in beta as room viewer ada-room acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as room viewer ada-room all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as room viewer ada-room beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
-ensure the home room of bob in beta as room viewer bob-room acme	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as room viewer bob-room all	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 ensure the home room of bob in beta as room viewer bob-room beta	ok Outcome {skipped=this box's FDE holds a read-only credential and posts in no room, so it has no home room}
 list files of acme as agent member ada-agent acme	ok List

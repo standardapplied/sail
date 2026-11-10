@@ -9,11 +9,9 @@ import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Resource;
-import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.ProjectScope;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
@@ -91,25 +89,18 @@ public final class Refusals {
       Action action,
       Resource resource,
       Supplier<? extends RuntimeException> notFound) {
-    switch (Access.decide(actor, action, resource)) {
+    require(Access.decide(actor, action, resource), notFound);
+  }
+
+  /**
+   * Throws unless {@code decision} allows: not found is {@code notFound}, a refusal its exception.
+   */
+  static void require(Decision decision, Supplier<? extends RuntimeException> notFound) {
+    switch (decision) {
       case Decision.Allowed allowed -> {}
       case Decision.NotFound absent -> throw notFound.get();
       case Decision.Refused refused -> throw exception(refused.refusal());
     }
-  }
-
-  /**
-   * Why {@code actor} may not take {@code action} on {@code resource}, its audience aside; empty if
-   * it may. A door asks this where the audience is settled already or beside the point: a launch or
-   * a stop is of work its caller found by a read, which decided the audience; a purge is an admin's
-   * alone, and no admin is scoped; a home room is had by whoever may create one. So only the role,
-   * the lane and the owner decide.
-   */
-  static Optional<Refusal> refusal(Actor actor, Action action, Resource resource) {
-    return Access.decide(actor.withScope(ProjectScope.all()), action, resource)
-            instanceof Decision.Refused refused
-        ? Optional.of(refused.refusal())
-        : Optional.empty();
   }
 
   /**
@@ -137,16 +128,15 @@ public final class Refusals {
 
   /**
    * Whether {@code actor} may read a row: one of {@code kind} whose id {@code id} names, filed
-   * under the project {@code project} names ({@link Resources#filed}).
+   * under the project {@code project} names, asked only of a row a restricted reader reads ({@link
+   * Access#reads}).
    */
   public static <T> Predicate<T> readable(
       Actor actor,
       Resource.Kind kind,
       Function<? super T, String> id,
       Function<? super T, String> project) {
-    return row ->
-        Access.decide(actor, Action.READ, Resources.filed(kind, id.apply(row), project.apply(row)))
-            instanceof Decision.Allowed;
+    return row -> Access.reads(actor, kind, id.apply(row), () -> project.apply(row));
   }
 
   /** Throws {@code refusal}'s exception, if the rule refused; a no-op when it allowed. */

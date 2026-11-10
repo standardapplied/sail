@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.authority;
 
-import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.identity.Actor;
@@ -42,15 +41,13 @@ public final class RoomAuthority implements WriteAuthority {
   @Override
   public Optional<Refusal> decide(
       Actor actor, String id, Map<String, Object> held, Map<String, Object> next) {
-    if (WriteAuthority.decided(actor)) {
-      return Optional.empty();
-    }
     var room =
         held == null
             ? Resources.room(id, Snapshots.text(next, PROJECT), null)
             : Resources.room(id, Snapshots.text(held, PROJECT), rooms.ownerOf(id, held));
     var refused =
-        Refusal.of(Access.decide(actor, held == null ? Action.CREATE : Action.CHANGE, room), room);
+        WriteAuthority.refused(
+            actor, Taking.of(room, held == null ? Action.CREATE : Action.CHANGE));
     if (refused.isPresent()) {
       return refused;
     }

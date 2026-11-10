@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.TestDefinitions;
@@ -370,9 +371,9 @@ class ScopeRuleTest {
     var admin = new Actor("nia", Role.ADMIN, Actor.Lane.API).withScope(ONLY_A);
 
     assertEquals(
-        Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Spec 'beta-work' was not found.", Remedy.NONE),
-        erase.spec(admin, specs.lastKnown("beta-work").orElseThrow()));
-    assertEquals(Optional.empty(), erase.spec(admin, specs.lastKnown("alpha-work").orElseThrow()));
+        new Decision.NotFound(), erase.spec(admin, specs.lastKnown("beta-work").orElseThrow()));
+    assertEquals(
+        new Decision.Allowed(), erase.spec(admin, specs.lastKnown("alpha-work").orElseThrow()));
     assertEquals(
         Refusal.of(
             Refusal.Kind.NOT_PRUNABLE,

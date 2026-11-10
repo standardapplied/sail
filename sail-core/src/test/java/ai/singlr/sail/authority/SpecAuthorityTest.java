@@ -278,7 +278,6 @@ class SpecAuthorityTest {
             OWNED,
             with(OWNED, "room_id", "den"),
             Kind.FIXED),
-        allows("main moves nothing it did not decide", MAIN, OWNED, with(OWNED, "room_id", "den")),
         allows("a push authored by its pusher", OWNER_SYNC, OWNED, with(edited, "_actor", OWNER)),
         allows(
             "a push authored by the machinery", OWNER_SYNC, OWNED, with(edited, "_actor", "sail")),

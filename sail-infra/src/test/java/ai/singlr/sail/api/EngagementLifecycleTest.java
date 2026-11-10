@@ -632,7 +632,11 @@ class EngagementLifecycleTest {
                               ? ops.engage("child", "claude-code", null, null, false, HANDLE)
                               : ops.disengage("child", HANDLE)));
       assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.failure().errorCode());
-      assertEquals("Room 'den' belongs to 'bob', not you.", refused.getMessage());
+      assertEquals(
+          "'den' belongs to bob: only bob or an admin may start work there, not you.",
+          refused.getMessage());
+      assertEquals(
+          "Ask bob to seat it there, or have an admin do it.", refused.failure().remedy().plain());
     }
     assertEquals(List.of(), probed, "nothing is probed or launched");
     assertNull(roomMember("den"));

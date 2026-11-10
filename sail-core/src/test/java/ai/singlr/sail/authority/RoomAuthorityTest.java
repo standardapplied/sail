@@ -236,7 +236,14 @@ class RoomAuthorityTest {
   @Test
   void aRoomOutsideTheActorsScopeIsOneItCannotFind() {
     assertEquals(
-        Optional.of(new Refusal(Kind.OUT_OF_SCOPE, "Room 'lobby' was not found.", Remedy.NONE)),
+        Optional.of(
+            new Refusal(
+                Kind.OUT_OF_SCOPE,
+                "Room 'lobby' is in no project this FDE is granted.",
+                Remedy.of(
+                    "Ask an admin on main for the project: ",
+                    Remedy.sail("fde grant", "<handle>", "<project>"),
+                    "."))),
         rule.decide(
             OWNER_API.withScope(ProjectScope.of(List.of("beta"))),
             "lobby",

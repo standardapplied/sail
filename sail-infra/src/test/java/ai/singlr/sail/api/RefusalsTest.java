@@ -137,10 +137,20 @@ class RefusalsTest {
   }
 
   @Test
-  void aRefusalOnceReadLeavesTheAudienceAsideAndKeepsTheRole() {
-    assertEquals(Optional.empty(), Refusals.refusal(OF_ALPHA, Action.SERVE, BRAVO));
+  void anUnrestrictedReadNeverAsksTheProject() {
+    var rows = List.of("b1", "unplaced");
+    Function<String, String> neverAsked =
+        row -> {
+          throw new AssertionError("an unrestricted read asked the project of " + row);
+        };
+
     assertEquals(
-        Refusal.readOnly("serve projects"), Refusals.refusal(VIEWER_OF_ALPHA, Action.SERVE, BRAVO));
+        rows,
+        Refusals.readable(UNRESTRICTED, rows, Resource.Kind.SPEC, Function.identity(), neverAsked));
+    assertEquals(
+        Optional.of("b1"),
+        Refusals.readable(
+            UNRESTRICTED, Optional.of("b1"), Resource.Kind.SPEC, Function.identity(), neverAsked));
   }
 
   private static Optional<String> read(Actor actor, Optional<String> row) {

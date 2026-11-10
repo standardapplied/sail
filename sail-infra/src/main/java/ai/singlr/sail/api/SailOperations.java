@@ -10,7 +10,6 @@ import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
-import ai.singlr.sail.authority.PostingRule;
 import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -1875,7 +1874,7 @@ public final class SailOperations implements HostOperations {
                   since,
                   limit,
                   Event.WellKnownTypes.TELEMETRY_TYPES,
-                  Actor.reader().scope());
+                  Access.audience(Actor.reader()));
           var maps = rows.stream().map(SailOperations::eventRowMap).toList();
           return new SpecEventsResponse(specId, since, limit, maps.size(), maps);
         });
@@ -2144,8 +2143,7 @@ public final class SailOperations implements HostOperations {
             throw new ApiException(ErrorCode.BAD_REQUEST, "session_id must not be blank.");
           }
           var room = requireRoomOrSpec(roomId);
-          Refusals.enforce(
-              PostingRule.decide(actor, room.id(), true, requireRoomStore().owners(room.id())));
+          Refusals.enforce(requireMessageStore().posting(actor, room.id(), room.project()));
           var cli = Strings.isBlank(agent) ? null : agent.strip();
           var data = new LinkedHashMap<String, Object>();
           data.put("room_id", room.id());

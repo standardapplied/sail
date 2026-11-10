@@ -189,8 +189,9 @@ class WriteAuthorityTest {
     assertEquals(
         new Refusal(
             Kind.ADMIN_ONLY,
-            "Pruning by policy or a whole project is admin-only.",
-            Remedy.of("Name the specs you own by id: ", Remedy.sail("spec prune", "<id...>"), ".")),
+            "Only an admin may erase the name of project 'acme' everywhere, as purging or renaming"
+                + " it does.",
+            "Ask an admin to do it."),
         projects.decide(OWNER_API, "acme", HELD, RENAMED).orElseThrow());
   }
 

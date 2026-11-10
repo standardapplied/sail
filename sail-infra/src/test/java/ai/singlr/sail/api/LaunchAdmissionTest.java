@@ -163,13 +163,17 @@ class LaunchAdmissionTest {
   }
 
   @Test
-  void requireAllowedLeavesTheAudienceToTheReadThatFoundTheSpec() {
-    assertDoesNotThrow(
-        () ->
-            Actor.run(
-                new Actor("uday", Role.MEMBER, Actor.Lane.API)
-                    .withScope(ProjectScope.of(List.of("beta"))),
-                () -> LaunchAdmission.requireAllowed(spec("uday"), "uday")));
+  void aSpecOutsideTheActorsScopeIsNotFoundBeforeAnythingElseIsAsked() {
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.run(
+                    new Actor("uday", Role.MEMBER, Actor.Lane.API)
+                        .withScope(ProjectScope.of(List.of("beta"))),
+                    () -> LaunchAdmission.requireAllowed(spec("uday"), "uday")));
+    assertEquals(ErrorCode.SPEC_NOT_FOUND, ex.failure().errorCode());
+    assertEquals("Spec 'auth' was not found.", ex.getMessage());
   }
 
   @Test
@@ -280,9 +284,16 @@ class LaunchAdmissionTest {
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, viewer.failure().errorCode());
     assertEquals("Your credential is read-only and cannot dispatch rooms.", viewer.getMessage());
 
-    Actor.run(
-        new Actor("uday", Role.MEMBER, Actor.Lane.API).withScope(ProjectScope.of(List.of("beta"))),
-        () -> LaunchAdmission.requireAllowedForRoom("chat", "acme", "uday", "uday"));
+    var outside =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.run(
+                    new Actor("uday", Role.MEMBER, Actor.Lane.API)
+                        .withScope(ProjectScope.of(List.of("beta"))),
+                    () -> LaunchAdmission.requireAllowedForRoom("chat", "acme", "uday", "uday")));
+    assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, outside.failure().errorCode());
+    assertEquals("Project 'acme' is not in the catalog.", outside.getMessage());
 
     var noHandle =
         assertThrows(

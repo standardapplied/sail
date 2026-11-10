@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
@@ -498,7 +499,7 @@ final class GlobalSpecOperations {
   GlobalBoardResponse board(String project) {
     requireStore();
     return new GlobalBoardResponse(
-        specStore.board(project, Actor.reader().scope()), doneOpenFindings(project));
+        specStore.board(project, Access.audience(Actor.reader())), doneOpenFindings(project));
   }
 
   /**

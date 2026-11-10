@@ -206,8 +206,7 @@ public final class StopOperations {
                 Resource.Kind.RUN,
                 RunStore.RunRow::id,
                 RunStore.RunRow::project)
-            .orElseThrow(
-                () -> new ApiException(ErrorCode.RUN_NOT_FOUND, "No run '" + runId + "'."));
+            .orElseThrow(() -> noRun(runId));
     authorize(run, dryRun);
     if (!run.ownedBy(localHandle)) {
       var node = Strings.isBlank(run.node()) ? "an unknown node" : run.node();
@@ -586,12 +585,16 @@ public final class StopOperations {
         Strings.isBlank(run.specId())
             ? null
             : ownerSeen(Actor.reader(), specStore.findById(run.specId())).orElse(null);
-    Refusals.enforce(
-        Refusals.refusal(
-            Actor.current(),
-            Action.OPERATE_RUN,
-            Resources.run(
-                run.id(), run.project(), run.owner(), run.specId(), run.node(), specOwner)));
+    Refusals.require(
+        Actor.current(),
+        Action.OPERATE_RUN,
+        Resources.run(run.id(), run.project(), run.owner(), run.specId(), run.node(), specOwner),
+        () -> noRun(run.id()));
+  }
+
+  /** The answer for run {@code runId} the caller cannot find: one it may not read is not there. */
+  private static ApiException noRun(String runId) {
+    return new ApiException(ErrorCode.RUN_NOT_FOUND, "No run '" + runId + "'.");
   }
 
   /**

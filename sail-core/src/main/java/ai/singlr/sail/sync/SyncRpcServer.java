@@ -6,9 +6,6 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.access.Access;
-import ai.singlr.sail.access.Action;
-import ai.singlr.sail.access.Decision;
-import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.EraseAuthority;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.ScopeRule;
@@ -38,6 +35,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Main's side of one sync session: a request loop over the SSH channel's stdio. Nothing is served
@@ -324,7 +322,7 @@ public final class SyncRpcServer {
    * head files it ({@link #reads}).
    */
   private boolean admits(String type, String id) {
-    return reads(type, id, headProject(type, id));
+    return reads(type, id, () -> headProject(type, id));
   }
 
   /**
@@ -335,16 +333,18 @@ public final class SyncRpcServer {
   private boolean admits(String type, String id, MainReplica.State version) {
     return version.snapshot() == null
         || reads(
-            type, id, changeLog == null ? null : changeLog.projectOf(type, id, version.snapshot()));
+            type,
+            id,
+            () -> changeLog == null ? null : changeLog.projectOf(type, id, version.snapshot()));
   }
 
   /**
-   * Whether the session's FDE may read row {@code id} of {@code type} filed under {@code project}:
-   * A5, a box receives a row only when its person may read it ({@link Access#decide}).
+   * Whether the session's FDE may read row {@code id} of {@code type} filed under the project
+   * {@code project} names, asked only of a scoped session ({@link Access#reads}): A5, a box
+   * receives a row only when its person may read it.
    */
-  private boolean reads(String type, String id, String project) {
-    var row = Resources.filed(SyncedEntities.require(type).kind(), id, project);
-    return Access.decide(principal, Action.READ, row) instanceof Decision.Allowed;
+  private boolean reads(String type, String id, Supplier<String> project) {
+    return Access.reads(principal, SyncedEntities.require(type).kind(), id, project);
   }
 
   /** The project main's head of {@code id} carries, null when unknown or main keeps no journal. */
@@ -652,7 +652,7 @@ public final class SyncRpcServer {
     var entries = new ArrayList<SyncWire.Entry>();
     var next = pull.since();
     for (var head : heads.after(pull.type(), pull.since(), pull.limit())) {
-      if (!reads(pull.type(), head.entityId(), head.project())) {
+      if (!reads(pull.type(), head.entityId(), head::project)) {
         next = head.seq();
         continue;
       }

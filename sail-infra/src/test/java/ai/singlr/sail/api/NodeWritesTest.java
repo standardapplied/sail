@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SyncConfig;
@@ -62,7 +61,7 @@ class NodeWritesTest {
           "code",
           "read_only_credential",
           "message",
-          "Your credential is read-only and cannot change specs.",
+          "Your credential is read-only and cannot create specs.",
           "action",
           "Ask an admin for a member or admin credential.",
           "field_errors",
@@ -167,7 +166,7 @@ class NodeWritesTest {
     var identity = access.identity(session, null);
     assertFalse(identity.admin(), "the terminal names no admin");
     var terminal = assertThrows(IOException.class, () -> access.admit("rajs", "acme", identity));
-    assertTrue(terminal.getMessage().contains("read-only"), terminal.getMessage());
+    assertEquals("Your credential is read-only and cannot post in rooms.", terminal.getMessage());
     assertEquals(0, count(), "nothing was written");
   }
 

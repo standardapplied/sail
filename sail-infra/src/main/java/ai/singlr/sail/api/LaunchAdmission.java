@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
@@ -40,15 +41,18 @@ public final class LaunchAdmission {
   /**
    * Refuses when the bound actor may not seat or remove the agents of spec-less room {@code roomId}
    * of {@code project}, which {@code owner} owns ({@link Action#DISPATCH}), or when they are not
-   * this box's to serve: the node handle must be set, and this box must own the room. The room is
-   * one its caller read, or one it is creating, whose project the creation decides, so its audience
-   * is not asked here ({@link Refusals#refusal}). Whether the roster may change is the room rule's
-   * too, decided where it is written.
+   * this box's to serve: the node handle must be set, and this box must own the room. A room its
+   * caller read was read in its scope; one being created is in a project the caller names, and one
+   * the caller may not read is answered as a project this box does not hold. Whether the roster may
+   * change is the room rule's too, decided where it is written.
    */
   public static void requireAllowedForRoom(
       String roomId, String project, String owner, String localHandle) {
-    Refusals.enforce(
-        Refusals.refusal(Actor.current(), Action.DISPATCH, Resources.room(roomId, project, owner)));
+    Refusals.require(
+        Actor.current(),
+        Action.DISPATCH,
+        Resources.room(roomId, project, owner),
+        () -> ProjectReader.absent(project));
     if (Strings.isBlank(localHandle)) {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED,
@@ -66,14 +70,35 @@ public final class LaunchAdmission {
   /**
    * Refuses when the bound actor may not dispatch {@code spec} ({@link Action#DISPATCH}), and then
    * when it does not run on the box identified by {@code localHandle} ({@link DispatchPolicy}). The
-   * spec is one its caller read, so its audience is settled ({@link Refusals#refusal}).
+   * spec is one its caller read in the actor's scope, so one outside it is not found.
    */
   public static void requireAllowed(Spec spec, String localHandle) {
-    Refusals.enforce(
-        Refusals.refusal(
-            Actor.current(),
-            Action.DISPATCH,
-            Resources.spec(spec.id(), spec.project(), spec.assignee(), spec.createdBy())));
+    admit(work(spec), spec, localHandle);
+  }
+
+  /**
+   * As {@link #requireAllowed} for seating or removing the agent of {@code spec} in {@code roomId},
+   * the room it lives in, which {@code roomOwner} owns: one born in another room changes that
+   * room's roster, so it is that room's owner's to seat too ({@link Action#DISPATCH}).
+   */
+  public static void requireAllowedToSeat(
+      Spec spec, String roomId, String roomOwner, String localHandle) {
+    var work = work(spec);
+    admit(
+        roomId.equals(spec.id())
+            ? work
+            : work.withParent(Resources.room(roomId, spec.project(), roomOwner)),
+        spec,
+        localHandle);
+  }
+
+  private static Resource work(Spec spec) {
+    return Resources.spec(spec.id(), spec.project(), spec.assignee(), spec.createdBy());
+  }
+
+  private static void admit(Resource work, Spec spec, String localHandle) {
+    Refusals.require(
+        Actor.current(), Action.DISPATCH, work, () -> Refusals.specNotFound(spec.id()));
     if (DispatchPolicy.check(spec, localHandle) instanceof DispatchDecision.Refused refused) {
       throw new ApiException(refused.code(), refused.message(), refused.fix());
     }

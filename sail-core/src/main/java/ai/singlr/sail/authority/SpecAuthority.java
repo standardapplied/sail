@@ -60,15 +60,8 @@ public final class SpecAuthority implements WriteAuthority {
   @Override
   public Optional<Refusal> decide(
       Actor actor, String id, Map<String, Object> held, Map<String, Object> next) {
-    if (WriteAuthority.decided(actor)) {
-      return Optional.empty();
-    }
     var spec = held == null ? asBorn(id, next) : asHeld(id, held);
-    var refused =
-        actions(actor, id, held, next).stream()
-            .map(action -> Refusal.of(Access.decide(actor, action, spec), spec))
-            .flatMap(Optional::stream)
-            .findFirst();
+    var refused = WriteAuthority.refused(actor, new Taking(spec, actions(actor, id, held, next)));
     return refused.isPresent() ? refused : facts(actor, id, held, next);
   }
 
@@ -179,24 +172,6 @@ public final class SpecAuthority implements WriteAuthority {
         Refusal.Kind.NOT_OWNER,
         "Room '" + id + "' already exists, and a spec's id is reserved for its own room.",
         "Pick another spec id.");
-  }
-
-  /**
-   * The refusal of a prune of spec {@code id} by someone other than its owner or an admin ({@link
-   * EraseAuthority#spec}), in the words {@link Access} refuses a change of it.
-   */
-  static Optional<Refusal> notOwner(String id, String assignee, String createdBy) {
-    if (Strings.isNotBlank(assignee)) {
-      return Refusal.of(
-          Refusal.Kind.NOT_OWNER,
-          "Spec '" + id + "' is assigned to '" + assignee + "', not you.",
-          "Ask " + assignee + " to make this change, or have an admin do it.");
-    }
-    var creator = Strings.isNotBlank(createdBy) ? createdBy : "its creator";
-    return Refusal.of(
-        Refusal.Kind.NOT_OWNER,
-        "Spec '" + id + "' is unassigned; only " + creator + " or an admin may change it.",
-        "Have an admin change it, or claim it first with --assignee <you>.");
   }
 
   private static String creatorOf(Actor actor, Map<String, Object> next) {

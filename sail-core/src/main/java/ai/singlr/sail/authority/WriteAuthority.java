@@ -40,11 +40,6 @@ public interface WriteAuthority {
   Optional<Refusal> decide(
       Actor actor, String id, Map<String, Object> held, Map<String, Object> next);
 
-  /** Whether {@code actor} has already been decided for: Sail itself ({@link Actor#isSail}). */
-  static boolean decided(Actor actor) {
-    return actor.isSail();
-  }
-
   /**
    * Why the bound {@link Actor} may not write {@code next} over {@code held} for {@code id} as this
    * box's own, by {@code rule}; empty if it may. The one decision of every write that is not a

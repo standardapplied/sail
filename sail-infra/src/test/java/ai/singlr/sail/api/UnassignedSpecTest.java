@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
@@ -162,7 +163,17 @@ class UnassignedSpecTest {
     var claim = send("PUT", "/v1/specs/auth", carol, "{\"assignee\": \"carol\"}");
 
     assertEquals(403, claim.statusCode(), claim.body());
-    assertTrue(claim.body().contains("Ask an admin"), claim.body());
+    assertEquals(
+        Map.of(
+            "code",
+            "forbidden_not_assignee",
+            "message",
+            "'design' belongs to uday: only uday or an admin may start work there, not you.",
+            "action",
+            "Ask uday to create it there, or have an admin do it.",
+            "field_errors",
+            List.of()),
+        YamlUtil.parseMap(claim.body()).get("error"));
     assertEquals(
         201,
         send("POST", "/v1/rooms/design/messages", carol, "{\"body\": \"hi\"}").statusCode(),

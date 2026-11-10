@@ -149,6 +149,15 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   }
 
   /**
+   * Why {@code actor} may not speak in conversation {@code roomId} of {@code project}, for a door
+   * to ask before it admits a voice there that posts no message of its own: the rule a post is
+   * decided by ({@link MessageAuthority#posting}).
+   */
+  public Optional<Refusal> posting(Actor actor, String roomId, String project) {
+    return authority().posting(actor, roomId, project);
+  }
+
+  /**
    * The condition every read of a conversation carries: a message is its reader's only when the
    * project it is filed under ({@link #projectOf}) is in the reader's scope, bound as {@code ?arg}.
    * A conversation is not one project's: a spec that moved leaves what was said before in the

@@ -47,8 +47,9 @@ public enum Action {
   APPROVE("Approve", "promote a draft to ready; approve or dismiss findings; mark done", "approve"),
   /**
    * Starting work on this box: dispatching or resuming a spec, seating or removing a room's agent.
-   * Where the work runs (its assignee's box, its room owner's box) is placement, decided after
-   * this, by the dispatch rules.
+   * Seating one for a spec born in another room changes that room's roster, so it also takes that
+   * room's owner ({@link Resource#parent}). Where the work runs (its assignee's box, its room
+   * owner's box) is placement, decided after this, by the dispatch rules.
    */
   DISPATCH("Dispatch", "dispatch or resume a spec; seat or remove a room agent", "dispatch"),
   /** Stopping a run, or reading its log: what the people the run works for may do with it. */

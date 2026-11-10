@@ -16,8 +16,9 @@ import java.util.Objects;
  * an unrestricted scope sees), and its {@code owners}, each named once and never blank. {@code
  * assignee} is the FDE a spec is assigned to, null when it is unassigned and for every other kind:
  * a spec's refusals name it. {@code parent} is what this one belongs to, null for none: the room a
- * spec was born in when it is not its own, whose owners a create or claim also takes; the spec a
- * review or run is for. Built by {@link Resources}, from the row already in hand.
+ * spec was born in when it is not its own, whose owners a create, a claim or a seating there also
+ * takes — its conversation's for a voice in it, its own for its roster; the spec a review or run is
+ * for. Built by {@link Resources}, from the row already in hand.
  */
 public record Resource(
     Kind kind, String id, String project, List<String> owners, String assignee, Resource parent) {

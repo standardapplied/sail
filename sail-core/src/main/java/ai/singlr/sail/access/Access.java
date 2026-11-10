@@ -13,6 +13,8 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.RunStore;
 import java.util.EnumSet;
+import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -31,8 +33,9 @@ import java.util.stream.Collectors;
  *       to grant, whatever its role: a room agent, read-only by construction, posts in its room and
  *       narrates its run.
  *   <li>Ownership: the cell says owner, and the actor neither is an admin nor acts for an owner; or
- *       it creates or claims a spec born in a room whose owners it does not act for: refused,
- *       naming the owners.
+ *       it starts work in the room a spec was born in ({@link Resource#parent}) — creates or claims
+ *       the spec there, or seats an agent there for it — and does not act for that room's owners:
+ *       refused, naming the owners.
  *   <li>Otherwise allowed.
  * </ol>
  *
@@ -43,6 +46,8 @@ public final class Access {
 
   private static final Decision ALLOWED = new Decision.Allowed();
   private static final Decision NOT_FOUND = new Decision.NotFound();
+  private static final Set<Action> SEATED =
+      EnumSet.of(Action.CREATE, Action.CLAIM, Action.DISPATCH);
 
   private Access() {}
 
@@ -69,7 +74,7 @@ public final class Access {
       return refused(notOwner(resource));
     }
     if (startsWorkIn(action, resource) && !owns(actor, resource.parent())) {
-      return refused(notSeated(resource.parent()));
+      return refused(notSeated(action, resource.parent()));
     }
     return ALLOWED;
   }
@@ -111,6 +116,19 @@ public final class Access {
   }
 
   /**
+   * Whether {@code actor} may read row {@code id} of {@code kind}, filed under the project {@code
+   * project} names: {@link Action#READ} of the row as it is filed ({@link Resources#filed}). The
+   * project is asked only when the actor's audience is restricted: working it out may cost a query,
+   * and no project hides a row from an unrestricted reader, so a list read by one adds no query per
+   * row.
+   */
+  public static boolean reads(
+      Actor actor, Resource.Kind kind, String id, Supplier<String> project) {
+    var filed = audience(actor).unrestricted() ? null : project.get();
+    return decide(actor, Action.READ, Resources.filed(kind, id, filed)) instanceof Decision.Allowed;
+  }
+
+  /**
    * Whether {@code resource} is {@code actor}'s own work. Until an agent's actor carries its work,
    * that is what its credential can show: the run its principal names, and otherwise work owned by
    * the FDE it acts for.
@@ -126,11 +144,12 @@ public final class Access {
   }
 
   /**
-   * Whether {@code action} makes the actor a voice in the room {@code resource} was born in: a
-   * create there, or a claim of a spec that lives there.
+   * Whether {@code action} starts work in the room {@code resource} was born in: a create there, a
+   * claim of a spec that lives there, which give the actor a voice in it, or a dispatch that seats
+   * an agent there, which changes its roster.
    */
   private static boolean startsWorkIn(Action action, Resource resource) {
-    return resource.parent() != null && (action == Action.CREATE || action == Action.CLAIM);
+    return resource.parent() != null && SEATED.contains(action);
   }
 
   private static Decision refused(Refusal refusal) {
@@ -142,9 +161,14 @@ public final class Access {
   }
 
   private static Refusal belowRole(Actor actor, Action action, Resource resource) {
-    return actor.canWrite() && action == Action.ASSIGN
-        ? notReassignable(resource)
-        : belowRole(actor, action, resource.kind());
+    if (!actor.canWrite()) {
+      return belowRole(actor, action, resource.kind());
+    }
+    return switch (action) {
+      case ASSIGN -> notReassignable(resource);
+      case PURGE -> notPurgeable(resource);
+      default -> adminOnly(action, resource.kind());
+    };
   }
 
   private static Refusal belowRole(Actor actor, Action action, Resource.Kind kind) {
@@ -164,6 +188,10 @@ public final class Access {
         "Ask an admin to reassign it. You may grab a spec only while it is unassigned.");
   }
 
+  /**
+   * The refusal of a purge asked before there is one resource to name: a prune by policy, or of a
+   * whole project, whose fix is the prune a member may make.
+   */
   private static Refusal adminOnly(Action action, Resource.Kind kind) {
     return action == Action.PURGE
         ? new Refusal(
@@ -174,6 +202,19 @@ public final class Access {
             Refusal.Kind.ADMIN_ONLY,
             "Only an admin may " + act(action, kind) + ".",
             "Ask an admin to do it.");
+  }
+
+  /**
+   * The refusal of a purge of {@code project} by name: purging it and renaming it alike erase its
+   * name everywhere, whoever's work is filed under it.
+   */
+  private static Refusal notPurgeable(Resource project) {
+    return new Refusal(
+        Refusal.Kind.ADMIN_ONLY,
+        "Only an admin may erase the name of project '"
+            + project.id()
+            + "' everywhere, as purging or renaming it does.",
+        "Ask an admin to do it.");
   }
 
   private static Refusal laneForbidden(Action action, Resource.Kind kind) {
@@ -222,13 +263,15 @@ public final class Access {
         "Ask " + named + " to post it, or have an admin do it.");
   }
 
-  private static Refusal notSeated(Resource room) {
+  private static Refusal notSeated(Action action, Resource room) {
     var id = room.id();
     if (room.owners().isEmpty()) {
       return new Refusal(
           Refusal.Kind.NOT_OWNER,
           "No one owns '" + id + "' yet, so only an admin may start work there.",
-          "Have an admin create or assign the spec.");
+          action == Action.DISPATCH
+              ? "Have an admin seat it."
+              : "Have an admin create or assign the spec.");
     }
     var named = String.join(" or ", room.owners());
     return new Refusal(
@@ -240,7 +283,10 @@ public final class Access {
             + ": only "
             + named
             + " or an admin may start work there, not you.",
-        "Ask " + named + " to create it there, or have an admin do it.");
+        "Ask "
+            + named
+            + (action == Action.DISPATCH ? " to seat it there" : " to create it there")
+            + ", or have an admin do it.");
   }
 
   private static Refusal notOwner(Resource resource) {
