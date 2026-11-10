@@ -2247,6 +2247,59 @@ message is in, never on a run named beside it, and rebuilds the event whole from
 for a local post, refusing a message this box does not hold. A refusal is a 403 through
 `Refusals`, naming the event type and what the sender may not drive.
 
+## Access
+
+One rule, `Access.decide(actor, action, resource)` (`ai.singlr.sail.access`), answers whether a
+principal may take an action on a resource, and words every refusal it gives. Its answer is
+allowed, not found (the resource is outside the principal's scope, so the door answers as for an
+id it does not hold and a list leaves the row out), or refused with a kind, a message and a fix.
+It reads nothing but its three arguments and the permission table, so a list decides each row from
+the row in hand. It is reached in this order, so one principal hears the same reason at every door:
+
+1. Sail itself, main's decisions as a node adopts them and this box's machinery, is allowed.
+2. Audience: a resource filed under a project outside the principal's scope is not found. A box and
+   the org's people are filed under none.
+3. Role: the role's cell says no: refused, read-only or admin-only.
+4. Lane: an agent's lane says no: refused, naming the lane. An agent's own work is its lane's to
+   grant whatever its role, so a room agent, read-only by construction, posts in its room and
+   narrates its run.
+5. Ownership: the cell says owner and the principal is neither an admin nor acting for an owner,
+   or it creates or claims a spec born in a room whose owners it does not act for: refused,
+   naming the owners.
+6. Otherwise allowed.
+
+`Resources` builds each resource with the project it is filed under and its owners, by the owner
+rules the security model names. The table is `Policy`, and this copy of it is generated
+(`PolicyTableTest`):
+
+| Action | Covers | Viewer | Member | Admin | Work agent | Read-only room agent | In-container credential |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Read | specs, rooms, messages, runs, files, projects | yes | yes | yes | yes | yes | yes |
+| Read a definition | a project's definition | no | yes | yes | yes | no | yes |
+| Post | a message in a conversation | no | yes | yes | yes | own work | yes |
+| Create | a spec, a room, a project | no | yes | yes | yes | no | yes |
+| Change | edit, delete or restore a spec or room; keep-local or merge its conflict | no | owner | yes | owner | no | yes |
+| Claim | take an unassigned spec; one born in a room also needs that room's owners | no | yes | yes | yes | no | yes |
+| Assign | give or move a spec to someone | no | no | yes | no | no | yes |
+| Approve | promote a draft to ready; approve or dismiss findings; mark done | no | owner | yes | owner | no | yes |
+| Dispatch | dispatch or resume a spec; seat or remove a room agent | no | owner | yes | no | no | yes |
+| Operate a run | stop it; read its log | no | owner | yes | no | no | yes |
+| Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | own work | own work | yes |
+| Share | add, change or remove project files and skills | no | yes | yes | yes | no | yes |
+| Serve | start and stop the project's processes | no | yes | yes | yes | no | yes |
+| Restore | restore or delete a snapshot | no | yes | yes | yes | no | yes |
+| Configure | change a project's definition | no | yes | yes | yes | no | yes |
+| Prune | erase a spec everywhere, once archived, cancelled or deleted | no | owner | yes | no | no | yes |
+| Purge | erase a project everywhere; a retention sweep | no | no | yes | no | no | yes |
+| Manage people | add, change role, grant, remove, pair, mint tokens | no | no | yes | no | no | yes |
+| Operate the box | sync now; read sync health and bus stats; point the box at another main | no | owner | yes | no | no | yes |
+
+A person reads the column of their role on every lane they come in by, a push over sync included.
+An agent reads its lane's column, and its role (its person's, capped by the lane) still caps every
+cell but own work. A cell holds today's answer where the agreed design changes it, and `Policy`
+names the spec that does: the in-container credential is its person's on the CLI lane until it has
+a lane of its own, so its column narrows nothing yet.
+
 ## Security model
 
 **One ingress by design.** The only network surface a box exposes is sshd, which the
@@ -2518,7 +2571,8 @@ no pairing is removed through the gateway as before, and no key file is touched.
     admission with the same refusal. One translator (`Refusals`) turns a refusal, thrown by
     the journal or answered by an admission, into the error clients get, so a kind has one
     code at every door: `READ_ONLY` → `read_only_credential`, `NOT_OWNER` →
-    `forbidden_not_assignee`, `NO_CONVERSATION` → `room_not_found`, `ADMIN_ONLY` → `forbidden_admin_only`, `NOT_AUTHOR` →
+    `forbidden_not_assignee`, `NO_CONVERSATION` → `room_not_found`, `ADMIN_ONLY` → `forbidden_admin_only`,
+    `LANE_FORBIDDEN` → `agent_lane_forbidden`, `NOT_AUTHOR` →
     `forbidden_not_author`, `FIXED` → `invalid_request`, `NOT_PRUNABLE` → `spec_not_prunable`,
     `NOT_PUBLISHABLE` → `forbidden`. The socket answers a thrown refusal in HTTP's envelope
     (code, message, fix); the terminal keeps its message-and-fix text.

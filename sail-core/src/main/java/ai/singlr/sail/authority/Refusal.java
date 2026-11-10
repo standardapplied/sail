@@ -28,6 +28,8 @@ public record Refusal(Kind kind, String message, Remedy fix) {
     NO_CONVERSATION,
     /** Only an admin may make this change. */
     ADMIN_ONLY,
+    /** The credential's lane may never take this action, whatever the role behind it. */
+    LANE_FORBIDDEN,
     /** The revision names an author or creator the actor may not write as. */
     NOT_AUTHOR,
     /** The revision changes a field that never changes after create. */

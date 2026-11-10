@@ -15,30 +15,30 @@ import java.util.Map;
  * member, {@code root} is an admin, and a credential naming no FDE is a machine's — on each lane a
  * write can arrive by.
  */
-final class Actors {
+public final class Actors {
 
-  static final String OWNER = "ada";
-  static final String OTHER = "bob";
-  static final String RUN = "019fee00-0000-7000-8000-00000000a0a0";
-  static final String OTHER_RUN = "019fee00-0000-7000-8000-00000000b0b0";
-  static final String AGENT_HANDLE = "claude/" + RUN;
-  static final String ROOM_HANDLE = "claude/room-" + RUN;
+  public static final String OWNER = "ada";
+  public static final String OTHER = "bob";
+  public static final String RUN = "019fee00-0000-7000-8000-00000000a0a0";
+  public static final String OTHER_RUN = "019fee00-0000-7000-8000-00000000b0b0";
+  public static final String AGENT_HANDLE = "claude/" + RUN;
+  public static final String ROOM_HANDLE = "claude/room-" + RUN;
 
-  static final Actor ADMIN = new Actor("root", Role.ADMIN, Actor.Lane.API);
-  static final Actor OWNER_API = new Actor(OWNER, Role.MEMBER, Actor.Lane.API);
-  static final Actor OWNER_CLI = new Actor(OWNER, Role.MEMBER, Actor.Lane.CLI);
-  static final Actor OTHER_API = new Actor(OTHER, Role.MEMBER, Actor.Lane.API);
-  static final Actor VIEWER = new Actor(OWNER, Role.VIEWER, Actor.Lane.API);
-  static final Actor MACHINE = new Actor(null, Role.MEMBER, Actor.Lane.API);
-  static final Actor AGENT = Actor.agentPrincipal(AGENT_HANDLE, OWNER);
-  static final Actor OTHERS_AGENT = Actor.agentPrincipal("claude/" + OTHER_RUN, OTHER);
-  static final Actor ROOM = Actor.roomPrincipal(ROOM_HANDLE, OWNER);
-  static final Actor OWNER_SYNC = Actor.sync(OWNER, Role.MEMBER);
-  static final Actor OTHER_SYNC = Actor.sync(OTHER, Role.MEMBER);
-  static final Actor ADMIN_SYNC = Actor.sync(OTHER, Role.ADMIN);
-  static final Actor VIEWER_SYNC = Actor.sync(OWNER, Role.VIEWER);
-  static final Actor MAIN = Actor.main(OTHER);
-  static final Actor SYSTEM = Actor.system();
+  public static final Actor ADMIN = new Actor("root", Role.ADMIN, Actor.Lane.API);
+  public static final Actor OWNER_API = new Actor(OWNER, Role.MEMBER, Actor.Lane.API);
+  public static final Actor OWNER_CLI = new Actor(OWNER, Role.MEMBER, Actor.Lane.CLI);
+  public static final Actor OTHER_API = new Actor(OTHER, Role.MEMBER, Actor.Lane.API);
+  public static final Actor VIEWER = new Actor(OWNER, Role.VIEWER, Actor.Lane.API);
+  public static final Actor MACHINE = new Actor(null, Role.MEMBER, Actor.Lane.API);
+  public static final Actor AGENT = Actor.agentPrincipal(AGENT_HANDLE, OWNER);
+  public static final Actor OTHERS_AGENT = Actor.agentPrincipal("claude/" + OTHER_RUN, OTHER);
+  public static final Actor ROOM = Actor.roomPrincipal(ROOM_HANDLE, OWNER);
+  public static final Actor OWNER_SYNC = Actor.sync(OWNER, Role.MEMBER);
+  public static final Actor OTHER_SYNC = Actor.sync(OTHER, Role.MEMBER);
+  public static final Actor ADMIN_SYNC = Actor.sync(OTHER, Role.ADMIN);
+  public static final Actor VIEWER_SYNC = Actor.sync(OWNER, Role.VIEWER);
+  public static final Actor MAIN = Actor.main(OTHER);
+  public static final Actor SYSTEM = Actor.system();
 
   private Actors() {}
 

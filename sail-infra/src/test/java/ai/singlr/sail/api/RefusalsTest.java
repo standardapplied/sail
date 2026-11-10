@@ -27,6 +27,7 @@ class RefusalsTest {
             Map.entry(Refusal.Kind.NOT_OWNER, ErrorCode.FORBIDDEN_NOT_ASSIGNEE),
             Map.entry(Refusal.Kind.NO_CONVERSATION, ErrorCode.ROOM_NOT_FOUND),
             Map.entry(Refusal.Kind.ADMIN_ONLY, ErrorCode.FORBIDDEN_ADMIN_ONLY),
+            Map.entry(Refusal.Kind.LANE_FORBIDDEN, ErrorCode.AGENT_LANE_FORBIDDEN),
             Map.entry(Refusal.Kind.NOT_AUTHOR, ErrorCode.FORBIDDEN_NOT_AUTHOR),
             Map.entry(Refusal.Kind.FIXED, ErrorCode.INVALID_REQUEST),
             Map.entry(Refusal.Kind.NOT_PRUNABLE, ErrorCode.SPEC_NOT_PRUNABLE),
