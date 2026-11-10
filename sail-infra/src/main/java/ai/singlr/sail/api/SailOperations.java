@@ -2100,13 +2100,14 @@ public final class SailOperations implements HostOperations {
             throw new ApiException(ErrorCode.BAD_REQUEST, "session_id must not be blank.");
           }
           var room = requireRoomOrSpec(roomId);
-          Refusals.require(
-              Access.decide(
+          if (Access.decide(
                   actor,
                   Action.POST,
                   Resources.conversation(
-                      room.id(), room.project(), requireRoomStore().owners(room.id()))),
-              () -> Refusals.roomNotFound(roomId));
+                      room.id(), room.project(), requireRoomStore().owners(room.id())))
+              instanceof Decision.Refused refused) {
+            throw Refusals.exception(refused.refusal());
+          }
           var cli = Strings.isBlank(agent) ? null : agent.strip();
           var data = new LinkedHashMap<String, Object>();
           data.put("room_id", room.id());
