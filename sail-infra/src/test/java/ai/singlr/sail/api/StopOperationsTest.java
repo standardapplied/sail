@@ -552,6 +552,42 @@ class StopOperationsTest {
     assertInstanceOf(StopOperations.Stopped.class, outcome);
   }
 
+  /**
+   * A run that names no spec and acts for no one, on a box with no handle, is an admin's to stop.
+   */
+  @Test
+  void aRunNamingNoSpecAndNoOneIsAnAdminsToStop() throws Exception {
+    var shell = liveAgentShell();
+    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    Acting.system(
+        () ->
+            runStore.create(
+                R1,
+                "acme",
+                null,
+                LOCAL_HANDLE,
+                "build",
+                "codex",
+                "b",
+                "t",
+                123,
+                null,
+                RUN_LOG,
+                UNIT));
+    db.execute("UPDATE runs SET owner = NULL, node = NULL WHERE id = ?", R1);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    new Actor("raj", Role.MEMBER, Actor.Lane.API),
+                    () -> ops.stop(new StopOperations.RunTarget(R1), null, false)));
+
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.failure().errorCode());
+    assertEquals("Run " + R1 + " names no spec and no one it acts for.", refusal.getMessage());
+  }
+
   @Test
   void theAssigneeMemberMayStopTheirOwnRun() throws Exception {
     var shell = liveAgentShell();

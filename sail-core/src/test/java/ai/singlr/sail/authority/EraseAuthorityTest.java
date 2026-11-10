@@ -229,6 +229,28 @@ class EraseAuthorityTest {
     assertEquals(Optional.empty(), rule.requested(Actors.ADMIN_SYNC, "project", "acme"));
   }
 
+  /**
+   * Only specs and projects are erased on request, but a credential that may not prune at all is
+   * told so first.
+   */
+  @Test
+  void aRequestToEraseAnotherTypeIsToldTheRoleBeforeTheType() {
+    for (var type : List.of("room", "run")) {
+      assertEquals(
+          Optional.of(Refusal.readOnly("prune specs")),
+          rule.requested(VIEWER_SYNC, type, "lobby"),
+          type);
+      assertEquals(
+          Optional.of(
+              new Refusal(
+                  Kind.NOT_PRUNABLE,
+                  "only specs and projects are pruned on request, not a " + type,
+                  "Prune the spec or project it belongs to.")),
+          rule.requested(OWNER_SYNC, type, "lobby"),
+          type);
+    }
+  }
+
   @Test
   void aProjectMainHoldsNoneOfIsSaidSoBeforeTheRoleAsWhatThisBoxDoesNotHoldIsEverywhere() {
     var none =

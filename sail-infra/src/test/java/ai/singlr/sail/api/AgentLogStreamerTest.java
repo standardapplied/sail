@@ -187,8 +187,11 @@ class AgentLogStreamerTest {
     streamer(id -> Optional.of(runOn("node-b")), "node-a").handle(out);
 
     assertEquals(409, out.status);
-    assertTrue(out.body().contains("run_on_other_node"), out.body());
-    assertTrue(out.body().contains("node-b"), out.body());
+    assertEquals(
+        "{\"code\": \"run_on_other_node\", \"message\": \"Run r1 executed on node-b; its logs live"
+            + " there, not on this box.\", \"node\": \"node-b\", \"spec\": \"auth\", \"project\":"
+            + " \"acme\"}",
+        out.body());
   }
 
   @Test

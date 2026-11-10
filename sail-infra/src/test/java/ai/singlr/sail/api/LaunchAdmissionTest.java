@@ -101,6 +101,73 @@ class LaunchAdmissionTest {
     };
   }
 
+  /**
+   * An unassigned spec has no owner to ask, but a credential that may not dispatch at all is told
+   * so before placement says the spec runs on no box.
+   */
+  @Test
+  void aViewerOrAnAgentIsToldItsRoleOrLaneBeforeAnUnassignedSpecsPlacement() {
+    var viewer =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.run(
+                    new Actor("uday", Role.VIEWER, Actor.Lane.API),
+                    () -> LaunchAdmission.requireAllowed(spec(null), "uday")));
+    var agent =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.run(
+                    Actor.agentPrincipal("claude/run-1", "uday"),
+                    () -> LaunchAdmission.requireAllowed(spec(null), "uday")));
+
+    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, viewer.failure().errorCode());
+    assertEquals("Your credential is read-only and cannot dispatch specs.", viewer.getMessage());
+    assertEquals(ErrorCode.AGENT_LANE_FORBIDDEN, agent.failure().errorCode());
+    assertEquals("Agent principals cannot dispatch specs.", agent.getMessage());
+  }
+
+  /** A spec is dispatched by its assignee, never by its creator, on the assignee's box. */
+  @Test
+  void anAssignedSpecIsItsAssigneesToDispatchNotItsCreators() {
+    var created =
+        new Spec(
+            "auth",
+            "acme",
+            "Add auth",
+            SpecStatus.PENDING,
+            "uday",
+            List.of(),
+            List.of(),
+            null,
+            null,
+            null,
+            null,
+            0,
+            "raj",
+            null,
+            null,
+            "raj",
+            null);
+
+    var creator =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.run(
+                    new Actor("raj", Role.MEMBER, Actor.Lane.API),
+                    () -> LaunchAdmission.requireAllowed(created, "uday")));
+
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, creator.failure().errorCode());
+    assertEquals("Spec 'auth' is assigned to 'uday', not you.", creator.getMessage());
+    assertDoesNotThrow(
+        () ->
+            Actor.run(
+                new Actor("uday", Role.MEMBER, Actor.Lane.API),
+                () -> LaunchAdmission.requireAllowed(created, "uday")));
+  }
+
   @Test
   void requireAllowedAdmitsTheAssignee() {
     assertDoesNotThrow(

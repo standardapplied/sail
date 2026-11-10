@@ -333,6 +333,13 @@ class EventAuthorityTest {
         retold(
             "a member retells a message in another's room", OWNER_API, POSTED, "den", null, null),
         retold(
+            "a credential acting for no FDE retells no message, whose post would be no one's",
+            MACHINE,
+            POSTED,
+            "den",
+            null,
+            Kind.NOT_OWNER),
+        retold(
             "a principal cannot announce a message",
             AGENT,
             POSTED,
