@@ -1927,6 +1927,8 @@ fde ada pins a terminal to hall on a node as cli admin root all	ok admitted
 fde ada pins a terminal to hall on main as cli admin root all	ok admitted
 fde ada pins a terminal to lobby on a node as cli admin root all	ok admitted
 fde ada pins a terminal to lobby on main as cli admin root all	ok admitted
+fde ada pins a terminal to lobby under beta on a node as cli admin root all	denied IOException Room 'lobby' belongs to project 'acme'; open the session with --project acme. | 
+fde ada pins a terminal to lobby under beta on main as cli admin root all	denied IOException Room 'lobby' belongs to project 'acme'; open the session with --project acme. | 
 fde ada pins a terminal to s-ada on a node as cli admin root all	ok admitted
 fde ada pins a terminal to s-ada on main as cli admin root all	ok admitted
 fde bob pins a terminal to attic on a node as cli admin root all	denied IOException Room 'attic' was not found. | 
@@ -1975,6 +1977,8 @@ fde vic pins a terminal to hall on a node as cli admin root all	denied Io Your c
 fde vic pins a terminal to hall on main as cli admin root all	denied Io Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 fde vic pins a terminal to lobby on a node as cli admin root all	denied Io Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 fde vic pins a terminal to lobby on main as cli admin root all	denied Io Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+fde vic pins a terminal to lobby under beta on a node as cli admin root all	denied IOException Room 'lobby' belongs to project 'acme'; open the session with --project acme. | 
+fde vic pins a terminal to lobby under beta on main as cli admin root all	denied IOException Room 'lobby' belongs to project 'acme'; open the session with --project acme. | 
 fde vic pins a terminal to s-ada on a node as cli admin root all	denied Io Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 fde vic pins a terminal to s-ada on main as cli admin root all	denied Io Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 list files of acme as agent member ada-agent acme	ok List
@@ -10842,6 +10846,7 @@ read the ports of omega as room viewer ada-room beta	denied PROJECT_NOT_IN_CATAL
 read the ports of omega as room viewer bob-room acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 read the ports of omega as room viewer bob-room all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 read the ports of omega as room viewer bob-room beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+report a room session in attic as api member machine all	denied ROOM_NOT_FOUND 404 Room 'attic' was not found. | 
 report a room session in attic as cli admin root all	denied ROOM_NOT_FOUND 404 Room 'attic' was not found. | 
 report a room session in attic as cli member ada acme	denied ROOM_NOT_FOUND 404 Room 'attic' was not found. | 
 report a room session in attic as cli member ada all	denied ROOM_NOT_FOUND 404 Room 'attic' was not found. | 
@@ -10855,6 +10860,7 @@ report a room session in attic as cli viewer ada beta	denied ROOM_NOT_FOUND 404 
 report a room session in attic as cli viewer bob acme	denied ROOM_NOT_FOUND 404 Room 'attic' was not found. | 
 report a room session in attic as cli viewer bob all	denied ROOM_NOT_FOUND 404 Room 'attic' was not found. | 
 report a room session in attic as cli viewer bob beta	denied ROOM_NOT_FOUND 404 Room 'attic' was not found. | 
+report a room session in b-room as api member machine all	denied FORBIDDEN_NOT_AUTHOR 403 This credential acts for no FDE, so a post in 'b-room' would be no one's. | Post with an FDE's own credential.
 report a room session in b-room as cli admin root all	ok RoomConversationResponse
 report a room session in b-room as cli member ada acme	denied ROOM_NOT_FOUND 404 Room 'b-room' was not found. | 
 report a room session in b-room as cli member ada all	ok RoomConversationResponse
@@ -10868,6 +10874,7 @@ report a room session in b-room as cli viewer ada beta	denied READ_ONLY_CREDENTI
 report a room session in b-room as cli viewer bob acme	denied ROOM_NOT_FOUND 404 Room 'b-room' was not found. | 
 report a room session in b-room as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 report a room session in b-room as cli viewer bob beta	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
+report a room session in den as api member machine all	denied FORBIDDEN_NOT_AUTHOR 403 This credential acts for no FDE, so a post in 'den' would be no one's. | Post with an FDE's own credential.
 report a room session in den as cli admin root all	ok RoomConversationResponse
 report a room session in den as cli member ada acme	ok RoomConversationResponse
 report a room session in den as cli member ada all	ok RoomConversationResponse
@@ -10881,6 +10888,7 @@ report a room session in den as cli viewer ada beta	denied ROOM_NOT_FOUND 404 Ro
 report a room session in den as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 report a room session in den as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 report a room session in den as cli viewer bob beta	denied ROOM_NOT_FOUND 404 Room 'den' was not found. | 
+report a room session in hall as api member machine all	denied FORBIDDEN_NOT_AUTHOR 403 This credential acts for no FDE, so a post in 'hall' would be no one's. | Post with an FDE's own credential.
 report a room session in hall as cli admin root all	ok RoomConversationResponse
 report a room session in hall as cli member ada acme	ok RoomConversationResponse
 report a room session in hall as cli member ada all	ok RoomConversationResponse
@@ -10894,6 +10902,7 @@ report a room session in hall as cli viewer ada beta	denied ROOM_NOT_FOUND 404 R
 report a room session in hall as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 report a room session in hall as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 report a room session in hall as cli viewer bob beta	denied ROOM_NOT_FOUND 404 Room 'hall' was not found. | 
+report a room session in lobby as api member machine all	denied FORBIDDEN_NOT_AUTHOR 403 This credential acts for no FDE, so a post in 'lobby' would be no one's. | Post with an FDE's own credential.
 report a room session in lobby as cli admin root all	ok RoomConversationResponse
 report a room session in lobby as cli member ada acme	ok RoomConversationResponse
 report a room session in lobby as cli member ada all	ok RoomConversationResponse
@@ -10907,6 +10916,7 @@ report a room session in lobby as cli viewer ada beta	denied ROOM_NOT_FOUND 404 
 report a room session in lobby as cli viewer bob acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 report a room session in lobby as cli viewer bob all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot change specs. | Ask an admin for a member or admin credential.
 report a room session in lobby as cli viewer bob beta	denied ROOM_NOT_FOUND 404 Room 'lobby' was not found. | 
+report a room session in s-ada as api member machine all	denied FORBIDDEN_NOT_AUTHOR 403 This credential acts for no FDE, so a post in 's-ada' would be no one's. | Post with an FDE's own credential.
 report a room session in s-ada as cli admin root all	ok RoomConversationResponse
 report a room session in s-ada as cli member ada acme	ok RoomConversationResponse
 report a room session in s-ada as cli member ada all	ok RoomConversationResponse

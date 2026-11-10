@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import ai.singlr.sail.commands.CliCommand;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Actor;
@@ -64,10 +65,14 @@ class RemedyOverHttpTest {
         new SailOperations(
             new ShellExecutor(false),
             ProjectReader.ofCatalog(new ProjectStore(db)),
+            (command, logPath) -> 4242L,
             null,
             null,
             new SpecStore(db),
-            new ReviewStore(db));
+            new ReviewStore(db),
+            null,
+            new ProjectStore(db),
+            ConnectEnvironment.detector());
     server =
         new SailApiServer(
             "127.0.0.1", 0, operations, TestAuth.tokens(db), new EventBus(), null, null, null);

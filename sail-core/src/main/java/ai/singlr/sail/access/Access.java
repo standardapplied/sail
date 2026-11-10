@@ -72,39 +72,39 @@ public final class Access {
   }
 
   /**
-   * Whether {@code actor} may take {@code action} at all, on some resource of {@code kind} it
-   * reads: Sail itself, the role and the lane, as {@link #decide(Actor, Action, Resource)} decides
-   * them, for a question asked before there is one resource to read — an erasure asked for before
-   * the specs it names are read, or again once nothing of it is left to own, a conflict's
-   * resolution — and never not found. Whose the resource is is that decision's once the resource is
-   * in hand; a lane that grants the action on its own work alone is refused, since no work is in
-   * hand to be its own.
+   * Why {@code actor} may not take {@code action} at all, on any resource of {@code kind} it reads:
+   * Sail itself, the role and the lane, as {@link #decide} decides them, for a question asked
+   * before there is one resource to read — an erasure asked for before the specs it names are read,
+   * or again once nothing of it is left to own, a conflict's resolution. No resource is read, so
+   * nothing is not found. Whose the resource is is {@link #decide}'s once the resource is in hand;
+   * a lane that grants the action on its own work alone is refused, since no work is in hand to be
+   * its own.
    */
-  public static Decision decide(Actor actor, Action action, Resource.Kind kind) {
-    return actor.isSail() ? ALLOWED : answer(steps(actor, action, kind, null));
+  public static Optional<Refusal> atAll(Actor actor, Action action, Resource.Kind kind) {
+    return actor.isSail() ? Optional.empty() : steps(actor, action, kind, null);
   }
 
   /**
-   * Whether {@code actor} may write what no one here can own, which {@code fact} says it is not: a
+   * Why {@code actor} may not write what no one here can own, which {@code fact} says it is not: a
    * conversation this box holds no row of, whose owners it cannot ask, or a post by a credential
    * that acts for no FDE, which would be no one's. What no one here can own is an admin's to write,
    * as the ownership step passes an admin whoever owns what it acts on; everyone else is refused by
    * the fact.
    */
-  public static Decision unowned(Actor actor, Refusal fact) {
-    return overrulesOwners(actor) ? ALLOWED : refused(fact);
+  public static Optional<Refusal> unowned(Actor actor, Refusal fact) {
+    return overrulesOwners(actor) ? Optional.empty() : Optional.of(fact);
   }
 
   /**
-   * The ownership step alone: allowed when {@code actor} overrules owners or acts for one of {@code
-   * resource}'s, refused naming them otherwise. For the one door that still decides that step
+   * The ownership step alone: none when {@code actor} overrules owners or acts for one of {@code
+   * resource}'s, a refusal naming them otherwise. For the one door that still decides that step
    * itself, a run's log, which the people the run works for read whatever their role, until
    * sail-every-door-asks-access asks {@link Action#OPERATE_RUN} of it.
    */
-  public static Decision owned(Actor actor, Resource resource) {
+  public static Optional<Refusal> owned(Actor actor, Resource resource) {
     return owns(actor, resource)
-        ? ALLOWED
-        : refused(Wording.notOwner(Action.OPERATE_RUN, resource));
+        ? Optional.empty()
+        : Optional.of(Wording.notOwner(Action.OPERATE_RUN, resource));
   }
 
   /**
@@ -170,10 +170,6 @@ public final class Access {
   }
 
   private static Decision answer(Optional<Refusal> refusal) {
-    return refusal.map(Access::refused).orElse(ALLOWED);
-  }
-
-  private static Decision refused(Refusal refusal) {
-    return new Decision.Refused(refusal);
+    return refusal.<Decision>map(Decision.Refused::new).orElse(ALLOWED);
   }
 }

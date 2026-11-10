@@ -248,7 +248,7 @@ final class SpecPruner {
    */
   private void authorize(PruneRequest request) {
     if (request.ids().isEmpty()) {
-      Refusals.enforce(authority.request(Actor.current(), true).refused());
+      Refusals.enforce(authority.request(Actor.current(), true));
     }
   }
 

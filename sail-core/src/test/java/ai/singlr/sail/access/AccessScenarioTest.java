@@ -183,7 +183,7 @@ class AccessScenarioTest {
     assertEquals(
         Optional.of(
             new Refusal(
-                Refusal.Kind.NOT_OWNER,
+                Refusal.Kind.ADMIN_ONLY,
                 "'r1' belongs to eng: only eng or an admin may start work there, not you.",
                 "Ask an admin to assign it to you.")),
         Actor.call(CLIENT, () -> specs.decide("in-r1", edited("in-r1", "assignee", "client"))));

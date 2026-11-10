@@ -268,13 +268,13 @@ class SpecAuthorityTest {
             OTHER_API,
             BORN_IN_LOBBY,
             with(BORN_IN_LOBBY, "assignee", OTHER),
-            Kind.NOT_OWNER),
+            Kind.ADMIN_ONLY),
         refuses(
             "a push claims no spec born where it may not start work",
             OTHER_SYNC,
             BORN_IN_LOBBY,
             with(BORN_IN_LOBBY, "assignee", OTHER),
-            Kind.NOT_OWNER),
+            Kind.ADMIN_ONLY),
         allows(
             "an admin assigns a spec born anywhere",
             ADMIN,
@@ -493,7 +493,7 @@ class SpecAuthorityTest {
         rule.decide(OTHER_API, SPEC, OWNED, with(OWNED, "assignee", OTHER)).orElseThrow());
     assertEquals(
         new Refusal(
-            Kind.NOT_OWNER,
+            Kind.ADMIN_ONLY,
             "'lobby' belongs to ada: only ada or an admin may start work there, not you.",
             "Ask an admin to assign it to you."),
         rule.decide(OTHER_API, SPEC, BORN_IN_LOBBY, with(BORN_IN_LOBBY, "assignee", OTHER))

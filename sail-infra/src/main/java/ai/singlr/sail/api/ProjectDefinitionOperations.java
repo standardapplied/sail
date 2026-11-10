@@ -35,7 +35,7 @@ final class ProjectDefinitionOperations {
    * hooks.
    */
   ProjectDefinitionResponse definition(String project) {
-    return response(ProjectReader.require(projects, Action.READ_DEFINITION, project).orElseThrow());
+    return response(ProjectGate.taking(projects, Action.READ_DEFINITION, project));
   }
 
   /** Creates the project {@code document}, a definition document, names; refused when it exists. */
@@ -58,7 +58,7 @@ final class ProjectDefinitionOperations {
    */
   ProjectDefinitionResponse writeSection(
       String project, String section, Object value, String ifMatch) {
-    ProjectReader.readable(projects, project);
+    ProjectGate.readable(projects, project);
     var named = Section.of(section);
     try {
       return response(

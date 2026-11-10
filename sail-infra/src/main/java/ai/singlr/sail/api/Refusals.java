@@ -73,7 +73,7 @@ public final class Refusals {
   }
 
   /** Throws {@code refusal}'s exception, if the rule refused; a no-op when it allowed. */
-  static void enforce(Optional<Refusal> refusal) {
+  public static void enforce(Optional<Refusal> refusal) {
     if (refusal.isPresent()) {
       throw exception(refusal.get());
     }

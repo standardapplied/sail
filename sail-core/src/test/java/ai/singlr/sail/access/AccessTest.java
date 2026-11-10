@@ -396,7 +396,7 @@ class AccessTest {
             Refusal.Kind.NOT_OWNER, seated, "Ask bob to create it there, or have an admin do it."),
         Access.decide(Actors.OWNER_API, Action.CREATE, inDen));
     assertEquals(
-        refused(Refusal.Kind.NOT_OWNER, seated, "Ask an admin to assign it to you."),
+        refused(Refusal.Kind.ADMIN_ONLY, seated, "Ask an admin to assign it to you."),
         Access.decide(Actors.OWNER_API, Action.CLAIM, inDen));
     assertEquals(new Decision.Allowed(), Access.decide(Actors.OWNER_API, Action.CHANGE, inDen));
     assertEquals(new Decision.Allowed(), Access.decide(Actors.ADMIN, Action.CLAIM, inDen));
@@ -435,10 +435,10 @@ class AccessTest {
     var fact = Refusal.noConversation("ghost").orElseThrow();
 
     for (var overrules : List.of(Actors.SYSTEM, Actors.MAIN, Actors.ADMIN)) {
-      assertEquals(new Decision.Allowed(), Access.unowned(overrules, fact));
+      assertEquals(Optional.empty(), Access.unowned(overrules, fact));
     }
     for (var bound : List.of(Actors.OWNER_API, Actors.AGENT, Actors.ROOM, Actors.VIEWER)) {
-      assertEquals(new Decision.Refused(fact), Access.unowned(bound, fact));
+      assertEquals(Optional.of(fact), Access.unowned(bound, fact));
     }
   }
 
@@ -449,7 +449,11 @@ class AccessTest {
     assertEquals(new Decision.NotFound(), Access.decide(outside, Action.CHANGE, SPEC_BOB));
     assertEquals(Optional.empty(), Access.withinAudience(outside, Action.CHANGE, SPEC_BOB));
     assertEquals(
-        Access.decide(Actors.OTHER_API, Action.CHANGE, SPEC_ADA).refused(),
+        Optional.of(
+            refusal(
+                Refusal.Kind.NOT_OWNER,
+                "Spec 'auth' is assigned to 'ada', not you.",
+                "Ask ada to make this change, or have an admin do it.")),
         Access.withinAudience(outside, Action.CHANGE, SPEC_ADA));
     assertEquals(Optional.empty(), Access.withinAudience(Actor.system(), Action.PURGE, SPEC_ADA));
   }
@@ -457,14 +461,14 @@ class AccessTest {
   @Test
   void resolvingAConflictIsAChangeOfItAtAllSaidAsResolvingIt() {
     assertEquals(
-        refused(
-            Refusal.Kind.READ_ONLY,
-            "Your credential is read-only and cannot resolve conflicts.",
-            READ_ONLY_FIX),
-        Access.decide(Actors.VIEWER, Action.CHANGE, Resource.Kind.CONFLICT));
+        Optional.of(
+            refusal(
+                Refusal.Kind.READ_ONLY,
+                "Your credential is read-only and cannot resolve conflicts.",
+                READ_ONLY_FIX)),
+        Access.atAll(Actors.VIEWER, Action.CHANGE, Resource.Kind.CONFLICT));
     assertEquals(
-        new Decision.Allowed(),
-        Access.decide(Actors.OTHER_API, Action.CHANGE, Resource.Kind.CONFLICT));
+        Optional.empty(), Access.atAll(Actors.OTHER_API, Action.CHANGE, Resource.Kind.CONFLICT));
   }
 
   @Test
@@ -659,39 +663,39 @@ class AccessTest {
     var unplaced = Actors.OTHER_API.withScope(ProjectScope.none());
 
     assertEquals(
-        new Decision.Allowed(),
-        Access.decide(unplaced, Action.PRUNE, Resource.Kind.SPEC),
+        Optional.empty(),
+        Access.atAll(unplaced, Action.PRUNE, Resource.Kind.SPEC),
         "no one resource is asked of, so neither its audience nor its owners");
     assertEquals(
-        new Decision.Allowed(), Access.decide(Actor.system(), Action.PURGE, Resource.Kind.PROJECT));
+        Optional.empty(), Access.atAll(Actor.system(), Action.PURGE, Resource.Kind.PROJECT));
     assertEquals(
-        refused(
+        refusedAtAll(
             Refusal.Kind.NOT_OWNER,
             "'" + Actors.ROOM_HANDLE + "' acts only on its own work, and no room of it is named.",
             "An agent acts only on the work sail launched it for."),
-        Access.decide(Actors.ROOM, Action.POST, Resource.Kind.ROOM),
+        Access.atAll(Actors.ROOM, Action.POST, Resource.Kind.ROOM),
         "a lane's grant on its own work alone has no work in hand to be its own");
     assertEquals(
-        refused(
+        refusedAtAll(
             Refusal.Kind.READ_ONLY,
             "Your credential is read-only and cannot prune specs.",
             READ_ONLY_FIX),
-        Access.decide(Actors.VIEWER, Action.PRUNE, Resource.Kind.SPEC));
+        Access.atAll(Actors.VIEWER, Action.PRUNE, Resource.Kind.SPEC));
     assertEquals(
-        new Decision.Refused(
+        Optional.of(
             new Refusal(
                 Refusal.Kind.ADMIN_ONLY,
                 "Pruning by policy or a whole project is admin-only.",
                 Remedy.of(
                     "Name the specs you own by id: ", Remedy.sail("spec prune", "<id...>"), "."))),
-        Access.decide(Actors.OWNER_API, Action.PURGE, Resource.Kind.PROJECT));
+        Access.atAll(Actors.OWNER_API, Action.PURGE, Resource.Kind.PROJECT));
     assertEquals(
-        refused(
+        refusedAtAll(
             Refusal.Kind.ADMIN_ONLY, "Only an admin may assign specs.", "Ask an admin to do it."),
-        Access.decide(Actors.OWNER_API, Action.ASSIGN, Resource.Kind.SPEC));
+        Access.atAll(Actors.OWNER_API, Action.ASSIGN, Resource.Kind.SPEC));
     assertEquals(
-        refused(Refusal.Kind.LANE_FORBIDDEN, "Agent principals cannot prune specs.", LANE_FIX),
-        Access.decide(Actors.AGENT, Action.PRUNE, Resource.Kind.SPEC));
+        refusedAtAll(Refusal.Kind.LANE_FORBIDDEN, "Agent principals cannot prune specs.", LANE_FIX),
+        Access.atAll(Actors.AGENT, Action.PRUNE, Resource.Kind.SPEC));
   }
 
   @Test
@@ -840,9 +844,7 @@ class AccessTest {
   }
 
   private static Optional<Refusal> owned(Actor actor, Resource run) {
-    return Access.owned(actor, run) instanceof Decision.Refused(var refusal)
-        ? Optional.of(refusal)
-        : Optional.empty();
+    return Access.owned(actor, run);
   }
 
   private static void add(
@@ -891,6 +893,10 @@ class AccessTest {
 
   private static Refusal refusal(Refusal.Kind kind, String message, String fix) {
     return new Refusal(kind, message, fix);
+  }
+
+  private static Optional<Refusal> refusedAtAll(Refusal.Kind kind, String message, String fix) {
+    return Optional.of(refusal(kind, message, fix));
   }
 
   private static Decision refused(Refusal.Kind kind, String message, String fix) {

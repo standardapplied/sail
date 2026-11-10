@@ -267,7 +267,20 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
                 : "' isn't on this box. Projects here: ")
             + (visible.isEmpty() ? "none" : String.join(", ", visible))
             + ".",
-        scoped ? ungranted(handle, nextProject) : Remedy.NONE);
+        scoped ? ungranted(handle, nextProject) : uncatalogued(nextProject));
+  }
+
+  /**
+   * What a box does about {@code project}, which its catalog does not hold and its scope does not
+   * withhold: create it, or sync it from main.
+   */
+  public static Remedy uncatalogued(String project) {
+    return Remedy.of(
+        "Create it with '",
+        Remedy.sail("project create", project),
+        "', or sync it from main with '",
+        Remedy.sail("sync"),
+        "'.");
   }
 
   /**

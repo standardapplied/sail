@@ -47,7 +47,7 @@ public final class StackOperations {
       ProjectServer.Pause pause,
       LongSupplier nanos) {
     this.shell = Objects.requireNonNull(shell, "shell");
-    this.catalog = catalog;
+    this.catalog = Objects.requireNonNull(catalog, "catalog");
     this.projects = Objects.requireNonNull(projects, "projects");
     this.pause = Objects.requireNonNull(pause, "pause");
     this.nanos = Objects.requireNonNull(nanos, "nanos");
@@ -97,7 +97,7 @@ public final class StackOperations {
    */
   public Ports serve(String project, Duration timeout)
       throws IOException, InterruptedException, TimeoutException {
-    ProjectReader.require(catalog, Action.SERVE, project);
+    ProjectGate.taking(catalog, Action.SERVE, project);
     if (timeout.isNegative() || timeout.isZero() || timeout.compareTo(MAX_TIMEOUT) > 0) {
       throw new IllegalArgumentException(
           "A serve's timeout is 1 to "
@@ -111,14 +111,14 @@ public final class StackOperations {
 
   /** Where each declared port of {@code project} stands now, starting nothing. */
   public Ports ports(String project) throws IOException, InterruptedException, TimeoutException {
-    ProjectReader.readable(catalog, project);
+    ProjectGate.readable(catalog, project);
     var config = projects.loadRunning(project).config();
     return Ports.of(project, server().ports(project, config));
   }
 
   /** Stops {@code project}'s processes; its services keep running. */
   public Ports stop(String project) throws IOException, InterruptedException, TimeoutException {
-    ProjectReader.require(catalog, Action.SERVE, project);
+    ProjectGate.taking(catalog, Action.SERVE, project);
     var config = projects.loadRunning(project).config();
     var server = server();
     server.stop(project);

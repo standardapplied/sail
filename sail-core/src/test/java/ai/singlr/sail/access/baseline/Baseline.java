@@ -60,6 +60,7 @@ public final class Baseline {
   private static final String DIRECTORY = "access/baseline/";
   private static final Path SOURCES = Path.of("src", "test", "resources");
   private static final int SHOWN = 40;
+  private static final String GONE = " (gone)";
 
   /**
    * The kinds and door codes of a not-found answer: outside the asker's audience, a project or a
@@ -163,7 +164,68 @@ public final class Baseline {
           + cell.answer()
           + "'";
     }
-    return null;
+    if (!fix(before).isEmpty() && fix(cell.answer()).isEmpty() && !notFound(cell.answer())) {
+      return "a refusal names its fix, and this one loses it: '" + before + "'";
+    }
+    return causeMisfit(cell, before);
+  }
+
+  /**
+   * Why {@code cell}'s cause does not fit how its answer moved from {@code before}; null when it
+   * does. Every cause is checked as far as two answers show it: (c) keeps the message and gains the
+   * fix it lacked; (b) keeps the class of refusal, worded otherwise — a door's status, or else its
+   * kind; (a) is any other denial, its reason said earlier in the order.
+   */
+  private static String causeMisfit(Moved cell, String before) {
+    var why = cell.why();
+    if (why.startsWith("(c)")) {
+      return gainsFix(before, cell.answer())
+          ? null
+          : "cause (c) keeps the message and gains a fix, and this one goes from '" + before + "'";
+    }
+    if (why.startsWith("(b)")) {
+      return refusalClass(before).equals(refusalClass(cell.answer()))
+          ? null
+          : "cause (b) keeps the class of refusal, and this one goes from '" + before + "'";
+    }
+    return why.startsWith("(a)") ? null : "names no cause (a), (b) or (c)";
+  }
+
+  /**
+   * Whether {@code now} says what {@code before} says and names the fix it lacked: in its own
+   * field, or, where a corpus shows the fix as part of the message (a push's denial), after it.
+   */
+  private static boolean gainsFix(String before, String now) {
+    if (!before.contains(" | ") && !now.contains(" | ")) {
+      var said = before.replace(GONE, "");
+      var says = now.replace(GONE, "");
+      return says.startsWith(said) && says.length() > said.length();
+    }
+    return message(before).equals(message(now)) && fix(before).isEmpty() && !fix(now).isEmpty();
+  }
+
+  /**
+   * The class of refusal a denial names: a door's HTTP status where it shows one, its third word,
+   * and otherwise its kind, its second.
+   */
+  private static String refusalClass(String answer) {
+    var words = answer.split(" ", 4);
+    if (words.length > 2 && words[2].matches("[1-5][0-9][0-9]")) {
+      return words[2];
+    }
+    return words.length > 1 ? words[1] : "";
+  }
+
+  /** What a denial says, its fix left out. */
+  private static String message(String answer) {
+    var bar = answer.indexOf(" | ");
+    return bar < 0 ? answer : answer.substring(0, bar);
+  }
+
+  /** The fix a denial names; empty when it names none, or its corpus shows none. */
+  private static String fix(String answer) {
+    var bar = answer.indexOf(" | ");
+    return bar < 0 ? "" : answer.substring(bar + 3).strip();
   }
 
   private static boolean denied(String answer) {

@@ -88,7 +88,7 @@ public final class SpecAuthority implements WriteAuthority {
     var bornIn = bornIn(id, next);
     return bornIn == null || rooms.holds(bornIn, id)
         ? Optional.empty()
-        : Access.unowned(actor, Refusal.noConversation(bornIn).orElseThrow()).refused();
+        : Access.unowned(actor, Refusal.noConversation(bornIn).orElseThrow());
   }
 
   /**

@@ -53,7 +53,7 @@ class BaselineTest {
 
   @Test
   void aCellWhoseReasonMovedAnswersWhatItsLineSays() {
-    var moved = List.of(new Baseline.Moved("b", NOT_FOUND, "audience before role"));
+    var moved = List.of(new Baseline.Moved("b", NOT_FOUND, "(a) audience before role"));
 
     assertEquals(
         List.of(),
@@ -95,9 +95,10 @@ class BaselineTest {
             "box", "denied UNHELD_PROJECT Project 'p' isn't on this box.");
     var moved =
         List.of(
-            new Baseline.Moved("scope", READ_ONLY, "a refusal before the audience"),
-            new Baseline.Moved("door", "denied ROOM_NOT_FOUND 404 Room 'r' was not found.", "x"),
-            new Baseline.Moved("box", NOT_FOUND, "the actor's audience before the box's"));
+            new Baseline.Moved("scope", READ_ONLY, "(a) a refusal before the audience"),
+            new Baseline.Moved(
+                "door", "denied ROOM_NOT_FOUND 404 Room 'r' was not found.", "(a) x"),
+            new Baseline.Moved("box", NOT_FOUND, "(a) the actor's audience before the box's"));
     var now =
         answers(
             "scope", READ_ONLY,
@@ -116,13 +117,56 @@ class BaselineTest {
   }
 
   @Test
+  void aMoveKeepsItsFixAndItsCauseFitsHowItsAnswerMoved() {
+    var bare = "denied UNHELD_PROJECT gone | ";
+    var named = "denied UNHELD_PROJECT gone | Create it.";
+    var reworded = "denied READ_ONLY read-only now | Ask an admin.";
+    var baseline =
+        answers(
+            "lost", READ_ONLY, "hidden", READ_ONLY, "c", bare, "b", READ_ONLY, "kind", READ_ONLY,
+            "x", bare);
+    var moved =
+        List.of(
+            new Baseline.Moved("lost", "denied ADMIN_ONLY admins | ", "(a) admins first"),
+            new Baseline.Moved("hidden", bare, "(a) not held before the role"),
+            new Baseline.Moved("c", named, "(c) a refusal names its fix"),
+            new Baseline.Moved("b", reworded, "(b) one wording"),
+            new Baseline.Moved("kind", NOT_FOUND, "(b) one wording"),
+            new Baseline.Moved("x", "denied UNHELD_PROJECT went | Create it.", "(c) a fix"));
+
+    assertEquals(
+        List.of(
+            "lost\n  moved:    a refusal names its fix, and this one loses it: '" + READ_ONLY + "'",
+            "kind\n  moved:    cause (b) keeps the class of refusal, and this one goes from '"
+                + READ_ONLY
+                + "'",
+            "x\n  moved:    cause (c) keeps the message and gains a fix, and this one goes from '"
+                + bare
+                + "'"),
+        Baseline.differences(
+            baseline,
+            moved,
+            answers(
+                "lost", READ_ONLY, "hidden", bare, "c", named, "b", reworded, "kind", READ_ONLY,
+                "x", bare)));
+  }
+
+  @Test
+  void aMovedLineNamesItsCause() {
+    assertEquals(
+        List.of("b\n  moved:    names no cause (a), (b) or (c)"),
+        Baseline.differences(
+            BASELINE, List.of(new Baseline.Moved("b", NOT_FOUND, "because")), BASELINE));
+  }
+
+  @Test
   void aMovedLineNamesACellOfTheBaselineOnceWithANewAnswerAndAWhy() {
     var moved =
         List.of(
             new Baseline.Moved("z", NOT_FOUND, "no such cell"),
             new Baseline.Moved("b", READ_ONLY, "the same answer"),
             new Baseline.Moved("c", NOT_FOUND, " "),
-            new Baseline.Moved("b", NOT_FOUND, "audience before role"));
+            new Baseline.Moved("b", NOT_FOUND, "(a) audience before role"));
 
     assertEquals(
         List.of(

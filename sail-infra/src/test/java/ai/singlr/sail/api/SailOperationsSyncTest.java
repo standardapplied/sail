@@ -8,7 +8,6 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
-import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ShellExec;
@@ -17,6 +16,7 @@ import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.HeldProjects;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -99,7 +99,7 @@ class SailOperationsSyncTest {
     var failure = assertInstanceOf(Result.Failure.class, result);
     assertEquals(ErrorCode.NOT_FOUND, failure.errorCode());
     assertEquals("Project 'beta' isn't on this box. Projects here: acme.", failure.errorMessage());
-    assertEquals(Remedy.NONE, failure.remedy());
+    assertEquals(ProjectStore.uncatalogued("beta"), failure.remedy());
     assertEquals(0, rounds.get());
   }
 
@@ -249,7 +249,7 @@ class SailOperationsSyncTest {
             specStore,
             null,
             null,
-            null,
+            new ProjectStore(db),
             () -> new ConnectEnvironment("203.0.113.7", "uday", true),
             scheduler),
         db,

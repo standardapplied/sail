@@ -5,12 +5,10 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.access.Access;
-import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Resources;
-import ai.singlr.sail.api.ApiException;
-import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Refusals;
+import ai.singlr.sail.authority.MessageAuthority;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
@@ -56,27 +54,20 @@ public record HostAccess(Sqlite db, RoleRule roles) {
 
   /**
    * Admits {@code who} into {@code roomId} when it may post in the room's conversation ({@link
-   * Action#POST}): a room of a project outside the FDE's scope is refused as one that does not
-   * exist, before anything names its project, and a refusal is said as the pty host says one.
+   * MessageAuthority#post}). A room of a project outside the FDE's scope is not found, as one this
+   * box does not hold, before anything names its project; then a session opened under another
+   * project is told the room's; then a refusal is said as the pty host says one.
    */
   public void admit(String roomId, String project, PtyIdentity who) throws IOException {
     var actor = actorOf(who.fde());
     var rooms = new RoomStore(db);
-    var room =
-        rooms
-            .findById(roomId)
-            .orElseThrow(() -> new IOException(Refusals.roomNotFound(roomId).getMessage()));
-    try {
-      Refusals.require(
-          Access.decide(
-              actor,
-              Action.POST,
-              Resources.conversation(room.id(), room.project(), rooms.owners(room.id()))),
-          () -> Refusals.roomNotFound(roomId));
-    } catch (ApiException refused) {
-      throw refused.failure().errorCode() == ErrorCode.ROOM_NOT_FOUND
-          ? new IOException(refused.getMessage())
-          : Remedied.io(refused.getMessage(), refused.remedy());
+    var notFound = new IOException(Refusals.roomNotFound(roomId).getMessage());
+    var room = rooms.findById(roomId).orElseThrow(() -> notFound);
+    var decision =
+        MessageAuthority.post(
+            actor, Resources.conversation(room.id(), room.project(), rooms.owners(room.id())));
+    if (decision instanceof Decision.NotFound) {
+      throw notFound;
     }
     if (!Objects.equals(room.project(), project)) {
       throw new IOException(
@@ -87,6 +78,9 @@ public record HostAccess(Sqlite db, RoleRule roles) {
               + "'; open the session with --project "
               + room.project()
               + ".");
+    }
+    if (decision instanceof Decision.Refused(var refusal)) {
+      throw Remedied.io(refusal.message(), refusal.fix());
     }
   }
 

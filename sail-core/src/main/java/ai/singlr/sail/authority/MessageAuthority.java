@@ -7,7 +7,9 @@ package ai.singlr.sail.authority;
 
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Refusal;
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
@@ -79,22 +81,40 @@ public final class MessageAuthority implements WriteAuthority {
     var unheld =
         rooms.holds(roomId, null)
             ? Optional.<Refusal>empty()
-            : Access.unowned(actor, Refusal.noConversation(roomId).orElseThrow()).refused();
+            : Access.unowned(actor, Refusal.noConversation(roomId).orElseThrow());
     if (unheld.isPresent()) {
       return unheld;
     }
     var conversation = Resources.conversation(roomId, project, rooms.owners(roomId));
-    var refused = WriteAuthority.refused(actor, Taking.of(conversation, Action.POST));
-    if (refused.isPresent() || Strings.isNotBlank(actor.actingFde())) {
-      return refused;
-    }
-    return Access.unowned(
+    return WriteAuthority.refused(actor, Taking.of(conversation, Action.POST))
+        .or(() -> noOnes(actor, roomId));
+  }
+
+  /**
+   * Whether {@code actor} may post in {@code conversation}, a room this box holds, as a door asks
+   * it before the post it admits: {@link Access} decides the post, then the fact that a post is
+   * someone's ({@link #noOnes}), as this rule decides a post on the journal.
+   */
+  public static Decision post(Actor actor, Resource conversation) {
+    var decision = Access.decide(actor, Action.POST, conversation);
+    return decision instanceof Decision.Allowed
+        ? noOnes(actor, conversation.id()).<Decision>map(Decision.Refused::new).orElse(decision)
+        : decision;
+  }
+
+  /**
+   * Why a post by {@code actor} in {@code roomId} would be no one's: its credential acts for no
+   * FDE. What no one here can own is an admin's to write ({@link Access#unowned}).
+   */
+  private static Optional<Refusal> noOnes(Actor actor, String roomId) {
+    return Strings.isNotBlank(actor.actingFde())
+        ? Optional.empty()
+        : Access.unowned(
             actor,
             new Refusal(
                 Refusal.Kind.NOT_AUTHOR,
                 "This credential acts for no FDE, so a post in '" + roomId + "' would be no one's.",
-                "Post with an FDE's own credential."))
-        .refused();
+                "Post with an FDE's own credential."));
   }
 
   private boolean mayPostAs(Actor actor, String author, String roomId) {

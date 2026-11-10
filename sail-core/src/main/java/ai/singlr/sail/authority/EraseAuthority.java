@@ -47,14 +47,14 @@ public final class EraseAuthority {
   }
 
   /**
-   * Whether {@code actor} may erase at all, asked before what it erases is read: whether its role
+   * Why {@code actor} may not erase at all, asked before what it erases is read: whether its role
    * and lane may prune specs, or, for a {@code wholesale} erasure — a whole project, or a policy's
-   * sweep — purge ({@link Access#decide(Actor, Action, Resource.Kind)}). Every decision of this
-   * rule is a {@link Decision}; main's answer to a node's request ({@link #requested}) and the wait
-   * for a run ({@link #idle}) are worded refusals.
+   * sweep — purge ({@link Access#atAll}). A prune by id is a {@link Decision} ({@link #prune}),
+   * since the spec it names may not be found; main's answer to a node's request ({@link
+   * #requested}) and the wait for a run ({@link #idle}) are worded refusals.
    */
-  public Decision request(Actor actor, boolean wholesale) {
-    return Access.decide(
+  public Optional<Refusal> request(Actor actor, boolean wholesale) {
+    return Access.atAll(
         actor,
         wholesale ? Action.PURGE : Action.PRUNE,
         wholesale ? Resource.Kind.PROJECT : Resource.Kind.SPEC);
@@ -76,7 +76,6 @@ public final class EraseAuthority {
     }
     if (!Erasure.PROJECT.equals(type)) {
       return request(actor, false)
-          .refused()
           .or(
               () ->
                   Refusal.of(
@@ -84,13 +83,9 @@ public final class EraseAuthority {
                       "only specs and projects are pruned on request, not a " + type,
                       "Prune the spec or project it belongs to."));
     }
-    if (!sees(actor, type, id)) {
-      return unheld(type, id);
-    }
     var target = new Erasure.Target(type, id);
-    var denied = request(actor, true).refused();
-    return denied.isPresent() || erasure.isErased(target) || erasure.holds(target)
-        ? denied
+    return sees(actor, type, id) && (erasure.isErased(target) || erasure.holds(target))
+        ? request(actor, true)
         : unheld(type, id);
   }
 
@@ -98,13 +93,15 @@ public final class EraseAuthority {
    * Whether {@code actor} may prune spec {@code id}, one decision on what this box holds of it. One
    * it holds no history of, or whose head is filed outside the actor's audience, is not found. One
    * it erased already leaves nothing to own, so only whether the actor may prune at all is asked
-   * ({@link Access#decide(Actor, Action, Resource.Kind)}): pruning it again is nothing to do. Any
-   * other is pruned by its owner or an admin, as this box last knew it ({@link #spec}).
+   * ({@link Access#atAll}): pruning it again is nothing to do. Any other is pruned by its owner or
+   * an admin, as this box last knew it ({@link #spec}).
    */
   public Decision prune(Actor actor, String id) {
     if (erasure.isErased(new Erasure.Target(Erasure.SPEC, id))) {
       return sees(actor, Erasure.SPEC, id)
-          ? Access.decide(actor, Action.PRUNE, Resource.Kind.SPEC)
+          ? Access.atAll(actor, Action.PRUNE, Resource.Kind.SPEC)
+              .<Decision>map(Decision.Refused::new)
+              .orElseGet(Decision.Allowed::new)
           : new Decision.NotFound();
     }
     return specs.lastKnown(id).map(spec -> spec(actor, spec)).orElseGet(Decision.NotFound::new);

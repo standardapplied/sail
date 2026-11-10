@@ -19,6 +19,7 @@ import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -202,7 +203,7 @@ class DispatchLaneParityTest {
               api.specStore(),
               new ReviewStore(api.db()),
               api.runStore(),
-              null,
+              new ProjectStore(api.db()),
               ConnectEnvironment.detector(),
               SyncScheduler.disabled(),
               new FdeStore(api.db()),

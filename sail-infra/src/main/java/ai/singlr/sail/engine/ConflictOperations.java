@@ -145,9 +145,7 @@ public final class ConflictOperations {
     return db.transaction(
         () -> {
           var conflict = requireOpen(readable(), entityType, entityId);
-          Refusals.require(
-              Access.decide(Actor.current(), Action.CHANGE, Resource.Kind.CONFLICT),
-              () -> notOpen(entityId));
+          Refusals.enforce(Access.atAll(Actor.current(), Action.CHANGE, Resource.Kind.CONFLICT));
           requireMainsRevision(conflict);
           requireCurrent(
               conflict,

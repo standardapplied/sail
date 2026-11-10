@@ -330,7 +330,7 @@ class AccessDoorsBaselineTest {
           new Door(
               "report a room session in " + room,
               ops -> ops.recordRoomConversation(room, "claude-code", "session-1", null, null),
-              actor -> actor.lane() == Actor.Lane.CLI));
+              actor -> actor.lane() == Actor.Lane.CLI || actor.actingFde() == null));
     }
     for (var project : List.of("acme", "beta")) {
       doors.add(
@@ -484,6 +484,16 @@ class AccessDoorsBaselineTest {
                   },
                   AccessDoorsBaselineTest::operator));
         }
+      }
+      for (var fde : List.of(Cast.OWNER, World.VIEWER_FDE)) {
+        doors.add(
+            new Door(
+                "fde " + fde + " pins a terminal to lobby under beta on " + box.getKey(),
+                ops -> {
+                  host.admit("lobby", "beta", new PtyIdentity(fde, false, false));
+                  return "admitted";
+                },
+                AccessDoorsBaselineTest::operator));
       }
     }
   }

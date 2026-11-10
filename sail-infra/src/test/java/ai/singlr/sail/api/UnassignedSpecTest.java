@@ -166,7 +166,7 @@ class UnassignedSpecTest {
     assertEquals(
         Map.of(
             "code",
-            "forbidden_not_assignee",
+            "forbidden_admin_only",
             "message",
             "'design' belongs to uday: only uday or an admin may start work there, not you.",
             "action",

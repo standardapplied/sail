@@ -10,6 +10,7 @@ import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.access.Resources;
+import ai.singlr.sail.authority.MessageAuthority;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
@@ -763,7 +764,7 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public StackOperations stack() {
-    return new StackOperations(shell, projectStore, projects, Thread::sleep, System::nanoTime);
+    return new StackOperations(shell, projectCatalog(), projects, Thread::sleep, System::nanoTime);
   }
 
   /** The review and fix lanes the review pipeline launches through — see {@code reviewLanes}. */
@@ -1231,10 +1232,7 @@ public final class SailOperations implements HostOperations {
   }
 
   private ProjectDefinitionOperations definitions() {
-    if (projectStore == null) {
-      throw storeUnavailable("project catalog");
-    }
-    return new ProjectDefinitionOperations(projectStore);
+    return new ProjectDefinitionOperations(projectCatalog());
   }
 
   @Override
@@ -1272,12 +1270,12 @@ public final class SailOperations implements HostOperations {
   @Override
   public Result<SnapshotActionResponse> restoreSnapshot(
       String project, String label, String localHandle) {
-    return safe(() -> snapshotOps.restore(held(Action.RESTORE, project), label, localHandle));
+    return safe(() -> snapshotOps.restore(taking(Action.RESTORE, project), label, localHandle));
   }
 
   @Override
   public Result<SnapshotActionResponse> deleteSnapshot(String project, String label) {
-    return safe(() -> snapshotOps.delete(held(Action.RESTORE, project), label));
+    return safe(() -> snapshotOps.delete(taking(Action.RESTORE, project), label));
   }
 
   @Override
@@ -1300,25 +1298,32 @@ public final class SailOperations implements HostOperations {
   }
 
   /**
-   * {@code project} as a route addresses it to read ({@link ProjectReader#readable}): one this
-   * box's catalog does not hold is refused, never answered as empty, and one its reader may not
-   * read is answered the same, so a caller cannot tell a project it was not granted from one that
-   * does not exist.
+   * {@code project} as a route addresses it to read ({@link ProjectGate#readable}): one this box's
+   * catalog does not hold is refused, never answered as empty, and one its reader may not read is
+   * answered the same, so a caller cannot tell a project it was not granted from one that does not
+   * exist.
    */
   private String readable(String project) {
     NameValidator.requireValidProjectName(project);
-    ProjectReader.readable(projectStore, project);
+    ProjectGate.readable(projectCatalog(), project);
     return project;
   }
 
   /**
-   * {@code project} as a route addresses it to take {@code action} on ({@link
-   * ProjectReader#require}).
+   * {@code project} as a route addresses it to take {@code action} on ({@link ProjectGate#taking}).
    */
-  private String held(Action action, String project) {
+  private String taking(Action action, String project) {
     NameValidator.requireValidProjectName(project);
-    ProjectReader.require(projectStore, action, project);
+    ProjectGate.taking(projectCatalog(), action, project);
     return project;
+  }
+
+  /** This box's project catalog, which every project door reads. */
+  private ProjectStore projectCatalog() {
+    if (projectStore == null) {
+      throw storeUnavailable("project catalog");
+    }
+    return projectStore;
   }
 
   /**
@@ -1431,15 +1436,9 @@ public final class SailOperations implements HostOperations {
     }
     var refused =
         Access.owned(
-                Actor.current(),
-                Resources.run(
-                    run.id(),
-                    run.project(),
-                    run.owner(),
-                    run.specId(),
-                    run.node(),
-                    this::specOwner))
-            .refused();
+            Actor.current(),
+            Resources.run(
+                run.id(), run.project(), run.owner(), run.specId(), run.node(), this::specOwner));
     if (refused.isPresent()) {
       return Refusals.failure(refused.get());
     }
@@ -2083,9 +2082,8 @@ public final class SailOperations implements HostOperations {
           }
           var room = roomOrSpec(roomId).orElseThrow(() -> Refusals.roomNotFound(roomId));
           Refusals.require(
-              Access.decide(
+              MessageAuthority.post(
                   actor,
-                  Action.POST,
                   Resources.conversation(
                       room.id(), room.project(), requireRoomStore().owners(room.id()))),
               () -> Refusals.roomNotFound(roomId));

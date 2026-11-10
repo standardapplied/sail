@@ -120,20 +120,15 @@ class EraseAuthorityTest {
 
   @Test
   void aWholeProjectOrASweepIsAnAdminsAndNoneAViewers() {
-    assertEquals(Optional.empty(), rule.request(ADMIN, true).refused());
-    assertEquals(Optional.empty(), rule.request(ADMIN_SYNC, true).refused());
-    assertEquals(Optional.empty(), rule.request(OWNER_API, false).refused());
-    assertEquals(
-        Optional.of(Kind.ADMIN_ONLY), rule.request(OWNER_API, true).refused().map(Refusal::kind));
-    assertEquals(
-        Optional.of(Kind.ADMIN_ONLY), rule.request(OWNER_SYNC, true).refused().map(Refusal::kind));
-    assertEquals(
-        Optional.of(Kind.READ_ONLY), rule.request(VIEWER, false).refused().map(Refusal::kind));
+    assertEquals(Optional.empty(), rule.request(ADMIN, true));
+    assertEquals(Optional.empty(), rule.request(ADMIN_SYNC, true));
+    assertEquals(Optional.empty(), rule.request(OWNER_API, false));
+    assertEquals(Optional.of(Kind.ADMIN_ONLY), rule.request(OWNER_API, true).map(Refusal::kind));
+    assertEquals(Optional.of(Kind.ADMIN_ONLY), rule.request(OWNER_SYNC, true).map(Refusal::kind));
+    assertEquals(Optional.of(Kind.READ_ONLY), rule.request(VIEWER, false).map(Refusal::kind));
     assertEquals(
         Optional.of(Kind.READ_ONLY),
-        rule.request(new Actor(OWNER, Role.VIEWER, Actor.Lane.CLI), true)
-            .refused()
-            .map(Refusal::kind));
+        rule.request(new Actor(OWNER, Role.VIEWER, Actor.Lane.CLI), true).map(Refusal::kind));
   }
 
   @Test
@@ -301,19 +296,19 @@ class EraseAuthorityTest {
             Kind.READ_ONLY,
             "Your credential is read-only and cannot prune specs.",
             "Ask an admin for a member or admin credential."),
-        rule.request(VIEWER, false).refused().orElseThrow());
+        rule.request(VIEWER, false).orElseThrow());
     assertEquals(
         new Refusal(
             Kind.LANE_FORBIDDEN,
             "Agent principals cannot prune specs.",
             "Only an operator lane (CLI or API token) may do this."),
-        rule.request(AGENT, false).refused().orElseThrow());
+        rule.request(AGENT, false).orElseThrow());
     assertEquals(
         new Refusal(
             Kind.ADMIN_ONLY,
             "Pruning by policy or a whole project is admin-only.",
             Remedy.of("Name the specs you own by id: ", Remedy.sail("spec prune", "<id...>"), ".")),
-        rule.request(OWNER_API, true).refused().orElseThrow());
+        rule.request(OWNER_API, true).orElseThrow());
     assertEquals(
         "Spec 'auth' is assigned to 'ada', not you.",
         refused(rule.spec(OTHER_API, spec(SpecStatus.ARCHIVED, OWNER, OWNER, true)))

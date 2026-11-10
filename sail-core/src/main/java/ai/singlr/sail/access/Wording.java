@@ -128,16 +128,20 @@ final class Wording {
   /**
    * The refusal of a create or a claim of a spec born in {@code room} by one who does not act for
    * its owners: a create is theirs to make there, and a claim, which would make the claimer one of
-   * them, an admin's to grant as an assignment.
+   * them, an admin's to grant as an assignment, so it is admin-only.
    */
   static Refusal notSeated(Action action, Resource room) {
-    return ownedBy(
-        room,
-        "start work",
-        "Have an admin create or assign the spec.",
-        action == Action.CLAIM
-            ? named -> "Ask an admin to assign it to you."
-            : named -> "Ask " + named + " to create it there, or have an admin do it.");
+    if (action != Action.CLAIM) {
+      return ownedBy(
+          room,
+          "start work",
+          "Have an admin create or assign the spec.",
+          named -> "Ask " + named + " to create it there, or have an admin do it.");
+    }
+    return new Refusal(
+        Refusal.Kind.ADMIN_ONLY,
+        ownedMessage(room, "start work"),
+        "Ask an admin to assign it to you.");
   }
 
   /**
@@ -147,26 +151,29 @@ final class Wording {
    */
   private static Refusal ownedBy(
       Resource room, String doing, String unowned, Function<String, String> owned) {
-    var id = room.id();
-    if (room.owners().isEmpty()) {
-      return new Refusal(
-          Refusal.Kind.NOT_OWNER,
-          "No one owns '" + id + "' yet, so only an admin may " + doing + " there.",
-          unowned);
-    }
     var named = String.join(" or ", room.owners());
     return new Refusal(
         Refusal.Kind.NOT_OWNER,
-        "'"
-            + id
-            + "' belongs to "
-            + named
-            + ": only "
-            + named
-            + " or an admin may "
-            + doing
-            + " there, not you.",
-        owned.apply(named));
+        ownedMessage(room, doing),
+        room.owners().isEmpty() ? unowned : owned.apply(named));
+  }
+
+  /** What {@code doing} in {@code room} is refused as: its owners', naming them, or an admin's. */
+  private static String ownedMessage(Resource room, String doing) {
+    var id = room.id();
+    if (room.owners().isEmpty()) {
+      return "No one owns '" + id + "' yet, so only an admin may " + doing + " there.";
+    }
+    var named = String.join(" or ", room.owners());
+    return "'"
+        + id
+        + "' belongs to "
+        + named
+        + ": only "
+        + named
+        + " or an admin may "
+        + doing
+        + " there, not you.";
   }
 
   /** The ownership step's refusal of {@code action} on {@code resource}, naming its owners. */
