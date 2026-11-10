@@ -53,7 +53,7 @@ public enum Action {
    */
   DISPATCH("Dispatch", "dispatch or resume a spec; seat or remove a room agent", "dispatch"),
   /** Stopping a run, or reading its log: what the people the run works for may do with it. */
-  OPERATE_RUN("Operate a run", "stop it; read its log", "stop"),
+  OPERATE_RUN("Operate a run", "stop it; read its log", "stop", "runs or read their logs"),
   /**
    * A run's reports about itself: its lifecycle events, its session, the acknowledgements of its
    * inbox. Whether the run executed on this box stays the event rule's own fact.

@@ -197,7 +197,7 @@ public final class EventAuthority {
    * What {@code action} is taken on when an event is about {@code subject}. The box, for an event
    * that speaks for it. Otherwise the work it names, answering to who drives it here: a run this
    * box executed is also this box's; and a run's narration is a person's only on the box that
-   * executed it, so a run another box executed has no narrator here but an admin.
+   * executed it.
    */
   private Resource resource(Action action, Subject subject) {
     var executed =
@@ -226,12 +226,15 @@ public final class EventAuthority {
    * Whether a sender {@link Access} allows is taken at its word: what an event the machinery acts
    * on reports, only whoever speaks for this box reports first-hand, and anyone else only retells,
    * never what this box executed itself; an announcement is retold by a voice, about a
-   * conversation. An event about the box, and a narration, are decided by the action alone.
+   * conversation; a person's narration, an admin's included, only of a run this box executed, since
+   * what another box's run did reaches this one by sync. An event about the box is decided by the
+   * action alone.
    */
   private boolean believed(Actor actor, Action action, Subject subject, boolean retold) {
     var firstHand = speaksForBox(actor);
     return switch (action) {
-      case OPERATE_BOX, NARRATE -> true;
+      case OPERATE_BOX -> true;
+      case NARRATE -> subject.executedHere();
       case POST ->
           firstHand
               || (retold

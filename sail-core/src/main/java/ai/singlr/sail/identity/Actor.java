@@ -192,11 +192,6 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
     return role == Role.ADMIN;
   }
 
-  /** True when this actor's role grants the {@code WRITE} capability. */
-  public boolean canWrite() {
-    return role.allows(Capability.WRITE);
-  }
-
   /**
    * True when this actor was built from a run credential on an in-container lane — the agent lane
    * or its room-restricted variant. Both are refused wherever a run must not act on runs (the

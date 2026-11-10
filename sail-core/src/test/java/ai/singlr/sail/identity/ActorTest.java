@@ -26,24 +26,21 @@ class ActorTest {
     assertEquals(Role.ADMIN, actor.role());
     assertEquals(Actor.Lane.CLI, actor.lane());
     assertTrue(actor.isAdmin());
-    assertTrue(actor.canWrite());
   }
 
   @Test
-  void memberCanWriteButIsNotAdmin() {
+  void memberIsNotAdmin() {
     var actor = new Actor("raj", Role.MEMBER, Actor.Lane.API);
 
     assertFalse(actor.isAdmin());
-    assertTrue(actor.canWrite());
     assertEquals(Actor.Lane.API, actor.lane());
   }
 
   @Test
-  void viewerCannotWrite() {
+  void viewerIsNotAdmin() {
     var actor = new Actor("obs", Role.VIEWER, Actor.Lane.API);
 
     assertFalse(actor.isAdmin());
-    assertFalse(actor.canWrite());
   }
 
   @Test
@@ -62,7 +59,6 @@ class ActorTest {
     assertEquals(Role.MEMBER, actor.role());
     assertEquals(Actor.Lane.AGENT, actor.lane());
     assertTrue(actor.agentLane());
-    assertTrue(actor.canWrite());
     assertFalse(actor.isAdmin());
   }
 
@@ -153,8 +149,6 @@ class ActorTest {
   void syncMainAndSystemNameTheirLanes() {
     var pusher = Actor.sync("sumesh", Role.MEMBER);
     assertEquals(Actor.Lane.SYNC, pusher.lane());
-    assertTrue(pusher.canWrite());
-    assertFalse(Actor.sync(null, Role.VIEWER).canWrite());
     assertEquals(new Actor("main", Role.ADMIN, Actor.Lane.MAIN), Actor.main());
     assertEquals(new Actor("sail", Role.ADMIN, Actor.Lane.SYSTEM), Actor.system());
   }

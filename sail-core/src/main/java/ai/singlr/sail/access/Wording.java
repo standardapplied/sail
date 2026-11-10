@@ -27,7 +27,7 @@ final class Wording {
    * the spec a reassignment would move and the project a purge would erase when one is in hand.
    */
   static Refusal belowRole(Actor actor, Action action, Resource.Kind kind, Resource resource) {
-    if (!actor.canWrite()) {
+    if (!Access.mayWrite(actor)) {
       return Refusal.readOnly(action.act(kind));
     }
     if (resource != null && action == Action.ASSIGN) {

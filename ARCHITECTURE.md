@@ -2309,7 +2309,7 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | Prune | erase a spec everywhere, once archived, cancelled or deleted | no | owner | yes | no | no |
 | Purge | erase a project everywhere; a retention sweep | no | no | yes | no | no |
 | Manage people | add, change role, grant, remove, pair, mint tokens | no | no | yes | no | no |
-| Operate the box | sync now; read sync health and bus stats; point the box at another main | no | owner | yes | no | no |
+| Operate the box | sync now; read sync health and bus stats; point the box at another main | owner | owner | yes | no | no |
 
 A person reads the column of their role on every lane they come in by, a push over sync included.
 An agent reads its role's column too (its person's, capped by the lane), and its lane's column
@@ -2373,7 +2373,8 @@ carries no text: the door that asked supplies its own answer for an id it does n
 run's reports of itself are Narrate, a run's stop or failure Operate a run, a dispatch or restart
 Dispatch, the review types Approve, a message's announcement Post, and an event about the box
 Operate the box. The rule keeps three facts: whether its sender speaks for this box (Operate the
-box) or only retells what another box did, whether this box executed the run, and that a run's
+box) or only retells what another box did, whether this box executed the run (a person's
+narration, an admin's included, is believed only of a run this box executed), and that a run's
 own principal publishes only its own run's narration (until sail-agents-act-on-their-own-work).
 Work outside the sender's scope is not found.
 

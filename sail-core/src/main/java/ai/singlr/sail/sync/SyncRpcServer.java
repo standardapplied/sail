@@ -267,7 +267,7 @@ public final class SyncRpcServer {
         reply(out, new SyncWire.Done());
       }
       case SyncWire.Announce announce -> {
-        if (principal.canWrite()) {
+        if (Access.mayWrite(principal)) {
           receiveContent(announce, in, out, frame);
         } else {
           reply(out, new SyncWire.Lack(List.of()));
@@ -404,7 +404,7 @@ public final class SyncRpcServer {
    * offer main's own rule denies.
    */
   private Set<String> unshared(String type, MainReplica.Offer offer) {
-    if (Access.audience(principal).unrestricted() || !principal.canWrite()) {
+    if (Access.audience(principal).unrestricted() || !Access.mayWrite(principal)) {
       return Set.of();
     }
     return without(
@@ -818,7 +818,7 @@ public final class SyncRpcServer {
       return new SyncWire.Denied(offer.id(), outside.get().message(), null, null, true);
     }
     if (RUN_ENTITY.equals(type)
-        && principal.canWrite()
+        && Access.mayWrite(principal)
         && (principal.handle() == null || principal.handle().isBlank())) {
       return new SyncWire.Refused(
           offer.id(),

@@ -14,6 +14,7 @@ import static ai.singlr.sail.access.AccessTest.Outcome.READ_ONLY;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
@@ -27,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -204,7 +206,7 @@ class AccessTest {
               Action.OPERATE_RUN,
               RUN_ADA,
               RUN_BOB,
-              "stop runs",
+              "stop runs or read their logs",
               List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY),
               RUN_NOT_OWNER,
               null),
@@ -292,7 +294,7 @@ class AccessTest {
               BOX_ADA,
               BOX_BOB,
               "operate boxes",
-              List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY),
+              List.of(OWNED, OWNED, ALLOWED, LANE, LANE),
               refusal(
                   Refusal.Kind.NOT_OWNER,
                   "Box 'bob' belongs to 'bob', not you.",
@@ -720,6 +722,48 @@ class AccessTest {
         refused(
             Refusal.Kind.ADMIN_ONLY, "Only an admin may manage people.", "Ask an admin to do it."),
         Access.decide(unplaced, Action.MANAGE_PEOPLE, PEOPLE));
+  }
+
+  @Test
+  void aBoxNamingNoFdeIsNoOnesSoAnAdminsAlone() {
+    var unnamed = Resources.box(" ");
+
+    assertEquals(Resources.box(null), unnamed);
+    assertEquals(new Decision.Allowed(), Access.decide(Actors.ADMIN, Action.OPERATE_BOX, unnamed));
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "This box has no owner, so only an admin may operate it.",
+            "Have an admin operate it."),
+        Access.decide(Actors.VIEWER, Action.OPERATE_BOX, unnamed));
+  }
+
+  @Test
+  void aRoleMayWriteWhenItsColumnAllowsAnythingButReadingAndOperatingItsBox() {
+    assertEquals(
+        Map.of(Role.VIEWER, false, Role.MEMBER, true, Role.ADMIN, true),
+        Stream.of(Role.values())
+            .collect(
+                Collectors.toMap(
+                    Function.identity(),
+                    role -> Access.mayWrite(new Actor(Actors.OWNER, role, Actor.Lane.SYNC)))));
+    assertFalse(Access.mayWrite(Actors.ROOM), "a room agent's role is a viewer's");
+    assertTrue(Access.mayWrite(Actors.AGENT));
+  }
+
+  @Test
+  void aPrincipalIsShownItsRoleItsLaneAndWhatItsRolesColumnGrants() {
+    assertEquals(
+        new Principal("admin", "api", List.of("read", "write", "admin")),
+        Principal.of(Actors.ADMIN));
+    assertEquals(
+        new Principal("member", "cli", List.of("read", "write")), Principal.of(Actors.OWNER_CLI));
+    assertEquals(new Principal("viewer", "api", List.of("read")), Principal.of(Actors.VIEWER));
+    assertEquals(new Principal("viewer", "room", List.of("read")), Principal.of(Actors.ROOM));
+    assertEquals(
+        new Principal("member", "agent", List.of("read", "write")), Principal.of(Actors.AGENT));
+    assertThrows(NullPointerException.class, () -> new Principal(null, "api", List.of()));
+    assertThrows(NullPointerException.class, () -> new Principal("viewer", null, List.of()));
   }
 
   @Test

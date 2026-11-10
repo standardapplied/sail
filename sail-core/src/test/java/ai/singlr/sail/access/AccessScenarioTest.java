@@ -235,7 +235,7 @@ class AccessScenarioTest {
     assertEquals(
         refused(
             Refusal.Kind.LANE_FORBIDDEN,
-            "Agent principals cannot stop runs.",
+            "Agent principals cannot stop runs or read their logs.",
             "Only an operator lane (CLI or API token) may do this."),
         Access.decide(ENGS_AGENT, Action.OPERATE_RUN, ENGS_RUN));
   }

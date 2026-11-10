@@ -38,19 +38,19 @@ import org.junit.jupiter.api.Test;
  * a capability but the members {@link #ALLOWED} names, each with the spec that deletes it or the
  * fact, not a permission, that needs it to know which fact applies. Read from the compiled classes
  * of every module, a member at a time, a lambda counted as the member it is written in, it sees: a
- * call of {@link Actor#isAdmin}, {@link Actor#canWrite}, {@link Actor#isSail}, {@link Actor#role},
- * {@link Actor#lane}, {@link Actor#agentLane}, {@link Actor#roomLane}, {@link Actor#scope} or
- * {@link Actor#actsFor}; of {@code RoleRule}'s resolvers, {@link Role#fromAttribute}, {@link
- * Role#allows}, {@link Role#cappedBy} or a role's order; a {@link Role} constant (so an {@code
- * Actor} built with a role literal), a {@code switch} over a role, a type check of one, and any
- * call that returns one; {@code RunRow#readOnlyLane}; a type check of the socket's run or box
- * caller; and anything of {@link Capability}, as a call, a field, a type check, a class constant,
- * or what an {@code invokedynamic} hands its bootstrap (a method reference, the types and constants
- * a pattern {@code switch} tests). It cannot see a role, a lane or a scope read as data: in SQL,
- * from a map, or through a type that hides it, so a filter inside a query takes its scope from
- * {@code Access.audience}. {@code Actor}, {@code Role}, {@code Capability} and the socket's callers
- * define what is read, so their own members are not swept. An entry that no longer matches a read
- * fails too, so the list shrinks as the later specs land.
+ * call of {@link Actor#isAdmin}, {@link Actor#isSail}, {@link Actor#role}, {@link Actor#lane},
+ * {@link Actor#agentLane}, {@link Actor#roomLane}, {@link Actor#scope} or {@link Actor#actsFor}; of
+ * {@code RoleRule}'s resolvers, {@link Role#fromAttribute}, {@link Role#allows}, {@link
+ * Role#cappedBy} or a role's order; a {@link Role} constant (so an {@code Actor} built with a role
+ * literal), a {@code switch} over a role, a type check of one, and any call that returns one;
+ * {@code RunRow#readOnlyLane}; a type check of the socket's run or box caller; and anything of
+ * {@link Capability}, as a call, a field, a type check, a class constant, or what an {@code
+ * invokedynamic} hands its bootstrap (a method reference, the types and constants a pattern {@code
+ * switch} tests). It cannot see a role, a lane or a scope read as data: in SQL, from a map, or
+ * through a type that hides it, so a filter inside a query takes its scope from {@code
+ * Access.audience}. {@code Actor}, {@code Role}, {@code Capability} and the socket's callers define
+ * what is read, so their own members are not swept. An entry that no longer matches a read fails
+ * too, so the list shrinks as the later specs land.
  */
 class OneDecisionSweepTest {
 
@@ -69,16 +69,7 @@ class OneDecisionSweepTest {
   private static final Map<String, Set<String>> READS =
       Map.of(
           ACTOR,
-          Set.of(
-              "isAdmin",
-              "canWrite",
-              "isSail",
-              "role",
-              "lane",
-              "agentLane",
-              "roomLane",
-              "scope",
-              "actsFor"),
+          Set.of("isAdmin", "isSail", "role", "lane", "agentLane", "roomLane", "scope", "actsFor"),
           ROLE,
           Set.of("allows", "fromAttribute", "cappedBy", "ordinal", "compareTo"),
           ROLE_RULE,
@@ -171,14 +162,11 @@ class OneDecisionSweepTest {
         SYNC_SERVER + "#serve",
         "fact: only a scoped session is served over main's change heads, which its scope rule"
             + " reads; an unscoped one has none to ask");
-    for (var content : List.of("requireServed", "serving", "receiveContent")) {
+    for (var content : List.of("requireServed", "serving", "receiveContent", "unshared")) {
       allowed.put(
           SYNC_SERVER + "#" + content,
           "audience: content named by hash alone is read by a scoped session only as main served"
               + " it rows this session, the Read rule where no row names its project");
-    }
-    for (var content : List.of("result", "serveContent", "unshared")) {
-      allowed.put(SYNC_SERVER + "#" + content, EVERY_DOOR);
     }
     return allowed;
   }
@@ -210,7 +198,6 @@ class OneDecisionSweepTest {
       assertEquals(
           Set.of(
               leaky + "admin",
-              leaky + "writer",
               leaky + "role",
               leaky + "lane",
               leaky + "agent",
@@ -243,10 +230,6 @@ class OneDecisionSweepTest {
   private static final class Leaky {
     boolean admin(Actor actor) {
       return actor.isAdmin();
-    }
-
-    boolean writer(Actor actor) {
-      return actor.canWrite();
     }
 
     boolean role(Actor actor) {
