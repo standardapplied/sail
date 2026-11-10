@@ -13,7 +13,6 @@ import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncTransportException;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.util.List;
-import java.util.Objects;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
@@ -57,13 +56,10 @@ class ReadsBaselineTest {
 
   /**
    * One full round of a box that syncs as {@code pusher} and starts with no row, and, per row main
-   * holds, whether the box holds it after. A session that names no FDE is refused at the hello,
-   * before any row is read, so each row's answer is that refusal: it receives nothing.
+   * holds, whether the box holds it after.
    */
   private static void pulled(World world, Cast.Member pusher, Corpus corpus) {
-    try (var node =
-        new SyncBox(Objects.requireNonNullElse(pusher.actor().handle(), "anonymous") + "-box")
-            .syncsAs(pusher.actor())) {
+    try (var node = new SyncBox(pusher.actor().handle() + "-box").syncsAs(pusher.actor())) {
       HeldProjects.hold(node.db, "beta");
       String failed = null;
       try {

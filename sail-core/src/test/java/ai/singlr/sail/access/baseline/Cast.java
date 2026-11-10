@@ -53,8 +53,8 @@ public final class Cast {
   private Cast() {}
 
   /**
-   * The whole cast: people on the host CLI, an HTTP token and a sync session, a machine token, an
-   * unauthenticated sync session, run and room agents, and Sail itself as main and as this box.
+   * The whole cast: people on the host CLI, an HTTP token and a sync session, a machine token, run
+   * and room agents, and Sail itself as main and as this box.
    */
   public static List<Member> everyone() {
     var cast = new ArrayList<Member>();
@@ -62,10 +62,6 @@ public final class Cast {
       cast.addAll(people(lane, SCOPES));
     }
     cast.add(member("api member machine all", new Actor(null, Role.MEMBER, Actor.Lane.API)));
-    cast.add(
-        member(
-            "sync viewer anonymous none",
-            Actor.sync(null, Role.VIEWER).withScope(ProjectScope.none())));
     cast.addAll(agents(SCOPES));
     cast.add(member("main admin bob all", Actor.main(OTHER)));
     cast.add(member("system admin sail all", Actor.system()));

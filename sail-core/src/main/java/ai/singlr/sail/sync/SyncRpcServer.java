@@ -12,9 +12,9 @@ import ai.singlr.sail.authority.EraseAuthority;
 import ai.singlr.sail.authority.ScopeRule;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.DatabaseCatalog;
@@ -59,8 +59,6 @@ import java.util.Set;
  */
 public final class SyncRpcServer {
 
-  private static final String RUN_ENTITY = "run";
-
   /** Main's change log as a paged pull reads it: the heads of one type after a checkpoint. */
   @FunctionalInterface
   public interface ChangeHeads {
@@ -88,17 +86,6 @@ public final class SyncRpcServer {
   private final Set<String> sharedBlobs = new HashSet<>();
   private final Set<String> sharedChunks = new HashSet<>();
 
-  public SyncRpcServer(MainReplica main, boolean writable) {
-    this(
-        Map.of("spec", main),
-        Actor.sync(null, writable ? Role.MEMBER : Role.VIEWER),
-        FdeRoster.EMPTY);
-  }
-
-  public SyncRpcServer(MainReplica main, boolean writable, FdeRoster fdeRoster) {
-    this(Map.of("spec", main), Actor.sync(null, writable ? Role.MEMBER : Role.VIEWER), fdeRoster);
-  }
-
   public SyncRpcServer(Map<String, MainReplica> replicas, Actor principal, FdeRoster fdeRoster) {
     this(replicas, principal, fdeRoster, SyncTransitionSink.NONE);
   }
@@ -124,6 +111,11 @@ public final class SyncRpcServer {
       throw new IllegalArgumentException(
           "A sync session acts on the SYNC lane, where main decides what the FDE may push; got "
               + principal.lane());
+    }
+    if (Strings.isBlank(principal.handle())) {
+      throw new IllegalArgumentException(
+          "A sync session acts for an FDE, to whom main attributes every commit; this one names"
+              + " none");
     }
     this.fdeRoster = Objects.requireNonNull(fdeRoster, "fdeRoster");
     this.transitionSink = Objects.requireNonNull(transitionSink, "transitionSink");
@@ -541,7 +533,7 @@ public final class SyncRpcServer {
         SyncWire.PROTOCOL,
         version,
         mainId(),
-        Objects.toString(principal.handle(), ""),
+        principal.handle(),
         limits.fileMax(),
         Access.audience(principal),
         db == null ? null : new DatabaseCatalog(db).id());
@@ -551,11 +543,11 @@ public final class SyncRpcServer {
    * Why a session from {@code box} is refused because its FDE syncs from another box, naming the
    * fix; empty when {@code box} is the FDE's box. Main's own FDE syncs from main alone; any other
    * FDE from the first box that synced as it, recorded now when none has, until an admin releases
-   * it. A session naming no FDE claims nothing.
+   * it.
    */
   private Optional<Remedy> boxRefusal(String box) {
     var handle = principal.handle();
-    if (mainBox == null || handle == null || handle.isBlank()) {
+    if (mainBox == null) {
       return Optional.empty();
     }
     if (handle.equals(mainBox.fde())) {
@@ -816,14 +808,6 @@ public final class SyncRpcServer {
     if (outside.isPresent()) {
       deniedInSession |= offer.snapshot() != null && carriesContent(type);
       return new SyncWire.Denied(offer.id(), outside.get().message(), null, null, true);
-    }
-    if (RUN_ENTITY.equals(type)
-        && Access.mayWrite(principal)
-        && (principal.handle() == null || principal.handle().isBlank())) {
-      return new SyncWire.Refused(
-          offer.id(),
-          "This sync session has no node handle, so a run cannot be attributed to it; "
-              + "set the node's sync handle before pushing runs.");
     }
     if (!unshared(type, offer).isEmpty()) {
       return new SyncWire.Refused(

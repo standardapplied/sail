@@ -7,7 +7,6 @@ package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -184,18 +183,6 @@ class NodeIdentitySyncTest {
     assertTrue(refused.getMessage().contains("main ('main')"), refused.getMessage());
     assertFalse(refused.getMessage().contains("release-box"), "releasing does nothing for it");
     assertTrue(new FdeBoxes(main.db).boxOf("ada").isEmpty(), "main's FDE records no other box");
-    SyncBox.assertConverged(main, ada);
-  }
-
-  @Test
-  void aSessionNamingNoFdeClaimsNoBox() throws IOException {
-    try (var link = SyncBox.connect(main.server(Actor.sync(null, Role.VIEWER)), ada)) {
-      assertEquals("", link.session().handle());
-    }
-    try (var other = new SyncBox("other");
-        var link = SyncBox.connect(main.server(Actor.sync(null, Role.VIEWER)), other)) {
-      assertInstanceOf(SyncSession.class, link.session());
-    }
     SyncBox.assertConverged(main, ada);
   }
 

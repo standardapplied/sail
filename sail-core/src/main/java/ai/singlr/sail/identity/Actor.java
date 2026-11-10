@@ -99,10 +99,7 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
     return new Actor(handle, Role.VIEWER, Lane.ROOM, owner);
   }
 
-  /**
-   * The FDE behind one {@code _sync} session on main, with the role the gateway resolved. A {@code
-   * null} handle (an unauthenticated or machine session) can never own a run or a spec.
-   */
+  /** The FDE behind one {@code _sync} session on main, with the role main's roster gives it. */
   public static Actor sync(String handle, Role role) {
     return new Actor(handle, role, Lane.SYNC);
   }
