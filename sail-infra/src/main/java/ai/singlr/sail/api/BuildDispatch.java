@@ -111,11 +111,12 @@ public final class BuildDispatch {
    * target repo set (the binding concurrency gate) and, in the same transaction, claim the spec
    * {@code in_progress} with its resolved repos and branch persisted, then publish the lifecycle
    * events, snapshot and branch as configured, launch, and arm the guardrail watcher. Every refusal
-   * fires before any mutation.
+   * fires before any mutation, and the admission's before the container is asked whether it runs,
+   * so who may dispatch the spec, and on which box, does not depend on the container's state.
    */
   public DispatchOperations.Outcome dispatch(
       String project, DispatchOperations.Request request, String localHandle) {
-    var loaded = projects.loadRunning(project);
+    var config = projects.definition(project);
     if (!request.mode().equals("background") && !request.mode().equals("foreground")) {
       throw new ApiException(
           ErrorCode.INVALID_MODE, "Dispatch mode must be background or foreground.");
@@ -124,7 +125,7 @@ public final class BuildDispatch {
       throw LaunchAdmission.nodeHandleUnset();
     }
     admission.requireTrustedRoster(localHandle);
-    if (loaded.config().agent() == null) {
+    if (config.agent() == null) {
       throw new ApiException(
           ErrorCode.AGENT_NOT_CONFIGURED, "The project's definition sets no agent.");
     }
@@ -137,17 +138,18 @@ public final class BuildDispatch {
             request.restart(),
             localHandle,
             spec -> earlierReviewsInScope(spec.id()));
-    if (resolution.spec() == null) {
-      return new DispatchOperations.NoSpecs();
-    }
     var nextSpec = resolution.spec();
-    if (!earlierReviewsInScope(nextSpec.id())) {
+    if (nextSpec != null && !earlierReviewsInScope(nextSpec.id())) {
       throw new ApiException(
           ErrorCode.CONFLICT,
           "Dispatching spec '"
               + nextSpec.id()
               + "' would close a review outside your project scope.",
           "Ask an admin to dispatch it.");
+    }
+    var loaded = projects.running(project, config);
+    if (nextSpec == null) {
+      return new DispatchOperations.NoSpecs();
     }
 
     var targetRepos = DispatchRepos.resolve(loaded.config(), nextSpec, request.repos());

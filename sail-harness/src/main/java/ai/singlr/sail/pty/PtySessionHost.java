@@ -46,10 +46,11 @@ import java.util.function.Function;
  * traffic flows through the subscriber queue onto the same channel, serialized per connection.
  *
  * <p>Reaping is driven by {@link #sweep(long)} with an injected clock — the production timer thread
- * merely calls it; tests call it directly with synthetic time. The same pass re-validates every
- * admitted connection's credential: a token the resolver no longer honors (a revoked FDE session)
- * severs the connections it admitted, so a revocation ends live attachments within one sweep rather
- * than at the next reconnect.
+ * merely calls it; tests call it directly with synthetic time. The same pass resolves every
+ * admitted connection's credential again: a token the resolver no longer honors (a revoked FDE
+ * session), or one that now stands for a principal other than the one it admitted (a demotion, a
+ * changed scope), severs the connections it admitted, so a change of access ends live attachments
+ * within one sweep rather than at the next reconnect.
  *
  * <p>Yielding is the one verb no FDE holds. A dispatch that reserves repos must end whichever
  * resumed conversation sits on them regardless of who opened it, so the host mints a random
@@ -120,7 +121,7 @@ public final class PtySessionHost implements AutoCloseable {
   private final Path sessionsDir;
   private final long journalCapacity;
   private final PtyIdentity.Resolver identity;
-  private final PtyRooms rooms;
+  private final PtyAdmission admission;
   private final PtyEvents events;
   private final String version;
   private final Limits limits;
@@ -133,14 +134,14 @@ public final class PtySessionHost implements AutoCloseable {
   private volatile byte[] dispatchCredential = new byte[0];
   private volatile boolean closed;
 
-  private record Admitted(SocketChannel channel, String token, String principal) {}
+  private record Admitted(SocketChannel channel, String token, PtyIdentity who) {}
 
   public PtySessionHost(
       Path socketPath,
       Path sessionsDir,
       long journalCapacity,
       PtyIdentity.Resolver identity,
-      PtyRooms rooms,
+      PtyAdmission admission,
       PtyEvents events,
       String version) {
     this(
@@ -148,7 +149,7 @@ public final class PtySessionHost implements AutoCloseable {
         sessionsDir,
         journalCapacity,
         identity,
-        rooms,
+        admission,
         events,
         version,
         Limits.DEFAULTS,
@@ -160,7 +161,7 @@ public final class PtySessionHost implements AutoCloseable {
       Path sessionsDir,
       long journalCapacity,
       PtyIdentity.Resolver identity,
-      PtyRooms rooms,
+      PtyAdmission admission,
       PtyEvents events,
       String version,
       Handoff handoff) {
@@ -169,7 +170,7 @@ public final class PtySessionHost implements AutoCloseable {
         sessionsDir,
         journalCapacity,
         identity,
-        rooms,
+        admission,
         events,
         version,
         Limits.DEFAULTS,
@@ -181,7 +182,7 @@ public final class PtySessionHost implements AutoCloseable {
       Path sessionsDir,
       long journalCapacity,
       PtyIdentity.Resolver identity,
-      PtyRooms rooms,
+      PtyAdmission admission,
       PtyEvents events,
       String version,
       Limits limits) {
@@ -190,7 +191,7 @@ public final class PtySessionHost implements AutoCloseable {
         sessionsDir,
         journalCapacity,
         identity,
-        rooms,
+        admission,
         events,
         version,
         limits,
@@ -202,7 +203,7 @@ public final class PtySessionHost implements AutoCloseable {
       Path sessionsDir,
       long journalCapacity,
       PtyIdentity.Resolver identity,
-      PtyRooms rooms,
+      PtyAdmission admission,
       PtyEvents events,
       String version,
       Limits limits,
@@ -211,7 +212,7 @@ public final class PtySessionHost implements AutoCloseable {
     this.sessionsDir = sessionsDir;
     this.journalCapacity = journalCapacity;
     this.identity = identity;
-    this.rooms = rooms;
+    this.admission = admission;
     this.events = events;
     this.version = version;
     this.limits = limits;
@@ -483,7 +484,7 @@ public final class PtySessionHost implements AutoCloseable {
             return;
           }
           principal = who.fde();
-          me = new Admitted(channel, token, principal);
+          me = new Admitted(channel, token, who);
           admitted.add(me);
           reply(channel, new PtyMessage.Welcome(bootId));
         } else {
@@ -519,6 +520,12 @@ public final class PtySessionHost implements AutoCloseable {
                 reply(
                     channel,
                     new PtyMessage.Err("Session '" + m.session() + "' is not yours to attach."));
+                break;
+              }
+              var unheld = projectRefusal(session.origin().project(), who);
+              if (unheld != null) {
+                log("refused", principal, m.session(), "project not held");
+                reply(channel, unheld);
                 break;
               }
               // The cap check and the registration it admits are one step, or concurrent attaches
@@ -682,6 +689,11 @@ public final class PtySessionHost implements AutoCloseable {
       log("refused", who.fde(), m.session(), bad.getMessage());
       return new PtyMessage.Err(Remedied.whole(bad));
     }
+    var unheld = projectRefusal(m.project(), who);
+    if (unheld != null) {
+      log("refused", who.fde(), m.session(), "project not held");
+      return unheld;
+    }
     var existing = sessions.get(m.session());
     if (existing != null && !admitted(who, existing)) {
       log("refused", who.fde(), m.session(), "not admitted");
@@ -717,7 +729,7 @@ public final class PtySessionHost implements AutoCloseable {
     if (!room.isBlank()) {
       try {
         ai.singlr.sail.engine.NameValidator.requireValidSpecId(room);
-        rooms.admit(room, m.project(), who);
+        admission.room(room, m.project(), who);
       } catch (IllegalArgumentException | IOException refused) {
         return new PtyMessage.Err(
             Remedy.of("Refusing room for session '" + m.session() + "': ")
@@ -760,6 +772,22 @@ public final class PtySessionHost implements AutoCloseable {
       deleteFiles(files, who.fde(), m.session());
       return new PtyMessage.Err(
           Remedy.of("Could not start session '" + m.session() + "': ").then(Remedied.whole(e)));
+    }
+  }
+
+  /**
+   * Why {@code who} may not open a terminal in {@code project}, or null when it may or the session
+   * names none: a project must be one the caller holds on this box ({@link PtyAdmission#project}).
+   */
+  private PtyMessage.Err projectRefusal(String project, PtyIdentity who) {
+    if (project == null || project.isBlank()) {
+      return null;
+    }
+    try {
+      admission.project(project, who);
+      return null;
+    } catch (IOException refused) {
+      return new PtyMessage.Err(Remedied.whole(refused));
     }
   }
 
@@ -870,15 +898,15 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /**
-   * One reaping pass at {@code nowNanos}: revoked credentials severed, then the mosh grace and
-   * retention rules, nothing else. Nothing once shutdown has begun: the sessions belong to the
-   * successor or are ending.
+   * One reaping pass at {@code nowNanos}: connections whose access changed severed, then the mosh
+   * grace and retention rules, nothing else. Nothing once shutdown has begun: the sessions belong
+   * to the successor or are ending.
    */
   public synchronized void sweep(long nowNanos) {
     if (closed) {
       return;
     }
-    severRevoked();
+    severChanged();
     sessions.forEach(
         (name, session) -> {
           if (session.live()
@@ -900,16 +928,19 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /**
-   * Closes every connection whose credential the resolver now refuses; its serve loop fails on the
-   * next read and drops the attachment. Each distinct token is resolved once per pass. A resolver
-   * that cannot answer at all (the store is down) severs nothing — that is an outage, not a
-   * revocation.
+   * Closes every connection whose credential the resolver now refuses, or now resolves to a
+   * principal other than the one it admitted — another role, another scope — so a demotion or a
+   * scope change reaches an open connection as a revocation does; its serve loop fails on the next
+   * read and drops the attachment, and a reconnect is admitted as the principal the credential now
+   * stands for. Each distinct token is resolved once per pass. A resolver that cannot answer at all
+   * (the store is down) severs nothing — that is an outage, not a change of access.
    */
-  private void severRevoked() {
-    var verdicts = new HashMap<String, Boolean>();
+  private void severChanged() {
+    var answers = new HashMap<String, Answer>();
     for (var connection : admitted) {
-      if (verdicts.computeIfAbsent(connection.token(), this::revoked)) {
-        log("severed", connection.principal(), "-", "credential revoked");
+      var reason = answers.computeIfAbsent(connection.token(), this::answer).severs(connection);
+      if (reason != null) {
+        log("severed", connection.who().fde(), "-", reason);
         try {
           connection.channel().close();
         } catch (IOException ignored) {
@@ -919,15 +950,30 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
-  private boolean revoked(String token) {
+  /**
+   * What a credential stands for at a sweep: the principal it resolves to now, or {@code refused}
+   * when the resolver no longer honors it; neither when the resolver could not answer.
+   */
+  private record Answer(PtyIdentity who, boolean refused) {
+    static final Answer UNANSWERED = new Answer(null, false);
+
+    /** Why {@code connection} is severed on this answer, or null when it stays. */
+    String severs(Admitted connection) {
+      if (refused) {
+        return "credential revoked";
+      }
+      return who == null || who.equals(connection.who()) ? null : "access changed";
+    }
+  }
+
+  private Answer answer(String token) {
     try {
-      identify(token);
-      return false;
+      return new Answer(identify(token), false);
     } catch (IOException refused) {
-      return true;
+      return new Answer(null, true);
     } catch (RuntimeException unavailable) {
       log("revalidation-skipped", "-", "-", unavailable.toString());
-      return false;
+      return Answer.UNANSWERED;
     }
   }
 

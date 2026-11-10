@@ -99,18 +99,6 @@ public final class Access {
   }
 
   /**
-   * The ownership step alone, of {@code run}: none when {@code actor} overrules owners or acts for
-   * one of its owners, a refusal naming them otherwise. For the one door that still decides that
-   * step itself, a run's log, which the people the run works for read whatever their role, until
-   * sail-every-door-asks-access asks {@link Action#OPERATE_RUN} of it.
-   */
-  public static Optional<Refusal> notRunOwner(Actor actor, Resource run) {
-    return owns(actor, run)
-        ? Optional.empty()
-        : Optional.of(Wording.notOwner(Action.OPERATE_RUN, run));
-  }
-
-  /**
    * Whether {@code actor}'s role may write at all: whether its column allows any action that
    * changes a row. Reading changes none, and operating a box is its own person's whatever their
    * role. A role that may write nothing is read-only: the role step's refusal says so, and main's

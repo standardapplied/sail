@@ -53,9 +53,6 @@ import java.util.stream.Stream;
  *       lane ({@code EventAuthority}), whatever this table says of the action, until
  *       sail-agents-act-on-their-own-work gives an agent's actor its work.
  *   <li>Configure: any member may, until sail-people-are-managed gives it to a project's creator.
- *   <li>Operate a run: the row decides a stop; a run's log is read by anyone the run works for,
- *       whatever their role ({@link Access#notRunOwner}), until sail-every-door-asks-access asks
- *       this row of the log doors too.
  * </ul>
  */
 public final class Policy {

@@ -42,6 +42,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /** The host facets as thin adapters over the stores and the shared executors. */
@@ -49,7 +50,11 @@ final class HostLanes {
   private HostLanes() {}
 
   record Dispatching(
-      DispatchOperations dispatchOps, StopOperations stopOps, RunStore runs, ShellExec shell)
+      DispatchOperations dispatchOps,
+      StopOperations stopOps,
+      RunStore runs,
+      Function<String, Optional<SpecStore.SpecRow>> specs,
+      ShellExec shell)
       implements HostDispatching {
     @Override
     public DispatchOperations.Outcome dispatch(
@@ -109,7 +114,20 @@ final class HostLanes {
     }
 
     @Override
-    public Optional<RunStore.RunRow> latestRunInLane(String project, String node, Lane lane) {
+    public Optional<RunStore.RunRow> latestLog(String project, String node, Optional<Lane> lane) {
+      var actor = Actor.current();
+      ProjectGate.requireReads(actor, project);
+      return lane.map(asked -> latestInLane(project, node, asked))
+          .orElseGet(() -> runs.latestForProjectOnNode(project, node))
+          .map(
+              run ->
+                  switch (LogAdmission.of(actor, Optional.of(run), run.id(), node, specs)) {
+                    case Result.Success<RunStore.RunRow> admitted -> admitted.value();
+                    case Result.Failure<RunStore.RunRow> refused -> throw ApiException.of(refused);
+                  });
+    }
+
+    private Optional<RunStore.RunRow> latestInLane(String project, String node, Lane lane) {
       return runs.listForProject(project).stream()
           .filter(run -> lane.matches(run.role()))
           .filter(run -> run.ownedBy(node))
@@ -278,8 +296,13 @@ final class HostLanes {
 
   record Pty(Sqlite db, RoleRule roles, EventStore events) implements HostPty {
     @Override
-    public PtyIdentity.Person identity(String token, String boxHandle) throws IOException {
-      return new HostAccess(db, roles).identity(token, boxHandle);
+    public PtyIdentity.Person identity(String token) throws IOException {
+      return new HostAccess(db, roles).identity(token);
+    }
+
+    @Override
+    public void admitProject(String project, PtyIdentity identity) throws IOException {
+      new HostAccess(db, roles).admitProject(project, identity);
     }
 
     @Override

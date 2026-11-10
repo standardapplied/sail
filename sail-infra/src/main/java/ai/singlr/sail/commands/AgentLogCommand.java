@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Lane;
@@ -21,6 +22,7 @@ import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -81,13 +83,13 @@ public final class AgentLogCommand implements Runnable {
     var operator = OperatorCommand.here();
     name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
+    var logPath = resolveLogPath(name, lane());
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);
     ContainerStateGuard.requireRunning(state, name);
 
-    var logPath = resolveLogPath(name, lane(), operator);
     if (logPath == null) {
       printNoLog(operator);
       return;
@@ -149,20 +151,32 @@ public final class AgentLogCommand implements Runnable {
 
   /**
    * The log file to tail, or null when the project has no run to show: the newest run this box
-   * executed, in {@code lane} when one is asked for. Every agent sail starts is a run with its own
-   * log ({@code ~/.sail/runs/<id>/agent.log}) — a build, a reviewer and a fix agent alike — so a
-   * lane only selects which run, never another file shape.
+   * executed, in {@code lane} when one is asked for, read as this box's operator as every log door
+   * admits a reader. Every agent sail starts is a run with its own log ({@code
+   * ~/.sail/runs/<id>/agent.log}) — a build, a reviewer and a fix agent alike — so a lane only
+   * selects which run, never another file shape. A refusal is said; a store that cannot answer
+   * shows no log.
    */
-  private String resolveLogPath(String project, Optional<Lane> lane, OperatorCommand operator) {
+  private static String resolveLogPath(String project, Optional<Lane> lane) {
     try (var operations = OperationsFactory.open()) {
-      var dispatching = operations.dispatching();
-      var node = NodeIdentity.handle();
-      return logPathFrom(
-          lane.map(asked -> dispatching.latestRunInLane(project, node, asked))
-              .orElseGet(() -> dispatching.latestRun(project, node)));
+      return logPath(operations, project, NodeIdentity.handle(), lane);
+    } catch (ApiException refused) {
+      throw refused;
     } catch (RuntimeException e) {
       return null;
     }
+  }
+
+  /**
+   * The log path of {@code project}'s newest run in {@code lane} on the box {@code node}, decided
+   * as {@code operations}' operator, or null when there is none.
+   */
+  static String logPath(
+      HostOperations operations, String project, String node, Optional<Lane> lane) {
+    return logPathFrom(
+        Actor.call(
+            operations.identity().operator(),
+            () -> operations.dispatching().latestLog(project, node, lane)));
   }
 
   /** The run's own log path, derived from its id, or null when there is no run. */

@@ -39,7 +39,7 @@ public final class PtyHostCommand implements Callable<Integer> {
             SailPaths.ptySocketPath(),
             SailPaths.sessionsDir(),
             new PtyHostIdentity(),
-            new PtyHostRooms(),
+            new PtyHostAdmission(),
             new PtyHostEvents(),
             handoff);
     var done = new CountDownLatch(1);
@@ -88,10 +88,10 @@ public final class PtyHostCommand implements Callable<Integer> {
       java.nio.file.Path socket,
       java.nio.file.Path sessions,
       ai.singlr.sail.pty.PtyIdentity.Resolver identity,
-      ai.singlr.sail.pty.PtyRooms rooms,
+      ai.singlr.sail.pty.PtyAdmission admission,
       ai.singlr.sail.pty.PtyEvents events)
       throws java.io.IOException {
-    return startHost(socket, sessions, identity, rooms, events, PtySessionHost.Handoff.NONE);
+    return startHost(socket, sessions, identity, admission, events, PtySessionHost.Handoff.NONE);
   }
 
   /** Starts the host and its sweep timer — the process shell around it is {@link #call()}. */
@@ -99,7 +99,7 @@ public final class PtyHostCommand implements Callable<Integer> {
       java.nio.file.Path socket,
       java.nio.file.Path sessions,
       ai.singlr.sail.pty.PtyIdentity.Resolver identity,
-      ai.singlr.sail.pty.PtyRooms rooms,
+      ai.singlr.sail.pty.PtyAdmission admission,
       ai.singlr.sail.pty.PtyEvents events,
       PtySessionHost.Handoff handoff)
       throws java.io.IOException {
@@ -109,7 +109,7 @@ public final class PtyHostCommand implements Callable<Integer> {
             sessions,
             JOURNAL_CAPACITY,
             identity,
-            rooms,
+            admission,
             events,
             SailVersion.version(),
             handoff);

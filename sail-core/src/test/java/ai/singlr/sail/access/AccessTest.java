@@ -809,84 +809,43 @@ class AccessTest {
   }
 
   @Test
-  void theOwnershipStepIsAnAdminsOrAnOwnersOrOneActingForAnOwnerReadOnlyIncluded() {
-    assertEquals(
-        Optional.empty(),
-        Access.notRunOwner(
-            Actors.ADMIN,
-            Resources.run("r1", "acme", null, "auth", null, spec -> Optional.empty())));
-    assertEquals(
-        Optional.empty(),
-        Access.notRunOwner(
-            Actors.OWNER_API,
-            Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
-    assertEquals(
-        Optional.empty(),
-        Access.notRunOwner(
-            Actors.VIEWER,
-            Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
-    assertEquals(
-        Optional.empty(),
-        Access.notRunOwner(
-            Actors.ROOM,
-            Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
-    assertEquals(
-        Optional.of(Refusal.Kind.NOT_OWNER),
-        Access.notRunOwner(
-                Actors.MACHINE,
-                Resources.run(
-                    "r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol")))
-            .map(Refusal::kind));
-    assertEquals(
-        Optional.of(Refusal.Kind.NOT_OWNER),
-        Access.notRunOwner(
-                Actors.OTHERS_AGENT,
-                Resources.run(
-                    "r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol")))
-            .map(Refusal::kind));
-  }
-
-  @Test
   void theOwnershipStepOfARunSpeaksTheTextsClientsSee() {
     assertEquals(
-        Optional.of(
-            new Refusal(
-                Refusal.Kind.NOT_OWNER,
-                "Run r1 belongs to spec 'auth', owned by 'ada' and 'carol', not you.",
-                "Only ada or carol or an admin may access this run.")),
-        Access.notRunOwner(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "Run r1 belongs to spec 'auth', owned by 'ada' and 'carol', not you.",
+            "Only ada or carol or an admin may access this run."),
+        Access.decide(
             Actors.OTHER_API,
+            Action.OPERATE_RUN,
             Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
     assertEquals(
-        Optional.of(
-            new Refusal(
-                Refusal.Kind.NOT_OWNER,
-                "Run r1 is an ad-hoc session launched by 'ada', not you.",
-                "Only ada or an admin may access this run.")),
-        Access.notRunOwner(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "Run r1 is an ad-hoc session launched by 'ada', not you.",
+            "Only ada or an admin may access this run."),
+        Access.decide(
             Actors.OTHER_API,
+            Action.OPERATE_RUN,
             Resources.run("r1", "acme", Actors.OWNER, null, null, spec -> Optional.empty())));
     assertEquals(
-        Optional.of(
-            new Refusal(
-                Refusal.Kind.NOT_OWNER,
-                "Run r1 belongs to spec 'auth', which has no owner.",
-                "Only its owner or an admin may access this run.")),
-        Access.notRunOwner(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "Run r1 belongs to spec 'auth', which has no owner.",
+            "Only its owner or an admin may access this run."),
+        Access.decide(
             Actors.OTHER_API,
+            Action.OPERATE_RUN,
             Resources.run("r1", "acme", null, "auth", null, spec -> Optional.empty())));
     assertEquals(
-        "Run r1 names no spec and no one it acts for.",
-        Access.notRunOwner(
-                Actors.OTHER_API,
-                Resources.run("r1", "acme", null, null, null, spec -> Optional.empty()))
-            .orElseThrow()
-            .message());
-    assertEquals(
-        Optional.empty(),
-        Access.notRunOwner(
-            Actors.AGENT,
-            Resources.run("r1", "acme", Actors.OWNER, null, null, spec -> Optional.empty())));
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "Run r1 names no spec and no one it acts for.",
+            "Only an admin may access this run."),
+        Access.decide(
+            Actors.OTHER_API,
+            Action.OPERATE_RUN,
+            Resources.run("r1", "acme", null, null, null, spec -> Optional.empty())));
   }
 
   private static void add(

@@ -168,7 +168,7 @@ class NodeWritesTest {
     assertEquals(403, roomRun.status(), roomRun.body().toString());
     assertEquals(READ_ONLY, roomRun.body().get("error"), "and for a room run of the box's own FDE");
     var access = new HostAccess(db, TestAuth.roles(db, ADAS_NODE));
-    var identity = access.identity(session, null);
+    var identity = access.identity(session);
     assertEquals(Role.VIEWER, identity.actor().role(), "the terminal names no admin");
     var terminal = assertThrows(IOException.class, () -> access.admit("rajs", "acme", identity));
     assertEquals(
@@ -194,7 +194,7 @@ class NodeWritesTest {
         socket("POST", "/v1/specs", new BoxCredentialStore(db).replace("ada"), form()).status());
     assertEquals(201, socket("POST", "/v1/specs", reserveRun("ada", "build"), form()).status());
     var access = new HostAccess(db, TestAuth.roles(db, ADAS_NODE));
-    access.admit("adas", "acme", access.identity(null, "ada"));
+    access.admit("adas", "acme", access.identity(null));
     assertEquals(5, count());
   }
 

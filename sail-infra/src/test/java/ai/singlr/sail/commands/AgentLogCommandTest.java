@@ -7,9 +7,28 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
+import ai.singlr.sail.api.HostOperations;
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.SyncScheduler;
+import ai.singlr.sail.config.Lane;
+import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.SyncOperations;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
+import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -82,6 +101,95 @@ class AgentLogCommandTest {
 
     assertEquals(legacy, AgentLogCommand.logPathFrom(Optional.of(run("review", legacy))));
   }
+
+  /**
+   * {@code sail agent log} reads as this box's operator, as the log route reads as its caller: a
+   * project outside the operator's scope is not in the catalog, and a run the operator may not
+   * operate is refused as a stop refuses it, so a viewer does not read its own run's log.
+   */
+  @Test
+  void aLogIsReadAsTheBoxsOperatorAndDecidedAsTheLogRouteDecidesIt() throws Exception {
+    try (var db = Sqlite.openMemory()) {
+      new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme", "beta");
+      var roster = new FdeStore(db);
+      roster.add("mady", "Mady", null, "viewer");
+      roster.restrict("mady");
+      roster.grant("mady", "acme");
+      Acting.system(
+          () ->
+              new RunStore(db)
+                  .create(
+                      RUN,
+                      "acme",
+                      null,
+                      "mady",
+                      "adhoc",
+                      "claude-code",
+                      null,
+                      "do it",
+                      1,
+                      null,
+                      null,
+                      "unit"));
+      var operations = operations(db, tempDir);
+
+      var readOnly =
+          assertThrows(
+              ApiException.class,
+              () -> AgentLogCommand.logPath(operations, "acme", "mady", Optional.empty()));
+      var outside =
+          assertThrows(
+              ApiException.class,
+              () -> AgentLogCommand.logPath(operations, "beta", "mady", Optional.empty()));
+
+      assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, readOnly.failure().errorCode());
+      assertEquals(
+          "Your credential is read-only and cannot stop runs or read their logs.",
+          readOnly.getMessage());
+      assertEquals(
+          "Ask an admin for a member or admin credential.", readOnly.failure().remedy().plain());
+      assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, outside.failure().errorCode());
+      assertEquals("Project 'beta' is not in the catalog.", outside.getMessage());
+
+      db.execute("UPDATE fdes SET role = 'member' WHERE handle = 'mady'");
+      assertEquals(
+          AgentUnit.forRun(RUN).logPath(),
+          AgentLogCommand.logPath(operations, "acme", "mady", Optional.empty()));
+      assertNull(AgentLogCommand.logPath(operations, "acme", "mady", Optional.of(Lane.REVIEW)));
+    }
+  }
+
+  private static HostOperations operations(Sqlite db, Path dir) {
+    return OperationsFactory.create(
+            db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+        .useControlPlane(
+            db,
+            dir,
+            new SyncOperations(
+                db,
+                "box",
+                dir,
+                () -> new SyncConfig("node", "sail@main", "mady", "mady-box"),
+                target -> {
+                  throw new IOException("main unavailable");
+                }));
+  }
+
+  private static final ShellExec SHELL =
+      new ShellExec() {
+        public Result exec(List<String> command) {
+          return new Result(0, "[]", "");
+        }
+
+        public Result exec(List<String> command, Path workDir, Duration timeout) {
+          return exec(command);
+        }
+
+        public boolean isDryRun() {
+          return false;
+        }
+      };
 
   @Test
   void noRunMeansNoLog() {

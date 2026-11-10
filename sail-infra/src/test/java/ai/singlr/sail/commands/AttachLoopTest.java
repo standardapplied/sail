@@ -39,7 +39,7 @@ class AttachLoopTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-            ai.singlr.sail.pty.PtyRooms.NONE,
+            ai.singlr.sail.pty.PtyAdmission.NONE,
             ai.singlr.sail.pty.PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();
@@ -169,7 +169,7 @@ class AttachLoopTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-            ai.singlr.sail.pty.PtyRooms.NONE,
+            ai.singlr.sail.pty.PtyAdmission.NONE,
             ai.singlr.sail.pty.PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();
@@ -199,7 +199,7 @@ class AttachLoopTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-            ai.singlr.sail.pty.PtyRooms.NONE,
+            ai.singlr.sail.pty.PtyAdmission.NONE,
             ai.singlr.sail.pty.PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();
@@ -255,7 +255,7 @@ class AttachLoopTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-            ai.singlr.sail.pty.PtyRooms.NONE,
+            ai.singlr.sail.pty.PtyAdmission.NONE,
             ai.singlr.sail.pty.PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();

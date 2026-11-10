@@ -117,7 +117,7 @@ class PtyRoomSessionIT extends AbstractIncusIT {
                   token ->
                       new PtyIdentity.Person(
                           new Actor(token.isBlank() ? "it" : "mady", Role.ADMIN, Actor.Lane.API)),
-                  new PtyHostRooms(dbPath),
+                  new PtyHostAdmission(dbPath),
                   new PtyHostEvents(dbPath, dir.resolve("pty-events.drops")),
                   "0.0.0-test")) {
         api.start();

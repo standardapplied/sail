@@ -127,8 +127,7 @@ class DisabledFdeTest {
     assertEquals(200, socket(runCredential).status());
     assertEquals("mady", CliOperator.of(MAIN, new FdeStore(db)).handle());
     assertInstanceOf(SshGateway.Authorized.class, gateway());
-    assertEquals(
-        "mady", new HostAccess(db, TestAuth.roles(db, MAIN)).identity(session, null).fde());
+    assertEquals("mady", new HostAccess(db, TestAuth.roles(db, MAIN)).identity(session).fde());
   }
 
   @Test
@@ -150,7 +149,7 @@ class DisabledFdeTest {
     var terminal =
         assertThrows(
             IOException.class,
-            () -> new HostAccess(db, TestAuth.roles(db, MAIN)).identity(session, null));
+            () -> new HostAccess(db, TestAuth.roles(db, MAIN)).identity(session));
     assertTrue(terminal.getMessage().contains("disabled"), "the terminal");
   }
 

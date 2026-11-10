@@ -11,10 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.identity.RoleRule;
+import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
@@ -39,7 +42,13 @@ class SessionClientTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-            (room, project, who) -> {},
+            new PtyAdmission() {
+              @Override
+              public void project(String project, PtyIdentity who) {}
+
+              @Override
+              public void room(String room, String project, PtyIdentity who) {}
+            },
             ai.singlr.sail.pty.PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();
@@ -71,8 +80,8 @@ class SessionClientTest {
             dir.resolve("h.sock"),
             dir.resolve("s"),
             64 * 1024,
-            token -> new HostAccess(null, null).identity("", ""),
-            (room, project, who) -> {},
+            token -> new HostAccess(null, new RoleRule(SyncConfig::unset, null)).identity(""),
+            PtyAdmission.NONE,
             PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();
@@ -100,10 +109,16 @@ class SessionClientTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new PtyIdentity.Person(new Actor("uday", Role.MEMBER, Actor.Lane.API)),
-            (room, project, who) -> {
-              throw Remedied.io(
-                  "Room " + room + " is not on this box yet.",
-                  Remedy.of("Run '", Remedy.sail("sync"), "'."));
+            new PtyAdmission() {
+              @Override
+              public void project(String project, PtyIdentity who) {}
+
+              @Override
+              public void room(String room, String project, PtyIdentity who) throws IOException {
+                throw Remedied.io(
+                    "Room " + room + " is not on this box yet.",
+                    Remedy.of("Run '", Remedy.sail("sync"), "'."));
+              }
             },
             PtyEvents.NONE,
             "0.0.0-test")) {

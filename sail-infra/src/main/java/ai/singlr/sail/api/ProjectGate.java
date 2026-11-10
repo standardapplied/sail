@@ -19,7 +19,7 @@ import java.util.Objects;
  * {@link ProjectReader#absent}, so a caller cannot tell a project it was not granted from one that
  * does not exist; a refusal is its exception.
  */
-final class ProjectGate {
+public final class ProjectGate {
 
   private ProjectGate() {}
 
@@ -36,12 +36,21 @@ final class ProjectGate {
   }
 
   /** The row of {@code project} in {@code catalog}, when whoever reads may read it. */
-  static ProjectStore.ProjectRow readable(ProjectStore catalog, String project) {
+  public static ProjectStore.ProjectRow readable(ProjectStore catalog, String project) {
     var row = held(catalog, project);
-    if (!ReadFilter.reads(Actor.reader(), () -> project)) {
+    requireReads(Actor.reader(), project);
+    return row;
+  }
+
+  /**
+   * Refuses {@code project} when {@code reader} may not read it, answered as one this box does not
+   * hold ({@link ProjectReader#absent}), so a caller cannot tell a project it was not granted from
+   * one that does not exist.
+   */
+  public static void requireReads(Actor reader, String project) {
+    if (!ReadFilter.reads(reader, () -> project)) {
       throw ProjectReader.absent(project);
     }
-    return row;
   }
 
   private static ProjectStore.ProjectRow held(ProjectStore catalog, String project) {

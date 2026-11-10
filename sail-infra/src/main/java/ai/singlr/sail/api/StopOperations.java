@@ -7,7 +7,6 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
-import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentPresence;
@@ -199,10 +198,8 @@ public final class StopOperations {
   }
 
   private Outcome stopRun(String runId, String localHandle, boolean dryRun) {
-    var run =
-        ReadFilter.readable(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project)
-            .orElseThrow(() -> Refusals.runNotFound(runId));
-    authorize(run, dryRun);
+    var run = runStore.findById(runId).orElseThrow(() -> Refusals.runNotFound(runId));
+    authorize(run);
     if (!run.ownedBy(localHandle)) {
       var node = Strings.isBlank(run.node()) ? "an unknown node" : run.node();
       throw new ApiException(
@@ -216,17 +213,19 @@ public final class StopOperations {
 
   /**
    * A project-targeted stop resolves the newest active session run — build or ad-hoc, the two are
-   * mutually exclusive by reservation — and applies the one resolved-run procedure. A project with
-   * no active run on this box has nothing to stop.
+   * mutually exclusive by reservation — and applies the one resolved-run procedure, decided as a
+   * stop by run id is: a project outside the caller's scope is not in the catalog, and its run is
+   * authorized before the container is asked about. A project with no active run on this box has
+   * nothing to stop.
    */
   private Outcome stopProject(String project, String localHandle, boolean dryRun) {
-    projects.requireExists(project);
+    ProjectGate.requireReads(Actor.reader(), project);
     var run = runStore.runningForProjectOnNode(project, localHandle).orElse(null);
-    if (run == null) {
-      return new NotRunning(null, null, false, false);
+    if (run != null) {
+      authorize(run);
     }
-    authorize(run, dryRun);
-    return stopResolved(run, dryRun);
+    projects.requireExists(project);
+    return run == null ? new NotRunning(null, null, false, false) : stopResolved(run, dryRun);
   }
 
   /**
@@ -566,16 +565,11 @@ public final class StopOperations {
   }
 
   /**
-   * Refuses a stop the bound actor may not make: operating a run is its owners' ({@link
-   * RunStore.RunRow#resource}), its spec's owner as the reader sees it. A stop by run id read the
-   * run in the caller's scope first; a stop of a whole project is the host CLI's, whose operator
-   * sees every project. A dry run writes and signals nothing, so it is described for whoever asks,
-   * with no one bound.
+   * Refuses a stop the bound actor may not make, a dry run's as the real one's: a run of a project
+   * outside the caller's scope is not found, and operating a run is its owners' ({@link
+   * RunStore.RunRow#resource}), its spec's owner as the reader sees it.
    */
-  private void authorize(RunStore.RunRow run, boolean dryRun) {
-    if (dryRun) {
-      return;
-    }
+  private void authorize(RunStore.RunRow run) {
     Refusals.require(
         Access.decide(
             Actor.current(), Action.OPERATE_RUN, run.resource(Actor.reader(), specStore::findById)),
