@@ -204,13 +204,9 @@ public final class ConflictOperations {
       List<SyncConflicts.Conflict> pending, String entityType, String entityId) {
     var conflict = among(pending, entityType, entityId);
     if (conflict == null) {
-      throw notOpen(entityId);
+      throw new ApiException(ErrorCode.NOT_FOUND, "No open conflict for '" + entityId + "'.");
     }
     return conflict;
-  }
-
-  private static ApiException notOpen(String entityId) {
-    return new ApiException(ErrorCode.NOT_FOUND, "No open conflict for '" + entityId + "'.");
   }
 
   /**

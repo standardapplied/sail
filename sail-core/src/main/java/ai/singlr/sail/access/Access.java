@@ -57,15 +57,16 @@ public final class Access {
     if (resource.kind().filed() && !audience(actor).admits(resource.project())) {
       return NOT_FOUND;
     }
-    return answer(steps(actor, action, resource.kind(), resource));
+    return Decision.of(steps(actor, action, resource.kind(), resource));
   }
 
   /**
    * Why {@code actor} may not take {@code action} on {@code resource}, whose audience was decided
-   * already: every step of {@link #decide(Actor, Action, Resource)} but the audience. A write's
+   * already: every step of {@link #decide(Actor, Action, Resource)} but the audience, so the
+   * resource's project is not read and a write's rule builds its resource with none. A write's
    * audience is the scope rule's ({@code ScopeRule}), asked first on every lane from the project
-   * the journal files the row under, so the write path decides it once, on the one project the
-   * row's head and snapshot name, and a write is never not found here.
+   * the journal files the row under, so the write path decides it once, and a write is never not
+   * found here.
    */
   public static Optional<Refusal> withinAudience(Actor actor, Action action, Resource resource) {
     return actor.isSail() ? Optional.empty() : steps(actor, action, resource.kind(), resource);
@@ -96,15 +97,15 @@ public final class Access {
   }
 
   /**
-   * The ownership step alone: none when {@code actor} overrules owners or acts for one of {@code
-   * resource}'s, a refusal naming them otherwise. For the one door that still decides that step
-   * itself, a run's log, which the people the run works for read whatever their role, until
+   * The ownership step alone, of {@code run}: none when {@code actor} overrules owners or acts for
+   * one of its owners, a refusal naming them otherwise. For the one door that still decides that
+   * step itself, a run's log, which the people the run works for read whatever their role, until
    * sail-every-door-asks-access asks {@link Action#OPERATE_RUN} of it.
    */
-  public static Optional<Refusal> owned(Actor actor, Resource resource) {
-    return owns(actor, resource)
+  public static Optional<Refusal> ownsRun(Actor actor, Resource run) {
+    return owns(actor, run)
         ? Optional.empty()
-        : Optional.of(Wording.notOwner(Action.OPERATE_RUN, resource));
+        : Optional.of(Wording.notOwner(Action.OPERATE_RUN, run));
   }
 
   /**
@@ -167,9 +168,5 @@ public final class Access {
   /** Whether no owner binds {@code actor}: Sail itself, and an admin. */
   private static boolean overrulesOwners(Actor actor) {
     return actor.isSail() || actor.isAdmin();
-  }
-
-  private static Decision answer(Optional<Refusal> refusal) {
-    return refusal.<Decision>map(Decision.Refused::new).orElse(ALLOWED);
   }
 }

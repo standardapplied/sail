@@ -12,11 +12,10 @@ import java.util.stream.Collectors;
 
 /**
  * What {@link Access} says when a step refuses, in the words a person reads. The sentences a rule
- * outside this package says as well live in {@link Refusal}: read-only ({@link Refusal#readOnly}),
- * an unclaimed spec's dispatch ({@link Refusal#unclaimed}) and a conversation this box does not
- * hold ({@link Refusal#noConversation}). Owners are joined as each sentence has always joined them:
- * a conversation's and a run's fix bare with "or", a run's message quoted with "and", a room's or a
- * box's message quoted with "or".
+ * outside this package says as well live in {@link Refusal}: read-only ({@link Refusal#readOnly})
+ * and a conversation this box does not hold ({@link Refusal#noConversation}). Owners are joined as
+ * each sentence has always joined them: a conversation's and a run's fix bare with "or", a run's
+ * message quoted with "and", a room's or a box's message quoted with "or".
  */
 final class Wording {
 
@@ -29,7 +28,7 @@ final class Wording {
    */
   static Refusal belowRole(Actor actor, Action action, Resource.Kind kind, Resource resource) {
     if (!actor.canWrite()) {
-      return Refusal.readOnly(action.act(kind)).orElseThrow();
+      return Refusal.readOnly(action.act(kind));
     }
     if (resource != null && action == Action.ASSIGN) {
       return notReassignable(resource);
@@ -191,7 +190,7 @@ final class Wording {
     if (spec.assignee() != null) {
       return new Refusal(
           Refusal.Kind.NOT_OWNER,
-          "Spec '" + id + "' is assigned to '" + spec.assignee() + "', not you.",
+          assignedElsewhere(spec),
           "Ask " + spec.assignee() + " to make this change, or have an admin do it.");
     }
     var creator = spec.owners().isEmpty() ? "its creator" : spec.owners().getFirst();
@@ -202,33 +201,37 @@ final class Wording {
   }
 
   /**
-   * The refusal of a dispatch of {@code spec} by someone it is not assigned to: an assigned spec is
-   * its assignee's to dispatch, and an unassigned one no one's until it is claimed.
+   * The refusal of a dispatch of {@code spec}, an assigned one, by someone it is not assigned to.
    */
   private static Refusal notDispatcher(Resource spec) {
-    var id = spec.id();
-    return spec.assignee() != null
-        ? new Refusal(
-            Refusal.Kind.NOT_OWNER,
-            "Spec '" + id + "' is assigned to '" + spec.assignee() + "', not you.",
-            "Ask "
-                + spec.assignee()
-                + " to dispatch it, or have an admin reassign it before dispatching.")
-        : Refusal.unclaimed(id);
+    return new Refusal(
+        Refusal.Kind.NOT_OWNER,
+        assignedElsewhere(spec),
+        "Ask "
+            + spec.assignee()
+            + " to dispatch it, or have an admin reassign it before dispatching.");
+  }
+
+  /** What a spec assigned to someone else says to one who is not them. */
+  private static String assignedElsewhere(Resource spec) {
+    return "Spec '" + spec.id() + "' is assigned to '" + spec.assignee() + "', not you.";
   }
 
   private static Refusal notRunOwner(Resource run) {
     var owners = run.owners();
+    if (run.spec() == null && owners.isEmpty()) {
+      return new Refusal(
+          Refusal.Kind.NOT_OWNER,
+          "Run " + run.id() + " names no spec and no one it acts for.",
+          "Only an admin may access this run.");
+    }
     var owned =
         owners.isEmpty()
             ? null
             : owners.stream().map(owner -> "'" + owner + "'").collect(Collectors.joining(" and "));
     var message =
         run.spec() == null
-            ? "Run "
-                + run.id()
-                + " is an ad-hoc session"
-                + (owned != null ? " launched by " + owned + ", not you." : ".")
+            ? "Run " + run.id() + " is an ad-hoc session launched by " + owned + ", not you."
             : "Run "
                 + run.id()
                 + " belongs to spec '"
@@ -241,6 +244,12 @@ final class Wording {
   }
 
   private static Refusal notReviewOwner(Resource review) {
+    if (review.spec() == null) {
+      return new Refusal(
+          Refusal.Kind.NOT_OWNER,
+          "Review " + review.id() + " names no spec, so it has no owner.",
+          "Only an admin may approve or dismiss it.");
+    }
     var owner = review.owners().isEmpty() ? null : review.owners().getFirst();
     return new Refusal(
         Refusal.Kind.NOT_OWNER,

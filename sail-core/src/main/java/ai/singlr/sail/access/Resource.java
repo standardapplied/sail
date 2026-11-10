@@ -89,7 +89,7 @@ public record Resource(
   }
 
   /** This resource at the start of a sentence: "Room 'lobby'". */
-  public String named() {
+  String named() {
     return kind.noun.substring(0, 1).toUpperCase(Locale.ROOT)
         + kind.noun.substring(1)
         + " '"

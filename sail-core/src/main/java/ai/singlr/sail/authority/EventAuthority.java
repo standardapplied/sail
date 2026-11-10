@@ -135,7 +135,9 @@ public final class EventAuthority {
         held.project(),
         worked.conversation(),
         held.id(),
-        worked.conversation() == null ? held.resource(this::specOwner).owners() : worked.owners(),
+        worked.conversation() == null
+            ? held.resource(Actor.system(), specs::findById).owners()
+            : worked.owners(),
         held.ownedBy(boxFde.get()));
   }
 
@@ -150,7 +152,7 @@ public final class EventAuthority {
           row.project(),
           conversation,
           null,
-          Resources.spec(row.id(), row.project(), row.assignee(), row.createdBy()).owners(),
+          Stream.ofNullable(row.owner()).filter(Strings::isNotBlank).toList(),
           false);
     }
     return rooms
@@ -250,7 +252,7 @@ public final class EventAuthority {
   private static Optional<Refusal> refused(
       Refusal.Kind kind, Actor actor, String type, Action action, Subject subject) {
     if (kind == Refusal.Kind.READ_ONLY) {
-      return Refusal.readOnly("publish events");
+      return Optional.of(Refusal.readOnly("publish events"));
     }
     if (action == Action.OPERATE_BOX) {
       return Refusal.of(
@@ -314,7 +316,7 @@ public final class EventAuthority {
     var work =
         Optional.ofNullable(subject.runId())
             .flatMap(runs::findById)
-            .map(run -> run.resource(this::specOwner))
+            .map(run -> run.resource(Actor.system(), specs::findById))
             .orElseGet(() -> work(subject, List.of()));
     return switch (Access.decide(actor, Action.NARRATE, work)) {
       case Decision.Allowed allowed -> Optional.empty();
@@ -331,10 +333,6 @@ public final class EventAuthority {
                   + "' may narrate only its own run.",
               refused.refusal().fix());
     };
-  }
-
-  private Optional<String> specOwner(String specId) {
-    return specs.findById(specId).map(SpecStore.SpecRow::owner);
   }
 
   private static String described(Subject subject) {

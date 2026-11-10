@@ -61,7 +61,7 @@ public record HostAccess(Sqlite db, RoleRule roles) {
   public void admit(String roomId, String project, PtyIdentity who) throws IOException {
     var actor = actorOf(who.fde());
     var rooms = new RoomStore(db);
-    var notFound = new IOException(Refusals.roomNotFound(roomId).getMessage());
+    var notFound = new IOException(Refusals.roomMissing(roomId));
     var room = rooms.findById(roomId).orElseThrow(() -> notFound);
     var decision =
         MessageAuthority.post(

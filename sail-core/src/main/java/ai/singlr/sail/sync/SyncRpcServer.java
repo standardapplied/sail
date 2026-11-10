@@ -805,11 +805,12 @@ public final class SyncRpcServer {
    * the erasure and staleness checks that would otherwise answer about a row it may not see, and
    * the denial carries nothing of main's: the node withdraws its row and learns only that the id is
    * not its to write. Every denial after it is therefore of an id main holds inside the pusher's
-   * scope, or not at all, so the version it carries is one the pusher may see.
+   * scope, or not at all, so the version it carries is one the pusher may see. A server over no
+   * database serves only an unscoped session ({@link #serve}), which no scope rule refuses.
    */
   private SyncWire.Result result(String type, MainReplica main, MainReplica.Offer offer) {
     var outside =
-        Access.audience(principal).unrestricted()
+        changeLog == null
             ? Optional.<Refusal>empty()
             : new ScopeRule(changeLog, type).pushed(principal, offer.id(), offer.snapshot());
     if (outside.isPresent()) {

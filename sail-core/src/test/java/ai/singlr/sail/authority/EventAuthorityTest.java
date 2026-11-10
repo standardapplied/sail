@@ -616,7 +616,7 @@ class EventAuthorityTest {
                     + "' may narrate only its own run.",
                 "An agent acts only on the work sail launched it for.")),
         agent);
-    assertEquals(Refusal.readOnly("publish events"), viewer);
+    assertEquals(Optional.of(Refusal.readOnly("publish events")), viewer);
   }
 
   @Test

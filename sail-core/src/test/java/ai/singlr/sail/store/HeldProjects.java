@@ -16,6 +16,13 @@ public final class HeldProjects {
 
   private HeldProjects() {}
 
+  /** A catalog of its own, in a database of its own, holding each of {@code names}. */
+  public static ProjectStore catalog(String... names) {
+    var db = Sqlite.openMemory();
+    new SchemaManager(db).migrate();
+    return new ProjectStore(hold(db, names));
+  }
+
   /** {@code db} holding each of {@code names}; a name it already holds is left as it is. */
   public static Sqlite hold(Sqlite db, String... names) {
     for (var name : names) {

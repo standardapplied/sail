@@ -6,15 +6,12 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.access.Access;
-import ai.singlr.sail.engine.SpecCliHelper;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Capability;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
-import ai.singlr.sail.store.RevisionJournal;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.lang.classfile.ClassFile;
@@ -189,16 +186,11 @@ class OneDecisionSweepTest {
   @Test
   void noMemberOutsideTheAccessPackageReadsARoleALaneOrACapabilityButTheNamedOnes()
       throws Exception {
-    var scanned = 0;
     var reads = new TreeSet<String>();
-    for (var module : List.of(RevisionJournal.class, SpecCliHelper.class, SailOperations.class)) {
-      for (var bytes : OneDecisionPointTest.classesOf(module)) {
-        reads.addAll(reads(bytes));
-        scanned++;
-      }
+    for (var bytes : OneDecisionPointTest.everyMainClass()) {
+      reads.addAll(reads(bytes));
     }
 
-    assertTrue(scanned > 500, "every module's classes were read: " + scanned);
     assertEquals(List.of(), findings(reads, ALLOWED.keySet()));
   }
 

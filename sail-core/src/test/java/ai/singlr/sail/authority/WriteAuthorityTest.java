@@ -219,7 +219,8 @@ class WriteAuthorityTest {
 
   @Test
   void theJournalAsksNoRuleOfAPushOrOfSailItself() {
-    WriteAuthority refusing = (actor, id, held, next) -> Refusal.readOnly("change anything");
+    WriteAuthority refusing =
+        (actor, id, held, next) -> Optional.of(Refusal.readOnly("change anything"));
 
     for (var decided : List.of(OWNER_SYNC, MAIN, SYSTEM)) {
       assertEquals(
@@ -228,7 +229,7 @@ class WriteAuthorityTest {
           decided.lane() + " was decided already");
     }
     assertEquals(
-        Refusal.readOnly("change anything"),
+        Optional.of(Refusal.readOnly("change anything")),
         Actor.call(ADMIN, () -> WriteAuthority.local(refusing, "x", null, null)));
   }
 }

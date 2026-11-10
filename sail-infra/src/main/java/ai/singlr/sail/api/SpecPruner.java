@@ -243,12 +243,12 @@ final class SpecPruner {
 
   /**
    * Refuses a prune that names no spec unless the bound actor may purge, which is an admin's alone
-   * ({@link EraseAuthority#request}): a whole project, or a policy's sweep. A prune by id is
-   * decided spec by spec, as each is found ({@link #roots}).
+   * ({@link EraseAuthority#purge}): a whole project, or a policy's sweep. A prune by id is decided
+   * spec by spec, as each is found ({@link #roots}).
    */
   private void authorize(PruneRequest request) {
     if (request.ids().isEmpty()) {
-      Refusals.enforce(authority.request(Actor.current(), true));
+      Refusals.enforce(authority.purge(Actor.current()));
     }
   }
 

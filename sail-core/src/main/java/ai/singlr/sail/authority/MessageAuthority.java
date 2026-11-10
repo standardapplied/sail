@@ -8,13 +8,13 @@ package ai.singlr.sail.authority;
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.PrincipalHandle;
-import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -38,14 +38,12 @@ public final class MessageAuthority implements WriteAuthority {
 
   private final RoomStore rooms;
   private final RunStore runs;
-  private final ChangeLog changeLog;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
   public MessageAuthority(Sqlite db) {
     this.rooms = new RoomStore(db);
     this.runs = new RunStore(db);
-    this.changeLog = new ChangeLog(db);
     this.attribution = new Attribution(db);
   }
 
@@ -56,7 +54,7 @@ public final class MessageAuthority implements WriteAuthority {
       return Optional.empty();
     }
     var roomId = MessageStore.roomIdOf(next);
-    var posting = posting(actor, roomId, changeLog.filed("message", id, next));
+    var posting = posting(actor, roomId);
     if (posting.isPresent()) {
       return posting;
     }
@@ -71,35 +69,43 @@ public final class MessageAuthority implements WriteAuthority {
   }
 
   /**
-   * Why {@code actor} may not post in conversation {@code roomId}, filed under {@code project}. A
+   * Why {@code actor} may not post in conversation {@code roomId}, whose audience was decided. A
    * conversation this box does not hold is not here, which is said first, as for every row this box
    * does not hold; then {@link Access} decides the post; and last the fact that a post is
    * someone's, so a credential acting for no FDE posts nothing. Both facts are of what no one here
    * can own, which is an admin's to write ({@link Access#unowned}), as on main.
    */
-  private Optional<Refusal> posting(Actor actor, String roomId, String project) {
+  private Optional<Refusal> posting(Actor actor, String roomId) {
     var unheld =
         rooms.holds(roomId, null)
             ? Optional.<Refusal>empty()
-            : Access.unowned(actor, Refusal.noConversation(roomId).orElseThrow());
+            : Access.unowned(actor, Refusal.noConversation(roomId));
     if (unheld.isPresent()) {
       return unheld;
     }
-    var conversation = Resources.conversation(roomId, project, rooms.owners(roomId));
-    return WriteAuthority.refused(actor, Taking.of(conversation, Action.POST))
-        .or(() -> noOnes(actor, roomId));
+    return posted(actor, Resources.conversation(roomId, null, rooms.owners(roomId)));
   }
 
   /**
    * Whether {@code actor} may post in {@code conversation}, a room this box holds, as a door asks
-   * it before the post it admits: {@link Access} decides the post, then the fact that a post is
-   * someone's ({@link #noOnes}), as this rule decides a post on the journal.
+   * it before the post it admits — the one decision of a write rule a door asks, since a post with
+   * no message to journal (a terminal's room pin, a room session's report) still answers to the
+   * rule's own fact that a post is someone's. It is this rule's decision of a post, the audience
+   * asked here as the scope rule asks it of a message.
    */
   public static Decision post(Actor actor, Resource conversation) {
-    var decision = Access.decide(actor, Action.POST, conversation);
-    return decision instanceof Decision.Allowed
-        ? noOnes(actor, conversation.id()).<Decision>map(Decision.Refused::new).orElse(decision)
-        : decision;
+    return ReadFilter.reads(actor, conversation::project)
+        ? Decision.of(posted(actor, conversation))
+        : new Decision.NotFound();
+  }
+
+  /**
+   * Why {@code actor} may not post in {@code conversation}, whose audience was decided: {@link
+   * Access} decides the post, then a post is someone's ({@link #noOnes}).
+   */
+  private static Optional<Refusal> posted(Actor actor, Resource conversation) {
+    return WriteAuthority.refused(actor, Taking.of(conversation, Action.POST))
+        .or(() -> noOnes(actor, conversation.id()));
   }
 
   /**

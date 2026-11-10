@@ -7,7 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
-import ai.singlr.sail.access.Refusal;
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
@@ -67,9 +67,12 @@ public final class LaunchAdmission {
   }
 
   /**
-   * Refuses when the bound actor may not dispatch {@code spec} ({@link Action#DISPATCH}), and then
-   * when it does not run on the box identified by {@code localHandle}: placement, not permission.
-   * The spec is one its caller read in the actor's scope, so one outside it is not found.
+   * Refuses when the bound actor may not dispatch {@code spec} ({@link Action#DISPATCH}), its
+   * assignee's ({@link Resources#dispatched}), and then when it does not run on the box identified
+   * by {@code localHandle}: placement, not permission. The spec is one its caller read in the
+   * actor's scope, so one outside it is not found. An unassigned spec has no owner to ask, so only
+   * the role and lane are ({@link Access#atAll}), and placement says it runs on no box until it is
+   * claimed, whoever asks, as main said.
    *
    * <p>Placement enforces one invariant: <em>a spec executes only on the node whose handle equals
    * the spec's assignee</em>. Node identity is {@code SyncConfig.handle} — one FDE, one devbox — so
@@ -78,12 +81,17 @@ public final class LaunchAdmission {
    * spec, then dispatch. A box with no handle can run nothing.
    */
   public static void requireAllowed(Spec spec, String localHandle) {
-    Refusals.require(
-        Access.decide(
-            Actor.current(),
-            Action.DISPATCH,
-            Resources.spec(spec.id(), spec.project(), spec.assignee(), spec.createdBy())),
-        () -> Refusals.specNotFound(spec.id()));
+    var actor = Actor.current();
+    if (Strings.isBlank(spec.assignee())) {
+      Refusals.enforce(Access.atAll(actor, Action.DISPATCH, Resource.Kind.SPEC));
+    } else {
+      Refusals.require(
+          Access.decide(
+              actor,
+              Action.DISPATCH,
+              Resources.dispatched(spec.id(), spec.project(), spec.assignee())),
+          () -> Refusals.specNotFound(spec.id()));
+    }
     if (Strings.isBlank(localHandle)) {
       throw nodeHandleUnset();
     }
@@ -110,7 +118,7 @@ public final class LaunchAdmission {
     if (Strings.isBlank(spec.assignee())) {
       return new ApiException(
           ErrorCode.RUNS_ON_OTHER_NODE,
-          Refusal.unclaimed(spec.id()).message(),
+          "Spec '" + spec.id() + "' is unassigned, so no node may dispatch it.",
           Remedy.of("Claim it first: ", claim));
     }
     return new ApiException(

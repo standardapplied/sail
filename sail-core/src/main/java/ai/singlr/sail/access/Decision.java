@@ -6,6 +6,7 @@
 package ai.singlr.sail.access;
 
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * The answer {@link Access#decide} gives: allowed, not found, or refused with a reason and a fix. A
@@ -13,6 +14,14 @@ import java.util.Objects;
  * resource, and so is never not found, answers a refusal or none instead ({@link Access#atAll}).
  */
 public sealed interface Decision {
+
+  /**
+   * The decision {@code refusal} answers, of a resource whose audience was decided: refused by it,
+   * or allowed when there is none. Never not found.
+   */
+  static Decision of(Optional<Refusal> refusal) {
+    return refusal.<Decision>map(Refused::new).orElseGet(Allowed::new);
+  }
 
   /** The principal may take the action. */
   record Allowed() implements Decision {}

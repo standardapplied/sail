@@ -235,8 +235,9 @@ An FDE sees every project unless main's roster scopes it (`fdes.scope = 'granted
 transaction with the grants it names; `sail fde update --unscoped` sets it back and forgets the
 grants, so a later narrowing grants only what it names), and then exactly the projects main granted it (`project_grants`,
 box-local on main like `fde_ssh_keys`; `sail fde grant` and `sail fde revoke`). That set is a
-`ProjectScope`, the fifth component of every `Actor`, and `ProjectScope.admits(project)` is the
-one predicate: every door asks it and none keeps a list of projects of its own. A row of no
+`ProjectScope`, the fifth component of every `Actor`, the value the audience is decided from: a
+row in hand is read through `ReadFilter` and a query filters by `Access.audience`, so every door
+asks one audience and none keeps a list of projects of its own. A row of no
 known project is admitted by an unrestricted scope only. The scope is resolved where an
 actor's FDE is resolved against main's roster, by the rule that resolves its role
 (`RoleRule.scopeOf`): the API's session and token authentication, and with them the SSH
@@ -2283,9 +2284,9 @@ A write is answered in one order (`WriteAuthority`): what lies outside the actor
 not found, which the scope rule says before any type rule is asked, from the project the journal
 files the row under, the one audience a write has; what this box does not hold, a project or a
 conversation, is not there; then `Access` decides the actions the revision takes, every step
-after the audience (`Access.withinAudience`, which only a write's rule asks); last come the
-rule's own facts. A deletion of an id this box holds no head of is decided as the rule decides a
-birth, as on main. A door's placement comes after `Access` too. The table is
+after the audience (`Access.withinAudience`, which only `WriteAuthority.refused` asks); last come
+the rule's own facts. A deletion of an id this box holds no head of is decided as the rule decides
+a birth, as on main. A door's placement comes after `Access` too. The table is
 `Policy`, and this copy of it is generated (`PolicyTableTest`):
 
 | Action | Covers | Viewer | Member | Admin | Work agent | Read-only room agent |
@@ -2334,7 +2335,8 @@ it is filed under and its owners, each owner rule once:
   the room's owner and the owner of every spec born in it.
 - A message is decided as a post in its conversation; a review is filed under its own first
   write's project and owned by its spec's owner.
-- A run is the FDE it acts for and its spec's owner as the reader sees that spec, or for a
+- A run is the FDE it acts for and its spec's owner (as the reader sees that spec at the doors,
+  and unfiltered on the journal and in the event rule), or for a
   spec-less run the box that ran it (`Resources.run`), so a run's own FDE keeps it after its spec
   is reassigned. A run being born answers to whoever's box runs the work it names: its spec's
   assignee, a spec-less room's owner, or else the FDE it acts for (`Resources.launched`).
@@ -2385,14 +2387,17 @@ through the voices that steer it (`Policy.hearsOnlySteering`; the filter is `Roo
 query): its owners, an active admin of main's roster, sail and the runs working for them.
 
 **Doors** ask `Access` for the side effects no row's rule decides: dispatch and seating
-(`LaunchAdmission`, then its placement; seating an agent for a spec then asks the journal whether
-it will take the spec room's roster, while a spec-less room's seat is Dispatch on the room, which
-its owner alone and an admin take, so it implies the room rule's Change), stop (Operate a run),
-posting into a room without a message (the terminal's room pin and a room session's report ask
-the message rule's own post, `MessageAuthority.post`), serving a stack, restoring a snapshot and
-reading a definition (`ProjectGate`, the one project gate), pruning, resolving a conflict. Every door reads the row it acts on in its
-caller's scope first, or is reached only by the box's operator, who sees every project. The
-checks a door still makes by role, lane or scope (resolving a credential, a run credential's own
+(`LaunchAdmission`: Dispatch on the spec, its assignee's, then placement; an unassigned spec is
+asked only of the role and lane, and placement says it runs on no box until it is claimed;
+seating an agent for a spec then asks the journal whether it will take the spec room's roster,
+while a spec-less room's seat is Dispatch on the room, which its owner alone and an admin take, so
+it implies the room rule's Change), stop (Operate a run), posting into a room without a message
+(the terminal's room pin and a room session's report ask the message rule's own post,
+`MessageAuthority.post`, the one decision of a rule a door asks, since a post with no message to
+journal still answers to the rule's fact that a post is someone's), serving a stack, restoring a
+snapshot and reading a definition (`ProjectGate`, the one project gate), pruning, resolving a
+conflict. Every door reads the row it acts on in its caller's scope first, or is reached only by
+the box's operator, who sees every project. The checks a door still makes by role, lane or scope (resolving a credential, a run credential's own
 routes), until `sail-every-door-asks-access` and `sail-agents-act-on-their-own-work`, and the facts
 that read a lane or role to know which applies, are the allowlist of `OneDecisionSweepTest`. It
 sees every such read compiled code makes: of a role, a lane, a scope or whom an actor acts for, a

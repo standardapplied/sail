@@ -28,8 +28,10 @@ import static ai.singlr.sail.identity.Actors.projection;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
+import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Refusal.Kind;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.Role;
@@ -37,6 +39,7 @@ import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Standing;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -76,6 +79,32 @@ class MessageAuthorityTest {
     public String toString() {
       return name;
     }
+  }
+
+  /**
+   * A run's principal whose run acts for no one, as a run credential with a blank owner binds: it
+   * has a handle but acts for no FDE, so its post would be no one's, on the journal and at a door.
+   */
+  @Test
+  void aRunPrincipalActingForNoOnePostsNothingOnTheJournalOrAtADoor() {
+    var ownerless = Actor.agentPrincipal("claude/" + Actors.RUN, null);
+    var noOnes =
+        new Refusal(
+            Kind.NOT_AUTHOR,
+            "This credential acts for no FDE, so a post in 'lobby' would be no one's.",
+            "Post with an FDE's own credential.");
+
+    assertEquals(
+        Optional.of(noOnes),
+        rule.decide(ownerless, MESSAGE, null, post("lobby", ownerless.handle())));
+    assertEquals(
+        new Decision.Refused(noOnes),
+        MessageAuthority.post(
+            ownerless, Resources.conversation("lobby", "acme", List.of(Actors.OWNER))));
+    assertEquals(
+        new Decision.Allowed(),
+        MessageAuthority.post(
+            Actors.AGENT, Resources.conversation("lobby", "acme", List.of(Actors.OWNER))));
   }
 
   private static Map<String, Object> post(String room, String author) {

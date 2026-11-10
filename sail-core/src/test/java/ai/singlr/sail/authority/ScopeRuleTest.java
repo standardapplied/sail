@@ -220,6 +220,27 @@ class ScopeRuleTest {
     return Map.of("project", "alpha", field, value);
   }
 
+  /**
+   * An actor that reads every project is never asked where a write is filed: a scope rule over a
+   * closed database, which would fail any lookup, answers every write and push of it.
+   */
+  @Test
+  void anUnrestrictedWriteAsksNoProject() {
+    var closed = Sqlite.openMemory();
+    closed.close();
+    var everywhere = new Actor("uma", Role.MEMBER, Actor.Lane.API);
+
+    for (var type : List.of("spec", "room", "run", "message")) {
+      var blind = new ScopeRule(new ChangeLog(closed), type);
+      var next = Map.<String, Object>of("project", "alpha", "room_id", "lobby", "spec_id", "s");
+
+      assertEquals(Optional.empty(), blind.decide(everywhere, "x", null, next), type);
+      assertEquals(Optional.empty(), blind.decide(everywhere, "x", next, next), type);
+      assertEquals(Optional.empty(), blind.decide(everywhere, "x", null, Map.of()), type);
+      assertEquals(Optional.empty(), blind.pushed(everywhere, "x", next), type);
+    }
+  }
+
   @Test
   void aWriteOverARowInAHiddenProjectSaysOnlyThatTheIdIsTaken() {
     var taken =

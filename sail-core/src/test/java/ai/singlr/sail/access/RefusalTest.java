@@ -30,11 +30,10 @@ class RefusalTest {
   @Test
   void theSharedFactsAreWordedOnce() {
     assertEquals(
-        Optional.of(
-            new Refusal(
-                Refusal.Kind.NO_CONVERSATION,
-                "No conversation 'attic' is on this box: it was deleted, or never here.",
-                "Check the spec or room id.")),
+        new Refusal(
+            Refusal.Kind.NO_CONVERSATION,
+            "No conversation 'attic' is on this box: it was deleted, or never here.",
+            "Check the spec or room id."),
         Refusal.noConversation("attic"));
     assertEquals(
         Optional.of(
@@ -44,11 +43,10 @@ class RefusalTest {
                 "Create a new spec instead.")),
         Refusal.fixed("spec", "s-1", "room_id"));
     assertEquals(
-        Optional.of(
-            new Refusal(
-                Refusal.Kind.READ_ONLY,
-                "Your credential is read-only and cannot change specs.",
-                "Ask an admin for a member or admin credential.")),
+        new Refusal(
+            Refusal.Kind.READ_ONLY,
+            "Your credential is read-only and cannot change specs.",
+            "Ask an admin for a member or admin credential."),
         Refusal.readOnly("change specs"));
   }
 }

@@ -926,9 +926,9 @@ class ScopedReadsTest {
     Acting.system(() -> new FdeStore(db).revoke("sam", "alpha"));
 
     var gone =
-        "404 {schema_version=1, error={code=run_not_found, message=Run '"
+        "404 {schema_version=1, error={code=run_not_found, message=No run '"
             + run
-            + "' was not found., field_errors=[]}}";
+            + "'., field_errors=[]}}";
     for (var asked :
         List.of(
             inbox,

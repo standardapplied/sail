@@ -42,15 +42,12 @@ import java.util.Optional;
  */
 public final class SpecAuthority implements WriteAuthority {
 
-  private static final String TYPE = "spec";
-  private static final String ROOM = "room";
   private static final String ASSIGNEE = "assignee";
   private static final String ROOM_ID = "room_id";
 
   private final RoomStore rooms;
   private final SpecStore specs;
   private final ProjectStore projects;
-  private final ChangeLog changeLog;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
@@ -58,7 +55,6 @@ public final class SpecAuthority implements WriteAuthority {
     this.rooms = new RoomStore(db);
     this.specs = new SpecStore(db);
     this.projects = new ProjectStore(db);
-    this.changeLog = new ChangeLog(db);
     this.attribution = new Attribution(db);
   }
 
@@ -88,7 +84,7 @@ public final class SpecAuthority implements WriteAuthority {
     var bornIn = bornIn(id, next);
     return bornIn == null || rooms.holds(bornIn, id)
         ? Optional.empty()
-        : Access.unowned(actor, Refusal.noConversation(bornIn).orElseThrow());
+        : Access.unowned(actor, Refusal.noConversation(bornIn));
   }
 
   /**
@@ -145,12 +141,12 @@ public final class SpecAuthority implements WriteAuthority {
   }
 
   /**
-   * Spec {@code id} as {@code next} would bear it, before it has an assignee to move: in its
-   * project, and born into the conversation it names, as that conversation's owners stand without
-   * it. One this box does not hold was answered already ({@link #intoAbsent}).
+   * Spec {@code id} as {@code next} would bear it, before it has an assignee to move: born into the
+   * conversation it names, as that conversation's owners stand without it. One this box does not
+   * hold was answered already ({@link #intoAbsent}).
    */
   private Resource asBorn(String id, Map<String, Object> next) {
-    var spec = Resources.spec(id, changeLog.filed(TYPE, id, next), null, null);
+    var spec = Resources.spec(id, null, null, null);
     var bornIn = bornIn(id, next);
     return bornIn == null ? spec : Resources.bornIn(spec, conversation(bornIn, spec, null));
   }
@@ -160,19 +156,13 @@ public final class SpecAuthority implements WriteAuthority {
    * owners count it as held, never as the revision would leave it.
    */
   private Resource asHeld(String id, Map<String, Object> held) {
-    var spec =
-        Resources.spec(
-            id,
-            changeLog.filed(TYPE, id, held),
-            assigneeOf(held),
-            Snapshots.text(held, Snapshots.CREATOR));
+    var spec = Resources.spec(id, null, assigneeOf(held), Snapshots.text(held, Snapshots.CREATOR));
     var bornIn = bornIn(id, held);
     return bornIn == null ? spec : Resources.bornIn(spec, conversation(bornIn, spec, held));
   }
 
   private Resource conversation(String roomId, Resource spec, Map<String, Object> held) {
-    return Resources.conversation(
-        roomId, changeLog.conversationProject(roomId), rooms.owners(roomId, spec.id(), held));
+    return Resources.conversation(roomId, null, rooms.owners(roomId, spec.id(), held));
   }
 
   /**
@@ -190,13 +180,11 @@ public final class SpecAuthority implements WriteAuthority {
     if (taken == null) {
       return Optional.empty();
     }
-    var room = Resources.room(id, changeLog.filed(ROOM, id, taken), RoomStore.ownerOf(taken));
-    var spec =
-        Resources.spec(
-            id, changeLog.filed(TYPE, id, next), assigneeOf(next), creatorOf(actor, next));
+    var room = Resources.room(id, null, RoomStore.ownerOf(taken));
+    var spec = Resources.spec(id, null, assigneeOf(next), creatorOf(actor, next));
     if (bornIn(id, next) == null
         && (spec.owners().equals(room.owners())
-            || Access.withinAudience(actor, Action.ASSIGN, room).isEmpty())) {
+            || WriteAuthority.refused(actor, Taking.of(room, Action.ASSIGN)).isEmpty())) {
       return Optional.empty();
     }
     return Refusal.of(

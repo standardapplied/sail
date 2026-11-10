@@ -59,6 +59,7 @@ class StopOperationsTest {
 
   @TempDir Path tempDir;
 
+  private Sqlite db;
   private SpecStore specStore;
   private RunStore runStore;
   private final List<Event> events = new ArrayList<>();
@@ -504,6 +505,51 @@ class StopOperationsTest {
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.failure().errorCode());
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
     assertEquals("running", runStore.findById(R1).orElseThrow().status());
+  }
+
+  /**
+   * An ad-hoc run this box ran for another FDE is the box's as well as that FDE's: this box's FDE
+   * stops it, and a third member is told whose it is.
+   */
+  @Test
+  void anAdHocRunThisBoxRanForAnotherFdeIsTheBoxsAndThatFdesToStop() throws Exception {
+    var shell = liveAgentShell();
+    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    Acting.system(
+        () ->
+            runStore.create(
+                R1,
+                "acme",
+                null,
+                LOCAL_HANDLE,
+                "build",
+                "codex",
+                "b",
+                "t",
+                123,
+                null,
+                RUN_LOG,
+                UNIT));
+    db.execute("UPDATE runs SET owner = 'ada' WHERE id = ?", R1);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    new Actor("raj", Role.MEMBER, Actor.Lane.API),
+                    () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.failure().errorCode());
+    assertEquals(
+        "Run " + R1 + " is an ad-hoc session launched by 'ada' and 'me', not you.",
+        refusal.getMessage());
+
+    var outcome =
+        Actor.call(
+            new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.API),
+            () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+
+    assertInstanceOf(StopOperations.Stopped.class, outcome);
   }
 
   @Test
@@ -1520,7 +1566,7 @@ class StopOperationsTest {
         agent:
           type: claude-code
         """);
-    var db = Sqlite.open(tempDir.resolve("stop-" + System.nanoTime() + ".db"));
+    db = Sqlite.open(tempDir.resolve("stop-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     specStore = new SpecStore(db);

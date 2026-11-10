@@ -91,10 +91,7 @@ final class ReviewOperations {
     var source =
         ReadFilter.readable(
                 Actor.reader(), specStore.findById(sourceSpecId), SpecStore.SpecRow::project)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + sourceSpecId + "' was not found."));
+            .orElseThrow(() -> Refusals.specNotFound(sourceSpecId));
     var review =
         ReadFilter.readable(
                 Actor.reader(),

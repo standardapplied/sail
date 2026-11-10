@@ -396,8 +396,8 @@ class RunAuthorityTest {
         Optional.of(
             new Refusal(
                 Kind.NOT_OWNER,
-                "Run run-x is an ad-hoc session.",
-                "Only its owner or an admin may access this run."));
+                "Run run-x names no spec and no one it acts for.",
+                "Only an admin may access this run."));
     var scoping = new ScopeRule(new ChangeLog(board.db), "run").before(rule);
 
     assertEquals(adHoc, scoping.decide(OWNER_API.withScope(scoped), "run-x", null, MARKED));
@@ -422,7 +422,7 @@ class RunAuthorityTest {
             () -> runs.commitRevision(OTHER_RUN, MARKED, null, runs.authority()));
 
     assertEquals(
-        "Run " + OTHER_RUN + " is an ad-hoc session.",
+        "Run " + OTHER_RUN + " names no spec and no one it acts for.",
         assertInstanceOf(PushOutcome.Denied.class, outcome).reason());
   }
 

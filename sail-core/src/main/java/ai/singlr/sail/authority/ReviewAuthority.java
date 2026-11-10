@@ -9,7 +9,6 @@ import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
@@ -31,14 +30,12 @@ public final class ReviewAuthority implements WriteAuthority {
 
   private final SpecStore specs;
   private final ReviewStore reviews;
-  private final ChangeLog changeLog;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
   public ReviewAuthority(Sqlite db) {
     this.specs = new SpecStore(db);
     this.reviews = new ReviewStore(db);
-    this.changeLog = new ChangeLog(db);
     this.attribution = new Attribution(db);
   }
 
@@ -56,7 +53,7 @@ public final class ReviewAuthority implements WriteAuthority {
             Taking.of(
                 Resources.review(
                     id,
-                    changeLog.filed(TYPE, id, row),
+                    null,
                     specId,
                     specId == null
                         ? null

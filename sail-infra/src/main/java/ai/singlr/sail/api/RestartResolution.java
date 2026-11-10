@@ -54,8 +54,7 @@ public sealed interface RestartResolution
           Remedy.of("Set the spec id of the non-pending spec to re-dispatch."));
     }
     if (spec == null) {
-      return new Refused(
-          ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.", Remedy.NONE);
+      return new Refused(ErrorCode.SPEC_NOT_FOUND, Refusals.specMissing(specId), Remedy.NONE);
     }
     if (spec.status() == SpecStatus.PENDING) {
       return new NotRestarted();

@@ -416,23 +416,30 @@ class AccessTest {
   }
 
   @Test
-  void aSpecIsDispatchedByItsOwnerWhereverItWasBornAndAnUnassignedOneByNoOneYet() {
+  void aSpecIsDispatchedByItsAssigneeAloneWhereverItWasBornAndAnUnassignedOneIsNoOnes() {
     var inDen = Resources.bornIn(Resources.spec("brief", "acme", "ada", "ada"), DEN);
+    var dispatched = Resources.dispatched("auth", "acme", "ada");
 
     assertEquals(new Decision.Allowed(), Access.decide(Actors.OWNER_API, Action.DISPATCH, inDen));
     assertEquals(
+        new Decision.Allowed(), Access.decide(Actors.OWNER_API, Action.DISPATCH, dispatched));
+    assertEquals(new Decision.Allowed(), Access.decide(Actors.ADMIN, Action.DISPATCH, dispatched));
+    assertEquals(
         refused(
             Refusal.Kind.NOT_OWNER,
-            "Spec 'auth' is unassigned, so no one may dispatch it until it is claimed.",
-            "Claim it first with --assignee <you>, then dispatch it."),
-        Access.decide(Actors.OTHER_API, Action.DISPATCH, UNASSIGNED_ADA));
+            "Spec 'auth' is assigned to 'ada', not you.",
+            "Ask ada to dispatch it, or have an admin reassign it before dispatching."),
+        Access.decide(Actors.OTHER_API, Action.DISPATCH, dispatched));
     assertEquals(
-        new Decision.Allowed(), Access.decide(Actors.OWNER_API, Action.DISPATCH, UNASSIGNED_ADA));
+        "The assignee of a dispatched spec must not be blank.",
+        assertThrows(
+                IllegalArgumentException.class, () -> Resources.dispatched("auth", "acme", " "))
+            .getMessage());
   }
 
   @Test
   void whatNoOneHereCanOwnIsSailsAndAnAdminsToWriteAndRefusedByItsFactForEveryoneElse() {
-    var fact = Refusal.noConversation("ghost").orElseThrow();
+    var fact = Refusal.noConversation("ghost");
 
     for (var overrules : List.of(Actors.SYSTEM, Actors.MAIN, Actors.ADMIN)) {
       assertEquals(Optional.empty(), Access.unowned(overrules, fact));
@@ -536,8 +543,8 @@ class AccessTest {
     assertEquals(
         refused(
             Refusal.Kind.NOT_OWNER,
-            "Run r-1 is an ad-hoc session.",
-            "Only its owner or an admin may access this run."),
+            "Run r-1 names no spec and no one it acts for.",
+            "Only an admin may access this run."),
         Access.decide(Actors.OWNER_API, Action.OPERATE_RUN, nobodys));
     assertEquals(
         refused(
@@ -830,7 +837,7 @@ class AccessTest {
             Actors.OTHER_API,
             Resources.run("r1", "acme", null, "auth", null, spec -> Optional.empty())));
     assertEquals(
-        "Run r1 is an ad-hoc session.",
+        "Run r1 names no spec and no one it acts for.",
         owned(
                 Actors.OTHER_API,
                 Resources.run("r1", "acme", null, null, null, spec -> Optional.empty()))
@@ -844,7 +851,7 @@ class AccessTest {
   }
 
   private static Optional<Refusal> owned(Actor actor, Resource run) {
-    return Access.owned(actor, run);
+    return Access.ownsRun(actor, run);
   }
 
   private static void add(

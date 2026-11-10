@@ -16,9 +16,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.PrincipalHandle;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -654,6 +656,65 @@ class RunStoreTest {
     assertEquals("completed", completed.status());
     assertEquals(0, completed.exitCode());
     assertNotNull(completed.completedAt());
+  }
+
+  /**
+   * A run is owned by the FDE it acts for and, for an ad-hoc session, by the box that ran it, or
+   * for a spec's run by the spec's owner as its reader sees the spec: an ad-hoc run of ada's that
+   * bob's box ran is ada's and bob's, and a spec's run its owner's only where the reader reads the
+   * spec.
+   */
+  @Test
+  void aRunsResourceNamesWhoItActsForAndTheBoxThatRanItOrItsSpecsOwnerAsTheReaderSeesIt() {
+    var adHoc = DateTimeUtils.newId().toString();
+    var ofSpec = DateTimeUtils.newId().toString();
+    for (var id : List.of(adHoc, ofSpec)) {
+      store.create(
+          id,
+          "acme",
+          id.equals(adHoc) ? null : "auth",
+          "bob",
+          "build",
+          "claude-code",
+          "b",
+          "t",
+          null,
+          null,
+          "/log",
+          "unit");
+    }
+    db.execute("UPDATE runs SET owner = 'ada' WHERE id IN (?, ?)", adHoc, ofSpec);
+    var spec =
+        Optional.of(
+            new SpecStore.SpecRow(
+                "auth",
+                "acme",
+                "auth",
+                SpecStatus.PENDING,
+                "carol",
+                null,
+                null,
+                null,
+                null,
+                0,
+                "carol",
+                null,
+                null,
+                "carol",
+                List.of(),
+                List.of()));
+    var scopedOut =
+        new Actor("dan", Role.MEMBER, Actor.Lane.API).withScope(ProjectScope.of(List.of("beta")));
+
+    assertEquals(
+        List.of("ada", "bob"),
+        store.findById(adHoc).orElseThrow().resource(Actor.system(), id -> spec).owners());
+    assertEquals(
+        List.of("ada", "carol"),
+        store.findById(ofSpec).orElseThrow().resource(Actor.system(), id -> spec).owners());
+    assertEquals(
+        List.of("ada"),
+        store.findById(ofSpec).orElseThrow().resource(scopedOut, id -> spec).owners());
   }
 
   @Test

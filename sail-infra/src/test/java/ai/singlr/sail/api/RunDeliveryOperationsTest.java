@@ -398,6 +398,20 @@ class RunDeliveryOperationsTest {
   }
 
   @Test
+  void aRunCredentialActingForNoOneReportsNoRoomSession() {
+    var failure =
+        Actor.call(
+                Actor.agentPrincipal("claude/run-x", null),
+                () -> operations.recordRoomConversation("room", "claude-code", "abc", null, null))
+            .asFailure();
+
+    assertEquals(ErrorCode.FORBIDDEN_NOT_AUTHOR, failure.errorCode());
+    assertEquals(
+        "This credential acts for no FDE, so a post in 'room' would be no one's.",
+        failure.errorMessage());
+  }
+
+  @Test
   void recordRoomConversationTakesTheRoomsPostGateSoABoxCannotForgeIntoForeignRooms() {
     var elsewhere =
         new Actor("mallory", Role.MEMBER, Actor.Lane.CLI)

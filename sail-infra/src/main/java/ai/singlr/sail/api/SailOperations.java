@@ -1413,42 +1413,29 @@ public final class SailOperations implements HostOperations {
   }
 
   /**
-   * Resolves a run, applies the provenance guard, then the ownership step ({@link Access#owned})
-   * before handing it to {@code served}, the log tail: an absent store is an internal error, an
-   * unknown run a 404, a run that executed elsewhere a structured {@code run_on_other_node}
-   * refusal, and a caller who is none of the run's owners — the FDE it acts for, its spec's owner,
-   * or for a spec-less run the box that ran it — nor an admin a {@code forbidden_not_assignee}.
+   * Resolves a run and hands it to {@code served}, the log tail, when the caller may read its log
+   * ({@link LogAdmission#of}); an absent store is an internal error.
    */
   private <T> Result<T> onLocalRun(
       String runId, String localHandle, Function<RunStore.RunRow, Result<T>> served) {
     if (runStore == null) {
       return storeUnavailable("Run store").failure().asFailure();
     }
-    var run =
-        ReadFilter.readable(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project)
-            .orElse(null);
-    if (run == null) {
-      return Result.failure(ErrorCode.RUN_NOT_FOUND, Refusals.runNotFound(runId).getMessage());
-    }
-    if (isForeign(run, localHandle)) {
-      return foreignRun(run);
-    }
-    var refused = Access.owned(Actor.current(), run.resource(this::specOwner));
-    if (refused.isPresent()) {
-      return Refusals.failure(refused.get());
-    }
-    return served.apply(run);
+    return switch (LogAdmission.of(
+        Actor.reader(),
+        Actor.current(),
+        runStore.findById(runId),
+        runId,
+        localHandle,
+        this::spec)) {
+      case Result.Success<RunStore.RunRow> readable -> served.apply(readable.value());
+      case Result.Failure<RunStore.RunRow> refused -> refused.asFailure();
+    };
   }
 
-  /**
-   * The current owner of {@code specId}, empty when the spec is absent or the store not wired, and
-   * when the reader may not see the spec: a run stays in the project it ran in, so the spec it
-   * worked may have moved to one outside the reader's scope, and its owner is not the run's to say.
-   */
-  private Optional<String> specOwner(String specId) {
-    return specStore == null
-        ? Optional.empty()
-        : StopOperations.ownerSeen(Actor.reader(), specStore.findById(specId));
+  /** Spec {@code specId} as this box holds it; empty when absent or the store is not wired. */
+  private Optional<SpecStore.SpecRow> spec(String specId) {
+    return specStore == null ? Optional.empty() : specStore.findById(specId);
   }
 
   private RunStore requireRunStore() {
@@ -1466,23 +1453,6 @@ public final class SailOperations implements HostOperations {
    */
   static boolean isForeign(RunStore.RunRow run, String localHandle) {
     return !run.ownedBy(localHandle);
-  }
-
-  /**
-   * The structured {@code run_on_other_node} refusal: the worst case becomes an honest, actionable
-   * no ("logs live on {node}'s box") rather than a foreign box's local file tailed as if it were
-   * this run's. The clashing {@code node}/{@code spec}/{@code project} ride as field errors so a
-   * client can offer to switch.
-   */
-  private static <T> Result<T> foreignRun(RunStore.RunRow run) {
-    var node = Strings.isBlank(run.node()) ? "an unknown node" : run.node();
-    return Result.failure(
-        ErrorCode.RUN_ON_OTHER_NODE,
-        "Run " + run.id() + " executed on " + node + "; its logs live there, not on this box.",
-        List.of(
-            new FieldError("node", Objects.toString(run.node(), "")),
-            new FieldError("spec", Objects.toString(run.specId(), "")),
-            new FieldError("project", Objects.toString(run.project(), ""))));
   }
 
   private ProjectResponse projectValue(String project) {
@@ -1577,7 +1547,7 @@ public final class SailOperations implements HostOperations {
     var specs = specStore.projectSpecs(project);
     var spec = SpecCatalog.findById(specs, specId);
     if (spec == null) {
-      throw new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.");
+      throw Refusals.specNotFound(specId);
     }
     var content =
         specStore
@@ -2113,8 +2083,7 @@ public final class SailOperations implements HostOperations {
       throw storeUnavailable("Run store");
     }
     return ReadFilter.readable(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project)
-        .orElseThrow(
-            () -> new ApiException(ErrorCode.RUN_NOT_FOUND, "Run '" + runId + "' was not found."));
+        .orElseThrow(() -> Refusals.runNotFound(runId));
   }
 
   private static final int INBOX_LIMIT = 20;

@@ -84,10 +84,11 @@ public final class ScopeRule {
     if (held != null && !ReadFilter.reads(actor, () -> changeLog.filed(type, id, held))) {
       return taken(id);
     }
-    var project = changeLog.projectOf(type, id, next);
-    if (inside(actor, () -> project, next)) {
+    var filed = once(() -> changeLog.projectOf(type, id, next));
+    if (inside(actor, filed, next)) {
       return held == null && next != null ? bornBeyond(actor, id, next) : Optional.empty();
     }
+    var project = filed.get();
     return project != null
             && (project.equals(id) || next != null && project.equals(next.get("project")))
         ? Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Project '" + project + "' was not found.", GRANT)
@@ -129,14 +130,30 @@ public final class ScopeRule {
   /**
    * Whether this box files {@code named}, a row of type {@code of}, outside {@code actor}'s
    * audience: a room by its conversation's project, which is its spec's where no room was minted,
-   * any other by its head's. A row this box does not hold is outside nothing.
+   * any other by its head's. A row this box does not hold is outside nothing. The row is looked up
+   * only for an actor that does not read every project.
    */
   private boolean beyond(Actor actor, String of, String named) {
     var project =
-        ROOM.equals(of)
-            ? changeLog.conversationProject(named)
-            : changeLog.headProject(of, named).orElse(null);
-    return project != null && !ReadFilter.reads(actor, () -> project);
+        once(
+            () ->
+                ROOM.equals(of)
+                    ? changeLog.conversationProject(named)
+                    : changeLog.headProject(of, named).orElse(null));
+    return !ReadFilter.reads(actor, project) && project.get() != null;
+  }
+
+  /** {@code lookup}, run at most once, and only when its value is first asked for. */
+  private static Supplier<String> once(Supplier<String> lookup) {
+    var found = new String[1];
+    var asked = new boolean[1];
+    return () -> {
+      if (!asked[0]) {
+        found[0] = lookup.get();
+        asked[0] = true;
+      }
+      return found[0];
+    };
   }
 
   /**

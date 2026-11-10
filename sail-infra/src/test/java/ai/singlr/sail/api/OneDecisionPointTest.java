@@ -10,8 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resources;
+import ai.singlr.sail.authority.MessageAuthority;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.engine.SpecCliHelper;
 import ai.singlr.sail.identity.Actor;
@@ -54,22 +56,20 @@ class OneDecisionPointTest {
   private static final String MAINS_COMMIT = "ai/singlr/sail/sync/StoreReplica";
   private static final String SEAM = RULES + "WriteAuthority";
   private static final String ACCESS = "ai/singlr/sail/access/Access";
+  private static final String POSTS = RULES + "MessageAuthority";
+  private static final Set<String> POSTING_DOORS =
+      Set.of("ai/singlr/sail/engine/HostAccess", "ai/singlr/sail/api/SailOperations");
   private static final String DECIDES =
       "(Lai/singlr/sail/identity/Actor;Ljava/lang/String;Ljava/util/Map;Ljava/util/Map;)"
           + "Ljava/util/Optional;";
 
   @Test
   void onlyTheJournalAndMainsCommitDecideOrJournalAWrite() throws Exception {
-    var scanned = 0;
     var violations = new TreeSet<String>();
-    for (var module : List.of(RevisionJournal.class, SpecCliHelper.class, SailOperations.class)) {
-      for (var bytes : classesOf(module)) {
-        violations.addAll(violations(bytes));
-        scanned++;
-      }
+    for (var bytes : everyMainClass()) {
+      violations.addAll(violations(bytes));
     }
 
-    assertTrue(scanned > 500, "every module's classes were read: " + scanned);
     assertEquals(Set.of(), violations);
   }
 
@@ -81,6 +81,8 @@ class OneDecisionPointTest {
               "ai/singlr/sail/api/OneDecisionPointTest$Leaky asks a write rule: SpecAuthority.decide",
               "ai/singlr/sail/api/OneDecisionPointTest$Leaky asks the journal's seam:"
                   + " WriteAuthority.local",
+              "ai/singlr/sail/api/OneDecisionPointTest$Leaky asks the message rule's post:"
+                  + " MessageAuthority.post",
               "ai/singlr/sail/api/OneDecisionPointTest$Leaky asks what a revision takes:"
                   + " WriteAuthority.refused",
               "ai/singlr/sail/api/OneDecisionPointTest$Leaky journals a revision: ChangeLog.append",
@@ -104,6 +106,11 @@ class OneDecisionPointTest {
 
     Optional<Refusal> local(WriteAuthority rule) {
       return WriteAuthority.local(rule, "auth", null, null);
+    }
+
+    Decision posts() {
+      return MessageAuthority.post(
+          Actor.current(), Resources.conversation("lobby", "acme", List.of()));
     }
 
     Optional<Refusal> unscoped() {
@@ -140,8 +147,11 @@ class OneDecisionPointTest {
       if (owner.equals(SEAM) && method.equals("refused") && !name.startsWith(RULES)) {
         found.add(name + " asks what a revision takes: " + called);
       }
-      if (owner.equals(ACCESS) && method.equals("withinAudience") && !name.startsWith(RULES)) {
+      if (owner.equals(ACCESS) && method.equals("withinAudience") && !name.equals(SEAM)) {
         found.add(name + " skips the audience a scope rule decided: " + called);
+      }
+      if (owner.equals(POSTS) && method.equals("post") && !POSTING_DOORS.contains(name)) {
+        found.add(name + " asks the message rule's post: " + called);
       }
       if (method.equals("decide")
           && member.type().stringValue().equals(DECIDES)
@@ -157,6 +167,16 @@ class OneDecisionPointTest {
       }
     }
     return List.copyOf(found);
+  }
+
+  /** The bytes of every main class of every module, each module read whole. */
+  static List<byte[]> everyMainClass() throws IOException, URISyntaxException {
+    var classes = new ArrayList<byte[]>();
+    for (var module : List.of(RevisionJournal.class, SpecCliHelper.class, SailOperations.class)) {
+      classes.addAll(classesOf(module));
+    }
+    assertTrue(classes.size() > 500, "every module's classes were read: " + classes.size());
+    return classes;
   }
 
   /**

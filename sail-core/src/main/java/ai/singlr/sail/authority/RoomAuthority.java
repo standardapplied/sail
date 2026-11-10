@@ -10,7 +10,6 @@ import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Snapshots;
@@ -29,19 +28,16 @@ import java.util.Optional;
  */
 public final class RoomAuthority implements WriteAuthority {
 
-  private static final String TYPE = "room";
   private static final String PROJECT = "project";
 
   private final RoomStore rooms;
   private final ProjectStore projects;
-  private final ChangeLog changeLog;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
   public RoomAuthority(Sqlite db) {
     this.rooms = new RoomStore(db);
     this.projects = new ProjectStore(db);
-    this.changeLog = new ChangeLog(db);
     this.attribution = new Attribution(db);
   }
 
@@ -58,11 +54,8 @@ public final class RoomAuthority implements WriteAuthority {
         WriteAuthority.refused(
             actor,
             held == null
-                ? Taking.of(
-                    Resources.room(id, changeLog.filed(TYPE, id, next), null), Action.CREATE)
-                : Taking.of(
-                    Resources.room(id, changeLog.filed(TYPE, id, held), rooms.ownerOf(id, held)),
-                    Action.CHANGE));
+                ? Taking.of(Resources.room(id, null, null), Action.CREATE)
+                : Taking.of(Resources.room(id, null, rooms.ownerOf(id, held)), Action.CHANGE));
     return refused.isPresent()
         ? refused
         : attribution.decide(actor, held, next, "created_by", null);

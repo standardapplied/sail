@@ -12,11 +12,13 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
- * The one place a {@link Decision} becomes what a door answers. A refusal is the error envelope API
- * clients get: its kind picks the {@link ErrorCode}, and its message and fix are carried verbatim.
- * A write the journal refused ({@link WriteRefused}) is translated here too, so every door answers
- * a kind with one code. A resource the caller may not read is the door's own answer for an id it
- * does not hold, so a door can never tell a caller that something it may not see exists.
+ * The one place a {@link Decision} becomes the API's error envelope. A refusal is the envelope API
+ * clients get: its kind picks the {@link ErrorCode}, and its message and fix are carried verbatim;
+ * the run-log stream says the same failure in its own envelope, and the pty host as the refusal's
+ * own message and fix. A write the journal refused ({@link WriteRefused}) is translated here too,
+ * so every door answers a kind with one code. A resource the caller may not read is the door's own
+ * answer for an id it does not hold, so a door can never tell a caller that something it may not
+ * see exists.
  */
 public final class Refusals {
 
@@ -53,17 +55,32 @@ public final class Refusals {
 
   /** The answer for a room the caller may not see: the same as for one that is not there. */
   public static ApiException roomNotFound(String roomId) {
-    return new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
+    return new ApiException(ErrorCode.ROOM_NOT_FOUND, roomMissing(roomId));
+  }
+
+  /** What {@link #roomNotFound} says, for a door whose answer is not the API envelope. */
+  public static String roomMissing(String roomId) {
+    return "Room '" + roomId + "' was not found.";
   }
 
   /** The answer for a run the caller may not see: the same as for one that is not there. */
   public static ApiException runNotFound(String runId) {
-    return new ApiException(ErrorCode.RUN_NOT_FOUND, "No run '" + runId + "'.");
+    return ApiException.of((Result.Failure<?>) noRun(runId));
+  }
+
+  /** {@link #runNotFound} as the failed result a door returns instead of throwing. */
+  static <T> Result<T> noRun(String runId) {
+    return Result.failure(ErrorCode.RUN_NOT_FOUND, "No run '" + runId + "'.");
   }
 
   /** The answer for a spec the caller may not see: the same as for one that is not there. */
   static ApiException specNotFound(String specId) {
-    return new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.");
+    return new ApiException(ErrorCode.SPEC_NOT_FOUND, specMissing(specId));
+  }
+
+  /** What {@link #specNotFound} says. */
+  static String specMissing(String specId) {
+    return "Spec '" + specId + "' was not found.";
   }
 
   /**

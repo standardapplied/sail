@@ -578,20 +578,8 @@ public final class StopOperations {
     }
     Refusals.require(
         Access.decide(
-            Actor.current(),
-            Action.OPERATE_RUN,
-            run.resource(spec -> ownerSeen(Actor.reader(), specStore.findById(spec)))),
+            Actor.current(), Action.OPERATE_RUN, run.resource(Actor.reader(), specStore::findById)),
         () -> Refusals.runNotFound(run.id()));
-  }
-
-  /**
-   * The owner of {@code spec} as the run-owner rule names it to {@code reader}: empty for a spec
-   * outside the reader's scope, so a run that stayed in a project its spec has left never says who
-   * owns that spec now.
-   */
-  static Optional<String> ownerSeen(Actor reader, Optional<SpecStore.SpecRow> spec) {
-    return ReadFilter.readable(reader, spec, SpecStore.SpecRow::project)
-        .map(SpecStore.SpecRow::owner);
   }
 
   /**

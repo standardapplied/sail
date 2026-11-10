@@ -47,24 +47,22 @@ public final class EraseAuthority {
   }
 
   /**
-   * Why {@code actor} may not erase at all, asked before what it erases is read: whether its role
-   * and lane may prune specs, or, for a {@code wholesale} erasure — a whole project, or a policy's
-   * sweep — purge ({@link Access#atAll}). A prune by id is a {@link Decision} ({@link #prune}),
-   * since the spec it names may not be found; main's answer to a node's request ({@link
-   * #requested}) and the wait for a run ({@link #idle}) are worded refusals.
+   * Why {@code actor} may not erase wholesale, a whole project or a policy's sweep, asked before
+   * what it erases is read: purging is an admin's ({@link Access#atAll}). A prune by id is a {@link
+   * Decision} ({@link #prune}), since the spec it names may not be found; main's answer to a node's
+   * request ({@link #requested}) and the wait for a run ({@link #idle}) are worded refusals.
    */
-  public Optional<Refusal> request(Actor actor, boolean wholesale) {
-    return Access.atAll(
-        actor,
-        wholesale ? Action.PURGE : Action.PRUNE,
-        wholesale ? Resource.Kind.PROJECT : Resource.Kind.SPEC);
+  public Optional<Refusal> purge(Actor actor) {
+    return Access.atAll(actor, Action.PURGE, Resource.Kind.PROJECT);
   }
 
   /**
    * Why main refuses a node's request, made as {@code actor}, to erase {@code type} {@code id},
    * decided on main's own copy. Only specs and projects are erased on request. What main holds
    * nothing of, or holds outside the actor's audience, has no owner main can establish. A spec is
-   * decided as a local prune decides it ({@link #prune}).
+   * decided as a local prune decides it ({@link #prune}). Asked only by main's sync server for a
+   * node's request, so {@code actor} is a sync principal; a local erase is decided by {@link
+   * #prune} and {@link #purge}.
    */
   public Optional<Refusal> requested(Actor actor, String type, String id) {
     if (Erasure.SPEC.equals(type)) {
@@ -75,7 +73,7 @@ public final class EraseAuthority {
       };
     }
     if (!Erasure.PROJECT.equals(type)) {
-      return request(actor, false)
+      return Access.atAll(actor, Action.PRUNE, Resource.Kind.SPEC)
           .or(
               () ->
                   Refusal.of(
@@ -85,7 +83,7 @@ public final class EraseAuthority {
     }
     var target = new Erasure.Target(type, id);
     return sees(actor, type, id) && (erasure.isErased(target) || erasure.holds(target))
-        ? request(actor, true)
+        ? purge(actor)
         : unheld(type, id);
   }
 
@@ -99,9 +97,7 @@ public final class EraseAuthority {
   public Decision prune(Actor actor, String id) {
     if (erasure.isErased(new Erasure.Target(Erasure.SPEC, id))) {
       return sees(actor, Erasure.SPEC, id)
-          ? Access.atAll(actor, Action.PRUNE, Resource.Kind.SPEC)
-              .<Decision>map(Decision.Refused::new)
-              .orElseGet(Decision.Allowed::new)
+          ? Decision.of(Access.atAll(actor, Action.PRUNE, Resource.Kind.SPEC))
           : new Decision.NotFound();
     }
     return specs.lastKnown(id).map(spec -> spec(actor, spec)).orElseGet(Decision.NotFound::new);

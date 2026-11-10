@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.RunAuthority;
@@ -126,11 +127,21 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     }
 
     /**
-     * This run as the people it works for may stop it and read its log ({@link Resources#run}), its
-     * spec's owner as {@code specOwner} finds it for whoever asks.
+     * This run as the people it works for may stop it and read its log ({@link Resources#run}): its
+     * spec, as {@code specs} finds it, is owned by its owner as {@code reader} sees it. A run stays
+     * in the project it ran in, so the spec it worked may have moved where the reader does not
+     * read, and its owner is then not the run's to say. Sail itself sees every spec.
      */
-    public Resource resource(Function<String, Optional<String>> specOwner) {
-      return Resources.run(id, project, owner, specId, node, specOwner);
+    public Resource resource(Actor reader, Function<String, Optional<SpecStore.SpecRow>> specs) {
+      return Resources.run(
+          id,
+          project,
+          owner,
+          specId,
+          node,
+          spec ->
+              ReadFilter.readable(reader, specs.apply(spec), SpecStore.SpecRow::project)
+                  .map(SpecStore.SpecRow::owner));
     }
 
     /** A row without activity — the shape every run has until its first progress stamp. */

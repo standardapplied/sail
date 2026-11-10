@@ -13,7 +13,6 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.PrincipalHandle;
-import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
@@ -41,14 +40,12 @@ import java.util.stream.Stream;
  */
 public final class RunAuthority implements WriteAuthority {
 
-  private static final String TYPE = "run";
   private static final Set<String> SESSION_FIELDS =
       Set.of("session_id", "session_source", "last_activity_at");
 
   private final SpecStore specs;
   private final RoomStore rooms;
   private final RunStore runs;
-  private final ChangeLog changeLog;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
@@ -56,7 +53,6 @@ public final class RunAuthority implements WriteAuthority {
     this.specs = new SpecStore(db);
     this.rooms = new RoomStore(db);
     this.runs = new RunStore(db);
-    this.changeLog = new ChangeLog(db);
     this.attribution = new Attribution(db);
   }
 
@@ -111,7 +107,7 @@ public final class RunAuthority implements WriteAuthority {
   private Resource asHeld(String id, Map<String, Object> held) {
     return Resources.run(
         id,
-        changeLog.filed(TYPE, id, held),
+        null,
         Snapshots.text(held, "owner"),
         Snapshots.text(held, "spec_id"),
         Snapshots.text(held, "node"),
@@ -136,10 +132,7 @@ public final class RunAuthority implements WriteAuthority {
             : Optional.ofNullable(Strings.isBlank(roomId) ? null : rooms.held(roomId))
                 .map(room -> rooms.ownerOf(roomId, room));
     return Resources.launched(
-        id,
-        changeLog.filed(TYPE, id, next),
-        specId,
-        worker.orElseGet(() -> Snapshots.text(next, "owner")));
+        id, null, specId, worker.orElseGet(() -> Snapshots.text(next, "owner")));
   }
 
   /**

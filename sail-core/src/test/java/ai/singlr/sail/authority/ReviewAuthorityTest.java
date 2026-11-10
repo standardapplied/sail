@@ -182,8 +182,8 @@ class ReviewAuthorityTest {
         Optional.of(
             new Refusal(
                 Kind.NOT_OWNER,
-                "Review rv-x is for spec 'null', which has no owner.",
-                "Only the spec's owner or an admin may approve or dismiss it."));
+                "Review rv-x names no spec, so it has no owner.",
+                "Only an admin may approve or dismiss it."));
     var scoping = new ScopeRule(new ChangeLog(board.db), "review").before(rule);
 
     assertEquals(noOnes, scoping.decide(OWNER_API.withScope(scoped), "rv-x", null, MARKED));
@@ -208,7 +208,7 @@ class ReviewAuthorityTest {
             () -> reviews.commitRevision(id, MARKED, null, reviews.authority()));
 
     assertEquals(
-        "Review " + id + " is for spec 'null', which has no owner.",
+        "Review " + id + " names no spec, so it has no owner.",
         assertInstanceOf(PushOutcome.Denied.class, outcome).reason());
   }
 

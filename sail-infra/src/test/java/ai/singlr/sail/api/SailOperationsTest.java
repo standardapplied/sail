@@ -795,7 +795,7 @@ class SailOperationsTest {
             .on(
                 "incus snapshot list acme",
                 "[{\"name\": \"snap-1\", \"created_at\": \"2026-08-17T08:00:00Z\"}]");
-    var acme = catalog("acme");
+    var acme = HeldProjects.catalog("acme");
     var operations = cataloged(shell, TestProjects.reading(yaml), acme);
 
     var list = operations.snapshots("acme");
@@ -2640,7 +2640,8 @@ class SailOperationsTest {
   @Test
   void aProjectNotInTheCatalogMapsToNotFound() throws Exception {
     var operations =
-        cataloged(shell(), TestProjects.reading(tempDir.resolve("missail.yaml")), catalog());
+        cataloged(
+            shell(), TestProjects.reading(tempDir.resolve("missail.yaml")), HeldProjects.catalog());
 
     var error = operations.project("acme");
 
@@ -3532,13 +3533,6 @@ class SailOperationsTest {
             max_duration: 4h
             action: stop
         """;
-  }
-
-  /** A catalog holding {@code projects}, in a database of its own. */
-  private ProjectStore catalog(String... projects) throws Exception {
-    var db = Sqlite.open(tempDir.resolve("catalog-" + System.nanoTime() + ".db"));
-    new SchemaManager(db).migrate();
-    return new ProjectStore(HeldProjects.hold(db, projects));
   }
 
   /** Operations over {@code definitions} whose project doors read {@code catalog}. */

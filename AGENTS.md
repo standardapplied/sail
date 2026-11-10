@@ -82,7 +82,10 @@ tests bite, and the deletion count in the body.
   scope or a capability to decide (`OneDecisionSweepTest`); a second derivation is a bug, not a
   convenience. The journal decides every write as it records the revision; a door asks `Access`,
   or the journal of the write it is about to make, never a write rule, and a rule never reads
-  from the database the row it is deciding (it has `held`).
+  from the database the row it is deciding (it has `held`). The one exception is
+  `MessageAuthority.post`: a post with no message to journal (the terminal's room pin, a room
+  session's report) still answers to the message rule's own fact that a post is someone's, so
+  those two doors ask the rule's post decision (`OneDecisionPointTest` pins them).
 - Prefer deleting over adding. The smallest change in the right place; a duplicated seam is
   a finding to fix in the same change.
 

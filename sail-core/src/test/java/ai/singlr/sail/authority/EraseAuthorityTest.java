@@ -20,9 +20,12 @@ import static ai.singlr.sail.identity.Actors.VIEWER;
 import static ai.singlr.sail.identity.Actors.VIEWER_SYNC;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Refusal.Kind;
+import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
@@ -120,15 +123,17 @@ class EraseAuthorityTest {
 
   @Test
   void aWholeProjectOrASweepIsAnAdminsAndNoneAViewers() {
-    assertEquals(Optional.empty(), rule.request(ADMIN, true));
-    assertEquals(Optional.empty(), rule.request(ADMIN_SYNC, true));
-    assertEquals(Optional.empty(), rule.request(OWNER_API, false));
-    assertEquals(Optional.of(Kind.ADMIN_ONLY), rule.request(OWNER_API, true).map(Refusal::kind));
-    assertEquals(Optional.of(Kind.ADMIN_ONLY), rule.request(OWNER_SYNC, true).map(Refusal::kind));
-    assertEquals(Optional.of(Kind.READ_ONLY), rule.request(VIEWER, false).map(Refusal::kind));
+    assertEquals(Optional.empty(), rule.purge(ADMIN));
+    assertEquals(Optional.empty(), rule.purge(ADMIN_SYNC));
+    assertEquals(Optional.empty(), Access.atAll(OWNER_API, Action.PRUNE, Resource.Kind.SPEC));
+    assertEquals(Optional.of(Kind.ADMIN_ONLY), rule.purge(OWNER_API).map(Refusal::kind));
+    assertEquals(Optional.of(Kind.ADMIN_ONLY), rule.purge(OWNER_SYNC).map(Refusal::kind));
     assertEquals(
         Optional.of(Kind.READ_ONLY),
-        rule.request(new Actor(OWNER, Role.VIEWER, Actor.Lane.CLI), true).map(Refusal::kind));
+        Access.atAll(VIEWER, Action.PRUNE, Resource.Kind.SPEC).map(Refusal::kind));
+    assertEquals(
+        Optional.of(Kind.READ_ONLY),
+        rule.purge(new Actor(OWNER, Role.VIEWER, Actor.Lane.CLI)).map(Refusal::kind));
   }
 
   @Test
@@ -296,19 +301,19 @@ class EraseAuthorityTest {
             Kind.READ_ONLY,
             "Your credential is read-only and cannot prune specs.",
             "Ask an admin for a member or admin credential."),
-        rule.request(VIEWER, false).orElseThrow());
+        Access.atAll(VIEWER, Action.PRUNE, Resource.Kind.SPEC).orElseThrow());
     assertEquals(
         new Refusal(
             Kind.LANE_FORBIDDEN,
             "Agent principals cannot prune specs.",
             "Only an operator lane (CLI or API token) may do this."),
-        rule.request(AGENT, false).orElseThrow());
+        Access.atAll(AGENT, Action.PRUNE, Resource.Kind.SPEC).orElseThrow());
     assertEquals(
         new Refusal(
             Kind.ADMIN_ONLY,
             "Pruning by policy or a whole project is admin-only.",
             Remedy.of("Name the specs you own by id: ", Remedy.sail("spec prune", "<id...>"), ".")),
-        rule.request(OWNER_API, true).orElseThrow());
+        rule.purge(OWNER_API).orElseThrow());
     assertEquals(
         "Spec 'auth' is assigned to 'ada', not you.",
         refused(rule.spec(OTHER_API, spec(SpecStatus.ARCHIVED, OWNER, OWNER, true)))

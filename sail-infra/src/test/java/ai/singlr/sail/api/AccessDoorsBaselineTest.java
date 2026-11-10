@@ -145,7 +145,7 @@ class AccessDoorsBaselineTest {
   private static List<Door> doors(World world) {
     var doors = new ArrayList<Door>();
     reads(world, doors);
-    runs(doors);
+    runs(world, doors);
     specs(world, doors);
     rooms(world, doors);
     projects(doors);
@@ -182,7 +182,7 @@ class AccessDoorsBaselineTest {
     doors.add(new Door("read review review-ada", ops -> ops.reviewDetail(review)));
   }
 
-  private static void runs(List<Door> doors) {
+  private static void runs(World world, List<Door> doors) {
     for (var box : BOXES) {
       for (var run : RUNS) {
         doors.add(
@@ -190,7 +190,25 @@ class AccessDoorsBaselineTest {
                 "read log of " + run + " on " + box + "'s box", ops -> ops.runLog(run, 10, box)));
         doors.add(new Door("stop " + run + " on " + box + "'s box", ops -> ops.stopRun(run, box)));
       }
+      var adHoc = "ada's ad-hoc run on bob's box";
+      doors.add(
+          new Door(
+              "read log of " + adHoc + " on " + box + "'s box",
+              ops -> ops.runLog(onBobsBox(world), 10, box)));
+      doors.add(
+          new Door(
+              "stop " + adHoc + " on " + box + "'s box",
+              ops -> ops.stopRun(onBobsBox(world), box)));
     }
+  }
+
+  /**
+   * Ada's ad-hoc run, as bob's box ran it: it acts for ada and was executed by bob's box, which is
+   * one of its owners too.
+   */
+  private static String onBobsBox(World world) {
+    world.db.execute("UPDATE runs SET node = ? WHERE id = ?", Cast.OTHER, World.ADHOC_RUN);
+    return World.ADHOC_RUN;
   }
 
   private static void specs(World world, List<Door> doors) {

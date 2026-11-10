@@ -66,8 +66,8 @@ public record Refusal(Kind kind, String message, Remedy fix) {
   }
 
   /** The refusal of a read-only role, which cannot {@code act} ("change specs"). */
-  public static Optional<Refusal> readOnly(String act) {
-    return of(
+  public static Refusal readOnly(String act) {
+    return new Refusal(
         Kind.READ_ONLY,
         "Your credential is read-only and cannot " + act + ".",
         "Ask an admin for a member or admin credential.");
@@ -77,22 +77,11 @@ public record Refusal(Kind kind, String message, Remedy fix) {
    * The refusal of a write into conversation {@code roomId}, which this box does not hold: it has
    * no owner here to ask.
    */
-  public static Optional<Refusal> noConversation(String roomId) {
-    return of(
+  public static Refusal noConversation(String roomId) {
+    return new Refusal(
         Kind.NO_CONVERSATION,
         "No conversation '" + roomId + "' is on this box: it was deleted, or never here.",
         "Check the spec or room id.");
-  }
-
-  /**
-   * The refusal of a dispatch of spec {@code specId}, which is unassigned: it runs on no one's box
-   * until it is claimed, so no one dispatches it, whoever asks.
-   */
-  public static Refusal unclaimed(String specId) {
-    return new Refusal(
-        Kind.NOT_OWNER,
-        "Spec '" + specId + "' is unassigned, so no one may dispatch it until it is claimed.",
-        "Claim it first with --assignee <you>, then dispatch it.");
   }
 
   /** The refusal of a field that never changes after create. */
