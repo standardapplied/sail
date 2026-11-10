@@ -5,7 +5,8 @@
 
 package ai.singlr.sail.store;
 
-import ai.singlr.sail.authority.ProjectAuthority;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -350,10 +351,24 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     journal.eraseRow(id);
   }
 
-  /** Who may write projects on this box: any writer, and a rename an admin alone. */
+  /**
+   * Who may write projects on this box: whoever may configure the project ({@link
+   * Action#CONFIGURE}), its creator's as its revision names it. A rename — the deletion of the old
+   * name that blocks its resurrection ({@link #renames}) — moves every spec and file of the
+   * project, whoever's they are, so it purges the old name too ({@link Action#PURGE}), and is
+   * refused before any of them is written.
+   */
   @Override
-  public ProjectAuthority authority() {
-    return new ProjectAuthority(db);
+  public WriteAuthority authority() {
+    return WriteAuthority.table(
+        db,
+        (id, held, next) -> {
+          var project =
+              Resources.project(id, Snapshots.text(held != null ? held : next, Snapshots.CREATOR));
+          return renames(next)
+              ? WriteAuthority.Taking.of(project, Action.CONFIGURE, Action.PURGE)
+              : WriteAuthority.Taking.of(project, Action.CONFIGURE);
+        });
   }
 
   /** Whether {@code deletion}, a tombstone's marks, is a rename's: it blocks the old name. */

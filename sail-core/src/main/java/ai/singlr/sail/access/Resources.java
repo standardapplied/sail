@@ -5,22 +5,21 @@
 
 package ai.singlr.sail.access;
 
-import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Ownership;
 import java.util.List;
-import java.util.Optional;
+import java.util.stream.Stream;
 
 /**
  * Every {@link Resource}, built from the row already in hand, so deciding a list costs no query per
  * row. Every owner a decision reads is derived here, by the one rule for it: whose a spec or room
- * is ({@link Ownership#ownerOf}), whose a run is ({@link RunAuthority#owners}), whose a project is
- * (its creator). Where today's rules genuinely derive owners differently, each derivation is its
- * own factory, never a flag: a room's settings answer to its owner ({@link #room}) while its
- * conversation answers to every owner of the work in it ({@link #conversation}); a run answers to
- * the people it works for ({@link #run}) while a run being created answers to whoever's box runs
- * its work ({@link #launched}). What a caller looks up before it calls (the spec owner a door may
- * see, the conversation's owners) is its own, so a door that sees less passes less.
+ * is ({@link Ownership#ownerOf}), whose a run is ({@link #run}), whose a project is (its creator).
+ * Where today's rules genuinely derive owners differently, each derivation is its own factory,
+ * never a flag: a room's settings answer to its owner ({@link #room}) while its conversation
+ * answers to every owner of the work in it ({@link #conversation}); a run answers to the people it
+ * works for ({@link #run}) while a run being created answers to whoever's box runs its work ({@link
+ * #launched}). What a caller looks up before it calls (the spec owner a door may see, the
+ * conversation's owners) is its own, so a door that sees less passes less.
  */
 public final class Resources {
 
@@ -76,17 +75,19 @@ public final class Resources {
   /**
    * Run {@code id} of {@code project} as the people it works for may stop it and read its log: the
    * FDE it acts for ({@code owner}), and the owner of spec {@code specId} as the caller sees it
-   * ({@code specOwner}), or for a run that works no spec the box that ran it ({@code node}).
+   * ({@code specOwner}), or for a run that works no spec the box that ran it ({@code node}). So
+   * work that moved to another owner can still be stopped by the FDE whose box runs it.
    */
   public static Resource run(
       String id, String project, String owner, String specId, String node, String specOwner) {
+    var adHoc = Strings.isBlank(specId);
     return new Resource(
         Resource.Kind.RUN,
         id,
         project,
-        RunAuthority.owners(owner, specId, node, spec -> Optional.ofNullable(specOwner)),
+        Stream.of(owner, adHoc ? node : specOwner).toList(),
         null,
-        Strings.isBlank(specId) ? null : named(specId, project, specOwner));
+        adHoc ? null : named(specId, project, specOwner));
   }
 
   /**

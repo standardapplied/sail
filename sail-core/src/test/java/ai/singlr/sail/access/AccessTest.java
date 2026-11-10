@@ -564,6 +564,41 @@ class AccessTest {
   }
 
   @Test
+  void whetherAnActorMayEverTakeAnActionIsItsRoleAndLaneAlone() {
+    var unplaced = Actors.OTHER_API.withScope(ProjectScope.none());
+
+    assertEquals(
+        new Decision.Allowed(),
+        Access.decide(unplaced, Action.PRUNE, Resource.Kind.SPEC),
+        "no one resource is asked of, so neither its audience nor its owners");
+    assertEquals(
+        new Decision.Allowed(), Access.decide(Actor.system(), Action.PURGE, Resource.Kind.PROJECT));
+    assertEquals(
+        new Decision.Allowed(), Access.decide(Actors.ROOM, Action.POST, Resource.Kind.ROOM));
+    assertEquals(
+        refused(
+            Refusal.Kind.READ_ONLY,
+            "Your credential is read-only and cannot prune specs.",
+            READ_ONLY_FIX),
+        Access.decide(Actors.VIEWER, Action.PRUNE, Resource.Kind.SPEC));
+    assertEquals(
+        new Decision.Refused(
+            new Refusal(
+                Refusal.Kind.ADMIN_ONLY,
+                "Pruning by policy or a whole project is admin-only.",
+                Remedy.of(
+                    "Name the specs you own by id: ", Remedy.sail("spec prune", "<id...>"), "."))),
+        Access.decide(Actors.OWNER_API, Action.PURGE, Resource.Kind.PROJECT));
+    assertEquals(
+        refused(
+            Refusal.Kind.ADMIN_ONLY, "Only an admin may assign specs.", "Ask an admin to do it."),
+        Access.decide(Actors.OWNER_API, Action.ASSIGN, Resource.Kind.SPEC));
+    assertEquals(
+        refused(Refusal.Kind.LANE_FORBIDDEN, "Agent principals cannot prune specs.", LANE_FIX),
+        Access.decide(Actors.AGENT, Action.PRUNE, Resource.Kind.SPEC));
+  }
+
+  @Test
   void aMachineCredentialActsForNoFdeSoOwnsNothing() {
     assertEquals(
         refused(

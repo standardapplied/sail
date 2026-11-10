@@ -110,6 +110,13 @@ class ReviewAuthorityTest {
             Kind.FIXED));
     rows.add(
         new Case(
+            "another member is told whose it is before the spec it would move to",
+            OTHER_API,
+            RUNNING,
+            with(RUNNING, "spec_id", "other"),
+            Kind.NOT_OWNER));
+    rows.add(
+        new Case(
             "a verdict authored by another FDE",
             OWNER_SYNC,
             RUNNING,

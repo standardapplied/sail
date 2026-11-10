@@ -138,7 +138,7 @@ class EraseRequestTest {
     assertEquals(
         "Pruning by policy or a whole project is admin-only.", refusal(MADY, "project", "acme"));
     assertEquals(
-        "Your role is read-only: it cannot prune.",
+        "Your credential is read-only and cannot prune specs.",
         refusal(Actor.sync("mady", Role.VIEWER), "spec", "in-acme"));
     assertInstanceOf(SyncWire.Accepted.class, ask(ADMIN, "project", "acme"));
     assertEquals(

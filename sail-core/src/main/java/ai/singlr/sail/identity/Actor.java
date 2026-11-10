@@ -178,6 +178,15 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
     return () -> call(actor, task::call);
   }
 
+  /**
+   * True for Sail itself: main, as a node adopts what it decided ({@link Lane#MAIN}), and this
+   * box's own machinery ({@link Lane#SYSTEM}). What it does was decided already, so no rule is
+   * asked of it.
+   */
+  public boolean isSail() {
+    return lane == Lane.MAIN || lane == Lane.SYSTEM;
+  }
+
   /** True when this actor's role grants full administrative authority. */
   public boolean isAdmin() {
     return role == Role.ADMIN;
