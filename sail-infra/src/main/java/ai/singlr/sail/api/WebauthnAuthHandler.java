@@ -153,7 +153,7 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
   }
 
   private ApiResponse registerTicket(HttpExchange exchange) throws IOException {
-    var ticket = enrollment.issue(requireString(JsonBody.readMap(exchange), "fde"));
+    var ticket = issued(requireString(JsonBody.readMap(exchange), "fde"));
     var result = new LinkedHashMap<String, Object>();
     result.put("ticket", ticket.ticket());
     result.put("fde", ticket.fdeHandle());
@@ -162,6 +162,21 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
       result.put("enroll_url", enrollOrigin + "/enroll?ticket=" + ticket.ticket());
     }
     return ApiResponse.ok(result);
+  }
+
+  /**
+   * A ticket enrolling FDE {@code fde}, minted by the admin the people gate admitted: a person the
+   * roster disables gets none, which the admin, who did authenticate, hears as a conflict.
+   */
+  private EnrollmentTickets.Ticket issued(String fde) {
+    try {
+      return enrollment.issue(fde);
+    } catch (PasskeyException refused) {
+      if (refused.kind() != PasskeyException.Kind.UNAUTHORIZED) {
+        throw refused;
+      }
+      throw new ApiException(ErrorCode.CONFLICT, refused.getMessage());
+    }
   }
 
   private ApiResponse registerStart(HttpExchange exchange) throws IOException {

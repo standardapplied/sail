@@ -518,15 +518,25 @@ class WebauthnAuthHandlerTest {
     var ticket = mintTicket("uday");
     db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'uday'");
 
-    for (var refused :
-        List.of(
-            postWithTicket("/v1/auth/register/start", ticket, "{}"),
-            post("/v1/auth/register/ticket", adminToken, "{\"fde\":\"uday\"}"))) {
-      assertEquals(401, refused.statusCode());
-      var error = (Map<?, ?>) YamlUtil.parseMap(refused.body()).get("error");
-      assertEquals("authentication_failed", error.get("code"));
-      assertEquals("FDE 'uday' is disabled. Ask an admin to re-enable it.", error.get("message"));
-    }
+    var started = postWithTicket("/v1/auth/register/start", ticket, "{}");
+    var minted = post("/v1/auth/register/ticket", adminToken, "{\"fde\":\"uday\"}");
+
+    assertEquals(
+        "401 authentication_failed FDE 'uday' is disabled. Ask an admin to re-enable it.",
+        answer(started),
+        "the disabled person's own ticket");
+    assertEquals(
+        "409 conflict FDE 'uday' is disabled. Ask an admin to re-enable it.",
+        answer(minted),
+        "an admin, who did authenticate, is told the person is disabled");
+    assertEquals(
+        "404 not_found Unknown FDE: nobody",
+        answer(post("/v1/auth/register/ticket", adminToken, "{\"fde\":\"nobody\"}")));
+  }
+
+  private static String answer(HttpResponse<String> response) {
+    var error = (Map<?, ?>) YamlUtil.parseMap(response.body()).get("error");
+    return response.statusCode() + " " + error.get("code") + " " + error.get("message");
   }
 
   @Test
