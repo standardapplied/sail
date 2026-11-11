@@ -173,6 +173,16 @@ class PtyRoomSessionIT extends AbstractIncusIT {
         var solo = runToExit("plain", "", "spec create --id solo --title Solo && echo done");
         assertTrue(solo.contains("done"), solo);
 
+        var promoted =
+            runToExit("promote", "", "spec update solo --status pending || echo refused=$?");
+        assertTrue(
+            promoted.contains("The credential in a project container cannot approve specs.")
+                && promoted.contains(
+                    "Do it from outside the container: 'sail spec update <id> --status <status>'"
+                        + " on the host, or Mast.")
+                && promoted.contains("refused=1"),
+            "a person's terminal moves no status, and is told the doors outside: " + promoted);
+
         var mast =
             runToExitAs(
                 "mast-session-token",
