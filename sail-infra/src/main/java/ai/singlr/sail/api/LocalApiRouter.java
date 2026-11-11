@@ -120,10 +120,10 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
                 Gate.UNSERVED,
                 aRoomsOrARunsOwn(answering("run session accepts POST"))),
             route(GET, SKILLS, reads, this::skills),
-            route(POST, SKILLS, sharing, this::share),
+            route(POST, SKILLS, sharing, this::unshared),
             unserved(SKILLS, "skills accepts GET or POST"),
             route(GET, SKILL, reads, this::skill),
-            route(DELETE, SKILL, sharing, this::unshare),
+            route(DELETE, SKILL, sharing, this::unshared),
             unserved(SKILL, "a skill accepts GET or DELETE"),
             route(POST, SERVE, serving, this::serve),
             route(DELETE, SERVE, serving, this::stop),
@@ -502,20 +502,15 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
   }
 
   /**
-   * Shares a folder in the container as a skill, as its operation decides before it reads the
-   * folder: a shared skill is instructions every other agent and every other box will follow, so no
-   * credential in a container may share one, a run's or the box's; a person shares it from outside.
+   * Sharing or removing a skill, which is a person's from outside the container: a shared skill is
+   * instructions every other agent and every other box will follow, so no credential in a container
+   * may share or remove one (A9), a run's or the box's. The socket serves neither, and answers the
+   * refusal Share is decided with on the project, reading nothing of the container; a column that
+   * granted it here would be a server error, never a share.
    */
-  private ApiResponse share(LocalApiRequest request, Caller caller, Map<String, String> path)
-      throws IOException, InterruptedException, TimeoutException {
-    var form = request.form();
-    return ApiResponse.ok(
-        operations
-            .skills()
-            .shareFromContainer(
-                path.get(PROJECT),
-                Objects.requireNonNullElse(form.get("folder"), ""),
-                form.get("name")));
+  private ApiResponse unshared(LocalApiRequest request, Caller caller, Map<String, String> path) {
+    return ApiResponse.from(
+        Refusals.failure(operations.skills().sharing(path.get(PROJECT)).orElseThrow()));
   }
 
   /** One shared skill's {@code SKILL.md}. */
@@ -524,14 +519,6 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
     var name = path.get("name");
     return ApiResponse.ok(
         Map.of("name", name, "skill_md", operations.skills().manifest(path.get(PROJECT), name)));
-  }
-
-  /** Stops sharing one skill, which like sharing is refused to every container credential. */
-  private ApiResponse unshare(LocalApiRequest request, Caller caller, Map<String, String> path)
-      throws IOException, InterruptedException, TimeoutException {
-    var project = path.get(PROJECT);
-    var name = path.get("name");
-    return ApiResponse.ok(Map.of("name", name, "files", operations.skills().remove(project, name)));
   }
 
   private ApiResponse specs(LocalApiRequest request, Caller caller, Map<String, String> path) {

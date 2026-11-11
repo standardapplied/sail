@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ProjectProvisioner;
@@ -132,6 +133,14 @@ public final class SkillOperations {
               .toList(),
           note);
     }
+  }
+
+  /**
+   * Why the bound actor may not share or remove a skill of {@code project}: Share decided on the
+   * project, as every share and removal here decides it before anything is read.
+   */
+  public Optional<Refusal> sharing(String project) {
+    return ProjectGate.refusing(catalog, Action.SHARE, project);
   }
 
   /**

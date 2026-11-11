@@ -8,10 +8,12 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ProjectStore;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * The one gate of a door that acts on a project: the row of the project in this box's catalog, when
@@ -33,6 +35,15 @@ final class ProjectGate {
         Access.decide(Actor.current(), action, Resources.project(project, row.createdBy())),
         () -> ProjectReader.absent(project));
     return row;
+  }
+
+  /**
+   * Why the bound actor may not take {@code action} on {@code project}, a project in {@code
+   * catalog} it reads, as {@link #taking} decides it; empty when it may.
+   */
+  static Optional<Refusal> refusing(ProjectStore catalog, Action action, String project) {
+    return Access.withinAudience(
+        Actor.current(), action, Resources.project(project, held(catalog, project).createdBy()));
   }
 
   /** The row of {@code project} in {@code catalog}, when whoever reads may read it. */
