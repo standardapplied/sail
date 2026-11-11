@@ -333,9 +333,9 @@ readonly AGENT_VERB_RUNS_AS_THE_BOX="'agent stop' reads this box's control plane
 readonly FOLLOW_WITH_SPEC="Follow the work with 'sail spec' and the board, or SSH to the host directly to run it."
 readonly NO_SYNC_SESSION='sync: main serves no session whose token is missing, invalid or expired'
 readonly CONTAINER_CANNOT_APPROVE='The credential in a project container cannot approve specs.'
-readonly PROMOTE_FROM_OUTSIDE="Do it from outside the container: 'sail spec update <id> --status <status>' on the host, or Mast."
+readonly PROMOTE_FROM_OUTSIDE="Do it from outside the container: 'sail spec update e21 --status <status>' on the host, or Mast."
 readonly CONTAINER_CANNOT_SHARE='The credential in a project container cannot share files and skills in projects.'
-readonly SHARE_FROM_OUTSIDE="Do it from outside the container: 'sail project skills add --container <folder> -p acme' on the host, or Mast."
+readonly SHARE_FROM_OUTSIDE="Do it from outside the container: 'sail project skills add --container <folder> -p acme' or 'sail project skills rm <skill> -p acme' on the host, or Mast."
 readonly FLEET_SKILL='mkdir -p /home/dev/fleet-skill && printf -- "---\\nname: fleet-skill\\ndescription: A fleet check.\\n---\\nCheck.\\n" > /home/dev/fleet-skill/SKILL.md'
 
 doors() {

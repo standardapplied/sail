@@ -419,7 +419,7 @@ class AccessScenarioTest {
         new Refusal(
             Refusal.Kind.LANE_FORBIDDEN,
             "The credential in a project container cannot approve specs.",
-            "Do it from outside the container: 'sail spec update <id> --status <status>'"
+            "Do it from outside the container: 'sail spec update e1 --status <status>'"
                 + " on the host, or Mast.");
     var share =
         new Decision.Refused(
@@ -475,7 +475,7 @@ class AccessScenarioTest {
             new Refusal(
                 Refusal.Kind.LANE_FORBIDDEN,
                 "The credential in a project container cannot approve specs.",
-                "Do it from outside the container: 'sail spec update <id> --status <status>'"
+                "Do it from outside the container: 'sail spec update e-draft --status <status>'"
                     + " on the host, or Mast.")),
         Actor.call(ENG_IN_CONTAINER, () -> specs.decide("e-draft", ready)));
   }

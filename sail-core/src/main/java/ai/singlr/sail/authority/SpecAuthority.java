@@ -76,7 +76,7 @@ public final class SpecAuthority implements WriteAuthority {
                 actor,
                 taking(actor, id, held == null ? asBorn(id, next) : asHeld(id, held), held, next))
             .or(() -> moving(actor, id, held, next))
-            .or(() -> approval(actor, held, next));
+            .or(() -> approval(actor, id, held, next));
     return refused.isPresent() ? refused : facts(actor, id, held, next);
   }
 
@@ -110,9 +110,9 @@ public final class SpecAuthority implements WriteAuthority {
    * they may write, and an agent's lane refuses it.
    */
   private static Optional<Refusal> approval(
-      Actor actor, Map<String, Object> held, Map<String, Object> next) {
+      Actor actor, String id, Map<String, Object> held, Map<String, Object> next) {
     return next != null && movesStatus(held, next)
-        ? Access.atAll(actor, Action.APPROVE, Resource.Kind.SPEC)
+        ? Access.atAll(actor, Action.APPROVE, Resources.spec(id, projectOf(next), null, null))
         : Optional.empty();
   }
 

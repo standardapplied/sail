@@ -55,10 +55,15 @@ class OwnWorkSocketTest {
           + " --container <folder> -p acme' or 'sail project skills rm <skill> -p acme' on the"
           + " host, or Mast.";
 
-  private static final String CANNOT_APPROVE =
-      "403 agent_lane_forbidden The credential in a project container cannot approve specs."
-          + " | Do it from outside the container: 'sail spec update <id> --status <status>' on the"
-          + " host, or Mast.";
+  /**
+   * What the in-container credential hears moving spec {@code id}'s status, or bearing it ready.
+   */
+  private static String cannotApprove(String id) {
+    return "403 agent_lane_forbidden The credential in a project container cannot approve specs."
+        + " | Do it from outside the container: 'sail spec update "
+        + id
+        + " --status <status>' on the host, or Mast.";
+  }
 
   @TempDir Path tempDir;
   private DoorFleet fleet;
@@ -93,7 +98,7 @@ class OwnWorkSocketTest {
             + " admin-only action (currently 'eng'). | Ask an admin to reassign it. You may grab a"
             + " spec only while it is unassigned.",
         said(socket("eng", "PUT", "/v1/specs/e1", "assignee=client")));
-    assertEquals(CANNOT_APPROVE, said(socket("eng", "PUT", "/v1/specs/e1", "status=done")));
+    assertEquals(cannotApprove("e1"), said(socket("eng", "PUT", "/v1/specs/e1", "status=done")));
     assertEquals(
         CANNOT_SHARE,
         said(socket("eng", "POST", "/v1/projects/acme/skills", "folder=%2Fhome%2Fdev%2Fjava")));
@@ -110,13 +115,15 @@ class OwnWorkSocketTest {
             + " Do it from outside the container: 'sail spec update e1 --assignee <fde>' on the"
             + " host, or Mast.",
         said(socket("uday", "PUT", "/v1/specs/e1", "assignee=client")));
-    assertEquals(CANNOT_APPROVE, said(socket("uday", "PUT", "/v1/specs/e1", "status=done")));
+    assertEquals(cannotApprove("e1"), said(socket("uday", "PUT", "/v1/specs/e1", "status=done")));
     assertEquals(
-        CANNOT_APPROVE,
+        cannotApprove("u-ready"),
         said(
             socket("uday", "POST", "/v1/specs", "id=u-ready&project=acme&title=u&status=pending")));
     assertEquals(
-        CANNOT_APPROVE, said(socket("uday", "PUT", "/v1/specs/a2", "status=archived")), "archive");
+        cannotApprove("a2"),
+        said(socket("uday", "PUT", "/v1/specs/a2", "status=archived")),
+        "archive");
     assertEquals(
         CANNOT_SHARE,
         said(socket("uday", "POST", "/v1/projects/acme/skills", "folder=%2Fhome%2Fdev%2Fjava")));

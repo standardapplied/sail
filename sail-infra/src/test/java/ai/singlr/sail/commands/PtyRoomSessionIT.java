@@ -178,7 +178,7 @@ class PtyRoomSessionIT extends AbstractIncusIT {
         assertTrue(
             promoted.contains("The credential in a project container cannot approve specs.")
                 && promoted.contains(
-                    "Do it from outside the container: 'sail spec update <id> --status <status>'"
+                    "Do it from outside the container: 'sail spec update solo --status <status>'"
                         + " on the host, or Mast.")
                 && promoted.contains("refused=1"),
             "a person's terminal moves no status, and is told the doors outside: " + promoted);

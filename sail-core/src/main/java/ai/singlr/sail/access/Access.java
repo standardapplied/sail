@@ -63,7 +63,7 @@ public final class Access {
     if (resource.kind().filed() && !audience(actor).admits(resource.project())) {
       return NOT_FOUND;
     }
-    return Decision.of(steps(actor, action, resource.kind(), resource));
+    return Decision.of(steps(actor, action, resource.kind(), resource, resource));
   }
 
   /**
@@ -74,7 +74,9 @@ public final class Access {
    * the row under, so the write path decides it once, and a write is never not found here.
    */
   public static Optional<Refusal> withinAudience(Actor actor, Action action, Resource resource) {
-    return actor.isSail() ? Optional.empty() : steps(actor, action, resource.kind(), resource);
+    return actor.isSail()
+        ? Optional.empty()
+        : steps(actor, action, resource.kind(), resource, resource);
   }
 
   /**
@@ -87,7 +89,7 @@ public final class Access {
    * its own.
    */
   public static Optional<Refusal> atAll(Actor actor, Action action, Resource.Kind kind) {
-    return actor.isSail() ? Optional.empty() : steps(actor, action, kind, null);
+    return actor.isSail() ? Optional.empty() : steps(actor, action, kind, null, null);
   }
 
   /**
@@ -135,29 +137,40 @@ public final class Access {
   }
 
   /**
+   * Why {@code actor} may not take {@code action} at all, as {@link #atAll(Actor, Action,
+   * Resource.Kind)} asks it of {@code named}'s kind, its refusal naming {@code named} where its
+   * words name what is refused: the role and the lane alone are asked, never whose {@code named}
+   * is.
+   */
+  public static Optional<Refusal> atAll(Actor actor, Action action, Resource named) {
+    return actor.isSail() ? Optional.empty() : steps(actor, action, named.kind(), null, named);
+  }
+
+  /**
    * The role, lane and ownership steps, of {@code resource}, or of some resource of {@code kind}
    * when it is null: a question of a kind has no work to be the actor's own and no owners to ask. A
    * lane's grant on its own work decides alone, before the role; a lane narrowed to its own work
-   * refuses outside it after the role, and inside it the owner still decides.
+   * refuses outside it after the role, and inside it the owner still decides. A refusal's words
+   * name {@code named}, the resource itself or, for a question of a kind, the one it is asked for.
    */
   private static Optional<Refusal> steps(
-      Actor actor, Action action, Resource.Kind kind, Resource resource) {
+      Actor actor, Action action, Resource.Kind kind, Resource resource, Resource named) {
     var role = Policy.cell(action, Column.role(actor.role()));
     var lane =
         Column.lane(actor.lane()).map(column -> Policy.cell(action, column)).orElse(Cell.YES);
     if (lane == Cell.ITS_OWN) {
       return resource != null && ownWork(actor, action, resource)
           ? Optional.empty()
-          : Optional.of(Wording.outsideWork(actor, action, kind, resource));
+          : Optional.of(Wording.outsideWork(actor, action, kind, named));
     }
     if (role == Cell.NO) {
-      return Optional.of(Wording.belowRole(actor, action, kind, resource));
+      return Optional.of(Wording.belowRole(actor, action, kind, named));
     }
     if (lane == Cell.NO) {
-      return Optional.of(Wording.laneForbidden(actor, action, kind, resource));
+      return Optional.of(Wording.laneForbidden(actor, action, kind, named));
     }
     if (lane == Cell.OWN_WORK && (resource == null || !ownWork(actor, action, resource))) {
-      return Optional.of(Wording.outsideWork(actor, action, kind, resource));
+      return Optional.of(Wording.outsideWork(actor, action, kind, named));
     }
     if (resource == null) {
       return Optional.empty();
