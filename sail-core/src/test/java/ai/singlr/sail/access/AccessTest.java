@@ -686,7 +686,7 @@ class AccessTest {
   void anAgentNarratesOnlyItsOwnRunNotTheOtherRunsOfItsPerson() {
     var sibling =
         Actor.agentPrincipal("claude/" + Actors.OTHER_RUN, Actors.OWNER)
-            .withWork(new Actor.Work("acme", "auth", "lobby"));
+            .withWork(Actor.Work.of("acme", "auth", "lobby"));
 
     assertEquals(
         refused(
@@ -728,7 +728,7 @@ class AccessTest {
     var build = Actors.AGENT;
     var adHoc =
         Actor.agentPrincipal(Actors.AGENT_HANDLE, Actors.OWNER)
-            .withWork(new Actor.Work("acme", null, null));
+            .withWork(Actor.Work.of("acme", null, null));
     var drafted =
         Resources.madeBy(Resources.spec("draft", "acme", null, "ada"), Actors.AGENT_HANDLE);
     var other = Resources.spec("other", "acme", null, "ada");
@@ -825,7 +825,7 @@ class AccessTest {
             DRAFT_IT),
         Access.decide(
             new Actor(Actors.AGENT_HANDLE, Role.ADMIN, Actor.Lane.AGENT, Actors.OWNER)
-                .withWork(new Actor.Work("acme", "auth", "lobby")),
+                .withWork(Actor.Work.of("acme", "auth", "lobby")),
             Action.CHANGE,
             REVIEW_ADA),
         "nothing but its project, specs, conversations and run is an agent's work");
@@ -848,7 +848,7 @@ class AccessTest {
   void anAgentsOwnWorkIsAskedBetweenItsRoleAndWhoseTheWorkIs() {
     var viewersAgent =
         new Actor(Actors.AGENT_HANDLE, Role.VIEWER, Actor.Lane.AGENT, Actors.OWNER)
-            .withWork(new Actor.Work("acme", "auth", "lobby"));
+            .withWork(Actor.Work.of("acme", "auth", "lobby"));
 
     assertEquals(
         refused(

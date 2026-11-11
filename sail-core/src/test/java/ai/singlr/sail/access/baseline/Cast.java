@@ -149,7 +149,7 @@ public final class Cast {
     return member(
         label(Actor.Lane.AGENT, role, who, scope),
         scoped(new Actor(handle, role, Actor.Lane.AGENT, owner), scope)
-            .withWork(new Actor.Work("acme", spec, spec)));
+            .withWork(Actor.Work.of("acme", spec, spec)));
   }
 
   /** A room agent of {@code owner} in {@code room} of acme, its person seeing {@code scope}. */
@@ -157,7 +157,7 @@ public final class Cast {
     var seen = scoped(Actor.roomPrincipal(handle, owner), scope).scope();
     return Actor.roomPrincipal(handle, owner)
         .withScope(ProjectScope.of(seen.admits("acme") ? List.of("acme") : List.of()))
-        .withWork(new Actor.Work("acme", null, room));
+        .withWork(Actor.Work.of("acme", null, room));
   }
 
   private static Actor scoped(Actor actor, String scope) {

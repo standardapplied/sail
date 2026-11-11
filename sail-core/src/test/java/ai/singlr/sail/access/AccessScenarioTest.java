@@ -54,13 +54,13 @@ class AccessScenarioTest {
       new Actor("obs", Role.VIEWER, Actor.Lane.API)
           .withScope(ProjectScope.of(List.of("acme", "beta")));
   private static final Actor ENGS_AGENT =
-      Actor.agentPrincipal("claude/" + RUN, "eng").withWork(new Actor.Work("acme", "e1", "e1"));
+      Actor.agentPrincipal("claude/" + RUN, "eng").withWork(Actor.Work.of("acme", "e1", "e1"));
   private static final Actor ENGS_ROOM_AGENT =
       Actor.roomPrincipal("claude/room-" + RUN, "eng")
           .withScope(ProjectScope.of(List.of("acme")))
-          .withWork(new Actor.Work("acme", null, "r1"));
+          .withWork(Actor.Work.of("acme", null, "r1"));
   private static final Actor ENGS_AD_HOC =
-      Actor.agentPrincipal("claude/" + RUN, "eng").withWork(new Actor.Work("acme", null, null));
+      Actor.agentPrincipal("claude/" + RUN, "eng").withWork(Actor.Work.of("acme", null, null));
   private static final String OUTSIDE_WORK =
       "An agent acts only on the work sail launched it for; draft a follow-up spec for anything"
           + " else.";
@@ -276,8 +276,7 @@ class AccessScenarioTest {
   void row15EngsAgentEditsTheDraftItCreatedButNotOneAnotherRunMade() {
     var another = Actor.agentPrincipal("claude/other-run", "eng");
     Actor.run(ENGS_AGENT, () -> specs.create(draft("d1")));
-    Actor.run(
-        another.withWork(new Actor.Work("acme", "e2", "e2")), () -> specs.create(draft("d2")));
+    Actor.run(another.withWork(Actor.Work.of("acme", "e2", "e2")), () -> specs.create(draft("d2")));
 
     assertEquals(
         Optional.empty(),
@@ -319,7 +318,7 @@ class AccessScenarioTest {
     assertEquals(
         Optional.empty(),
         Actor.call(
-            ENGS_AGENT.withWork(new Actor.Work("acme", "d1", "d1")),
+            ENGS_AGENT.withWork(Actor.Work.of("acme", "d1", "d1")),
             () -> specs.decide("d1", retitled)),
         "a run that works d1 still may");
   }

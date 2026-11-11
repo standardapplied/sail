@@ -143,7 +143,7 @@ final class SyncFixtures {
   /** {@link #agent} conversing in {@code room}: its spec was born there. */
   static Actor agentIn(SyncBox box, String runId, String room) {
     var agent = agent(box, runId);
-    return agent.withWork(new Actor.Work("acme", agent.work().spec(), room));
+    return agent.withWork(Actor.Work.of("acme", agent.work().spec(), room));
   }
 
   /** An open HIGH security finding titled {@code title}, with a fresh id. */

@@ -403,7 +403,7 @@ class RunDeliveryOperationsTest {
     var failure =
         Actor.call(
                 Actor.agentPrincipal("claude/run-x", null)
-                    .withWork(new Actor.Work("acme", null, "room")),
+                    .withWork(Actor.Work.of("acme", null, "room")),
                 () -> operations.recordRoomConversation("room", "claude-code", "abc", null, null))
             .asFailure();
 

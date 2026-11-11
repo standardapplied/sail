@@ -31,12 +31,12 @@ public final class Actors {
   public static final Actor VIEWER = new Actor(OWNER, Role.VIEWER, Actor.Lane.API);
   public static final Actor MACHINE = new Actor(null, Role.MEMBER, Actor.Lane.API);
   public static final Actor AGENT =
-      Actor.agentPrincipal(AGENT_HANDLE, OWNER).withWork(new Actor.Work("acme", "auth", "lobby"));
+      Actor.agentPrincipal(AGENT_HANDLE, OWNER).withWork(Actor.Work.of("acme", "auth", "lobby"));
   public static final Actor OTHERS_AGENT =
       Actor.agentPrincipal("claude/" + OTHER_RUN, OTHER)
-          .withWork(new Actor.Work("acme", "theirs", "den"));
+          .withWork(Actor.Work.of("acme", "theirs", "den"));
   public static final Actor ROOM =
-      Actor.roomPrincipal(ROOM_HANDLE, OWNER).withWork(new Actor.Work("acme", null, "lobby"));
+      Actor.roomPrincipal(ROOM_HANDLE, OWNER).withWork(Actor.Work.of("acme", null, "lobby"));
   public static final Actor OWNER_SYNC = new Actor(OWNER, Role.MEMBER, Actor.Lane.SYNC);
   public static final Actor OTHER_SYNC = new Actor(OTHER, Role.MEMBER, Actor.Lane.SYNC);
   public static final Actor ADMIN_SYNC = new Actor(OTHER, Role.ADMIN, Actor.Lane.SYNC);
@@ -60,7 +60,7 @@ public final class Actors {
             ? Actor.roomPrincipal(run.principal(), run.owner())
             : Actor.agentPrincipal(run.principal(), run.owner()))
         .withWork(
-            new Actor.Work(
+            Actor.Work.of(
                 run.project(), run.specId(), run.specId() == null ? run.roomId() : run.specId()));
   }
 

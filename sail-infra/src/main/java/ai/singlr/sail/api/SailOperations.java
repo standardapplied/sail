@@ -114,9 +114,12 @@ public final class SailOperations implements HostOperations {
     return roles().boxFde().orElse(null);
   }
 
-  /** The role rule over this box's roster and its sync configuration ({@link #box}). */
+  /**
+   * The role rule over this box's roster, its sync configuration ({@link #box}) and its specs,
+   * where a run's work lives.
+   */
   private RoleRule roles() {
-    return new RoleRule(this::box, fdeStore);
+    return new RoleRule(this::box, fdeStore, specStore);
   }
 
   /**
@@ -1339,16 +1342,11 @@ public final class SailOperations implements HostOperations {
    * A run acting for no FDE acts for this box's, so a run credential never outranks the FDE whose
    * box launched it; and it sees the projects that FDE does, so a run a scoped FDE started on main
    * reads no more than its owner may, and an ownerless run no more than the box's person. It works
-   * what it was launched for, conversing in its spec's room, as this box holds the spec (its id,
-   * the room it was born for, once the spec is gone), or in the room it was launched in.
+   * what it was launched for, as the role rule derives it from the run and this box's specs.
    */
   @Override
   public Optional<Actor> runActor(RunStore.RunRow run) {
-    var room =
-        run.specId() == null
-            ? run.roomId()
-            : spec(run.specId()).map(SpecStore.SpecRow::roomIdOrIdentity).orElse(run.specId());
-    return roles().principal(RoleRule.Credential.run(run, room));
+    return roles().principal(RoleRule.Credential.run(run));
   }
 
   @Override

@@ -93,7 +93,7 @@ class MessageAuthorityTest {
   void aRunPrincipalActingForNoOnePostsNothingOnTheJournalOrAtADoor() {
     var ownerless =
         Actor.agentPrincipal("claude/" + Actors.RUN, null)
-            .withWork(new Actor.Work("acme", null, "lobby"));
+            .withWork(Actor.Work.of("acme", null, "lobby"));
     var noOnes =
         new Refusal(
             Kind.NOT_AUTHOR,
@@ -275,7 +275,7 @@ class MessageAuthorityTest {
                         List.of())));
     var adHoc =
         Actor.agentPrincipal("claude/" + OTHER_RUN, OWNER)
-            .withWork(new Actor.Work("acme", null, null));
+            .withWork(Actor.Work.of("acme", null, null));
 
     assertEquals(Optional.empty(), rule.decide(AGENT, MESSAGE, null, post("made", AGENT_HANDLE)));
     assertEquals(

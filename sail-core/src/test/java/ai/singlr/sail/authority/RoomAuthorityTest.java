@@ -239,7 +239,7 @@ class RoomAuthorityTest {
   void anAdHocRunChangesARoomOfItsProjectAndNoOther() {
     var adHoc =
         Actor.agentPrincipal("claude/" + OWNER + "-adhoc", OWNER)
-            .withWork(new Actor.Work("acme", null, null));
+            .withWork(Actor.Work.of("acme", null, null));
     HeldProjects.hold(board.db, "beta");
     var beta = with(LOBBY, "project", "beta");
 

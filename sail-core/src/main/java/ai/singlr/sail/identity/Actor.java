@@ -70,11 +70,26 @@ public record Actor(
 
   /**
    * What sail launched a run for, its agent's own work: the {@code project} it is filed under, the
-   * {@code spec} it works (null for none), and the {@code room} it converses in, its spec's room
-   * for a run that works a spec (null for none). A work that names neither a spec nor a room is its
-   * whole project's, an ad-hoc run's.
+   * {@code spec} it works (null for none), and the room it converses in ({@link #room}), its spec's
+   * room for a run that works a spec (null for none), which {@code rooms} finds only when a
+   * decision asks it, so a request that decides nothing of a room reads none. A work that names
+   * neither a spec nor a room is its whole project's, an ad-hoc run's.
    */
-  public record Work(String project, String spec, String room) {}
+  public record Work(String project, String spec, Supplier<String> rooms) {
+    public Work {
+      Objects.requireNonNull(rooms, "rooms");
+    }
+
+    /** A work whose room, {@code room}, is known already. */
+    public static Work of(String project, String spec, String room) {
+      return new Work(project, spec, () -> room);
+    }
+
+    /** The room it converses in, found as it is asked. */
+    public String room() {
+      return rooms.get();
+    }
+  }
 
   public Actor {
     Objects.requireNonNull(scope, "scope");

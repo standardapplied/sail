@@ -14,8 +14,10 @@ import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
@@ -30,12 +32,14 @@ class RoleRuleTest {
 
   private Sqlite db;
   private FdeStore roster;
+  private SpecStore specs;
 
   @BeforeEach
   void setUp() {
     db = Sqlite.openMemory();
     new SchemaManager(db).migrate();
     roster = new FdeStore(db);
+    specs = new SpecStore(db);
     roster.add("uday", null, null, "member");
     roster.add("mady", null, null, "member");
     roster.add("raj", null, null, "admin");
@@ -261,7 +265,7 @@ class RoleRuleTest {
         new RoleRule(() -> MAIN, null).principal(Credential.person("stranger", Actor.Lane.API)),
         "a box that keeps no roster knows no one but its operator");
     assertThrows(NullPointerException.class, () -> rule.principal(null));
-    assertThrows(NullPointerException.class, () -> Credential.run(null, null));
+    assertThrows(NullPointerException.class, () -> Credential.run(null));
   }
 
   @Test
@@ -308,7 +312,7 @@ class RoleRuleTest {
     roster.grant("uday", "alpha");
     roster.restrict("mady");
     roster.grant("mady", "beta");
-    var main = new RoleRule(() -> MAIN, roster);
+    var main = new RoleRule(() -> MAIN, roster, specs);
     var build = run("019fee00-0000-7000-8000-000000000001", "mady", "build");
     var room = run("019fee00-0000-7000-8000-000000000002", "mady", "room");
     var ownerless = run("019fee00-0000-7000-8000-000000000003", null, "build");
@@ -316,50 +320,80 @@ class RoleRuleTest {
     assertEquals(
         Optional.of(
             Actor.agentPrincipal(build.principal(), "mady")
-                .withScope(ProjectScope.of(List.of("beta")))
-                .withWork(new Actor.Work("acme", "s1", "s1"))),
-        main.principal(Credential.run(build, "s1")));
+                .withScope(ProjectScope.of(List.of("beta")))),
+        main.principal(Credential.run(build)).map(RoleRuleTest::unworked));
     assertEquals(
         Optional.of(
-            Actor.roomPrincipal(room.principal(), "mady")
-                .withScope(ProjectScope.of(List.of()))
-                .withWork(new Actor.Work("acme", "s1", "r1"))),
-        main.principal(Credential.run(room, "r1")),
+            Actor.roomPrincipal(room.principal(), "mady").withScope(ProjectScope.of(List.of()))),
+        main.principal(Credential.run(room)).map(RoleRuleTest::unworked),
         "a read-only run reads only its own project, and mady is not granted acme");
     assertEquals(
         Optional.of(
             new Actor(ownerless.principal(), Role.MEMBER, Actor.Lane.AGENT, null)
-                .withScope(ProjectScope.of(List.of("alpha")))
-                .withWork(new Actor.Work("acme", "s1", "s1"))),
-        new RoleRule(() -> NODE, roster).principal(Credential.run(ownerless, "s1")),
+                .withScope(ProjectScope.of(List.of("alpha")))),
+        new RoleRule(() -> NODE, roster, specs)
+            .principal(Credential.run(ownerless))
+            .map(RoleRuleTest::unworked),
         "a run acting for no FDE sees what the box's FDE sees, never every project");
     db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'mady'");
-    assertEquals(Optional.empty(), main.principal(Credential.run(build, "s1")));
+    assertEquals(Optional.empty(), main.principal(Credential.run(build)));
   }
 
   /**
    * A run works what it was launched for: a build, a review, a fix and a room member its spec and
-   * that spec's room, or a spec-less room member its room; an ad-hoc run its whole project. A
-   * read-only run reads the project it was launched in alone, of what its person reads.
+   * the room that spec lives in, its own once the spec is gone; a spec-less room member the room it
+   * was launched in; an ad-hoc run its whole project. A read-only run reads the project it was
+   * launched in alone, of what its person reads.
    */
   @Test
   void aRunWorksWhatItWasLaunchedForAndAReadOnlyRunReadsOnlyItsProject() {
-    var main = new RoleRule(() -> MAIN, roster);
+    var main = new RoleRule(() -> MAIN, roster, specs);
+    var build = run("019fee00-0000-7000-8000-000000000007", "mady", "build");
     var adhoc = run("019fee00-0000-7000-8000-000000000004", "mady", "adhoc", null);
-    var full = run("019fee00-0000-7000-8000-000000000005", "mady", "room-full", null);
-    var wake = run("019fee00-0000-7000-8000-000000000006", "mady", "room", null);
+    var full = run("019fee00-0000-7000-8000-000000000005", "mady", "room-full", null, "lobby");
+    var wake = run("019fee00-0000-7000-8000-000000000006", "mady", "room", null, "lobby");
 
-    assertEquals(
-        new Actor.Work("acme", null, null),
-        main.principal(Credential.run(adhoc, "lobby")).orElseThrow().work());
-    assertEquals(
-        new Actor.Work("acme", null, "lobby"),
-        main.principal(Credential.run(full, "lobby")).orElseThrow().work());
-    assertEquals(
-        ProjectScope.all(), main.principal(Credential.run(full, "lobby")).orElseThrow().scope());
+    assertEquals(List.of("acme", "s1", "s1"), work(main, build), "s1 is gone: its own room");
+    db.execute(
+        "INSERT INTO specs (id, project, title, status, room_id, created_at, updated_at)"
+            + " VALUES ('s1', 'acme', 'S1', 'draft', 'r1', 'now', 'now')");
+    assertEquals(List.of("acme", "s1", "r1"), work(main, build), "s1 was born in r1");
+    assertEquals(Arrays.asList("acme", null, null), work(main, adhoc));
+    assertEquals(Arrays.asList("acme", null, "lobby"), work(main, full));
+    assertEquals(ProjectScope.all(), main.principal(Credential.run(full)).orElseThrow().scope());
     assertEquals(
         ProjectScope.of(List.of("acme")),
-        main.principal(Credential.run(wake, "lobby")).orElseThrow().scope());
+        main.principal(Credential.run(wake)).orElseThrow().scope());
+  }
+
+  /** A door that reads no specs finds no spec run's work, rather than guessing its room. */
+  @Test
+  void aDoorThatReadsNoSpecsRefusesToGuessASpecRunsWork() {
+    var bare = new RoleRule(() -> MAIN, roster);
+
+    assertEquals(
+        "Run 019fee00-0000-7000-8000-000000000008 works spec s1, and this door reads no specs.",
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                    bare.principal(
+                        Credential.run(
+                            run("019fee00-0000-7000-8000-000000000008", "mady", "build"))))
+            .getMessage());
+    assertEquals(
+        Arrays.asList("acme", null, "lobby"),
+        work(bare, run("019fee00-0000-7000-8000-000000000009", "mady", "room", null, "lobby")));
+  }
+
+  /** {@code actor} without its work, whose room is found as it is asked. */
+  private static Actor unworked(Actor actor) {
+    return actor.withWork(null);
+  }
+
+  /** The project, spec and room of the work {@code rule} finds {@code run} launched for. */
+  private static List<String> work(RoleRule rule, RunStore.RunRow run) {
+    var work = rule.principal(Credential.run(run)).orElseThrow().work();
+    return Arrays.asList(work.project(), work.spec(), work.room());
   }
 
   private RunStore.RunRow run(String id, String owner, String lane) {
@@ -367,11 +401,16 @@ class RoleRuleTest {
   }
 
   private RunStore.RunRow run(String id, String owner, String lane, String spec) {
+    return run(id, owner, lane, spec, null);
+  }
+
+  private RunStore.RunRow run(String id, String owner, String lane, String spec, String room) {
     var runs = new RunStore(db);
     Acting.system(
         () ->
             runs.create(
                 id, "acme", spec, owner, lane, "claude-code", "b", "t", null, null, "/l", "u"));
+    db.execute("UPDATE runs SET room_id = ? WHERE id = ?", room, id);
     return runs.findById(id).orElseThrow();
   }
 }

@@ -11,6 +11,7 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -36,10 +37,21 @@ public final class RoleRule {
 
   private final Supplier<SyncConfig> box;
   private final FdeStore roster;
+  private final SpecStore specs;
 
+  /** The rule of a door that takes no run credential, so finds no run's work. */
   public RoleRule(Supplier<SyncConfig> box, FdeStore roster) {
+    this(box, roster, null);
+  }
+
+  /**
+   * The rule of a door that takes run credentials too, whose work's room is read from {@code specs}
+   * when a decision asks it.
+   */
+  public RoleRule(Supplier<SyncConfig> box, FdeStore roster, SpecStore specs) {
     this.box = Objects.requireNonNull(box, "box");
     this.roster = roster;
+    this.specs = specs;
   }
 
   /**
@@ -96,11 +108,10 @@ public final class RoleRule {
 
     /**
      * A run's credential: its principal, for the FDE the run acts for, on the work it was launched
-     * for. {@code room} is the room it converses in: its spec's room, as the door reads the spec,
-     * for a run that works one, else the room it was launched in.
+     * for ({@link #workOf}).
      */
-    static Credential run(RunStore.RunRow run, String room) {
-      return new Run(Objects.requireNonNull(run, "run"), room);
+    static Credential run(RunStore.RunRow run) {
+      return new Run(Objects.requireNonNull(run, "run"));
     }
 
     /** FDE {@code handle}, whose role {@code cap} caps. */
@@ -112,8 +123,8 @@ public final class RoleRule {
     /** No FDE, acting with the box's FDE's role, which {@code cap} caps. */
     record Machine(Role cap) implements Credential {}
 
-    /** A run's principal, conversing in {@code room}. */
-    record Run(RunStore.RunRow run, String room) implements Credential {}
+    /** A run's principal. */
+    record Run(RunStore.RunRow run) implements Credential {}
   }
 
   /** The FDE a login session was opened for, and the principal it acts as; empty if refused. */
@@ -146,7 +157,7 @@ public final class RoleRule {
       case Credential.Box(var cap, var lane) ->
           actingFor(null, boxFde().orElse(null), cap, lane, null);
       case Credential.Machine(var cap) -> actingFor(null, null, cap, Actor.Lane.API, null);
-      case Credential.Run(var run, var room) -> {
+      case Credential.Run(var run) -> {
         var principal =
             run.readOnlyLane()
                 ? Actor.roomPrincipal(run.principal(), run.owner())
@@ -158,19 +169,32 @@ public final class RoleRule {
                     (run.readOnlyLane()
                             ? actor.withScope(only(actor.scope(), run.project()))
                             : actor)
-                        .withWork(workOf(run, room)));
+                        .withWork(workOf(run)));
       }
     };
   }
 
   /**
-   * What {@code run}, conversing in {@code room}, was launched for: an ad-hoc run its whole
-   * project; any other its spec, when it works one, and its room.
+   * What {@code run} was launched for: an ad-hoc run its whole project; a run of no spec the room
+   * it was launched in, which its row carries; any other its spec and the room that spec lives in,
+   * its own once the spec is gone, read only when a decision asks it.
    */
-  private static Actor.Work workOf(RunStore.RunRow run, String room) {
-    return Lane.ADHOC.matches(run.role())
-        ? new Actor.Work(run.project(), null, null)
-        : new Actor.Work(run.project(), run.specId(), room);
+  private Actor.Work workOf(RunStore.RunRow run) {
+    if (Lane.ADHOC.matches(run.role())) {
+      return Actor.Work.of(run.project(), null, null);
+    }
+    var spec = run.specId();
+    if (spec == null) {
+      return Actor.Work.of(run.project(), null, run.roomId());
+    }
+    if (specs == null) {
+      throw new IllegalStateException(
+          "Run " + run.id() + " works spec " + spec + ", and this door reads no specs.");
+    }
+    return new Actor.Work(
+        run.project(),
+        spec,
+        () -> specs.findById(spec).map(SpecStore.SpecRow::roomIdOrIdentity).orElse(spec));
   }
 
   /** Project {@code project} alone, of what {@code scope} admits: none when it admits it not. */
