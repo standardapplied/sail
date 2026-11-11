@@ -136,9 +136,6 @@ class OneDecisionSweepTest {
         STORES + "Snapshots#adoptedCreator", "fact: whom a write names its creator (attribution)");
     allowed.put(STORES + "RoomStore$RoomSchema#apply", "fact: a room main decided is adopted");
     allowed.put(STORES + "RoomStore$RoomSchema#creatorOf", "fact: a room main decided is adopted");
-    allowed.put(
-        STORES + "RunStore$RunRow#principalActor",
-        "fact: which principal a run's credential stands for, by its lane");
     allowed.put(RULES + "RunAuthority#decide", "fact: which box executed a pushed run");
     allowed.put(RULES + "WriteAuthority#local", "fact: which box decides a write, main a push");
     allowed.put(SYNC_SERVER + "#<init>", "fact: a sync server serves a sync session alone");

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.identity;
 
+import ai.singlr.sail.store.RunStore;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -37,6 +38,16 @@ public final class Actors {
   public static final Actor VIEWER_SYNC = new Actor(OWNER, Role.VIEWER, Actor.Lane.SYNC);
   public static final Actor MAIN = Actor.main(OTHER);
   public static final Actor SYSTEM = Actor.system();
+
+  /**
+   * The actor {@code run}'s credential stands for before the role rule weighs its owner: its
+   * principal, on the room lane for a read-only lane and the agent lane otherwise.
+   */
+  public static Actor principalOf(RunStore.RunRow run) {
+    return run.readOnlyLane()
+        ? Actor.roomPrincipal(run.principal(), run.owner())
+        : Actor.agentPrincipal(run.principal(), run.owner());
+  }
 
   private Actors() {}
 

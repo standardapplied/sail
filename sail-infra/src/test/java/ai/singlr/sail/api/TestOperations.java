@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
@@ -87,7 +88,7 @@ class TestOperations implements Operations {
   /** Every run here acts for an active member FDE, so its lane decides its role. */
   @Override
   public Optional<Actor> runActor(RunStore.RunRow run) {
-    return Optional.of(run.principalActor());
+    return Optional.of(Actors.principalOf(run));
   }
 
   @Override

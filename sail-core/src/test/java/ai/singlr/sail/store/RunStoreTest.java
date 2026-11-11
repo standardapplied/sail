@@ -1535,9 +1535,6 @@ class RunStoreTest {
     var build = store.findById(newRun("backend", "other")).orElseThrow();
 
     var roomRow = store.findById(room).orElseThrow();
-
-    assertEquals(Actor.roomPrincipal(roomRow.principal(), "node-a"), roomRow.principalActor());
-    assertEquals(Actor.agentPrincipal(build.principal(), build.owner()), build.principalActor());
   }
 
   @Test

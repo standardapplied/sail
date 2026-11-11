@@ -108,14 +108,18 @@ public final class RoleRule {
    */
   public Optional<Actor> principal(Credential credential) {
     return switch (Objects.requireNonNull(credential, "credential")) {
-      case Credential.Person(var handle, var cap, var lane) -> actorOf(handle, cap, lane);
+      case Credential.Person(var handle, var cap, var lane) ->
+          Strings.isBlank(handle) ? Optional.empty() : actingFor(handle, handle, cap, lane, null);
       case Credential.Box(var cap, var lane) ->
           actingFor(null, boxFde().orElse(null), cap, lane, null);
       case Credential.Machine(var cap) -> actingFor(null, null, cap, Actor.Lane.API, null);
       case Credential.Run(var run) -> {
-        var principal = run.principalActor();
+        var principal =
+            run.readOnlyLane()
+                ? Actor.roomPrincipal(run.principal(), run.owner())
+                : Actor.agentPrincipal(run.principal(), run.owner());
         yield actingFor(
-            run.owner(), principal.handle(), principal.role(), principal.lane(), principal.owner());
+            run.owner(), principal.handle(), principal.role(), principal.lane(), run.owner());
       }
     };
   }
@@ -161,15 +165,6 @@ public final class RoleRule {
     return roster == null || Strings.isBlank(handle) || isOperator(handle)
         ? ProjectScope.all()
         : roster.scopeOf(handle);
-  }
-
-  /**
-   * The actor a credential naming FDE {@code handle} and minted with {@code cap} acts as on {@code
-   * lane}: its role and its scope, resolved together; empty when the credential is refused.
-   */
-  private Optional<Actor> actorOf(String handle, Role cap, Actor.Lane lane) {
-    return roleOf(handle, cap)
-        .map(role -> new Actor(handle, role, lane).withScope(scopeOf(handle)));
   }
 
   /** Whether {@code handle} names an FDE other than this node's own. */

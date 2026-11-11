@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
@@ -494,7 +495,7 @@ class RouteGateSweepTest {
                       case "runForCredential" ->
                           Optional.of(RUN)
                               .filter(_ -> TestOperations.RUN_CREDENTIAL.equals(args[0]));
-                      case "runActor" -> Optional.of(RUN.principalActor());
+                      case "runActor" -> Optional.of(Actors.principalOf(RUN));
                       case "boxFde" -> BOX;
                       case "boxActorForCredential" ->
                           Optional.of(new Actor(BOX, Role.MEMBER, Actor.Lane.CLI))

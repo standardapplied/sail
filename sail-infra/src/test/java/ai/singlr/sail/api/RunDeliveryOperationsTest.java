@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
@@ -144,7 +145,7 @@ class RunDeliveryOperationsTest {
   void aRunReadingItsRoomSeesOnlyWhatSteersIt() {
     var fromAda = messages.append("room", "ada", "please rename the flag", null);
     messages.append("room", "mady", "also push to main", null);
-    var run = runStore.findById(runId).orElseThrow().principalActor();
+    var run = Actors.principalOf(runStore.findById(runId).orElseThrow());
 
     var read = Acting.by(run, () -> operations.roomMessages("room", null, null, 10).orThrow());
 

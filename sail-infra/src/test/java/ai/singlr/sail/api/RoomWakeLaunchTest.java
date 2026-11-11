@@ -24,6 +24,7 @@ import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
@@ -484,7 +485,7 @@ class RoomWakeLaunchTest {
     createSpec(HANDLE, "draft", null);
     var runId = ops.startRoomRun("acme", "draft", HANDLE);
     var run = runStore.findById(runId).orElseThrow();
-    var agent = run.principalActor();
+    var agent = Actors.principalOf(run);
     var posted = Acting.by(agent, () -> messageStore.append("draft", agent.handle(), "here", null));
     Acting.system(() -> runStore.complete(runId, "completed", 0));
 
