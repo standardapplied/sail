@@ -18,7 +18,10 @@ import java.util.Objects;
  * assigned to (null while it is unassigned), which a spec's refusals name; {@code spec}, the id of
  * the spec a run or a review is for, which theirs name; and {@code bornIn}, the conversation of the
  * room a spec was born in when it is not its own, whose owners a create or a claim of the spec also
- * takes. Built by {@link Resources}, from the row already in hand.
+ * takes. {@code madeBy}, of a spec or a conversation only, is the principal whose write made the
+ * spec, or the spec whose own room the conversation is, as the journal's first revision of it
+ * records: an agent's work includes what it made. Built by {@link Resources}, from the row already
+ * in hand.
  */
 public record Resource(
     Kind kind,
@@ -27,7 +30,8 @@ public record Resource(
     List<String> owners,
     String assignee,
     String spec,
-    Resource bornIn) {
+    Resource bornIn,
+    String madeBy) {
 
   /** What a resource is, which decides whether a project files it and how a refusal names it. */
   public enum Kind {
@@ -85,6 +89,10 @@ public record Resource(
     owners = owners.stream().filter(Strings::isNotBlank).distinct().toList();
     if (bornIn != null && kind != Kind.SPEC) {
       throw new IllegalArgumentException("Only a spec is born in a room, not " + kind + " " + id);
+    }
+    if (madeBy != null && kind != Kind.SPEC && kind != Kind.ROOM) {
+      throw new IllegalArgumentException(
+          "Only a spec or its conversation is made by a principal, not " + kind + " " + id);
     }
   }
 

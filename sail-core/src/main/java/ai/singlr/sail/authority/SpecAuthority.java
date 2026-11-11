@@ -51,6 +51,7 @@ public final class SpecAuthority implements WriteAuthority {
   private final RoomStore rooms;
   private final SpecStore specs;
   private final ProjectStore projects;
+  private final ChangeLog journal;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
@@ -58,6 +59,7 @@ public final class SpecAuthority implements WriteAuthority {
     this.rooms = new RoomStore(db);
     this.specs = new SpecStore(db);
     this.projects = new ProjectStore(db);
+    this.journal = new ChangeLog(db);
     this.attribution = new Attribution(db);
   }
 
@@ -167,22 +169,27 @@ public final class SpecAuthority implements WriteAuthority {
   }
 
   /**
-   * Spec {@code id} as {@code next} would bear it, before it has an assignee to move: born into the
-   * conversation it names, as that conversation's owners stand without it. One this box does not
-   * hold was answered already ({@link #intoAbsent}).
+   * Spec {@code id} as {@code next} would bear it, before it has an assignee to move: filed under
+   * the project it names, born into the conversation it names, as that conversation's owners stand
+   * without it. One this box does not hold was answered already ({@link #intoAbsent}).
    */
   private Resource asBorn(String id, Map<String, Object> next) {
-    var spec = Resources.spec(id, null, null, null);
+    var spec = Resources.spec(id, projectOf(next), null, null);
     var bornIn = bornIn(id, next);
     return bornIn == null ? spec : Resources.bornIn(spec, conversation(bornIn, spec, null));
   }
 
   /**
-   * Spec {@code id} as {@code held} has it: its owner, and the conversation it lives in, whose
-   * owners count it as held, never as the revision would leave it.
+   * Spec {@code id} as {@code held} has it: its project and owner, who made it ({@link
+   * ChangeLog#bornBy}), and the conversation it lives in, whose owners count it as held, never as
+   * the revision would leave it.
    */
   private Resource asHeld(String id, Map<String, Object> held) {
-    var spec = Resources.spec(id, null, assigneeOf(held), Snapshots.text(held, Snapshots.CREATOR));
+    var spec =
+        Resources.madeBy(
+            Resources.spec(
+                id, projectOf(held), assigneeOf(held), Snapshots.text(held, Snapshots.CREATOR)),
+            journal.bornBy("spec", id).orElse(null));
     var bornIn = bornIn(id, held);
     return bornIn == null ? spec : Resources.bornIn(spec, conversation(bornIn, spec, held));
   }

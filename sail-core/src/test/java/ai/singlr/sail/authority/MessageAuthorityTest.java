@@ -32,12 +32,15 @@ import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Refusal.Kind;
 import ai.singlr.sail.access.Resources;
+import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.Snapshots;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Standing;
 import java.time.Instant;
 import java.util.List;
@@ -88,7 +91,9 @@ class MessageAuthorityTest {
    */
   @Test
   void aRunPrincipalActingForNoOnePostsNothingOnTheJournalOrAtADoor() {
-    var ownerless = Actor.agentPrincipal("claude/" + Actors.RUN, null);
+    var ownerless =
+        Actor.agentPrincipal("claude/" + Actors.RUN, null)
+            .withWork(new Actor.Work("acme", null, "lobby"));
     var noOnes =
         new Refusal(
             Kind.NOT_AUTHOR,
@@ -142,11 +147,11 @@ class MessageAuthorityTest {
         new Case("the pipeline narrates", SYSTEM, "den", "sail", null),
         new Case("another member posts in the owner's room", OTHER_API, "lobby", OTHER, null),
         new Case(
-            "another FDE's agent posts there as itself",
+            "another FDE's agent posts nowhere outside its own work",
             OTHERS_AGENT,
             "lobby",
             "claude/" + OTHER_RUN,
-            null),
+            Kind.NOT_OWNER),
         new Case(
             "a member posts in no conversation this box does not hold",
             OTHER_API,
@@ -223,12 +228,58 @@ class MessageAuthorityTest {
   }
 
   @Test
-  void anAgentPostsInAnotherSpecsRoomWhereItsFdeMayPost() {
+  void anAgentPostsOnlyInItsOwnWorkEvenWhereItsFdeMayPost() {
     board.spec("other", "den", OWNER, OWNER);
 
-    assertEquals(Optional.empty(), rule.decide(AGENT, MESSAGE, null, post("den", AGENT_HANDLE)));
     assertEquals(
-        Optional.empty(), rule.decide(OWNER_SYNC, MESSAGE, null, post("den", AGENT_HANDLE)));
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "'" + AGENT_HANDLE + "' may post only in its own work, not in 'den'.",
+                "An agent acts only on the work sail launched it for; draft a follow-up spec for"
+                    + " anything else.")),
+        rule.decide(AGENT, MESSAGE, null, post("den", AGENT_HANDLE)));
+    assertEquals(
+        Optional.empty(),
+        rule.decide(OWNER_SYNC, MESSAGE, null, post("den", AGENT_HANDLE)),
+        "main takes its pusher's run's post: the box decided it");
+  }
+
+  /**
+   * A conversation of a spec an agent made is its own work, read from the journal's first revision
+   * of the spec, and filed under the spec's project, which an ad-hoc run's work is.
+   */
+  @Test
+  void anAgentPostsInTheRoomOfASpecItMadeAndAnAdHocRunInItsProject() {
+    Acting.by(
+        AGENT,
+        () ->
+            new SpecStore(board.db)
+                .create(
+                    new SpecStore.SpecRow(
+                        "made",
+                        "acme",
+                        "made",
+                        SpecStatus.DRAFT,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0,
+                        null,
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of())));
+    var adHoc =
+        Actor.agentPrincipal("claude/" + OTHER_RUN, OWNER)
+            .withWork(new Actor.Work("acme", null, null));
+
+    assertEquals(Optional.empty(), rule.decide(AGENT, MESSAGE, null, post("made", AGENT_HANDLE)));
+    assertEquals(
+        Optional.empty(), rule.decide(adHoc, MESSAGE, null, post("den", "claude/" + OTHER_RUN)));
   }
 
   @Test

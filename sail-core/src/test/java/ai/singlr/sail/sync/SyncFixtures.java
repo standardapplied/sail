@@ -9,6 +9,8 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Finding;
@@ -131,6 +133,17 @@ final class SyncFixtures {
   /** The principal minted for run {@code runId} on {@code box}. */
   static String principal(SyncBox box, String runId) {
     return new RunStore(box.db).findById(runId).orElseThrow().principal();
+  }
+
+  /** The agent of run {@code runId} on {@code box}, on the work it was launched for. */
+  static Actor agent(SyncBox box, String runId) {
+    return Actors.principalOf(new RunStore(box.db).findById(runId).orElseThrow());
+  }
+
+  /** {@link #agent} conversing in {@code room}: its spec was born there. */
+  static Actor agentIn(SyncBox box, String runId, String room) {
+    var agent = agent(box, runId);
+    return agent.withWork(new Actor.Work("acme", agent.work().spec(), room));
   }
 
   /** An open HIGH security finding titled {@code title}, with a fresh id. */

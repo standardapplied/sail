@@ -2065,8 +2065,10 @@ class SailOperationsTest {
     assertEquals(
         Optional.of(
             new Actor("claude/r1", Role.MEMBER, Actor.Lane.AGENT, null)
-                .withScope(ProjectScope.of(List.of("acme")))),
-        operations.runActor(ownerless));
+                .withScope(ProjectScope.of(List.of("acme")))
+                .withWork(new Actor.Work("acme", "auth", "auth"))),
+        operations.runActor(ownerless),
+        "it works its spec, conversing in the spec's own id once this box holds the spec no more");
   }
 
   @Test

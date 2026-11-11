@@ -12,6 +12,7 @@ import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.identity.ProjectScope;
 import java.util.Arrays;
 import java.util.EnumSet;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -29,10 +30,11 @@ import java.util.Set;
  *       has had this step already, from the project the journal files its row under ({@link
  *       #withinAudience}).
  *   <li>Role: the cell of the actor's role says no: refused, read-only or admin-only; unless the
- *       actor's lane grants the action on its own work, whatever its role, which decides it alone —
- *       a room agent, read-only by construction, posts in its room and narrates its run.
- *   <li>Lane: the lane of an agent or of the in-container credential says no: refused, naming the
- *       lane.
+ *       actor's lane grants the action on its own work, whatever its role ({@link Cell#ITS_OWN}),
+ *       which decides it alone — a room agent, read-only by construction, posts in its room and
+ *       narrates its run.
+ *   <li>Lane: the lane of an agent or of the in-container credential says no, or an agent acts
+ *       outside its own work ({@link #ownWork}): refused, naming the lane or the work.
  *   <li>Ownership: the role's cell says owner, and the actor neither is an admin nor acts for an
  *       owner; or it starts work in the room a spec was born in ({@link Resource#bornIn}) — creates
  *       or claims the spec there — and does not act for that room's owners: refused, naming the
@@ -124,15 +126,17 @@ public final class Access {
 
   /**
    * The role, lane and ownership steps, of {@code resource}, or of some resource of {@code kind}
-   * when it is null: a question of a kind has no work to be the actor's own and no owners to ask.
+   * when it is null: a question of a kind has no work to be the actor's own and no owners to ask. A
+   * lane's grant on its own work decides alone, before the role; a lane narrowed to its own work
+   * refuses outside it after the role, and inside it the owner still decides.
    */
   private static Optional<Refusal> steps(
       Actor actor, Action action, Resource.Kind kind, Resource resource) {
     var role = Policy.cell(action, Column.role(actor.role()));
     var lane =
         Column.lane(actor.lane()).map(column -> Policy.cell(action, column)).orElse(Cell.YES);
-    if (lane == Cell.OWN_WORK) {
-      return resource != null && ownWork(actor, resource)
+    if (lane == Cell.ITS_OWN) {
+      return resource != null && ownWork(actor, action, resource)
           ? Optional.empty()
           : Optional.of(Wording.outsideWork(actor, action, kind, resource));
     }
@@ -141,6 +145,9 @@ public final class Access {
     }
     if (lane == Cell.NO) {
       return Optional.of(Wording.laneForbidden(actor, action, kind, resource));
+    }
+    if (lane == Cell.OWN_WORK && (resource == null || !ownWork(actor, action, resource))) {
+      return Optional.of(Wording.outsideWork(actor, action, kind, resource));
     }
     if (resource == null) {
       return Optional.empty();
@@ -155,14 +162,40 @@ public final class Access {
   }
 
   /**
-   * Whether {@code resource} is {@code actor}'s own work. Until an agent's actor carries its work,
-   * that is what its credential can show: the run its principal names, and otherwise work owned by
-   * the FDE it acts for.
+   * Whether {@code action} on {@code resource} is within {@code actor}'s own work: the run its
+   * principal names, the one thing it narrates; the project of its work; the spec it works, a spec
+   * it made, and for an ad-hoc run any spec of its project; its spec's conversation, addressed by
+   * the spec or by its room, the conversation of a spec it made, and for an ad-hoc run any of its
+   * project. Creating is filing a spec under its work's project, born in no other room or in its
+   * work's room; the one room it creates is the own room of a spec it made, the spec's birth.
    */
-  private static boolean ownWork(Actor actor, Resource resource) {
-    return resource.kind() == Resource.Kind.RUN
-        ? PrincipalHandle.namesRun(actor.handle(), resource.id())
-        : resource.owners().stream().anyMatch(actor::actsFor);
+  private static boolean ownWork(Actor actor, Action action, Resource resource) {
+    var work = actor.work();
+    if (resource.kind() == Resource.Kind.RUN) {
+      return PrincipalHandle.namesRun(actor.handle(), resource.id());
+    }
+    if (work == null || action == Action.NARRATE) {
+      return false;
+    }
+    var project = Objects.equals(work.project(), resource.project());
+    var wholeProject = project && work.spec() == null && work.room() == null;
+    var made = resource.madeBy() != null && resource.madeBy().equals(actor.handle());
+    return switch (resource.kind()) {
+      case PROJECT -> action != Action.CREATE && Objects.equals(work.project(), resource.id());
+      case SPEC ->
+          action == Action.CREATE
+              ? project
+                  && (resource.bornIn() == null
+                      || Objects.equals(work.room(), resource.bornIn().id()))
+              : wholeProject || made || Objects.equals(work.spec(), resource.id());
+      case ROOM ->
+          made
+              || action != Action.CREATE
+                  && (wholeProject
+                      || Objects.equals(work.spec(), resource.id())
+                      || Objects.equals(work.room(), resource.id()));
+      default -> false;
+    };
   }
 
   private static boolean owns(Actor actor, Resource resource) {

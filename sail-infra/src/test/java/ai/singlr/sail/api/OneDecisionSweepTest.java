@@ -45,9 +45,10 @@ import org.junit.jupiter.api.Test;
  *
  * <ul>
  *   <li>{@link Actor#isAdmin}, {@link Actor#isSail}, {@link Actor#role}, {@link Actor#lane}, {@link
- *       Actor#agentLane}, {@link Actor#roomLane}, {@link Actor#scope}, {@link Actor#actsFor}, and
- *       the lane tests {@link Actor#peer} and {@link Actor#owner};
- *   <li>{@link Actor#withScope}, which widens or narrows a scope without asking one;
+ *       Actor#agentLane}, {@link Actor#scope}, {@link Actor#actsFor}, an agent's {@link
+ *       Actor#work}, and the lane tests {@link Actor#peer} and {@link Actor#owner};
+ *   <li>{@link Actor#withScope} and {@link Actor#withWork}, which widen or narrow a scope or an
+ *       agent's work without asking one;
  *   <li>the factories that mint a principal with its role, {@link Actor#agentPrincipal}, {@link
  *       Actor#roomPrincipal} and {@link Actor#main}, so a door that binds one instead of asking
  *       {@code RoleRule} is seen;
@@ -93,8 +94,9 @@ class OneDecisionSweepTest {
               "role",
               "lane",
               "agentLane",
-              "roomLane",
               "scope",
+              "work",
+              "withWork",
               "actsFor",
               "agentPrincipal",
               "roomPrincipal",
@@ -132,9 +134,6 @@ class OneDecisionSweepTest {
 
   private static Map<String, String> allowed() {
     var allowed = new TreeMap<String, String>();
-    allowed.put(RULES + "EventAuthority#decide", OWN_WORK);
-    allowed.put(API + "LocalApiRouter#messages", OWN_WORK);
-    allowed.put(API + "LocalApiRouter#project", OWN_WORK);
     allowed.put(API + "LocalApiRouter#requirePerson", OWN_WORK);
     allowed.put(
         API + "Event$Publisher#of", "fact: the role and lane an event's publisher acted on");
@@ -154,7 +153,8 @@ class OneDecisionSweepTest {
     allowed.put(RULES + "Attribution#decide", "fact: a push names only its pusher (attribution)");
     allowed.put(RULES + "MessageAuthority#mayPostAs", "fact: as whom a pusher posts (attribution)");
     allowed.put(
-        RULES + "EventAuthority#refused", "fact: whose work a refused event's words describe");
+        RULES + "EventAuthority#refused",
+        "fact: whose work a refused event's words describe, and an agent's words its own");
     allowed.put(STORES + "Snapshots#creator", "fact: whom a write names its creator (attribution)");
     allowed.put(
         STORES + "Snapshots#adoptedCreator", "fact: whom a write names its creator (attribution)");
@@ -233,7 +233,8 @@ class OneDecisionSweepTest {
               leaky + "role",
               leaky + "lane",
               leaky + "agent",
-              leaky + "room",
+              leaky + "work",
+              leaky + "worked",
               leaky + "inALambda",
               leaky + "sail",
               leaky + "scope",
@@ -292,8 +293,12 @@ class OneDecisionSweepTest {
       return actor.agentLane();
     }
 
-    boolean room(Actor actor) {
-      return actor.roomLane();
+    boolean work(Actor actor) {
+      return actor.work() != null;
+    }
+
+    Actor worked(Actor actor) {
+      return actor.withWork(null);
     }
 
     boolean inALambda(List<Actor> actors) {

@@ -95,9 +95,10 @@ class RoomAuthorityTest {
     var created = with(LOBBY, "created_by", null);
     var verbs = List.of(roster, wake, retitled, handedOn);
     var rows = Stream.<Case>builder();
-    for (var actor : List.of(ADMIN, OWNER_API, OWNER_CLI, MACHINE, OTHER_API, AGENT, OWNER_SYNC)) {
+    for (var actor : List.of(ADMIN, OWNER_API, OWNER_CLI, MACHINE, OTHER_API, OWNER_SYNC)) {
       rows.add(new Case("create by " + actor, actor, null, created, null));
     }
+    rows.add(new Case("an agent creates no room", AGENT, null, created, Kind.NOT_OWNER));
     rows.add(new Case("a viewer cannot create", VIEWER, null, created, Kind.READ_ONLY));
     rows.add(
         new Case(

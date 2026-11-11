@@ -20,7 +20,9 @@ import java.util.function.Supplier;
  * {@link Lane#ROOM} lanes: the FDE the run's principal acts for, used for attribution and policy
  * tiering, never as a separate authorization system. {@code scope} is the projects the actor may
  * see ({@link ProjectScope}): every project unless main scoped the FDE behind it, which only the
- * doors that resolve an FDE against main's roster ever say.
+ * doors that resolve an FDE against main's roster ever say. {@code work} is set only on the {@link
+ * Lane#AGENT} and {@link Lane#ROOM} lanes: what sail launched the run for ({@link Work}), which
+ * only the role rule resolves.
  *
  * <p>Every entry point binds the actor it acts as with {@link #run} or {@link #call}, at its edge,
  * and the {@code ChangeLog} reads it back through {@link #current()} for every revision it records.
@@ -30,7 +32,8 @@ import java.util.function.Supplier;
  * unknown role resolves (via {@link Role#fromAttribute}) to the least-privileged {@link
  * Role#VIEWER}.
  */
-public record Actor(String handle, Role role, Lane lane, String owner, ProjectScope scope) {
+public record Actor(
+    String handle, Role role, Lane lane, String owner, ProjectScope scope, Work work) {
 
   /** The author this box's own machinery writes as. */
   public static final String SYSTEM_HANDLE = "sail";
@@ -65,6 +68,14 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
     SYSTEM
   }
 
+  /**
+   * What sail launched a run for, its agent's own work: the {@code project} it is filed under, the
+   * {@code spec} it works (null for none), and the {@code room} it converses in, its spec's room
+   * for a run that works a spec (null for none). A work that names neither a spec nor a room is its
+   * whole project's, an ad-hoc run's.
+   */
+  public record Work(String project, String spec, String room) {}
+
   public Actor {
     Objects.requireNonNull(scope, "scope");
   }
@@ -74,12 +85,17 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
   }
 
   public Actor(String handle, Role role, Lane lane, String owner) {
-    this(handle, role, lane, owner, ProjectScope.all());
+    this(handle, role, lane, owner, ProjectScope.all(), null);
   }
 
   /** This actor seeing only {@code scope}. */
   public Actor withScope(ProjectScope scope) {
-    return new Actor(handle, role, lane, owner, scope);
+    return new Actor(handle, role, lane, owner, scope, work);
+  }
+
+  /** This actor working {@code work}. */
+  public Actor withWork(Work work) {
+    return new Actor(handle, role, lane, owner, scope, work);
   }
 
   /**
@@ -204,11 +220,6 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
    */
   public boolean agentLane() {
     return lane == Lane.AGENT || lane == Lane.ROOM;
-  }
-
-  /** True when this actor is a room-role run's principal — read-and-converse only. */
-  public boolean roomLane() {
-    return lane == Lane.ROOM;
   }
 
   /**

@@ -44,6 +44,9 @@ class AccessTest {
 
   private static final String READ_ONLY_FIX = "Ask an admin for a member or admin credential.";
   private static final String LANE_FIX = "Only an operator lane (CLI or API token) may do this.";
+  private static final String DRAFT_IT =
+      "An agent acts only on the work sail launched it for; draft a follow-up spec for anything"
+          + " else.";
   private static final String FROM_OUTSIDE =
       "Do it from outside the container: with sail on the host, or in Mast.";
 
@@ -142,13 +145,13 @@ class AccessTest {
               LOBBY,
               DEN,
               "post in rooms",
-              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, OWN_WORK, READ_ONLY, ALLOWED, ALLOWED),
+              List.of(READ_ONLY, ALLOWED, ALLOWED, OWN_WORK, OWN_WORK, READ_ONLY, ALLOWED, ALLOWED),
               null,
               actor ->
                   refusal(
                       Refusal.Kind.NOT_OWNER,
-                      "'den' belongs to bob: only bob or an admin may post there, not you.",
-                      "Ask bob to post it, or have an admin do it.")),
+                      "'" + actor.handle() + "' may post only in its own work, not in 'den'.",
+                      DRAFT_IT)),
           new Expected(
               Action.CREATE,
               SPEC_ADA,
@@ -170,7 +173,7 @@ class AccessTest {
               UNASSIGNED_ADA,
               UNASSIGNED_BOB,
               "claim specs",
-              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY, READ_ONLY, ALLOWED, ALLOWED),
+              List.of(READ_ONLY, ALLOWED, ALLOWED, LANE, READ_ONLY, READ_ONLY, ALLOWED, ALLOWED),
               null,
               null),
           new Expected(
@@ -241,7 +244,7 @@ class AccessTest {
               PROJECT_ADA,
               PROJECT_BOB,
               "share files and skills in projects",
-              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY, READ_ONLY, LANE, LANE),
+              List.of(READ_ONLY, ALLOWED, ALLOWED, LANE, READ_ONLY, READ_ONLY, LANE, LANE),
               null,
               null),
           new Expected(
@@ -257,7 +260,7 @@ class AccessTest {
               PROJECT_ADA,
               PROJECT_BOB,
               "restore or delete snapshots",
-              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY, READ_ONLY, LANE, LANE),
+              List.of(READ_ONLY, ALLOWED, ALLOWED, LANE, READ_ONLY, READ_ONLY, LANE, LANE),
               null,
               null),
           new Expected(
@@ -265,7 +268,7 @@ class AccessTest {
               PROJECT_ADA,
               PROJECT_BOB,
               "configure projects",
-              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY, READ_ONLY, LANE, LANE),
+              List.of(READ_ONLY, ALLOWED, ALLOWED, LANE, READ_ONLY, READ_ONLY, LANE, LANE),
               null,
               null),
           new Expected(
@@ -644,24 +647,27 @@ class AccessTest {
   }
 
   @Test
-  void aRoomAgentPostsOnlyWhereItsPersonOwnsTheConversation() {
+  void aRoomAgentPostsOnlyInItsOwnRoomWhoeverOwnsTheOthers() {
     assertEquals(
         refused(
             Refusal.Kind.NOT_OWNER,
-            "No one owns 'den' yet, so only an admin may post there.",
-            "Claim its spec first with --assignee <you>, or have an admin post."),
-        Access.decide(Actors.ROOM, Action.POST, Resources.conversation("den", "acme", List.of())));
-    assertEquals(
-        new Decision.Allowed(),
+            "'" + Actors.ROOM_HANDLE + "' may post only in its own work, not in 'den'.",
+            DRAFT_IT),
         Access.decide(
             Actors.ROOM,
             Action.POST,
             Resources.conversation("den", "acme", List.of("bob", "ada"))));
+    assertEquals(
+        new Decision.Allowed(),
+        Access.decide(Actors.ROOM, Action.POST, Resources.conversation("lobby", "acme", List.of())),
+        "its own room, whoever owns it");
   }
 
   @Test
   void anAgentNarratesOnlyItsOwnRunNotTheOtherRunsOfItsPerson() {
-    var sibling = Actor.agentPrincipal("claude/" + Actors.OTHER_RUN, Actors.OWNER);
+    var sibling =
+        Actor.agentPrincipal("claude/" + Actors.OTHER_RUN, Actors.OWNER)
+            .withWork(new Actor.Work("acme", "auth", "lobby"));
 
     assertEquals(
         refused(
@@ -673,7 +679,176 @@ class AccessTest {
                 + "'.",
             "An agent acts only on the work sail launched it for."),
         Access.decide(sibling, Action.NARRATE, RUN_ADA));
-    assertEquals(new Decision.Allowed(), Access.decide(sibling, Action.CHANGE, RUN_ADA));
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'claude/"
+                + Actors.OTHER_RUN
+                + "' may change only its own work, not run '"
+                + Actors.RUN
+                + "'.",
+            DRAFT_IT),
+        Access.decide(sibling, Action.CHANGE, RUN_ADA));
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'claude/" + Actors.OTHER_RUN + "' may narrate only its own work, not room 'lobby'.",
+            "An agent acts only on the work sail launched it for."),
+        Access.decide(sibling, Action.NARRATE, LOBBY),
+        "an agent narrates its run alone, not the conversation it works in");
+  }
+
+  /**
+   * An agent's own work, by kind: its project; the spec it works, a spec it made, and for an ad-hoc
+   * run any spec of its project; its spec's conversation by the spec's id or its room's, a
+   * conversation of a spec it made, and for an ad-hoc run any of its project. It files a spec only
+   * under its project, born in no other room or in its own, and creates no room. Nothing else is.
+   */
+  @Test
+  void anAgentsOwnWorkIsItsProjectItsSpecItsRoomAndWhatItMade() {
+    var build = Actors.AGENT;
+    var adHoc =
+        Actor.agentPrincipal(Actors.AGENT_HANDLE, Actors.OWNER)
+            .withWork(new Actor.Work("acme", null, null));
+    var drafted =
+        Resources.madeBy(Resources.spec("draft", "acme", null, "ada"), Actors.AGENT_HANDLE);
+    var other = Resources.spec("other", "acme", null, "ada");
+    var fresh = Resources.spec("new", "acme", null, null);
+
+    for (var allowed :
+        List.of(
+            Access.decide(build, Action.SERVE, PROJECT_ADA),
+            Access.decide(build, Action.READ_DEFINITION, PROJECT_ADA),
+            Access.decide(build, Action.CHANGE, Resources.spec("auth", "acme", null, "ada")),
+            Access.decide(build, Action.CHANGE, drafted),
+            Access.decide(build, Action.POST, Resources.conversation("auth", "acme", List.of())),
+            Access.decide(build, Action.POST, LOBBY),
+            Access.decide(
+                build,
+                Action.POST,
+                Resources.madeBy(
+                    Resources.conversation("draft", "acme", List.of()), Actors.AGENT_HANDLE)),
+            Access.decide(build, Action.CREATE, fresh),
+            Access.decide(build, Action.CREATE, Resources.bornIn(fresh, LOBBY)),
+            Access.decide(adHoc, Action.CHANGE, other),
+            Access.decide(adHoc, Action.POST, DEN))) {
+      assertEquals(new Decision.Allowed(), allowed);
+    }
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'" + Actors.AGENT_HANDLE + "' may change only its own work, not spec 'other'.",
+            DRAFT_IT),
+        Access.decide(build, Action.CHANGE, other));
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'" + Actors.AGENT_HANDLE + "' may change only its own work, not spec 'draft'.",
+            DRAFT_IT),
+        Access.decide(build, Action.CHANGE, Resources.madeBy(drafted, "claude/someone-else")),
+        "a spec another run made");
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'" + Actors.AGENT_HANDLE + "' may post only in its own work, not in 'den'.",
+            DRAFT_IT),
+        Access.decide(
+            build,
+            Action.POST,
+            Resources.madeBy(Resources.conversation("den", "acme", List.of()), "claude/other")));
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'" + Actors.AGENT_HANDLE + "' may create only its own work, not spec 'new'.",
+            DRAFT_IT),
+        Access.decide(build, Action.CREATE, Resources.bornIn(fresh, DEN)),
+        "born in a room not its own");
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'" + Actors.AGENT_HANDLE + "' may create only its own work, not spec 'new'.",
+            DRAFT_IT),
+        Access.decide(adHoc, Action.CREATE, Resources.spec("new", "beta", null, null)),
+        "filed under another project");
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'" + Actors.AGENT_HANDLE + "' may create only its own work, not room 'lobby'.",
+            DRAFT_IT),
+        Access.decide(adHoc, Action.CREATE, LOBBY),
+        "no room is an agent's to create");
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'" + Actors.AGENT_HANDLE + "' may create only its own work, not project 'acme'.",
+            DRAFT_IT),
+        Access.decide(adHoc, Action.CREATE, PROJECT_ADA),
+        "nor a project");
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'"
+                + Actors.AGENT_HANDLE
+                + "' may start or stop only its own work, not project 'beta'.",
+            DRAFT_IT),
+        Access.decide(build, Action.SERVE, Resources.project("beta", "ada")));
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'" + Actors.AGENT_HANDLE + "' may change only its own work, not spec 'other'.",
+            DRAFT_IT),
+        Access.decide(adHoc, Action.CHANGE, Resources.spec("other", "beta", null, "ada")),
+        "an ad-hoc run's spec of another project");
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'" + Actors.AGENT_HANDLE + "' may change only its own work, not review 'rev-1'.",
+            DRAFT_IT),
+        Access.decide(
+            new Actor(Actors.AGENT_HANDLE, Role.ADMIN, Actor.Lane.AGENT, Actors.OWNER)
+                .withWork(new Actor.Work("acme", "auth", "lobby")),
+            Action.CHANGE,
+            REVIEW_ADA),
+        "nothing but its project, specs, conversations and run is an agent's work");
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'" + Actors.AGENT_HANDLE + "' may change only its own work, not spec 'auth'.",
+            DRAFT_IT),
+        Access.decide(
+            Actor.agentPrincipal(Actors.AGENT_HANDLE, Actors.OWNER), Action.CHANGE, SPEC_ADA),
+        "an agent of no known work has none");
+  }
+
+  /**
+   * A lane narrowed to its own work refuses after the role step and before the owner step: a
+   * viewer's agent hears it is read-only, and an agent inside its work still answers to whose the
+   * work is.
+   */
+  @Test
+  void anAgentsOwnWorkIsAskedBetweenItsRoleAndWhoseTheWorkIs() {
+    var viewersAgent =
+        new Actor(Actors.AGENT_HANDLE, Role.VIEWER, Actor.Lane.AGENT, Actors.OWNER)
+            .withWork(new Actor.Work("acme", "auth", "lobby"));
+
+    assertEquals(
+        refused(
+            Refusal.Kind.READ_ONLY,
+            "Your credential is read-only and cannot change specs.",
+            READ_ONLY_FIX),
+        Access.decide(viewersAgent, Action.CHANGE, Resources.spec("other", "acme", null, "ada")));
+    assertEquals(
+        new Decision.Refused(SPEC_NOT_OWNER), Access.decide(Actors.AGENT, Action.CHANGE, SPEC_BOB));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.NOT_OWNER,
+                "'"
+                    + Actors.AGENT_HANDLE
+                    + "' resolves no conflicts: an agent acts only on its own work.",
+                "Ask the FDE the agent works for to resolve it.")),
+        Access.atAll(Actors.AGENT, Action.CHANGE, Resource.Kind.CONFLICT),
+        "no agent resolves a conflict");
   }
 
   @Test
@@ -709,7 +884,7 @@ class AccessTest {
         refusedAtAll(
             Refusal.Kind.NOT_OWNER,
             "'" + Actors.ROOM_HANDLE + "' acts only on its own work, and no room of it is named.",
-            "An agent acts only on the work sail launched it for."),
+            DRAFT_IT),
         Access.atAll(Actors.ROOM, Action.POST, Resource.Kind.ROOM),
         "a lane's grant on its own work alone has no work in hand to be its own");
     assertEquals(
@@ -863,12 +1038,20 @@ class AccessTest {
             List.of("ada", " ", "ada", "bob"),
             null,
             null,
+            null,
             null);
 
     assertEquals(List.of("ada", "bob"), resource.owners());
     assertThrows(
         NullPointerException.class,
-        () -> new Resource(null, "auth", "acme", List.of(), null, null, null));
+        () -> new Resource(null, "auth", "acme", List.of(), null, null, null, null));
+    assertEquals(
+        "Only a spec or its conversation is made by a principal, not RUN r-1",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> Resources.madeBy(Resources.launched("r-1", "acme", "auth", "ada"), "x"))
+            .getMessage());
+    assertEquals(null, Resources.madeBy(SPEC_ADA, " ").madeBy());
     assertEquals(
         "Only a spec is born in a room, not RUN r-1",
         assertThrows(

@@ -100,9 +100,11 @@ class SpecAuthorityTest {
 
   static Stream<Case> matrix() {
     var edited = with(OWNED, "title", "Edited");
-    var ownRoomCreate = projection("title", "New", "assignee", null, "room_id", SPEC);
+    var ownRoomCreate =
+        projection("title", "New", "assignee", null, "room_id", SPEC, "project", "acme");
     var namingOther = with(ownRoomCreate, "assignee", OTHER);
-    var inLobby = projection("title", "New", "assignee", null, "room_id", "lobby");
+    var inLobby =
+        projection("title", "New", "assignee", null, "room_id", "lobby", "project", "acme");
     return Stream.of(
         allows("an admin creates", ADMIN, null, ownRoomCreate),
         allows("the owner creates", OWNER_API, null, ownRoomCreate),
@@ -235,8 +237,12 @@ class SpecAuthorityTest {
             OTHER_SYNC,
             UNASSIGNED,
             with(UNASSIGNED, "assignee", OTHER)),
-        allows(
-            "an agent claims for its FDE", AGENT, UNASSIGNED, with(UNASSIGNED, "assignee", OWNER)),
+        refuses(
+            "an agent claims nothing, not even for its FDE",
+            AGENT,
+            UNASSIGNED,
+            with(UNASSIGNED, "assignee", OWNER),
+            Kind.LANE_FORBIDDEN),
         refuses(
             "an agent cannot claim for itself",
             AGENT,
@@ -503,7 +509,7 @@ class SpecAuthorityTest {
             AGENT,
             "lobby",
             null,
-            projection("title", "Lobby", "assignee", null, "room_id", "lobby")));
+            projection("title", "Lobby", "assignee", null, "room_id", "lobby", "project", "acme")));
   }
 
   /** Who a push writes as is asked before a spec's fixed room. */
@@ -552,7 +558,18 @@ class SpecAuthorityTest {
   @Test
   void aStatusMoveAndAReadyBirthTakeApproveAfterWhatTheyTakeOtherwise() {
     var done = with(OWNED, "status", "done");
-    var ready = projection("title", "New", "assignee", null, "room_id", SPEC, "status", "pending");
+    var ready =
+        projection(
+            "title",
+            "New",
+            "assignee",
+            null,
+            "room_id",
+            SPEC,
+            "status",
+            "pending",
+            "project",
+            "acme");
     var drafts =
         Optional.of(
             new Refusal(

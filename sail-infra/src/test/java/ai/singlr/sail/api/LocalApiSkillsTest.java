@@ -232,23 +232,31 @@ class LocalApiSkillsTest {
         assertInstanceOf(Map.class, unnamed.body().get("error")).get("action"));
   }
 
+  /**
+   * A run reads the skills of every project its person reads, as the table's Read says, and a
+   * scoped person's credential reaches only the projects they are granted: one outside is not
+   * there, and nothing is asked of its container.
+   */
   @Test
-  void aRunReachesOnlyItsOwnProjectAndAScopedPersonOnlyTheirs() {
+  void aRunReadsItsPersonsOtherProjectsSkillsAndAScopedPersonOnlyTheirs() {
     shareJava("zeta");
+    var run = TestOperations.RUN_CREDENTIAL;
+
+    assertEquals(200, router.ask("GET", "/v1/projects/zeta/skills", run, "").status());
+    assertEquals(
+        Map.of("name", "java", "skill_md", JAVA_MD),
+        withoutSchema(router.ask("GET", "/v1/projects/zeta/skills/java", run, "").body()));
     var invocations = shell.invocations().size();
+    for (var asked :
+        List.of(
+            List.of("GET", "/v1/projects/zeta/skills", ""),
+            List.of("GET", "/v1/projects/zeta/skills/java", ""),
+            List.of("POST", "/v1/projects/zeta/skills", "folder=%2Fhome%2Fdev%2Fjava"),
+            List.of("DELETE", "/v1/projects/zeta/skills/java", ""))) {
+      var refused = router.ask(asked.get(0), asked.get(1), SCOPED, asked.get(2));
 
-    for (var credential : List.of(TestOperations.RUN_CREDENTIAL, SCOPED)) {
-      for (var asked :
-          List.of(
-              List.of("GET", "/v1/projects/zeta/skills", ""),
-              List.of("GET", "/v1/projects/zeta/skills/java", ""),
-              List.of("POST", "/v1/projects/zeta/skills", "folder=%2Fhome%2Fdev%2Fjava"),
-              List.of("DELETE", "/v1/projects/zeta/skills/java", ""))) {
-        var refused = router.ask(asked.get(0), asked.get(1), credential, asked.get(2));
-
-        assertEquals(404, refused.status(), credential + " " + asked);
-        assertEquals("Project 'zeta' is not in the catalog.", message(refused));
-      }
+      assertEquals(404, refused.status(), asked.toString());
+      assertEquals("Project 'zeta' is not in the catalog.", message(refused));
     }
     assertEquals(invocations, shell.invocations().size(), "nothing was asked of zeta's container");
     assertEquals(200, router.ask("GET", SKILLS, SCOPED, "").status());

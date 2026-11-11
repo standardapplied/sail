@@ -10,6 +10,7 @@ import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Snapshots;
@@ -23,7 +24,8 @@ import java.util.Optional;
  * owner has it ({@link RoomStore#ownerOf}), each decided by {@link Access}. Owning a spec born in a
  * room gives a voice in its conversation, never its settings. A room lands only in a project this
  * box holds ({@link ProjectStore#refusesInto}): a project it does not is not there, which is said
- * before anything is decided. Then the one fact: a push names only its pusher ({@link
+ * before anything is decided. A spec's own room is made by whoever made the spec ({@link
+ * ChangeLog#bornBy}), an agent's own work. Then the one fact: a push names only its pusher ({@link
  * Attribution}).
  */
 public final class RoomAuthority implements WriteAuthority {
@@ -32,12 +34,14 @@ public final class RoomAuthority implements WriteAuthority {
 
   private final RoomStore rooms;
   private final ProjectStore projects;
+  private final ChangeLog journal;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
   public RoomAuthority(Sqlite db) {
     this.rooms = new RoomStore(db);
     this.projects = new ProjectStore(db);
+    this.journal = new ChangeLog(db);
     this.attribution = new Attribution(db);
   }
 
@@ -50,12 +54,15 @@ public final class RoomAuthority implements WriteAuthority {
     if (unheld.isPresent()) {
       return unheld;
     }
+    var made = journal.bornBy("spec", id).orElse(null);
     var refused =
         WriteAuthority.refused(
             actor,
             held == null
-                ? Taking.of(Resources.room(id, null, null), Action.CREATE)
-                : Taking.of(Resources.room(id, null, rooms.ownerOf(id, held)), Action.CHANGE));
+                ? Taking.of(Resources.madeBy(Resources.room(id, null, null), made), Action.CREATE)
+                : Taking.of(
+                    Resources.madeBy(Resources.room(id, null, rooms.ownerOf(id, held)), made),
+                    Action.CHANGE));
     return refused.isPresent()
         ? refused
         : attribution.decide(actor, held, next, "created_by", null);

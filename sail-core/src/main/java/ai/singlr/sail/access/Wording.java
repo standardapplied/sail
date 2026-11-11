@@ -128,26 +128,33 @@ final class Wording {
   /**
    * The refusal of {@code action}, which {@code actor}'s lane grants on its own work alone, on
    * {@code resource}, or on some resource of {@code kind} when it is null, which names no work to
-   * be its own.
+   * be its own: a conflict, which no agent resolves, its person's to settle. Work it may not touch
+   * it may draft a follow-up spec for; a run it may not narrate is simply not its own.
    */
   static Refusal outsideWork(Actor actor, Action action, Resource.Kind kind, Resource resource) {
-    var fix = "An agent acts only on the work sail launched it for.";
+    var fix =
+        "An agent acts only on the work sail launched it for"
+            + (action == Action.NARRATE ? "." : "; draft a follow-up spec for anything else.");
     if (resource == null) {
-      return new Refusal(
-          Refusal.Kind.NOT_OWNER,
-          "'"
-              + actor.handle()
-              + "' acts only on its own work, and no "
-              + kind.noun()
-              + " of it is named.",
-          fix);
+      return kind == Resource.Kind.CONFLICT
+          ? new Refusal(
+              Refusal.Kind.NOT_OWNER,
+              "'" + actor.handle() + "' resolves no conflicts: an agent acts only on its own work.",
+              "Ask the FDE the agent works for to resolve it.")
+          : new Refusal(
+              Refusal.Kind.NOT_OWNER,
+              "'"
+                  + actor.handle()
+                  + "' acts only on its own work, and no "
+                  + kind.noun()
+                  + " of it is named.",
+              fix);
     }
     if (action == Action.POST) {
-      return ownedBy(
-          resource,
-          "post",
-          "Claim its spec first with --assignee <you>, or have an admin post.",
-          named -> "Ask " + named + " to post it, or have an admin do it.");
+      return new Refusal(
+          Refusal.Kind.NOT_OWNER,
+          "'" + actor.handle() + "' may post only in its own work, not in '" + resource.id() + "'.",
+          fix);
     }
     return new Refusal(
         Refusal.Kind.NOT_OWNER,

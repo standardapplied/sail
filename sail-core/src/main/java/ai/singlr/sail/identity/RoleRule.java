@@ -6,10 +6,12 @@
 package ai.singlr.sail.identity;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -92,9 +94,13 @@ public final class RoleRule {
       return new Machine(Role.fromAttribute(minted));
     }
 
-    /** A run's credential: its principal, for the FDE the run acts for. */
-    static Credential run(RunStore.RunRow run) {
-      return new Run(Objects.requireNonNull(run, "run"));
+    /**
+     * A run's credential: its principal, for the FDE the run acts for, on the work it was launched
+     * for. {@code room} is the room it converses in: its spec's room, as the door reads the spec,
+     * for a run that works one, else the room it was launched in.
+     */
+    static Credential run(RunStore.RunRow run, String room) {
+      return new Run(Objects.requireNonNull(run, "run"), room);
     }
 
     /** FDE {@code handle}, whose role {@code cap} caps. */
@@ -106,8 +112,8 @@ public final class RoleRule {
     /** No FDE, acting with the box's FDE's role, which {@code cap} caps. */
     record Machine(Role cap) implements Credential {}
 
-    /** A run's principal. */
-    record Run(RunStore.RunRow run) implements Credential {}
+    /** A run's principal, conversing in {@code room}. */
+    record Run(RunStore.RunRow run, String room) implements Credential {}
   }
 
   /** The FDE a login session was opened for, and the principal it acts as; empty if refused. */
@@ -130,7 +136,8 @@ public final class RoleRule {
    * The principal {@code credential} stands for: its handle, its role capped by what the credential
    * was minted with, its lane, and its scope, always the resolved person's; empty when the
    * credential is refused — an FDE disabled or unknown here, or a box that cannot place its own
-   * FDE.
+   * FDE. A run's principal also carries its work ({@link #workOf}), and a read-only run reads only
+   * the project it was launched in, of what its person reads.
    */
   public Optional<Actor> principal(Credential credential) {
     return switch (Objects.requireNonNull(credential, "credential")) {
@@ -139,15 +146,36 @@ public final class RoleRule {
       case Credential.Box(var cap, var lane) ->
           actingFor(null, boxFde().orElse(null), cap, lane, null);
       case Credential.Machine(var cap) -> actingFor(null, null, cap, Actor.Lane.API, null);
-      case Credential.Run(var run) -> {
+      case Credential.Run(var run, var room) -> {
         var principal =
             run.readOnlyLane()
                 ? Actor.roomPrincipal(run.principal(), run.owner())
                 : Actor.agentPrincipal(run.principal(), run.owner());
         yield actingFor(
-            run.owner(), principal.handle(), principal.role(), principal.lane(), run.owner());
+                run.owner(), principal.handle(), principal.role(), principal.lane(), run.owner())
+            .map(
+                actor ->
+                    (run.readOnlyLane()
+                            ? actor.withScope(only(actor.scope(), run.project()))
+                            : actor)
+                        .withWork(workOf(run, room)));
       }
     };
+  }
+
+  /**
+   * What {@code run}, conversing in {@code room}, was launched for: an ad-hoc run its whole
+   * project; any other its spec, when it works one, and its room.
+   */
+  private static Actor.Work workOf(RunStore.RunRow run, String room) {
+    return Lane.ADHOC.matches(run.role())
+        ? new Actor.Work(run.project(), null, null)
+        : new Actor.Work(run.project(), run.specId(), room);
+  }
+
+  /** Project {@code project} alone, of what {@code scope} admits: none when it admits it not. */
+  private static ProjectScope only(ProjectScope scope, String project) {
+    return ProjectScope.of(scope.admits(project) ? List.of(project) : List.of());
   }
 
   /**

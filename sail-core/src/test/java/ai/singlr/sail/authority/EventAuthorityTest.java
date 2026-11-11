@@ -360,12 +360,19 @@ class EventAuthorityTest {
             null,
             Kind.NOT_OWNER),
         retold(
-            "a principal cannot announce a message",
+            "a principal announces no message outside its own work",
             AGENT,
             POSTED,
             "den",
             null,
-            Kind.NOT_PUBLISHABLE));
+            Kind.NOT_OWNER),
+        observed(
+            "a principal's announcement in its own work is not taken at its word",
+            AGENT,
+            POSTED,
+            "lobby",
+            null,
+            Kind.NOT_OWNER));
   }
 
   @ParameterizedTest(name = "{0}")

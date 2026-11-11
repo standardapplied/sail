@@ -268,8 +268,9 @@ class UnassignedSpecTest {
     assertUnassignedAndCreatedBy("auth", "uday");
   }
 
+  /** A run creates a draft for the FDE it acts for, and claims nothing, for that FDE or itself. */
   @Test
-  void aRunCreatesItForTheFdeItActsForAndClaimsItForThatFde() {
+  void aRunCreatesItForTheFdeItActsForAndClaimsNothing() {
     new FdeStore(db).add("uday", null, null, "member");
     var credential = runCredential("uday");
     var router = new SocketDoor(operations);
@@ -283,8 +284,23 @@ class UnassignedSpecTest {
     assertEquals(422, asPrincipal.status(), "a run's principal is never an assignee");
 
     var claimed = router.ask("PUT", "/v1/specs/draft", credential, "assignee=uday");
-    assertEquals(200, claimed.status(), claimed.body().toString());
-    assertEquals("uday", specs.findById("draft").orElseThrow().assignee());
+    assertEquals(403, claimed.status(), claimed.body().toString());
+    assertEquals(
+        Map.of(
+            "code",
+            "agent_lane_forbidden",
+            "message",
+            "Agent principals cannot claim specs.",
+            "action",
+            "Only an operator lane (CLI or API token) may do this."),
+        Map.of(
+            "code",
+            ((Map<?, ?>) claimed.body().get("error")).get("code"),
+            "message",
+            ((Map<?, ?>) claimed.body().get("error")).get("message"),
+            "action",
+            ((Map<?, ?>) claimed.body().get("error")).get("action")));
+    assertUnassignedAndCreatedBy("draft", "uday");
   }
 
   @Test

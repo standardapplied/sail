@@ -451,12 +451,11 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
 
   /**
    * Reads {@code project} as the caller, before anything is asked of it: a project the caller
-   * cannot read is not there, and a run reaches only its own project.
+   * cannot read is not there.
    */
   private static void project(Caller caller, String project) {
     NameValidator.requireValidProjectName(project);
-    if (caller instanceof Caller.Run(var run, _) && !project.equals(run.project())
-        || !ReadFilter.reads(caller.actor(), () -> project)) {
+    if (!ReadFilter.reads(caller.actor(), () -> project)) {
       throw ProjectReader.absent(project);
     }
   }
@@ -613,14 +612,9 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
     return ApiResponse.from(result);
   }
 
-  /** A post in a room's conversation; a room session posts only in its own room. */
+  /** A post in a room's conversation, an agent's only in its own work, as the message rule says. */
   private ApiResponse messages(LocalApiRequest request, Caller caller, Map<String, String> path) {
     var id = path.get("id");
-    if (caller instanceof Caller.Run(var run, _)
-        && run.readOnlyLane()
-        && !id.equals(run.conversationId())) {
-      return problem(403, "A room session posts only to its own room.");
-    }
     var form = request.form();
     return ApiResponse.fromCreated(
         operations.postRoomMessage(

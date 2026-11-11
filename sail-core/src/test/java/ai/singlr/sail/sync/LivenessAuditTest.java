@@ -5,9 +5,10 @@
 
 package ai.singlr.sail.sync;
 
+import static ai.singlr.sail.sync.SyncFixtures.agent;
+import static ai.singlr.sail.sync.SyncFixtures.agentIn;
 import static ai.singlr.sail.sync.SyncFixtures.draft;
 import static ai.singlr.sail.sync.SyncFixtures.ownSpec;
-import static ai.singlr.sail.sync.SyncFixtures.principal;
 import static ai.singlr.sail.sync.SyncFixtures.room;
 import static ai.singlr.sail.sync.SyncFixtures.run;
 import static ai.singlr.sail.sync.SyncFixtures.spec;
@@ -126,35 +127,28 @@ class LivenessAuditTest {
   }
 
   /**
-   * L3: an agent's spec, room, review and file revisions land in the round its run does, since runs
-   * sync first; none is offered before its run and none fails the round.
+   * L3: an agent's revisions of every type it writes, a draft, an edit of its spec and a post in
+   * its room, land in the round its run does, since runs sync first; none is offered before its run
+   * and none fails the round.
    */
   @Test
   void anAgentsRevisionsOfEveryTypeLandInTheRoundItsRunDoes() {
     ownSpec(main, "ada", "mine", "ada");
     round(ada, ADA);
     var runId = run(ada, "ada", "mine");
-    var agent = Actor.agentPrincipal(principal(ada, runId), "ada");
+    var agent = agent(ada, runId);
     Acting.by(agent, () -> ada.specs.create(draft("born", null)));
-    Acting.by(
-        agent,
-        () ->
-            new RoomStore(ada.db)
-                .create(
-                    new RoomStore.RoomRow(
-                        "den", "acme", "den", "ada", null, null, null, null, null, null)));
-    Acting.by(
-        agent,
-        () ->
-            new FileStore(ada.db)
-                .put("acme", "notes.txt", new ByteArrayInputStream("notes".getBytes()), 0644));
+    Acting.by(agent, () -> ada.specs.setContent("mine", "built", ""));
+    var post =
+        Acting.by(
+            agent, () -> new MessageStore(ada.db).append("mine", agent.handle(), "done", null));
 
     var reports = round(ada, ADA);
 
     assertNothingFails(reports, "L3: nothing fails; everything waits for its run");
     assertTrue(main.specs.findById("born").isPresent(), "the spec lands with its run");
-    assertTrue(new RoomStore(main.db).findById("den").isPresent(), "the room too");
-    assertTrue(new FileStore(main.db).find("acme", "notes.txt").isPresent(), "the file too");
+    assertEquals("built", main.specs.getContent("mine").orElseThrow().body(), "the edit too");
+    assertTrue(new MessageStore(main.db).findById(post.id()).isPresent(), "the post too");
     assertConvergedWithin(1, ada, ADA);
   }
 
@@ -306,7 +300,7 @@ class LivenessAuditTest {
     ownSpec(main, "ada", "mine", "ada");
     round(ada, ADA);
     var run = run(ada, "ada", "mine");
-    var agent = Actor.agentPrincipal(principal(ada, run), "ada");
+    var agent = agent(ada, run);
     Acting.by(agent, () -> ada.specs.create(draft("born", null)));
     Acting.by(agent, () -> ada.specs.setContent("born", "drafted", ""));
     Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
@@ -328,7 +322,7 @@ class LivenessAuditTest {
     round(ada, ADA);
     var run = run(ada, "ada", "mine");
     ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", run);
-    var agent = Actor.agentPrincipal(principal(ada, run), "ada");
+    var agent = agentIn(ada, run, "lab");
     Acting.by(agent, () -> ada.specs.create(draft("born", null).withRoomId("lab")));
     Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
 
@@ -352,7 +346,7 @@ class LivenessAuditTest {
     round(ada, ADA);
     var run = run(ada, "ada", "mine");
     ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", run);
-    var agent = Actor.agentPrincipal(principal(ada, run), "ada");
+    var agent = agentIn(ada, run, "lab");
     Acting.by(agent, () -> ada.specs.create(draft("born", null).withRoomId("lab")));
     Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
     Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
@@ -392,7 +386,7 @@ class LivenessAuditTest {
     room(main, "ada", "lab");
     round(ada, ADA);
     var run = run(ada, "ada", "mine");
-    var agent = Actor.agentPrincipal(principal(ada, run), "ada");
+    var agent = agentIn(ada, run, "lab");
     Acting.by(agent, () -> ada.specs.create(draft("born", null).withRoomId("lab")));
     Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
     Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
@@ -864,7 +858,7 @@ class LivenessAuditTest {
     round(ada, ADA);
     var run = run(ada, "ada", "mine");
     ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", run);
-    var agent = Actor.agentPrincipal(principal(ada, run), "ada");
+    var agent = agent(ada, run);
     Acting.by(agent, () -> ada.specs.create(draft("born", null)));
     Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
     assertConvergedWithin(3, ada, ADA);
@@ -885,13 +879,13 @@ class LivenessAuditTest {
     round(ada, ADA);
     var first = run(ada, "ada", "mine");
     ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", first);
-    var agent = Actor.agentPrincipal(principal(ada, first), "ada");
+    var agent = agent(ada, first);
     Acting.by(agent, () -> ada.specs.create(draft("born", null)));
     Acting.system(() -> new RunStore(ada.db).complete(first, "stopped", null));
     assertConvergedWithin(3, ada, ADA);
     var second = run(ada, "ada", "mine");
     ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", second);
-    var again = Actor.agentPrincipal(principal(ada, second), "ada");
+    var again = agent(ada, second);
     Acting.by(again, () -> ada.specs.create(draft("born", null)));
     var post = Acting.as("ada", () -> new MessageStore(ada.db).append("born", "ada", "hi", null));
     Acting.system(() -> new RunStore(ada.db).complete(second, "stopped", null));

@@ -15,6 +15,7 @@ import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.PrincipalHandle;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -38,12 +39,14 @@ public final class MessageAuthority implements WriteAuthority {
 
   private final RoomStore rooms;
   private final RunStore runs;
+  private final ChangeLog journal;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
   public MessageAuthority(Sqlite db) {
     this.rooms = new RoomStore(db);
     this.runs = new RunStore(db);
+    this.journal = new ChangeLog(db);
     this.attribution = new Attribution(db);
   }
 
@@ -76,7 +79,8 @@ public final class MessageAuthority implements WriteAuthority {
    * conversation this box does not hold is not here, which is said first, as for every row this box
    * does not hold; then {@link Access} decides the post; and last the fact that a post is
    * someone's, so a credential acting for no FDE posts nothing. Both facts are of what no one here
-   * can own, which is an admin's to write ({@link Access#unowned}), as on main.
+   * can own, which is an admin's to write ({@link Access#unowned}), as on main. The conversation is
+   * filed under its project, and made by whoever made the spec whose own room it is.
    */
   private Optional<Refusal> posting(Actor actor, String roomId) {
     var unheld =
@@ -86,7 +90,12 @@ public final class MessageAuthority implements WriteAuthority {
     if (unheld.isPresent()) {
       return unheld;
     }
-    return posted(actor, Resources.conversation(roomId, null, rooms.owners(roomId)));
+    return posted(
+        actor,
+        Resources.madeBy(
+            Resources.conversation(
+                roomId, journal.conversationProject(roomId), rooms.owners(roomId)),
+            journal.bornBy("spec", roomId).orElse(null)));
   }
 
   /**

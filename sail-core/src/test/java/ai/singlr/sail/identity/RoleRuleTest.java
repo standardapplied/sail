@@ -261,7 +261,7 @@ class RoleRuleTest {
         new RoleRule(() -> MAIN, null).principal(Credential.person("stranger", Actor.Lane.API)),
         "a box that keeps no roster knows no one but its operator");
     assertThrows(NullPointerException.class, () -> rule.principal(null));
-    assertThrows(NullPointerException.class, () -> Credential.run(null));
+    assertThrows(NullPointerException.class, () -> Credential.run(null, null));
   }
 
   @Test
@@ -312,29 +312,62 @@ class RoleRuleTest {
     assertEquals(
         Optional.of(
             Actor.agentPrincipal(build.principal(), "mady")
-                .withScope(ProjectScope.of(List.of("beta")))),
-        main.principal(Credential.run(build)));
+                .withScope(ProjectScope.of(List.of("beta")))
+                .withWork(new Actor.Work("acme", "s1", "s1"))),
+        main.principal(Credential.run(build, "s1")));
     assertEquals(
         Optional.of(
             Actor.roomPrincipal(room.principal(), "mady")
-                .withScope(ProjectScope.of(List.of("beta")))),
-        main.principal(Credential.run(room)));
+                .withScope(ProjectScope.of(List.of()))
+                .withWork(new Actor.Work("acme", "s1", "r1"))),
+        main.principal(Credential.run(room, "r1")),
+        "a read-only run reads only its own project, and mady is not granted acme");
     assertEquals(
         Optional.of(
             new Actor(ownerless.principal(), Role.MEMBER, Actor.Lane.AGENT, null)
-                .withScope(ProjectScope.of(List.of("alpha")))),
-        new RoleRule(() -> NODE, roster).principal(Credential.run(ownerless)),
+                .withScope(ProjectScope.of(List.of("alpha")))
+                .withWork(new Actor.Work("acme", "s1", "s1"))),
+        new RoleRule(() -> NODE, roster).principal(Credential.run(ownerless, "s1")),
         "a run acting for no FDE sees what the box's FDE sees, never every project");
     db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'mady'");
-    assertEquals(Optional.empty(), main.principal(Credential.run(build)));
+    assertEquals(Optional.empty(), main.principal(Credential.run(build, "s1")));
+  }
+
+  /**
+   * A run works what it was launched for: a build, a review, a fix and a room member its spec and
+   * that spec's room, or a spec-less room member its room; an ad-hoc run its whole project. A
+   * read-only run reads the project it was launched in alone, of what its person reads.
+   */
+  @Test
+  void aRunWorksWhatItWasLaunchedForAndAReadOnlyRunReadsOnlyItsProject() {
+    var main = new RoleRule(() -> MAIN, roster);
+    var adhoc = run("019fee00-0000-7000-8000-000000000004", "mady", "adhoc", null);
+    var full = run("019fee00-0000-7000-8000-000000000005", "mady", "room-full", null);
+    var wake = run("019fee00-0000-7000-8000-000000000006", "mady", "room", null);
+
+    assertEquals(
+        new Actor.Work("acme", null, null),
+        main.principal(Credential.run(adhoc, "lobby")).orElseThrow().work());
+    assertEquals(
+        new Actor.Work("acme", null, "lobby"),
+        main.principal(Credential.run(full, "lobby")).orElseThrow().work());
+    assertEquals(
+        ProjectScope.all(), main.principal(Credential.run(full, "lobby")).orElseThrow().scope());
+    assertEquals(
+        ProjectScope.of(List.of("acme")),
+        main.principal(Credential.run(wake, "lobby")).orElseThrow().scope());
   }
 
   private RunStore.RunRow run(String id, String owner, String lane) {
+    return run(id, owner, lane, "s1");
+  }
+
+  private RunStore.RunRow run(String id, String owner, String lane, String spec) {
     var runs = new RunStore(db);
     Acting.system(
         () ->
             runs.create(
-                id, "acme", null, owner, lane, "claude-code", "b", "t", null, null, "/l", "u"));
+                id, "acme", spec, owner, lane, "claude-code", "b", "t", null, null, "/l", "u"));
     return runs.findById(id).orElseThrow();
   }
 }

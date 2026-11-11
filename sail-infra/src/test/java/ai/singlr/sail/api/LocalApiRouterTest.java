@@ -181,8 +181,9 @@ class LocalApiRouterTest {
             + " characters.",
         refusal(router.ask(form("PUT", "/v1/projects/Bad_Name/zz", ""))));
     assertEquals(
-        "404 project_not_in_catalog Project 'nope' is not in the catalog.",
-        refusal(router.ask(get("/v1/projects/nope/zz", Map.of()))));
+        "404 {error=No route for /v1/projects/nope/zz}",
+        answer(router.ask(get("/v1/projects/nope/zz", Map.of()))),
+        "a run reads every project its person does, as the person's own credential");
     assertEquals(
         "404 {error=No route for /v1/projects/acme/zz}",
         answer(router.ask(form("DELETE", "/v1/projects/acme/zz", ""))));
@@ -387,7 +388,7 @@ class LocalApiRouterTest {
 
   private static LocalApiRequest merge(String template) {
     assertTrue(template.contains("\ntitle: local\n"), template);
-    var headers = new HashMap<>(auth());
+    var headers = new HashMap<>(boxAuth());
     headers.put("content-type", "application/json");
     var body =
         YamlUtil.dumpJson(
@@ -713,29 +714,6 @@ class LocalApiRouterTest {
         Actor.Lane.ROOM,
         ops.lastActor.lane(),
         "the read-only run resolves to the room principal, never the write-capable agent principal");
-  }
-
-  @Test
-  void aSpeclessRoomSessionPostsOnlyToItsOwnRoom() {
-    var own =
-        router.ask(
-            new LocalApiRequest(
-                "POST",
-                "/v1/specs/lounge/messages",
-                Map.of(),
-                roomAuth(),
-                "body=hi".getBytes(StandardCharsets.UTF_8)));
-    assertEquals(201, own.status(), "a room-keyed run owns its own conversation");
-
-    var foreign =
-        router.ask(
-            new LocalApiRequest(
-                "POST",
-                "/v1/specs/auth/messages",
-                Map.of(),
-                roomAuth(),
-                "body=hi".getBytes(StandardCharsets.UTF_8)));
-    assertEquals(403, foreign.status(), "another room is never this session's to post into");
   }
 
   @Test

@@ -1338,11 +1338,17 @@ public final class SailOperations implements HostOperations {
   /**
    * A run acting for no FDE acts for this box's, so a run credential never outranks the FDE whose
    * box launched it; and it sees the projects that FDE does, so a run a scoped FDE started on main
-   * reads no more than its owner may, and an ownerless run no more than the box's person.
+   * reads no more than its owner may, and an ownerless run no more than the box's person. It works
+   * what it was launched for, conversing in its spec's room, as this box holds the spec (its id,
+   * the room it was born for, once the spec is gone), or in the room it was launched in.
    */
   @Override
   public Optional<Actor> runActor(RunStore.RunRow run) {
-    return roles().principal(RoleRule.Credential.run(run));
+    var room =
+        run.specId() == null
+            ? run.roomId()
+            : spec(run.specId()).map(SpecStore.SpecRow::roomIdOrIdentity).orElse(run.specId());
+    return roles().principal(RoleRule.Credential.run(run, room));
   }
 
   @Override

@@ -17,7 +17,7 @@ public final class SocketDoor {
 
   private final LocalApiRouter router;
 
-  /** The socket over {@code operations}, whose box gate decides on the box they stand for. */
+  /** The socket over {@code operations}. */
   public SocketDoor(LocalLaneOperations operations) {
     this.router = new LocalApiRouter(operations);
   }

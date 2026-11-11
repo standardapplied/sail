@@ -2283,9 +2283,11 @@ the row in hand. It is reached in this order, so one principal hears the same re
 2. Audience: a resource filed under a project outside the principal's scope is not found. A box and
    the org's people are filed under none.
 3. Role: the role's cell says no: refused, read-only or admin-only; unless the agent's lane grants
-   the action on its own work, which decides it alone whatever the role, so a room agent,
-   read-only by construction, posts in its room and narrates its run.
-4. Lane: an agent's lane says no: refused, naming the lane.
+   the action as its own, which decides it alone whatever the role, so a room agent, read-only by
+   construction, posts in its room and narrates its run.
+4. Lane: the lane of an agent or of the in-container credential says no: refused, naming the
+   lane; or an agent's lane narrows the action to its own work, and the resource is not: refused,
+   naming the work.
 5. Ownership: the role's cell says owner and the principal is neither an admin nor acting for an
    owner, or it starts work in the room a spec was born in (creates or claims the spec there)
    without acting for that room's owners: refused, naming the owners.
@@ -2303,20 +2305,20 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | Action | Covers | Viewer | Member | Admin | Work agent | Read-only room agent | In-container credential |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Read | specs, rooms, messages, runs, files, projects | yes | yes | yes | yes | yes | yes |
-| Read a definition | a project's definition | no | yes | yes | yes | no | yes |
-| Post | a message in a conversation | no | yes | yes | yes | own work | yes |
-| Create | a spec, a room, a project | no | yes | yes | yes | no | yes |
-| Change | edit, delete or restore a spec or room; settle a parked conflict | no | owner | yes | yes | no | yes |
-| Claim | take an unassigned spec; one born in a room also needs that room's owners | no | yes | yes | yes | no | yes |
+| Read a definition | a project's definition | no | yes | yes | own work | no | yes |
+| Post | a message in a conversation | no | yes | yes | own work | its own | yes |
+| Create | a spec, a room, a project | no | yes | yes | own work | no | yes |
+| Change | edit, delete or restore a spec or room; settle a parked conflict | no | owner | yes | own work | no | yes |
+| Claim | take an unassigned spec; one born in a room also needs that room's owners | no | yes | yes | no | no | yes |
 | Assign | give or move a spec to someone | no | no | yes | no | no | no |
 | Approve | move a spec's status (promote, done, archive, cancel) or create it ready; approve or dismiss findings | no | owner | yes | no | no | no |
 | Dispatch | dispatch or resume a spec; seat or remove a room agent | no | owner | yes | no | no | no |
 | Operate a run | stop it; attach to it; read its log | no | owner | yes | no | no | no |
-| Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | own work | own work | no |
-| Share | add, change or remove project files and skills | no | yes | yes | yes | no | no |
-| Serve | start and stop the project's processes | no | yes | yes | yes | no | yes |
-| Restore | restore or delete a snapshot | no | yes | yes | yes | no | no |
-| Configure | change a project's definition | no | yes | yes | yes | no | no |
+| Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | its own | its own | no |
+| Share | add, change or remove project files and skills | no | yes | yes | no | no | no |
+| Serve | start and stop the project's processes | no | yes | yes | own work | no | yes |
+| Restore | restore or delete a snapshot | no | yes | yes | no | no | no |
+| Configure | change a project's definition | no | yes | yes | no | no | no |
 | Prune | erase a spec everywhere, once archived, cancelled or deleted | no | owner | yes | no | no | no |
 | Purge | erase a project everywhere; a retention sweep | no | no | yes | no | no | no |
 | Manage people | add, change role, grant, remove, pair, mint tokens | no | no | yes | no | no | no |
@@ -2324,8 +2326,18 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 
 A person reads the column of their role on every lane they come in by, a push over sync included.
 An agent reads its role's column too (its person's, capped by the lane), and its lane's column
-narrows it: a lane cell is yes (it narrows nothing), no, or own work, the lane's own grant whatever
-the role; whose the work is, is the role column's to say. A cell holds today's answer where the
+narrows it: a lane cell is yes (it narrows nothing), no, own work (the agent's own work alone, as
+its role allows, asked after the role and before the owner), or its own (the lane's own grant on
+its own work whatever the role: a run narrating itself, a room agent posting in its room); whose
+the work is, is the role column's to say. An agent's work (`Actor.Work`, which only `RoleRule`
+builds from the run) is its spec, in that spec's room, for a build, review, fix or a room member
+of a spec's room; its room for a spec-less room member; its whole project for an ad-hoc run; and
+every spec it made, read from the journal's first revision of the spec (`ChangeLog.bornBy`) with
+that spec's own room. It files a spec only under its project, born in no room or its own, and
+creates no room but a spec's own. A read-only room agent reads its room's project alone, which
+`RoleRule` narrows its scope to, so the table's Read stays yes. A run credential readable by
+another run of the same person gains only that run's agent column, which is accepted until runs
+are isolated. A cell holds today's answer where the
 agreed design changes it, and `Policy` names the spec that does. The box credential presented in
 a project container is its person, narrowed by its own column (`Actor.Lane.CONTAINER`, the
 `In-container credential` column): whatever runs in the container can read it, so it carries no
@@ -2396,8 +2408,11 @@ run's reports of itself are Narrate, a run's stop or failure Operate a run, a di
 Dispatch, the review types Approve, a message's announcement Post, and an event about the box
 Operate the box. The rule keeps three facts: whether its sender speaks for this box (Operate the
 box) or only retells what another box did, whether this box executed the run (a person's
-narration, an admin's included, is believed only of a run this box executed), and that a run's
-own principal publishes only its own run's narration (until sail-agents-act-on-their-own-work).
+narration, an admin's included, is believed only of a run this box executed, and a run's own
+principal of its own run, whose credential only the executing box holds), and that an agent's
+announcement is never taken at its word: it retells nothing, since the socket strips `source`. An
+agent is decided like anyone, the run it names as Narrate's resource, and hears its own words: an
+agent narrates only its own run, and every other type but an announcement is not for agents.
 Work outside the sender's scope is not found.
 
 **Reads and sync.** Read is yes in every column, so a read is the audience alone. One read filter
@@ -2467,10 +2482,10 @@ every table the server mounts, and the socket's, whole; fails a context created 
 is proven by that router's own tests, not by the sweep. The socket's table also carries what it
 has always answered a method a pattern does not serve, each pattern's last route.
 
-The facts that read a lane or role to know which applies, and the checks of an agent's own work
-until `sail-agents-act-on-their-own-work`, are the allowlist of `OneDecisionSweepTest`. It sees
-every such read compiled code makes: of a role, a lane (`peer` and `owner` included), a scope or
-whom an actor acts for, a scope widened (`withScope`), a principal minted with its role
+The facts that read a lane or role to know which applies are the allowlist of
+`OneDecisionSweepTest`. It sees every such read compiled code makes: of a role, a lane (`peer` and
+`owner` included), a scope, an agent's work or whom an actor acts for, a scope or a work widened
+(`withScope`, `withWork`), a principal minted with its role
 (`agentPrincipal`, `roomPrincipal`, `main`), whoami's view of a role outside the two whoami
 handlers, a role constant, resolver (`values` and `valueOf` included) or `switch`, a type check
 of the socket's run or box caller, and an audience asked of a project in Java (`Access.audience`

@@ -12,7 +12,8 @@ import java.util.Map;
 /**
  * The cast every rule's table is played by: {@code ada} owns the work, {@code bob} is another
  * member, {@code root} is an admin, and a credential naming no FDE is a machine's — on each lane a
- * write can arrive by.
+ * write can arrive by. Ada's agent is a build of her spec {@code auth}, born in her room {@code
+ * lobby}; her room agent sits in {@code lobby}; bob's agent builds {@code theirs} in {@code den}.
  */
 public final class Actors {
 
@@ -29,9 +30,13 @@ public final class Actors {
   public static final Actor OTHER_API = new Actor(OTHER, Role.MEMBER, Actor.Lane.API);
   public static final Actor VIEWER = new Actor(OWNER, Role.VIEWER, Actor.Lane.API);
   public static final Actor MACHINE = new Actor(null, Role.MEMBER, Actor.Lane.API);
-  public static final Actor AGENT = Actor.agentPrincipal(AGENT_HANDLE, OWNER);
-  public static final Actor OTHERS_AGENT = Actor.agentPrincipal("claude/" + OTHER_RUN, OTHER);
-  public static final Actor ROOM = Actor.roomPrincipal(ROOM_HANDLE, OWNER);
+  public static final Actor AGENT =
+      Actor.agentPrincipal(AGENT_HANDLE, OWNER).withWork(new Actor.Work("acme", "auth", "lobby"));
+  public static final Actor OTHERS_AGENT =
+      Actor.agentPrincipal("claude/" + OTHER_RUN, OTHER)
+          .withWork(new Actor.Work("acme", "theirs", "den"));
+  public static final Actor ROOM =
+      Actor.roomPrincipal(ROOM_HANDLE, OWNER).withWork(new Actor.Work("acme", null, "lobby"));
   public static final Actor OWNER_SYNC = new Actor(OWNER, Role.MEMBER, Actor.Lane.SYNC);
   public static final Actor OTHER_SYNC = new Actor(OTHER, Role.MEMBER, Actor.Lane.SYNC);
   public static final Actor ADMIN_SYNC = new Actor(OTHER, Role.ADMIN, Actor.Lane.SYNC);
@@ -47,12 +52,16 @@ public final class Actors {
 
   /**
    * The actor {@code run}'s credential stands for before the role rule weighs its owner: its
-   * principal, on the room lane for a read-only lane and the agent lane otherwise.
+   * principal, on the room lane for a read-only lane and the agent lane otherwise, working its spec
+   * in the spec's own room, or the room it was launched in.
    */
   public static Actor principalOf(RunStore.RunRow run) {
-    return run.readOnlyLane()
-        ? Actor.roomPrincipal(run.principal(), run.owner())
-        : Actor.agentPrincipal(run.principal(), run.owner());
+    return (run.readOnlyLane()
+            ? Actor.roomPrincipal(run.principal(), run.owner())
+            : Actor.agentPrincipal(run.principal(), run.owner()))
+        .withWork(
+            new Actor.Work(
+                run.project(), run.specId(), run.specId() == null ? run.roomId() : run.specId()));
   }
 
   private Actors() {}
