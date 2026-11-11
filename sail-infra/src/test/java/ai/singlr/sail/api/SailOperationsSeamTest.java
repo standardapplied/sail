@@ -526,13 +526,7 @@ class SailOperationsSeamTest {
       var head = box.specs.latestRev("auth");
       var response =
           new SocketDoor(operations)
-              .ask(
-                  new LocalApiRequest(
-                      "POST",
-                      "/v1/conflicts/auth/resolve",
-                      Map.of(),
-                      Map.of("authorization", "Bearer " + token),
-                      "strategy=mine".getBytes(StandardCharsets.UTF_8)));
+              .ask("POST", "/v1/conflicts/auth/resolve", token, "strategy=mine");
       assertEquals(expected, response.status(), response.body().toString());
       assertEquals(expected == 200, box.conflicts.pending().isEmpty());
       if (expected != 200) {

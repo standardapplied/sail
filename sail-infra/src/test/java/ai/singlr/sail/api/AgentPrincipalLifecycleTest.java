@@ -26,7 +26,6 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -194,12 +193,12 @@ class AgentPrincipalLifecycleTest {
                 },
                 delivered));
 
-    var whoami = router.ask(request("GET", "/v1/whoami", credential.get(), ""));
+    var whoami = router.ask("GET", "/v1/whoami", credential.get(), "");
     assertEquals(200, whoami.status());
     assertEquals(expectedHandle, whoami.body().get("handle"));
     assertEquals(HANDLE, whoami.body().get("owner"));
 
-    var updated = router.ask(request("PUT", "/v1/specs/auth", credential.get(), "priority=3"));
+    var updated = router.ask("PUT", "/v1/specs/auth", credential.get(), "priority=3");
     assertEquals(200, updated.status());
     assertEquals(
         expectedHandle,
@@ -214,8 +213,7 @@ class AgentPrincipalLifecycleTest {
             "claude-code",
             "acme",
             Map.of("run_id", "some-other-run", "source", "watcher"));
-    var published =
-        router.ask(request("POST", "/v1/events", credential.get(), hookEvent.toJsonLine()));
+    var published = router.ask("POST", "/v1/events", credential.get(), hookEvent.toJsonLine());
     assertEquals(202, published.status());
     BusTesting.awaitDelivery(delivered);
     var stamped = events.getFirst();
@@ -243,7 +241,7 @@ class AgentPrincipalLifecycleTest {
         Acting.by(ADMIN, () -> stopOps.stop(new StopOperations.RunTarget(runId), HANDLE, false));
     assertInstanceOf(StopOperations.Stopped.class, stopped);
 
-    var refused = router.ask(request("GET", "/v1/whoami", credential.get(), ""));
+    var refused = router.ask("GET", "/v1/whoami", credential.get(), "");
     assertEquals(401, refused.status(), "a stopped run's credential is revoked");
     subscription.close();
   }
@@ -340,21 +338,11 @@ class AgentPrincipalLifecycleTest {
             new FdeStore(db),
             SessionYield.NONE);
     var router = new SocketDoor(operations);
-    var updated = router.ask(request("PUT", "/v1/specs/auth", credential.get(), "priority=7"));
+    var updated = router.ask("PUT", "/v1/specs/auth", credential.get(), "priority=7");
     assertEquals(
         200,
         updated.status(),
         "the dispatched agent can mutate its own assigned spec because it acts for the assignee");
-  }
-
-  private static LocalApiRequest request(
-      String method, String path, String credential, String body) {
-    return new LocalApiRequest(
-        method,
-        path,
-        Map.of(),
-        Map.of("authorization", "Bearer " + credential),
-        body.getBytes(StandardCharsets.UTF_8));
   }
 
   /**

@@ -41,7 +41,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -344,14 +343,7 @@ class OneDecisionTest {
 
   private static ApiResponse socket(
       LocalLaneOperations lane, String method, String path, String credential, String form) {
-    return new SocketDoor(lane)
-        .ask(
-            new LocalApiRequest(
-                method,
-                path,
-                Map.of(),
-                Map.of("authorization", "Bearer " + credential),
-                form.getBytes(StandardCharsets.UTF_8)));
+    return new SocketDoor(lane).ask(method, path, credential, form);
   }
 
   private String reserve(String specId, String roomId, String role) {

@@ -31,7 +31,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -413,7 +412,7 @@ class RouteGateSweepTest {
         for (var credential :
             List.of(TestOperations.RUN_CREDENTIAL, TestOperations.BOX_CREDENTIAL)) {
           var asked = method + " " + pattern.getKey() + " as " + credential;
-          var answer = router.ask(request(method, path(pattern.getKey()), credential));
+          var answer = router.ask(method, path(pattern.getKey()), credential, "a=b");
 
           assertTrue(answer.status() >= 400 && answer.status() < 500, asked + ": " + answer);
           assertEquals(List.of(), reached, asked);
@@ -434,12 +433,12 @@ class RouteGateSweepTest {
             "/v1/projects/acme/files/a.md",
             "/v1/projects/acme/skills/a/b",
             "/v1/conflicts/")) {
-      var answer = router.ask(request("GET", path, TestOperations.RUN_CREDENTIAL));
+      var answer = router.ask("GET", path, TestOperations.RUN_CREDENTIAL, "a=b");
 
       assertEquals("404 {error=No route for " + path + "}", answer.status() + " " + answer.body());
     }
     var history =
-        router.ask(request("PATCH", "/v1/specs/auth/history", TestOperations.RUN_CREDENTIAL));
+        router.ask("PATCH", "/v1/specs/auth/history", TestOperations.RUN_CREDENTIAL, "a=b");
     assertEquals(
         "404 {error=No route for spec sub-resource history}",
         history.status() + " " + history.body());
@@ -477,15 +476,6 @@ class RouteGateSweepTest {
         .replace("{project}", RUN.project())
         .replaceAll("\\{[a-z]+\\.\\.\\.}", "a/b/resolve")
         .replaceAll("\\{[a-z]+}", "a");
-  }
-
-  private static LocalApiRequest request(String method, String path, String credential) {
-    return new LocalApiRequest(
-        method,
-        path,
-        Map.of(),
-        Map.of("authorization", "Bearer " + credential),
-        "a=b".getBytes(StandardCharsets.UTF_8));
   }
 
   /**

@@ -28,21 +28,15 @@ public final class SocketDoor {
   }
 
   /**
-   * What the socket answers {@code method} on {@code path} with {@code form}, asked by {@code
-   * bearer}.
+   * What the socket answers {@code method} on {@code path} with {@code body}, asked by {@code
+   * bearer}, or by no credential when it is null.
    */
-  public ApiResponse ask(String method, String path, String bearer, String form) {
+  public ApiResponse ask(String method, String path, String bearer, String body) {
+    var headers =
+        bearer == null ? Map.<String, String>of() : Map.of("authorization", "Bearer " + bearer);
     return ask(
         new LocalApiRequest(
-            method,
-            path,
-            Map.of(),
-            Map.of(
-                "authorization",
-                "Bearer " + bearer,
-                "content-type",
-                "application/x-www-form-urlencoded"),
-            form.getBytes(StandardCharsets.UTF_8)));
+            method, path, Map.of(), headers, body.getBytes(StandardCharsets.UTF_8)));
   }
 
   List<Route<?>> routes() {

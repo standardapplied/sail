@@ -35,7 +35,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -149,7 +148,7 @@ class UnassignedSpecTest {
         201, byCreator.statusCode(), "every writer of the project speaks: " + byCreator.body());
     var room = roomRunCredential("mady", "auth");
     var router = new SocketDoor(operations);
-    var answered = router.ask(form("POST", "/v1/specs/auth/messages", room, "body=on it"));
+    var answered = router.ask("POST", "/v1/specs/auth/messages", room, "body=on it");
     assertEquals(201, answered.status(), answered.body().toString());
     var terminal = new HostAccess(db, new RoleRule(SyncConfig::unset, new FdeStore(db)));
     terminal.admit(
@@ -275,17 +274,15 @@ class UnassignedSpecTest {
     var credential = runCredential("uday");
     var router = new SocketDoor(operations);
 
-    var created =
-        router.ask(form("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme"));
+    var created = router.ask("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme");
     assertEquals(201, created.status(), created.body().toString());
     assertUnassignedAndCreatedBy("draft", "uday");
 
     var principal = new RunStore(db).findByCredential(credential).orElseThrow().principal();
-    var asPrincipal =
-        router.ask(form("PUT", "/v1/specs/draft", credential, "assignee=" + principal));
+    var asPrincipal = router.ask("PUT", "/v1/specs/draft", credential, "assignee=" + principal);
     assertEquals(422, asPrincipal.status(), "a run's principal is never an assignee");
 
-    var claimed = router.ask(form("PUT", "/v1/specs/draft", credential, "assignee=uday"));
+    var claimed = router.ask("PUT", "/v1/specs/draft", credential, "assignee=uday");
     assertEquals(200, claimed.status(), claimed.body().toString());
     assertEquals("uday", specs.findById("draft").orElseThrow().assignee());
   }
@@ -297,7 +294,7 @@ class UnassignedSpecTest {
     try (var udays = box(() -> new SyncConfig("node", "main", "uday", "box"))) {
       var created =
           new SocketDoor(udays)
-              .ask(form("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme"));
+              .ask("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme");
 
       assertEquals(201, created.status(), created.body().toString());
     }
@@ -395,14 +392,5 @@ class UnassignedSpecTest {
     try (var client = HttpClient.newHttpClient()) {
       return client.send(request, HttpResponse.BodyHandlers.ofString());
     }
-  }
-
-  private static LocalApiRequest form(String method, String path, String credential, String body) {
-    return new LocalApiRequest(
-        method,
-        path,
-        Map.of(),
-        Map.of("authorization", "Bearer " + credential),
-        body.getBytes(StandardCharsets.UTF_8));
   }
 }

@@ -33,7 +33,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -190,11 +189,11 @@ class WriteAuthorshipTest {
       var principal = runs.findByCredential(credential).orElseThrow().principal();
       var router = new SocketDoor(operations);
 
-      var status = router.ask(put("/v1/specs/auth", credential, "status=pending"));
+      var status = router.ask("PUT", "/v1/specs/auth", credential, "status=pending");
       assertEquals(200, status.status(), status.body().toString());
       assertAuthoredBy("auth", principal);
 
-      var content = router.ask(put("/v1/specs/auth/content", credential, "body=reviewed"));
+      var content = router.ask("PUT", "/v1/specs/auth/content", credential, "body=reviewed");
       assertEquals(200, content.status(), content.body().toString());
       assertAuthoredBy("auth", principal);
     }
@@ -335,15 +334,6 @@ class WriteAuthorshipTest {
     try (var client = HttpClient.newHttpClient()) {
       return client.send(request, HttpResponse.BodyHandlers.ofString());
     }
-  }
-
-  private static LocalApiRequest put(String path, String credential, String form) {
-    return new LocalApiRequest(
-        "PUT",
-        path,
-        Map.of(),
-        Map.of("authorization", "Bearer " + credential),
-        form.getBytes(StandardCharsets.UTF_8));
   }
 
   private static SpecStore.SpecRow spec(String id, String assignee) {
