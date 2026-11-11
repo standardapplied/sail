@@ -894,7 +894,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         ErrorCode.METHOD_NOT_ALLOWED, "HTTP method is not allowed for this endpoint.");
   }
 
-  private static ApiException notFound() {
+  static ApiException notFound() {
     return new ApiException(ErrorCode.NOT_FOUND, "API endpoint was not found.");
   }
 

@@ -382,6 +382,45 @@ class SseHandlerTest {
   }
 
   @Test
+  void theStreamAnswersOnlyItsOwnPathAndAsksTheCallerBeforeTheMethod(@TempDir Path tmp)
+      throws Exception {
+    try (var bus = new EventBus()) {
+      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 8);
+      try (var server =
+          new SailApiServer(
+              "127.0.0.1",
+              0,
+              new SailOperations(),
+              new FixedTokenTestAuth("tok"),
+              bus,
+              persister,
+              tmp.resolve("api.sock"))) {
+        server.start();
+        var client = HttpClient.newHttpClient();
+        var base = "http://127.0.0.1:" + server.port();
+        for (var path : List.of("/v1/events/stream/x", "/v1/events/streamx")) {
+          var notThere =
+              client.send(
+                  HttpRequest.newBuilder(URI.create(base + path))
+                      .header("Authorization", "Bearer tok")
+                      .GET()
+                      .build(),
+                  HttpResponse.BodyHandlers.ofString());
+          assertEquals(404, notThere.statusCode(), path);
+          assertTrue(notThere.body().contains("API endpoint was not found."), notThere.body());
+        }
+        var anonymousPost =
+            client.send(
+                HttpRequest.newBuilder(URI.create(base + "/v1/events/stream"))
+                    .POST(HttpRequest.BodyPublishers.ofString(""))
+                    .build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(401, anonymousPost.statusCode(), "the caller is asked before the method");
+      }
+    }
+  }
+
+  @Test
   void streamRejectsMissingToken(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
       var persister = new AuditPersister(tmp.resolve("events.jsonl"), 8);

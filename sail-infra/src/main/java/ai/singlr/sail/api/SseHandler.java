@@ -109,10 +109,13 @@ public final class SseHandler implements HttpHandler, RouteTable {
     this.connectionPermits = new Semaphore(maxConnections);
   }
 
+  private final List<Route<SseHandler>> routes =
+      List.of(new Route<>("GET", "/v1/events/stream", Gate.READS_IN_SCOPE, this));
+
   /** The event stream, read in the caller's scope. */
   @Override
   public List<Route<?>> routes() {
-    return List.of(new Route<>("GET", "/v1/events/stream", Gate.READS_IN_SCOPE, this));
+    return List.copyOf(routes);
   }
 
   /** Total SSE connection attempts rejected due to the connection cap. */
@@ -125,18 +128,30 @@ public final class SseHandler implements HttpHandler, RouteTable {
     return maxConnections - connectionPermits.availablePermits();
   }
 
+  /**
+   * Answers {@code exchange} as the API router answers a request: its caller is authenticated
+   * first, then its table serves it, or says the path or the method is not there.
+   */
   @Override
   public void handle(HttpExchange exchange) throws IOException {
     try {
-      if (!"GET".equals(exchange.getRequestMethod())) {
-        sendMethodNotAllowed(exchange);
-        return;
-      }
       try {
         auth.require(exchange);
       } catch (ApiException e) {
         ApiResponse.sendError(exchange, e);
         return;
+      }
+      switch (RouteTable.serve(
+          routes, exchange.getRequestMethod(), exchange.getRequestURI().getPath())) {
+        case RouteTable.Served.NotFound<SseHandler> _ -> {
+          ApiResponse.sendError(exchange, ApiRouter.notFound());
+          return;
+        }
+        case RouteTable.Served.MethodNotAllowed<SseHandler> _ -> {
+          sendMethodNotAllowed(exchange);
+          return;
+        }
+        case RouteTable.Served.Match<SseHandler> _ -> {}
       }
       if (!connectionPermits.tryAcquire()) {
         rejected.increment();
