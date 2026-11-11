@@ -6,7 +6,6 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -172,9 +171,26 @@ class SailCommandLineTest {
   }
 
   @Test
-  void onlyTheCommandsNamedAsTheBoxsOwnReadAsTheBox() {
-    assertTrue(SailCommandLine.readsAsTheBox(new SyncCommand()));
-    assertFalse(SailCommandLine.readsAsTheBox(new ProjectListCommand()));
+  void aSubcommandNamedAsTheBoxsOwnReadsAsTheBoxAndPlacesNoOne() {
+    var read = new ArrayList<Actor>();
+    var line =
+        SailCommandLine.of(
+            new Probe(),
+            () -> {
+              throw new AssertionError("the box's own machinery places no one");
+            });
+    line.addSubcommand(
+        "status",
+        new SyncCommand.Status(
+            operator -> {
+              read.add(Actor.reader());
+              throw new IllegalStateException("read once");
+            }));
+    line.setExecutionExceptionHandler((failure, cli, parsed) -> 1);
+
+    line.execute("status");
+
+    assertEquals(List.of(Actor.system()), read);
   }
 
   private static void walk(CommandLine line, String path, Set<String> tree, Set<String> asTheBox) {
