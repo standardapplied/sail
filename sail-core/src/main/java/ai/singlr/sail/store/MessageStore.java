@@ -122,7 +122,9 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           requireReplyTarget(row);
           var snapshot = snapshot(row);
           WriteAuthority.admit(db, decide(id, snapshot));
-          authored(row);
+          if (row.author() == null) {
+            throw new IllegalArgumentException("message author is required");
+          }
           var rev = Revisions.next(null, YamlUtil.dumpJson(snapshot));
           write(row, rev, null);
           journal(row, rev, ChangeLog.Entry.LOCAL, snapshot);
@@ -555,7 +557,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           if (existing.isPresent() && !comparableSnapshot(id).equals(snapshot)) {
             throw new IllegalArgumentException("message '" + id + "' is immutable");
           }
-          var row = authored(fromSnapshot(id, snapshot));
+          var row = fromSnapshot(id, snapshot);
           requireReplyTarget(row);
           write(row, rev, rev);
           if (!Objects.equals(existing.map(MessageRow::rev).orElse(null), rev)) {
@@ -666,7 +668,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   private void adoptMainCopy(String id, Map<String, Object> remote, String rev) {
     db.transaction(
         () -> {
-          var row = authored(fromSnapshot(id, remote));
+          var row = fromSnapshot(id, remote);
           requireReplyTarget(row);
           replace(row, rev);
           journal(row, rev, ChangeLog.Entry.SYNC, remote);
@@ -746,17 +748,6 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
                 reader(),
                 row.roomId())
             .isPresent();
-  }
-
-  /**
-   * {@code row}, refused when it names no author: a message main decided, or one this box's own
-   * machinery writes past the rules. A pushed or posted message is the message rule's to refuse.
-   */
-  private static MessageRow authored(MessageRow row) {
-    if (Strings.isBlank(row.author())) {
-      throw new IllegalArgumentException("message author is required");
-    }
-    return row;
   }
 
   private static MessageRow fromSnapshot(String id, Map<String, Object> snapshot) {

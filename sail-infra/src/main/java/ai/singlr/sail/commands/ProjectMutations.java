@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.ProjectDefinitionJson;
@@ -40,6 +41,14 @@ final class ProjectMutations {
   /** The catalog these mutations read and write. */
   ProjectCatalog catalog() {
     return catalog;
+  }
+
+  /**
+   * The definition project {@code name} holds for a read: one the box's person may not read, or the
+   * catalog does not hold, is not in the catalog, in the words every reading door says it.
+   */
+  ProjectDefinition readable(String name) {
+    return catalog.read(name).orElseThrow(() -> ProjectReader.absent(name));
   }
 
   /** The definition project {@code name} holds, or a refusal naming how to make one. */

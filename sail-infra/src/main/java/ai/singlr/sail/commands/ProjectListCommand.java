@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
@@ -21,6 +22,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -42,13 +44,7 @@ public final class ProjectListCommand implements Runnable {
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
     var containers = new ContainerManager(new ShellExecutor(false)).listAll();
-    List<ContainerInfo> projects;
-    try (var operations = OperationsFactory.open(operator::warn)) {
-      projects =
-          merge(
-              containers,
-              operations.catalog().projects().stream().map(ProjectStore.ProjectRow::name).toList());
-    }
+    var projects = merge(containers, catalogNames(() -> OperationsFactory.open(operator::warn)));
 
     if (json) {
       System.out.println(renderJson(projects));
@@ -92,6 +88,18 @@ public final class ProjectListCommand implements Runnable {
         Actor.reader(),
         byName.values().stream().sorted(Comparator.comparing(ContainerInfo::name)).toList(),
         ContainerInfo::name);
+  }
+
+  /**
+   * The names of the projects the catalog {@code open} opens holds, or none when it cannot be read:
+   * a box before {@code sail init} has no catalog yet, and lists its containers alone.
+   */
+  static List<String> catalogNames(Supplier<HostOperations> open) {
+    try (var operations = open.get()) {
+      return operations.catalog().projects().stream().map(ProjectStore.ProjectRow::name).toList();
+    } catch (RuntimeException unreadable) {
+      return List.of();
+    }
   }
 
   /** Renders the project roster as JSON — pure, so the shape is unit-tested. */

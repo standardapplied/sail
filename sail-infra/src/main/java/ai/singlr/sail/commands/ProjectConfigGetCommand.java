@@ -8,7 +8,6 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.OperatorCommand;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Parameters;
 
@@ -45,10 +44,9 @@ public final class ProjectConfigGetCommand implements Runnable {
   }
 
   private void execute() {
-    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     var read = Section.of(section);
-    var value = ProjectDefinitionJson.section(mutations.current(name, operator), read);
+    var value = ProjectDefinitionJson.section(mutations.readable(name), read);
     System.out.println(value == null ? "null" : value);
   }
 }

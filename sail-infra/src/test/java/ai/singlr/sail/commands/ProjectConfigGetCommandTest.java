@@ -50,14 +50,14 @@ class ProjectConfigGetCommandTest {
         new CommandRun(
             1,
             "",
-            "  ✗ No project 'ghost' in the catalog. Create it with 'sail project create ghost', or"
-                + " sync it from main with 'sail sync'.\n"),
+            "  ✗ Project 'ghost' is not in the catalog.\n  Create it with 'sail project create ghost',"
+                + " or sync it from main with 'sail sync'.\n"),
         get("ghost", "resources"));
     assertEquals(1, get("acme", "git").exit());
   }
 
   @Test
-  void aProjectOutsideTheOperatorsScopeReadsAsOneTheCatalogDoesNotHold() {
+  void aProjectOutsideTheOperatorsScopeIsNotInTheCatalogAsAMissingOneIs() {
     var scoped =
         new Actor("vic", Role.MEMBER, Actor.Lane.CLI).withScope(ProjectScope.of(List.of("beta")));
 
@@ -65,8 +65,8 @@ class ProjectConfigGetCommandTest {
         new CommandRun(
             1,
             "",
-            "  ✗ No project 'acme' in the catalog. Create it with 'sail project create acme', or"
-                + " sync it from main with 'sail sync'.\n"),
+            "  ✗ Project 'acme' is not in the catalog.\n  Create it with 'sail project create acme',"
+                + " or sync it from main with 'sail sync'.\n"),
         CommandRun.as(scoped, new ProjectConfigGetCommand(mutations), "acme", "resources"));
   }
 

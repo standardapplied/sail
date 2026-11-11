@@ -19,6 +19,16 @@ import org.junit.jupiter.api.Test;
 class ActorTest {
 
   @Test
+  void anActorBoundToTheOperationIsWhoReadsOverTheCommandsReader() {
+    var person = new Actor("ada", Role.MEMBER, Actor.Lane.CLI);
+    var bound = new Actor("bob", Role.ADMIN, Actor.Lane.API);
+
+    assertEquals(person, Actor.readingAs(() -> person, Actor::reader));
+    assertEquals(bound, Actor.readingAs(() -> person, () -> Actor.call(bound, Actor::reader)));
+    assertEquals(Actor.system(), Actor.reader(), "with neither, the box reads as itself");
+  }
+
+  @Test
   void cliOperatorIsAdminOnItsOwnBox() {
     var actor = new Actor("sumesh", Role.ADMIN, Actor.Lane.CLI);
 
