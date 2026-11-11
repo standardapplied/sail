@@ -11,10 +11,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.pty.PtyAdmissions;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyMessage;
-import ai.singlr.sail.pty.PtyRooms;
 import ai.singlr.sail.pty.PtySessionHost;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -31,8 +33,9 @@ class PtyHostYieldTest {
   private static final PtyIdentity.Resolver RESOLVER =
       token ->
           switch (token) {
-            case "" -> new PtyIdentity("box", false);
-            case "tok-mady" -> new PtyIdentity("mady", false);
+            case "" -> new PtyIdentity.Person(new Actor("box", Role.MEMBER, Actor.Lane.API));
+            case "tok-mady" ->
+                new PtyIdentity.Person(new Actor("mady", Role.MEMBER, Actor.Lane.API));
             default -> throw new IOException("Session token is not valid or has expired.");
           };
 
@@ -46,7 +49,11 @@ class PtyHostYieldTest {
 
     try (var host =
         PtyHostCommand.startHost(
-            dir.resolve("h.sock"), dir.resolve("s"), RESOLVER, PtyRooms.NONE, PtyEvents.NONE)) {
+            dir.resolve("h.sock"),
+            dir.resolve("s"),
+            RESOLVER,
+            PtyAdmissions.NONE,
+            PtyEvents.NONE)) {
       try (var client = SessionClient.connect(dir.resolve("h.sock"), "")) {
         client.create("resume-1", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
         client.create("shell", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
@@ -74,7 +81,11 @@ class PtyHostYieldTest {
   void theDispatchAuthorityEndsSessionsWhoeverOpenedThem() throws Exception {
     try (var host =
         PtyHostCommand.startHost(
-            dir.resolve("h.sock"), dir.resolve("s"), RESOLVER, PtyRooms.NONE, PtyEvents.NONE)) {
+            dir.resolve("h.sock"),
+            dir.resolve("s"),
+            RESOLVER,
+            PtyAdmissions.NONE,
+            PtyEvents.NONE)) {
       try (var mady = SessionClient.connect(dir.resolve("h.sock"), "tok-mady")) {
         mady.create("resume-1", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
       }
@@ -102,7 +113,11 @@ class PtyHostYieldTest {
 
     try (var host =
         PtyHostCommand.startHost(
-            dir.resolve("h.sock"), dir.resolve("s"), RESOLVER, PtyRooms.NONE, PtyEvents.NONE)) {
+            dir.resolve("h.sock"),
+            dir.resolve("s"),
+            RESOLVER,
+            PtyAdmissions.NONE,
+            PtyEvents.NONE)) {
       try (var mady = SessionClient.connect(dir.resolve("h.sock"), "tok-mady")) {
         mady.create("resume-1", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
       }
@@ -122,7 +137,11 @@ class PtyHostYieldTest {
   void aHostThatMintedNoCredentialIsAnErrorNotASilentSkip() throws Exception {
     try (var host =
         PtyHostCommand.startHost(
-            dir.resolve("h.sock"), dir.resolve("s"), RESOLVER, PtyRooms.NONE, PtyEvents.NONE)) {
+            dir.resolve("h.sock"),
+            dir.resolve("s"),
+            RESOLVER,
+            PtyAdmissions.NONE,
+            PtyEvents.NONE)) {
       try (var mady = SessionClient.connect(dir.resolve("h.sock"), "tok-mady")) {
         mady.create("resume-1", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
       }

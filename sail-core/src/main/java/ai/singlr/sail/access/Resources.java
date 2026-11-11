@@ -120,9 +120,13 @@ public final class Resources {
     return new Resource(Resource.Kind.PROJECT, name, name, one(createdBy), null, null, null);
   }
 
-  /** The box of {@code fde}: its sync health, bus stats and main, which are its person's. */
+  /**
+   * The box of {@code fde}: its sync health, bus stats and main, which are its person's. A box that
+   * names no FDE is no one's, so an admin's alone.
+   */
   public static Resource box(String fde) {
-    return new Resource(Resource.Kind.BOX, fde, null, one(fde), null, null, null);
+    return new Resource(
+        Resource.Kind.BOX, Strings.isBlank(fde) ? null : fde, null, one(fde), null, null, null);
   }
 
   /** The org's people, tokens and pairings, which no one owns: an admin's alone. */

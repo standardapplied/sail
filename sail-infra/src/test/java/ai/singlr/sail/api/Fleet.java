@@ -26,6 +26,7 @@ import ai.singlr.sail.engine.SlackPoster;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.EventStore;
@@ -383,7 +384,7 @@ public final class Fleet implements AutoCloseable {
               handle,
               () ->
                   Actor.call(
-                      Actor.cliOperator(handle),
+                      new Actor(handle, Role.ADMIN, Actor.Lane.CLI),
                       () ->
                           dispatcher.dispatch(
                               PROJECT,
@@ -411,7 +412,7 @@ public final class Fleet implements AutoCloseable {
           handle,
           () ->
               Actor.call(
-                  Actor.cliOperator(handle),
+                  new Actor(handle, Role.ADMIN, Actor.Lane.CLI),
                   () -> stopper.stop(new StopOperations.ProjectTarget(PROJECT), handle, false)));
     }
 
@@ -488,7 +489,7 @@ public final class Fleet implements AutoCloseable {
               handle,
               () ->
                   Actor.call(
-                      Actor.cliOperator(handle),
+                      new Actor(handle, Role.ADMIN, Actor.Lane.CLI),
                       () ->
                           operations.postRoomMessage(
                               specId,
@@ -519,7 +520,9 @@ public final class Fleet implements AutoCloseable {
     }
 
     public Result<RunLogResponse> runLog(String runId) {
-      return Actor.call(Actor.cliOperator(handle), () -> operations.runLog(runId, 100, handle));
+      return Actor.call(
+          new Actor(handle, Role.ADMIN, Actor.Lane.CLI),
+          () -> operations.runLog(runId, 100, handle));
     }
 
     public String latestPeer(String specId) {

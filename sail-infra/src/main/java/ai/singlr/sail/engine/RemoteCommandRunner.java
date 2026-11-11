@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.Sail;
+import ai.singlr.sail.commands.SailCommandLine;
 import ai.singlr.sail.config.ClientConfig;
 import ai.singlr.sail.ssh.SshGateway;
 import java.io.IOException;
@@ -14,7 +15,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import picocli.CommandLine;
 import picocli.CommandLine.Help.Ansi;
 
 /**
@@ -90,7 +90,7 @@ public final class RemoteCommandRunner {
 
   private int executeLocal(String[] args) {
     try {
-      return new CommandLine(new Sail()).execute(args);
+      return SailCommandLine.of(new Sail()).execute(args);
     } catch (Exception e) {
       System.err.println(
           Banner.errorLine("Failed to run local command: " + e.getMessage(), Ansi.AUTO));

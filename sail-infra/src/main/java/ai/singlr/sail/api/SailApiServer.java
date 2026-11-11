@@ -11,8 +11,11 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.UnaryOperator;
 
 public final class SailApiServer implements AutoCloseable {
 
@@ -26,6 +29,7 @@ public final class SailApiServer implements AutoCloseable {
   private final EventBus.Subscription reviewSubscription;
   private final SseHandler sseHandler;
   private final LocalApiSocket socketListener;
+  private final List<RouteTable> tables = new ArrayList<>();
 
   /**
    * Construct with {@code auth}. When {@code eventBus} is non-null, the persister is registered as
@@ -58,7 +62,7 @@ public final class SailApiServer implements AutoCloseable {
       EventBus eventBus,
       EventSubscriber auditSubscriber,
       Path socketPath,
-      HttpHandler passkeyHandler)
+      WebauthnAuthHandler passkeyHandler)
       throws IOException {
     this(
         host,
@@ -89,7 +93,7 @@ public final class SailApiServer implements AutoCloseable {
       EventBus eventBus,
       EventSubscriber auditSubscriber,
       Path socketPath,
-      HttpHandler passkeyHandler,
+      WebauthnAuthHandler passkeyHandler,
       SpecStore specStore,
       ReviewPipelineController reviewController)
       throws IOException {
@@ -122,7 +126,7 @@ public final class SailApiServer implements AutoCloseable {
       EventBus eventBus,
       EventSubscriber auditSubscriber,
       Path socketPath,
-      HttpHandler passkeyHandler,
+      WebauthnAuthHandler passkeyHandler,
       SpecStore specStore,
       ReviewPipelineController reviewController,
       RateLimitGate rateLimits,
@@ -143,23 +147,45 @@ public final class SailApiServer implements AutoCloseable {
             : null;
     server = HttpServer.create(new InetSocketAddress(host, port), 32);
     executor = Executors.newVirtualThreadPerTaskExecutor();
-    PrivateAttributes.context(
-        server, "/", new ApiRouter(operations, auth, rateLimits, new AgentLogStreamer(auth)));
+    serve(
+        "/",
+        new ApiRouter(operations, auth, rateLimits, new AgentLogStreamer(auth)),
+        UnaryOperator.identity());
     if (passkeyHandler != null) {
-      PrivateAttributes.context(server, "/v1/auth", rateLimits.wrap(passkeyHandler));
-      var pages = rateLimits.wrap(new WebauthnPageHandler());
-      PrivateAttributes.context(server, "/login", pages);
-      PrivateAttributes.context(server, "/enroll", pages);
+      serve("/v1/auth", passkeyHandler, rateLimits::wrap);
+      var pages = new WebauthnPageHandler();
+      serve("/login", pages, rateLimits::wrap);
+      serve("/enroll", pages, rateLimits::wrap);
     }
     if (eventBus != null) {
       sseHandler = new SseHandler(eventBus, auth, turns);
-      PrivateAttributes.context(server, "/v1/events/stream", rateLimits.wrap(sseHandler));
+      serve("/v1/events/stream", sseHandler, rateLimits::wrap);
       socketListener = socketPath == null ? null : new LocalApiSocket(operations, socketPath);
     } else {
       sseHandler = null;
       socketListener = null;
     }
     server.setExecutor(executor);
+  }
+
+  /**
+   * Serves {@code table} at {@code path}, through {@code limit}: every context this server serves
+   * is a route table, so every path it answers declares its gates.
+   */
+  private <T extends HttpHandler & RouteTable> void serve(
+      String path, T table, UnaryOperator<HttpHandler> limit) {
+    PrivateAttributes.context(server, path, limit.apply(table));
+    if (!tables.contains(table)) {
+      tables.add(table);
+    }
+  }
+
+  /**
+   * The route table of every context this server serves, in the order it mounted them: the hook
+   * {@code RouteGateSweepTest} pins the tables through, read by nothing else.
+   */
+  List<RouteTable> tables() {
+    return List.copyOf(tables);
   }
 
   public void start() throws IOException {

@@ -46,7 +46,7 @@ import org.junit.jupiter.api.io.TempDir;
 /** Liveness audit (L1-L3, L6): every offer a legitimate node makes settles in bounded rounds. */
 class LivenessAuditTest {
 
-  private static final Actor ADA = Actor.sync("ada", Role.MEMBER);
+  private static final Actor ADA = new Actor("ada", Role.MEMBER, Actor.Lane.SYNC);
 
   @TempDir Path dir;
   private SyncBox main;
@@ -121,7 +121,7 @@ class LivenessAuditTest {
     room(ada, "ada", "lab");
     Acting.as("ada", () -> new MessageStore(ada.db).append("lab", "ada", "hello", null));
 
-    assertConvergedWithin(3, ada, Actor.sync("ada", Role.VIEWER));
+    assertConvergedWithin(3, ada, new Actor("ada", Role.VIEWER, Actor.Lane.SYNC));
   }
 
   /**
@@ -313,7 +313,7 @@ class LivenessAuditTest {
     Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
     var before = new ChangeLog(ada.db).history("spec", "born").size();
 
-    assertConvergedWithin(3, ada, Actor.sync("ada", Role.VIEWER));
+    assertConvergedWithin(3, ada, new Actor("ada", Role.VIEWER, Actor.Lane.SYNC));
 
     assertTrue(ada.specs.findById("born").isEmpty(), "the spec is withdrawn");
     assertTrue(
@@ -379,7 +379,7 @@ class LivenessAuditTest {
     Acting.as("ada", () -> ada.specs.create(spec("first", "ada").withRoomId("lab")));
     Acting.as("ada", () -> ada.specs.create(spec("second", "ada").withRoomId("lab")));
 
-    assertConvergedWithin(5, ada, Actor.sync("ada", Role.VIEWER));
+    assertConvergedWithin(5, ada, new Actor("ada", Role.VIEWER, Actor.Lane.SYNC));
 
     assertTrue(new RoomStore(ada.db).findById("lab").isEmpty(), "the room was denied");
     assertTrue(ada.specs.findById("first").isEmpty(), "the first spec settled");
@@ -432,7 +432,7 @@ class LivenessAuditTest {
                     null,
                     "/log",
                     "unit"));
-    var viewer = Actor.sync("ada", Role.VIEWER);
+    var viewer = new Actor("ada", Role.VIEWER, Actor.Lane.SYNC);
 
     round(ada, viewer);
     round(ada, viewer);
@@ -516,7 +516,7 @@ class LivenessAuditTest {
       assertEquals(List.of(), settling.get(5, TimeUnit.SECONDS));
       assertEquals(2, files.find("acme", "a.txt").orElseThrow().size(), "the replacement stays");
       main.limits(new FileLimits(4));
-      assertConvergedWithin(2, node, Actor.sync("node", Role.MEMBER));
+      assertConvergedWithin(2, node, new Actor("node", Role.MEMBER, Actor.Lane.SYNC));
       assertEquals(2, new FileStore(main.db).find("acme", "a.txt").orElseThrow().size());
     }
   }
@@ -525,7 +525,7 @@ class LivenessAuditTest {
   @Test
   void aReplyToAnAcceptedNarratorPostOfAnotherFdesRunLands() throws IOException {
     try (var bob = new SyncBox("bob")) {
-      var bobSyncs = Actor.sync("bob", Role.MEMBER);
+      var bobSyncs = new Actor("bob", Role.MEMBER, Actor.Lane.SYNC);
       ownSpec(main, "bob", "mine", "bob");
       round(bob, bobSyncs);
       var run = run(bob, "bob", "mine");
@@ -534,7 +534,7 @@ class LivenessAuditTest {
               () -> new MessageStore(bob.db).append("mine", MessageStore.SAIL_AUTHOR, "ok", null));
       Acting.system(() -> new RunStore(bob.db).complete(run, "stopped", null));
       assertConvergedWithin(3, bob, bobSyncs);
-      var adaIsAdmin = Actor.sync("ada", Role.ADMIN);
+      var adaIsAdmin = new Actor("ada", Role.ADMIN, Actor.Lane.SYNC);
       round(ada, adaIsAdmin);
       var reply =
           Acting.as(
@@ -557,7 +557,7 @@ class LivenessAuditTest {
             () -> new MessageStore(ada.db).append("mine", MessageStore.SAIL_AUTHOR, "done", null));
     Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
 
-    assertConvergedWithin(3, ada, Actor.sync("ada", Role.VIEWER));
+    assertConvergedWithin(3, ada, new Actor("ada", Role.VIEWER, Actor.Lane.SYNC));
 
     assertTrue(new MessageStore(ada.db).findById(post.id()).isEmpty(), "withdrawn here");
     assertTrue(new MessageStore(main.db).findById(post.id()).isEmpty(), "never on main");

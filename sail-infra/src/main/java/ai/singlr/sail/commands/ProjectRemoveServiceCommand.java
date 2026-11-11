@@ -51,7 +51,7 @@ public final class ProjectRemoveServiceCommand implements Runnable {
     var out = System.out;
 
     var mutations = ProjectMutations.here();
-    var actor = mutations.writer(name, dryRun);
+    var actor = mutations.writer(name);
     var config = mutations.current(name, operator);
     if (config.services() == null || !config.services().containsKey(serviceName)) {
       throw new IllegalStateException(

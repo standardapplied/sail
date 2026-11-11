@@ -5,10 +5,10 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.ProjectDefinitionJson;
-import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.identity.Actor;
@@ -33,14 +33,22 @@ final class ProjectMutations {
     this.operator = Objects.requireNonNull(operator, "operator");
   }
 
-  /** Mutations of this box's catalog, written as this box's operator ({@link CliOperator}). */
+  /** Mutations of this box's catalog, written as this box's operator, as its operations say. */
   static ProjectMutations here() {
-    return new ProjectMutations(ProjectCatalog.here(), CliOperator::current);
+    return new ProjectMutations(ProjectCatalog.here(), SailCommandLine::operator);
   }
 
   /** The catalog these mutations read and write. */
   ProjectCatalog catalog() {
     return catalog;
+  }
+
+  /**
+   * The definition project {@code name} holds for a read: one the box's person may not read, or the
+   * catalog does not hold, is not in the catalog, in the words every reading door says it.
+   */
+  ProjectDefinition readable(String name) {
+    return catalog.read(name).orElseThrow(() -> ProjectReader.absent(name));
   }
 
   /** The definition project {@code name} holds, or a refusal naming how to make one. */
@@ -51,13 +59,10 @@ final class ProjectMutations {
   /**
    * This box's operator, resolved before a command changes anything, for the catalog write of
    * project {@code name} that ends it: a node that cannot name its operator, or whose operator the
-   * journal will refuse that write, refuses up front, never after cloning, starting or editing.
-   * Null for a dry run, which touches no catalog.
+   * journal will refuse that write, refuses up front, never after cloning, starting or editing. A
+   * dry run is refused as the write it rehearses.
    */
-  Actor writer(String name, boolean dryRun) {
-    if (dryRun) {
-      return null;
-    }
+  Actor writer(String name) {
     var actor = operator.get();
     catalog.requireRecordable(name, actor);
     return actor;

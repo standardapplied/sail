@@ -14,7 +14,8 @@ import java.util.Optional;
 /**
  * Default {@link EnrollmentTickets} over the {@link EnrollmentTicketStore}, resolving FDE handles
  * to the surrogate ids the store records. Tickets live for {@link #TTL} — long enough to complete a
- * browser enrollment, short enough to limit exposure of an unused ticket.
+ * browser enrollment, short enough to limit exposure of an unused ticket. A ticket is neither
+ * minted nor honoured for a person the roster disables ({@link ActivePerson}).
  */
 public final class EnrollmentService implements EnrollmentTickets {
 
@@ -30,19 +31,16 @@ public final class EnrollmentService implements EnrollmentTickets {
 
   @Override
   public Ticket issue(String fdeHandle) {
-    var fde =
-        fdes.byHandle(fdeHandle)
-            .orElseThrow(
-                () ->
-                    new PasskeyException(
-                        PasskeyException.Kind.NOT_FOUND, "Unknown FDE: " + fdeHandle));
+    var fde = ActivePerson.named(fdes, fdeHandle);
     var created = tickets.issue(fde.id(), TTL);
     return new Ticket(created.ticket(), fde.handle(), created.expiresAt());
   }
 
   @Override
   public Optional<String> authorize(String ticket) {
-    return tickets.validate(ticket).map(EnrollmentTicketStore.TicketInfo::fdeHandle);
+    return tickets
+        .validate(ticket)
+        .map(enrolls -> ActivePerson.named(fdes, enrolls.fdeHandle()).handle());
   }
 
   @Override

@@ -14,6 +14,7 @@ import static ai.singlr.sail.access.AccessTest.Outcome.READ_ONLY;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
@@ -27,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -204,7 +206,7 @@ class AccessTest {
               Action.OPERATE_RUN,
               RUN_ADA,
               RUN_BOB,
-              "stop runs",
+              "stop or attach to runs or read their logs",
               List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY),
               RUN_NOT_OWNER,
               null),
@@ -292,7 +294,7 @@ class AccessTest {
               BOX_ADA,
               BOX_BOB,
               "operate boxes",
-              List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY),
+              List.of(OWNED, OWNED, ALLOWED, LANE, LANE),
               refusal(
                   Refusal.Kind.NOT_OWNER,
                   "Box 'bob' belongs to 'bob', not you.",
@@ -329,7 +331,7 @@ class AccessTest {
       }
       for (var sail : List.of(Actors.MAIN, Actors.SYSTEM)) {
         for (var resource : List.of(row.own(), row.others())) {
-          var actor = sail.withScope(ProjectScope.none());
+          var actor = sail.withScope(ProjectScope.of(List.of()));
           cases.add(
               new Case(
                   row.action() + " by " + sail.lane() + " seeing nothing",
@@ -569,7 +571,8 @@ class AccessTest {
 
     assertEquals(acme, Access.audience(Actors.VIEWER.withScope(acme)));
     assertEquals(ProjectScope.all(), Access.audience(Actors.SYSTEM.withScope(acme)));
-    assertEquals(ProjectScope.all(), Access.audience(Actors.MAIN.withScope(ProjectScope.none())));
+    assertEquals(
+        ProjectScope.all(), Access.audience(Actors.MAIN.withScope(ProjectScope.of(List.of()))));
   }
 
   @Test
@@ -662,7 +665,7 @@ class AccessTest {
 
   @Test
   void whetherAnActorMayEverTakeAnActionIsItsRoleAndLaneAlone() {
-    var unplaced = Actors.OTHER_API.withScope(ProjectScope.none());
+    var unplaced = Actors.OTHER_API.withScope(ProjectScope.of(List.of()));
 
     assertEquals(
         Optional.empty(),
@@ -713,13 +716,53 @@ class AccessTest {
 
   @Test
   void aBoxAndThePeopleAreFiledUnderNoProjectSoNoScopeHidesThem() {
-    var unplaced = Actors.OWNER_API.withScope(ProjectScope.none());
+    var unplaced = Actors.OWNER_API.withScope(ProjectScope.of(List.of()));
 
     assertEquals(new Decision.Allowed(), Access.decide(unplaced, Action.OPERATE_BOX, BOX_ADA));
     assertEquals(
         refused(
             Refusal.Kind.ADMIN_ONLY, "Only an admin may manage people.", "Ask an admin to do it."),
         Access.decide(unplaced, Action.MANAGE_PEOPLE, PEOPLE));
+  }
+
+  @Test
+  void aBoxNamingNoFdeIsNoOnesSoAnAdminsAlone() {
+    var unnamed = Resources.box(" ");
+
+    assertEquals(Resources.box(null), unnamed);
+    assertEquals(new Decision.Allowed(), Access.decide(Actors.ADMIN, Action.OPERATE_BOX, unnamed));
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "This box has no owner, so only an admin may operate it.",
+            "Have an admin operate it."),
+        Access.decide(Actors.VIEWER, Action.OPERATE_BOX, unnamed));
+  }
+
+  @Test
+  void aRoleMayWriteWhenItsColumnAllowsAnythingButReadingAndOperatingItsBox() {
+    assertEquals(
+        Map.of(Role.VIEWER, false, Role.MEMBER, true, Role.ADMIN, true),
+        Stream.of(Role.values())
+            .collect(
+                Collectors.toMap(
+                    Function.identity(),
+                    role -> Access.mayWrite(new Actor(Actors.OWNER, role, Actor.Lane.SYNC)))));
+    assertFalse(Access.mayWrite(Actors.ROOM), "a room agent's role is a viewer's");
+    assertTrue(Access.mayWrite(Actors.AGENT));
+  }
+
+  @Test
+  void aPrincipalIsShownItsRoleItsLaneAndWhatItsRolesColumnGrants() {
+    assertEquals(
+        new Whoami("admin", "api", List.of("read", "write", "admin")), Whoami.of(Actors.ADMIN));
+    assertEquals(
+        new Whoami("member", "cli", List.of("read", "write")), Whoami.of(Actors.OWNER_CLI));
+    assertEquals(new Whoami("viewer", "api", List.of("read")), Whoami.of(Actors.VIEWER));
+    assertEquals(new Whoami("viewer", "room", List.of("read")), Whoami.of(Actors.ROOM));
+    assertEquals(new Whoami("member", "agent", List.of("read", "write")), Whoami.of(Actors.AGENT));
+    assertThrows(NullPointerException.class, () -> new Whoami(null, "api", List.of()));
+    assertThrows(NullPointerException.class, () -> new Whoami("viewer", null, List.of()));
   }
 
   @Test
@@ -765,84 +808,43 @@ class AccessTest {
   }
 
   @Test
-  void theOwnershipStepIsAnAdminsOrAnOwnersOrOneActingForAnOwnerReadOnlyIncluded() {
-    assertEquals(
-        Optional.empty(),
-        Access.notRunOwner(
-            Actors.ADMIN,
-            Resources.run("r1", "acme", null, "auth", null, spec -> Optional.empty())));
-    assertEquals(
-        Optional.empty(),
-        Access.notRunOwner(
-            Actors.OWNER_API,
-            Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
-    assertEquals(
-        Optional.empty(),
-        Access.notRunOwner(
-            Actors.VIEWER,
-            Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
-    assertEquals(
-        Optional.empty(),
-        Access.notRunOwner(
-            Actors.ROOM,
-            Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
-    assertEquals(
-        Optional.of(Refusal.Kind.NOT_OWNER),
-        Access.notRunOwner(
-                Actors.MACHINE,
-                Resources.run(
-                    "r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol")))
-            .map(Refusal::kind));
-    assertEquals(
-        Optional.of(Refusal.Kind.NOT_OWNER),
-        Access.notRunOwner(
-                Actors.OTHERS_AGENT,
-                Resources.run(
-                    "r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol")))
-            .map(Refusal::kind));
-  }
-
-  @Test
   void theOwnershipStepOfARunSpeaksTheTextsClientsSee() {
     assertEquals(
-        Optional.of(
-            new Refusal(
-                Refusal.Kind.NOT_OWNER,
-                "Run r1 belongs to spec 'auth', owned by 'ada' and 'carol', not you.",
-                "Only ada or carol or an admin may access this run.")),
-        Access.notRunOwner(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "Run r1 belongs to spec 'auth', owned by 'ada' and 'carol', not you.",
+            "Only ada or carol or an admin may access this run."),
+        Access.decide(
             Actors.OTHER_API,
+            Action.OPERATE_RUN,
             Resources.run("r1", "acme", Actors.OWNER, "auth", null, spec -> Optional.of("carol"))));
     assertEquals(
-        Optional.of(
-            new Refusal(
-                Refusal.Kind.NOT_OWNER,
-                "Run r1 is an ad-hoc session launched by 'ada', not you.",
-                "Only ada or an admin may access this run.")),
-        Access.notRunOwner(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "Run r1 is an ad-hoc session launched by 'ada', not you.",
+            "Only ada or an admin may access this run."),
+        Access.decide(
             Actors.OTHER_API,
+            Action.OPERATE_RUN,
             Resources.run("r1", "acme", Actors.OWNER, null, null, spec -> Optional.empty())));
     assertEquals(
-        Optional.of(
-            new Refusal(
-                Refusal.Kind.NOT_OWNER,
-                "Run r1 belongs to spec 'auth', which has no owner.",
-                "Only its owner or an admin may access this run.")),
-        Access.notRunOwner(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "Run r1 belongs to spec 'auth', which has no owner.",
+            "Only its owner or an admin may access this run."),
+        Access.decide(
             Actors.OTHER_API,
+            Action.OPERATE_RUN,
             Resources.run("r1", "acme", null, "auth", null, spec -> Optional.empty())));
     assertEquals(
-        "Run r1 names no spec and no one it acts for.",
-        Access.notRunOwner(
-                Actors.OTHER_API,
-                Resources.run("r1", "acme", null, null, null, spec -> Optional.empty()))
-            .orElseThrow()
-            .message());
-    assertEquals(
-        Optional.empty(),
-        Access.notRunOwner(
-            Actors.AGENT,
-            Resources.run("r1", "acme", Actors.OWNER, null, null, spec -> Optional.empty())));
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "Run r1 names no spec and no one it acts for.",
+            "Only an admin may access this run."),
+        Access.decide(
+            Actors.OTHER_API,
+            Action.OPERATE_RUN,
+            Resources.run("r1", "acme", null, null, null, spec -> Optional.empty())));
   }
 
   private static void add(

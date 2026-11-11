@@ -33,11 +33,9 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -127,8 +125,7 @@ class DisabledFdeTest {
     assertEquals(200, socket(runCredential).status());
     assertEquals("mady", CliOperator.of(MAIN, new FdeStore(db)).handle());
     assertInstanceOf(SshGateway.Authorized.class, gateway());
-    assertEquals(
-        "mady", new HostAccess(db, TestAuth.roles(db, MAIN)).identity(session, null).fde());
+    assertEquals("mady", new HostAccess(db, TestAuth.roles(db, MAIN)).identity(session).fde());
   }
 
   @Test
@@ -150,7 +147,7 @@ class DisabledFdeTest {
     var terminal =
         assertThrows(
             IOException.class,
-            () -> new HostAccess(db, TestAuth.roles(db, MAIN)).identity(session, null));
+            () -> new HostAccess(db, TestAuth.roles(db, MAIN)).identity(session));
     assertTrue(terminal.getMessage().contains("disabled"), "the terminal");
   }
 
@@ -214,14 +211,7 @@ class DisabledFdeTest {
   }
 
   private ApiResponse socket(String method, String path, String credential, String form) {
-    return new LocalApiRouter(operations)
-        .handle(
-            new LocalApiRequest(
-                method,
-                path,
-                Map.of(),
-                Map.of("authorization", "Bearer " + credential),
-                form.getBytes(StandardCharsets.UTF_8)));
+    return new SocketDoor(operations).ask(method, path, credential, form);
   }
 
   private String reserveRun(String owner, String project, String specId) {

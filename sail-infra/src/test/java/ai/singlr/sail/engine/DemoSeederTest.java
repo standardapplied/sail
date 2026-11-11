@@ -78,7 +78,8 @@ class DemoSeederTest {
   @Test
   void aNodesFirstRoundLetsItsSeedGoWithNoNotice() throws Exception {
     DemoSeeder.seedIfAbsent(db, true);
-    var ada = Actor.sync("ada", Role.MEMBER).withScope(ProjectScope.of(List.of("acme")));
+    var ada =
+        new Actor("ada", Role.MEMBER, Actor.Lane.SYNC).withScope(ProjectScope.of(List.of("acme")));
     try (var main = new SyncBox("main")) {
       var syncing =
           new SyncOperations(

@@ -13,6 +13,9 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
@@ -22,6 +25,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,6 +36,8 @@ import org.junit.jupiter.api.Test;
  * FDE may not read is not found ({@code ScopedReadsTest}).
  */
 class HostAccessTest {
+
+  private static final SyncConfig ADAS_NODE = new SyncConfig("node", "sail@main", "ada", "ada-box");
 
   private Sqlite db;
   private HostAccess access;
@@ -70,27 +76,54 @@ class HostAccessTest {
   }
 
   @Test
-  void aSessionWithNoTokenIsTheBoxsFdeWithItsRoleAndABoxWithNoneIsRefused() throws IOException {
-    assertEquals(new PtyIdentity("root", true), access.identity(null, "root"));
-    assertEquals(new PtyIdentity("ada", false), access.identity(" ", "ada"));
+  void aSessionWithNoTokenIsTheBoxsPersonOnTheCliLaneAndABoxWithNoneIsRefused() throws IOException {
+    var fdes = new FdeStore(db);
+    fdes.restrict("ada");
+    fdes.grant("ada", "acme");
+    var adas = new HostAccess(db, TestAuth.roles(db, ADAS_NODE));
+
+    assertEquals(
+        new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.CLI)),
+        access.identity(null));
+    assertEquals(
+        new PtyIdentity.Person(
+            new Actor("ada", Role.MEMBER, Actor.Lane.CLI)
+                .withScope(ProjectScope.of(List.of("acme")))),
+        adas.identity(" "));
     assertEquals(
         "This box has no FDE identity. Set one with 'sail host config set sync-handle <handle>' or"
             + " connect through the gateway.",
-        assertThrows(Remedied.Io.class, () -> access.identity(null, " ")).getMessage());
+        assertThrows(
+                Remedied.Io.class,
+                () -> new HostAccess(db, TestAuth.roles(db, SyncConfig.unset())).identity(null))
+            .getMessage());
     assertEquals(
         "Session token is not valid or has expired.",
-        assertThrows(IOException.class, () -> access.identity("nope", "ada")).getMessage());
+        assertThrows(IOException.class, () -> access.identity("nope")).getMessage());
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'ada'");
+    assertEquals(
+        "FDE 'ada' is disabled or not in this box's roster. Ask an admin to re-enable it, or run"
+            + " 'sail sync' on a node that has not synced its roster.",
+        assertThrows(Remedied.Io.class, () -> adas.identity(null)).getMessage());
   }
 
   @Test
-  void aSessionTokenIsItsFdeWithItsRole() throws IOException {
+  void aSessionTokenIsItsFdeOnTheApiLaneWithItsRoleAndScope() throws IOException {
     var sessions = new AuthSessionStore(db);
     var fdes = new FdeStore(db);
+    fdes.restrict("ada");
+    fdes.grant("ada", "acme");
     var root = sessions.create(fdes.byHandle("root").orElseThrow().id(), Duration.ofHours(1));
     var ada = sessions.create(fdes.byHandle("ada").orElseThrow().id(), Duration.ofHours(1));
 
-    assertEquals(new PtyIdentity("root", true), access.identity(root.token(), "ada"));
-    assertEquals(new PtyIdentity("ada", false), access.identity(ada.token(), "root"));
+    assertEquals(
+        new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API)),
+        access.identity(root.token()));
+    assertEquals(
+        new PtyIdentity.Person(
+            new Actor("ada", Role.MEMBER, Actor.Lane.API)
+                .withScope(ProjectScope.of(List.of("acme")))),
+        access.identity(ada.token()));
   }
 
   @Test
@@ -102,7 +135,11 @@ class HostAccessTest {
           mismatch,
           assertThrows(
                   IOException.class,
-                  () -> access.admit("lobby", "beta", new PtyIdentity(fde, false)))
+                  () ->
+                      access.admit(
+                          "lobby",
+                          "beta",
+                          new PtyIdentity.Person(new Actor(fde, Role.MEMBER, Actor.Lane.API))))
               .getMessage(),
           fde);
     }
@@ -111,9 +148,14 @@ class HostAccessTest {
             + " credential.",
         assertThrows(
                 Remedied.Io.class,
-                () -> access.admit("lobby", "acme", new PtyIdentity("vic", false)))
+                () ->
+                    access.admit(
+                        "lobby",
+                        "acme",
+                        new PtyIdentity.Person(new Actor("vic", Role.VIEWER, Actor.Lane.API))))
             .getMessage());
 
-    access.admit("lobby", "acme", new PtyIdentity("ada", false));
+    access.admit(
+        "lobby", "acme", new PtyIdentity.Person(new Actor("ada", Role.MEMBER, Actor.Lane.API)));
   }
 }

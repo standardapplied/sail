@@ -738,7 +738,7 @@ class MainRebuiltRoundTest {
     var rev = pushed.latestRev("pushed");
     serving = pulledAfterACopy("copy.db", serving.id(), "r-late-1");
     Acting.by(
-        Actor.sync("mady", Role.MEMBER),
+        new Actor("mady", Role.MEMBER, Actor.Lane.SYNC),
         () -> new SpecStore(nodeDb).applyRevision("pushed", snapshot, rev));
 
     round();

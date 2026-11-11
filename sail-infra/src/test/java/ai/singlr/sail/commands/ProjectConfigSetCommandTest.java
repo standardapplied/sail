@@ -13,6 +13,7 @@ import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -29,12 +30,13 @@ class ProjectConfigSetCommandTest {
   void aCatalogHoldingAcme() {
     mutations =
         new ProjectMutations(
-            new ProjectCatalog(dir.resolve("sail.db")), () -> Actor.cliOperator("uday"));
+            new ProjectCatalog(dir.resolve("sail.db")),
+            () -> new Actor("uday", Role.ADMIN, Actor.Lane.CLI));
     mutations
         .catalog()
         .create(
             TestDefinitions.yaml("name: acme\nimage: ubuntu/24.04\ndescription: Storefront\n"),
-            Actor.cliOperator("uday"));
+            new Actor("uday", Role.ADMIN, Actor.Lane.CLI));
   }
 
   @Test
@@ -90,6 +92,19 @@ class ProjectConfigSetCommandTest {
     assertEquals("[dry-run] write the image section of 'acme'\n", run.out());
     assertEquals("ubuntu/24.04", acme().image());
     assertEquals(1, set("", "acme", "image", "7", "--dry-run").exit(), "still checked");
+  }
+
+  @Test
+  void aDryRunIsRefusedAsTheWriteItRehearses() {
+    mutations =
+        new ProjectMutations(
+            mutations.catalog(), () -> new Actor("vic", Role.VIEWER, Actor.Lane.CLI));
+
+    var run = set("", "acme", "image", "\"x/1\"", "--dry-run");
+
+    assertEquals(1, run.exit());
+    assertEquals("", run.out());
+    assertEquals(set("", "acme", "image", "\"x/1\"").err(), run.err());
   }
 
   @Test

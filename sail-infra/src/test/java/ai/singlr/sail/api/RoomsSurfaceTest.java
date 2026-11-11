@@ -16,6 +16,7 @@ import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
@@ -81,7 +82,7 @@ class RoomsSurfaceTest {
   }
 
   private static Actor admin() {
-    return Actor.cliOperator(HANDLE);
+    return new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI);
   }
 
   private RoomDetailResponse create(String id, String title) {

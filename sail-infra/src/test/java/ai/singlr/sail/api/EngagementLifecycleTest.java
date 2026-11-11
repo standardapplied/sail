@@ -214,7 +214,7 @@ class EngagementLifecycleTest {
 
     var launch =
         Actor.call(
-            Actor.cliOperator(HANDLE),
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
             () -> ops.engage("auth", "claude-code", null, null, false, HANDLE));
 
     assertEquals("full", launch.mode(), "full is the default mode");
@@ -232,7 +232,7 @@ class EngagementLifecycleTest {
 
     var launch =
         Actor.call(
-            Actor.cliOperator(HANDLE),
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
             () -> ops.engage("auth", "claude-code", null, "opus-x", true, HANDLE));
 
     assertEquals("full", launch.mode(), "full is the default mode");
@@ -266,7 +266,7 @@ class EngagementLifecycleTest {
 
     var launch =
         Actor.call(
-            Actor.cliOperator(HANDLE),
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
             () -> ops.engage("auth", "claude-code", "full", null, true, HANDLE));
     launch.completion().run();
 
@@ -287,7 +287,7 @@ class EngagementLifecycleTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    Actor.cliOperator(HANDLE),
+                    new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
                     () -> ops.engage("ghost", "claude-code", null, null, false, HANDLE)));
     assertEquals(ErrorCode.ROOM_NOT_FOUND, ex.failure().errorCode());
   }
@@ -299,7 +299,10 @@ class EngagementLifecycleTest {
     var ex =
         assertThrows(
             ApiException.class,
-            () -> Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("ghost", HANDLE)));
+            () ->
+                Actor.call(
+                    new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
+                    () -> ops.disengage("ghost", HANDLE)));
     assertEquals(ErrorCode.ROOM_NOT_FOUND, ex.failure().errorCode());
   }
 
@@ -310,7 +313,7 @@ class EngagementLifecycleTest {
 
     var launch =
         Actor.call(
-            Actor.cliOperator(HANDLE),
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
             () -> ops.engage("auth", "claude-code", "full", null, true, HANDLE));
     specStore.delete("auth");
     launch.completion().run();
@@ -329,7 +332,7 @@ class EngagementLifecycleTest {
 
     var launch =
         Actor.call(
-            Actor.cliOperator(HANDLE),
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
             () -> ops.engage("auth", "claude-code", "read-only", null, true, HANDLE));
 
     assertNull(launch.completion(), "nothing is deferred — no payment to make");
@@ -350,7 +353,7 @@ class EngagementLifecycleTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    Actor.cliOperator(HANDLE),
+                    new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
                     () -> ops.engage("auth", "codex", "read-only", null, false, HANDLE)));
 
     assertEquals(ErrorCode.BAD_REQUEST, refusal.failure().errorCode());
@@ -366,13 +369,13 @@ class EngagementLifecycleTest {
         ApiException.class,
         () ->
             Actor.call(
-                Actor.cliOperator(HANDLE),
+                new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
                 () -> ops.engage("auth", "claude-code", "yolo", null, false, HANDLE)));
     assertThrows(
         ApiException.class,
         () ->
             Actor.call(
-                Actor.cliOperator(HANDLE),
+                new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
                 () -> ops.engage("auth", "hal9000", null, null, false, HANDLE)));
     assertNull(stored("auth"));
     assertTrue(events.isEmpty());
@@ -411,7 +414,7 @@ class EngagementLifecycleTest {
                                   continued.completeExceptionally(failure);
                                 }
                               }));
-      var requester = Actor.cliOperator("mady");
+      var requester = new Actor("mady", Role.ADMIN, Actor.Lane.CLI);
 
       var engaged =
           Acting.by(
@@ -452,7 +455,7 @@ class EngagementLifecycleTest {
 
       var engaged =
           Actor.call(
-              Actor.cliOperator(HANDLE),
+              new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
               () ->
                   sailOps.addRoomMember(
                       "auth", new EngageRequest("claude-code", null, null, true), HANDLE));
@@ -464,7 +467,7 @@ class EngagementLifecycleTest {
 
       var refused =
           Actor.call(
-              Actor.cliOperator(HANDLE),
+              new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
               () ->
                   sailOps.addRoomMember(
                       "auth", new EngageRequest("codex", "read-only", null, false), HANDLE));
@@ -472,7 +475,7 @@ class EngagementLifecycleTest {
 
       var membersAdd =
           Actor.call(
-              Actor.cliOperator(HANDLE),
+              new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
               () ->
                   sailOps.addRoomMember(
                       "auth", new EngageRequest("claude-code", "read_only", null, false), HANDLE));
@@ -483,7 +486,7 @@ class EngagementLifecycleTest {
       assertEquals(1, ((Result.Success<RoomMembersResponse>) listed).value().members().size());
       var posted =
           Actor.call(
-              Actor.cliOperator(HANDLE),
+              new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
               () ->
                   sailOps.postRoomMessage(
                       "auth",
@@ -494,23 +497,29 @@ class EngagementLifecycleTest {
       assertTrue(roomList instanceof Result.Success<SpecMessagesResponse>);
       assertEquals(1, ((Result.Success<SpecMessagesResponse>) roomList).value().messages().size());
       var removed =
-          Actor.call(Actor.cliOperator(HANDLE), () -> sailOps.removeRoomMember("auth", HANDLE));
+          Actor.call(
+              new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
+              () -> sailOps.removeRoomMember("auth", HANDLE));
       assertTrue(removed instanceof Result.Success<DisengageResponse>);
       assertEquals("claude-code", ((Result.Success<DisengageResponse>) removed).value().agent());
       Actor.call(
-          Actor.cliOperator(HANDLE),
+          new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
           () ->
               sailOps.addRoomMember(
                   "auth", new EngageRequest("claude-code", null, null, true), HANDLE));
 
       var dismissed =
-          Actor.call(Actor.cliOperator(HANDLE), () -> sailOps.removeRoomMember("auth", HANDLE));
+          Actor.call(
+              new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
+              () -> sailOps.removeRoomMember("auth", HANDLE));
       assertTrue(dismissed instanceof Result.Success<DisengageResponse>);
       assertEquals("claude-code", ((Result.Success<DisengageResponse>) dismissed).value().agent());
       assertNull(stored("auth"));
 
       var empty =
-          Actor.call(Actor.cliOperator(HANDLE), () -> sailOps.removeRoomMember("auth", HANDLE));
+          Actor.call(
+              new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
+              () -> sailOps.removeRoomMember("auth", HANDLE));
       assertTrue(empty instanceof Result.Success<DisengageResponse>);
       assertNull(((Result.Success<DisengageResponse>) empty).value().agent());
     }
@@ -521,10 +530,12 @@ class EngagementLifecycleTest {
     var ops = operations(shell());
     seedSpec("auth");
     Actor.call(
-        Actor.cliOperator(HANDLE),
+        new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
         () -> ops.engage("auth", "claude-code", "read-only", null, false, HANDLE));
 
-    var dismissed = Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("auth", HANDLE));
+    var dismissed =
+        Actor.call(
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI), () -> ops.disengage("auth", HANDLE));
 
     assertEquals("claude-code", dismissed);
     assertNull(stored("auth"));
@@ -533,7 +544,8 @@ class EngagementLifecycleTest {
     assertEquals("claude-code", left.getFirst().data().get("agent"));
 
     assertNull(
-        Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("auth", HANDLE)),
+        Actor.call(
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI), () -> ops.disengage("auth", HANDLE)),
         "dismissing an empty room is a no-op, not an error");
     assertEquals(1, ofType(Event.WellKnownTypes.SPEC_DISENGAGED).size());
   }
@@ -570,7 +582,7 @@ class EngagementLifecycleTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    Actor.cliOperator(HANDLE),
+                    new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
                     () -> unwired.engage("auth", "claude-code", null, null, false, HANDLE)));
 
     assertEquals(ErrorCode.COMMAND_FAILED, refusal.failure().errorCode());
@@ -694,7 +706,7 @@ class EngagementLifecycleTest {
 
     var launch =
         Actor.call(
-            Actor.cliOperator(HANDLE),
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
             () -> ops.engage("chat-room", "claude-code", "read-only", null, false, HANDLE));
     assertEquals("read_only", launch.mode());
     assertNull(launch.completion(), "no spec, no snapshot offer — nothing to anchor a rollback");
@@ -703,10 +715,14 @@ class EngagementLifecycleTest {
 
     assertEquals(
         "claude-code",
-        Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("chat-room", HANDLE)));
+        Actor.call(
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
+            () -> ops.disengage("chat-room", HANDLE)));
     assertNull(roomMember("chat-room"));
     assertNull(
-        Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("chat-room", HANDLE)),
+        Actor.call(
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
+            () -> ops.disengage("chat-room", HANDLE)),
         "dismissing an empty room is a no-op");
   }
 
@@ -734,7 +750,7 @@ class EngagementLifecycleTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    Actor.cliOperator(HANDLE),
+                    new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
                     () -> ops.engage("picky-room", "claude-code", "yolo", null, false, HANDLE)));
     assertEquals(ErrorCode.BAD_REQUEST, badMode.failure().errorCode());
 
@@ -743,7 +759,7 @@ class EngagementLifecycleTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    Actor.cliOperator(HANDLE),
+                    new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
                     () -> ops.engage("picky-room", "codex", "read-only", null, false, HANDLE)));
     assertEquals(ErrorCode.BAD_REQUEST, codexReadOnly.failure().errorCode());
     assertNull(roomMember("picky-room"), "no refused engage seats anyone");
@@ -765,18 +781,19 @@ class EngagementLifecycleTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    Actor.cliOperator(HANDLE),
+                    new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
                     () -> ops.engage("open-room", "claude-code", null, null, false, HANDLE)));
     assertEquals(ErrorCode.NOT_YOUR_SPEC, ex.failure().errorCode());
     assertTrue(ex.getMessage().contains("belongs to 'ada'"), ex.getMessage());
 
     Actor.call(
-        Actor.cliOperator("ada"),
+        new Actor("ada", Role.ADMIN, Actor.Lane.CLI),
         () -> ops.engage("open-room", "claude-code", null, null, false, "ada"));
     assertNotNull(roomMember("open-room"), "its creator's box seats the member");
     assertEquals(
         "claude-code",
-        Actor.call(Actor.cliOperator("ada"), () -> ops.disengage("open-room", "ada")));
+        Actor.call(
+            new Actor("ada", Role.ADMIN, Actor.Lane.CLI), () -> ops.disengage("open-room", "ada")));
   }
 
   @Test
@@ -794,7 +811,7 @@ class EngagementLifecycleTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    Actor.cliOperator(HANDLE),
+                    new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
                     () -> ops.engage("ada-room", "claude-code", null, null, false, HANDLE)));
     assertEquals(ErrorCode.NOT_YOUR_SPEC, ex.failure().errorCode());
   }
@@ -805,7 +822,7 @@ class EngagementLifecycleTest {
     seedSpec("auth");
 
     Actor.call(
-        Actor.cliOperator(HANDLE),
+        new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
         () -> ops.engage("auth", "claude-code", null, null, false, HANDLE));
 
     var member = roomMember("auth");
@@ -826,11 +843,11 @@ class EngagementLifecycleTest {
     var ops = operations(shell());
     seedSpec("auth");
     Actor.call(
-        Actor.cliOperator(HANDLE),
+        new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
         () -> ops.engage("auth", "claude-code", "read-only", null, false, HANDLE));
     assertNotNull(roomMember("auth"));
 
-    Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("auth", HANDLE));
+    Actor.call(new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI), () -> ops.disengage("auth", HANDLE));
 
     assertNull(roomMember("auth"), "the roster empties");
     assertNull(stored("auth"), "the roster clears with it");
@@ -845,7 +862,7 @@ class EngagementLifecycleTest {
     seedSpec("auth");
     var launch =
         Actor.call(
-            Actor.cliOperator(HANDLE),
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
             () -> ops.engage("auth", "claude-code", "full", null, true, HANDLE));
     specStore.compareAndSetStatus("auth", SpecStatus.DRAFT, SpecStatus.IN_PROGRESS);
 
@@ -868,14 +885,14 @@ class EngagementLifecycleTest {
     assertTrue(ops.roomMembers("auth").isEmpty(), "a fresh room seats nobody");
 
     Actor.call(
-        Actor.cliOperator(HANDLE),
+        new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
         () -> ops.engage("auth", "claude-code", "read-only", null, false, HANDLE));
     var members = ops.roomMembers("auth");
     assertEquals(1, members.size());
     assertEquals("claude-code", members.getFirst().agent());
     assertEquals("read_only", members.getFirst().mode());
 
-    Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("auth", HANDLE));
+    Actor.call(new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI), () -> ops.disengage("auth", HANDLE));
     assertTrue(ops.roomMembers("auth").isEmpty(), "dismissal empties the roster");
 
     var missing = assertThrows(ApiException.class, () -> ops.roomMembers("ghost"));
@@ -924,12 +941,13 @@ class EngagementLifecycleTest {
     var ops = operations(shell());
     seedSpec("auth");
     Actor.call(
-        Actor.cliOperator(HANDLE),
+        new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
         () -> ops.engage("auth", "claude-code", "read-only", null, false, HANDLE));
     roomStore.updateRoster("auth", null);
 
     assertNull(
-        Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("auth", HANDLE)),
+        Actor.call(
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI), () -> ops.disengage("auth", HANDLE)),
         "the room row is authoritative: an empty roster means nobody is seated");
   }
 }

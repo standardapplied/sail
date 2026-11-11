@@ -33,7 +33,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -114,6 +113,68 @@ class WriteAuthorshipTest {
   }
 
   @Test
+  void aMachineTokensRoomPostIsRefusedByTheMessageRuleAsNoOnesPost() throws Exception {
+    try (var operations = operations(() -> SyncConfig.unset());
+        var server = server(operations)) {
+      var uday = token("uday", "member");
+      var room =
+          send(
+              server,
+              "POST",
+              "/v1/rooms",
+              uday,
+              "{\"id\": \"lobby\", \"project\": \"acme\", \"title\": \"Lobby\"}");
+      assertEquals(201, room.statusCode(), room.body());
+      var machine = new TokenStore(db).create("ci-bot", "member").token();
+
+      var posted = send(server, "POST", "/v1/rooms/lobby/messages", machine, "{\"body\": \"hi\"}");
+
+      assertEquals(403, posted.statusCode(), posted.body());
+      assertEquals(
+          Map.of(
+              "code",
+              "forbidden_not_author",
+              "message",
+              "This credential acts for no FDE, so a post in 'lobby' would be no one's.",
+              "action",
+              "Post with an FDE's own credential.",
+              "field_errors",
+              List.of()),
+          YamlUtil.parseMap(posted.body()).get("error"));
+    }
+  }
+
+  @Test
+  void anAdminMachineTokenIsRefusedAPostAsAnyNoOnesPostIs() throws Exception {
+    try (var operations = operations(() -> SyncConfig.unset());
+        var server = server(operations)) {
+      var uday = token("uday", "member");
+      send(
+          server,
+          "POST",
+          "/v1/rooms",
+          uday,
+          "{\"id\": \"lobby\", \"project\": \"acme\", \"title\": \"Lobby\"}");
+      var machine = new TokenStore(db).create("ops-bot", "admin").token();
+
+      var posted = send(server, "POST", "/v1/rooms/lobby/messages", machine, "{\"body\": \"hi\"}");
+
+      assertEquals(403, posted.statusCode(), posted.body());
+      assertEquals(
+          Map.of(
+              "code",
+              "forbidden_not_author",
+              "message",
+              "This credential acts for no FDE, so a post in 'lobby' would be no one's.",
+              "action",
+              "Post with an FDE's own credential.",
+              "field_errors",
+              List.of()),
+          YamlUtil.parseMap(posted.body()).get("error"));
+    }
+  }
+
+  @Test
   void aSocketWriteIsAuthoredByTheRunsPrincipal() {
     new FdeStore(db).add("uday", null, null, "member");
     try (var operations = operations(() -> SyncConfig.unset());
@@ -134,13 +195,13 @@ class WriteAuthorshipTest {
                       "claude-code",
                       List.of()));
       var principal = runs.findByCredential(credential).orElseThrow().principal();
-      var router = new LocalApiRouter(operations);
+      var router = new SocketDoor(operations);
 
-      var status = router.handle(put("/v1/specs/auth", credential, "status=pending"));
+      var status = router.ask("PUT", "/v1/specs/auth", credential, "status=pending");
       assertEquals(200, status.status(), status.body().toString());
       assertAuthoredBy("auth", principal);
 
-      var content = router.handle(put("/v1/specs/auth/content", credential, "body=reviewed"));
+      var content = router.ask("PUT", "/v1/specs/auth/content", credential, "body=reviewed");
       assertEquals(200, content.status(), content.body().toString());
       assertAuthoredBy("auth", principal);
     }
@@ -281,15 +342,6 @@ class WriteAuthorshipTest {
     try (var client = HttpClient.newHttpClient()) {
       return client.send(request, HttpResponse.BodyHandlers.ofString());
     }
-  }
-
-  private static LocalApiRequest put(String path, String credential, String form) {
-    return new LocalApiRequest(
-        "PUT",
-        path,
-        Map.of(),
-        Map.of("authorization", "Bearer " + credential),
-        form.getBytes(StandardCharsets.UTF_8));
   }
 
   private static SpecStore.SpecRow spec(String id, String assignee) {

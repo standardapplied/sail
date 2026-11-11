@@ -182,7 +182,7 @@ class ReviewStoreTest {
             IllegalArgumentException.class,
             () ->
                 Actor.call(
-                    Actor.sync("ada", Role.MEMBER),
+                    new Actor("ada", Role.MEMBER, Actor.Lane.SYNC),
                     () -> store.commitRevision(adas, offered, adasRev, store.authority())));
     assertTrue(refused.getMessage().contains(bobsStage), refused.getMessage());
     assertEquals(List.of(), store.findingsForReview(bobs), "Bob's review holds no foreign finding");

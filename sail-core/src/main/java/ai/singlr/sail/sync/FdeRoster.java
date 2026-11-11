@@ -17,7 +17,4 @@ import java.util.Map;
 public interface FdeRoster {
 
   List<Map<String, Object>> entries();
-
-  /** A roster with no identities — for sessions, like the test harness, that only sync specs. */
-  FdeRoster EMPTY = List::of;
 }

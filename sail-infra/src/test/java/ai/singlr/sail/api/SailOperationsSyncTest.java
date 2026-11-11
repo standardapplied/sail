@@ -69,7 +69,9 @@ class SailOperationsSyncTest {
     var operations = operations(scheduler(), store -> {});
 
     var result =
-        Acting.by(Actor.cliOperator("uday"), () -> operations.createGlobalSpec(create("auth")));
+        Acting.by(
+            new Actor("uday", Role.ADMIN, Actor.Lane.CLI),
+            () -> operations.createGlobalSpec(create("auth")));
 
     assertInstanceOf(Result.Success.class, result);
     assertEquals(1, rounds.get());
@@ -94,7 +96,8 @@ class SailOperationsSyncTest {
 
     var result =
         Acting.by(
-            Actor.cliOperator("uday"), () -> operations.createGlobalSpec(create("c-beta", "beta")));
+            new Actor("uday", Role.ADMIN, Actor.Lane.CLI),
+            () -> operations.createGlobalSpec(create("c-beta", "beta")));
 
     var failure = assertInstanceOf(Result.Failure.class, result);
     assertEquals(ErrorCode.NOT_FOUND, failure.errorCode());
@@ -115,13 +118,17 @@ class SailOperationsSyncTest {
             store -> {});
 
     var result =
-        Acting.by(Actor.cliOperator("uday"), () -> operations.createGlobalSpec(create("auth")));
+        Acting.by(
+            new Actor("uday", Role.ADMIN, Actor.Lane.CLI),
+            () -> operations.createGlobalSpec(create("auth")));
 
     assertInstanceOf(Result.Success.class, result);
     assertEquals(1, rounds.get());
     assertInstanceOf(
         Result.Success.class,
-        Acting.by(Actor.cliOperator("uday"), () -> operations.createGlobalSpec(create("billing"))));
+        Acting.by(
+            new Actor("uday", Role.ADMIN, Actor.Lane.CLI),
+            () -> operations.createGlobalSpec(create("billing"))));
     assertEquals(2, rounds.get());
   }
 
@@ -151,7 +158,7 @@ class SailOperationsSyncTest {
               assertInstanceOf(
                   Result.Success.class,
                   Acting.by(
-                      Actor.cliOperator("uday"),
+                      new Actor("uday", Role.ADMIN, Actor.Lane.CLI),
                       () -> operations.createGlobalSpec(create("auth"))));
             });
 
@@ -163,12 +170,12 @@ class SailOperationsSyncTest {
     var operations = operations(scheduler(), new EventBus(), plainShell(), store -> {});
 
     Acting.by(
-        Actor.cliOperator("uday"),
+        new Actor("uday", Role.ADMIN, Actor.Lane.CLI),
         () -> operations.publishEvent(event(Event.WellKnownTypes.SPEC_DISPATCHED)));
     assertEquals(1, rounds.get());
 
     Acting.by(
-        Actor.cliOperator("uday"),
+        new Actor("uday", Role.ADMIN, Actor.Lane.CLI),
         () -> operations.publishEvent(event(Event.WellKnownTypes.AGENT_TOOL_STARTED)));
     assertEquals(1, rounds.get());
   }

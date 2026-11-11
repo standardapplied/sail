@@ -5,12 +5,17 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.auth.EnrollmentService;
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.Banner;
@@ -25,6 +30,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SyncIdentity;
 import ai.singlr.sail.engine.WorkstationIdentity;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -58,6 +64,7 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -98,36 +105,43 @@ public final class FdeCommand implements Runnable {
 
   /**
    * What a pairing touches on this box: the control plane, the operator (the account {@code
-   * sail-api} runs as, whose home holds the pty socket Mast forwards to), the SSH host key a code
-   * pins, the workstation key containers trust and the main a node syncs with ({@code null} on main
-   * or a lone box). A test puts all of it under a temporary directory.
+   * sail-api} runs as, whose home holds the pty socket Mast forwards to), the box's sync
+   * configuration, which names its FDE and the main a node syncs with, the SSH host key a code pins
+   * and the workstation key containers trust. A test puts all of it under a temporary directory.
    */
   record Box(
       Path database,
       String operator,
-      String handle,
+      SyncConfig sync,
       Path home,
       Path hostKey,
       Path workstationKey,
-      ShellExec shell,
-      String main) {
+      ShellExec shell) {
 
     static Box here() {
-      var sync = HostSync.config();
       return new Box(
           SailPaths.controlPlaneDb(),
           System.getProperty("user.name"),
-          sync.handle(),
+          HostSync.config(),
           Path.of(System.getProperty("user.home")),
           Path.of("/etc/ssh/ssh_host_ed25519_key.pub"),
           SailPaths.workstationPublicKeyPath(),
-          new ShellExecutor(false),
-          HostSync.isNode(sync) ? sync.main() : null);
+          new ShellExecutor(false));
+    }
+
+    /** The FDE this box is, named by its sync handle. */
+    String handle() {
+      return sync.handle();
+    }
+
+    /** The main a node syncs with; {@code null} on main or a lone box. */
+    String main() {
+      return node() ? sync.main() : null;
     }
 
     /** Whether this box is a node, whose roster is a copy of main's. */
     boolean node() {
-      return main != null;
+      return HostSync.isNode(sync);
     }
 
     /**
@@ -156,7 +170,7 @@ public final class FdeCommand implements Runnable {
 
   @Override
   public void run() {
-    new picocli.CommandLine(this).usage(System.out);
+    CommandLine.usage(this, System.out);
   }
 
   private static OperatorCommand operator() {
@@ -351,12 +365,16 @@ public final class FdeCommand implements Runnable {
   }
 
   /**
-   * Refuses an FDE roster edit on a node. The roster is main-authoritative and replicates one-way,
-   * so an add/update/remove on a node is silently overwritten by the next sync — failing loud with
-   * the right place to run it is far better than losing the edit.
+   * Refuses an FDE roster edit unless whom this box's root acts for may manage people, as {@link
+   * Access} decides it at every door, then refuses it on a node. The roster is main-authoritative
+   * and replicates one-way, so an add/update/remove on a node is silently overwritten by the next
+   * sync — failing loud with the right place to run it is far better than losing the edit. The role
+   * is asked first, so one who may not manage people is told so wherever they ask, and only one who
+   * may is sent to main.
    */
-  private static void requireMainForRosterEdit(boolean node, String action) {
-    if (node) {
+  private static void requireRosterEdit(Box box, String action) {
+    Refusals.enforce(Access.atAll(Actor.reader(), Action.MANAGE_PEOPLE, Resource.Kind.PEOPLE));
+    if (box.node()) {
       throw new IllegalStateException(rosterEditOnNodeMessage(action));
     }
   }
@@ -462,7 +480,7 @@ public final class FdeCommand implements Runnable {
           () -> {
             var operator = operator();
             var box = command.box.get();
-            requireMainForRosterEdit(box.node(), "Adding an FDE");
+            requireRosterEdit(box, "Adding an FDE");
             if (scoped) {
               requireNotThisBoxsOwn(box, handle);
             }
@@ -596,7 +614,7 @@ public final class FdeCommand implements Runnable {
             var operator = operator();
             requireOneScopeChange(operator);
             var box = command.box.get();
-            requireMainForRosterEdit(box.node(), "Updating an FDE");
+            requireRosterEdit(box, "Updating an FDE");
             if (displayName == null && email == null && role == null && !scoped && !unscoped) {
               throw new IllegalArgumentException(
                   "Nothing to update. Pass --name, --email, --role, --scoped (with --grant) or"
@@ -777,7 +795,7 @@ public final class FdeCommand implements Runnable {
           () -> {
             var operator = operator();
             var box = command.box.get();
-            requireMainForRosterEdit(box.node(), "Granting a project");
+            requireRosterEdit(box, "Granting a project");
             requireNotThisBoxsOwn(box, handle);
             try (var db = Sqlite.open(box.database())) {
               System.out.println(scopeEdit(db, handle, project, true, dryRun, json, operator));
@@ -814,7 +832,7 @@ public final class FdeCommand implements Runnable {
           () -> {
             var operator = operator();
             var box = command.box.get();
-            requireMainForRosterEdit(box.node(), "Revoking a project");
+            requireRosterEdit(box, "Revoking a project");
             try (var db = Sqlite.open(box.database())) {
               System.out.println(scopeEdit(db, handle, project, false, dryRun, json, operator));
             }
@@ -963,7 +981,7 @@ public final class FdeCommand implements Runnable {
           () -> {
             var operator = operator();
             var box = command.box.get();
-            requireMainForRosterEdit(box.node(), "Removing an FDE");
+            requireRosterEdit(box, "Removing an FDE");
             if (!force) {
               ConsoleHelper.confirmDestructive(
                   "Remove FDE '" + handle + "' and revoke all its credentials?",
@@ -1482,7 +1500,7 @@ public final class FdeCommand implements Runnable {
 
     @Override
     public void run() {
-      new picocli.CommandLine(this).usage(System.out);
+      CommandLine.usage(this, System.out);
     }
 
     private Path database() {
@@ -1639,7 +1657,7 @@ public final class FdeCommand implements Runnable {
 
     @Override
     public void run() {
-      new picocli.CommandLine(this).usage(System.out);
+      CommandLine.usage(this, System.out);
     }
 
     private Path database() {

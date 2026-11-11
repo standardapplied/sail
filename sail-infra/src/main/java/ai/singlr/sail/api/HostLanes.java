@@ -41,7 +41,9 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /** The host facets as thin adapters over the stores and the shared executors. */
@@ -49,7 +51,11 @@ final class HostLanes {
   private HostLanes() {}
 
   record Dispatching(
-      DispatchOperations dispatchOps, StopOperations stopOps, RunStore runs, ShellExec shell)
+      DispatchOperations dispatchOps,
+      StopOperations stopOps,
+      RunStore runs,
+      Function<String, Optional<SpecStore.SpecRow>> specs,
+      ShellExec shell)
       implements HostDispatching {
     @Override
     public DispatchOperations.Outcome dispatch(
@@ -109,7 +115,34 @@ final class HostLanes {
     }
 
     @Override
-    public Optional<RunStore.RunRow> latestRunInLane(String project, String node, Lane lane) {
+    public Optional<RunStore.RunRow> latestOperable(String project, String node) {
+      return operable(project, node, () -> latestRun(project, node));
+    }
+
+    @Override
+    public Optional<RunStore.RunRow> latestOperable(String project, String node, Lane lane) {
+      Objects.requireNonNull(lane, "lane");
+      return operable(project, node, () -> latestInLane(project, node, lane));
+    }
+
+    /**
+     * The run {@code latest} finds, once the reader reads {@code project}, if it may operate it.
+     */
+    private Optional<RunStore.RunRow> operable(
+        String project, String node, Supplier<Optional<RunStore.RunRow>> latest) {
+      var actor = Actor.reader();
+      ProjectGate.requireReads(project);
+      return latest
+          .get()
+          .map(
+              run ->
+                  switch (LogAdmission.of(actor, Optional.of(run), run.id(), node, specs)) {
+                    case Result.Success<RunStore.RunRow> admitted -> admitted.value();
+                    case Result.Failure<RunStore.RunRow> refused -> throw ApiException.of(refused);
+                  });
+    }
+
+    private Optional<RunStore.RunRow> latestInLane(String project, String node, Lane lane) {
       return runs.listForProject(project).stream()
           .filter(run -> lane.matches(run.role()))
           .filter(run -> run.ownedBy(node))
@@ -134,6 +167,11 @@ final class HostLanes {
     @Override
     public List<ProjectStore.ProjectRow> projects() {
       return projectStore.list();
+    }
+
+    @Override
+    public ProjectStore.ProjectRow readable(String project) {
+      return ProjectGate.readable(projectStore, project);
     }
 
     @Override
@@ -278,13 +316,27 @@ final class HostLanes {
 
   record Pty(Sqlite db, RoleRule roles, EventStore events) implements HostPty {
     @Override
-    public PtyIdentity identity(String token, String boxHandle) throws IOException {
-      return new HostAccess(db, roles).identity(token, boxHandle);
+    public PtyIdentity.Person identity(String token) throws IOException {
+      return new HostAccess(db, roles).identity(token);
+    }
+
+    /**
+     * Admits {@code identity} into {@code project} when it holds the project on this box ({@link
+     * ProjectGate#readable}): the catalog holds it and its person's scope admits it, whatever their
+     * role. One it does not hold is not in the catalog, as a project this box does not have.
+     */
+    @Override
+    public void admitProject(String project, PtyIdentity.Person who) throws IOException {
+      try {
+        Actor.run(who.actor(), () -> ProjectGate.readable(new ProjectStore(db), project));
+      } catch (ApiException absent) {
+        throw Remedied.io(absent.reason(), absent.remedy());
+      }
     }
 
     @Override
-    public void admitRoom(String room, String project, PtyIdentity identity) throws IOException {
-      new HostAccess(db, roles).admit(room, project, identity);
+    public void admitRoom(String room, String project, PtyIdentity.Person who) throws IOException {
+      new HostAccess(db, roles).admit(room, project, who);
     }
 
     @Override

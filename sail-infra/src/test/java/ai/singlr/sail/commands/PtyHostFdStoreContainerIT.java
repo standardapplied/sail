@@ -31,6 +31,7 @@ class PtyHostFdStoreContainerIT extends AbstractIncusIT {
     UserUnitFixture.ensureSystemdOrSkip();
     var container = "sail-it-pty-store";
     try (var fixture = UserUnitFixture.start()) {
+      fixture.holds(container);
       launch(container);
       var prepared =
           exec(

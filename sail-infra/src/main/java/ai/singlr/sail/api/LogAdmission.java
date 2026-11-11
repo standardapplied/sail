@@ -6,7 +6,8 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Access;
-import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
@@ -25,10 +26,11 @@ final class LogAdmission {
   private LogAdmission() {}
 
   /**
-   * Run {@code runId}, {@code found}, when {@code actor} may read its log on this box. A run the
-   * actor may not read is not there, a run that executed elsewhere ({@link
-   * RunStore.RunRow#ownedBy}) is that box's to serve ({@code run_on_other_node}), and the rest is
-   * the ownership step ({@link Access#notRunOwner}), its spec's owner as the actor sees it.
+   * Run {@code runId}, {@code found}, when {@code actor} may read its log on this box, in a stop's
+   * order: a run the actor may not read is not there, one it may not operate ({@link
+   * Action#OPERATE_RUN}), its spec's owner as the actor sees it, is refused, and a run that
+   * executed elsewhere ({@link RunStore.RunRow#ownedBy}) is that box's to serve ({@code
+   * run_on_other_node}).
    */
   static Result<RunStore.RunRow> of(
       Actor actor,
@@ -36,16 +38,16 @@ final class LogAdmission {
       String runId,
       String localHandle,
       Function<String, Optional<SpecStore.SpecRow>> specs) {
-    var run = ReadFilter.readable(actor, found, RunStore.RunRow::project).orElse(null);
+    var run = found.orElse(null);
     if (run == null) {
       return Refusals.noRun(runId);
     }
-    if (!run.ownedBy(localHandle)) {
-      return foreign(run);
-    }
-    return Access.notRunOwner(actor, run.resource(actor, specs))
-        .map(Refusals::<RunStore.RunRow>failure)
-        .orElseGet(() -> Result.success(run));
+    return switch (Access.decide(actor, Action.OPERATE_RUN, run.resource(actor, specs))) {
+      case Decision.NotFound absent -> Refusals.noRun(runId);
+      case Decision.Refused(var refusal) -> Refusals.failure(refusal);
+      case Decision.Allowed allowed ->
+          run.ownedBy(localHandle) ? Result.success(run) : foreign(run);
+    };
   }
 
   /**

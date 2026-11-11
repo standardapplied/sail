@@ -197,7 +197,8 @@ class SyncWireTest {
     var scoped =
         new SyncWire.Welcome(
             4, "0.48.0", "main-box", "nia", 4096, ProjectScope.of(List.of("beta", "alpha")));
-    var ungranted = new SyncWire.Welcome(4, "0.48.0", "main-box", "bob", 4096, ProjectScope.none());
+    var ungranted =
+        new SyncWire.Welcome(4, "0.48.0", "main-box", "bob", 4096, ProjectScope.of(List.of()));
 
     assertFalse(SyncWire.encode(unscoped).contains("scope"));
     assertEquals(
@@ -210,7 +211,7 @@ class SyncWireTest {
     assertEquals(ungranted, SyncWire.decodeResponse(SyncWire.encode(ungranted)));
     assertTrue(SyncWire.encode(ungranted).contains("\"scope\": []"));
     assertEquals(
-        ProjectScope.none(),
+        ProjectScope.of(List.of()),
         ((SyncWire.Welcome)
                 SyncWire.decodeResponse(
                     "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.48.0\","

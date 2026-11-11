@@ -8,17 +8,24 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
+import com.sun.net.httpserver.HttpServer;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,6 +66,43 @@ class SessionAwareAuthTest {
   }
 
   @Test
+  void aSessionIsItsFdeOnTheApiLaneWithTheRoleAndScopeTheRosterGivesIt() throws Exception {
+    var session = sessionFor("mady", "member");
+    fdes.restrict("mady");
+    fdes.grant("mady", "acme");
+    var auth = TestAuth.sessions(db);
+    var http = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    http.createContext(
+        "/",
+        exchange -> {
+          auth.require(exchange);
+          var stamped = ApiAuth.actorOf(exchange).toString().getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(200, stamped.length);
+          try (var body = exchange.getResponseBody()) {
+            body.write(stamped);
+          }
+        });
+    http.start();
+    try (var client = HttpClient.newHttpClient()) {
+      var stamped =
+          client.send(
+              HttpRequest.newBuilder(
+                      URI.create("http://127.0.0.1:" + http.getAddress().getPort() + "/"))
+                  .header("Authorization", "Bearer " + session)
+                  .build(),
+              HttpResponse.BodyHandlers.ofString());
+
+      assertEquals(
+          new Actor("mady", Role.MEMBER, Actor.Lane.API)
+              .withScope(ProjectScope.of(List.of("acme")))
+              .toString(),
+          stamped.body());
+    } finally {
+      http.stop(0);
+    }
+  }
+
+  @Test
   void adminSessionCanReadAndWrite() throws Exception {
     var session = sessionFor("admin-fde", "admin");
     assertEquals(200, send("GET", "/v1/specs/board", session).statusCode());
@@ -81,6 +125,17 @@ class SessionAwareAuthTest {
   @Test
   void invalidSessionTokenIsRejected() throws Exception {
     assertEquals(403, send("GET", "/v1/specs/board", "sess_bogus").statusCode());
+  }
+
+  @Test
+  void aSessionWhoseFdeIsDisabledOrGoneIsRejected() throws Exception {
+    var disabled = sessionFor("gone-quiet", "admin");
+    var removed = sessionFor("gone-away", "admin");
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'gone-quiet'");
+    db.execute("DELETE FROM fdes WHERE handle = 'gone-away'");
+
+    assertEquals(403, send("GET", "/v1/specs/board", disabled).statusCode());
+    assertEquals(403, send("GET", "/v1/specs/board", removed).statusCode());
   }
 
   @Test

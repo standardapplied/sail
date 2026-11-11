@@ -39,8 +39,8 @@ import org.junit.jupiter.api.Test;
  */
 class BoxRunsSyncTest {
 
-  private static final Actor UDAY = Actor.sync("uday", Role.MEMBER);
-  private static final Actor BOB = Actor.sync("bob", Role.MEMBER);
+  private static final Actor UDAY = new Actor("uday", Role.MEMBER, Actor.Lane.SYNC);
+  private static final Actor BOB = new Actor("bob", Role.MEMBER, Actor.Lane.SYNC);
 
   private SyncBox main;
   private SyncBox ada;

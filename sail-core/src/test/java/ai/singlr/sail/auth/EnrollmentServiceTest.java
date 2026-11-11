@@ -15,9 +15,11 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.api.io.TempDir;
 
 class EnrollmentServiceTest {
@@ -64,5 +66,22 @@ class EnrollmentServiceTest {
     assertTrue(service.consume(ticket));
     assertFalse(service.consume(ticket));
     assertTrue(service.authorize(ticket).isEmpty());
+  }
+
+  @Test
+  void aDisabledPersonIsMintedNoTicketAndTheirTicketAuthorizesNothing() {
+    var ticket = service.issue("uday").ticket();
+    disable("uday");
+
+    for (var refused :
+        List.<Executable>of(() -> service.issue("uday"), () -> service.authorize(ticket))) {
+      var e = assertThrows(PasskeyException.class, refused);
+      assertEquals(PasskeyException.Kind.DISABLED, e.kind());
+      assertEquals("FDE 'uday' is disabled.", e.getMessage());
+    }
+  }
+
+  private void disable(String handle) {
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = ?", handle);
   }
 }

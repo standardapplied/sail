@@ -10,11 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.LocalApiSocket;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestControlPlane;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.BoxCredentialFile;
@@ -23,6 +25,8 @@ import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.store.BoxCredentialStore;
@@ -104,7 +108,7 @@ class PtyRoomSessionIT extends AbstractIncusIT {
               .useMessages(new MessageStore(db))
               .useBoxCredentials(boxStore)
               .useRooms(rooms);
-      TestControlPlane.standalone(operations, db, socketDir);
+      TestControlPlane.on(operations, db, socketDir, new SyncConfig(null, null, "it"));
 
       try (var api = new LocalApiSocket(operations, socketDir.resolve("api.sock"));
           var host =
@@ -112,8 +116,10 @@ class PtyRoomSessionIT extends AbstractIncusIT {
                   dir.resolve("h.sock"),
                   dir.resolve("s"),
                   64 * 1024,
-                  token -> new PtyIdentity(token.isBlank() ? "it" : "mady", true),
-                  new PtyHostRooms(dbPath),
+                  token ->
+                      new PtyIdentity.Person(
+                          new Actor(token.isBlank() ? "it" : "mady", Role.ADMIN, Actor.Lane.API)),
+                  new PtyHostAccess(() -> OperationsFactory.open(dbPath)),
                   new PtyHostEvents(dbPath, dir.resolve("pty-events.drops")),
                   "0.0.0-test")) {
         api.start();

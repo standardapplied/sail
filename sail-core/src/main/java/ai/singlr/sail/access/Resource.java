@@ -88,12 +88,17 @@ public record Resource(
     }
   }
 
-  /** This resource at the start of a sentence: "Room 'lobby'". */
+  /**
+   * This resource at the start of a sentence: "Room 'lobby'", or "This box" for one with no id, a
+   * box that names no FDE.
+   */
   String named() {
-    return kind.noun.substring(0, 1).toUpperCase(Locale.ROOT)
-        + kind.noun.substring(1)
-        + " '"
-        + id
-        + "'";
+    return id == null
+        ? "This " + kind.noun
+        : kind.noun.substring(0, 1).toUpperCase(Locale.ROOT)
+            + kind.noun.substring(1)
+            + " '"
+            + id
+            + "'";
   }
 }

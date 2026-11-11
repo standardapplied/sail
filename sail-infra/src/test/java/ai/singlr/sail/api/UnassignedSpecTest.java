@@ -16,6 +16,8 @@ import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.BoxCredentialStore;
@@ -33,11 +35,11 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -78,22 +80,27 @@ class UnassignedSpecTest {
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     specs = new SpecStore(db);
-    operations =
-        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
-            .useControlPlane(
-                db,
-                tempDir,
-                new SyncOperations(
-                    db,
-                    "box",
-                    tempDir,
-                    SyncConfig::unset,
-                    target -> {
-                      throw new IOException("main unavailable");
-                    }));
+    operations = box(SyncConfig::unset);
     var auth = TestAuth.sessions(db);
     server = new SailApiServer("127.0.0.1", 0, operations, auth, new EventBus(), null, null, null);
     server.start();
+  }
+
+  /** Operations over this database on a box {@code config} names. */
+  private SailOperations box(Supplier<SyncConfig> config) {
+    return OperationsFactory.create(
+            db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+        .useControlPlane(
+            db,
+            tempDir,
+            new SyncOperations(
+                db,
+                "box",
+                tempDir,
+                config,
+                target -> {
+                  throw new IOException("main unavailable");
+                }));
   }
 
   @AfterEach
@@ -140,12 +147,14 @@ class UnassignedSpecTest {
     assertEquals(
         201, byCreator.statusCode(), "every writer of the project speaks: " + byCreator.body());
     var room = roomRunCredential("mady", "auth");
-    var router = new LocalApiRouter(operations);
-    var answered = router.handle(form("POST", "/v1/specs/auth/messages", room, "body=on it"));
+    var router = new SocketDoor(operations);
+    var answered = router.ask("POST", "/v1/specs/auth/messages", room, "body=on it");
     assertEquals(201, answered.status(), answered.body().toString());
     var terminal = new HostAccess(db, new RoleRule(SyncConfig::unset, new FdeStore(db)));
-    terminal.admit("auth", "acme", new PtyIdentity("mady", false));
-    terminal.admit("auth", "acme", new PtyIdentity("uday", false));
+    terminal.admit(
+        "auth", "acme", new PtyIdentity.Person(new Actor("mady", Role.MEMBER, Actor.Lane.API)));
+    terminal.admit(
+        "auth", "acme", new PtyIdentity.Person(new Actor("uday", Role.MEMBER, Actor.Lane.API)));
     assertEquals(
         List.of("mady"), new RoomStore(db).owners("auth"), "the claim moved its ownership");
   }
@@ -263,19 +272,17 @@ class UnassignedSpecTest {
   void aRunCreatesItForTheFdeItActsForAndClaimsItForThatFde() {
     new FdeStore(db).add("uday", null, null, "member");
     var credential = runCredential("uday");
-    var router = new LocalApiRouter(operations);
+    var router = new SocketDoor(operations);
 
-    var created =
-        router.handle(form("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme"));
+    var created = router.ask("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme");
     assertEquals(201, created.status(), created.body().toString());
     assertUnassignedAndCreatedBy("draft", "uday");
 
     var principal = new RunStore(db).findByCredential(credential).orElseThrow().principal();
-    var asPrincipal =
-        router.handle(form("PUT", "/v1/specs/draft", credential, "assignee=" + principal));
+    var asPrincipal = router.ask("PUT", "/v1/specs/draft", credential, "assignee=" + principal);
     assertEquals(422, asPrincipal.status(), "a run's principal is never an assignee");
 
-    var claimed = router.handle(form("PUT", "/v1/specs/draft", credential, "assignee=uday"));
+    var claimed = router.ask("PUT", "/v1/specs/draft", credential, "assignee=uday");
     assertEquals(200, claimed.status(), claimed.body().toString());
     assertEquals("uday", specs.findById("draft").orElseThrow().assignee());
   }
@@ -284,12 +291,13 @@ class UnassignedSpecTest {
   void theBoxCredentialCreatesItForTheBoxFde() {
     new FdeStore(db).add("uday", null, null, "member");
     var credential = new BoxCredentialStore(db).replace("uday");
-    var router = new LocalApiRouter(operations);
+    try (var udays = box(() -> new SyncConfig("node", "main", "uday", "box"))) {
+      var created =
+          new SocketDoor(udays)
+              .ask("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme");
 
-    var created =
-        router.handle(form("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme"));
-
-    assertEquals(201, created.status(), created.body().toString());
+      assertEquals(201, created.status(), created.body().toString());
+    }
     assertUnassignedAndCreatedBy("draft", "uday");
   }
 
@@ -384,14 +392,5 @@ class UnassignedSpecTest {
     try (var client = HttpClient.newHttpClient()) {
       return client.send(request, HttpResponse.BodyHandlers.ofString());
     }
-  }
-
-  private static LocalApiRequest form(String method, String path, String credential, String body) {
-    return new LocalApiRequest(
-        method,
-        path,
-        Map.of(),
-        Map.of("authorization", "Bearer " + credential),
-        body.getBytes(StandardCharsets.UTF_8));
   }
 }

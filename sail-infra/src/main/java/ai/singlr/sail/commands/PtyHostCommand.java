@@ -8,6 +8,9 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.SailVersion;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.pty.PtyAdmission;
+import ai.singlr.sail.pty.PtyEvents;
+import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
 import java.nio.file.Path;
 import java.util.List;
@@ -38,8 +41,8 @@ public final class PtyHostCommand implements Callable<Integer> {
         startHost(
             SailPaths.ptySocketPath(),
             SailPaths.sessionsDir(),
-            new PtyHostIdentity(),
-            new PtyHostRooms(),
+            PtyHostAccess.here(),
+            PtyHostAccess.here(),
             new PtyHostEvents(),
             handoff);
     var done = new CountDownLatch(1);
@@ -87,20 +90,20 @@ public final class PtyHostCommand implements Callable<Integer> {
   static PtySessionHost startHost(
       java.nio.file.Path socket,
       java.nio.file.Path sessions,
-      ai.singlr.sail.pty.PtyIdentity.Resolver identity,
-      ai.singlr.sail.pty.PtyRooms rooms,
-      ai.singlr.sail.pty.PtyEvents events)
+      PtyIdentity.Resolver identity,
+      PtyAdmission admission,
+      PtyEvents events)
       throws java.io.IOException {
-    return startHost(socket, sessions, identity, rooms, events, PtySessionHost.Handoff.NONE);
+    return startHost(socket, sessions, identity, admission, events, PtySessionHost.Handoff.NONE);
   }
 
   /** Starts the host and its sweep timer — the process shell around it is {@link #call()}. */
   static PtySessionHost startHost(
       java.nio.file.Path socket,
       java.nio.file.Path sessions,
-      ai.singlr.sail.pty.PtyIdentity.Resolver identity,
-      ai.singlr.sail.pty.PtyRooms rooms,
-      ai.singlr.sail.pty.PtyEvents events,
+      PtyIdentity.Resolver identity,
+      PtyAdmission admission,
+      PtyEvents events,
       PtySessionHost.Handoff handoff)
       throws java.io.IOException {
     var host =
@@ -109,7 +112,7 @@ public final class PtyHostCommand implements Callable<Integer> {
             sessions,
             JOURNAL_CAPACITY,
             identity,
-            rooms,
+            admission,
             events,
             SailVersion.version(),
             handoff);

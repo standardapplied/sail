@@ -87,11 +87,11 @@ class WebauthnAuthHandlerTest {
             "127.0.0.1",
             0,
             new TestOperations(),
-            TestAuth.tokens(db),
+            TestAuth.sessions(db),
             new EventBus(),
             null,
             null,
-            new WebauthnAuthHandler(ceremonies, enrollment, TestAuth.tokens(db), origins));
+            new WebauthnAuthHandler(ceremonies, enrollment, TestAuth.sessions(db), origins));
     server.start();
   }
 
@@ -287,6 +287,21 @@ class WebauthnAuthHandlerTest {
   }
 
   @Test
+  void anyMethodButPostIsRefusedTheMethodWhereverItAsksAndOnlyAPostIsToldThePathIsNotThere()
+      throws Exception {
+    startWith(new FakeCeremonies());
+
+    for (var path : List.of("/v1/auth/nothing", "/v1/auth//register/ticket")) {
+      var refused = send("GET", path, adminToken, null);
+      assertEquals(405, refused.statusCode(), path);
+      assertTrue(refused.body().contains("Passkey endpoints accept POST only."), refused.body());
+    }
+    var missing = post("/v1/auth/nothing", adminToken, "{}");
+    assertEquals(404, missing.statusCode());
+    assertTrue(missing.body().contains("Unknown passkey endpoint."), missing.body());
+  }
+
+  @Test
   void unknownPasskeyEndpointIsNotFound() throws Exception {
     startWith(new FakeCeremonies());
     assertEquals(404, post("/v1/auth/bogus", adminToken, "{}").statusCode());
@@ -304,6 +319,53 @@ class WebauthnAuthHandlerTest {
     assertEquals(401, post("/v1/auth/register/ticket", null, "{\"fde\":\"uday\"}").statusCode());
     assertEquals(
         403, post("/v1/auth/register/ticket", viewerToken, "{\"fde\":\"uday\"}").statusCode());
+  }
+
+  @Test
+  void anAdminsPasskeySessionMintsATicketAndAnyoneElseIsRefusedAsThePeopleGateSays()
+      throws Exception {
+    startWith(new FakeCeremonies());
+    var roster = new FdeStore(db);
+    var sessions = new AuthSessionStore(db);
+    var admin = sessions.create(roster.add("mady", null, null, "admin").id(), Duration.ofHours(1));
+    var member = sessions.create(roster.add("eng", null, null, "member").id(), Duration.ofHours(1));
+
+    var minted = post("/v1/auth/register/ticket", admin.token(), "{\"fde\":\"uday\"}");
+    var notAdmin = post("/v1/auth/register/ticket", member.token(), "{\"fde\":\"uday\"}");
+    var readOnly = post("/v1/auth/register/start", viewerToken, "{\"fde\":\"uday\"}");
+
+    assertEquals(200, minted.statusCode(), minted.body());
+    assertEquals("enr_fake", YamlUtil.parseMap(minted.body()).get("ticket"));
+    assertEquals(403, notAdmin.statusCode());
+    assertEquals(
+        Map.of(
+            "code",
+            "forbidden_admin_only",
+            "message",
+            "Only an admin may manage people.",
+            "action",
+            "Ask an admin to do it.",
+            "field_errors",
+            List.of()),
+        YamlUtil.parseMap(notAdmin.body()).get("error"));
+    var unticketed =
+        post(
+            "/v1/auth/register/finish",
+            viewerToken,
+            "{\"challenge_id\":\"wac_reg\",\"client_data_json\":\"AAAA\",\"attestation_object\":\"AAAA\"}");
+    assertEquals(readOnly.body(), unticketed.body());
+    assertEquals(403, readOnly.statusCode());
+    assertEquals(
+        Map.of(
+            "code",
+            "read_only_credential",
+            "message",
+            "Your credential is read-only and cannot manage people.",
+            "action",
+            "Ask an admin for a member or admin credential.",
+            "field_errors",
+            List.of()),
+        YamlUtil.parseMap(readOnly.body()).get("error"));
   }
 
   @Test
@@ -464,6 +526,81 @@ class WebauthnAuthHandlerTest {
     assertEquals("uday", YamlUtil.parseMap(loginFinish.body()).get("fde"));
   }
 
+  @Test
+  void aDisabledPersonsTicketStartsNoEnrollment() throws Exception {
+    new FdeStore(db).add("uday", null, null);
+    startWithRealEnrollment();
+    var ticket = mintTicket("uday");
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'uday'");
+
+    var started = postWithTicket("/v1/auth/register/start", ticket, "{}");
+    var minted = post("/v1/auth/register/ticket", adminToken, "{\"fde\":\"uday\"}");
+
+    assertEquals(
+        "401 authentication_failed FDE 'uday' is disabled. Ask an admin to re-enable it.",
+        answer(started),
+        "the disabled person's own ticket");
+    assertEquals(
+        "409 conflict FDE 'uday' is disabled.",
+        answer(minted),
+        "an admin, who did authenticate, is told the person is disabled");
+    assertEquals(
+        "404 not_found Unknown FDE: nobody",
+        answer(post("/v1/auth/register/ticket", adminToken, "{\"fde\":\"nobody\"}")));
+  }
+
+  private static String answer(HttpResponse<String> response) {
+    var error = (Map<?, ?>) YamlUtil.parseMap(response.body()).get("error");
+    return response.statusCode() + " " + error.get("code") + " " + error.get("message");
+  }
+
+  @Test
+  void aTicketFinishesNoOtherFdesRegistration() throws Exception {
+    new FdeStore(db).add("uday", null, null);
+    new FdeStore(db).add("ada", null, null);
+    startWithRealEnrollment();
+    var adasTicket = mintTicket("ada");
+    var udays =
+        YamlUtil.parseMap(post("/v1/auth/register/start", adminToken, "{\"fde\":\"uday\"}").body());
+    var registration = new TestAuthenticator(RP_ID).register(challengeOf(udays), ORIGIN);
+
+    var refused =
+        postWithTicket(
+            "/v1/auth/register/finish", adasTicket, registerFinishBody(udays, registration));
+
+    assertEquals(422, refused.statusCode());
+    var error = (Map<?, ?>) YamlUtil.parseMap(refused.body()).get("error");
+    assertEquals("invalid_request", error.get("code"));
+    assertEquals(
+        "Registration challenge is not for the FDE this enrollment ticket enrolls. Start the"
+            + " registration again with this ticket.",
+        error.get("message"));
+    assertTrue(new WebauthnCredentialStore(db).listForFde(fdeId("uday")).isEmpty());
+  }
+
+  private void startWithRealEnrollment() throws Exception {
+    startWith(
+        new PasskeyService(
+            new RelyingParty(RP_ID, "Sail", Set.of(ORIGIN)),
+            new FdeStore(db),
+            new WebauthnCredentialStore(db),
+            new AuthSessionStore(db),
+            new PendingChallengeStore(db),
+            Duration.ofDays(30)),
+        new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db)),
+        List.of(ORIGIN));
+  }
+
+  private String mintTicket(String handle) throws Exception {
+    var minted = post("/v1/auth/register/ticket", adminToken, "{\"fde\":\"" + handle + "\"}");
+    assertEquals(200, minted.statusCode(), minted.body());
+    return (String) YamlUtil.parseMap(minted.body()).get("ticket");
+  }
+
+  private String fdeId(String handle) {
+    return new FdeStore(db).byHandle(handle).orElseThrow().id();
+  }
+
   private HttpResponse<String> postWithTicket(String path, String ticket, String body)
       throws Exception {
     var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path));
@@ -542,7 +679,11 @@ class WebauthnAuthHandlerTest {
 
     @Override
     public Registration finishRegistration(
-        String challengeId, byte[] clientDataJson, byte[] attestationObject, String label) {
+        String challengeId,
+        String enrolling,
+        byte[] clientDataJson,
+        byte[] attestationObject,
+        String label) {
       if ("dup".equals(label)) {
         throw new PasskeyException(PasskeyException.Kind.BAD_REQUEST, "already registered");
       }

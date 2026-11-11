@@ -6,11 +6,16 @@
 package ai.singlr.sail.identity;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.identity.RoleRule.Credential;
+import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
@@ -42,7 +47,17 @@ class RoleRuleTest {
   }
 
   private Optional<Role> roleOf(SyncConfig box, String handle, Role cap) {
-    return new RoleRule(() -> box, roster).roleOf(handle, cap);
+    return roleOf(new RoleRule(() -> box, roster), handle, cap);
+  }
+
+  /** The role {@code rule} gives a credential naming FDE {@code handle}, minted as {@code cap}. */
+  private static Optional<Role> roleOf(RoleRule rule, String handle, Role cap) {
+    return rule.principal(new Credential.Person(handle, cap, Actor.Lane.API)).map(Actor::role);
+  }
+
+  /** The role {@code rule} gives a credential naming no FDE, minted as {@code cap}. */
+  private static Optional<Role> unbound(RoleRule rule, Role cap) {
+    return rule.principal(new Credential.Machine(cap)).map(Actor::role);
   }
 
   @Test
@@ -83,9 +98,9 @@ class RoleRuleTest {
   void onANodeACredentialNamingNoFdeActsWithTheBoxFdesRole() {
     var rule = new RoleRule(() -> NODE, roster);
 
-    assertEquals(Optional.of(Role.MEMBER), rule.roleOfUnbound(Role.ADMIN));
+    assertEquals(Optional.of(Role.MEMBER), unbound(rule, Role.ADMIN));
     roster.update("uday", null, null, "admin");
-    assertEquals(Optional.of(Role.ADMIN), rule.roleOfUnbound(Role.ADMIN));
+    assertEquals(Optional.of(Role.ADMIN), unbound(rule, Role.ADMIN));
   }
 
   @Test
@@ -109,8 +124,10 @@ class RoleRuleTest {
     assertEquals(Optional.empty(), roleOf(NODE, "stranger", Role.ADMIN));
     assertEquals(
         Optional.of(Role.ADMIN),
-        new RoleRule(() -> new SyncConfig("main", null, "root", null), roster)
-            .roleOf("root", Role.ADMIN));
+        roleOf(
+            new RoleRule(() -> new SyncConfig("main", null, "root", null), roster),
+            "root",
+            Role.ADMIN));
   }
 
   @Test
@@ -118,22 +135,19 @@ class RoleRuleTest {
     assertEquals(Optional.empty(), roleOf(MAIN, " ", Role.ADMIN));
     assertEquals(Optional.empty(), roleOf(MAIN, null, Role.ADMIN));
     var bare = new RoleRule(() -> MAIN, null);
-    assertEquals(Optional.of(Role.ADMIN), bare.roleOf("uday", Role.ADMIN));
-    assertEquals(Optional.empty(), bare.roleOf("mady", Role.ADMIN));
+    assertEquals(Optional.of(Role.ADMIN), roleOf(bare, "uday", Role.ADMIN));
+    assertEquals(Optional.empty(), roleOf(bare, "mady", Role.ADMIN));
   }
 
   @Test
   void aCredentialNamingNoFdeActsAsTheBoxsFdeWhenTheBoxHasASyncHandle() {
+    assertEquals(Optional.of(Role.ADMIN), unbound(new RoleRule(() -> MAIN, roster), Role.ADMIN));
+    assertEquals(Optional.of(Role.MEMBER), unbound(new RoleRule(() -> NODE, roster), Role.ADMIN));
     assertEquals(
-        Optional.of(Role.ADMIN), new RoleRule(() -> MAIN, roster).roleOfUnbound(Role.ADMIN));
-    assertEquals(
-        Optional.of(Role.MEMBER), new RoleRule(() -> NODE, roster).roleOfUnbound(Role.ADMIN));
-    assertEquals(
-        Optional.of(Role.MEMBER),
-        new RoleRule(() -> STANDALONE, roster).roleOfUnbound(Role.MEMBER));
+        Optional.of(Role.MEMBER), unbound(new RoleRule(() -> STANDALONE, roster), Role.MEMBER));
     assertEquals(
         Optional.of(Role.ADMIN),
-        new RoleRule(SyncConfig::unset, roster).roleOfUnbound(Role.ADMIN),
+        unbound(new RoleRule(SyncConfig::unset, roster), Role.ADMIN),
         "a box with no sync handle has no FDE to cap it");
   }
 
@@ -141,15 +155,15 @@ class RoleRuleTest {
   void aCredentialNamingNoFdeOnANodeWhoseRosterLacksItsFdeIsRefused() {
     var stranger = new SyncConfig("node", "sail@main", "stranger", "node-box");
 
-    assertEquals(Optional.empty(), new RoleRule(() -> stranger, roster).roleOfUnbound(Role.ADMIN));
-    assertEquals(Optional.empty(), new RoleRule(() -> NODE, null).roleOfUnbound(Role.ADMIN));
+    assertEquals(Optional.empty(), unbound(new RoleRule(() -> stranger, roster), Role.ADMIN));
+    assertEquals(Optional.empty(), unbound(new RoleRule(() -> NODE, null), Role.ADMIN));
   }
 
   @Test
   void aCredentialNamingNoFdeOnANodeThatNamesNoFdeIsRefused() {
     var anonymous = new SyncConfig("node", "sail@main", null, "node-box");
 
-    assertEquals(Optional.empty(), new RoleRule(() -> anonymous, roster).roleOfUnbound(Role.ADMIN));
+    assertEquals(Optional.empty(), unbound(new RoleRule(() -> anonymous, roster), Role.ADMIN));
   }
 
   @Test
@@ -167,16 +181,160 @@ class RoleRuleTest {
     roster.grant("mady", "alpha");
     var rule = new RoleRule(() -> MAIN, roster);
 
-    assertEquals(ProjectScope.all(), rule.scopeOf("uday"), "main's own FDE acts as an admin");
+    assertEquals(
+        Optional.of(ProjectScope.all()),
+        rule.principal(Credential.person("uday", Actor.Lane.API)).map(Actor::scope),
+        "main's own FDE acts as an admin");
     assertEquals(
         Optional.of(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-        rule.actorOf("uday", Role.ADMIN, Actor.Lane.API));
+        rule.principal(Credential.person("uday", Actor.Lane.API)));
     assertEquals(
         Optional.of(
             new Actor("mady", Role.MEMBER, Actor.Lane.SYNC)
                 .withScope(ProjectScope.of(List.of("alpha")))),
-        rule.actorOf("mady", Role.ADMIN, Actor.Lane.SYNC));
-    assertEquals(Optional.empty(), rule.actorOf("nobody", Role.ADMIN, Actor.Lane.API));
-    assertEquals(ProjectScope.all(), new RoleRule(() -> MAIN, null).scopeOf("mady"));
+        rule.principal(Credential.person("mady", Actor.Lane.SYNC)));
+    assertEquals(Optional.empty(), rule.principal(Credential.person("nobody", Actor.Lane.API)));
+    assertEquals(
+        Optional.of(ProjectScope.all()),
+        new RoleRule(() -> MAIN, null)
+            .principal(new Credential.Machine(Role.ADMIN))
+            .map(Actor::scope),
+        "a box that keeps no roster scopes no one");
+  }
+
+  @Test
+  void aPersonAndATokenActAsTheFdeTheyNameWithItsRoleCappedAndItsScope() {
+    roster.restrict("mady");
+    roster.grant("mady", "alpha");
+    var rule = new RoleRule(() -> MAIN, roster);
+    var alpha = ProjectScope.of(List.of("alpha"));
+
+    assertEquals(
+        Optional.of(new Actor("mady", Role.MEMBER, Actor.Lane.SYNC).withScope(alpha)),
+        rule.principal(Credential.person("mady", Actor.Lane.SYNC)));
+    assertEquals(
+        Optional.of(new Actor("mady", Role.VIEWER, Actor.Lane.API).withScope(alpha)),
+        rule.principal(Credential.token("mady", "viewer")));
+    assertEquals(
+        Optional.of(new Actor("raj", Role.ADMIN, Actor.Lane.API)),
+        rule.principal(Credential.token("raj", "admin")));
+    assertEquals(
+        Optional.of(new Actor("raj", Role.ADMIN, Actor.Lane.CLI)),
+        rule.principal(Credential.person("raj", Actor.Lane.CLI)));
+    assertEquals(
+        Optional.of(new Actor("raj", Role.ADMIN, Actor.Lane.API)),
+        rule.principal(Credential.person("raj", Actor.Lane.API)),
+        "a person's own credential carries their whole role");
+  }
+
+  @Test
+  void aSessionIsItsPersonWithThePrincipalTheRuleGivesThemOrNothing() {
+    var rule = new RoleRule(() -> MAIN, roster);
+    var sessions = new AuthSessionStore(db);
+    var mady = sessions.create(roster.byHandle("mady").orElseThrow().id(), Duration.ofMinutes(1));
+
+    assertEquals(Optional.empty(), rule.session(sessions, "sess_bogus", Actor.Lane.API));
+    assertEquals(
+        Optional.of(new Actor("mady", Role.MEMBER, Actor.Lane.SYNC)),
+        rule.session(sessions, mady.token(), Actor.Lane.SYNC).orElseThrow().principal());
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'mady'");
+    assertEquals(
+        Optional.empty(),
+        rule.session(sessions, mady.token(), Actor.Lane.API).orElseThrow().principal(),
+        "a disabled FDE's session is its person, refused a principal");
+    assertEquals(
+        Optional.empty(),
+        new RoleRule(() -> MAIN, null).session(sessions, mady.token(), Actor.Lane.API),
+        "a box that keeps no roster knows no session's person");
+  }
+
+  @Test
+  void aCredentialNamingNoOneHereIsRefused() {
+    var rule = new RoleRule(() -> MAIN, roster);
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'mady'");
+
+    assertEquals(Optional.empty(), rule.principal(Credential.person(" ", Actor.Lane.API)));
+    assertEquals(Optional.empty(), rule.principal(Credential.token("mady", "member")));
+    roster.add("stranger", null, null, "admin");
+    assertEquals(
+        Optional.empty(),
+        new RoleRule(() -> MAIN, null).principal(Credential.person("stranger", Actor.Lane.API)),
+        "a box that keeps no roster knows no one but its operator");
+    assertThrows(NullPointerException.class, () -> rule.principal(null));
+    assertThrows(NullPointerException.class, () -> Credential.run(null));
+  }
+
+  @Test
+  void theBoxsOwnCredentialsAndAMachineTokenActWithTheBoxFdesRoleAndScope() {
+    roster.restrict("uday");
+    roster.grant("uday", "alpha");
+    var node = new RoleRule(() -> NODE, roster);
+    var alpha = ProjectScope.of(List.of("alpha"));
+
+    assertEquals(
+        Optional.of(new Actor("uday", Role.MEMBER, Actor.Lane.CLI).withScope(alpha)),
+        node.principal(Credential.box()));
+    assertEquals(
+        Optional.of(new Actor("uday", Role.VIEWER, Actor.Lane.API).withScope(alpha)),
+        node.principal(Credential.hostToken("viewer")));
+    assertEquals(
+        Optional.of(new Actor(null, Role.MEMBER, Actor.Lane.API).withScope(alpha)),
+        node.principal(Credential.machine("admin")),
+        "a machine token acts as no one, seeing no more than the box's FDE");
+    assertEquals(
+        Optional.of(new Actor(null, Role.VIEWER, Actor.Lane.API).withScope(alpha)),
+        node.principal(Credential.machine("viewer")),
+        "and no more than it was minted with");
+    assertEquals(
+        Optional.of(new Actor("uday", Role.ADMIN, Actor.Lane.CLI)),
+        new RoleRule(() -> MAIN, roster).principal(Credential.box()),
+        "main's own FDE is its admin, never scoped");
+    assertEquals(
+        Optional.of(new Actor(null, Role.ADMIN, Actor.Lane.CLI)),
+        new RoleRule(SyncConfig::unset, roster).principal(Credential.box()),
+        "a box with no sync handle has no FDE to be, and its root is an admin");
+    var anonymous = new RoleRule(() -> new SyncConfig("node", "sail@main", null, "n"), roster);
+    assertEquals(Optional.empty(), anonymous.principal(Credential.box()));
+    assertEquals(Optional.empty(), anonymous.principal(Credential.machine("member")));
+  }
+
+  @Test
+  void aRunIsItsPrincipalForTheFdeItActsForOrForTheBoxsFde() {
+    roster.restrict("uday");
+    roster.grant("uday", "alpha");
+    roster.restrict("mady");
+    roster.grant("mady", "beta");
+    var main = new RoleRule(() -> MAIN, roster);
+    var build = run("019fee00-0000-7000-8000-000000000001", "mady", "build");
+    var room = run("019fee00-0000-7000-8000-000000000002", "mady", "room");
+    var ownerless = run("019fee00-0000-7000-8000-000000000003", null, "build");
+
+    assertEquals(
+        Optional.of(
+            Actor.agentPrincipal(build.principal(), "mady")
+                .withScope(ProjectScope.of(List.of("beta")))),
+        main.principal(Credential.run(build)));
+    assertEquals(
+        Optional.of(
+            Actor.roomPrincipal(room.principal(), "mady")
+                .withScope(ProjectScope.of(List.of("beta")))),
+        main.principal(Credential.run(room)));
+    assertEquals(
+        Optional.of(
+            new Actor(ownerless.principal(), Role.MEMBER, Actor.Lane.AGENT, null)
+                .withScope(ProjectScope.of(List.of("alpha")))),
+        new RoleRule(() -> NODE, roster).principal(Credential.run(ownerless)),
+        "a run acting for no FDE sees what the box's FDE sees, never every project");
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'mady'");
+    assertEquals(Optional.empty(), main.principal(Credential.run(build)));
+  }
+
+  private RunStore.RunRow run(String id, String owner, String lane) {
+    var runs = new RunStore(db);
+    Acting.system(
+        () ->
+            runs.create(
+                id, "acme", null, owner, lane, "claude-code", "b", "t", null, null, "/l", "u"));
+    return runs.findById(id).orElseThrow();
   }
 }

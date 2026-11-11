@@ -66,6 +66,7 @@ class WhoamiTest {
     var body = YamlUtil.parseMap(response.body());
     assertEquals(1, body.get("schema_version"));
     assertEquals("uday", body.get("fde"));
+    assertEquals("uday", body.get("name"));
     assertEquals("Alex Morgan", body.get("display_name"));
     assertEquals("alex@example.com", body.get("email"));
     assertEquals("admin", body.get("role"));

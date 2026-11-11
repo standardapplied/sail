@@ -23,7 +23,6 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -55,7 +54,7 @@ class RoomPrincipalAccessTest {
   private EventBus bus;
   private SpecStore specStore;
   private MessageStore messageStore;
-  private LocalApiRouter router;
+  private SocketDoor router;
   private String credential;
   private String runId;
   private String principal;
@@ -109,7 +108,7 @@ class RoomPrincipalAccessTest {
                 SessionYield.NONE)
             .useMessages(messageStore)
             .useRooms(new RoomStore(db));
-    router = new LocalApiRouter(operations);
+    router = new SocketDoor(operations);
   }
 
   @AfterEach
@@ -147,13 +146,7 @@ class RoomPrincipalAccessTest {
   }
 
   private ApiResponse call(String method, String path, String body) {
-    return router.handle(
-        new LocalApiRequest(
-            method,
-            path,
-            Map.of(),
-            Map.of("authorization", "Bearer " + credential),
-            body.getBytes(StandardCharsets.UTF_8)));
+    return router.ask(method, path, credential, body);
   }
 
   @Test

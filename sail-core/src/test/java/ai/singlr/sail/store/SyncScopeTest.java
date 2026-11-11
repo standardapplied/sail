@@ -41,8 +41,8 @@ class SyncScopeTest {
     scope.record(ProjectScope.of(List.of("alpha", "beta")));
     assertEquals(ProjectScope.of(List.of("alpha", "beta")), scope.held());
 
-    scope.record(ProjectScope.none());
-    assertEquals(ProjectScope.none(), scope.held());
+    scope.record(ProjectScope.of(List.of()));
+    assertEquals(ProjectScope.of(List.of()), scope.held());
 
     scope.record(ProjectScope.of(List.of("gamma")));
     assertEquals(ProjectScope.of(List.of("gamma")), scope.held());

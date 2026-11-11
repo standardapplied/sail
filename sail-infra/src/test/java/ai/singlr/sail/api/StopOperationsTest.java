@@ -463,8 +463,8 @@ class StopOperationsTest {
             ErrorCode.FORBIDDEN_NOT_ASSIGNEE);
     var messages =
         List.of(
-            "Your credential is read-only and cannot stop runs.",
-            "Agent principals cannot stop runs.",
+            "Your credential is read-only and cannot stop or attach to runs or read their logs.",
+            "Agent principals cannot stop or attach to runs or read their logs.",
             "Run " + R1 + " belongs to spec 'auth', owned by 'me', not you.");
 
     for (var i = 0; i < asked.size(); i++) {
@@ -761,22 +761,86 @@ class StopOperationsTest {
   }
 
   @Test
-  void aProjectsRunIsNoRunToAnActorOutsideTheProject() throws Exception {
+  void aProjectOutsideTheCallersScopeIsNotInTheCatalogWhetherOrNotItRuns() throws Exception {
     var ops = stopOps(liveAgentShell(), failingHalter(), StopOperations.Listener.NONE);
-    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
-    seedRun(123, UNIT);
     var outside = ADMIN.withScope(ProjectScope.of(List.of("beta")));
 
-    var refusal =
-        assertThrows(
-            ApiException.class,
-            () ->
-                Actor.call(
-                    outside,
-                    () -> ops.stop(new StopOperations.ProjectTarget("acme"), LOCAL_HANDLE, false)));
+    for (var running : List.of(false, true)) {
+      if (running) {
+        seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+        seedRun(123, UNIT);
+      }
+      for (var dryRun : List.of(false, true)) {
+        var refusal =
+            assertThrows(
+                ApiException.class,
+                () ->
+                    Actor.call(
+                        outside,
+                        () ->
+                            ops.stop(
+                                new StopOperations.ProjectTarget("acme"), LOCAL_HANDLE, dryRun)));
 
-    assertEquals(ErrorCode.RUN_NOT_FOUND, refusal.failure().errorCode());
-    assertEquals("No run '" + R1 + "'.", refusal.getMessage());
+        assertEquals(ErrorCode.PROJECT_NOT_IN_CATALOG, refusal.failure().errorCode());
+        assertEquals("Project 'acme' is not in the catalog.", refusal.getMessage());
+        assertEquals(
+            "Create it with 'sail project create acme', or sync it from main with 'sail sync'.",
+            refusal.failure().remedy().plain());
+      }
+    }
+    assertEquals("running", runStore.findById(R1).orElseThrow().status());
+  }
+
+  /**
+   * A dry run writes and signals nothing, but it says what the real stop would, so it is decided as
+   * the real stop is, by run id and by project alike, and before the container is asked about: a
+   * viewer, an agent and a member the run is not for hear the real stop's refusal, whatever state
+   * the container is in.
+   */
+  @Test
+  void aStopIsDecidedBeforeTheContainerIsAskedAndADryRunAsTheRealOne() throws Exception {
+    var ops =
+        stopOps(
+            shell().on("incus list ^acme$", "[]"), failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    var asked =
+        List.of(
+            new Actor("raj", Role.VIEWER, Actor.Lane.CLI),
+            Actor.agentPrincipal("claude/" + R1, LOCAL_HANDLE),
+            new Actor("raj", Role.MEMBER, Actor.Lane.CLI));
+    var codes =
+        List.of(
+            ErrorCode.READ_ONLY_CREDENTIAL,
+            ErrorCode.AGENT_LANE_FORBIDDEN,
+            ErrorCode.FORBIDDEN_NOT_ASSIGNEE);
+    var messages =
+        List.of(
+            "Your credential is read-only and cannot stop or attach to runs or read their logs.",
+            "Agent principals cannot stop or attach to runs or read their logs.",
+            "Run " + R1 + " belongs to spec 'auth', owned by 'me', not you.");
+    var fixes =
+        List.of(
+            "Ask an admin for a member or admin credential.",
+            "Only an operator lane (CLI or API token) may do this.",
+            "Only me or an admin may access this run.");
+    for (var target :
+        List.<StopOperations.Target>of(
+            new StopOperations.RunTarget(R1), new StopOperations.ProjectTarget("acme"))) {
+      for (var i = 0; i < asked.size(); i++) {
+        var actor = asked.get(i);
+        for (var dryRun : List.of(true, false)) {
+          var refusal =
+              assertThrows(
+                  ApiException.class,
+                  () -> Actor.call(actor, () -> ops.stop(target, LOCAL_HANDLE, dryRun)));
+          var question = actor + " " + target + " dry run " + dryRun;
+          assertEquals(codes.get(i), refusal.failure().errorCode(), question);
+          assertEquals(messages.get(i), refusal.failure().errorMessage(), question);
+          assertEquals(fixes.get(i), refusal.failure().remedy().plain(), question);
+        }
+      }
+    }
     assertEquals("running", runStore.findById(R1).orElseThrow().status());
   }
 

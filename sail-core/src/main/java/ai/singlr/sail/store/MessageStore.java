@@ -95,11 +95,13 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     return append(roomId, author, body, replyTo, Mark.PLAIN);
   }
 
+  /**
+   * Appends {@code author}'s message to {@code roomId}, decided as the journal records it. The
+   * message rule is asked before a message with no author is refused, so a credential acting for no
+   * FDE hears the rule's own fact that a post is someone's.
+   */
   public MessageRow append(String roomId, String author, String body, String replyTo, Mark mark) {
     requireBody(body);
-    if (Strings.isBlank(author)) {
-      throw new IllegalArgumentException("message author is required");
-    }
     if (replyTo != null) {
       Ids.requireUuid(replyTo);
     }
@@ -110,7 +112,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
               new MessageRow(
                   id,
                   roomId,
-                  author.strip(),
+                  Strings.isBlank(author) ? null : author.strip(),
                   body,
                   replyTo,
                   DateTimeUtils.now(),
@@ -120,6 +122,9 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           requireReplyTarget(row);
           var snapshot = snapshot(row);
           WriteAuthority.admit(db, decide(id, snapshot));
+          if (row.author() == null) {
+            throw new IllegalArgumentException("message author is required");
+          }
           var rev = Revisions.next(null, YamlUtil.dumpJson(snapshot));
           write(row, rev, null);
           journal(row, rev, ChangeLog.Entry.LOCAL, snapshot);

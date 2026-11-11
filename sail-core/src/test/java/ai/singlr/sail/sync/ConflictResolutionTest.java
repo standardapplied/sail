@@ -59,7 +59,8 @@ class ConflictResolutionTest {
 
   /** One spec round of {@code box}, pushing as the FDE whose box it is, an admin. */
   private SyncEngine.Report sync(SyncBox box) {
-    try (var link = SyncBox.connect(main.server(Actor.sync(box.id, Role.ADMIN)), box)) {
+    try (var link =
+        SyncBox.connect(main.server(new Actor(box.id, Role.ADMIN, Actor.Lane.SYNC)), box)) {
       return link.reconcile("spec", SyncedEntities.replicas(box.db, box.id, box.id).get("spec"))
           .report();
     } catch (IOException e) {
@@ -70,8 +71,8 @@ class ConflictResolutionTest {
   private void assertConverged() {
     SyncBox.quiesce(
         main,
-        node.syncsAs(Actor.sync(node.id, Role.ADMIN)),
-        other.syncsAs(Actor.sync(other.id, Role.ADMIN)));
+        node.syncsAs(new Actor(node.id, Role.ADMIN, Actor.Lane.SYNC)),
+        other.syncsAs(new Actor(other.id, Role.ADMIN, Actor.Lane.SYNC)));
     SyncBox.assertEqualToMain(main, node);
     SyncBox.assertEqualToMain(main, other);
   }

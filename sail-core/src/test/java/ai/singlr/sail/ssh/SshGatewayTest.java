@@ -24,6 +24,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 class SshGatewayTest {
 
+  /** Row 25's refusal, the same at the gateway as on the host CLI. */
+  static final String MEMBER_MAY_NOT_MANAGE_PEOPLE =
+      "Only an admin may manage people. Ask an admin to do it.";
+
   @TempDir Path tempDir;
   private Sqlite db;
   private FdeStore fdes;
@@ -62,16 +66,56 @@ class SshGatewayTest {
   }
 
   @Test
+  void anAgentVerbThatReadsTheControlPlaneDirectlyIsRefusedAndOneThatAsksTheApiRuns() {
+    for (var verb :
+        List.of("stop", "logs", "status", "attach", "report", "sweep", "run", "watch")) {
+      var refused =
+          assertInstanceOf(
+              SshGateway.Rejected.class,
+              authorize("sail agent " + verb + " beta --dry-run", "uday"));
+      assertEquals(
+          "'agent "
+              + verb
+              + "' reads this box's control plane directly, as the box's own person, so it is not"
+              + " available over an SSH-key session. Follow the work with 'sail spec' and the"
+              + " board, or SSH to the host directly to run it.",
+          refused.reason());
+    }
+    for (var verb : List.of("stream", "sessions", "review")) {
+      assertEquals(
+          List.of("agent", verb, "r1"),
+          assertInstanceOf(
+                  SshGateway.Authorized.class, authorize("sail agent " + verb + " r1", "uday"))
+              .args());
+    }
+    assertInstanceOf(SshGateway.Rejected.class, authorize("sail agent", "uday"));
+  }
+
+  @Test
   void stripsLeadingSailToken() {
     var authorized = assertInstanceOf(SshGateway.Authorized.class, authorize("spec list", "uday"));
     assertEquals(List.of("spec", "list"), authorized.args());
   }
 
   @Test
-  void rejectsFdeCommandForNonAdminRole() {
-    var rejected = assertInstanceOf(SshGateway.Rejected.class, authorize("sail fde list", "uday"));
-    assertTrue(rejected.reason().contains("admin role"));
-    assertTrue(sessions.validate("sess_anything").isEmpty());
+  void aMemberMayNotManagePeopleAndIsToldWhoMay() {
+    for (var command : List.of("sail fde list", "sail fde add zed --name Zed")) {
+      var rejected = assertInstanceOf(SshGateway.Rejected.class, authorize(command, "uday"));
+      assertEquals(MEMBER_MAY_NOT_MANAGE_PEOPLE, rejected.reason());
+    }
+  }
+
+  @Test
+  void aViewerMayNotManagePeopleAndIsToldWhatCredentialMay() {
+    fdes.add("obs", null, null, "viewer");
+
+    var rejected =
+        assertInstanceOf(SshGateway.Rejected.class, authorize("sail fde add zed", "obs"));
+
+    assertEquals(
+        "Your credential is read-only and cannot manage people. Ask an admin for a member or"
+            + " admin credential.",
+        rejected.reason());
   }
 
   @Test
@@ -133,11 +177,16 @@ class SshGatewayTest {
             "sail fde passkey",
             "sail fde passkey list",
             "sail fde passkey add uday",
-            "sail fde passkey rm --credential abc123 uday",
-            "sail fde rm uday")) {
+            "sail fde passkey rm --credential abc123 uday")) {
       var rejected = assertInstanceOf(SshGateway.Rejected.class, authorize(command, "uday"));
-      assertTrue(rejected.reason().contains("admin role"));
+      assertEquals(
+          "Managing another FDE's passkeys requires the admin role. You may manage your own:"
+              + " sail fde passkey list uday",
+          rejected.reason());
     }
+    var rejected =
+        assertInstanceOf(SshGateway.Rejected.class, authorize("sail fde rm uday", "uday"));
+    assertEquals(MEMBER_MAY_NOT_MANAGE_PEOPLE, rejected.reason());
   }
 
   @Test

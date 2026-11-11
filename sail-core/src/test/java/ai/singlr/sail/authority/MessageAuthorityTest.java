@@ -181,11 +181,11 @@ class MessageAuthorityTest {
             Kind.NO_CONVERSATION),
         new Case("a machine credential posts as no one", MACHINE, "lobby", null, Kind.NOT_AUTHOR),
         new Case(
-            "an admin acting for no FDE posts all the same",
+            "an admin acting for no FDE posts nothing either: a post is someone's",
             new Actor(null, Role.ADMIN, Actor.Lane.CLI),
             "lobby",
             null,
-            null),
+            Kind.NOT_AUTHOR),
         new Case("a viewer posts nowhere", VIEWER, "lobby", OWNER, Kind.READ_ONLY),
         new Case("an agent posts as no FDE", AGENT, "lobby", OWNER, Kind.NOT_AUTHOR),
         new Case("a member posts as no one else", OWNER_API, "lobby", OTHER, Kind.NOT_AUTHOR),

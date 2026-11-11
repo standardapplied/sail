@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.InstantSource;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -54,7 +55,7 @@ import java.util.function.Predicate;
  * that frame is what a reader who connects mid-turn, or reconnects after missing a turn's end, is
  * told. A stream the bus drops an event for is ended, so its client reconnects and is told again.
  */
-public final class SseHandler implements HttpHandler {
+public final class SseHandler implements HttpHandler, RouteTable {
 
   /** Default cap on concurrent SSE connections. */
   public static final int DEFAULT_MAX_CONNECTIONS = 64;
@@ -108,6 +109,15 @@ public final class SseHandler implements HttpHandler {
     this.connectionPermits = new Semaphore(maxConnections);
   }
 
+  private final List<Route<SseHandler>> routes =
+      List.of(new Route<>("GET", "/v1/events/stream", Gate.READS_IN_SCOPE, this));
+
+  /** The event stream, read in the caller's scope. */
+  @Override
+  public List<Route<?>> routes() {
+    return List.copyOf(routes);
+  }
+
   /** Total SSE connection attempts rejected due to the connection cap. */
   public long rejectedCount() {
     return rejected.sum();
@@ -118,15 +128,26 @@ public final class SseHandler implements HttpHandler {
     return maxConnections - connectionPermits.availablePermits();
   }
 
+  /**
+   * Answers {@code exchange} as the API router answers a request: its caller is authenticated
+   * first, then its table serves the path as the router reads it ({@link ApiRouter#canonical}), or
+   * says the path or the method is not there.
+   */
   @Override
   public void handle(HttpExchange exchange) throws IOException {
     try {
-      if (!"GET".equals(exchange.getRequestMethod())) {
-        sendMethodNotAllowed(exchange);
-        return;
-      }
       try {
         auth.require(exchange);
+        switch (RouteTable.serve(
+            routes, exchange.getRequestMethod(), ApiRouter.canonical(exchange.getRequestURI()))) {
+          case RouteTable.Served.NotFound<SseHandler> _ -> throw ApiRouter.notFound();
+          case RouteTable.Served.MethodNotAllowed<SseHandler> _ -> {
+            sendMethodNotAllowed(exchange);
+            return;
+          }
+          case RouteTable.Served.Match<SseHandler>(var route, _) ->
+              route.gate().admit(ApiAuth.actorOf(exchange));
+        }
       } catch (ApiException e) {
         ApiResponse.sendError(exchange, e);
         return;
@@ -167,7 +188,7 @@ public final class SseHandler implements HttpHandler {
     headers.set("X-Accel-Buffering", "no");
     exchange.sendResponseHeaders(200, 0);
     var recheck = new StreamRecheck(() -> refusal(exchange), clock);
-    var filter = parseFilter(uri, ApiRouter.actorOf(exchange));
+    var filter = parseFilter(uri, ApiAuth.actorOf(exchange));
     try (var out = exchange.getResponseBody()) {
       var lastHeartbeat = clock.instant();
       writeComment(out, "subscribed");
@@ -189,7 +210,7 @@ public final class SseHandler implements HttpHandler {
           }
           if (event != null) {
             if (recheck.recheck()) {
-              filter = parseFilter(uri, ApiRouter.actorOf(exchange));
+              filter = parseFilter(uri, ApiAuth.actorOf(exchange));
             }
             if (filter.test(event)) {
               writeEvent(out, event);
@@ -197,7 +218,7 @@ public final class SseHandler implements HttpHandler {
           }
           if (Duration.between(lastHeartbeat, clock.instant()).toMillis() > HEARTBEAT_MILLIS) {
             if (recheck.recheck()) {
-              filter = parseFilter(uri, ApiRouter.actorOf(exchange));
+              filter = parseFilter(uri, ApiAuth.actorOf(exchange));
             }
             writeComment(out, "keepalive");
             lastHeartbeat = clock.instant();

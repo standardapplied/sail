@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.api.HomeRoom;
 import ai.singlr.sail.api.Operations;
 import ai.singlr.sail.api.OperationsFactory;
@@ -14,9 +15,9 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
+import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.GitCredentials;
@@ -265,7 +266,7 @@ public final class ProjectApplyCommand implements Runnable {
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var devices = new IncusDeviceManager(observer);
-    var targets = new ContainerManager(observer).listAll();
+    var targets = targets(new ContainerManager(observer));
 
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);
@@ -386,6 +387,15 @@ public final class ProjectApplyCommand implements Runnable {
   record TargetPlan(Action action, ProjectDefinition config) {}
 
   /**
+   * The containers a bulk apply converges: every one Incus lists whose project the box's person may
+   * read, so a container kept for a project outside their grants is neither changed nor named, as
+   * {@code project list} names it not.
+   */
+  static List<ContainerInfo> targets(ContainerManager containers) throws Exception {
+    return ReadFilter.readable(Actor.reader(), containers.listAll(), ContainerInfo::name);
+  }
+
+  /**
    * A bulk-apply target's plan, decided before any lifecycle mutation: a target without a
    * definition in the catalog plans a machinery-only convergence ({@code config} null).
    */
@@ -473,7 +483,8 @@ public final class ProjectApplyCommand implements Runnable {
       homeRoom =
           dryRun
               ? null
-              : ensureHomeRoom(operations, config, HostSync.handle(), () -> CliOperator.current());
+              : ensureHomeRoom(
+                  operations, config, HostSync.handle(), operations.identity()::operator);
     }
 
     var added = results.stream().mapToInt(ProjectApplier.ApplyResult::added).sum();

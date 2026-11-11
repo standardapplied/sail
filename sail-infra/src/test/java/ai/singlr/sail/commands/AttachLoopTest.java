@@ -11,13 +11,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.pty.PtyAdmissions;
+import ai.singlr.sail.pty.PtyEvents;
+import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtySessionHost;
+import ai.singlr.sail.pty.PtyWire;
 import java.io.ByteArrayOutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -35,9 +45,9 @@ class AttachLoopTest {
             dir.resolve("h.sock"),
             dir.resolve("s"),
             64 * 1024,
-            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
-            ai.singlr.sail.pty.PtyRooms.NONE,
-            ai.singlr.sail.pty.PtyEvents.NONE,
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
+            PtyAdmissions.NONE,
+            PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
@@ -67,15 +77,12 @@ class AttachLoopTest {
   void anObserverAndAMidSequenceReplayAreNarratedNotDropped() throws Exception {
     var frames = new ByteArrayOutputStream();
     var sink = java.nio.channels.Channels.newChannel(frames);
-    ai.singlr.sail.pty.PtyWire.write(sink, new ai.singlr.sail.pty.PtyMessage.ReplayBegin(false));
-    ai.singlr.sail.pty.PtyWire.write(
-        sink,
-        new ai.singlr.sail.pty.PtyMessage.Output(-1, "old\n".getBytes(StandardCharsets.UTF_8)));
-    ai.singlr.sail.pty.PtyWire.write(sink, new ai.singlr.sail.pty.PtyMessage.ReplayEnd());
-    ai.singlr.sail.pty.PtyWire.write(sink, new ai.singlr.sail.pty.PtyMessage.WriterChanged("mady"));
-    ai.singlr.sail.pty.PtyWire.write(sink, new ai.singlr.sail.pty.PtyMessage.WriterChanged(""));
-    ai.singlr.sail.pty.PtyWire.write(
-        sink, new ai.singlr.sail.pty.PtyMessage.SessionEnded("exited(0)"));
+    PtyWire.write(sink, new PtyMessage.ReplayBegin(false));
+    PtyWire.write(sink, new PtyMessage.Output(-1, "old\n".getBytes(StandardCharsets.UTF_8)));
+    PtyWire.write(sink, new PtyMessage.ReplayEnd());
+    PtyWire.write(sink, new PtyMessage.WriterChanged("mady"));
+    PtyWire.write(sink, new PtyMessage.WriterChanged(""));
+    PtyWire.write(sink, new PtyMessage.SessionEnded("exited(0)"));
     var stdout = new ByteArrayOutputStream();
 
     var reason =
@@ -101,12 +108,10 @@ class AttachLoopTest {
   void aHostsRefusalIsNarratedAsItsReaderTypesTheFix() throws Exception {
     var frames = new ByteArrayOutputStream();
     var sink = java.nio.channels.Channels.newChannel(frames);
-    ai.singlr.sail.pty.PtyWire.write(
+    PtyWire.write(
         sink,
-        new ai.singlr.sail.pty.PtyMessage.Err(
-            Remedy.of("Room lounge is gone. Run '", Remedy.sail("sync"), "'.")));
-    ai.singlr.sail.pty.PtyWire.write(
-        sink, new ai.singlr.sail.pty.PtyMessage.SessionEnded("exited(0)"));
+        new PtyMessage.Err(Remedy.of("Room lounge is gone. Run '", Remedy.sail("sync"), "'.")));
+    PtyWire.write(sink, new PtyMessage.SessionEnded("exited(0)"));
     var stdout = new ByteArrayOutputStream();
 
     AttachLoop.run(
@@ -165,9 +170,9 @@ class AttachLoopTest {
             dir.resolve("h.sock"),
             dir.resolve("s"),
             64 * 1024,
-            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
-            ai.singlr.sail.pty.PtyRooms.NONE,
-            ai.singlr.sail.pty.PtyEvents.NONE,
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
+            PtyAdmissions.NONE,
+            PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
@@ -195,9 +200,9 @@ class AttachLoopTest {
             dir.resolve("h.sock"),
             dir.resolve("s"),
             64 * 1024,
-            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
-            ai.singlr.sail.pty.PtyRooms.NONE,
-            ai.singlr.sail.pty.PtyEvents.NONE,
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
+            PtyAdmissions.NONE,
+            PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
@@ -211,7 +216,7 @@ class AttachLoopTest {
             24);
         var channel = client.attach("s1", true);
 
-        var ready = new java.util.concurrent.CountDownLatch(1);
+        var ready = new CountDownLatch(1);
         var stdout =
             new ByteArrayOutputStream() {
               @Override
@@ -222,7 +227,7 @@ class AttachLoopTest {
                 }
               }
             };
-        var fired = new java.util.concurrent.atomic.AtomicBoolean();
+        var fired = new AtomicBoolean();
         AttachLoop.Resizes resizes =
             () -> {
               if (!fired.compareAndSet(false, true)) {
@@ -251,16 +256,16 @@ class AttachLoopTest {
             dir.resolve("h.sock"),
             dir.resolve("s"),
             64 * 1024,
-            token -> new ai.singlr.sail.pty.PtyIdentity("uday", true),
-            ai.singlr.sail.pty.PtyRooms.NONE,
-            ai.singlr.sail.pty.PtyEvents.NONE,
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
+            PtyAdmissions.NONE,
+            PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();
       try (var client = SessionClient.connect(dir.resolve("h.sock"))) {
         client.create("s1", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
         var channel = client.attach("s1", false);
 
-        var refused = new java.util.concurrent.CountDownLatch(1);
+        var refused = new CountDownLatch(1);
         var stdout =
             new ByteArrayOutputStream() {
               @Override
@@ -287,7 +292,7 @@ class AttachLoopTest {
         stdinFeed.flush();
 
         assertTrue(
-            refused.await(10, java.util.concurrent.TimeUnit.SECONDS),
+            refused.await(10, TimeUnit.SECONDS),
             "the host's Err reaches the operator's screen: " + stdout);
         assertTrue(
             stdout.toString(StandardCharsets.UTF_8).contains("You do not hold the write token"),

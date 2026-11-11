@@ -36,7 +36,8 @@ class CatalogRevisionBySyncTest {
   @Test
   void aRevisionAppliedBySyncIsWhatTheNodesNextReadTheLoopAndTheNextNotificationUse() {
     try (var main = new SyncBox(dir, "main");
-        var node = new SyncBox(dir, "node").syncsAs(Actor.sync("node", Role.ADMIN))) {
+        var node =
+            new SyncBox(dir, "node").syncsAs(new Actor("node", Role.ADMIN, Actor.Lane.SYNC))) {
       var authored = new ProjectStore(main.db);
       var reader = ProjectReader.ofCatalog(new ProjectStore(node.db));
       var notifications = new CatalogNotificationsResolver(reader);

@@ -32,11 +32,6 @@ public record ProjectScope(boolean unrestricted, Set<String> projects) {
     return ALL;
   }
 
-  /** No project at all: a scoped FDE with no grant, and a session that names no FDE. */
-  public static ProjectScope none() {
-    return NONE;
-  }
-
   /** Exactly {@code projects}. */
   public static ProjectScope of(Collection<String> projects) {
     return projects.isEmpty() ? NONE : new ProjectScope(false, Set.copyOf(projects));

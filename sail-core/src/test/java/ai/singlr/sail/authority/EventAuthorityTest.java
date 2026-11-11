@@ -263,7 +263,20 @@ class EventAuthorityTest {
             "auth",
             null,
             Kind.NOT_OWNER),
-        observed("an admin narrates any run", ADMIN, TOOL, "auth", RUN, null),
+        observed(
+            "an admin does not narrate a run another box executed",
+            ADMIN,
+            TOOL,
+            "auth",
+            RUN,
+            Kind.NOT_OWNER),
+        observed(
+            "an admin narrates nothing without a run this box executed",
+            ADMIN,
+            TOOL,
+            "auth",
+            null,
+            Kind.NOT_OWNER),
         retold(
             "a run is not narrated from a box that did not execute it, even by its spec's owner",
             CAROL_API,
@@ -286,7 +299,14 @@ class EventAuthorityTest {
             null,
             null,
             Kind.NOT_PUBLISHABLE),
-        observed("a viewer cannot announce", VIEWER, BOARD, null, null, Kind.READ_ONLY),
+        observed(
+            "a viewer who is not the box's FDE cannot announce for it",
+            VIEWER,
+            BOARD,
+            null,
+            null,
+            Kind.NOT_OWNER),
+        observed("a viewer cannot narrate", VIEWER, TOOL, "auth", RUN, Kind.READ_ONLY),
         observed("an admin announces a message", ADMIN, POSTED, "den", null, null),
         retold(
             "who may post in a conversation retells a message in it",
@@ -366,6 +386,22 @@ class EventAuthorityTest {
         observed(
             "this box's FDE announces what its sync pulled", OWNER_API, POSTED, "den", null, null),
         observed("this box's FDE announces for it", OWNER_API, BOARD, null, null, null),
+        observed("this box's FDE announces for it as a viewer", VIEWER, BOARD, null, null, null),
+        observed(
+            "this box's FDE does not narrate as a viewer",
+            VIEWER,
+            TOOL,
+            "auth",
+            RUN,
+            Kind.READ_ONLY),
+        observed("an admin narrates a run this box executed", ADMIN, TOOL, "auth", RUN, null),
+        observed(
+            "an admin does not narrate a run another box executed",
+            ADMIN,
+            TOOL,
+            "auth",
+            OTHER_RUN,
+            Kind.NOT_OWNER),
         observed(
             "this box's FDE does not report on a spec it does not own",
             OWNER_API,
@@ -494,9 +530,9 @@ class EventAuthorityTest {
   }
 
   /**
-   * Every refusal of an event says the earliest reason: a viewer's announcement is read-only before
-   * it speaks for the box, and an agent's event of a type no client publishes is that type's before
-   * the agent's lane.
+   * Every refusal of an event says the earliest reason: a viewer's narration is read-only before
+   * whose run it is or where it ran, and an agent's event of a type no client publishes is that
+   * type's before the agent's lane.
    */
   @Test
   void anEventIsRefusedForItsEarliestReason() {
@@ -504,7 +540,7 @@ class EventAuthorityTest {
 
     assertEquals(
         Optional.of(Refusal.readOnly("publish events")),
-        rule.decide(VIEWER, BOARD, nothing, false));
+        rule.decide(VIEWER, TOOL, rule.subject("acme", "auth", OTHER_RUN), false));
     assertEquals(
         Optional.of(
             new Refusal(
@@ -534,13 +570,13 @@ class EventAuthorityTest {
     boxFde = OWNER;
 
     assertEquals(
-        new Subject("acme", "auth", RUN, List.of(CAROL), true),
+        new Subject("acme", "auth", RUN, List.of(CAROL), true, OWNER),
         rule.subject("elsewhere", "billing", RUN));
     assertEquals(
-        new Subject("acme", "auth", OTHER_RUN, List.of(CAROL), false),
+        new Subject("acme", "auth", OTHER_RUN, List.of(CAROL), false, "bob"),
         rule.subject("elsewhere", "billing", OTHER_RUN));
     assertEquals(
-        new Subject("acme", null, ADHOC, List.of(OTHER), false),
+        new Subject("acme", null, ADHOC, List.of(OTHER), false, OTHER),
         rule.subject("elsewhere", "billing", ADHOC));
   }
 
@@ -561,28 +597,54 @@ class EventAuthorityTest {
     board.db.execute("DELETE FROM specs WHERE id = 'auth'");
 
     assertEquals(
-        new Subject("acme", "auth", OTHER_RUN, List.of(), false),
+        new Subject("acme", "auth", OTHER_RUN, List.of(), false, "bob"),
         rule.subject("elsewhere", null, OTHER_RUN));
   }
 
   @Test
   void aSpecOrRoomDecidesItsProjectItsOwnersAndWhoHasAVoiceInIt() {
     assertEquals(
-        new Subject("acme", "billing", null, List.of(OTHER), false),
+        new Subject("acme", "billing", null, List.of(OTHER), false, null),
         rule.subject("elsewhere", "billing", null));
     assertEquals(
-        new Subject("acme", "den", null, List.of(CAROL, OTHER), false),
+        new Subject("acme", "den", null, List.of(CAROL, OTHER), false, null),
         rule.subject("elsewhere", "den", "no-such-run"));
   }
 
   @Test
   void workThisBoxDoesNotHoldIsAsItsSenderNamedItAndNoOnes() {
     assertEquals(
-        new Subject("elsewhere", "gone", null, List.of(), false),
+        new Subject("elsewhere", "gone", null, List.of(), false, null),
         rule.subject("elsewhere", "gone", null));
     assertEquals(
-        new Subject("elsewhere", null, null, List.of(), false),
+        new Subject("elsewhere", null, null, List.of(), false, null),
         rule.subject("elsewhere", " ", " "));
+  }
+
+  @Test
+  void anAdminsNarrationOfARunAnotherBoxExecutedIsWhatThisBoxDidNotObserve() {
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Event type 'agent_tool_started' reports what another box observed of run "
+                    + RUN
+                    + " of 'auth' (owned by 'carol'): only the box that executed it reports that.",
+                "Publish it from "
+                    + OWNER
+                    + ", which executed it; what it reports reaches this box by sync.")),
+        rule.decide(ADMIN, TOOL, rule.subject("acme", "auth", RUN), false));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Event type 'agent_tool_started' reports what another box observed of run "
+                    + RUN
+                    + " of 'auth' (owned by 'carol'): only the box that executed it reports that.",
+                "What another box did reaches this one by sync.")),
+        rule.decide(
+            ADMIN, TOOL, new Subject("acme", "auth", RUN, List.of(CAROL), false, null), false),
+        "a run whose box is not known names none");
   }
 
   @Test
@@ -703,7 +765,7 @@ class EventAuthorityTest {
     assertEquals(
         Optional.empty(),
         rule.decide(
-            OWNER_API.withScope(ProjectScope.none()),
+            OWNER_API.withScope(ProjectScope.of(List.of())),
             BOARD,
             rule.subject("acme", null, null),
             false));

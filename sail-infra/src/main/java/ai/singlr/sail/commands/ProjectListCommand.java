@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
@@ -13,12 +15,14 @@ import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ProjectStore;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -39,9 +43,8 @@ public final class ProjectListCommand implements Runnable {
 
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
-    var shell = new ShellExecutor(false);
-    var containers = new ContainerManager(shell).listAll();
-    var projects = merge(containers, catalogNames(operator));
+    var containers = new ContainerManager(new ShellExecutor(false)).listAll();
+    var projects = merge(containers, catalogNames(() -> OperationsFactory.open(operator::warn)));
 
     if (json) {
       System.out.println(renderJson(projects));
@@ -67,10 +70,11 @@ public final class ProjectListCommand implements Runnable {
   }
 
   /**
-   * The full project roster: every catalogued project plus any container without a catalog entry,
-   * keyed by name so a project that is both catalogued and provisioned shows its live container
-   * state rather than a placeholder. Catalogued-but-unprovisioned projects (e.g. just synced from
-   * main) surface as {@link ContainerState.NotCreated} so they can be found and provisioned.
+   * The project roster whoever reads sees: every catalogued project plus any container without a
+   * catalog entry, keyed by name so a project that is both catalogued and provisioned shows its
+   * live container state rather than a placeholder, and none outside the reader's scope.
+   * Catalogued-but-unprovisioned projects (e.g. just synced from main) surface as {@link
+   * ContainerState.NotCreated} so they can be found and provisioned.
    */
   static List<ContainerInfo> merge(List<ContainerInfo> containers, List<String> catalogNames) {
     var byName = new LinkedHashMap<String, ContainerInfo>();
@@ -80,13 +84,20 @@ public final class ProjectListCommand implements Runnable {
     for (var container : containers) {
       byName.put(container.name(), container);
     }
-    return byName.values().stream().sorted(Comparator.comparing(ContainerInfo::name)).toList();
+    return ReadFilter.readable(
+        Actor.reader(),
+        byName.values().stream().sorted(Comparator.comparing(ContainerInfo::name)).toList(),
+        ContainerInfo::name);
   }
 
-  private static List<String> catalogNames(OperatorCommand operator) {
-    try (var operations = OperationsFactory.open()) {
+  /**
+   * The names of the projects the catalog {@code open} opens holds, or none when it cannot be read:
+   * a box before {@code sail init} has no catalog yet, and lists its containers alone.
+   */
+  static List<String> catalogNames(Supplier<HostOperations> open) {
+    try (var operations = open.get()) {
       return operations.catalog().projects().stream().map(ProjectStore.ProjectRow::name).toList();
-    } catch (RuntimeException e) {
+    } catch (RuntimeException unreadable) {
       return List.of();
     }
   }

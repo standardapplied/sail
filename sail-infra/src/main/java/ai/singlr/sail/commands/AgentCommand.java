@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 
 @Command(
@@ -28,6 +29,6 @@ public final class AgentCommand implements Runnable {
 
   @Override
   public void run() {
-    new picocli.CommandLine(this).usage(System.out);
+    CommandLine.usage(this, System.out);
   }
 }

@@ -6,10 +6,11 @@
 package ai.singlr.sail.auth;
 
 /**
- * A passkey ceremony that cannot complete. The {@link Kind} lets the API boundary pick the HTTP
- * status without coupling the ceremony logic to the transport. Login failures are deliberately
- * collapsed to {@link Kind#UNAUTHORIZED} with a generic message so the response cannot be used as
- * an oracle to distinguish an unknown credential from a bad signature.
+ * A passkey ceremony that cannot complete. The {@link Kind} lets the API boundary pick its answer
+ * without coupling the ceremony logic to the transport. A login whose assertion fails is collapsed
+ * to {@link Kind#UNAUTHORIZED} with a generic message, so the answer cannot tell an unknown
+ * credential from a bad signature; one whose assertion verifies for a disabled FDE is {@link
+ * Kind#DISABLED}, since only the holder of that FDE's passkey can reach it.
  */
 public final class PasskeyException extends RuntimeException {
 
@@ -18,8 +19,10 @@ public final class PasskeyException extends RuntimeException {
     NOT_FOUND,
     /** The request is malformed or the ceremony challenge is unknown/expired. */
     BAD_REQUEST,
-    /** Authentication failed (any login-ceremony rejection). */
-    UNAUTHORIZED
+    /** A login assertion that does not verify, said generically. */
+    UNAUTHORIZED,
+    /** The FDE the ceremony is for is disabled in the roster. */
+    DISABLED
   }
 
   private final transient Kind kind;

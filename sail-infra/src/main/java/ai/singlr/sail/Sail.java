@@ -67,6 +67,6 @@ public final class Sail implements Runnable {
   public void run() {
     Banner.printBranding(System.out, Ansi.AUTO);
     System.out.println();
-    new CommandLine(this).usage(System.out);
+    CommandLine.usage(this, System.out);
   }
 }

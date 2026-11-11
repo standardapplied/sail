@@ -18,8 +18,6 @@ import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.ProjectScope;
-import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
@@ -62,6 +60,11 @@ import picocli.CommandLine.Command;
     description = "Internal sync RPC server for an SSH-key session.",
     hidden = true)
 public final class SyncServerCommand implements Callable<Integer> {
+
+  /** What main answers a session no FDE it knows stands behind: nothing is served. */
+  static final String REFUSED =
+      "sync: main serves no session whose token is missing, invalid or expired, or whose FDE is"
+          + " disabled or removed. Ask an admin to re-enable the FDE, then sync again.";
 
   @Override
   public Integer call() throws Exception {
@@ -108,9 +111,9 @@ public final class SyncServerCommand implements Callable<Integer> {
   /**
    * Serves one session as the FDE {@code token} names, with the role {@link RoleRule} gives it on
    * this main ({@code box}), whose own FDE syncs from no box but main, seeing the projects main's
-   * roster scopes it to. A session with no token is a read-only one that owns nothing and sees
-   * nothing; a token whose FDE is disabled is refused before anything is served. Main first fixes
-   * the findings of every shipped follow-up it holds ({@link ShippedFollowUps#catchUp}), so a
+   * roster scopes it to. A session no FDE stands behind, with no token, one that is not a live
+   * session, or one whose FDE is disabled or gone, is refused before anything is served. Main first
+   * fixes the findings of every shipped follow-up it holds ({@link ShippedFollowUps#catchUp}), so a
    * resolution a busy database cost an earlier session lands before this one can move a follow-up
    * on; failing that fails the session for the node to retry.
    */
@@ -126,8 +129,7 @@ public final class SyncServerCommand implements Callable<Integer> {
     var db = converged.db();
     var principal = principal(db, token, new RoleRule(box, new FdeStore(db)));
     if (principal.isEmpty()) {
-      System.err.println(
-          "sync: this session's FDE is disabled on main. Ask an admin to re-enable it.");
+      System.err.println(REFUSED);
       return 1;
     }
     try {
@@ -223,16 +225,16 @@ public final class SyncServerCommand implements Callable<Integer> {
     return map;
   }
 
+  /**
+   * The FDE {@code token}'s session was opened for, as {@link RoleRule} resolves it on the sync
+   * lane; empty when there is no token, it is not a live session, or its FDE is disabled or gone.
+   */
   private static Optional<Actor> principal(Sqlite db, String token, RoleRule roles) {
-    var fde =
-        Strings.isBlank(token)
-            ? Optional.<FdeStore.Fde>empty()
-            : new AuthSessionStore(db)
-                .validate(token)
-                .flatMap(session -> new FdeStore(db).byId(session.fdeId()));
-    if (fde.isEmpty()) {
-      return Optional.of(Actor.sync(null, Role.VIEWER).withScope(ProjectScope.none()));
+    if (Strings.isBlank(token)) {
+      return Optional.empty();
     }
-    return roles.actorOf(fde.get().handle(), Role.ADMIN, Actor.Lane.SYNC);
+    return roles
+        .session(new AuthSessionStore(db), token, Actor.Lane.SYNC)
+        .flatMap(RoleRule.Session::principal);
   }
 }

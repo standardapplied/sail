@@ -294,16 +294,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       return Lane.readOnly(role);
     }
 
-    /**
-     * The actor this run's credential stands for before the role rule weighs it: its principal, for
-     * the FDE the run acts for, on the room lane for a read-only lane and the agent lane otherwise.
-     */
-    public Actor principalActor() {
-      return readOnlyLane()
-          ? Actor.roomPrincipal(principal, owner)
-          : Actor.agentPrincipal(principal, owner);
-    }
-
     /** Whether this row serves a review: a reviewer's run, or the fix agent's that answers it. */
     public boolean servesReview() {
       return lane().map(Lane::servesReview).orElse(false);

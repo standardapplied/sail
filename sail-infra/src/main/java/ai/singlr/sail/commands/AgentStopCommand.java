@@ -17,12 +17,12 @@ import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Sqlite;
 import java.util.LinkedHashMap;
 import java.util.Objects;
@@ -89,15 +89,11 @@ public final class AgentStopCommand implements Runnable {
     }
   }
 
-  /**
-   * Stops {@code project}'s run as this box's operator — acting as no one for a preview, which
-   * writes and signals nothing.
-   */
+  /** Stops {@code project}'s run as this box's operator, a preview decided as the real stop is. */
   static StopOperations.Outcome stopAsOperator(
       HostOperations operations, String project, String handle, boolean dryRun) {
-    return CliOperator.actingUnlessPreview(
-        dryRun,
-        operations.identity()::operator,
+    return Actor.call(
+        operations.identity().operator(),
         () ->
             operations
                 .dispatching()

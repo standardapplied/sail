@@ -32,9 +32,9 @@ public sealed interface PtyMessage {
 
   /**
    * Starts a session. {@code room} is the room this session is pinned to — blank for none. The host
-   * admits it through its {@link PtyRooms} gate (the room exists in the session's project and the
-   * caller holds its post right) before it rides into the child as {@code SAIL_ROOM_ID}, onto the
-   * session's events, and back out on listings. {@code command} is capped at {@link
+   * admits it through its {@link PtyAdmission} gate (the room exists in the session's project and
+   * the caller holds its post right) before it rides into the child as {@code SAIL_ROOM_ID}, onto
+   * the session's events, and back out on listings. {@code command} is capped at {@link
    * #MAX_COMMAND_BYTES} as encoded on the wire.
    */
   record Create(

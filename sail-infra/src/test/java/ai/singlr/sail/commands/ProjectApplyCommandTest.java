@@ -20,6 +20,8 @@ import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.ContainerManager;
+import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.FileMutexTest;
@@ -27,8 +29,10 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.ProvisionState;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -57,6 +61,24 @@ class ProjectApplyCommandTest {
   private static ProjectApplyCommand.Outcome outcome(
       ContainerSailSetup.Result machinery, boolean hostnameRealigned) {
     return new ProjectApplyCommand.Outcome(3, 1, 4, machinery, hostnameRealigned, List.of(), null);
+  }
+
+  @Test
+  void aBulkApplyConvergesOnlyTheContainersOfProjectsItsPersonReads() throws Exception {
+    var incus =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus list",
+                "[{\"name\": \"alpha\", \"status\": \"Running\", \"state\": {}},"
+                    + " {\"name\": \"beta\", \"status\": \"Running\", \"state\": {}}]");
+    var scoped =
+        new Actor("ada", Role.MEMBER, Actor.Lane.CLI).withScope(ProjectScope.of(List.of("alpha")));
+
+    var targets =
+        Actor.readingAs(
+            () -> scoped, () -> ProjectApplyCommand.targets(new ContainerManager(incus)));
+
+    assertEquals(List.of("alpha"), targets.stream().map(ContainerInfo::name).toList());
   }
 
   @Test

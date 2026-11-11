@@ -136,7 +136,9 @@ class ProjectCatalogTest {
             IllegalStateException.class,
             () ->
                 new ProjectCatalog(unopenable)
-                    .create(TestDefinitions.named("web"), Actor.cliOperator("uday")));
+                    .create(
+                        TestDefinitions.named("web"),
+                        new Actor("uday", Role.ADMIN, Actor.Lane.CLI)));
 
     assertTrue(
         failed.getMessage().startsWith("Project 'web' was not recorded in the catalog: "),
@@ -162,7 +164,7 @@ class ProjectCatalogTest {
   @Test
   void aSecondCreateOfANameIsRefusedAsTheNameTakenAndLeavesTheFirst() {
     var catalog = new ProjectCatalog(dir.resolve("sail.db"));
-    var uday = Actor.cliOperator("uday");
+    var uday = new Actor("uday", Role.ADMIN, Actor.Lane.CLI);
     catalog.create(TestDefinitions.described("web", "first"), uday);
 
     var taken =
@@ -177,7 +179,7 @@ class ProjectCatalogTest {
   @Test
   void aSectionIsWrittenOverTheVersionItWasReadFromAndRefusedOverAnyOther() {
     var catalog = new ProjectCatalog(dir.resolve("sail.db"));
-    var uday = Actor.cliOperator("uday");
+    var uday = new Actor("uday", Role.ADMIN, Actor.Lane.CLI);
     catalog.create(TestDefinitions.described("web", "Storefront"), uday);
     var read = catalog.read("web").orElseThrow();
 
@@ -198,7 +200,7 @@ class ProjectCatalogTest {
   @Test
   void anEditWritesTheSectionsItChangesInOneRevisionAndOneThatChangesNothingWritesNone() {
     var catalog = new ProjectCatalog(dir.resolve("sail.db"));
-    var uday = Actor.cliOperator("uday");
+    var uday = new Actor("uday", Role.ADMIN, Actor.Lane.CLI);
     catalog.create(TestDefinitions.described("web", "Storefront"), uday);
     var read = catalog.read("web").orElseThrow();
     var edited =

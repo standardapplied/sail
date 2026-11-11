@@ -14,6 +14,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.TokenStore;
 import java.time.Duration;
 import java.util.function.Function;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Parameters;
@@ -31,7 +32,7 @@ public final class ServerTokenCommand implements Runnable {
 
   @Override
   public void run() {
-    new picocli.CommandLine(this).usage(System.out);
+    CommandLine.usage(this, System.out);
   }
 
   private static OperatorCommand operator() {

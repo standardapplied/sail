@@ -173,7 +173,7 @@ class LaunchAdmissionTest {
     assertDoesNotThrow(
         () ->
             Actor.run(
-                Actor.cliOperator("uday"),
+                new Actor("uday", Role.ADMIN, Actor.Lane.CLI),
                 () -> LaunchAdmission.requireAllowed(spec("uday"), "uday")));
   }
 
@@ -443,7 +443,7 @@ class LaunchAdmissionTest {
             ApiException.class,
             () ->
                 Actor.run(
-                    Actor.cliOperator("uday"),
+                    new Actor("uday", Role.ADMIN, Actor.Lane.CLI),
                     () -> LaunchAdmission.requireAllowedForRoom("chat", "acme", "uday", " ")));
     assertEquals(ErrorCode.COMMAND_FAILED, noHandle.failure().errorCode());
 
@@ -452,12 +452,12 @@ class LaunchAdmissionTest {
             ApiException.class,
             () ->
                 Actor.run(
-                    Actor.cliOperator("uday"),
+                    new Actor("uday", Role.ADMIN, Actor.Lane.CLI),
                     () -> LaunchAdmission.requireAllowedForRoom("chat", "acme", "ada", "uday")));
     assertEquals(ErrorCode.NOT_YOUR_SPEC, foreign.failure().errorCode());
 
     Actor.run(
-        Actor.cliOperator("uday"),
+        new Actor("uday", Role.ADMIN, Actor.Lane.CLI),
         () -> LaunchAdmission.requireAllowedForRoom("chat", "acme", "uday", "uday"));
   }
 }

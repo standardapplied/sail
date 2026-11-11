@@ -51,10 +51,7 @@ public final class TestAuth {
   public static SessionAwareAuth sessions(Sqlite db, Supplier<SyncConfig> box) {
     var roles = new RoleRule(box, new FdeStore(db));
     return new SessionAwareAuth(
-        new AuthSessionStore(db),
-        new FdeStore(db),
-        roles,
-        new TokenAuth(new TokenStore(db), roles));
+        new AuthSessionStore(db), roles, new TokenAuth(new TokenStore(db), roles));
   }
 
   /** Runs {@code work} as this box's CLI operator, as the host CLI binds it. */

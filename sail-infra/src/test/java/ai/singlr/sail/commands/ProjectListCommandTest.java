@@ -8,9 +8,17 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
 import ai.singlr.sail.engine.ContainerManager.ResourceLimits;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.Sqlite;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -52,6 +60,38 @@ class ProjectListCommandTest {
 
     assertEquals(
         List.of("alpha", "mid", "zeta"), merged.stream().map(ContainerInfo::name).toList());
+  }
+
+  @Test
+  void aScopedOperatorListsOnlyItsProjectsCataloguedOrNot() {
+    var scoped =
+        new Actor("mady", Role.MEMBER, Actor.Lane.CLI).withScope(ProjectScope.of(List.of("acme")));
+
+    var merged =
+        Actor.call(
+            scoped,
+            () ->
+                ProjectListCommand.merge(
+                    List.of(running("acme"), running("legacy")), List.of("acme", "beta")));
+
+    assertEquals(List.of("acme"), merged.stream().map(ContainerInfo::name).toList());
+  }
+
+  @Test
+  void aBoxWithNoCatalogYetListsItsContainersAlone() {
+    try (var db = Sqlite.openMemory()) {
+      assertEquals(
+          List.of(),
+          ProjectListCommand.catalogNames(
+              () ->
+                  OperationsFactory.create(
+                      db,
+                      new ScriptedShellExecutor(),
+                      null,
+                      null,
+                      SyncScheduler.disabled(),
+                      SessionYield.NONE)));
+    }
   }
 
   @Test

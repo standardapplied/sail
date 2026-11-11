@@ -54,7 +54,7 @@ class LocalApiSkillsTest {
   private Sqlite db;
   private FileStore files;
   private ScriptedShellExecutor shell;
-  private LocalApiRouter router;
+  private SocketDoor router;
 
   @BeforeEach
   void setUp() {
@@ -80,7 +80,7 @@ class LocalApiSkillsTest {
                       default -> Optional.empty();
                     }));
     router =
-        new LocalApiRouter(
+        new SocketDoor(
             new TestOperations() {
               @Override
               public SkillOperations skills() {
@@ -103,18 +103,8 @@ class LocalApiSkillsTest {
     db.close();
   }
 
-  private static LocalApiRequest request(
-      String method, String path, String credential, String form) {
-    return new LocalApiRequest(
-        method,
-        path,
-        Map.of(),
-        credential == null ? Map.of() : Map.of("authorization", "Bearer " + credential),
-        form.getBytes(StandardCharsets.UTF_8));
-  }
-
   private ApiResponse box(String method, String path, String form) {
-    return router.handle(request(method, path, TestOperations.BOX_CREDENTIAL, form));
+    return router.ask(method, path, TestOperations.BOX_CREDENTIAL, form);
   }
 
   private static String message(ApiResponse response) {
@@ -162,7 +152,7 @@ class LocalApiSkillsTest {
             TestOperations.BOX_CREDENTIAL,
             TestOperations.RUN_CREDENTIAL,
             TestOperations.ROOM_RUN_CREDENTIAL)) {
-      var listed = router.handle(request("GET", SKILLS, credential, ""));
+      var listed = router.ask("GET", SKILLS, credential, "");
 
       assertEquals(200, listed.status(), credential);
       assertEquals(
@@ -177,8 +167,7 @@ class LocalApiSkillsTest {
   void everyCallerReadsASkillsManifest() {
     shareJava();
 
-    var read =
-        router.handle(request("GET", SKILLS + "/java", TestOperations.ROOM_RUN_CREDENTIAL, ""));
+    var read = router.ask("GET", SKILLS + "/java", TestOperations.ROOM_RUN_CREDENTIAL, "");
 
     assertEquals(200, read.status());
     assertEquals(Map.of("name", "java", "skill_md", JAVA_MD), withoutSchema(read.body()));
@@ -220,10 +209,8 @@ class LocalApiSkillsTest {
 
     for (var credential :
         List.of(TestOperations.RUN_CREDENTIAL, TestOperations.ROOM_RUN_CREDENTIAL)) {
-      var share =
-          router.handle(
-              request("POST", SKILLS, credential, "folder=%2Fhome%2Fdev%2Fdrafts%2Flint"));
-      var remove = router.handle(request("DELETE", SKILLS + "/java", credential, ""));
+      var share = router.ask("POST", SKILLS, credential, "folder=%2Fhome%2Fdev%2Fdrafts%2Flint");
+      var remove = router.ask("DELETE", SKILLS + "/java", credential, "");
 
       assertEquals(403, share.status(), credential);
       assertEquals(PERSON_ONLY.formatted("share"), message(share));
@@ -238,7 +225,7 @@ class LocalApiSkillsTest {
           remedy(remove));
     }
     assertEquals(List.of(".sail/skills/java/SKILL.md"), shared());
-    var unnamed = router.handle(request("POST", SKILLS, TestOperations.RUN_CREDENTIAL, ""));
+    var unnamed = router.ask("POST", SKILLS, TestOperations.RUN_CREDENTIAL, "");
     assertEquals(
         "Ask them to run 'skill add <folder>' in their own session.",
         assertInstanceOf(Map.class, unnamed.body().get("error")).get("action"));
@@ -266,19 +253,18 @@ class LocalApiSkillsTest {
     for (var credential : List.of(TestOperations.RUN_CREDENTIAL, SCOPED)) {
       for (var asked :
           List.of(
-              request("GET", "/v1/projects/zeta/skills", credential, ""),
-              request("GET", "/v1/projects/zeta/skills/java", credential, ""),
-              request(
-                  "POST", "/v1/projects/zeta/skills", credential, "folder=%2Fhome%2Fdev%2Fjava"),
-              request("DELETE", "/v1/projects/zeta/skills/java", credential, ""))) {
-        var refused = router.handle(asked);
+              List.of("GET", "/v1/projects/zeta/skills", ""),
+              List.of("GET", "/v1/projects/zeta/skills/java", ""),
+              List.of("POST", "/v1/projects/zeta/skills", "folder=%2Fhome%2Fdev%2Fjava"),
+              List.of("DELETE", "/v1/projects/zeta/skills/java", ""))) {
+        var refused = router.ask(asked.get(0), asked.get(1), credential, asked.get(2));
 
-        assertEquals(404, refused.status(), credential + " " + asked.method());
+        assertEquals(404, refused.status(), credential + " " + asked);
         assertEquals("Project 'zeta' is not in the catalog.", message(refused));
       }
     }
     assertEquals(invocations, shell.invocations().size(), "nothing was asked of zeta's container");
-    assertEquals(200, router.handle(request("GET", SKILLS, SCOPED, "")).status());
+    assertEquals(200, router.ask("GET", SKILLS, SCOPED, "").status());
     assertEquals(
         List.of(".sail/skills/java/SKILL.md"),
         files.list("zeta").stream().map(FileStore.FileRow::path).toList());
@@ -286,7 +272,7 @@ class LocalApiSkillsTest {
 
   @Test
   void aRequestWithoutACredentialIsRefused() {
-    assertEquals(401, router.handle(request("GET", SKILLS, null, "")).status());
+    assertEquals(401, router.ask("GET", SKILLS, null, "").status());
   }
 
   @Test
@@ -347,7 +333,7 @@ class LocalApiSkillsTest {
                     .onOk("incus list", "[{\"name\": \"acme\", \"status\": \"Running\"}]"),
                 project -> Optional.of(TestDefinitions.yaml(ACME))));
     var interrupted =
-        new LocalApiRouter(
+        new SocketDoor(
             new TestOperations() {
               @Override
               public SkillOperations skills() {
@@ -356,8 +342,8 @@ class LocalApiSkillsTest {
             });
 
     var failed =
-        interrupted.handle(
-            request("POST", SKILLS, TestOperations.BOX_CREDENTIAL, "folder=%2Fhome%2Fdev%2Fjava"));
+        interrupted.ask(
+            "POST", SKILLS, TestOperations.BOX_CREDENTIAL, "folder=%2Fhome%2Fdev%2Fjava");
 
     assertEquals(500, failed.status());
     assertEquals(true, Thread.interrupted(), "the interrupt is kept for whoever waits on it");

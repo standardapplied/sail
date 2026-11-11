@@ -71,7 +71,9 @@ class LegacyConversionSyncTest {
         box("node", "node-catalog", "sync:\n  role: node\n  main: main.example\n  handle: uday\n");
 
     try (var main = SyncBox.opening(mainFile, "main");
-        var node = SyncBox.opening(nodeFile, "node").syncsAs(Actor.sync("uday", Role.ADMIN))) {
+        var node =
+            SyncBox.opening(nodeFile, "node")
+                .syncsAs(new Actor("uday", Role.ADMIN, Actor.Lane.SYNC))) {
       SyncBox.quiesce(main, node);
 
       SyncBox.assertEqualToMain(main, node);

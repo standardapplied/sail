@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConnectEnvironment;
@@ -23,6 +24,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
@@ -112,6 +114,11 @@ class ScopedReadsTest {
           "/v1/rooms",
           "/v1/runs",
           "/v1/projects");
+
+  /**
+   * The unaddressed routes that are the box's to read, which only its own person or an admin do.
+   */
+  private static final Set<String> THE_BOXS = Set.of("/v1/sync", "/v1/events/stats");
 
   /** The unaddressed routes on which an unrestricted caller is shown something of bravo. */
   private static final Set<String> SHOW_EVERY_PROJECT =
@@ -314,7 +321,7 @@ class ScopedReadsTest {
     var specs = new SpecStore(db);
     var runs = new RunStore(db);
     operations =
-        TestControlPlane.standalone(
+        TestControlPlane.on(
             new SailOperations(
                     new BoxShell(),
                     ProjectReader.ofCatalog(new ProjectStore(db)),
@@ -333,13 +340,13 @@ class ScopedReadsTest {
                 .useRooms(new RoomStore(db))
                 .useEvents(new EventStore(db)),
             db,
-            tempDir.resolve("projects"));
+            tempDir.resolve("projects"),
+            new SyncConfig(null, null, "main", "box"));
     var auth = TestAuth.tokens(db);
     var streamer = new AgentLogStreamer(auth, runs::findById, specs::findById, () -> "main");
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext(
-        "/",
-        new ApiRouter(recording(operations), auth, new RateLimitGate(), streamer, () -> "main"));
+        "/", new ApiRouter(recording(operations), auth, new RateLimitGate(), streamer));
     server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
     server.start();
   }
@@ -363,13 +370,21 @@ class ScopedReadsTest {
       assertEquals(withoutBravo.get(route), withBravo.get(route), route);
     }
     for (var route : withBravo.keySet()) {
-      if (!route.startsWith("bravo ")) {
+      if (!route.startsWith("bravo ") && !THE_BOXS.contains(route)) {
         assertEquals("200", withBravo.get(route).substring(0, 3), route + " served sam");
         assertEquals("200", unrestricted.get(route).substring(0, 3), route + " served ada");
       }
       if (route.startsWith("bravo ") || SHOW_EVERY_PROJECT.contains(route)) {
         assertNotEquals(withBravo.get(route), unrestricted.get(route), route + " shows ada bravo");
       }
+    }
+    for (var route : THE_BOXS) {
+      assertEquals(
+          """
+          403 {"schema_version": 1, "error": {"code": "forbidden_not_assignee", "message": "Box 'main' belongs to 'main', not you.", "action": "Ask main to operate it, or have an admin do it.", "field_errors": []}}""",
+          withBravo.get(route),
+          route + " is main's box, not sam's");
+      assertEquals("200", unrestricted.get(route).substring(0, 3), route + " served ada");
     }
     assertEquals(
         """
@@ -896,7 +911,7 @@ class ScopedReadsTest {
   void aRunIsDeliveredNothingOfAProjectItsFdeNoLongerHolds() throws Exception {
     var runs = new RunStore(db);
     var messages = new MessageStore(db);
-    var local = new LocalApiRouter(operations);
+    var local = new SocketDoor(operations);
     var run = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     var reserved =
         Acting.system(
@@ -919,7 +934,7 @@ class ScopedReadsTest {
     var talk = messages.list("alpha-spec", null, 1).getFirst();
     var inbox = new LocalApiRequest("GET", "/v1/run/messages", Map.of(), bearer, new byte[0]);
 
-    var held = local.handle(inbox);
+    var held = local.ask(inbox);
     assertEquals(200, held.status());
     assertEquals(true, held.body().toString().contains("Talk in the alpha spec"), "" + held.body());
 
@@ -934,11 +949,11 @@ class ScopedReadsTest {
             inbox,
             form(bearer, "/v1/run/messages", "delivered=" + talk.id()),
             form(bearer, "/v1/run/session", "session_id=a-session"))) {
-      var answer = local.handle(asked);
+      var answer = local.ask(asked);
       assertEquals(gone, answer.status() + " " + answer.body(), asked.method() + asked.path());
     }
     var room =
-        local.handle(
+        local.ask(
             new LocalApiRequest(
                 "GET", "/v1/specs/alpha-spec/messages", Map.of(), bearer, new byte[0]));
     assertEquals(
@@ -949,7 +964,7 @@ class ScopedReadsTest {
     assertEquals(null, runs.findById(run).orElseThrow().sessionId());
 
     Acting.system(() -> new FdeStore(db).grant("sam", "alpha"));
-    assertEquals(held.body(), local.handle(inbox).body(), "granted again, it is delivered again");
+    assertEquals(held.body(), local.ask(inbox).body(), "granted again, it is delivered again");
   }
 
   private static LocalApiRequest form(Map<String, String> bearer, String path, String body) {
@@ -1238,7 +1253,7 @@ class ScopedReadsTest {
   void aRunNarratesItsOwnLifecycleAfterAnAdminMovedItsSpecOutOfTheScope() throws Exception {
     Acting.system(this::bravoArrives);
     var runs = new RunStore(db);
-    var local = new LocalApiRouter(operations);
+    var local = new SocketDoor(operations);
     var run = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     var reserved =
         Acting.system(
@@ -1271,13 +1286,13 @@ class ScopedReadsTest {
                     + "\", \"host\": \"main\", \"data\": {}}")
                 .getBytes(StandardCharsets.UTF_8));
 
-    var before = local.handle(narrated);
+    var before = local.ask(narrated);
     assertEquals(202, before.status(), "" + before.body());
 
     assertEquals(
         "200",
         send(ada, "PUT", "/v1/specs/alpha-spec", "{\"project\": \"bravo\"}").substring(0, 3));
-    var after = local.handle(narrated);
+    var after = local.ask(narrated);
 
     assertEquals(202, after.status(), "the run is filed under alpha still: " + after.body());
   }
@@ -1304,25 +1319,25 @@ class ScopedReadsTest {
   void theTerminalDoorRefusesARoomOutsideTheFdesScopeAsOneThatDoesNotExist() throws Exception {
     Acting.system(this::bravoArrives);
     var door = new HostAccess(db, TestAuth.roles(db));
+    var scoped =
+        door.identity(
+            new AuthSessionStore(db)
+                .create(new FdeStore(db).byHandle("sam").orElseThrow().id(), Duration.ofHours(1))
+                .token());
 
-    var outside =
-        assertThrows(
-            IOException.class,
-            () -> door.admit("bravo-room", "bravo", new PtyIdentity("sam", false)));
+    var outside = assertThrows(IOException.class, () -> door.admit("bravo-room", "bravo", scoped));
     var misaddressed =
-        assertThrows(
-            IOException.class,
-            () -> door.admit("bravo-room", "alpha", new PtyIdentity("sam", false)));
-    var missing =
-        assertThrows(
-            IOException.class,
-            () -> door.admit("ghost-room", "bravo", new PtyIdentity("sam", false)));
+        assertThrows(IOException.class, () -> door.admit("bravo-room", "alpha", scoped));
+    var missing = assertThrows(IOException.class, () -> door.admit("ghost-room", "bravo", scoped));
 
     assertEquals("Room 'bravo-room' was not found.", outside.getMessage());
     assertEquals("Room 'bravo-room' was not found.", misaddressed.getMessage());
     assertEquals("Room 'ghost-room' was not found.", missing.getMessage());
-    door.admit("alpha-room", "alpha", new PtyIdentity("sam", false));
-    door.admit("bravo-room", "bravo", new PtyIdentity("ada", true));
+    door.admit("alpha-room", "alpha", scoped);
+    door.admit(
+        "bravo-room",
+        "bravo",
+        new PtyIdentity.Person(new Actor("ada", Role.ADMIN, Actor.Lane.API)));
   }
 
   /**

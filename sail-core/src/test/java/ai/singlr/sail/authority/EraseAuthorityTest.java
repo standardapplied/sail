@@ -194,7 +194,10 @@ class EraseAuthorityTest {
                 Kind.NOT_PRUNABLE,
                 "main holds no spec 'auth', so it cannot tell whose it is; sync it before pruning",
                 "Sync the spec before pruning it.")),
-        rule.requested(Actor.sync(OWNER, Role.VIEWER).withScope(outsider.scope()), "spec", "auth"));
+        rule.requested(
+            new Actor(OWNER, Role.VIEWER, Actor.Lane.SYNC).withScope(outsider.scope()),
+            "spec",
+            "auth"));
   }
 
   @Test
@@ -340,7 +343,10 @@ class EraseAuthorityTest {
         "an owner main never scoped erases it whole");
     assertEquals(
         Optional.of(Kind.NOT_PRUNABLE),
-        rule.requested(Actor.sync(OWNER, Role.MEMBER).withScope(scoped.scope()), "spec", "moved")
+        rule.requested(
+                new Actor(OWNER, Role.MEMBER, Actor.Lane.SYNC).withScope(scoped.scope()),
+                "spec",
+                "moved")
             .map(Refusal::kind),
         "and main answers a scoped node's request by the same rule");
     Acting.system(() -> specs.updateStatus("moved", SpecStatus.IN_PROGRESS));

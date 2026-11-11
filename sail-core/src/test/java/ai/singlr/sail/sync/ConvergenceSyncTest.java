@@ -982,7 +982,7 @@ class ConvergenceSyncTest {
   /** Renames as {@code as}, an admin whose box then syncs as one: a rename is an admin's alone. */
   private static void renameProject(SyncBox box, String as, String from, String to) {
     Acting.as(as, () -> new ProjectStore(box.db).rename(from, to, TestDefinitions.named(to)));
-    box.syncsAs(Actor.sync(as, Role.ADMIN));
+    box.syncsAs(new Actor(as, Role.ADMIN, Actor.Lane.SYNC));
   }
 
   private static ProjectDefinition definition(SyncBox box, String name) {

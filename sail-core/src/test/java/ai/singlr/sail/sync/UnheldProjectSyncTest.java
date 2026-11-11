@@ -69,7 +69,8 @@ class UnheldProjectSyncTest {
 
   @Test
   void aScopedPusherHearsOnlyTheScopeRuleWhateverMainHolds() {
-    var scoped = Actor.sync("node", Role.MEMBER).withScope(ProjectScope.of(List.of("acme")));
+    var scoped =
+        new Actor("node", Role.MEMBER, Actor.Lane.SYNC).withScope(ProjectScope.of(List.of("acme")));
     Acting.unchecked(
         "node",
         () -> {

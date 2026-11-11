@@ -100,7 +100,7 @@ public final class SyncBox implements AutoCloseable {
     this.conflicts = new SyncConflicts(db);
     this.syncState = new SyncState(db);
     this.replica = new StoreReplica(id, specs, new ChangeLog(db), conflicts, syncState);
-    syncsAs(Actor.sync(id, Role.MEMBER));
+    syncsAs(new Actor(id, Role.MEMBER, Actor.Lane.SYNC));
   }
 
   /**
@@ -463,8 +463,7 @@ public final class SyncBox implements AutoCloseable {
 
   /** This box serving every registered type as main, to sessions authenticated as {@code as}. */
   public SyncRpcServer server(Actor as) {
-    return SyncRpcServer.over(db, id, null, as, FdeRoster.EMPTY, transitions, "1.0.0")
-        .content(db, limits);
+    return SyncRpcServer.over(db, id, null, as, List::of, transitions, "1.0.0").content(db, limits);
   }
 
   /**
@@ -511,7 +510,7 @@ public final class SyncBox implements AutoCloseable {
                 }));
     var changes = new ChangeLog(db);
     return new SyncRpcServer(
-            replicas, as, FdeRoster.EMPTY, SyncTransitionSink.NONE, changes::headsAfter, "1.0.0")
+            replicas, as, List::of, SyncTransitionSink.NONE, changes::headsAfter, "1.0.0")
         .content(db, limits)
         .boxes(new SyncRpcServer.MainBox(null, this.id));
   }
@@ -809,8 +808,8 @@ public final class SyncBox implements AutoCloseable {
             main,
             "main",
             null,
-            Actor.sync(handle, Role.MEMBER),
-            FdeRoster.EMPTY,
+            new Actor(handle, Role.MEMBER, Actor.Lane.SYNC),
+            List::of,
             SyncTransitionSink.NONE,
             "1.0.0");
     try (var link = connect(server, node, handle, SyncWire.MAX_FRAME, out -> out)) {

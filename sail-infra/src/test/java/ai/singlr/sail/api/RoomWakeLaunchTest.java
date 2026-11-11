@@ -24,6 +24,7 @@ import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Actors;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
@@ -484,14 +485,14 @@ class RoomWakeLaunchTest {
     createSpec(HANDLE, "draft", null);
     var runId = ops.startRoomRun("acme", "draft", HANDLE);
     var run = runStore.findById(runId).orElseThrow();
-    var agent = run.principalActor();
+    var agent = Actors.principalOf(run);
     var posted = Acting.by(agent, () -> messageStore.append("draft", agent.handle(), "here", null));
     Acting.system(() -> runStore.complete(runId, "completed", 0));
 
     try (var main = new SyncBox("main");
         var link =
             SyncBox.connect(
-                main.server(Actor.sync(HANDLE, Role.MEMBER)),
+                main.server(new Actor(HANDLE, Role.MEMBER, Actor.Lane.SYNC)),
                 db,
                 "uday-box",
                 SyncWire.MAX_FRAME,
@@ -505,7 +506,8 @@ class RoomWakeLaunchTest {
       assertEquals(HANDLE, new RunStore(main.db).findById(runId).orElseThrow().owner());
       assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
       try (var box =
-          SyncBox.opening(db.path(), "uday-box").syncsAs(Actor.sync(HANDLE, Role.MEMBER))) {
+          SyncBox.opening(db.path(), "uday-box")
+              .syncsAs(new Actor(HANDLE, Role.MEMBER, Actor.Lane.SYNC))) {
         SyncBox.assertConverged(main, box);
       }
     }

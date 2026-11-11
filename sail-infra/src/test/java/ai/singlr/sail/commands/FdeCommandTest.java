@@ -7,16 +7,22 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerAuthorizedKeys;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -152,16 +158,18 @@ class FdeCommandTest {
     return new FdeCommand.Box(
         tempDir.resolve("sail.db"),
         operator,
-        handle,
+        new SyncConfig(null, main, handle),
         home(),
         hostKey(),
         workstationKey(),
-        keygen,
-        main);
+        keygen);
   }
 
   private CommandLine fdeCommand() {
-    var command = new CommandLine(new FdeCommand(this::box));
+    var command =
+        SailCommandLine.of(
+            new FdeCommand(this::box),
+            () -> inDb(db -> CliOperator.of(box().sync(), new FdeStore(db))));
     command.setExecutionExceptionHandler(
         (failure, line, parsed) -> {
           refusal = failure.getMessage();
@@ -520,7 +528,7 @@ class FdeCommandTest {
         List.of(
             "  ✓ FDE added: ada (member)",
             "  ✓ Paired ada: Mast logs in as root@34.1.2.3. The code expires "
-                + token.expiresAt()
+                + DateTimeUtils.format(token.expiresAt())
                 + ".",
             "  ✓ Workstation key set.",
             "",
@@ -610,7 +618,7 @@ class FdeCommandTest {
             "  ✓ Unpaired ada first: 1 key line removed from root's authorized_keys and token"
                 + " 'mast-ada' revoked. The workstation key was its key and is removed.",
             "  ✓ Paired ada: Mast logs in as root@box.acme.dev. The code expires "
-                + tokens().getFirst().expiresAt()
+                + DateTimeUtils.format(tokens().getFirst().expiresAt())
                 + ".",
             "  ✓ Workstation key set.",
             "",
@@ -686,6 +694,16 @@ class FdeCommandTest {
     assertNothingWritten("ada");
   }
 
+  /** {@code handle} on this box's copy of main's roster, with {@code role}. */
+  private FdeStore.Fde replicatedAs(String handle, String role) {
+    return inDb(
+        db -> {
+          new FdeStore(db)
+              .replicate(handle, null, null, role, "active", Instant.parse("2026-10-01T00:00:00Z"));
+          return new FdeStore(db).byHandle(handle).orElseThrow();
+        });
+  }
+
   private FdeStore.Fde replicated(String handle, String email) {
     return inDb(
         db -> {
@@ -730,7 +748,7 @@ class FdeCommandTest {
         List.of(fields.get("handle"), fields.get("email"), fields.get("host"), fields.get("user")));
     assertEquals(
         "  ✓ Paired client: Mast logs in as root@c.acme.dev. The code expires "
-            + token.expiresAt()
+            + DateTimeUtils.format(token.expiresAt())
             + ".",
         printed().getFirst());
   }
@@ -1812,6 +1830,7 @@ class FdeCommandTest {
   @Test
   void aNodeRefusesToRemoveWithTheRosterSentence() {
     main = "sail@main";
+    replicatedAs("ada", "admin");
 
     assertEquals(1, fde("rm", "ada", "--force"));
     assertEquals(FdeCommand.rosterEditOnNodeMessage("Removing an FDE"), refusal);
@@ -1835,14 +1854,14 @@ class FdeCommandTest {
         printed());
     assertEquals(0, fde("add", "uma"));
     assertEquals(List.of("  ✓ FDE added: uma (member)"), printed());
-    assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("nia")));
+    assertEquals(ProjectScope.of(List.of()), inDb(db -> new FdeStore(db).scopeOf("nia")));
     assertEquals(ProjectScope.all(), inDb(db -> new FdeStore(db).scopeOf("uma")));
 
     assertEquals(0, fde("grant", "nia", "alpha", "--dry-run"));
     assertEquals(
         List.of("  ✓ Would grant alpha to nia. Its box holds the project after its next sync."),
         printed());
-    assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("nia")));
+    assertEquals(ProjectScope.of(List.of()), inDb(db -> new FdeStore(db).scopeOf("nia")));
 
     assertEquals(0, fde("grant", "nia", "alpha"));
     assertEquals(
@@ -1940,12 +1959,13 @@ class FdeCommandTest {
         refusal);
     assertEquals(1, fde("revoke", "Bad Handle", "alpha"));
     assertEquals(0, fde("revoke", "nia", "ghost"), "a project since pruned is still revocable");
-    assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("nia")));
+    assertEquals(ProjectScope.of(List.of()), inDb(db -> new FdeStore(db).scopeOf("nia")));
   }
 
   @Test
   void aNodeRefusesToAddGrantOrRevokeWithTheRosterSentence() {
     main = "sail@main";
+    var ada = replicatedAs("ada", "admin");
 
     assertEquals(1, fde("add", "nia", "--scoped"));
     assertEquals(FdeCommand.rosterEditOnNodeMessage("Adding an FDE"), refusal);
@@ -1953,6 +1973,55 @@ class FdeCommandTest {
     assertEquals(FdeCommand.rosterEditOnNodeMessage("Granting a project"), refusal);
     assertEquals(1, fde("revoke", "nia", "alpha"));
     assertEquals(FdeCommand.rosterEditOnNodeMessage("Revoking a project"), refusal);
+    assertEquals(List.of(ada), inDb(db -> new FdeStore(db).list()));
+  }
+
+  @Test
+  void aMemberOnTheirNodeIsToldOnlyAnAdminManagesPeopleBeforeWhereTheRosterLives() {
+    main = "sail@main";
+    var eng = replicatedAs("ada", "member");
+
+    for (var edit :
+        List.of(
+            List.of("add", "zed", "--name", "Zed"),
+            List.of("update", "ada", "--name", "Eng"),
+            List.of("grant", "ada", "alpha"),
+            List.of("revoke", "ada", "alpha"),
+            List.of("rm", "ada", "--force"))) {
+      err.reset();
+      assertEquals(1, fde(edit.toArray(String[]::new)), edit.toString());
+
+      var refusal = assertInstanceOf(ApiException.class, refused, edit.toString());
+      assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, refusal.failure().errorCode());
+      assertEquals("Only an admin may manage people.", refusal.getMessage());
+      assertEquals("Ask an admin to do it.", refusal.remedy().plain());
+      assertEquals(
+          List.of("  ✗ Only an admin may manage people.", "  Ask an admin to do it."),
+          err.toString(StandardCharsets.UTF_8).lines().toList());
+    }
+    assertEquals(List.of(eng), inDb(db -> new FdeStore(db).list()));
+  }
+
+  @Test
+  void aViewerOnTheirNodeIsToldTheirCredentialIsReadOnly() {
+    main = "sail@main";
+    replicatedAs("ada", "viewer");
+
+    assertEquals(1, fde("add", "zed"));
+
+    var refusal = assertInstanceOf(ApiException.class, refused);
+    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, refusal.failure().errorCode());
+    assertEquals("Your credential is read-only and cannot manage people.", refusal.getMessage());
+    assertEquals("Ask an admin for a member or admin credential.", refusal.remedy().plain());
+  }
+
+  @Test
+  void aNodeThatCannotPlaceItsFdeSaysSoBeforeAnyRosterEdit() {
+    main = "sail@main";
+
+    assertEquals(1, fde("add", "zed"));
+
+    assertEquals(CliOperator.unplaced("ada").getMessage(), refusal);
     assertTrue(inDb(db -> new FdeStore(db).list()).isEmpty());
   }
 
@@ -2154,7 +2223,7 @@ class FdeCommandTest {
                 + " Its box drops acme, beta with their containers and unpushed work on its next"
                 + " sync."),
         printed());
-    assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("client")));
+    assertEquals(ProjectScope.of(List.of()), inDb(db -> new FdeStore(db).scopeOf("client")));
 
     assertEquals(0, fde("update", "client", "--unscoped", "--role", "admin", "--name", "Cli"));
     assertEquals(
@@ -2185,6 +2254,7 @@ class FdeCommandTest {
     assertEquals("Unknown FDE 'ghost'.", refusal);
 
     main = "sail@main";
+    replicatedAs("ada", "admin");
     assertEquals(1, fde("update", "client", "--scoped"));
     assertEquals(FdeCommand.rosterEditOnNodeMessage("Updating an FDE"), refusal);
   }
@@ -2486,7 +2556,7 @@ class FdeCommandTest {
     assertEquals(keygen.made.getFirst().line() + "\n", Files.readString(workstationKey()));
     assertEquals(
         "  ✓ Paired ada: Mast logs in as ubuntu@box. The code expires "
-            + tokens().getFirst().expiresAt()
+            + DateTimeUtils.format(tokens().getFirst().expiresAt())
             + ".",
         printed().get(1));
   }

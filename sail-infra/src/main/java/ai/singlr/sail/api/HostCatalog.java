@@ -18,6 +18,12 @@ public interface HostCatalog {
 
   List<ProjectStore.ProjectRow> projects();
 
+  /**
+   * The row of {@code project}, when the bound actor reads it; one the catalog does not hold, or
+   * the actor's scope leaves out, is not in the catalog.
+   */
+  ProjectStore.ProjectRow readable(String project);
+
   /** The definitions of this box's projects, read from the catalog. */
   ProjectReader definitions();
 

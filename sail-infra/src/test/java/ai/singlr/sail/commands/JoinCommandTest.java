@@ -60,8 +60,8 @@ class JoinCommandTest {
       target -> {
         throw new AssertionError("main has nothing to say about a key this join made");
       };
-  private static final Actor MADY = Actor.sync("mady", Role.MEMBER);
-  private static final Actor ADA = Actor.sync("ada", Role.MEMBER);
+  private static final Actor MADY = new Actor("mady", Role.MEMBER, Actor.Lane.SYNC);
+  private static final Actor ADA = new Actor("ada", Role.MEMBER, Actor.Lane.SYNC);
 
   private static final String PUB =
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTKEYBLOB sail-sync:mady";

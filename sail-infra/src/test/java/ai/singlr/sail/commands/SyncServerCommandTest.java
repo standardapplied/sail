@@ -44,7 +44,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.io.PrintStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -150,7 +152,7 @@ class SyncServerCommandTest {
         Thread.ofVirtual()
             .start(
                 () -> {
-                  try {
+                  try (toClient) {
                     SyncServerCommand.serve(mainReplicaDb, "main", token, serverIn, toClient, sink);
                   } catch (IOException e) {
                     throw new UncheckedIOException(e);
@@ -199,20 +201,57 @@ class SyncServerCommandTest {
   void aDisabledFdesSessionIsRefusedBeforeAnythingIsServed() throws Exception {
     var token = tokenFor("member");
     mainDb.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'uday'");
+
+    assertRefused(token);
+  }
+
+  @Test
+  void aSessionNoLiveTokenStandsBehindIsRefusedNotServedAsAnyone() throws Exception {
+    var expired =
+        new AuthSessionStore(mainDb)
+            .create(
+                new FdeStore(mainDb).add("ada", null, null, "member").id(), Duration.ofSeconds(-1))
+            .token();
+    for (var token : new String[] {null, "", "  ", "sess_never-issued", expired}) {
+      assertRefused(token);
+    }
+  }
+
+  @Test
+  void aSessionWhoseFdeWasRemovedIsRefused() throws Exception {
+    var token = tokenFor("member");
+    new FdeStore(mainDb).remove(new FdeStore(mainDb).byHandle("uday").orElseThrow().id());
+
+    assertRefused(token);
+  }
+
+  /** Asserts main refuses a session on {@code token} before serving anything, saying why. */
+  private void assertRefused(String token) throws IOException {
     var out = new ByteArrayOutputStream();
+    var err = new ByteArrayOutputStream();
+    var originalErr = System.err;
+    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+    int exit;
+    try {
+      exit =
+          SyncServerCommand.serve(
+              mainReplicaDb,
+              "main",
+              token,
+              new ByteArrayInputStream(new byte[0]),
+              out,
+              SyncTransitionSink.NONE,
+              SyncConfig::unset);
+    } finally {
+      System.setErr(originalErr);
+    }
 
-    var exit =
-        SyncServerCommand.serve(
-            mainReplicaDb,
-            "main",
-            token,
-            new ByteArrayInputStream(new byte[0]),
-            out,
-            SyncTransitionSink.NONE,
-            SyncConfig::unset);
-
-    assertEquals(1, exit);
+    assertEquals(1, exit, String.valueOf(token));
     assertEquals(0, out.size(), "nothing is served");
+    assertEquals(
+        "sync: main serves no session whose token is missing, invalid or expired, or whose FDE is"
+            + " disabled or removed. Ask an admin to re-enable the FDE, then sync again.\n",
+        err.toString(StandardCharsets.UTF_8));
   }
 
   @Test
@@ -226,7 +265,7 @@ class SyncServerCommandTest {
         Thread.ofVirtual()
             .start(
                 () -> {
-                  try {
+                  try (toClient) {
                     SyncServerCommand.serve(
                         mainReplicaDb,
                         "main",
@@ -261,14 +300,6 @@ class SyncServerCommandTest {
       toServer.close();
       serverThread.join();
     }
-  }
-
-  @Test
-  void anAbsentTokenIsTreatedAsReadOnly() throws Exception {
-    Acting.as("uday", () -> nodeSpecs.create(spec("auth", "Auth")));
-    syncWithToken(null);
-    assertTrue(mainSpecs.findById("auth").isEmpty());
-    assertTrue(nodeSpecs.findById("auth").isEmpty());
   }
 
   private StoreReplica nodeRunReplica() {

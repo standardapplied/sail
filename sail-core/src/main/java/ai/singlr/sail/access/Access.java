@@ -10,6 +10,7 @@ import ai.singlr.sail.access.Policy.Column;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.identity.ProjectScope;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.Optional;
 import java.util.Set;
@@ -46,6 +47,8 @@ public final class Access {
   private static final Decision ALLOWED = new Decision.Allowed();
   private static final Decision NOT_FOUND = new Decision.NotFound();
   private static final Set<Action> SEATED = EnumSet.of(Action.CREATE, Action.CLAIM);
+  private static final Set<Action> WRITES_NOTHING =
+      EnumSet.of(Action.READ, Action.READ_DEFINITION, Action.OPERATE_BOX);
 
   private Access() {}
 
@@ -96,15 +99,16 @@ public final class Access {
   }
 
   /**
-   * The ownership step alone, of {@code run}: none when {@code actor} overrules owners or acts for
-   * one of its owners, a refusal naming them otherwise. For the one door that still decides that
-   * step itself, a run's log, which the people the run works for read whatever their role, until
-   * sail-every-door-asks-access asks {@link Action#OPERATE_RUN} of it.
+   * Whether {@code actor}'s role may write at all: whether its column allows any action that
+   * changes a row. Reading changes none, and operating a box is its own person's whatever their
+   * role. A role that may write nothing is read-only: the role step's refusal says so, and main's
+   * sync server neither takes content from such a session nor asks what it was served.
    */
-  public static Optional<Refusal> notRunOwner(Actor actor, Resource run) {
-    return owns(actor, run)
-        ? Optional.empty()
-        : Optional.of(Wording.notOwner(Action.OPERATE_RUN, run));
+  public static boolean mayWrite(Actor actor) {
+    var column = Column.role(actor.role());
+    return Arrays.stream(Action.values())
+        .filter(action -> !WRITES_NOTHING.contains(action))
+        .anyMatch(action -> Policy.cell(action, column) != Cell.NO);
   }
 
   /**

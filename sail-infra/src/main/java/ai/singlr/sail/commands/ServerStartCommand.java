@@ -239,11 +239,11 @@ public final class ServerStartCommand implements Runnable {
         configured ? new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db)) : null;
     var roster = new FdeStore(db);
     var roles = new RoleRule(BoxIdentity::config, roster);
-    var tokenAuth = new TokenAuth(tokenStore, roles);
+    var auth =
+        new SessionAwareAuth(new AuthSessionStore(db), roles, new TokenAuth(tokenStore, roles));
     var passkeyHandler =
         new WebauthnAuthHandler(
-            passkeyService, enrollment, tokenAuth, configured ? webauthn.origins() : null);
-    var auth = new SessionAwareAuth(new AuthSessionStore(db), roster, roles, tokenAuth);
+            passkeyService, enrollment, auth, configured ? webauthn.origins() : null);
 
     var server =
         new SailApiServer(

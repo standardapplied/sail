@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -38,8 +40,8 @@ class PtySocketPermissionsTest {
             socket,
             dir.resolve("sessions"),
             64 * 1024,
-            token -> new PtyIdentity("uday", true),
-            PtyRooms.NONE,
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
+            PtyAdmissions.NONE,
             PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();

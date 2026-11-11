@@ -54,7 +54,7 @@ import org.junit.jupiter.api.io.TempDir;
 class AdhocDispatchTest {
 
   private static final String HANDLE = "me";
-  private static final Actor ADMIN = Actor.cliOperator(HANDLE);
+  private static final Actor ADMIN = new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI);
 
   private static final String RUNNING_JSON =
       """

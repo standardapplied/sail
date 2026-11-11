@@ -129,7 +129,7 @@ class AccessScenarioTest {
 
   @Test
   void row4ClientsPushOfABetaSpecIsInNoProjectItIsGranted() {
-    var pushing = Actor.sync("client", Role.MEMBER).withScope(CLIENT.scope());
+    var pushing = new Actor("client", Role.MEMBER, Actor.Lane.SYNC).withScope(CLIENT.scope());
     var revised = edited("b1", "title", "pushed");
 
     assertEquals(
@@ -235,7 +235,7 @@ class AccessScenarioTest {
     assertEquals(
         refused(
             Refusal.Kind.LANE_FORBIDDEN,
-            "Agent principals cannot stop runs.",
+            "Agent principals cannot stop or attach to runs or read their logs.",
             "Only an operator lane (CLI or API token) may do this."),
         Access.decide(ENGS_AGENT, Action.OPERATE_RUN, ENGS_RUN));
   }

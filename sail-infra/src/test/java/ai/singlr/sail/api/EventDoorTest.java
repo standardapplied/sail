@@ -33,7 +33,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -624,14 +623,7 @@ class EventDoorTest {
   }
 
   private ApiResponse socket(String credential, String json) {
-    return new LocalApiRouter(operations)
-        .handle(
-            new LocalApiRequest(
-                "POST",
-                "/v1/events",
-                Map.of(),
-                Map.of("authorization", "Bearer " + credential),
-                json.getBytes(StandardCharsets.UTF_8)));
+    return new SocketDoor(operations).ask("POST", "/v1/events", credential, json);
   }
 
   private String reserve(String specId, String roomId, String role) {

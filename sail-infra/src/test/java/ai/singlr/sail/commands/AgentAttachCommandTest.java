@@ -21,9 +21,11 @@ import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.pty.PtyAdmissions;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
-import ai.singlr.sail.pty.PtyRooms;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.HeldProjects;
@@ -139,8 +141,8 @@ class AgentAttachCommandTest {
         PtyHostCommand.startHost(
             dir.resolve("h.sock"),
             dir.resolve("s"),
-            token -> new PtyIdentity("uday", true),
-            PtyRooms.NONE,
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
+            PtyAdmissions.NONE,
             PtyEvents.NONE)) {
       var plan =
           new AgentAttachCommand.ResumePlan("resume-1", List.of("sh", "-c", "read a"), "", "");
@@ -316,8 +318,8 @@ class AgentAttachCommandTest {
             PtyHostCommand.startHost(
                 socket,
                 dir.resolve("s"),
-                token -> new PtyIdentity("uday", true),
-                PtyRooms.NONE,
+                token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
+                PtyAdmissions.NONE,
                 PtyEvents.NONE)) {
       new SchemaManager(db).migrate();
       HeldProjects.hold(db, "acme");

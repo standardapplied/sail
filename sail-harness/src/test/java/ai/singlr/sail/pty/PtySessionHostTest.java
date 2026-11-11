@@ -13,6 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.SqliteException;
 import java.io.IOException;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
@@ -20,7 +24,12 @@ import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -34,33 +43,58 @@ class PtySessionHostTest {
   @TempDir Path dir;
 
   private PtySessionHost host;
-  private final java.util.concurrent.ConcurrentLinkedQueue<String> events =
-      new java.util.concurrent.ConcurrentLinkedQueue<>();
+  private final ConcurrentLinkedQueue<String> events = new ConcurrentLinkedQueue<>();
   private volatile CountDownLatch startGate;
   private final CountDownLatch startGated = new CountDownLatch(1);
 
-  private final java.util.Set<String> revoked = java.util.concurrent.ConcurrentHashMap.newKeySet();
+  private final Set<String> revoked = ConcurrentHashMap.newKeySet();
+
+  private final Map<String, PtyIdentity.Person> reresolved = new ConcurrentHashMap<>();
+  private volatile boolean storeDown;
 
   private final PtyIdentity.Resolver resolver =
       token -> {
+        if (storeDown) {
+          throw new IllegalStateException("the control plane is unavailable");
+        }
         if (revoked.contains(token)) {
           throw new IOException("Session token is not valid or has expired.");
         }
+        if (reresolved.containsKey(token)) {
+          return reresolved.get(token);
+        }
         return switch (token) {
-          case "", "tok-uday" -> new PtyIdentity("uday", false);
-          case "tok-mady" -> new PtyIdentity("mady", false);
-          case "tok-root" -> new PtyIdentity("root", true);
+          case "", "tok-uday" ->
+              new PtyIdentity.Person(new Actor("uday", Role.MEMBER, Actor.Lane.API));
+          case "tok-mady" -> new PtyIdentity.Person(new Actor("mady", Role.MEMBER, Actor.Lane.API));
+          case "tok-root" -> new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API));
+          case "tok-vic" -> new PtyIdentity.Person(new Actor("vic", Role.VIEWER, Actor.Lane.API));
           default -> throw new IOException("Session token is not valid or has expired.");
         };
       };
 
-  private static final PtyRooms ROOMS =
-      (room, project, who) -> {
-        if (!room.equals("design-talk")) {
-          throw new IOException("Room '" + room + "' was not found.");
+  private final Set<String> unheld = ConcurrentHashMap.newKeySet();
+
+  private final PtyAdmission admission =
+      new PtyAdmission() {
+        @Override
+        public void project(String project, PtyIdentity.Person who) throws IOException {
+          if (project.equals("outage")) {
+            throw new SqliteException("database is locked", 5);
+          }
+          if (unheld.contains(project + ":" + who.fde())) {
+            throw new IOException("Project '" + project + "' is not in the catalog.");
+          }
         }
-        if (!who.admin() && !who.fde().equals("uday")) {
-          throw new IOException("Room 'design-talk' is assigned to 'uday', not you.");
+
+        @Override
+        public void room(String room, String project, PtyIdentity.Person who) throws IOException {
+          if (!room.equals("design-talk")) {
+            throw new IOException("Room '" + room + "' was not found.");
+          }
+          if (!((PtyIdentity.Person) who).actor().isAdmin() && !who.fde().equals("uday")) {
+            throw new IOException("Room 'design-talk' is assigned to 'uday', not you.");
+          }
         }
       };
 
@@ -69,13 +103,18 @@ class PtySessionHostTest {
   }
 
   private PtySessionHost startHost(PtySessionHost.Limits limits) throws IOException {
+    return startHost(limits, PtySessionHost.Handoff.NONE);
+  }
+
+  private PtySessionHost startHost(PtySessionHost.Limits limits, PtySessionHost.Handoff handoff)
+      throws IOException {
     host =
         new PtySessionHost(
             dir.resolve("host.sock"),
             dir.resolve("sessions"),
             64 * 1024,
             resolver,
-            ROOMS,
+            admission,
             new PtyEvents() {
               @Override
               public void sessionStarted(PtySession.Origin origin) {
@@ -102,7 +141,8 @@ class PtySessionHostTest {
               }
             },
             "0.0.0-test",
-            limits);
+            limits,
+            handoff);
     host.start();
     return host;
   }
@@ -469,7 +509,7 @@ class PtySessionHostTest {
   void aCommandOfManyTinyArgumentsIsCappedByItsWireSizeNotItsCharacters() throws Exception {
     try (var host = startHost()) {
       try (var channel = connect()) {
-        var command = new java.util.ArrayList<>(List.of("/bin/true"));
+        var command = new ArrayList<>(List.of("/bin/true"));
         for (var i = 0; i < 20_000; i++) {
           command.add("x");
         }
@@ -554,7 +594,7 @@ class PtySessionHostTest {
         try (var observer = connect("tok-root")) {
           PtyWire.write(observer, new PtyMessage.Attach("sized", true));
           assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(observer));
-          var frames = new java.util.ArrayList<PtyMessage>();
+          var frames = new ArrayList<PtyMessage>();
           PtyMessage frame;
           do {
             frame = PtyWire.read(observer);
@@ -624,6 +664,97 @@ class PtySessionHostTest {
   }
 
   @Test
+  void aDemotionOrAScopeChangeSeversAtTheNextSweepAndAnOutageSeversNothing() throws Exception {
+    try (var ignored = startHost()) {
+      try (var mady = connect("tok-mady");
+          var uday = connect("tok-uday");
+          var root = connect("tok-root")) {
+        PtyWire.write(
+            uday,
+            new PtyMessage.Create(
+                "udays", List.of("sh", "-c", "echo up; read a"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(uday));
+        PtyWire.write(root, new PtyMessage.Attach("udays", false));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(root));
+        awaitText(root, "up");
+
+        storeDown = true;
+        host.sweep(System.nanoTime());
+        storeDown = false;
+        PtyWire.write(root, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+        assertInstanceOf(
+            PtyMessage.Sessions.class, readControl(root), "a store outage severs nothing");
+
+        reresolved.put(
+            "tok-root", new PtyIdentity.Person(new Actor("root", Role.MEMBER, Actor.Lane.API)));
+        reresolved.put(
+            "tok-mady",
+            new PtyIdentity.Person(
+                new Actor("mady", Role.MEMBER, Actor.Lane.API)
+                    .withScope(ProjectScope.of(List.of("acme")))));
+        host.sweep(System.nanoTime());
+
+        for (var severed : List.of(root, mady)) {
+          assertTimeoutPreemptively(
+              java.time.Duration.ofSeconds(10),
+              () ->
+                  assertThrows(
+                      IOException.class,
+                      () -> {
+                        while (true) {
+                          PtyWire.read(severed);
+                        }
+                      },
+                      "a demoted or rescoped connection reads nothing more"));
+        }
+        PtyWire.write(uday, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+        assertInstanceOf(
+            PtyMessage.Sessions.class, readControl(uday), "an unchanged principal stays");
+        try (var demoted = connect("tok-root")) {
+          PtyWire.write(demoted, new PtyMessage.Attach("udays", false));
+          assertEquals(
+              "Session 'udays' is not yours to attach.",
+              assertInstanceOf(PtyMessage.Err.class, readControl(demoted)).message(),
+              "a reconnect is admitted as the principal the credential now stands for");
+        }
+      }
+    }
+  }
+
+  @Test
+  void aTerminalOpensAndAttachesOnlyInAProjectItsPersonHolds() throws Exception {
+    var shim =
+        new PtySessionHost.Handoff(
+            SdNotify.NONE, Map.of(), exit -> List.of("sh", "-c", "echo up; read a", "--"));
+    try (var ignored = startHost(PtySessionHost.Limits.DEFAULTS, shim)) {
+      unheld.add("beta:mady");
+      try (var mady = connect("tok-mady")) {
+        PtyWire.write(mady, new PtyMessage.Create("hers", List.of(), "/tmp", "beta", "", 80, 24));
+        assertEquals(
+            "Project 'beta' is not in the catalog.",
+            assertInstanceOf(PtyMessage.Err.class, readControl(mady)).message());
+        assertEquals(0, host.sessionCount(), "nothing is spawned for a project not held");
+
+        PtyWire.write(mady, new PtyMessage.Create("acmes", List.of(), "/tmp", "acme", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(mady));
+      }
+      unheld.add("acme:mady");
+      try (var mady = connect("tok-mady")) {
+        PtyWire.write(mady, new PtyMessage.Attach("acmes", true));
+        assertEquals(
+            "Project 'acme' is not in the catalog.",
+            assertInstanceOf(PtyMessage.Err.class, readControl(mady)).message(),
+            "a session in a project its person no longer holds is not reattached");
+      }
+      try (var root = connect("tok-root")) {
+        PtyWire.write(root, new PtyMessage.Attach("acmes", false));
+        assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(root));
+        awaitText(root, "up");
+      }
+    }
+  }
+
+  @Test
   void aNonWritersInputIsRefusedWithoutKillingTheConnection() throws Exception {
     try (var ignored = startHost()) {
       try (var owner = connect("tok-uday")) {
@@ -676,6 +807,33 @@ class PtySessionHostTest {
         PtyWire.write(admin, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
         var listed = (PtyMessage.Sessions) readControl(admin);
         assertEquals(2, listed.sessions().size(), "an admin sees every owner's sessions");
+      }
+    }
+  }
+
+  @Test
+  void aViewerOperatesTheirOwnSessionsAndNoOneElses() throws Exception {
+    try (var ignored = startHost()) {
+      try (var uday = connect("tok-uday")) {
+        PtyWire.write(
+            uday,
+            new PtyMessage.Create("udays", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(uday));
+      }
+      try (var vic = connect("tok-vic")) {
+        PtyWire.write(
+            vic,
+            new PtyMessage.Create("vics", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(vic));
+        PtyWire.write(vic, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+        assertEquals(
+            List.of("vics"),
+            ((PtyMessage.Sessions) readControl(vic))
+                .sessions().stream().map(PtyMessage.SessionInfo::name).toList());
+        PtyWire.write(vic, new PtyMessage.Kill("udays"));
+        assertInstanceOf(PtyMessage.Err.class, readControl(vic), "not another person's");
+        PtyWire.write(vic, new PtyMessage.Kill("vics"));
+        assertInstanceOf(PtyMessage.Ok.class, readControl(vic), "a viewer's own box is theirs");
       }
     }
   }
@@ -893,6 +1051,22 @@ class PtySessionHostTest {
   }
 
   @Test
+  void aStoreThatCannotAnswerTheProjectCheckOpensNothingAndKeepsTheConnection() throws Exception {
+    try (var ignored = startHost();
+        var channel = connect()) {
+      PtyWire.write(
+          channel, new PtyMessage.Create("s", List.of("sh"), "/tmp", "outage", "", 80, 24));
+      assertEquals(
+          PtySessionHost.UNSERVED,
+          assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel)).message());
+      assertEquals(0, host.sessionCount());
+      PtyWire.write(channel, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+      assertInstanceOf(
+          PtyMessage.Sessions.class, PtyWire.read(channel), "the connection survives the outage");
+    }
+  }
+
+  @Test
   void aCreateThatFailsToSpawnLeavesNoRingBehind() throws Exception {
     try (var ignored = startHost(new PtySessionHost.Limits(1, 16, 256, 64));
         var channel = connect()) {
@@ -1075,7 +1249,7 @@ class PtySessionHostTest {
             new PtyMessage.Create("shared", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
       }
-      var held = new java.util.ArrayList<SocketChannel>();
+      var held = new ArrayList<SocketChannel>();
       try {
         for (var i = 0; i < 2; i++) {
           var observer = connect();
@@ -1159,13 +1333,13 @@ class PtySessionHostTest {
             new PtyMessage.Create("shared", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
       }
-      var contenders = new java.util.ArrayList<SocketChannel>();
+      var contenders = new ArrayList<SocketChannel>();
       try {
         for (var i = 0; i < 8; i++) {
           contenders.add(connect());
         }
         var go = new CountDownLatch(1);
-        var replies = new java.util.concurrent.ConcurrentLinkedQueue<PtyMessage>();
+        var replies = new ConcurrentLinkedQueue<PtyMessage>();
         var threads =
             contenders.stream()
                 .map(

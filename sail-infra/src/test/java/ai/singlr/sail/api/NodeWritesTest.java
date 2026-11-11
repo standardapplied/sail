@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -17,6 +16,7 @@ import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxCredentialStore;
@@ -32,7 +32,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -45,10 +44,10 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * A node's writes speak for its FDE. On Ada's node, Raj — an admin on main — reads through every
  * door and writes through none: his API token, his passkey session, a session his gateway key
- * mints, his box credential, a run acting for him and his terminal. Every door but the terminal,
- * which keeps its own text, answers the spec rule's one refusal — the same kind, code, message and
- * fix — and so does a room run of Ada's own. Ada, the runs acting for her, and a credential naming
- * no FDE write as before.
+ * mints, a run acting for him and his terminal. Every door but the terminal, which keeps its own
+ * text, answers the spec rule's one refusal — the same kind, code, message and fix — and so does a
+ * room run of Ada's own. The box credential is never his: one minted for him on Ada's box is
+ * refused. Ada, the runs acting for her, and a credential naming no FDE write as before.
  */
 class NodeWritesTest {
 
@@ -153,18 +152,23 @@ class NodeWritesTest {
       assertEquals(403, write.statusCode(), write.body());
       assertEquals(READ_ONLY, YamlUtil.parseMap(write.body()).get("error"), "over HTTP");
     }
-    for (var credential : List.of(boxCredential, reserveRun("raj", "build"))) {
-      assertEquals(200, socket("GET", "/v1/specs", credential, "").status());
-      var write = socket("POST", "/v1/specs", credential, form());
-      assertEquals(403, write.status(), write.body().toString());
-      assertEquals(READ_ONLY, write.body().get("error"), "the same refusal on the socket");
+    var run = reserveRun("raj", "build");
+    assertEquals(200, socket("GET", "/v1/specs", run, "").status());
+    var write = socket("POST", "/v1/specs", run, form());
+    assertEquals(403, write.status(), write.body().toString());
+    assertEquals(READ_ONLY, write.body().get("error"), "the same refusal on the socket");
+    for (var method : List.of("GET", "POST")) {
+      assertEquals(
+          401,
+          socket(method, "/v1/specs", boxCredential, form()).status(),
+          "a box credential is the box's own person's, never another FDE's");
     }
     var roomRun = socket("POST", "/v1/specs", reserveRun("ada", "room"), form());
     assertEquals(403, roomRun.status(), roomRun.body().toString());
     assertEquals(READ_ONLY, roomRun.body().get("error"), "and for a room run of the box's own FDE");
     var access = new HostAccess(db, TestAuth.roles(db, ADAS_NODE));
-    var identity = access.identity(session, null);
-    assertFalse(identity.admin(), "the terminal names no admin");
+    var identity = access.identity(session);
+    assertEquals(Role.VIEWER, identity.actor().role(), "the terminal names no admin");
     var terminal = assertThrows(IOException.class, () -> access.admit("rajs", "acme", identity));
     assertEquals(
         "Your credential is read-only and cannot post in rooms. Ask an admin for a member or admin"
@@ -189,7 +193,7 @@ class NodeWritesTest {
         socket("POST", "/v1/specs", new BoxCredentialStore(db).replace("ada"), form()).status());
     assertEquals(201, socket("POST", "/v1/specs", reserveRun("ada", "build"), form()).status());
     var access = new HostAccess(db, TestAuth.roles(db, ADAS_NODE));
-    access.admit("adas", "acme", access.identity(null, "ada"));
+    access.admit("adas", "acme", access.identity(null));
     assertEquals(5, count());
   }
 
@@ -233,14 +237,7 @@ class NodeWritesTest {
   }
 
   private ApiResponse socket(String method, String path, String credential, String form) {
-    return new LocalApiRouter(operations)
-        .handle(
-            new LocalApiRequest(
-                method,
-                path,
-                Map.of(),
-                Map.of("authorization", "Bearer " + credential),
-                form.getBytes(StandardCharsets.UTF_8)));
+    return new SocketDoor(operations).ask(method, path, credential, form);
   }
 
   private String reserveRun(String boxHandle, String role) {

@@ -59,12 +59,7 @@ public final class PasskeyService implements PasskeyCeremonies {
 
   @Override
   public Ceremony startRegistration(String fdeHandle) {
-    var fde =
-        fdes.byHandle(fdeHandle)
-            .orElseThrow(
-                () ->
-                    new PasskeyException(
-                        PasskeyException.Kind.NOT_FOUND, "Unknown FDE: " + fdeHandle));
+    var fde = ActivePerson.named(fdes, fdeHandle);
     var existing =
         credentials.listForFde(fde.id()).stream()
             .map(WebauthnCredentialStore.Credential::credentialId)
@@ -78,15 +73,14 @@ public final class PasskeyService implements PasskeyCeremonies {
 
   @Override
   public Registration finishRegistration(
-      String challengeId, byte[] clientDataJson, byte[] attestationObject, String label) {
+      String challengeId,
+      String enrolling,
+      byte[] clientDataJson,
+      byte[] attestationObject,
+      String label) {
     var pending =
-        challenges
-            .consume(challengeId, REGISTER)
-            .orElseThrow(
-                () ->
-                    new PasskeyException(
-                        PasskeyException.Kind.BAD_REQUEST,
-                        "Registration challenge is unknown or expired."));
+        challenges.consume(challengeId, REGISTER).orElseThrow(PasskeyService::registrationUnknown);
+    var fde = registering(pending.fdeId(), enrolling);
     RegisteredCredential credential;
     try {
       credential =
@@ -98,8 +92,29 @@ public final class PasskeyService implements PasskeyCeremonies {
       throw new PasskeyException(
           PasskeyException.Kind.BAD_REQUEST, "This passkey is already registered.");
     }
-    credentials.save(credential, pending.fdeId(), effectiveLabel(label, credential.aaguid()));
-    return new Registration(handleOf(pending.fdeId()), credential.credentialId());
+    credentials.save(credential, fde.id(), effectiveLabel(label, credential.aaguid()));
+    return new Registration(fde.handle(), credential.credentialId());
+  }
+
+  /**
+   * The FDE a registration challenge enrolls, while it may act: a ticket finishes only the
+   * challenge of the FDE it enrolls ({@code enrolling}), and an admin's registration, with none,
+   * any FDE's.
+   */
+  private FdeStore.Fde registering(String fdeId, String enrolling) {
+    var fde = fdes.byId(fdeId).orElseThrow(PasskeyService::registrationUnknown);
+    if (enrolling != null && !enrolling.equals(fde.handle())) {
+      throw new PasskeyException(
+          PasskeyException.Kind.BAD_REQUEST,
+          "Registration challenge is not for the FDE this enrollment ticket enrolls. Start the"
+              + " registration again with this ticket.");
+    }
+    return ActivePerson.of(fde);
+  }
+
+  private static PasskeyException registrationUnknown() {
+    return new PasskeyException(
+        PasskeyException.Kind.BAD_REQUEST, "Registration challenge is unknown or expired.");
   }
 
   @Override
@@ -138,9 +153,11 @@ public final class PasskeyService implements PasskeyCeremonies {
     } catch (IllegalArgumentException e) {
       throw loginFailed();
     }
+    var fde =
+        ActivePerson.of(fdes.byId(credential.fdeId()).orElseThrow(PasskeyService::loginFailed));
     credentials.recordUse(credentialId, newSignCount);
-    var session = sessions.create(credential.fdeId(), sessionTtl);
-    return new LoginResult(session.token(), handleOf(credential.fdeId()), session.expiresAt());
+    var session = sessions.create(fde.id(), sessionTtl);
+    return new LoginResult(session.token(), fde.handle(), session.expiresAt());
   }
 
   /**
@@ -168,10 +185,6 @@ public final class PasskeyService implements PasskeyCeremonies {
   private static PasskeyException loginFailed() {
     return new PasskeyException(
         PasskeyException.Kind.UNAUTHORIZED, "Passkey authentication failed.");
-  }
-
-  private String handleOf(String fdeId) {
-    return fdes.byId(fdeId).map(FdeStore.Fde::handle).orElse(null);
   }
 
   private static String displayName(FdeStore.Fde fde) {

@@ -199,11 +199,33 @@ class ScopedSyncTest {
     assertInstanceOf(
         SyncWire.Manifest.class,
         serve(
-                main.server(Actor.sync("uma", Role.MEMBER)),
+                main.server(new Actor("uma", Role.MEMBER, Actor.Lane.SYNC)),
                 HELLO,
                 new SyncWire.Fetch(List.of(theirs)))
             .get(1),
         "an unscoped session fetches by hash as it always has");
+  }
+
+  @Test
+  void aReadOnlySessionsContentIsNeverTakenAndItsOfferIsTheRulesToDeny() throws Exception {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    var secret = bodyHash(main, "beta-work");
+    var rev = new ChangeLog(main.db).head("spec", "alpha-work").orElseThrow().rev();
+    var forged = new LinkedHashMap<>(main.replicas().get("spec").current("alpha-work"));
+    forged.put("body_hash", secret);
+
+    var answered =
+        serve(
+            main.server(new Actor("nia", Role.VIEWER, Actor.Lane.SYNC).withScope(ONLY_A)),
+            HELLO,
+            new SyncWire.Announce(List.of(secret)),
+            new SyncWire.Push("spec", List.of(new MainReplica.Offer("alpha-work", forged, rev))));
+
+    assertEquals(new SyncWire.Lack(List.of()), answered.get(1));
+    assertEquals(
+        "Your credential is read-only and cannot change specs.",
+        assertInstanceOf(SyncWire.Denied.class, only(answered.get(2))).reason());
   }
 
   @Test
@@ -259,14 +281,15 @@ class ScopedSyncTest {
     assertEquals(
         new SyncWire.Lack(List.of()),
         serve(
-                main.server(Actor.sync("uma", Role.MEMBER)),
+                main.server(new Actor("uma", Role.MEMBER, Actor.Lane.SYNC)),
                 HELLO,
                 new SyncWire.Announce(List.of(secret)))
             .get(1),
         "an unscoped session is asked only for what main lacks, as it always has");
     assertInstanceOf(
         SyncWire.Accepted.class,
-        only(serve(main.server(Actor.sync("nia", Role.MEMBER)), HELLO, push).get(1)),
+        only(
+            serve(main.server(new Actor("nia", Role.MEMBER, Actor.Lane.SYNC)), HELLO, push).get(1)),
         "and names content by hash as it always has");
   }
 
@@ -301,7 +324,7 @@ class ScopedSyncTest {
     var denied =
         only(
             serve(
-                    main.server(Actor.sync("nia", Role.VIEWER).withScope(ONLY_A)),
+                    main.server(new Actor("nia", Role.VIEWER, Actor.Lane.SYNC).withScope(ONLY_A)),
                     HELLO,
                     new SyncWire.Push(
                         "spec", List.of(new MainReplica.Offer("alpha-work", offer, rev))))
@@ -397,7 +420,7 @@ class ScopedSyncTest {
         assertInstanceOf(
                 SyncWire.Page.class,
                 serve(
-                        main.server(Actor.sync("nia", Role.MEMBER)),
+                        main.server(new Actor("nia", Role.MEMBER, Actor.Lane.SYNC)),
                         HELLO,
                         new SyncWire.Need("spec", ids))
                     .get(1))
@@ -707,7 +730,8 @@ class ScopedSyncTest {
     SyncBox.assertScopedToMain(main, nia, ONLY_A);
 
     var onlyB = ProjectScope.of(List.of(B));
-    SyncBox.quiesce(main, uma.syncsAs(Actor.sync("uma", Role.MEMBER).withScope(onlyB)));
+    SyncBox.quiesce(
+        main, uma.syncsAs(new Actor("uma", Role.MEMBER, Actor.Lane.SYNC).withScope(onlyB)));
 
     assertEquals(thread, movedRoomTalk(uma), "a node of beta alone holds the thread and no room");
     SyncBox.assertScopedToMain(main, uma, onlyB);
@@ -766,7 +790,9 @@ class ScopedSyncTest {
 
     assertInstanceOf(
         SyncWire.Accepted.class,
-        only(serve(main.server(Actor.sync("nia", Role.MEMBER)), HELLO, erase).getLast()),
+        only(
+            serve(main.server(new Actor("nia", Role.MEMBER, Actor.Lane.SYNC)), HELLO, erase)
+                .getLast()),
         "the same owner, unscoped, erases the spec and all that belongs to it");
     assertTrue(new ChangeLog(main.db).isErased("review", review));
   }
@@ -800,7 +826,7 @@ class ScopedSyncTest {
                     "/l",
                     "u"));
 
-    var kept = SyncBox.roundSettling(main, nia.syncsAs(scoped(ProjectScope.none())));
+    var kept = SyncBox.roundSettling(main, nia.syncsAs(scoped(ProjectScope.of(List.of()))));
 
     assertEquals(
         List.of(
@@ -1018,7 +1044,7 @@ class ScopedSyncTest {
         Acting.as(
             "nia", () -> new MessageStore(nia.db).append("alpha-work", "nia", "working", null));
 
-    var kept = SyncBox.roundSettling(main, nia.syncsAs(scoped(ProjectScope.none())));
+    var kept = SyncBox.roundSettling(main, nia.syncsAs(scoped(ProjectScope.of(List.of()))));
 
     assertInstanceOf(Settlement.How.Kept.class, kept.settled().getFirst().how());
     assertEquals(
@@ -1224,21 +1250,23 @@ class ScopedSyncTest {
   }
 
   @Test
-  void aScopedFdeWithNoGrantAndASessionWithNoFdeReceiveNothing() throws Exception {
+  void aScopedFdeWithNoGrantReceivesNothingOfAnyType() throws Exception {
     seed(main, A, "nia");
     seed(main, B, "uma");
 
-    SyncBox.quiesce(main, nia.syncsAs(scoped(ProjectScope.none())));
+    SyncBox.quiesce(main, nia.syncsAs(scoped(ProjectScope.of(List.of()))));
 
     assertEquals(0, count(nia.db, "SELECT count(*) FROM change_log"));
-    assertEquals(ProjectScope.none(), new SyncScope(nia.db).held());
+    assertEquals(ProjectScope.of(List.of()), new SyncScope(nia.db).held());
     for (var entity : SyncedEntities.all()) {
       var page =
           assertInstanceOf(
               SyncWire.Page.class,
               serve(
-                      main.server(Actor.sync(null, Role.VIEWER).withScope(ProjectScope.none())),
-                      SyncWire.Hello.of("1.0.0", "anon"),
+                      main.server(
+                          new Actor("nia", Role.VIEWER, Actor.Lane.SYNC)
+                              .withScope(ProjectScope.of(List.of()))),
+                      SyncWire.Hello.of("1.0.0", "nia"),
                       new SyncWire.Pull(entity.type(), 0, 100))
                   .getLast());
       assertEquals(List.of(), page.entries(), entity.type());
@@ -1251,10 +1279,10 @@ class ScopedSyncTest {
     seed(main, A, "nia");
     seed(main, B, "uma");
 
-    SyncBox.quiesce(main, nia.syncsAs(scoped(ProjectScope.none())));
-    assertEquals(ProjectScope.none(), new SyncScope(nia.db).held());
+    SyncBox.quiesce(main, nia.syncsAs(scoped(ProjectScope.of(List.of()))));
+    assertEquals(ProjectScope.of(List.of()), new SyncScope(nia.db).held());
 
-    SyncBox.quiesce(main, nia.syncsAs(Actor.sync("nia", Role.MEMBER)));
+    SyncBox.quiesce(main, nia.syncsAs(new Actor("nia", Role.MEMBER, Actor.Lane.SYNC)));
 
     assertEquals(ProjectScope.all(), new SyncScope(nia.db).held());
     SyncBox.assertEqualToMain(main, nia);
@@ -1263,8 +1291,7 @@ class ScopedSyncTest {
 
   @Test
   void aScopedSessionIsServedOnlyFromMainsDatabase() {
-    var server =
-        new SyncRpcServer(Map.of(), scoped(ONLY_A), FdeRoster.EMPTY, SyncTransitionSink.NONE);
+    var server = new SyncRpcServer(Map.of(), scoped(ONLY_A), List::of, SyncTransitionSink.NONE);
 
     var refused =
         assertThrows(
@@ -1278,7 +1305,7 @@ class ScopedSyncTest {
   }
 
   private static Actor scoped(ProjectScope scope) {
-    return Actor.sync("nia", Role.MEMBER).withScope(scope);
+    return new Actor("nia", Role.MEMBER, Actor.Lane.SYNC).withScope(scope);
   }
 
   /**
@@ -1389,7 +1416,7 @@ class ScopedSyncTest {
     return new SyncRpcServer(
             replicas,
             scoped(ONLY_A),
-            FdeRoster.EMPTY,
+            List::of,
             SyncTransitionSink.NONE,
             new ChangeLog(main.db)::headsAfter,
             "1.0.0")

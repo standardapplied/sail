@@ -68,7 +68,7 @@ public final class ProjectConfigSetCommand implements Runnable {
         "-".equals(value)
             ? new String(stdin.get().readAllBytes(), StandardCharsets.UTF_8).strip()
             : value;
-    var actor = mutations.writer(name, dryRun);
+    var actor = mutations.writer(name);
     var read = mutations.current(name, operator);
     var edited =
         ProjectDefinitionJson.withSection(read, written, "null".equals(json) ? null : json);

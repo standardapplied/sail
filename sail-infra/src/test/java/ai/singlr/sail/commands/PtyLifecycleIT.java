@@ -10,12 +10,17 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.AbstractIncusIT;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyMessage;
-import ai.singlr.sail.pty.PtyRooms;
 import ai.singlr.sail.pty.PtySessionHost;
+import ai.singlr.sail.store.HeldProjects;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayOutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
@@ -36,14 +41,23 @@ class PtyLifecycleIT extends AbstractIncusIT {
 
   @TempDir Path dir;
 
-  private PtySessionHost startHost() throws Exception {
+  /**
+   * A host whose box holds {@code container}'s project, admitting it as production does: through
+   * the box's catalog ({@link PtyHostAccess}).
+   */
+  private PtySessionHost startHost(String container) throws Exception {
+    var dbPath = dir.resolve("sail.db");
+    try (var db = Sqlite.open(dbPath)) {
+      new SchemaManager(db).migrate();
+      HeldProjects.hold(db, container);
+    }
     var host =
         new PtySessionHost(
             dir.resolve("h.sock"),
             dir.resolve("s"),
             64 * 1024,
-            token -> new PtyIdentity("uday", true),
-            PtyRooms.NONE,
+            token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
+            new PtyHostAccess(() -> OperationsFactory.open(dbPath)),
             PtyEvents.NONE,
             "0.0.0-test");
     host.start();
@@ -70,7 +84,7 @@ class PtyLifecycleIT extends AbstractIncusIT {
       launch(container);
       prepareDevWorkspace(container);
 
-      try (var host = startHost();
+      try (var host = startHost(container);
           var client = SessionClient.connect(dir.resolve("h.sock"))) {
         client.create("c1", List.of("sh", "-c", "read a; exit 3"), "/tmp", container, "", 80, 24);
         var born = listed(client, "c1");
@@ -114,7 +128,7 @@ class PtyLifecycleIT extends AbstractIncusIT {
       prepareDevWorkspace(container);
 
       String firstBoot;
-      try (var host = startHost();
+      try (var host = startHost(container);
           var client = SessionClient.connect(dir.resolve("h.sock"))) {
         client.create("c1", List.of("sh", "-c", "read a"), "/tmp", container, "", 80, 24);
         firstBoot = client.hostBootId();
@@ -122,7 +136,7 @@ class PtyLifecycleIT extends AbstractIncusIT {
         assertTrue(client.list().stream().anyMatch(s -> s.name().equals("c1") && s.live()));
       }
 
-      try (var restarted = startHost();
+      try (var restarted = startHost(container);
           var client = SessionClient.connect(dir.resolve("h.sock"))) {
         assertNotEquals(firstBoot, client.hostBootId(), "a restart is a new boot id");
         assertEquals(restarted.bootId(), client.hostBootId());

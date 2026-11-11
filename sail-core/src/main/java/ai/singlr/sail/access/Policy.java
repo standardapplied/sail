@@ -53,14 +53,6 @@ import java.util.stream.Stream;
  *       lane ({@code EventAuthority}), whatever this table says of the action, until
  *       sail-agents-act-on-their-own-work gives an agent's actor its work.
  *   <li>Configure: any member may, until sail-people-are-managed gives it to a project's creator.
- *   <li>Operate a run: the row decides a stop; a run's log is read by anyone the run works for,
- *       whatever their role ({@link Access#notRunOwner}), until sail-every-door-asks-access asks
- *       this row of the log doors too.
- *   <li>Narrate: an admin may narrate any run, where the agreed table gives it the runs this box
- *       executed; the event rule leans on it, so a run another box executed has no narrator here
- *       but an admin ({@code EventAuthority}), until sail-every-door-asks-access narrows it.
- *   <li>Operate the box: a viewer may not, until sail-every-door-asks-access gives a person their
- *       own box.
  * </ul>
  */
 public final class Policy {
@@ -185,7 +177,7 @@ public final class Policy {
           new Row(Action.PRUNE, NO, OWNER, YES, NO, NO),
           new Row(Action.PURGE, NO, NO, YES, NO, NO),
           new Row(Action.MANAGE_PEOPLE, NO, NO, YES, NO, NO),
-          new Row(Action.OPERATE_BOX, NO, OWNER, YES, NO, NO));
+          new Row(Action.OPERATE_BOX, OWNER, OWNER, YES, NO, NO));
 
   private static final Map<Action, Row> ROWS = indexed(TABLE);
 

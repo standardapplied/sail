@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,6 +16,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ProjectDefinitionJson;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ConnectEnvironment;
@@ -24,11 +26,13 @@ import ai.singlr.sail.engine.SailSkills;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.store.BoxCredentialStore;
@@ -56,6 +60,7 @@ import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -974,6 +979,44 @@ class SailOperationsTest {
     assertTrue(fullError(error).contains("raj"), fullError(error));
   }
 
+  /**
+   * Who may dispatch a spec, and on which box it runs, is decided before the container is asked
+   * whether it runs, so the answer does not depend on the container's state: another box's spec is
+   * placement and another FDE's spec is theirs, a stopped container or not.
+   */
+  @Test
+  void aDispatchIsDecidedBeforeTheContainerIsAskedWhetherItRuns() throws Exception {
+    var operations =
+        operationsWithStore(
+            baseYaml(),
+            shell().on("incus list ^acme$", STOPPED_JSON),
+            store -> seedAssigned(store, "auth", "pending", "raj"));
+
+    var placement =
+        Actor.call(ADMIN, () -> operations.dispatch("acme", request("auth"), LOCAL_HANDLE));
+    var theirs =
+        Actor.call(
+            new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.API),
+            () -> operations.dispatch("acme", request("auth"), LOCAL_HANDLE));
+    var stopped =
+        Actor.call(
+            new Actor("raj", Role.MEMBER, Actor.Lane.API),
+            () -> operations.dispatch("acme", request("auth"), "raj"));
+
+    assertError(ErrorCode.RUNS_ON_OTHER_NODE, placement);
+    assertEquals(
+        "Spec 'auth' is assigned to 'raj', which runs on that FDE's devbox, not this node ('"
+            + LOCAL_HANDLE
+            + "').",
+        placement.errorMessage());
+    assertEquals(
+        "Reassign it to dispatch here: sail spec update auth --assignee " + LOCAL_HANDLE,
+        placement.remedy().plain());
+    assertError(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, theirs);
+    assertEquals("Spec 'auth' is assigned to 'raj', not you.", theirs.errorMessage());
+    assertError(ErrorCode.PROJECT_STOPPED, stopped);
+  }
+
   @Test
   void viewerCredentialIsRefusedReadOnly() throws Exception {
     var operations =
@@ -1236,6 +1279,72 @@ class SailOperationsTest {
     assertError(
         ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
         Acting.by(other, () -> operations.runLog(R1, 200, "node-a")));
+  }
+
+  /**
+   * Reading a run's log is operating it, as a stop is: the person the run works for reads it only
+   * with a credential that may stop it, so a viewer and the run's own agent are refused as a stop
+   * refuses them.
+   */
+  @Test
+  void runLogRefusesTheRunsOwnViewerAndAgentAsAStopDoes() throws Exception {
+    var operations =
+        opsWithLocalRunAndSpec(
+            shell()
+                .on("incus list ^acme$", RUNNING_JSON)
+                .on("tail -n 2 -- " + RUN_LOG, "one\ntwo\n"));
+    var asked =
+        List.of(
+            new Actor(LOCAL_HANDLE, Role.VIEWER, Actor.Lane.API),
+            Actor.agentPrincipal("claude/" + R1, LOCAL_HANDLE));
+    var codes = List.of(ErrorCode.READ_ONLY_CREDENTIAL, ErrorCode.AGENT_LANE_FORBIDDEN);
+    var messages =
+        List.of(
+            "Your credential is read-only and cannot stop or attach to runs or read their logs.",
+            "Agent principals cannot stop or attach to runs or read their logs.");
+    var fixes =
+        List.of(
+            "Ask an admin for a member or admin credential.",
+            "Only an operator lane (CLI or API token) may do this.");
+
+    for (var i = 0; i < asked.size(); i++) {
+      var actor = asked.get(i);
+      var refused =
+          assertInstanceOf(
+              Result.Failure.class, Acting.by(actor, () -> operations.runLog(R1, 2, "node-a")));
+      assertEquals(codes.get(i), refused.errorCode(), actor.toString());
+      assertEquals(messages.get(i), refused.errorMessage(), actor.toString());
+      assertEquals(fixes.get(i), refused.remedy().plain(), actor.toString());
+    }
+  }
+
+  /**
+   * Whether the caller may read a run's log is asked before where the run executed, as a stop asks
+   * it: a viewer and a member the run is not for hear why, not that another box holds the log.
+   */
+  @Test
+  void aForeignRunsLogTellsWhoMayNotReadItWhyBeforeWhereItRuns() throws Exception {
+    var operations = opsWithLocalRunAndSpec(shell().on("incus list ^acme$", RUNNING_JSON));
+
+    var viewer =
+        assertInstanceOf(
+            Result.Failure.class,
+            Acting.by(
+                new Actor(LOCAL_HANDLE, Role.VIEWER, Actor.Lane.API),
+                () -> operations.runLog(R1, 2, "sumesh")));
+    var other =
+        assertInstanceOf(
+            Result.Failure.class,
+            Acting.by(
+                new Actor("raj", Role.MEMBER, Actor.Lane.API),
+                () -> operations.runLog(R1, 2, "sumesh")));
+
+    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, viewer.errorCode());
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, other.errorCode());
+    assertEquals(
+        "Run " + R1 + " belongs to spec 'auth', owned by 'node-a' and 'me', not you.",
+        other.errorMessage());
+    assertEquals("Only node-a or me or an admin may access this run.", other.remedy().plain());
   }
 
   @Test
@@ -1852,43 +1961,112 @@ class SailOperationsTest {
     assertTrue(result.isSuccess());
   }
 
-  @Test
-  void boxCredentialResolvesToTheRosterFdeAndFailsClosed() throws Exception {
+  /**
+   * Operations on a node whose FDE {@code handle} names when asked, over {@code db}, whose roster
+   * holds uday, an admin, and ada, a member granted acme alone.
+   */
+  private SailOperations nodeOf(Sqlite db, Supplier<String> handle) throws IOException {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, baseYaml());
-    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     HeldProjects.hold(db, "acme");
     var fdeStore = new FdeStore(db);
-    fdeStore.add("uday", "Uday", "uday@example.dev", "admin");
+    Acting.system(
+        () -> {
+          fdeStore.add("uday", "Uday", "uday@example.dev", "admin");
+          fdeStore.add("ada", "Ada", "ada@example.dev", "member");
+          fdeStore.restrict("ada");
+          fdeStore.grant("ada", "acme");
+        });
+    return new SailOperations(
+            shell(),
+            TestProjects.reading(yaml),
+            new EventBus(),
+            null,
+            new SpecStore(db),
+            new ReviewStore(db),
+            new RunStore(db),
+            new ProjectStore(db),
+            SyncScheduler.disabled(),
+            fdeStore,
+            SessionYield.NONE)
+        .useBoxCredentials(new BoxCredentialStore(db))
+        .useControlPlane(
+            db,
+            tempDir,
+            new SyncOperations(
+                db,
+                "box",
+                tempDir,
+                () -> new SyncConfig("node", "main", handle.get(), "box"),
+                target -> {
+                  throw new IOException("main unavailable");
+                }));
+  }
+
+  @Test
+  void boxCredentialResolvesToTheBoxsOwnPersonWhenAskedAndFailsClosed() throws Exception {
+    var box = new AtomicReference<>("uday");
+    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    var operations = nodeOf(db, box::get);
     var boxStore = new BoxCredentialStore(db);
-    var operations =
-        new SailOperations(
-                shell(),
-                TestProjects.reading(yaml),
-                new EventBus(),
-                null,
-                new SpecStore(db),
-                new ReviewStore(db),
-                new RunStore(db),
-                new ProjectStore(db),
-                SyncScheduler.disabled(),
-                fdeStore,
-                SessionYield.NONE)
-            .useBoxCredentials(boxStore);
 
-    var credential = boxStore.replace("uday");
-    var actor = operations.boxActorForCredential(credential).orElseThrow();
-    assertEquals("uday", actor.handle());
-    assertEquals(Role.ADMIN, actor.role());
-    assertEquals(Actor.Lane.CLI, actor.lane());
-
+    var udays = boxStore.replace("uday");
+    assertEquals(
+        Optional.of(new Actor("uday", Role.ADMIN, Actor.Lane.CLI)),
+        operations.boxActorForCredential(udays));
     assertTrue(operations.boxActorForCredential("sailbox_wrong").isEmpty());
 
-    var ghost = boxStore.replace("departed");
+    box.set("ada");
+    assertEquals(
+        Optional.empty(),
+        operations.boxActorForCredential(udays),
+        "a credential minted for an FDE the box no longer is stands for no one");
+    assertEquals(
+        Optional.of(
+            new Actor("ada", Role.MEMBER, Actor.Lane.CLI)
+                .withScope(ProjectScope.of(List.of("acme")))),
+        operations.boxActorForCredential(boxStore.replace("ada")),
+        "the box's person, with their role and scope");
+
+    box.set("departed");
     assertTrue(
-        operations.boxActorForCredential(ghost).isEmpty(),
+        operations.boxActorForCredential(boxStore.replace("departed")).isEmpty(),
         "a handle absent from the roster must refuse");
+  }
+
+  @Test
+  void aRunActingForNoFdeSeesWhatTheBoxsPersonSees() throws Exception {
+    var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
+    var operations = nodeOf(db, () -> "ada");
+    var ownerless =
+        new RunStore.RunRow(
+            "run-1",
+            "acme",
+            "auth",
+            "ada",
+            "build",
+            "claude-code",
+            "feat/auth",
+            "task",
+            null,
+            null,
+            "running",
+            null,
+            null,
+            null,
+            Instant.EPOCH,
+            null,
+            List.of(),
+            null,
+            "claude/r1",
+            null);
+
+    assertEquals(
+        Optional.of(
+            new Actor("claude/r1", Role.MEMBER, Actor.Lane.AGENT, null)
+                .withScope(ProjectScope.of(List.of("acme")))),
+        operations.runActor(ownerless));
   }
 
   @Test

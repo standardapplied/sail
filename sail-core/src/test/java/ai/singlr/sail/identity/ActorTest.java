@@ -19,31 +19,38 @@ import org.junit.jupiter.api.Test;
 class ActorTest {
 
   @Test
+  void anActorBoundToTheOperationIsWhoReadsOverTheCommandsReader() {
+    var person = new Actor("ada", Role.MEMBER, Actor.Lane.CLI);
+    var bound = new Actor("bob", Role.ADMIN, Actor.Lane.API);
+
+    assertEquals(person, Actor.readingAs(() -> person, Actor::reader));
+    assertEquals(bound, Actor.readingAs(() -> person, () -> Actor.call(bound, Actor::reader)));
+    assertEquals(Actor.system(), Actor.reader(), "with neither, the box reads as itself");
+  }
+
+  @Test
   void cliOperatorIsAdminOnItsOwnBox() {
-    var actor = Actor.cliOperator("sumesh");
+    var actor = new Actor("sumesh", Role.ADMIN, Actor.Lane.CLI);
 
     assertEquals("sumesh", actor.handle());
     assertEquals(Role.ADMIN, actor.role());
     assertEquals(Actor.Lane.CLI, actor.lane());
     assertTrue(actor.isAdmin());
-    assertTrue(actor.canWrite());
   }
 
   @Test
-  void memberCanWriteButIsNotAdmin() {
+  void memberIsNotAdmin() {
     var actor = new Actor("raj", Role.MEMBER, Actor.Lane.API);
 
     assertFalse(actor.isAdmin());
-    assertTrue(actor.canWrite());
     assertEquals(Actor.Lane.API, actor.lane());
   }
 
   @Test
-  void viewerCannotWrite() {
+  void viewerIsNotAdmin() {
     var actor = new Actor("obs", Role.VIEWER, Actor.Lane.API);
 
     assertFalse(actor.isAdmin());
-    assertFalse(actor.canWrite());
   }
 
   @Test
@@ -62,7 +69,6 @@ class ActorTest {
     assertEquals(Role.MEMBER, actor.role());
     assertEquals(Actor.Lane.AGENT, actor.lane());
     assertTrue(actor.agentLane());
-    assertTrue(actor.canWrite());
     assertFalse(actor.isAdmin());
   }
 
@@ -74,7 +80,7 @@ class ActorTest {
     assertFalse(agent.actsFor("sumesh"));
     assertFalse(agent.actsFor(null));
 
-    var human = Actor.cliOperator("uday");
+    var human = new Actor("uday", Role.ADMIN, Actor.Lane.CLI);
     assertFalse(human.agentLane());
     assertNull(human.owner());
     assertTrue(human.actsFor("uday"));
@@ -90,10 +96,10 @@ class ActorTest {
 
   @Test
   void theActingFdeIsTheHandleOrTheFdeARunActsFor() {
-    assertEquals("uday", Actor.cliOperator("uday").actingFde());
+    assertEquals("uday", new Actor("uday", Role.ADMIN, Actor.Lane.CLI).actingFde());
     assertEquals("uday", Actor.agentPrincipal("claude/a1b2c3", "uday").actingFde());
     assertEquals("uday", Actor.roomPrincipal("claude/room-a1b2c3", "uday").actingFde());
-    assertEquals("carol", Actor.sync("carol", Role.MEMBER).actingFde());
+    assertEquals("carol", new Actor("carol", Role.MEMBER, Actor.Lane.SYNC).actingFde());
     assertNull(new Actor(null, Role.ADMIN, Actor.Lane.API).actingFde());
   }
 
@@ -114,13 +120,16 @@ class ActorTest {
           assertEquals(Actor.system(), Actor.current());
         });
 
-    assertEquals("uday", Actor.call(Actor.cliOperator("uday"), () -> Actor.current().handle()));
+    assertEquals(
+        "uday",
+        Actor.call(new Actor("uday", Role.ADMIN, Actor.Lane.CLI), () -> Actor.current().handle()));
     assertThrows(IllegalStateException.class, Actor::current);
   }
 
   @Test
   void aReadNoDoorBoundAnActorToIsTheBoxsOwnAndABoundOneIsItsCallers() {
-    var scoped = Actor.cliOperator("uday").withScope(ProjectScope.of(List.of("acme")));
+    var scoped =
+        new Actor("uday", Role.ADMIN, Actor.Lane.CLI).withScope(ProjectScope.of(List.of("acme")));
 
     assertEquals(Actor.system(), Actor.reader());
     assertEquals(ProjectScope.all(), Actor.reader().scope());
@@ -132,13 +141,14 @@ class ActorTest {
     var seen = new AtomicReference<Actor>();
     var task =
         Actor.call(
-            Actor.cliOperator("uday"), () -> Actor.carrying(() -> seen.set(Actor.current())));
+            new Actor("uday", Role.ADMIN, Actor.Lane.CLI),
+            () -> Actor.carrying(() -> seen.set(Actor.current())));
     var callable = Actor.call(Actor.system(), () -> Actor.carrying(() -> Actor.current().handle()));
 
     var thread = Thread.ofVirtual().start(task);
     thread.join();
 
-    assertEquals(Actor.cliOperator("uday"), seen.get());
+    assertEquals(new Actor("uday", Role.ADMIN, Actor.Lane.CLI), seen.get());
     try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
       assertEquals("sail", executor.submit(callable).get());
     }
@@ -151,10 +161,8 @@ class ActorTest {
 
   @Test
   void syncMainAndSystemNameTheirLanes() {
-    var pusher = Actor.sync("sumesh", Role.MEMBER);
+    var pusher = new Actor("sumesh", Role.MEMBER, Actor.Lane.SYNC);
     assertEquals(Actor.Lane.SYNC, pusher.lane());
-    assertTrue(pusher.canWrite());
-    assertFalse(Actor.sync(null, Role.VIEWER).canWrite());
     assertEquals(new Actor("main", Role.ADMIN, Actor.Lane.MAIN), Actor.main());
     assertEquals(new Actor("sail", Role.ADMIN, Actor.Lane.SYSTEM), Actor.system());
   }
@@ -172,7 +180,7 @@ class ActorTest {
 
   @Test
   void onlyASyncedRevisionNamesAPeerOrKeepsTheAuthorItOffers() {
-    var pusher = Actor.sync("sumesh", Role.MEMBER);
+    var pusher = new Actor("sumesh", Role.MEMBER, Actor.Lane.SYNC);
     assertEquals("sumesh", pusher.peer());
     assertEquals("uday", pusher.authorOf("uday"));
     assertEquals("sumesh", pusher.authorOf(null));
@@ -183,7 +191,7 @@ class ActorTest {
     assertNull(Actor.main(null).authorOf(null), "main recorded none, so the node records none");
     assertEquals("main", Actor.main(null).peer());
 
-    var operator = Actor.cliOperator("mady");
+    var operator = new Actor("mady", Role.ADMIN, Actor.Lane.CLI);
     assertNull(operator.peer());
     assertEquals("mady", operator.authorOf("uday"));
     assertNull(Actor.system().peer());

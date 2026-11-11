@@ -17,6 +17,7 @@ import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -415,7 +416,8 @@ class ErasureTest {
 
   private void prune(Erasure.Target root, String actor) {
     Actor.run(
-        Actor.cliOperator(actor), () -> erasure.erase(erasure.closure(List.of(root)), "local"));
+        new Actor(actor, Role.ADMIN, Actor.Lane.CLI),
+        () -> erasure.erase(erasure.closure(List.of(root)), "local"));
   }
 
   private Erasure.Target spec(String id) {

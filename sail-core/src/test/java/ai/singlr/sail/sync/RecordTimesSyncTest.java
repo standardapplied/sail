@@ -375,7 +375,7 @@ class RecordTimesSyncTest {
 
     var taken =
         Actor.call(
-            Actor.sync("main", Role.MEMBER),
+            new Actor("main", Role.MEMBER, Actor.Lane.SYNC),
             () ->
                 rooms.commitRevision(
                     "lounge", offer, rooms.latestRev("lounge"), rooms.authority()));

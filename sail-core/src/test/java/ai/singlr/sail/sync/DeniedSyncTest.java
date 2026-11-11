@@ -38,8 +38,8 @@ import org.junit.jupiter.api.Test;
 @ActingAs
 class DeniedSyncTest {
 
-  private static final Actor ADA = Actor.sync("ada", Role.MEMBER);
-  private static final Actor ADA_VIEWING = Actor.sync("ada", Role.VIEWER);
+  private static final Actor ADA = new Actor("ada", Role.MEMBER, Actor.Lane.SYNC);
+  private static final Actor ADA_VIEWING = new Actor("ada", Role.VIEWER, Actor.Lane.SYNC);
 
   private SyncBox main;
   private SyncBox node;

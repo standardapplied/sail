@@ -22,7 +22,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
-import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
@@ -483,11 +483,18 @@ class AccessDoorsBaselineTest {
         });
   }
 
+  /** A login session of FDE {@code fde}'s, as the gateway mints one for the pty host. */
+  private static String session(World world, String fde) {
+    return new AuthSessionStore(world.db)
+        .create(new FdeStore(world.db).byHandle(fde).orElseThrow().id(), Duration.ofHours(1))
+        .token();
+  }
+
   /**
    * Pinning a terminal session to a room ({@link HostAccess#admit}) as each FDE of the roster, on
    * main, where this box's own FDE is its operator, and on a node, where every FDE has the roster's
-   * role: the pty host binds the FDE a session names, whoever the credential, so the door is asked
-   * once for each, by the box's operator.
+   * role: each FDE is the principal the pty host resolves from a session token of theirs, so the
+   * door is asked once for each, by the box's operator.
    */
   private static void terminals(World world, List<Door> doors) {
     var configs =
@@ -506,7 +513,7 @@ class AccessDoorsBaselineTest {
               new Door(
                   "fde " + fde + " pins a terminal to " + room + " on " + box.getKey(),
                   ops -> {
-                    host.admit(room, project, new PtyIdentity(fde, false, false));
+                    host.admit(room, project, host.identity(session(world, fde)));
                     return "admitted";
                   },
                   AccessDoorsBaselineTest::operator));
@@ -517,7 +524,7 @@ class AccessDoorsBaselineTest {
             new Door(
                 "fde " + fde + " pins a terminal to lobby under beta on " + box.getKey(),
                 ops -> {
-                  host.admit("lobby", "beta", new PtyIdentity(fde, false, false));
+                  host.admit("lobby", "beta", host.identity(session(world, fde)));
                   return "admitted";
                 },
                 AccessDoorsBaselineTest::operator));

@@ -41,7 +41,7 @@ import org.junit.jupiter.api.Test;
 class LocalApiRouterTest {
 
   private final RecordingOps ops = new RecordingOps();
-  private final LocalApiRouter router = new LocalApiRouter(ops);
+  private final SocketDoor router = new SocketDoor(ops);
 
   private static Map<String, String> auth() {
     return Map.of("authorization", "Bearer " + TestOperations.RUN_CREDENTIAL);
@@ -68,45 +68,193 @@ class LocalApiRouterTest {
         method, path, Map.of(), auth(), body.getBytes(StandardCharsets.UTF_8));
   }
 
-  @Test
-  void agentsCanReadSyncAndConflictsButCannotTriggerSync() {
-    var operations =
-        new TestOperations() {
-          @Override
-          public SyncStatus syncStatus() {
-            return new SyncStatus(
-                "node",
-                "main",
-                new SyncEngine.Report(1, 2, 3, 4),
-                "in_sync",
-                null,
-                null,
-                0,
-                null,
-                null,
-                null);
-          }
+  /** Operations whose box reports its sync health and holds no parked conflict. */
+  private static class SyncingOperations extends TestOperations {
+    @Override
+    public SyncStatus syncStatus() {
+      return new SyncStatus(
+          "node",
+          "main",
+          new SyncEngine.Report(1, 2, 3, 4),
+          "in_sync",
+          null,
+          null,
+          0,
+          null,
+          null,
+          null);
+    }
 
-          @Override
-          public List<SyncConflicts.Conflict> conflicts() {
-            return List.of();
-          }
-        };
-    var local = new LocalApiRouter(operations);
-    assertEquals("main", local.handle(get("/v1/sync", Map.of())).body().get("main"));
-    assertEquals(List.of(), local.handle(get("/v1/conflicts", Map.of())).body().get("conflicts"));
-    assertEquals(405, local.handle(form("POST", "/v1/sync", "")).status());
-    assertEquals(405, local.handle(form("POST", "/v1/conflicts", "")).status());
-    assertEquals(400, local.handle(form("POST", "/v1/conflicts/spec/resolve", "")).status());
+    @Override
+    public List<SyncConflicts.Conflict> conflicts() {
+      return List.of();
+    }
+  }
+
+  @Test
+  void theBoxsPersonReadsItsSyncHealthAndNoRunDoes() {
+    var local = new SocketDoor(new SyncingOperations());
+    var health = new LocalApiRequest("GET", "/v1/sync", Map.of(), boxAuth(), new byte[0]);
+
+    assertEquals("main", local.ask(health).body().get("main"));
     assertEquals(
-        404, local.handle(form("POST", "/v1/conflicts/resolve", "strategy=mine")).status());
+        "403 {schema_version=1, error={code=agent_lane_forbidden, message=Agent principals cannot"
+            + " operate boxes., action=Only an operator lane (CLI or API token) may do this., field_errors=[]}}",
+        answer(local.ask(get("/v1/sync", Map.of()))));
     assertEquals(
-        404, local.handle(form("POST", "/v1/conflicts//resolve", "strategy=mine")).status());
+        "403 {schema_version=1, error={code=agent_lane_forbidden, message=Agent principals cannot"
+            + " operate boxes., action=Only an operator lane (CLI or API token) may do this., field_errors=[]}}",
+        answer(
+            local.ask(new LocalApiRequest("GET", "/v1/sync", Map.of(), roomAuth(), new byte[0]))));
     assertEquals(
-        401, local.handle(new LocalApiRequest("GET", "/v1/sync", Map.of(), new byte[0])).status());
+        "403 {schema_version=1, error={code=forbidden_not_assignee, message=Box 'ada' belongs to"
+            + " 'ada', not you., action=Ask ada to operate it, or have an admin do it.,"
+            + " field_errors=[]}}",
+        answer(
+            new SocketDoor(
+                    new SyncingOperations() {
+                      @Override
+                      public String boxFde() {
+                        return "ada";
+                      }
+                    })
+                .ask(health)),
+        "the box gate decides on the box the router serves, not on the caller's own");
+  }
+
+  private static String answer(ApiResponse response) {
+    return response.status() + " " + response.body();
+  }
+
+  @Test
+  void eachPatternAnswersAMethodItDoesNotServeInTheSocketsOwnWords() {
+    var answers = new LinkedHashMap<String, String>();
+    for (var asked :
+        List.of(
+            "POST /v1/sync",
+            "POST /v1/conflicts",
+            "GET /v1/conflicts/auth/resolve",
+            "POST /v1/whoami",
+            "GET /v1/events",
+            "PUT /v1/run/messages",
+            "GET /v1/run/session",
+            "PUT /v1/projects/acme/skills",
+            "PUT /v1/projects/acme/skills/java",
+            "GET /v1/projects/acme/serve",
+            "POST /v1/projects/acme/ports",
+            "PUT /v1/specs",
+            "POST /v1/specs/board",
+            "POST /v1/specs/auth",
+            "POST /v1/specs/auth/content",
+            "PUT /v1/specs/auth/messages")) {
+      var parts = asked.split(" ");
+      answers.put(asked, answer(router.ask(form(parts[0], parts[1], ""))));
+    }
+
+    assertEquals(
+        List.of(
+            "405 {error=Only GET is available.}",
+            "405 {error=Only GET is available.}",
+            "405 {error=Conflict resolution accepts POST}",
+            "405 {error=whoami accepts GET}",
+            "405 {error=events accepts POST}",
+            "405 {error=run messages accepts GET or POST}",
+            "405 {error=run session accepts POST}",
+            "405 {error=skills accepts GET or POST}",
+            "405 {error=a skill accepts GET or DELETE}",
+            "405 {error=serve accepts POST or DELETE}",
+            "405 {error=ports accepts GET}",
+            "405 {error=specs accepts GET or POST}",
+            "405 {error=board accepts GET}",
+            "405 {error=spec accepts GET, PUT, or DELETE}",
+            "405 {error=content accepts GET or PUT}",
+            "405 {error=messages accepts GET or POST}"),
+        List.copyOf(answers.values()),
+        answers.toString());
+    assertEquals(
+        "405 {error=A merge template accepts GET}",
+        answer(
+            router.ask(
+                new LocalApiRequest(
+                    "POST",
+                    "/v1/conflicts/auth",
+                    Map.of("template", "true"),
+                    auth(),
+                    new byte[0]))));
+  }
+
+  @Test
+  void theBoxCredentialHearsItHasNoRunBeforeTheMethodItAsked() {
+    var inbox = router.ask("PUT", "/v1/run/messages", TestOperations.BOX_CREDENTIAL, "");
+    var session = router.ask("GET", "/v1/run/session", TestOperations.BOX_CREDENTIAL, "");
+
+    assertEquals(
+        "403 {error=Run message delivery requires a run credential; the box credential has no run"
+            + " to deliver to.}",
+        answer(inbox));
+    assertEquals(
+        "403 {error=Session reports name a run's conversation and require a run credential; the"
+            + " box credential reports only a room-bound conversation (room_id).}",
+        answer(session));
+  }
+
+  @Test
+  void aPathAsSentIsAnsweredAsTheSocketAlwaysAnsweredIt() {
+    assertEquals(
+        "400 bad_request Invalid project name: ''. Must match [a-z0-9][a-z0-9-]*, max 63"
+            + " characters.",
+        refusal(router.ask(form("GET", "/v1/projects//x", ""))));
+    assertEquals(
+        "404 {error=No route for spec sub-resource zz}",
+        answer(router.ask(form("PATCH", "/v1/specs/e1/zz", ""))));
+    assertEquals(
+        "404 {error=No route for spec sub-resource content/x}",
+        answer(router.ask(form("GET", "/v1/specs/e1/content/x", ""))));
+    assertEquals(
+        "405 {error=spec accepts GET, PUT, or DELETE}",
+        answer(router.ask(form("POST", "/v1/specs/", ""))));
+    assertEquals(
+        "",
+        ((Map<?, ?>) router.ask(get("/v1/specs/", Map.of())).body().get("spec")).get("id"),
+        "an empty id reaches the operation, which answers for it");
+    assertEquals(
+        List.of("handle", "owner", "role", "lane", "run_id", "project"),
+        List.copyOf(router.ask(get("/v1/whoami", Map.of())).body().keySet()));
+  }
+
+  @Test
+  void aPathBelowAProjectNoRouteServesIsAnsweredOnlyOnceTheProjectIsRead() {
+    assertEquals(
+        "400 bad_request Invalid project name: 'Bad_Name'. Must match [a-z0-9][a-z0-9-]*, max 63"
+            + " characters.",
+        refusal(router.ask(form("PUT", "/v1/projects/Bad_Name/zz", ""))));
+    assertEquals(
+        "404 project_not_in_catalog Project 'nope' is not in the catalog.",
+        refusal(router.ask(get("/v1/projects/nope/zz", Map.of()))));
+    assertEquals(
+        "404 {error=No route for /v1/projects/acme/zz}",
+        answer(router.ask(form("DELETE", "/v1/projects/acme/zz", ""))));
+  }
+
+  private static String refusal(ApiResponse response) {
+    var error = (Map<?, ?>) response.body().get("error");
+    return response.status() + " " + error.get("code") + " " + error.get("message");
+  }
+
+  @Test
+  void agentsReadConflictsButCannotTriggerSync() {
+    var local = new SocketDoor(new SyncingOperations());
+    assertEquals(List.of(), local.ask(get("/v1/conflicts", Map.of())).body().get("conflicts"));
+    assertEquals(405, local.ask(form("POST", "/v1/sync", "")).status());
+    assertEquals(405, local.ask(form("POST", "/v1/conflicts", "")).status());
+    assertEquals(400, local.ask(form("POST", "/v1/conflicts/spec/resolve", "")).status());
+    assertEquals(404, local.ask(form("POST", "/v1/conflicts/resolve", "strategy=mine")).status());
+    assertEquals(404, local.ask(form("POST", "/v1/conflicts//resolve", "strategy=mine")).status());
+    assertEquals(
+        401, local.ask(new LocalApiRequest("GET", "/v1/sync", Map.of(), new byte[0])).status());
     assertEquals(
         401,
-        local.handle(new LocalApiRequest("GET", "/v1/conflicts", Map.of(), new byte[0])).status());
+        local.ask(new LocalApiRequest("GET", "/v1/conflicts", Map.of(), new byte[0])).status());
   }
 
   @Test
@@ -122,15 +270,15 @@ class LocalApiRouterTest {
                 type == null ? ErrorCode.BAD_REQUEST : ErrorCode.CONFLICT, "refused " + id);
           }
         };
-    var local = new LocalApiRouter(operations);
+    var local = new SocketDoor(operations);
     var body = "strategy=mine".getBytes(StandardCharsets.UTF_8);
 
     var stale =
-        local.handle(
+        local.ask(
             new LocalApiRequest(
                 "POST", "/v1/conflicts/auth/resolve", Map.of("type", "room"), auth(), body));
     var ambiguous =
-        local.handle(
+        local.ask(
             new LocalApiRequest("POST", "/v1/conflicts/auth/resolve", Map.of(), auth(), body));
 
     assertEquals(List.of("room:auth", "null:auth"), asked);
@@ -142,7 +290,7 @@ class LocalApiRouterTest {
   @Test
   void aWriteTheJournalRefusedIsAnsweredInHttpsEnvelopeWithItsKindsCode() {
     var lane =
-        new LocalApiRouter(
+        new SocketDoor(
             new TestOperations() {
               @Override
               public SyncConflicts.Conflict resolveConflict(
@@ -153,7 +301,7 @@ class LocalApiRouterTest {
             });
 
     var refused =
-        lane.handle(
+        lane.ask(
             new LocalApiRequest(
                 "POST",
                 "/v1/conflicts/auth/resolve",
@@ -185,7 +333,7 @@ class LocalApiRouterTest {
       var conflicts = new ConflictOperations(box.db);
       var rev = box.specs.revOf("auth");
       var lane =
-          new LocalApiRouter(
+          new SocketDoor(
               new TestOperations() {
                 @Override
                 public String conflictMergeTemplate(String type, String id) {
@@ -200,7 +348,7 @@ class LocalApiRouterTest {
               });
       var started = template(lane);
       var posted =
-          lane.handle(
+          lane.ask(
               new LocalApiRequest(
                   "POST",
                   "/v1/conflicts/auth",
@@ -210,7 +358,7 @@ class LocalApiRouterTest {
       assertEquals(405, posted.status(), posted.body().toString());
 
       var unnamed =
-          lane.handle(merge(started.replaceAll("(?m)^" + ConflictMerge.CONFLICT + ": .*\n", "")));
+          lane.ask(merge(started.replaceAll("(?m)^" + ConflictMerge.CONFLICT + ": .*\n", "")));
       assertEquals(400, unnamed.status(), unnamed.body().toString());
       assertEquals(
           Map.of(
@@ -238,7 +386,7 @@ class LocalApiRouterTest {
 
       parkTitle(box, local, "remote, revised");
       var parked = box.conflicts.pendingFor("spec", "auth").orElseThrow();
-      var moved = lane.handle(merge(started));
+      var moved = lane.ask(merge(started));
       assertEquals(409, moved.status(), moved.body().toString());
       assertEquals(
           "'auth' was re-recorded after this merge was started. Start again from the fresh version.",
@@ -247,19 +395,18 @@ class LocalApiRouterTest {
       assertEquals(rev, box.specs.revOf("auth"));
       assertEquals(local, box.specs.comparableSnapshot("auth"));
 
-      var fresh = lane.handle(merge(template(lane)));
+      var fresh = lane.ask(merge(template(lane)));
       assertEquals(200, fresh.status(), fresh.body().toString());
       assertEquals("merged", box.specs.findById("auth").orElseThrow().title());
       assertTrue(box.conflicts.pending().isEmpty());
-      var gone = lane.handle(get("/v1/conflicts/auth", Map.of("type", "spec", "template", "true")));
+      var gone = lane.ask(get("/v1/conflicts/auth", Map.of("type", "spec", "template", "true")));
       assertEquals(404, gone.status(), gone.body().toString());
-      assertEquals(404, lane.handle(merge(started)).status());
+      assertEquals(404, lane.ask(merge(started)).status());
     }
   }
 
-  private static String template(LocalApiRouter lane) {
-    var response =
-        lane.handle(get("/v1/conflicts/auth", Map.of("type", "spec", "template", "true")));
+  private static String template(SocketDoor lane) {
+    var response = lane.ask(get("/v1/conflicts/auth", Map.of("type", "spec", "template", "true")));
     assertEquals(200, response.status(), response.body().toString());
     return (String) response.body().get("template");
   }
@@ -301,7 +448,7 @@ class LocalApiRouterTest {
   @Test
   void missingCredentialIs401OnEveryRoute() {
     for (var path : List.of("/v1/specs", "/v1/specs/board", "/v1/events", "/v1/whoami", "/v1/x")) {
-      var response = router.handle(new LocalApiRequest("GET", path, Map.of(), new byte[0]));
+      var response = router.ask(new LocalApiRequest("GET", path, Map.of(), new byte[0]));
       assertEquals(401, response.status(), path);
       assertTrue(response.body().get("error").toString().contains("SAIL_RUN_CREDENTIAL"), path);
       assertTrue(response.body().get("error").toString().contains("box.credential"), path);
@@ -311,7 +458,7 @@ class LocalApiRouterTest {
   @Test
   void unknownCredentialIs401() {
     var response =
-        router.handle(
+        router.ask(
             new LocalApiRequest(
                 "GET",
                 "/v1/specs",
@@ -323,7 +470,7 @@ class LocalApiRouterTest {
 
   @Test
   void whoamiReflectsTheRunPrincipal() {
-    var response = router.handle(get("/v1/whoami", Map.of()));
+    var response = router.ask(get("/v1/whoami", Map.of()));
     assertEquals(200, response.status());
     assertEquals(TestOperations.PRINCIPAL, response.body().get("handle"));
     assertEquals(TestOperations.OWNER, response.body().get("owner"));
@@ -332,7 +479,7 @@ class LocalApiRouterTest {
     assertEquals("run-1", response.body().get("run_id"));
     assertEquals("acme", response.body().get("project"));
 
-    assertEquals(405, router.handle(form("POST", "/v1/whoami", "")).status());
+    assertEquals(405, router.ask(form("POST", "/v1/whoami", "")).status());
   }
 
   @Test
@@ -345,7 +492,7 @@ class LocalApiRouterTest {
             "claude-code",
             "host-01",
             Map.of("run_id", "run-victim", "source", "watcher", "exit_code", 0, "reason", "done"));
-    var response = router.handle(form("POST", "/v1/events", event.toJsonLine()));
+    var response = router.ask(form("POST", "/v1/events", event.toJsonLine()));
     assertEquals(202, response.status());
     assertEquals(1L, response.body().get("id"));
     var offered = ops.lastEvent;
@@ -376,7 +523,7 @@ class LocalApiRouterTest {
         Result.failure(ErrorCode.FORBIDDEN, "Event type 'spec_dispatched' is not available.");
     var event = Event.of("acme", "auth", "spec_dispatched", "claude-code", "host-01");
 
-    var response = router.handle(form("POST", "/v1/events", event.toJsonLine()));
+    var response = router.ask(form("POST", "/v1/events", event.toJsonLine()));
 
     assertEquals(403, response.status());
     assertEquals(
@@ -394,8 +541,7 @@ class LocalApiRouterTest {
     var event = Event.of("acme", "auth", "agent_tool_started", "claude-code", "host-01");
 
     var error =
-        (Map<?, ?>)
-            router.handle(form("POST", "/v1/events", event.toJsonLine())).body().get("error");
+        (Map<?, ?>) router.ask(form("POST", "/v1/events", event.toJsonLine())).body().get("error");
 
     assertEquals(
         List.of(
@@ -410,13 +556,13 @@ class LocalApiRouterTest {
 
   @Test
   void eventsRejectsWrongMethodAndMalformedBody() {
-    assertEquals(405, router.handle(get("/v1/events", Map.of())).status());
-    assertEquals(400, router.handle(form("POST", "/v1/events", "{not json}")).status());
+    assertEquals(405, router.ask(get("/v1/events", Map.of())).status());
+    assertEquals(400, router.ask(form("POST", "/v1/events", "{not json}")).status());
   }
 
   @Test
   void listSpecsPassesEveryFilterThrough() {
-    router.handle(
+    router.ask(
         get(
             "/v1/specs",
             Map.of(
@@ -436,7 +582,7 @@ class LocalApiRouterTest {
   @Test
   void createSpecParsesFormFieldsCsvAndPriority() {
     var response =
-        router.handle(
+        router.ask(
             form(
                 "POST",
                 "/v1/specs",
@@ -456,16 +602,16 @@ class LocalApiRouterTest {
 
   @Test
   void createSpecPassesTheHomeRoomThroughAndLeavesItNullWhenAbsent() {
-    router.handle(form("POST", "/v1/specs", "id=born&title=Born&room_id=design-talk"));
+    router.ask(form("POST", "/v1/specs", "id=born&title=Born&room_id=design-talk"));
     assertEquals("design-talk", ops.lastCreate.roomId(), "a brainstorm's spec names its room");
 
-    router.handle(form("POST", "/v1/specs", "id=solo&title=Solo"));
+    router.ask(form("POST", "/v1/specs", "id=solo&title=Solo"));
     assertNull(ops.lastCreate.roomId(), "no room means the identity-room default downstream");
   }
 
   @Test
   void createSpecDefaultsStatusDraftAndStampsThePrincipal() {
-    router.handle(form("POST", "/v1/specs", "id=x&title=X&actor=ada"));
+    router.ask(form("POST", "/v1/specs", "id=x&title=X&actor=ada"));
     assertEquals("draft", ops.lastCreate.status());
     assertEquals(
         TestOperations.PRINCIPAL,
@@ -477,29 +623,29 @@ class LocalApiRouterTest {
 
   @Test
   void createSpecToleratesAnUnparseablePriority() {
-    router.handle(form("POST", "/v1/specs", "id=x&title=X&priority=high"));
+    router.ask(form("POST", "/v1/specs", "id=x&title=X&priority=high"));
     assertEquals(0, ops.lastCreate.priority());
   }
 
   @Test
   void specsCollectionRejectsWrongMethod() {
-    assertEquals(405, router.handle(form("DELETE", "/v1/specs", "")).status());
+    assertEquals(405, router.ask(form("DELETE", "/v1/specs", "")).status());
   }
 
   @Test
   void boardReadsProjectAndRejectsWrongMethod() {
-    assertEquals(200, router.handle(get("/v1/specs/board", Map.of("project", "acme"))).status());
+    assertEquals(200, router.ask(get("/v1/specs/board", Map.of("project", "acme"))).status());
     assertEquals("acme", ops.lastBoardProject);
-    assertEquals(405, router.handle(form("POST", "/v1/specs/board", "")).status());
+    assertEquals(405, router.ask(form("POST", "/v1/specs/board", "")).status());
   }
 
   @Test
   void showUpdateDeleteASpec() {
-    assertEquals(200, router.handle(get("/v1/specs/oauth", Map.of())).status());
+    assertEquals(200, router.ask(get("/v1/specs/oauth", Map.of())).status());
     assertEquals("oauth", ops.lastShownId);
 
     var updated =
-        router.handle(form("PUT", "/v1/specs/oauth", "status=archived&depends_on=a&actor=ada"));
+        router.ask(form("PUT", "/v1/specs/oauth", "status=archived&depends_on=a&actor=ada"));
     assertEquals(200, updated.status());
     assertEquals("archived", ops.lastUpdate.status());
     assertEquals(List.of("a"), ops.lastUpdate.dependsOn());
@@ -509,36 +655,36 @@ class LocalApiRouterTest {
     assertEquals(Role.MEMBER, ops.lastActor.role());
     assertTrue(ops.lastActor.agentLane());
 
-    assertEquals(200, router.handle(form("DELETE", "/v1/specs/oauth", "")).status());
+    assertEquals(200, router.ask(form("DELETE", "/v1/specs/oauth", "")).status());
     assertEquals("oauth", ops.lastDeletedId);
 
-    assertEquals(405, router.handle(form("PATCH", "/v1/specs/oauth", "")).status());
+    assertEquals(405, router.ask(form("PATCH", "/v1/specs/oauth", "")).status());
   }
 
   @Test
   void updateLeavesUnsetListsNull() {
-    router.handle(form("PUT", "/v1/specs/oauth", "status=done"));
+    router.ask(form("PUT", "/v1/specs/oauth", "status=done"));
     assertNull(ops.lastUpdate.dependsOn());
     assertNull(ops.lastUpdate.priority());
   }
 
   @Test
   void getAndSetContent() {
-    assertEquals(200, router.handle(get("/v1/specs/oauth/content", Map.of())).status());
+    assertEquals(200, router.ask(get("/v1/specs/oauth/content", Map.of())).status());
     assertEquals("oauth", ops.lastContentId);
 
-    var set = router.handle(form("PUT", "/v1/specs/oauth/content", "body=%23%20Body&plan=steps"));
+    var set = router.ask(form("PUT", "/v1/specs/oauth/content", "body=%23%20Body&plan=steps"));
     assertEquals(200, set.status());
     assertEquals("# Body", ops.lastContent.body());
     assertEquals("steps", ops.lastContent.plan());
 
-    assertEquals(405, router.handle(form("DELETE", "/v1/specs/oauth/content", "")).status());
+    assertEquals(405, router.ask(form("DELETE", "/v1/specs/oauth/content", "")).status());
   }
 
   @Test
   void postAndListMessagesUseTheRunPrincipalAndClampPages() {
     var posted =
-        router.handle(
+        router.ask(
             form(
                 "POST",
                 "/v1/specs/oauth/messages",
@@ -552,8 +698,7 @@ class LocalApiRouterTest {
     assertTrue(ops.lastActor.agentLane());
 
     var asked =
-        router.handle(
-            form("POST", "/v1/specs/oauth/messages", "body=Which%20flow%3F&question=true"));
+        router.ask(form("POST", "/v1/specs/oauth/messages", "body=Which%20flow%3F&question=true"));
     assertEquals(201, asked.status());
     assertEquals(
         MessageStore.Mark.QUESTION, ops.lastMessage.mark(), "the form flag reaches the request");
@@ -561,7 +706,7 @@ class LocalApiRouterTest {
     assertEquals(
         200,
         router
-            .handle(
+            .ask(
                 get(
                     "/v1/specs/oauth/messages",
                     Map.of("before", "01900000-0000-7000-8000-000000000001", "limit", "500")))
@@ -569,19 +714,18 @@ class LocalApiRouterTest {
     assertEquals(100, ops.lastMessageLimit);
     assertEquals("01900000-0000-7000-8000-000000000001", ops.lastBefore);
 
-    router.handle(get("/v1/specs/oauth/messages", Map.of("limit", "0")));
+    router.ask(get("/v1/specs/oauth/messages", Map.of("limit", "0")));
     assertEquals(1, ops.lastMessageLimit);
-    router.handle(get("/v1/specs/oauth/messages", Map.of()));
+    router.ask(get("/v1/specs/oauth/messages", Map.of()));
     assertEquals(50, ops.lastMessageLimit);
-    assertEquals(
-        400, router.handle(get("/v1/specs/oauth/messages", Map.of("limit", "bad"))).status());
-    assertEquals(405, router.handle(form("DELETE", "/v1/specs/oauth/messages", "")).status());
+    assertEquals(400, router.ask(get("/v1/specs/oauth/messages", Map.of("limit", "bad"))).status());
+    assertEquals(405, router.ask(form("DELETE", "/v1/specs/oauth/messages", "")).status());
   }
 
   @Test
   void afterFilterPassesThroughToTheDeliveryRead() {
     var response =
-        router.handle(
+        router.ask(
             get(
                 "/v1/specs/oauth/messages",
                 Map.of("after", "01900000-0000-7000-8000-000000000001")));
@@ -593,13 +737,12 @@ class LocalApiRouterTest {
   @Test
   void aHistoricalReadOnlyInviteCredentialStaysViewerTierAcrossTheUpgrade() {
     var whoami =
-        router.handle(
-            new LocalApiRequest("GET", "/v1/whoami", Map.of(), inviteAuth(), new byte[0]));
+        router.ask(new LocalApiRequest("GET", "/v1/whoami", Map.of(), inviteAuth(), new byte[0]));
     assertEquals(200, whoami.status());
     assertEquals("viewer", whoami.body().get("role"), "the retired lane never gains write tier");
     assertEquals("run-3", whoami.body().get("run_id"));
 
-    router.handle(
+    router.ask(
         new LocalApiRequest(
             "PUT",
             "/v1/specs/oauth",
@@ -616,7 +759,7 @@ class LocalApiRouterTest {
   @Test
   void aSpeclessRoomSessionPostsOnlyToItsOwnRoom() {
     var own =
-        router.handle(
+        router.ask(
             new LocalApiRequest(
                 "POST",
                 "/v1/specs/lounge/messages",
@@ -626,7 +769,7 @@ class LocalApiRouterTest {
     assertEquals(201, own.status(), "a room-keyed run owns its own conversation");
 
     var foreign =
-        router.handle(
+        router.ask(
             new LocalApiRequest(
                 "POST",
                 "/v1/specs/auth/messages",
@@ -638,7 +781,7 @@ class LocalApiRouterTest {
 
   @Test
   void aRunReadingItsOwnRoomAcknowledgesExactlyTheMessagesShown() {
-    var response = router.handle(get("/v1/specs/auth/messages", Map.of()));
+    var response = router.ask(get("/v1/specs/auth/messages", Map.of()));
 
     assertEquals(200, response.status());
     assertEquals("run-1", ops.lastAckRunId, "reading the room is a delivery");
@@ -648,7 +791,7 @@ class LocalApiRouterTest {
         "the acknowledgement names exactly the page's messages, never more");
 
     ops.lastAckRunId = null;
-    router.handle(
+    router.ask(
         get("/v1/specs/auth/messages", Map.of("before", "01900000-0000-7000-8000-000000000002")));
     assertEquals(
         "run-1",
@@ -658,33 +801,33 @@ class LocalApiRouterTest {
 
   @Test
   void foreignFailedOrEmptyReadsLeaveTheLedgerAlone() {
-    router.handle(get("/v1/specs/oauth/messages", Map.of()));
+    router.ask(get("/v1/specs/oauth/messages", Map.of()));
     assertNull(ops.lastAckRunId, "another spec's room is not this run's delivery");
 
-    router.handle(
+    router.ask(
         new LocalApiRequest("GET", "/v1/specs/auth/messages", Map.of(), boxAuth(), new byte[0]));
     assertNull(ops.lastAckRunId, "the box credential has no run to deliver to");
 
     ops.emptyMessages = true;
-    router.handle(get("/v1/specs/auth/messages", Map.of()));
+    router.ask(get("/v1/specs/auth/messages", Map.of()));
     assertNull(ops.lastAckRunId, "an empty page delivers nothing");
 
     ops.emptyMessages = false;
     ops.failMessages = true;
-    router.handle(get("/v1/specs/auth/messages", Map.of()));
+    router.ask(get("/v1/specs/auth/messages", Map.of()));
     assertNull(ops.lastAckRunId, "a failed read delivers nothing");
   }
 
   @Test
   void runMessagesServesTheInboxAndTheAcknowledgementToRunCallersOnly() {
-    var inbox = router.handle(get("/v1/run/messages", Map.of()));
+    var inbox = router.ask(get("/v1/run/messages", Map.of()));
     assertEquals(200, inbox.status());
     assertEquals("run-1", inbox.body().get("run_id"));
     assertEquals(false, inbox.body().get("has_more"));
     assertEquals("run-1", ops.lastInboxRunId);
 
     var ack =
-        router.handle(
+        router.ask(
             form(
                 "POST",
                 "/v1/run/messages",
@@ -698,14 +841,14 @@ class LocalApiRouterTest {
         "a comma-separated ack carries every id shown");
 
     var boxed =
-        router.handle(
+        router.ask(
             new LocalApiRequest("GET", "/v1/run/messages", Map.of(), boxAuth(), new byte[0]));
     assertEquals(403, boxed.status());
     assertTrue(boxed.body().get("error").toString().contains("run credential"));
 
-    assertEquals(405, router.handle(form("DELETE", "/v1/run/messages", "")).status());
+    assertEquals(405, router.ask(form("DELETE", "/v1/run/messages", "")).status());
 
-    var emptyAck = router.handle(form("POST", "/v1/run/messages", "delivered="));
+    var emptyAck = router.ask(form("POST", "/v1/run/messages", "delivered="));
     assertEquals(200, emptyAck.status());
     assertEquals(
         List.of(),
@@ -717,7 +860,7 @@ class LocalApiRouterTest {
   @Test
   void runSessionRecordsTheHookReportedIdentityForRunCallersOnly() {
     var recorded =
-        router.handle(
+        router.ask(
             form(
                 "POST",
                 "/v1/run/session",
@@ -735,7 +878,7 @@ class LocalApiRouterTest {
         "form values arrive urldecoded, so a path travels intact");
 
     var boxed =
-        router.handle(
+        router.ask(
             new LocalApiRequest(
                 "POST",
                 "/v1/run/session",
@@ -745,14 +888,14 @@ class LocalApiRouterTest {
     assertEquals(403, boxed.status());
     assertTrue(boxed.body().get("error").toString().contains("run credential"));
 
-    assertEquals(405, router.handle(get("/v1/run/session", Map.of())).status());
-    assertEquals(405, router.handle(form("DELETE", "/v1/run/session", "")).status());
+    assertEquals(405, router.ask(get("/v1/run/session", Map.of())).status());
+    assertEquals(405, router.ask(form("DELETE", "/v1/run/session", "")).status());
   }
 
   @Test
   void aRoomBoundInteractiveSessionReportsItsConversationOverTheBoxLane() {
     var reported =
-        router.handle(
+        router.ask(
             new LocalApiRequest(
                 "POST",
                 "/v1/run/session",
@@ -778,7 +921,7 @@ class LocalApiRouterTest {
     assertNull(ops.lastSessionRunId, "no run row is touched by a box-lane report");
 
     var wrongMethod =
-        router.handle(
+        router.ask(
             new LocalApiRequest(
                 "GET",
                 "/v1/run/session",
@@ -791,7 +934,7 @@ class LocalApiRouterTest {
   @Test
   void aRunCallersReportIgnoresAnyRoomItClaims() {
     var recorded =
-        router.handle(form("POST", "/v1/run/session", "session_id=abc&room_id=someone-elses"));
+        router.ask(form("POST", "/v1/run/session", "session_id=abc&room_id=someone-elses"));
     assertEquals(200, recorded.status());
     assertEquals("run-1", ops.lastSessionRunId, "a run credential always reports onto its run");
     assertNull(ops.lastConversationRoom, "a run never mints a room conversation");
@@ -800,7 +943,7 @@ class LocalApiRouterTest {
   @Test
   void boxCredentialActsAsTheFdeOnSpecAndMessageRoutes() {
     var created =
-        router.handle(
+        router.ask(
             new LocalApiRequest(
                 "POST",
                 "/v1/specs",
@@ -815,7 +958,7 @@ class LocalApiRouterTest {
         "the create travels with the actor so a room binding is authorized");
 
     var posted =
-        router.handle(
+        router.ask(
             new LocalApiRequest(
                 "POST",
                 "/v1/specs/oauth/messages",
@@ -829,7 +972,7 @@ class LocalApiRouterTest {
     assertFalse(ops.lastActor.agentLane());
 
     var updated =
-        router.handle(
+        router.ask(
             new LocalApiRequest(
                 "PUT",
                 "/v1/specs/oauth",
@@ -843,7 +986,7 @@ class LocalApiRouterTest {
   @Test
   void boxCredentialCannotPostEvents() {
     var response =
-        router.handle(
+        router.ask(
             new LocalApiRequest(
                 "POST",
                 "/v1/events",
@@ -854,12 +997,17 @@ class LocalApiRouterTest {
 
     assertEquals(403, response.status());
     assertTrue(response.body().get("error").toString().contains("run credential"));
+    assertEquals(
+        "405 {error=events accepts POST}",
+        answer(
+            router.ask(new LocalApiRequest("GET", "/v1/events", Map.of(), boxAuth(), new byte[0]))),
+        "a method the route does not take is refused before who asks it");
   }
 
   @Test
   void whoamiReflectsTheBoxFde() {
     var response =
-        router.handle(new LocalApiRequest("GET", "/v1/whoami", Map.of(), boxAuth(), new byte[0]));
+        router.ask(new LocalApiRequest("GET", "/v1/whoami", Map.of(), boxAuth(), new byte[0]));
 
     assertEquals(200, response.status());
     assertEquals(TestOperations.BOX_HANDLE, response.body().get("handle"));
@@ -878,7 +1026,7 @@ class LocalApiRouterTest {
             return Optional.of(new Actor("impostor", Role.ADMIN, Actor.Lane.CLI));
           }
         };
-    var response = new LocalApiRouter(greedy).handle(get("/v1/whoami", Map.of()));
+    var response = new SocketDoor(greedy).ask(get("/v1/whoami", Map.of()));
 
     assertEquals(TestOperations.PRINCIPAL, response.body().get("handle"));
     assertEquals("agent", response.body().get("lane"));
@@ -886,14 +1034,14 @@ class LocalApiRouterTest {
 
   @Test
   void unknownRouteAndUnknownSubResourceAre404() {
-    assertEquals(404, router.handle(get("/v1/widgets", Map.of())).status());
-    assertEquals(404, router.handle(get("/v1/specs/oauth/history", Map.of())).status());
+    assertEquals(404, router.ask(get("/v1/widgets", Map.of())).status());
+    assertEquals(404, router.ask(get("/v1/specs/oauth/history", Map.of())).status());
   }
 
   @Test
   void aRunWhoseFdeTheBoxCannotPlaceIsRefusedWithItsRemedyAsData() {
     var lane =
-        new LocalApiRouter(
+        new SocketDoor(
             new TestOperations() {
               @Override
               public Optional<Actor> runActor(RunStore.RunRow run) {
@@ -901,7 +1049,7 @@ class LocalApiRouterTest {
               }
             });
 
-    var refused = lane.handle(get("/v1/specs", Map.of()));
+    var refused = lane.ask(get("/v1/specs", Map.of()));
 
     assertEquals(403, refused.status());
     var reason =
@@ -910,6 +1058,7 @@ class LocalApiRouterTest {
             + "', whom this box cannot place: its roster has disabled that FDE or does not know it"
             + " yet, or this box names no FDE of its own.";
     var error = (Map<?, ?>) refused.body().get("error");
+    assertEquals("forbidden", error.get("code"));
     assertEquals(reason, error.get("message"));
     assertEquals(
         List.of(
@@ -936,7 +1085,7 @@ class LocalApiRouterTest {
   @Test
   void aRemediedFailureBelowTheLaneKeepsItsRemedyAsData() {
     var lane =
-        new LocalApiRouter(
+        new SocketDoor(
             new TestOperations() {
               @Override
               public Result<GlobalSpecDetailResponse> globalSpec(String id) {
@@ -946,7 +1095,7 @@ class LocalApiRouterTest {
               }
             });
 
-    var refused = lane.handle(get("/v1/specs/taken", Map.of()));
+    var refused = lane.ask(get("/v1/specs/taken", Map.of()));
 
     assertEquals(400, refused.status());
     var error = (Map<?, ?>) refused.body().get("error");
@@ -959,7 +1108,7 @@ class LocalApiRouterTest {
   @Test
   void aRemediedStateFailureIsAnInternalErrorThatKeepsItsRemedy() {
     var lane =
-        new LocalApiRouter(
+        new SocketDoor(
             new TestOperations() {
               @Override
               public Result<GlobalSpecDetailResponse> globalSpec(String id) {
@@ -969,7 +1118,7 @@ class LocalApiRouterTest {
               }
             });
 
-    var refused = lane.handle(get("/v1/specs/taken", Map.of()));
+    var refused = lane.ask(get("/v1/specs/taken", Map.of()));
 
     assertEquals(500, refused.status());
     var error = (Map<?, ?>) refused.body().get("error");
@@ -981,9 +1130,9 @@ class LocalApiRouterTest {
 
   @Test
   void operationExceptionsBecome400And500() {
-    assertEquals(400, router.handle(get("/v1/specs/bad", Map.of())).status());
-    assertEquals(500, router.handle(get("/v1/specs/boom", Map.of())).status());
-    assertNotNull(router.handle(get("/v1/specs/boom", Map.of())).body().get("error"));
+    assertEquals(400, router.ask(get("/v1/specs/bad", Map.of())).status());
+    assertEquals(500, router.ask(get("/v1/specs/boom", Map.of())).status());
+    assertNotNull(router.ask(get("/v1/specs/boom", Map.of())).body().get("error"));
   }
 
   private static final class RecordingOps extends TestOperations {

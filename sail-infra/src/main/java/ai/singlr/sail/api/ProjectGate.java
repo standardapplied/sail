@@ -38,10 +38,20 @@ final class ProjectGate {
   /** The row of {@code project} in {@code catalog}, when whoever reads may read it. */
   static ProjectStore.ProjectRow readable(ProjectStore catalog, String project) {
     var row = held(catalog, project);
+    requireReads(project);
+    return row;
+  }
+
+  /**
+   * Refuses {@code project} when whoever reads may not read it, answered as one this box does not
+   * hold ({@link ProjectReader#absent}), so a caller cannot tell a project it was not granted from
+   * one that does not exist. A door with no catalog in hand reads the project first this way, so
+   * nothing it finds in the project, a run's id included, is named to a caller outside it.
+   */
+  static void requireReads(String project) {
     if (!ReadFilter.reads(Actor.reader(), () -> project)) {
       throw ProjectReader.absent(project);
     }
-    return row;
   }
 
   private static ProjectStore.ProjectRow held(ProjectStore catalog, String project) {

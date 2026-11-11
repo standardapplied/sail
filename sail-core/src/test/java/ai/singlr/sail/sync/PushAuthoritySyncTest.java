@@ -50,9 +50,9 @@ import org.junit.jupiter.api.Test;
  */
 class PushAuthoritySyncTest {
 
-  private static final Actor ADA = Actor.sync("ada", Role.MEMBER);
-  private static final Actor ADA_ADMIN = Actor.sync("ada", Role.ADMIN);
-  private static final Actor BOB = Actor.sync("bob", Role.MEMBER);
+  private static final Actor ADA = new Actor("ada", Role.MEMBER, Actor.Lane.SYNC);
+  private static final Actor ADA_ADMIN = new Actor("ada", Role.ADMIN, Actor.Lane.SYNC);
+  private static final Actor BOB = new Actor("bob", Role.MEMBER, Actor.Lane.SYNC);
 
   private SyncBox main;
   private SyncBox ada;

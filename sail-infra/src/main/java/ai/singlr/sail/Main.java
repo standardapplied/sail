@@ -8,6 +8,7 @@ package ai.singlr.sail;
 import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.commands.CliCommand;
 import ai.singlr.sail.commands.RootRequired;
+import ai.singlr.sail.commands.SailCommandLine;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.AutoUpgrader;
@@ -33,7 +34,7 @@ public final class Main {
       default -> {}
     }
     AutoUpgrader.upgradeIfAvailable(args);
-    var cmd = new CommandLine(new Sail());
+    var cmd = SailCommandLine.of(new Sail());
     cmd.setExecutionExceptionHandler((ex, commandLine, parseResult) -> report(ex, commandLine));
     var exitCode = cmd.execute(args);
     System.exit(exitCode);
@@ -45,7 +46,7 @@ public final class Main {
    */
   static boolean exempt(String[] args) {
     try {
-      for (var parsed = new CommandLine(new Sail()).parseArgs(args);
+      for (var parsed = SailCommandLine.of(new Sail()).parseArgs(args);
           parsed != null;
           parsed = parsed.subcommand()) {
         if (parsed.isUsageHelpRequested() || parsed.isVersionHelpRequested()) {

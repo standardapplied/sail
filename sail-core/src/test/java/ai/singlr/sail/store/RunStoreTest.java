@@ -169,7 +169,7 @@ class RunStoreTest {
     assertInstanceOf(
         PushOutcome.Accepted.class,
         Actor.call(
-            Actor.sync("node-a", Role.MEMBER),
+            new Actor("node-a", Role.MEMBER, Actor.Lane.SYNC),
             () -> store.commitRevision(pushed, base(), null, store.authority())));
     var unstamped = new HashMap<>(base());
     unstamped.put("node", null);
@@ -1261,7 +1261,7 @@ class RunStoreTest {
   @Test
   void aSyncSessionCommitsAndDeletesOnlyTheRunsItsOwnNodeExecuted() {
     var id = "00000000-0000-7000-8000-000000000001";
-    var own = Actor.sync("node-a", Role.MEMBER);
+    var own = new Actor("node-a", Role.MEMBER, Actor.Lane.SYNC);
     assertInstanceOf(
         PushOutcome.Accepted.class,
         Actor.call(own, () -> store.commitRevision(id, base(), null, store.authority())));
@@ -1280,10 +1280,10 @@ class RunStoreTest {
   void aSyncSessionIsDeniedARunAnotherNodeExecutedWithMainsRun() {
     var id = "00000000-0000-7000-8000-000000000001";
     Actor.call(
-        Actor.sync("node-a", Role.MEMBER),
+        new Actor("node-a", Role.MEMBER, Actor.Lane.SYNC),
         () -> store.commitRevision(id, base(), null, store.authority()));
     var rev = store.latestRev(id);
-    var other = Actor.sync("node-b", Role.MEMBER);
+    var other = new Actor("node-b", Role.MEMBER, Actor.Lane.SYNC);
     var restamped = new HashMap<>(moved());
     restamped.put("node", "node-b");
 
@@ -1304,13 +1304,13 @@ class RunStoreTest {
 
   @Test
   void aSyncSessionIsDeniedAForgedOrUnstampedRunAndATombstonedRunsReturn() {
-    var own = Actor.sync("node-a", Role.MEMBER);
+    var own = new Actor("node-a", Role.MEMBER, Actor.Lane.SYNC);
     var unstamped = new HashMap<>(base());
     unstamped.remove("node");
     assertInstanceOf(
         PushOutcome.Denied.class,
         Actor.call(
-            Actor.sync("node-b", Role.MEMBER),
+            new Actor("node-b", Role.MEMBER, Actor.Lane.SYNC),
             () ->
                 store.commitRevision(
                     "00000000-0000-7000-8000-000000000002", base(), null, store.authority())));
@@ -1535,9 +1535,6 @@ class RunStoreTest {
     var build = store.findById(newRun("backend", "other")).orElseThrow();
 
     var roomRow = store.findById(room).orElseThrow();
-
-    assertEquals(Actor.roomPrincipal(roomRow.principal(), "node-a"), roomRow.principalActor());
-    assertEquals(Actor.agentPrincipal(build.principal(), build.owner()), build.principalActor());
   }
 
   @Test

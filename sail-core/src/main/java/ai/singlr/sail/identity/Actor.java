@@ -8,6 +8,7 @@ package ai.singlr.sail.identity;
 import ai.singlr.sail.common.Strings;
 import java.util.Objects;
 import java.util.concurrent.Callable;
+import java.util.function.Supplier;
 
 /**
  * Who is acting: the one identity every write names, whichever door it came through. {@code handle}
@@ -38,6 +39,8 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
   public static final String MAIN_HANDLE = "main";
 
   private static final ScopedValue<Actor> CURRENT = ScopedValue.newInstance();
+
+  private static final ScopedValue<Supplier<Actor>> READER = ScopedValue.newInstance();
 
   /** The ways a write can be made. */
   public enum Lane {
@@ -75,14 +78,6 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
   }
 
   /**
-   * The local operator of a main or standalone box: the box's own FDE handle with admin authority
-   * (the host operator already holds the admin token).
-   */
-  public static Actor cliOperator(String handle) {
-    return new Actor(handle, Role.ADMIN, Lane.CLI);
-  }
-
-  /**
    * A run's agent principal authenticated over the local socket: write-capable on the spec, event,
    * and content surface, never admin, and refused outright on the dispatch and stop routes.
    */
@@ -97,14 +92,6 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
    */
   public static Actor roomPrincipal(String handle, String owner) {
     return new Actor(handle, Role.VIEWER, Lane.ROOM, owner);
-  }
-
-  /**
-   * The FDE behind one {@code _sync} session on main, with the role the gateway resolved. A {@code
-   * null} handle (an unauthenticated or machine session) can never own a run or a spec.
-   */
-  public static Actor sync(String handle, Role role) {
-    return new Actor(handle, role, Lane.SYNC);
   }
 
   /** Main, as a node adopts what it decided. */
@@ -142,14 +129,27 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
   }
 
   /**
-   * Who is reading. A read leaves nothing behind that must name its author, so this box's own work
-   * that no door bound an actor to — its root CLI describing what the box holds, its machinery
-   * looking a row up — reads as the box itself ({@link #system}), which sees every project. A door
-   * that serves anyone else binds its caller before it routes, and a read then sees no more than
-   * that caller's {@link #scope}. A write never falls back like this: see {@link #current()}.
+   * Who is reading: the actor bound to the current operation; else whoever {@link #readingAs} named
+   * for the work around it; else, for this box's own machinery that no door bound an actor to, the
+   * box itself ({@link #system}), which sees every project. A door that serves anyone else binds
+   * its caller before it routes, and a read then sees no more than that caller's {@link #scope}. A
+   * write never falls back like this: see {@link #current()}.
    */
   public static Actor reader() {
-    return CURRENT.isBound() ? CURRENT.get() : system();
+    if (CURRENT.isBound()) {
+      return CURRENT.get();
+    }
+    return READER.isBound() ? READER.get().get() : system();
+  }
+
+  /**
+   * Runs {@code work} with every read no actor is bound to made as whoever {@code reader} names,
+   * asked at each such read: the host CLI's person, whom a command that reads nothing need not
+   * resolve. Writes still need an actor bound with {@link #run} or {@link #call}.
+   */
+  public static <T, X extends Throwable> T readingAs(
+      Supplier<Actor> reader, ScopedValue.CallableOp<T, X> work) throws X {
+    return ScopedValue.where(READER, Objects.requireNonNull(reader, "reader")).call(work);
   }
 
   /** Runs {@code work} as {@code actor}. */
@@ -190,11 +190,6 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
   /** True when this actor's role grants full administrative authority. */
   public boolean isAdmin() {
     return role == Role.ADMIN;
-  }
-
-  /** True when this actor's role grants the {@code WRITE} capability. */
-  public boolean canWrite() {
-    return role.allows(Capability.WRITE);
   }
 
   /**

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.DispatchOperations;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.RunReservation;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -21,6 +22,8 @@ import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.store.EventStore;
@@ -92,8 +95,8 @@ class AgentResumeSessionIT extends AbstractIncusIT {
               socket,
               dir.resolve("s"),
               64 * 1024,
-              token -> new PtyIdentity("it", true),
-              new PtyHostRooms(dbPath),
+              token -> new PtyIdentity.Person(new Actor("it", Role.ADMIN, Actor.Lane.API)),
+              new PtyHostAccess(() -> OperationsFactory.open(dbPath)),
               new PtyHostEvents(dbPath, dir.resolve("pty-events.drops")),
               "0.0.0-test")) {
         host.start();

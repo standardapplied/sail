@@ -30,21 +30,32 @@ public interface PasskeyCeremonies {
 
   /**
    * Begins enrolling a passkey for the FDE identified by {@code fdeHandle}. Throws {@link
-   * PasskeyException.Kind#NOT_FOUND} when no such FDE exists.
+   * PasskeyException.Kind#NOT_FOUND} when no such FDE exists, and {@link
+   * PasskeyException.Kind#DISABLED} when the roster disables it.
    */
   Ceremony startRegistration(String fdeHandle);
 
-  /** Verifies a registration response and persists the credential against the challenge's FDE. */
+  /**
+   * Verifies a registration response and persists the credential against the challenge's FDE,
+   * refused when the roster disables it. {@code enrolling} is the FDE an enrollment ticket enrolls,
+   * whose challenge alone the ticket finishes; {@code null} when an admin registers, who finishes
+   * any FDE's.
+   */
   Registration finishRegistration(
-      String challengeId, byte[] clientDataJson, byte[] attestationObject, String label);
+      String challengeId,
+      String enrolling,
+      byte[] clientDataJson,
+      byte[] attestationObject,
+      String label);
 
   /** Begins a discoverable-credential login: issues an assertion challenge and request options. */
   Ceremony startLogin();
 
   /**
-   * Verifies an assertion and, on success, issues a session for the credential's owner. {@code
-   * userHandle} is the user id the authenticator returned (may be {@code null} when absent); when
-   * present it must identify the same owner as the credential, per WebAuthn §7.2.
+   * Verifies an assertion and, on success, issues a session for the credential's owner, none for
+   * one the roster disables. {@code userHandle} is the user id the authenticator returned (may be
+   * {@code null} when absent); when present it must identify the same owner as the credential, per
+   * WebAuthn §7.2.
    */
   LoginResult finishLogin(
       String challengeId,

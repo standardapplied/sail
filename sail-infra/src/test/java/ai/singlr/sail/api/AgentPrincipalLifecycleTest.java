@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ReviewStore;
@@ -25,7 +26,6 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -49,7 +49,7 @@ import org.junit.jupiter.api.io.TempDir;
 class AgentPrincipalLifecycleTest {
 
   private static final String HANDLE = "uday";
-  private static final Actor ADMIN = Actor.cliOperator(HANDLE);
+  private static final Actor ADMIN = new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI);
 
   private static final String RUNNING_JSON =
       """
@@ -170,7 +170,7 @@ class AgentPrincipalLifecycleTest {
             new FdeStore(db),
             SessionYield.NONE);
     TestControlPlane.standalone(operations, db, tempDir);
-    var router = new LocalApiRouter(operations);
+    var router = new SocketDoor(operations);
     var delivered = new CountDownLatch(1);
     var subscription =
         bus.subscribe(
@@ -193,12 +193,12 @@ class AgentPrincipalLifecycleTest {
                 },
                 delivered));
 
-    var whoami = router.handle(request("GET", "/v1/whoami", credential.get(), ""));
+    var whoami = router.ask("GET", "/v1/whoami", credential.get(), "");
     assertEquals(200, whoami.status());
     assertEquals(expectedHandle, whoami.body().get("handle"));
     assertEquals(HANDLE, whoami.body().get("owner"));
 
-    var updated = router.handle(request("PUT", "/v1/specs/auth", credential.get(), "priority=3"));
+    var updated = router.ask("PUT", "/v1/specs/auth", credential.get(), "priority=3");
     assertEquals(200, updated.status());
     assertEquals(
         expectedHandle,
@@ -213,8 +213,7 @@ class AgentPrincipalLifecycleTest {
             "claude-code",
             "acme",
             Map.of("run_id", "some-other-run", "source", "watcher"));
-    var published =
-        router.handle(request("POST", "/v1/events", credential.get(), hookEvent.toJsonLine()));
+    var published = router.ask("POST", "/v1/events", credential.get(), hookEvent.toJsonLine());
     assertEquals(202, published.status());
     BusTesting.awaitDelivery(delivered);
     var stamped = events.getFirst();
@@ -242,7 +241,7 @@ class AgentPrincipalLifecycleTest {
         Acting.by(ADMIN, () -> stopOps.stop(new StopOperations.RunTarget(runId), HANDLE, false));
     assertInstanceOf(StopOperations.Stopped.class, stopped);
 
-    var refused = router.handle(request("GET", "/v1/whoami", credential.get(), ""));
+    var refused = router.ask("GET", "/v1/whoami", credential.get(), "");
     assertEquals(401, refused.status(), "a stopped run's credential is revoked");
     subscription.close();
   }
@@ -309,7 +308,7 @@ class AgentPrincipalLifecycleTest {
 
     var outcome =
         Acting.by(
-            Actor.cliOperator("alice"),
+            new Actor("alice", Role.ADMIN, Actor.Lane.CLI),
             () ->
                 dispatchOps.dispatch(
                     "acme",
@@ -338,22 +337,12 @@ class AgentPrincipalLifecycleTest {
             SyncScheduler.disabled(),
             new FdeStore(db),
             SessionYield.NONE);
-    var router = new LocalApiRouter(operations);
-    var updated = router.handle(request("PUT", "/v1/specs/auth", credential.get(), "priority=7"));
+    var router = new SocketDoor(operations);
+    var updated = router.ask("PUT", "/v1/specs/auth", credential.get(), "priority=7");
     assertEquals(
         200,
         updated.status(),
         "the dispatched agent can mutate its own assigned spec because it acts for the assignee");
-  }
-
-  private static LocalApiRequest request(
-      String method, String path, String credential, String body) {
-    return new LocalApiRequest(
-        method,
-        path,
-        Map.of(),
-        Map.of("authorization", "Bearer " + credential),
-        body.getBytes(StandardCharsets.UTF_8));
   }
 
   /**

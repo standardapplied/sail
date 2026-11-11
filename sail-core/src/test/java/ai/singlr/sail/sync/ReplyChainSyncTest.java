@@ -65,11 +65,11 @@ class ReplyChainSyncTest {
   }
 
   private SyncBox.Link connect() throws IOException {
-    return SyncBox.connect(main.server(Actor.sync("node", Role.ADMIN)), node);
+    return SyncBox.connect(main.server(new Actor("node", Role.ADMIN, Actor.Lane.SYNC)), node);
   }
 
   private void assertConverged() {
-    SyncBox.assertConverged(main, node.syncsAs(Actor.sync("node", Role.ADMIN)));
+    SyncBox.assertConverged(main, node.syncsAs(new Actor("node", Role.ADMIN, Actor.Lane.SYNC)));
   }
 
   private static void chain(MessageStore messages) {

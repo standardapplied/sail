@@ -78,6 +78,6 @@ public final class Acting {
   private static Actor operator(String handle) {
     return handle == null
         ? new Actor(null, Role.MEMBER, Actor.Lane.API)
-        : Actor.cliOperator(handle);
+        : new Actor(handle, Role.ADMIN, Actor.Lane.CLI);
   }
 }

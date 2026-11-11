@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectReader;
@@ -22,7 +23,9 @@ import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.identity.Actor;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -50,13 +53,18 @@ public final class AgentStatusCommand implements Runnable {
   private boolean json;
 
   private final Function<OperatorCommand, HostOperations> operations;
+  private final ShellExec shell;
 
   public AgentStatusCommand() {
-    this(operator -> OperationsFactory.open(operator::warn));
+    this(operator -> OperationsFactory.open(operator::warn), new ShellExecutor(false));
   }
 
-  AgentStatusCommand(Function<OperatorCommand, HostOperations> operations) {
+  /**
+   * The status command over {@code operations}, asking this box's containers through {@code shell}.
+   */
+  AgentStatusCommand(Function<OperatorCommand, HostOperations> operations, ShellExec shell) {
     this.operations = operations;
+    this.shell = shell;
   }
 
   @Override
@@ -74,12 +82,11 @@ public final class AgentStatusCommand implements Runnable {
   }
 
   private void executeAll(OperatorCommand operator) throws Exception {
-    var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
-    var containers = mgr.listAll();
-
+    var running =
+        mgr.listAll().stream().filter(c -> c.state() instanceof ContainerState.Running).toList();
     var runningContainers =
-        containers.stream().filter(c -> c.state() instanceof ContainerState.Running).toList();
+        ReadFilter.readable(Actor.reader(), running, ContainerManager.ContainerInfo::name);
 
     if (runningContainers.isEmpty()) {
       if (json) {
@@ -178,7 +185,9 @@ public final class AgentStatusCommand implements Runnable {
 
   private void executeSingle(OperatorCommand operator) throws Exception {
     NameValidator.requireValidProjectName(name);
-    var shell = new ShellExecutor(false);
+    try (var operations = this.operations.apply(operator)) {
+      operations.catalog().readable(name);
+    }
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);

@@ -7,7 +7,6 @@ package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -32,8 +31,8 @@ import org.junit.jupiter.api.Test;
  */
 class NodeIdentitySyncTest {
 
-  private static final Actor ADA = Actor.sync("ada", Role.MEMBER);
-  private static final Actor UDAY = Actor.sync("uday", Role.MEMBER);
+  private static final Actor ADA = new Actor("ada", Role.MEMBER, Actor.Lane.SYNC);
+  private static final Actor UDAY = new Actor("uday", Role.MEMBER, Actor.Lane.SYNC);
 
   private SyncBox main;
   private SyncBox ada;
@@ -174,8 +173,7 @@ class NodeIdentitySyncTest {
   @Test
   void mainsOwnFdeSyncsFromNoBoxButMain() throws IOException {
     var server =
-        SyncRpcServer.over(
-            main.db, "main", "ada", ADA, FdeRoster.EMPTY, SyncTransitionSink.NONE, "1.0.0");
+        SyncRpcServer.over(main.db, "main", "ada", ADA, List::of, SyncTransitionSink.NONE, "1.0.0");
 
     var refused =
         assertThrows(SyncTransportException.class, () -> SyncBox.connect(server, ada).close());
@@ -184,18 +182,6 @@ class NodeIdentitySyncTest {
     assertTrue(refused.getMessage().contains("main ('main')"), refused.getMessage());
     assertFalse(refused.getMessage().contains("release-box"), "releasing does nothing for it");
     assertTrue(new FdeBoxes(main.db).boxOf("ada").isEmpty(), "main's FDE records no other box");
-    SyncBox.assertConverged(main, ada);
-  }
-
-  @Test
-  void aSessionNamingNoFdeClaimsNoBox() throws IOException {
-    try (var link = SyncBox.connect(main.server(Actor.sync(null, Role.VIEWER)), ada)) {
-      assertEquals("", link.session().handle());
-    }
-    try (var other = new SyncBox("other");
-        var link = SyncBox.connect(main.server(Actor.sync(null, Role.VIEWER)), other)) {
-      assertInstanceOf(SyncSession.class, link.session());
-    }
     SyncBox.assertConverged(main, ada);
   }
 

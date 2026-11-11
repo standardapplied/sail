@@ -72,7 +72,7 @@ public final class RootRequired {
   /** The words naming {@code spec}'s command under {@code sail}, however it was invoked. */
   private static List<String> verbOf(CommandSpec spec) {
     var type = spec.userObject().getClass();
-    return pathTo(new CommandLine(new Sail()), type, List.of())
+    return pathTo(SailCommandLine.of(new Sail()), type, List.of())
         .orElseThrow(() -> new IllegalStateException(type.getName() + " is no command of sail."));
   }
 

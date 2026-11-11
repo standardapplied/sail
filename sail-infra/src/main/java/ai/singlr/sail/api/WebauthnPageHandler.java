@@ -9,6 +9,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 /**
  * Serves the two static passkey ceremony pages at the Relying Party origin: {@code /login} runs
@@ -24,26 +25,31 @@ import java.nio.charset.StandardCharsets;
  * can never be redirected off the machine — echoing the opaque {@code state} nonce the CLI
  * supplied.
  */
-public final class WebauthnPageHandler implements HttpHandler {
+public final class WebauthnPageHandler implements HttpHandler, RouteTable {
+
+  private static final String GET = "GET";
+  private static final Gate PAGES = Gate.unauthenticated("the enrollment and sign-in pages");
+
+  private final List<Route<String>> routes =
+      List.of(
+          new Route<>(GET, "/login", PAGES, LOGIN_PAGE),
+          new Route<>(GET, "/enroll", PAGES, ENROLL_PAGE));
+
+  @Override
+  public List<Route<?>> routes() {
+    return List.copyOf(routes);
+  }
 
   @Override
   public void handle(HttpExchange exchange) throws IOException {
     try {
-      var path = exchange.getRequestURI().getPath();
-      if (!"GET".equals(exchange.getRequestMethod())) {
-        send(exchange, 405, "text/plain; charset=utf-8", "Method Not Allowed");
-        return;
-      }
-      var page =
-          switch (path) {
-            case "/login" -> LOGIN_PAGE;
-            case "/enroll" -> ENROLL_PAGE;
-            default -> null;
-          };
-      if (page == null) {
-        send(exchange, 404, "text/plain; charset=utf-8", "Not Found");
-      } else {
-        send(exchange, 200, "text/html; charset=utf-8", page);
+      var method = exchange.getRequestMethod();
+      switch (RouteTable.serve(routes, method, exchange.getRequestURI().getPath())) {
+        case RouteTable.Served.Match<String>(var route, _) ->
+            send(exchange, 200, "text/html; charset=utf-8", route.handler());
+        case RouteTable.Served.NotFound<String> none when GET.equals(method) ->
+            send(exchange, 404, "text/plain; charset=utf-8", "Not Found");
+        default -> send(exchange, 405, "text/plain; charset=utf-8", "Method Not Allowed");
       }
     } finally {
       exchange.close();

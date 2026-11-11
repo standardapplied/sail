@@ -5,6 +5,10 @@
 
 package ai.singlr.sail.pty;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
@@ -42,10 +46,11 @@ import java.util.function.Function;
  * traffic flows through the subscriber queue onto the same channel, serialized per connection.
  *
  * <p>Reaping is driven by {@link #sweep(long)} with an injected clock — the production timer thread
- * merely calls it; tests call it directly with synthetic time. The same pass re-validates every
- * admitted connection's credential: a token the resolver no longer honors (a revoked FDE session)
- * severs the connections it admitted, so a revocation ends live attachments within one sweep rather
- * than at the next reconnect.
+ * merely calls it; tests call it directly with synthetic time. The same pass resolves every
+ * admitted connection's credential again: a token the resolver no longer honors (a revoked FDE
+ * session), or one that now stands for a principal other than the one it admitted (a demotion, a
+ * changed scope), severs the connections it admitted, so a change of access ends live attachments
+ * within one sweep rather than at the next reconnect.
  *
  * <p>Yielding is the one verb no FDE holds. A dispatch that reserves repos must end whichever
  * resumed conversation sits on them regardless of who opened it, so the host mints a random
@@ -69,6 +74,15 @@ public final class PtySessionHost implements AutoCloseable {
   static final Duration CORPSE_RETENTION = Duration.ofMinutes(10);
   static final String DISPATCH_CREDENTIAL_FILE = "pty-dispatch.token";
   static final String BOOT_ID_FILE = "host.boot";
+
+  /**
+   * What a request hears when the host could not serve it, the store behind its access checks
+   * included: nothing was opened or changed, and asking again is the fix.
+   */
+  static final String UNSERVED =
+      "The host could not serve that request. Nothing was opened or changed; try again, and if it"
+          + " keeps failing, check the pty host's log.";
+
   private static final List<String> SESSION_FILE_SUFFIXES =
       List.of(
           SessionFiles.META_SUFFIX + ".tmp",
@@ -116,7 +130,7 @@ public final class PtySessionHost implements AutoCloseable {
   private final Path sessionsDir;
   private final long journalCapacity;
   private final PtyIdentity.Resolver identity;
-  private final PtyRooms rooms;
+  private final PtyAdmission admission;
   private final PtyEvents events;
   private final String version;
   private final Limits limits;
@@ -129,14 +143,14 @@ public final class PtySessionHost implements AutoCloseable {
   private volatile byte[] dispatchCredential = new byte[0];
   private volatile boolean closed;
 
-  private record Admitted(SocketChannel channel, String token, String principal) {}
+  private record Admitted(SocketChannel channel, String token, PtyIdentity who) {}
 
   public PtySessionHost(
       Path socketPath,
       Path sessionsDir,
       long journalCapacity,
       PtyIdentity.Resolver identity,
-      PtyRooms rooms,
+      PtyAdmission admission,
       PtyEvents events,
       String version) {
     this(
@@ -144,7 +158,7 @@ public final class PtySessionHost implements AutoCloseable {
         sessionsDir,
         journalCapacity,
         identity,
-        rooms,
+        admission,
         events,
         version,
         Limits.DEFAULTS,
@@ -156,7 +170,7 @@ public final class PtySessionHost implements AutoCloseable {
       Path sessionsDir,
       long journalCapacity,
       PtyIdentity.Resolver identity,
-      PtyRooms rooms,
+      PtyAdmission admission,
       PtyEvents events,
       String version,
       Handoff handoff) {
@@ -165,7 +179,7 @@ public final class PtySessionHost implements AutoCloseable {
         sessionsDir,
         journalCapacity,
         identity,
-        rooms,
+        admission,
         events,
         version,
         Limits.DEFAULTS,
@@ -177,7 +191,7 @@ public final class PtySessionHost implements AutoCloseable {
       Path sessionsDir,
       long journalCapacity,
       PtyIdentity.Resolver identity,
-      PtyRooms rooms,
+      PtyAdmission admission,
       PtyEvents events,
       String version,
       Limits limits) {
@@ -186,7 +200,7 @@ public final class PtySessionHost implements AutoCloseable {
         sessionsDir,
         journalCapacity,
         identity,
-        rooms,
+        admission,
         events,
         version,
         limits,
@@ -198,7 +212,7 @@ public final class PtySessionHost implements AutoCloseable {
       Path sessionsDir,
       long journalCapacity,
       PtyIdentity.Resolver identity,
-      PtyRooms rooms,
+      PtyAdmission admission,
       PtyEvents events,
       String version,
       Limits limits,
@@ -207,7 +221,7 @@ public final class PtySessionHost implements AutoCloseable {
     this.sessionsDir = sessionsDir;
     this.journalCapacity = journalCapacity;
     this.identity = identity;
-    this.rooms = rooms;
+    this.admission = admission;
     this.events = events;
     this.version = version;
     this.limits = limits;
@@ -479,7 +493,7 @@ public final class PtySessionHost implements AutoCloseable {
             return;
           }
           principal = who.fde();
-          me = new Admitted(channel, token, principal);
+          me = new Admitted(channel, token, who);
           admitted.add(me);
           reply(channel, new PtyMessage.Welcome(bootId));
         } else {
@@ -488,7 +502,7 @@ public final class PtySessionHost implements AutoCloseable {
         }
         while (true) {
           var message = PtyWire.read(channel);
-          if (who.dispatchAuthority()
+          if (who instanceof PtyIdentity.Dispatch
               && !(message instanceof PtyMessage.Yield)
               && !(message instanceof PtyMessage.ListSessions)) {
             reply(
@@ -497,8 +511,9 @@ public final class PtySessionHost implements AutoCloseable {
             continue;
           }
           switch (message) {
-            case PtyMessage.Create m -> reply(channel, create(m, who));
-            case PtyMessage.Attach m -> {
+            case PtyMessage.Create m when who instanceof PtyIdentity.Person person ->
+                reply(channel, create(m, person));
+            case PtyMessage.Attach m when who instanceof PtyIdentity.Person person -> {
               if (attached != null) {
                 reply(channel, new PtyMessage.Err("This connection is already attached."));
                 break;
@@ -515,6 +530,12 @@ public final class PtySessionHost implements AutoCloseable {
                 reply(
                     channel,
                     new PtyMessage.Err("Session '" + m.session() + "' is not yours to attach."));
+                break;
+              }
+              var unheld = projectRefusal(session.origin().project(), person);
+              if (unheld != null) {
+                log("refused", principal, m.session(), "project not held");
+                reply(channel, unheld);
                 break;
               }
               // The cap check and the registration it admits are one step, or concurrent attaches
@@ -582,7 +603,7 @@ public final class PtySessionHost implements AutoCloseable {
             case PtyMessage.Yield m ->
                 reply(
                     channel,
-                    who.dispatchAuthority()
+                    who instanceof PtyIdentity.Dispatch
                         ? yieldSession(m.session(), m.reason())
                         : new PtyMessage.Err("Yield requires host dispatch authority."));
             default -> reply(channel, new PtyMessage.Err("Unexpected client frame."));
@@ -590,7 +611,7 @@ public final class PtySessionHost implements AutoCloseable {
         }
       } catch (RuntimeException crashed) {
         log("exception", principal, "-", crashed.toString());
-        reply(channel, new PtyMessage.Err("The host could not serve that request."));
+        reply(channel, new PtyMessage.Err(UNSERVED));
       }
     } catch (IOException disconnected) {
       var unused = disconnected;
@@ -605,8 +626,14 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
+  /**
+   * Whether {@code who} may attach to, replace or kill {@code session}: operating the box of the
+   * person who opened it, which that person and an admin may.
+   */
   private static boolean admitted(PtyIdentity who, PtySession session) {
-    return who.admin() || who.fde().equals(session.ownerFde());
+    return who instanceof PtyIdentity.Person(var actor)
+        && Access.decide(actor, Action.OPERATE_BOX, Resources.box(session.ownerFde()))
+            instanceof Decision.Allowed;
   }
 
   /** The session's command as requested; an empty request means a login shell. */
@@ -656,7 +683,7 @@ public final class PtySessionHost implements AutoCloseable {
    * has begun — a handoff has snapshotted the sessions, and a create landing after it would replace
    * a handed-off session's ring and sidecar under the successor's feet.
    */
-  private synchronized PtyMessage create(PtyMessage.Create m, PtyIdentity who) {
+  private synchronized PtyMessage create(PtyMessage.Create m, PtyIdentity.Person who) {
     if (closed) {
       return SHUTTING_DOWN;
     }
@@ -671,6 +698,11 @@ public final class PtySessionHost implements AutoCloseable {
     } catch (IllegalArgumentException bad) {
       log("refused", who.fde(), m.session(), bad.getMessage());
       return new PtyMessage.Err(Remedied.whole(bad));
+    }
+    var unheld = projectRefusal(m.project(), who);
+    if (unheld != null) {
+      log("refused", who.fde(), m.session(), "project not held");
+      return unheld;
     }
     var existing = sessions.get(m.session());
     if (existing != null && !admitted(who, existing)) {
@@ -707,7 +739,7 @@ public final class PtySessionHost implements AutoCloseable {
     if (!room.isBlank()) {
       try {
         ai.singlr.sail.engine.NameValidator.requireValidSpecId(room);
-        rooms.admit(room, m.project(), who);
+        admission.room(room, m.project(), who);
       } catch (IllegalArgumentException | IOException refused) {
         return new PtyMessage.Err(
             Remedy.of("Refusing room for session '" + m.session() + "': ")
@@ -753,6 +785,26 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
+  /**
+   * Why {@code who} may not open a terminal in {@code project}, or null when it may or the session
+   * names none: a project must be one the caller holds on this box ({@link PtyAdmission#project}).
+   * A store that cannot answer opens nothing and keeps the connection, said as {@link #UNSERVED}.
+   */
+  private PtyMessage.Err projectRefusal(String project, PtyIdentity.Person who) {
+    if (project == null || project.isBlank()) {
+      return null;
+    }
+    try {
+      admission.project(project, who);
+      return null;
+    } catch (IOException refused) {
+      return new PtyMessage.Err(Remedied.whole(refused));
+    } catch (RuntimeException unavailable) {
+      log("project-check-failed", who.fde(), project, unavailable.toString());
+      return new PtyMessage.Err(UNSERVED);
+    }
+  }
+
   private static void requireValidGeometry(int cols, int rows) {
     if (cols < 1 || cols > 65535 || rows < 1 || rows > 65535) {
       throw new IllegalArgumentException(
@@ -789,7 +841,7 @@ public final class PtySessionHost implements AutoCloseable {
     var limit = Math.clamp(request.limit(), 1, PtyMessage.PAGE_LIMIT);
     var mine =
         sessions.values().stream()
-            .filter(session -> who.dispatchAuthority() || admitted(who, session))
+            .filter(session -> who instanceof PtyIdentity.Dispatch || admitted(who, session))
             .filter(session -> session.name().compareTo(after) > 0)
             .sorted(java.util.Comparator.comparing(PtySession::name))
             .toList();
@@ -860,15 +912,15 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /**
-   * One reaping pass at {@code nowNanos}: revoked credentials severed, then the mosh grace and
-   * retention rules, nothing else. Nothing once shutdown has begun: the sessions belong to the
-   * successor or are ending.
+   * One reaping pass at {@code nowNanos}: connections whose access changed severed, then the mosh
+   * grace and retention rules, nothing else. Nothing once shutdown has begun: the sessions belong
+   * to the successor or are ending.
    */
   public synchronized void sweep(long nowNanos) {
     if (closed) {
       return;
     }
-    severRevoked();
+    severChanged();
     sessions.forEach(
         (name, session) -> {
           if (session.live()
@@ -890,16 +942,19 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /**
-   * Closes every connection whose credential the resolver now refuses; its serve loop fails on the
-   * next read and drops the attachment. Each distinct token is resolved once per pass. A resolver
-   * that cannot answer at all (the store is down) severs nothing — that is an outage, not a
-   * revocation.
+   * Closes every connection whose credential the resolver now refuses, or now resolves to a
+   * principal other than the one it admitted — another role, another scope — so a demotion or a
+   * scope change reaches an open connection as a revocation does; its serve loop fails on the next
+   * read and drops the attachment, and a reconnect is admitted as the principal the credential now
+   * stands for. Each distinct token is resolved once per pass. A resolver that cannot answer at all
+   * (the store is down) severs nothing — that is an outage, not a change of access.
    */
-  private void severRevoked() {
-    var verdicts = new HashMap<String, Boolean>();
+  private void severChanged() {
+    var answers = new HashMap<String, Answer>();
     for (var connection : admitted) {
-      if (verdicts.computeIfAbsent(connection.token(), this::revoked)) {
-        log("severed", connection.principal(), "-", "credential revoked");
+      var reason = answers.computeIfAbsent(connection.token(), this::answer).severs(connection);
+      if (reason != null) {
+        log("severed", connection.who().fde(), "-", reason);
         try {
           connection.channel().close();
         } catch (IOException ignored) {
@@ -909,15 +964,30 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
-  private boolean revoked(String token) {
+  /**
+   * What a credential stands for at a sweep: the principal it resolves to now, or {@code refused}
+   * when the resolver no longer honors it; neither when the resolver could not answer.
+   */
+  private record Answer(PtyIdentity who, boolean refused) {
+    static final Answer UNANSWERED = new Answer(null, false);
+
+    /** Why {@code connection} is severed on this answer, or null when it stays. */
+    String severs(Admitted connection) {
+      if (refused) {
+        return "credential revoked";
+      }
+      return who == null || who.equals(connection.who()) ? null : "access changed";
+    }
+  }
+
+  private Answer answer(String token) {
     try {
-      identify(token);
-      return false;
+      return new Answer(identify(token), false);
     } catch (IOException refused) {
-      return true;
+      return new Answer(null, true);
     } catch (RuntimeException unavailable) {
       log("revalidation-skipped", "-", "-", unavailable.toString());
-      return false;
+      return Answer.UNANSWERED;
     }
   }
 
