@@ -8,11 +8,23 @@ let package = Package(
     name: "SailKit",
     platforms: [.macOS(.v15), .iOS(.v18)],
     products: [
+        .library(name: "SailAPI", targets: ["SailAPI"]),
         .library(name: "SailTerminalWire", targets: ["SailTerminalWire"]),
     ],
     targets: [
+        .target(name: "SailAPI", swiftSettings: strict),
         .target(name: "SailTerminalWire", swiftSettings: strict),
-        .target(name: "SailKitTestSupport", path: "Tests/SailKitTestSupport", swiftSettings: strict),
+        .target(
+            name: "SailKitTestSupport",
+            dependencies: ["SailAPI"],
+            path: "Tests/SailKitTestSupport",
+            swiftSettings: strict
+        ),
+        .testTarget(
+            name: "SailAPITests",
+            dependencies: ["SailAPI", "SailKitTestSupport"],
+            swiftSettings: strict
+        ),
         .testTarget(
             name: "SailTerminalWireTests",
             dependencies: ["SailTerminalWire", "SailKitTestSupport"],
