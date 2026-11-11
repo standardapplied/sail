@@ -713,6 +713,8 @@ access() {
     gateway_allows "$run" eng fde passkey list eng
   check "$run" "obs asks main's gateway to stop a run: agent stop would run as main's own person, refused [gateway]" \
     naming "$FOLLOW_WITH_SPEC" gateway_door "$run" observer "$AGENT_VERB_RUNS_AS_THE_BOX" agent stop acme --dry-run
+  check "$run" "eng lists acme's agent sessions at main's gateway: an agent verb that asks the API runs [gateway]" \
+    gateway_allows "$run" eng agent sessions acme
   check "$run" "matrix 27: main refuses a sync session whose token is no session [sync]" \
     refused "$run" main "$NO_SYNC_SESSION" "sudo SAIL_TOKEN=bogus sail _sync < /dev/null"
   for path in /v1/sync /v1/events/stats; do

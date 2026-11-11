@@ -48,14 +48,17 @@ public final class SshGateway {
 
   static final Duration SESSION_TTL = Duration.ofMinutes(10);
 
-  /** Commands the loopback API authorizes per request, as the session's FDE. */
-  private static final Set<String> API_COMMANDS = Set.of("spec", "events");
+  /**
+   * Commands the loopback API authorizes per request, as the session's FDE; under {@code agent},
+   * only {@link #AGENT_API_VERBS}.
+   */
+  public static final Set<String> API_COMMANDS = Set.of("spec", "agent", "events");
 
   /** The {@code agent} verbs that talk to the loopback API, as the session's FDE. */
   private static final Set<String> AGENT_API_VERBS = Set.of("stream", "sessions", "review");
 
   /** Database-direct administration commands; the gateway admits those who may manage people. */
-  private static final Set<String> ADMIN_COMMANDS = Set.of("fde");
+  public static final Set<String> ADMIN_COMMANDS = Set.of("fde");
 
   /**
    * Database-direct sync RPC. The gateway admits any active FDE — a {@code viewer} may open a
@@ -66,20 +69,6 @@ public final class SshGateway {
   public static final Set<String> SYNC_COMMANDS = Set.of("_sync");
 
   private SshGateway() {}
-
-  /**
-   * Whether {@code args}, a {@code sail} command line, is one the gateway runs as the caller's FDE:
-   * a loopback-API command, an {@code agent} verb that is one, or an administration command.
-   */
-  public static boolean runsAsTheFde(List<String> args) {
-    if (args.isEmpty()) {
-      return false;
-    }
-    var subcommand = args.getFirst();
-    return API_COMMANDS.contains(subcommand)
-        || ADMIN_COMMANDS.contains(subcommand)
-        || subcommand.equals("agent") && args.size() > 1 && AGENT_API_VERBS.contains(args.get(1));
-  }
 
   public sealed interface Decision permits Authorized, Rejected {}
 
@@ -120,7 +109,8 @@ public final class SshGateway {
     }
     tokens = withSelfEnrollHandle(tokens, fdeHandle);
     var subcommand = tokens.getFirst();
-    if (subcommand.equals("agent") && !runsAsTheFde(tokens)) {
+    if (subcommand.equals("agent")
+        && !(tokens.size() > 1 && AGENT_API_VERBS.contains(tokens.get(1)))) {
       return new Rejected(
           Remedy.of(
                   "'"
@@ -131,7 +121,9 @@ public final class SshGateway {
                   "' and the board, or SSH to the host directly to run it.")
               .plain());
     }
-    if (!runsAsTheFde(tokens) && !SYNC_COMMANDS.contains(subcommand)) {
+    if (!API_COMMANDS.contains(subcommand)
+        && !ADMIN_COMMANDS.contains(subcommand)
+        && !SYNC_COMMANDS.contains(subcommand)) {
       return new Rejected(
           "'"
               + subcommand

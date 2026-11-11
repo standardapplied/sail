@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import picocli.CommandLine.Help.Ansi;
 
 /**
@@ -32,6 +34,9 @@ public final class RemoteCommandRunner {
       Set.of("--version", "-V", "upgrade", "init", "client", "login", "enroll");
   private static final Set<String> INTERACTIVE_COMMANDS = Set.of("shell", "exec");
   private static final Set<String> HOST_ONLY_COMMANDS = Set.of("host");
+  private static final Set<String> GATEWAY_COMMANDS =
+      Stream.concat(SshGateway.API_COMMANDS.stream(), SshGateway.ADMIN_COMMANDS.stream())
+          .collect(Collectors.toUnmodifiableSet());
   private static final int SSH_CONNECTION_FAILURE = 255;
 
   private final ClientConfig config;
@@ -163,7 +168,7 @@ public final class RemoteCommandRunner {
    * system account.
    */
   private boolean gatewayLane(String[] args) {
-    return config.gatewayEnabled() && SshGateway.runsAsTheFde(List.of(args));
+    return config.gatewayEnabled() && args.length > 0 && GATEWAY_COMMANDS.contains(args[0]);
   }
 
   /** Returns the classification of a command for testing. */
