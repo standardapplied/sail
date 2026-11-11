@@ -324,6 +324,7 @@ readonly ASK_AN_ADMIN='Ask an admin to reassign it. You may grab a spec only whi
 readonly E1_NOT_CLIENTS="Event type 'review_completed' makes this box act on 'e1' (owned by 'eng'), which you may not drive."
 readonly ASK_E1S_OWNER='Only its owner or an admin may publish it.'
 readonly E1_RUNS_ON_ENG="Spec 'e1' is assigned to 'eng', which runs on that FDE's devbox, not this node ('uday')."
+readonly E1_IS_A_DRAFT="Spec 'e1' is a draft. A spec is dispatched only when pending."
 readonly ADMIN_MANAGES_PEOPLE='Only an admin may manage people.'
 readonly ASK_AN_ADMIN_TO_DO_IT='Ask an admin to do it.'
 readonly MAIN_IS_UDAYS="Box 'uday' belongs to 'uday', not you."
@@ -701,10 +702,10 @@ access() {
   check "$run" "matrix 10: uday's dispatch of e1 on main is placement: e1 runs on eng's box [HTTP]" \
     http_token_door "$run" main uday admin 403 POST /v1/projects/acme/dispatch '{"spec_id":"e1","dry_run":true}' "$E1_RUNS_ON_ENG"
   check "$run" "eng applies acme" apply_project "$run" eng acme
-  check "$run" "matrix 10: eng dispatches e1 on its box, as a dry run [HTTP]" \
-    http_token_door "$run" eng eng member 200 POST /v1/projects/acme/dispatch '{"spec_id":"e1","dry_run":true}' '"dispatched": true'
-  check "$run" "matrix 10: eng dispatches e1 on its box, as a dry run [CLI]" \
-    allowed "$run" eng "sudo sail spec dispatch -p acme --spec e1 --dry-run --no-snapshot"
+  check "$run" "matrix 10: eng's dispatch of e1 on its box is eng's to make, and stops at the fact that e1 is a draft [HTTP]" \
+    http_token_door "$run" eng eng member 409 POST /v1/projects/acme/dispatch '{"spec_id":"e1","dry_run":true}' "$E1_IS_A_DRAFT"
+  check "$run" "matrix 10: eng's dispatch of e1 on its box is eng's to make, and stops at the fact that e1 is a draft [CLI]" \
+    refused "$run" eng "$E1_IS_A_DRAFT" "sudo sail spec dispatch -p acme --spec e1 --dry-run --no-snapshot"
   check "$run" "matrix 25: eng adds a person at its node's CLI, refused admin-only [CLI]" \
     naming "$ASK_AN_ADMIN_TO_DO_IT" refused "$run" eng "$ADMIN_MANAGES_PEOPLE" "sudo sail fde add zed --name Zed"
   check "$run" "matrix 25: eng adds a person at main's gateway, refused admin-only [gateway]" \
