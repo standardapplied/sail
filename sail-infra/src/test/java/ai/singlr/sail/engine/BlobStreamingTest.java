@@ -43,7 +43,7 @@ class BlobStreamingTest {
     var process =
         new ProcessBuilder(
                 Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                "-Xmx48m",
+                "-Xmx24m",
                 "--enable-native-access=ALL-UNNAMED",
                 "-cp",
                 System.getProperty(
@@ -109,14 +109,14 @@ class BlobStreamingTest {
   }
 
   /**
-   * 256 files on main, each a manifest of ~1,615 chunks over one shared 64 KiB chunk: ~100 MiB
+   * 128 files on main, each a manifest of ~1,615 chunks over one shared 64 KiB chunk: ~100 MiB
    * apiece, of which 64 KiB ever crosses. A node that keeps a page's manifests before fetching runs
-   * out of a 48 MiB heap after about 225 of them; one that brings each blob home in turn never
-   * holds more than one. Main's rows are written directly: the blob store verifies what it
-   * assembles, and here only the node assembles.
+   * out of a 24 MiB heap after about 90 of them; one that brings each blob home in turn never holds
+   * more than one. Main's rows are written directly: the blob store verifies what it assembles, and
+   * here only the node assembles.
    */
   public static final class ManifestsProbe {
-    private static final int FILES = 256;
+    private static final int FILES = 128;
     private static final int CHUNKS_PER_FILE = 1615;
 
     public static void main(String[] args) throws Exception {
