@@ -1,0 +1,39 @@
+{
+  "request": {
+    "body": {
+      "id": "harbor-ferry",
+      "project": "harbor",
+      "title": "A ferry timetable"
+    },
+    "method": "POST",
+    "path": "/v1/specs"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Ask an admin on main for the project: fde grant <handle> <project>.",
+        "code": "not_found",
+        "field_errors": [],
+        "message": "Project 'harbor' was not found.",
+        "remedy": [
+          {
+            "text": "Ask an admin on main for the project: "
+          },
+          {
+            "args": [
+              "<handle>",
+              "<project>"
+            ],
+            "run": "sail",
+            "verb": "fde grant"
+          },
+          {
+            "text": "."
+          }
+        ]
+      },
+      "schema_version": 1
+    },
+    "status": 404
+  }
+}

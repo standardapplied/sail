@@ -1,0 +1,263 @@
+{
+  "error_codes": [
+    {
+      "code": "bad_request",
+      "status": 400
+    },
+    {
+      "code": "invalid_request",
+      "status": 422
+    },
+    {
+      "code": "invalid_json",
+      "status": 400
+    },
+    {
+      "code": "invalid_mode",
+      "status": 422
+    },
+    {
+      "code": "invalid_tail",
+      "status": 422
+    },
+    {
+      "code": "missing_bearer_token",
+      "status": 401
+    },
+    {
+      "code": "invalid_bearer_token",
+      "status": 403
+    },
+    {
+      "code": "authentication_failed",
+      "status": 401
+    },
+    {
+      "code": "passkey_not_configured",
+      "status": 503
+    },
+    {
+      "code": "forbidden",
+      "status": 403
+    },
+    {
+      "code": "unsupported_media_type",
+      "status": 415
+    },
+    {
+      "code": "request_too_large",
+      "status": 413
+    },
+    {
+      "code": "not_found",
+      "status": 404
+    },
+    {
+      "code": "conflict",
+      "status": 409
+    },
+    {
+      "code": "method_not_allowed",
+      "status": 405
+    },
+    {
+      "code": "rate_limited",
+      "status": 429
+    },
+    {
+      "code": "precondition_failed",
+      "status": 412
+    },
+    {
+      "code": "project_not_in_catalog",
+      "status": 404
+    },
+    {
+      "code": "project_not_created",
+      "status": 404
+    },
+    {
+      "code": "project_stopped",
+      "status": 409
+    },
+    {
+      "code": "container_error",
+      "status": 500
+    },
+    {
+      "code": "container_ip_unavailable",
+      "status": 503
+    },
+    {
+      "code": "server_ip_not_configured",
+      "status": 503
+    },
+    {
+      "code": "spec_not_found",
+      "status": 404
+    },
+    {
+      "code": "spec_pruned",
+      "status": 410
+    },
+    {
+      "code": "spec_not_prunable",
+      "status": 409
+    },
+    {
+      "code": "room_not_found",
+      "status": 404
+    },
+    {
+      "code": "spec_not_ready",
+      "status": 409
+    },
+    {
+      "code": "node_handle_unset",
+      "status": 409
+    },
+    {
+      "code": "fde_not_in_roster",
+      "status": 403
+    },
+    {
+      "code": "runs_on_other_node",
+      "status": 403
+    },
+    {
+      "code": "run_not_found",
+      "status": 404
+    },
+    {
+      "code": "run_on_other_node",
+      "status": 409
+    },
+    {
+      "code": "not_your_spec",
+      "status": 403
+    },
+    {
+      "code": "read_only_credential",
+      "status": 403
+    },
+    {
+      "code": "agent_lane_forbidden",
+      "status": 403
+    },
+    {
+      "code": "forbidden_not_assignee",
+      "status": 403
+    },
+    {
+      "code": "forbidden_admin_only",
+      "status": 403
+    },
+    {
+      "code": "forbidden_not_author",
+      "status": 403
+    },
+    {
+      "code": "agent_already_running",
+      "status": 409
+    },
+    {
+      "code": "agent_not_configured",
+      "status": 409
+    },
+    {
+      "code": "agent_status_failed",
+      "status": 500
+    },
+    {
+      "code": "agent_log_failed",
+      "status": 500
+    },
+    {
+      "code": "agent_stop_failed",
+      "status": 500
+    },
+    {
+      "code": "agent_report_failed",
+      "status": 500
+    },
+    {
+      "code": "agent_launch_failed",
+      "status": 500
+    },
+    {
+      "code": "snapshot_failed",
+      "status": 500
+    },
+    {
+      "code": "branch_create_failed",
+      "status": 500
+    },
+    {
+      "code": "project_load_failed",
+      "status": 500
+    },
+    {
+      "code": "command_failed",
+      "status": 500
+    },
+    {
+      "code": "internal",
+      "status": 500
+    }
+  ],
+  "event_types": [
+    "agent_cancelled",
+    "agent_conversation_started",
+    "agent_failed",
+    "agent_log_chunk",
+    "agent_presence",
+    "agent_session_completed",
+    "agent_session_started",
+    "agent_session_stopped",
+    "agent_stop_nudged",
+    "agent_text_delta",
+    "agent_tool_call",
+    "agent_tool_finished",
+    "agent_tool_started",
+    "agent_turn_began",
+    "agent_turn_ended",
+    "agent_turn_state",
+    "board_updated",
+    "guardrail_triggered",
+    "pty_session_attached",
+    "pty_session_ended",
+    "pty_session_started",
+    "snapshot_created",
+    "snapshot_deleted",
+    "snapshot_restored",
+    "spec_disengaged",
+    "spec_dispatched",
+    "spec_engage_failed",
+    "spec_engaged",
+    "spec_message_posted",
+    "spec_restarted",
+    "spec_status_changed",
+    "spec_stranded",
+    "sync_degraded",
+    "sync_recovered"
+  ],
+  "member_modes": [
+    "full",
+    "read_only"
+  ],
+  "roles": [
+    "admin",
+    "member",
+    "viewer"
+  ],
+  "spec_statuses": [
+    "draft",
+    "pending",
+    "in_progress",
+    "review",
+    "awaiting_merge",
+    "done",
+    "cancelled",
+    "archived"
+  ]
+}

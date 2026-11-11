@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/whoami"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "invalid_bearer_token",
+        "field_errors": [],
+        "message": "Bearer token is invalid."
+      },
+      "schema_version": 1
+    },
+    "status": 403
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/whoami"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Send Authorization: Bearer <token>.",
+        "code": "missing_bearer_token",
+        "field_errors": [],
+        "message": "Missing bearer token."
+      },
+      "schema_version": 1
+    },
+    "status": 401
+  }
+}

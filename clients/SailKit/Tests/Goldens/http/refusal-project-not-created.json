@@ -1,0 +1,35 @@
+{
+  "request": {
+    "body": {
+      "agent": "claude-code",
+      "mode": "read_only",
+      "model": "opus"
+    },
+    "method": "POST",
+    "path": "/v1/rooms/harbor-design/members"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "action": "Create it: project apply harbor",
+        "code": "project_not_created",
+        "field_errors": [],
+        "message": "Project 'harbor' has no container on this box.",
+        "remedy": [
+          {
+            "text": "Create it: "
+          },
+          {
+            "args": [
+              "harbor"
+            ],
+            "run": "sail",
+            "verb": "project apply"
+          }
+        ]
+      },
+      "schema_version": 1
+    },
+    "status": 404
+  }
+}
