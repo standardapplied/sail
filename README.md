@@ -305,7 +305,7 @@ sail project skills add --container /home/dev/.agents/skills/java --project web
 Inside the container, `skill ls` and `skill show` beside `spec` read the same rows. Sharing or
 removing a skill is a person's, from outside the container (the host CLI, or Mast): whatever runs
 in the container can read its credential, so the socket refuses both to every credential there and
-names the host command. A
+names both host commands. A
 copy of a shared skill made by hand in an agent's folder, holding nothing but the skill's own
 files, is taken over by the next install. Sail ships one skill, `spec-board`, so an interactive
 session finds the `spec` CLI.
