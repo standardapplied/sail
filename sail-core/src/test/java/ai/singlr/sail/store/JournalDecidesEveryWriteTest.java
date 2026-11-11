@@ -394,7 +394,11 @@ class JournalDecidesEveryWriteTest {
     }
     if (write.memberRefusal() != null) {
       for (var actor : NOT_THE_OWNER) {
-        assertEquals(write.memberRefusal(), refusal(actor, write), actor.lane() + " member");
+        var expected =
+            actor.lane() == Actor.Lane.AGENT && write.name().startsWith("ReviewStore")
+                ? Kind.LANE_FORBIDDEN
+                : write.memberRefusal();
+        assertEquals(expected, refusal(actor, write), actor.lane() + " member");
         assertEquals(before, box.state(), actor.lane() + " member wrote nothing");
       }
     }

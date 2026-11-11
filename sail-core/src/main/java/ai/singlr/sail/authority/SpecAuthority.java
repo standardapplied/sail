@@ -11,6 +11,7 @@ import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ProjectStore;
@@ -30,7 +31,8 @@ import java.util.Optional;
  * revision, a tombstone or a restore is a {@link Action#CHANGE} of the spec as {@code held} has it.
  * Moving the assignee of a live spec is a {@link Action#CLAIM} when it takes an unassigned spec for
  * the FDE the actor acts as ({@link Actor#actingFde}), and otherwise an {@link Action#ASSIGN}; a
- * restore that moves it is a change as well.
+ * restore that moves it is a change as well. A move of its status, and a birth in any status but
+ * draft, then take {@link Action#APPROVE} ({@link #approval}).
  *
  * <p>What this box does not hold is not there, said before anything is decided: a spec lands only
  * in a project this box holds ({@link ProjectStore#refusesInto}), and is born only into a
@@ -44,6 +46,7 @@ public final class SpecAuthority implements WriteAuthority {
 
   private static final String ASSIGNEE = "assignee";
   private static final String ROOM_ID = "room_id";
+  private static final String STATUS = "status";
 
   private final RoomStore rooms;
   private final SpecStore specs;
@@ -70,9 +73,32 @@ public final class SpecAuthority implements WriteAuthority {
     }
     var refused =
         WriteAuthority.refused(
-            actor,
-            taking(actor, id, held == null ? asBorn(id, next) : asHeld(id, held), held, next));
+                actor,
+                taking(actor, id, held == null ? asBorn(id, next) : asHeld(id, held), held, next))
+            .or(() -> approval(actor, held, next));
     return refused.isPresent() ? refused : facts(actor, id, held, next);
+  }
+
+  /**
+   * Why {@code actor} may not move a spec's status from {@code held} to {@code next}, or bear it in
+   * any status but draft: that is {@link Action#APPROVE}, asked after what the revision takes
+   * otherwise, so a refusal of that keeps its words, and asked of the role and lane alone ({@link
+   * Access#atAll}). Whose the spec is, the revision's other actions asked already: a change of its
+   * owner, a claim of the claimer, a birth of no one but its creator. So a person approves what
+   * they may write, and an agent's lane refuses it.
+   */
+  private static Optional<Refusal> approval(
+      Actor actor, Map<String, Object> held, Map<String, Object> next) {
+    return next != null && movesStatus(held, next)
+        ? Access.atAll(actor, Action.APPROVE, Resource.Kind.SPEC)
+        : Optional.empty();
+  }
+
+  private static boolean movesStatus(Map<String, Object> held, Map<String, Object> next) {
+    var status = Snapshots.text(next, STATUS);
+    return held == null
+        ? Strings.isNotBlank(status) && !SpecStatus.DRAFT.wire().equals(status)
+        : !Objects.equals(Snapshots.text(held, STATUS), status);
   }
 
   /**

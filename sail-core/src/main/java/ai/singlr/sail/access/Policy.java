@@ -43,9 +43,9 @@ import java.util.stream.Stream;
  *   <li>Post, Create, Serve: a work agent may wherever its person may, until
  *       sail-agents-act-on-their-own-work narrows it to its own work. A room agent's own work is,
  *       until then, the conversations its person owns.
- *   <li>Change and Approve: a work agent may wherever its person owns the work; Claim, Restore and
- *       Configure: a work agent may as its person may. sail-agents-act-on-their-own-work narrows
- *       Change to its own work and refuses the rest.
+ *   <li>Change: a work agent may wherever its person owns the work; Claim, Restore and Configure: a
+ *       work agent may as its person may. sail-agents-act-on-their-own-work narrows Change to its
+ *       own work and refuses the rest.
  *   <li>Share: a work agent may share files wherever its person may, as the journal decides a file;
  *       the box's socket refuses every run credential the sharing of skills before it asks, until
  *       sail-agents-act-on-their-own-work gives that door this cell.
@@ -166,7 +166,7 @@ public final class Policy {
           new Row(Action.CHANGE, NO, OWNER, YES, YES, NO),
           new Row(Action.CLAIM, NO, YES, YES, YES, NO),
           new Row(Action.ASSIGN, NO, NO, YES, NO, NO),
-          new Row(Action.APPROVE, NO, OWNER, YES, YES, NO),
+          new Row(Action.APPROVE, NO, OWNER, YES, NO, NO),
           new Row(Action.DISPATCH, NO, OWNER, YES, NO, NO),
           new Row(Action.OPERATE_RUN, NO, OWNER, YES, NO, NO),
           new Row(Action.NARRATE, NO, OWNER, YES, OWN_WORK, OWN_WORK),

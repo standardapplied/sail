@@ -544,6 +544,62 @@ class SpecAuthorityTest {
         rule.decide(ADMIN_SYNC, "fresh", null, with(create, "_created_by", OWNER)));
   }
 
+  /**
+   * A move of a spec's status, and a birth in any status but draft, take Approve after what the
+   * revision takes otherwise: a person hears what they heard before, since Change is asked first
+   * and the spec is approved as the write leaves it, by its creator at birth; an agent is refused.
+   */
+  @Test
+  void aStatusMoveAndAReadyBirthTakeApproveAfterWhatTheyTakeOtherwise() {
+    var done = with(OWNED, "status", "done");
+    var ready = projection("title", "New", "assignee", null, "room_id", SPEC, "status", "pending");
+    var drafts =
+        Optional.of(
+            new Refusal(
+                Kind.LANE_FORBIDDEN,
+                "An agent creates only drafts and never sets a status.",
+                "Omit --status; its person promotes it on the board."));
+
+    assertEquals(Optional.empty(), rule.decide(OWNER_API, SPEC, OWNED, done));
+    assertEquals(Optional.empty(), rule.decide(OWNER_SYNC, SPEC, OWNED, done));
+    assertEquals(Optional.empty(), rule.decide(ADMIN, SPEC, OWNED, done));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Spec 'auth' is assigned to 'ada', not you.",
+                "Ask ada to make this change, or have an admin do it.")),
+        rule.decide(OTHER_API, SPEC, OWNED, done));
+    assertEquals(readOnly("change specs"), rule.decide(VIEWER, SPEC, OWNED, done));
+    assertEquals(drafts, rule.decide(AGENT, SPEC, OWNED, done));
+    assertEquals(drafts, rule.decide(AGENT, SPEC, OWNED, with(OWNED, "status", "archived")));
+    assertEquals(
+        Optional.empty(),
+        rule.decide(
+            OTHER_API,
+            SPEC,
+            UNASSIGNED,
+            with(with(UNASSIGNED, "assignee", OTHER), "status", "in_progress")),
+        "a claim and a move are one write: the claimer is the owner it is left with");
+    assertEquals(Optional.empty(), rule.decide(OWNER_API, SPEC, null, ready));
+    assertEquals(
+        Optional.empty(),
+        rule.decide(OWNER_API, SPEC, null, with(ready, "assignee", OTHER)),
+        "a spec born ready for someone else is its creator's to approve");
+    assertEquals(Optional.empty(), rule.decide(ADMIN, SPEC, null, with(ready, "assignee", OTHER)));
+    assertEquals(drafts, rule.decide(AGENT, SPEC, null, ready));
+    assertEquals(Optional.empty(), rule.decide(AGENT, SPEC, null, with(ready, "status", "draft")));
+    assertEquals(Optional.empty(), rule.decide(MACHINE, SPEC, null, ready));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_AUTHOR,
+                "'ada' may not create for 'bob'.",
+                "A box creates only as its own FDE.")),
+        rule.decide(OWNER_SYNC, SPEC, null, with(ready, "_created_by", OTHER)),
+        "a push is told for whom it may not create, as before");
+  }
+
   @Test
   void aSpecBornInAnotherRoomNeverTakesARoomsIdWhoeverAsks() {
     var elsewhere = projection("title", "Den", "assignee", null, "room_id", "lounge");

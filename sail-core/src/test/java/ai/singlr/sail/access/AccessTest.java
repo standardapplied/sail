@@ -188,7 +188,7 @@ class AccessTest {
               REVIEW_ADA,
               REVIEW_BOB,
               "approve reviews",
-              List.of(READ_ONLY, OWNED, ALLOWED, OWNED, READ_ONLY),
+              List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY),
               refusal(
                   Refusal.Kind.NOT_OWNER,
                   "Review rev-1 is for spec 'auth', owned by 'bob', not you.",

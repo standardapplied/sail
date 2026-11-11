@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import static ai.singlr.sail.sync.SyncFixtures.assign;
+import static ai.singlr.sail.sync.SyncFixtures.draft;
 import static ai.singlr.sail.sync.SyncFixtures.findingKeptInChangeLog;
 import static ai.singlr.sail.sync.SyncFixtures.ownSpec;
 import static ai.singlr.sail.sync.SyncFixtures.principal;
@@ -362,7 +363,7 @@ class PushAuthoritySyncTest {
     var runs = new RunStore(ada.db);
     var offline = run(ada, "ada", "open");
     var agent = Actor.agentPrincipal(principal(ada, offline), "ada");
-    Acting.by(agent, () -> ada.specs.updateStatus("open", SpecStatus.IN_PROGRESS));
+    Acting.by(agent, () -> ada.specs.setContent("open", "built", ""));
     Acting.as("ada", () -> runs.complete(offline, "completed", 0));
 
     sync(ada, ADA);
@@ -371,7 +372,7 @@ class PushAuthoritySyncTest {
     assertEquals("completed", new RunStore(main.db).findById(offline).orElseThrow().status());
     var claimed = main.specs.findById("open").orElseThrow();
     assertEquals("ada", claimed.assignee());
-    assertEquals(SpecStatus.IN_PROGRESS, claimed.status());
+    assertEquals("built", main.specs.getContent("open").orElseThrow().body());
   }
 
   @Test
@@ -444,7 +445,7 @@ class PushAuthoritySyncTest {
     sync(ada, ADA);
     var agentRun = run(ada, "ada", "mine");
     var agent = Actor.agentPrincipal(principal(ada, agentRun), "ada");
-    Acting.by(agent, () -> ada.specs.create(spec("born", null)));
+    Acting.by(agent, () -> ada.specs.create(draft("born", null)));
     var post =
         Acting.by(
             agent, () -> new MessageStore(ada.db).append("mine", agent.handle(), "early", null));

@@ -2309,7 +2309,7 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | Change | edit, delete or restore a spec or room; settle a parked conflict | no | owner | yes | yes | no |
 | Claim | take an unassigned spec; one born in a room also needs that room's owners | no | yes | yes | yes | no |
 | Assign | give or move a spec to someone | no | no | yes | no | no |
-| Approve | promote a draft to ready; approve or dismiss findings; mark done | no | owner | yes | yes | no |
+| Approve | move a spec's status (promote, done, archive, cancel) or create it ready; approve or dismiss findings | no | owner | yes | no | no |
 | Dispatch | dispatch or resume a spec; seat or remove a room agent | no | owner | yes | no | no |
 | Operate a run | stop it; attach to it; read its log | no | owner | yes | no | no |
 | Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | own work | own work |
@@ -2369,7 +2369,7 @@ does not hold is answered before that, and the rule's own facts after it:
 
 | Rule | Actions | Its own facts |
 | --- | --- | --- |
-| `SpecAuthority` | a birth is Create, plus Claim or Assign for one born in another room naming an assignee; an edit, tombstone or restore is Change; moving a live spec's assignee is Claim (an unassigned spec, for the FDE the actor acts as) or Assign | not held: a project this box holds, a conversation it holds to be born in (what no one here can own is an admin's, `Access.unowned`); taking a room's reserved id from its owner is Assign of the room; facts: a push names only its pusher; `room_id` never changes; a spec's id is reserved for its own room |
+| `SpecAuthority` | a birth is Create, plus Claim or Assign for one born in another room naming an assignee; an edit, tombstone or restore is Change; moving a live spec's assignee is Claim (an unassigned spec, for the FDE the actor acts as) or Assign; a move of its status, and a birth in any status but draft, then Approve, of the role and lane alone (`Access.atAll`), since whose the spec is the other actions asked | not held: a project this box holds, a conversation it holds to be born in (what no one here can own is an admin's, `Access.unowned`); taking a room's reserved id from its owner is Assign of the room; facts: a push names only its pusher; `room_id` never changes; a spec's id is reserved for its own room |
 | `RoomAuthority` | a birth is Create; every later revision, tombstone included, is Change of its settings | not held: a project this box holds; facts: attribution |
 | `MessageAuthority` | Post in its conversation | not held: a conversation this box holds; facts: a credential acting for no FDE posts nothing; both are of what no one here can own, an admin's (`Access.unowned`); as whom a pusher posts |
 | `RunAuthority` | a run's own session report by its own principal is Narrate; every other revision is Change | its principals are its own; attribution; spec and room never change; a run names a spec or a room, never both; a pushed run is its executing box's |

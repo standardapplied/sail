@@ -79,7 +79,17 @@ final class Wording {
         "Ask an admin to do it.");
   }
 
+  /**
+   * The lane step's refusal of {@code action} on some resource of {@code kind}: an agent's move of
+   * a spec's status, or a spec it bears ready, says what an agent may make instead.
+   */
   static Refusal laneForbidden(Action action, Resource.Kind kind) {
+    if (action == Action.APPROVE && kind == Resource.Kind.SPEC) {
+      return new Refusal(
+          Refusal.Kind.LANE_FORBIDDEN,
+          "An agent creates only drafts and never sets a status.",
+          "Omit --status; its person promotes it on the board.");
+    }
     return new Refusal(
         Refusal.Kind.LANE_FORBIDDEN,
         "Agent principals cannot " + action.act(kind) + ".",

@@ -27,11 +27,20 @@ final class SyncFixtures {
 
   /** A pending spec {@code id} assigned to {@code assignee}, titled after its id. */
   static SpecStore.SpecRow spec(String id, String assignee) {
+    return spec(id, assignee, SpecStatus.PENDING);
+  }
+
+  /** A draft {@code id} assigned to {@code assignee}: the one status an agent creates a spec in. */
+  static SpecStore.SpecRow draft(String id, String assignee) {
+    return spec(id, assignee, SpecStatus.DRAFT);
+  }
+
+  private static SpecStore.SpecRow spec(String id, String assignee, SpecStatus status) {
     return new SpecStore.SpecRow(
         id,
         "acme",
         "Spec " + id,
-        SpecStatus.PENDING,
+        status,
         assignee,
         null,
         null,

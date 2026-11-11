@@ -223,10 +223,42 @@ class AccessScenarioTest {
   }
 
   @Test
+  void row14EngsAgentCreatingAReadySpecIsToldToOmitTheStatus() {
+    var ready = new LinkedHashMap<>(specs.held("e1"));
+    ready.put("title", "follow-up");
+    ready.put("room_id", "e-ready");
+    ready.put("status", SpecStatus.PENDING.wire());
+    ready.remove("_created_by");
+
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.LANE_FORBIDDEN,
+                "An agent creates only drafts and never sets a status.",
+                "Omit --status; its person promotes it on the board.")),
+        Actor.call(ENGS_AGENT, () -> specs.decide("e-ready", ready)));
+  }
+
+  @Test
   void row15EngsAgentEditsTheDraftItCreated() {
     assertEquals(
         ALLOWED,
         Access.decide(ENGS_AGENT, Action.CHANGE, Resources.spec("d1", "acme", null, "eng")));
+  }
+
+  @Test
+  void row16EngsAgentSettingE1DoneIsRefused() {
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.LANE_FORBIDDEN,
+                "An agent creates only drafts and never sets a status.",
+                "Omit --status; its person promotes it on the board.")),
+        Actor.call(
+            ENGS_AGENT, () -> specs.decide("e1", edited("e1", "status", SpecStatus.DONE.wire()))));
+    assertEquals(
+        Optional.empty(),
+        Actor.call(ENG, () -> specs.decide("e1", edited("e1", "status", SpecStatus.DONE.wire()))));
   }
 
   @Test
