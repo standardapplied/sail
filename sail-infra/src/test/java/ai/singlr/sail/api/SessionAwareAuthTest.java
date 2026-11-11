@@ -128,6 +128,17 @@ class SessionAwareAuthTest {
   }
 
   @Test
+  void aSessionWhoseFdeIsDisabledOrGoneIsRejected() throws Exception {
+    var disabled = sessionFor("gone-quiet", "admin");
+    var removed = sessionFor("gone-away", "admin");
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'gone-quiet'");
+    db.execute("DELETE FROM fdes WHERE handle = 'gone-away'");
+
+    assertEquals(403, send("GET", "/v1/specs/board", disabled).statusCode());
+    assertEquals(403, send("GET", "/v1/specs/board", removed).statusCode());
+  }
+
+  @Test
   void missingTokenDelegatesAndIsUnauthorized() throws Exception {
     assertEquals(401, send("GET", "/v1/specs/board", null).statusCode());
   }

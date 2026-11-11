@@ -56,7 +56,7 @@ public record HostAccess(Sqlite db, RoleRule roles) {
             .orElseThrow(() -> new IOException("The session's FDE no longer exists."));
     return new PtyIdentity.Person(
         roles
-            .principal(RoleRule.Credential.session(session, Actor.Lane.API))
+            .principal(RoleRule.Credential.person(fde.handle(), Actor.Lane.API))
             .orElseThrow(() -> disabled(fde.handle())));
   }
 

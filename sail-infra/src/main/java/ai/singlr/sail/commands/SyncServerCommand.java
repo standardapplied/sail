@@ -128,7 +128,8 @@ public final class SyncServerCommand implements Callable<Integer> {
       Supplier<SyncConfig> box)
       throws IOException {
     var db = converged.db();
-    var principal = principal(db, token, new RoleRule(box, new FdeStore(db)));
+    var roster = new FdeStore(db);
+    var principal = principal(db, token, roster, new RoleRule(box, roster));
     if (principal.isEmpty()) {
       System.err.println(REFUSED);
       return 1;
@@ -230,11 +231,13 @@ public final class SyncServerCommand implements Callable<Integer> {
    * The FDE {@code token}'s session was opened for, as {@link RoleRule} resolves it on the sync
    * lane; empty when there is no token, it is not a live session, or its FDE is disabled or gone.
    */
-  private static Optional<Actor> principal(Sqlite db, String token, RoleRule roles) {
+  private static Optional<Actor> principal(
+      Sqlite db, String token, FdeStore roster, RoleRule roles) {
     return Strings.isBlank(token)
         ? Optional.empty()
         : new AuthSessionStore(db)
             .validate(token)
-            .flatMap(session -> roles.principal(Credential.session(session, Actor.Lane.SYNC)));
+            .flatMap(session -> roster.byId(session.fdeId()))
+            .flatMap(fde -> roles.principal(Credential.person(fde.handle(), Actor.Lane.SYNC)));
   }
 }

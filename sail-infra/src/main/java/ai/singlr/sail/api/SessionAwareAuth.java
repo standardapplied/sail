@@ -56,12 +56,15 @@ public final class SessionAwareAuth implements ApiAuth {
   }
 
   private void authenticateSession(HttpExchange exchange, String token) {
-    var session = sessions.validate(token).orElseThrow(SessionAwareAuth::invalid);
+    var fde =
+        sessions
+            .validate(token)
+            .flatMap(session -> roster.byId(session.fdeId()))
+            .orElseThrow(SessionAwareAuth::invalid);
     var actor =
         roles
-            .principal(Credential.session(session, Actor.Lane.API))
+            .principal(Credential.person(fde.handle(), Actor.Lane.API))
             .orElseThrow(SessionAwareAuth::invalid);
-    var fde = roster.byId(session.fdeId()).orElseThrow(SessionAwareAuth::invalid);
     exchange.setAttribute("token.name", actor.handle());
     exchange.setAttribute(ApiAuth.ACTOR, actor);
     if (fde.displayName() != null) {

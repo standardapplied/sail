@@ -216,7 +216,6 @@ class ProjectScopeTest {
   }
 
   private static Optional<ProjectScope> scopeOf(RoleRule rule, String handle) {
-    return rule.principal(new RoleRule.Credential.Person(handle, Role.ADMIN, Actor.Lane.API))
-        .map(Actor::scope);
+    return rule.principal(RoleRule.Credential.person(handle, Actor.Lane.API)).map(Actor::scope);
   }
 }

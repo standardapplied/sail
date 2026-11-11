@@ -7,7 +7,6 @@ package ai.singlr.sail.identity;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
-import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
 import java.util.Objects;
@@ -50,21 +49,16 @@ public final class RoleRule {
   public sealed interface Credential {
 
     /**
-     * A person's own credential naming FDE {@code handle}, with their full role, on the API lane
-     * its commands reach: the SSH gateway's key.
+     * A person's own credential naming FDE {@code handle}, with their full role, on {@code lane}:
+     * the SSH gateway's key, or a login session the door validated and read its FDE for.
      */
-    static Credential person(String handle) {
-      return new Person(handle, Role.ADMIN, Actor.Lane.API);
+    static Credential person(String handle, Actor.Lane lane) {
+      return new Person(handle, Role.ADMIN, lane);
     }
 
     /** An API token bound to FDE {@code handle}, minted with the role {@code minted} names. */
     static Credential token(String handle, String minted) {
       return new Person(handle, Role.fromAttribute(minted), Actor.Lane.API);
-    }
-
-    /** A login session the door has validated, on {@code lane}: the FDE it was opened for. */
-    static Credential session(AuthSessionStore.SessionInfo session, Actor.Lane lane) {
-      return new Session(Objects.requireNonNull(session, "session"), lane);
     }
 
     /**
@@ -96,9 +90,6 @@ public final class RoleRule {
     /** FDE {@code handle}, whose role {@code cap} caps. */
     record Person(String handle, Role cap, Actor.Lane lane) implements Credential {}
 
-    /** The FDE a validated login session was opened for. */
-    record Session(AuthSessionStore.SessionInfo session, Actor.Lane lane) implements Credential {}
-
     /** The box's FDE, whose role {@code cap} caps. */
     record Box(Role cap, Actor.Lane lane) implements Credential {}
 
@@ -112,16 +103,12 @@ public final class RoleRule {
   /**
    * The principal {@code credential} stands for: its handle, its role capped by what the credential
    * was minted with, its lane, and its scope, always the resolved person's; empty when the
-   * credential is refused — an FDE disabled or unknown here, a session whose FDE is gone, or a box
-   * that cannot place its own FDE.
+   * credential is refused — an FDE disabled or unknown here, or a box that cannot place its own
+   * FDE.
    */
   public Optional<Actor> principal(Credential credential) {
     return switch (Objects.requireNonNull(credential, "credential")) {
       case Credential.Person(var handle, var cap, var lane) -> actorOf(handle, cap, lane);
-      case Credential.Session(var session, var lane) ->
-          Optional.ofNullable(roster)
-              .flatMap(known -> known.byId(session.fdeId()))
-              .flatMap(fde -> actorOf(fde.handle(), Role.ADMIN, lane));
       case Credential.Box(var cap, var lane) ->
           actingFor(null, boxFde().orElse(null), cap, lane, null);
       case Credential.Machine(var cap) -> actingFor(null, null, cap, Actor.Lane.API, null);

@@ -10,12 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.RoleRule.Credential;
-import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
-import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
@@ -26,7 +24,6 @@ class RoleRuleTest {
 
   private static final SyncConfig MAIN = new SyncConfig("main", null, "uday", "main-box");
   private static final SyncConfig NODE = new SyncConfig("node", "sail@main", "uday", "node-box");
-  private static final Duration MINUTE = Duration.ofMinutes(1);
   private static final SyncConfig STANDALONE = new SyncConfig(null, null, "uday", null);
 
   private Sqlite db;
@@ -184,19 +181,17 @@ class RoleRuleTest {
 
     assertEquals(
         Optional.of(ProjectScope.all()),
-        rule.principal(new Credential.Person("uday", Role.ADMIN, Actor.Lane.API)).map(Actor::scope),
+        rule.principal(Credential.person("uday", Actor.Lane.API)).map(Actor::scope),
         "main's own FDE acts as an admin");
     assertEquals(
         Optional.of(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-        rule.principal(new Credential.Person("uday", Role.ADMIN, Actor.Lane.API)));
+        rule.principal(Credential.person("uday", Actor.Lane.API)));
     assertEquals(
         Optional.of(
             new Actor("mady", Role.MEMBER, Actor.Lane.SYNC)
                 .withScope(ProjectScope.of(List.of("alpha")))),
-        rule.principal(new Credential.Person("mady", Role.ADMIN, Actor.Lane.SYNC)));
-    assertEquals(
-        Optional.empty(),
-        rule.principal(new Credential.Person("nobody", Role.ADMIN, Actor.Lane.API)));
+        rule.principal(Credential.person("mady", Actor.Lane.SYNC)));
+    assertEquals(Optional.empty(), rule.principal(Credential.person("nobody", Actor.Lane.API)));
     assertEquals(
         Optional.of(ProjectScope.all()),
         new RoleRule(() -> MAIN, null)
@@ -206,58 +201,43 @@ class RoleRuleTest {
   }
 
   @Test
-  void aPersonATokenAndASessionActAsTheFdeTheyNameWithItsRoleCappedAndItsScope() {
+  void aPersonAndATokenActAsTheFdeTheyNameWithItsRoleCappedAndItsScope() {
     roster.restrict("mady");
     roster.grant("mady", "alpha");
     var rule = new RoleRule(() -> MAIN, roster);
     var alpha = ProjectScope.of(List.of("alpha"));
-    var sessions = new AuthSessionStore(db);
-    var session =
-        sessions
-            .validate(sessions.create(roster.byHandle("mady").orElseThrow().id(), MINUTE).token())
-            .orElseThrow();
 
     assertEquals(
         Optional.of(new Actor("mady", Role.MEMBER, Actor.Lane.SYNC).withScope(alpha)),
-        rule.principal(new Credential.Person("mady", Role.ADMIN, Actor.Lane.SYNC)));
+        rule.principal(Credential.person("mady", Actor.Lane.SYNC)));
     assertEquals(
         Optional.of(new Actor("mady", Role.VIEWER, Actor.Lane.API).withScope(alpha)),
         rule.principal(Credential.token("mady", "viewer")));
-    assertEquals(
-        Optional.of(new Actor("mady", Role.MEMBER, Actor.Lane.SYNC).withScope(alpha)),
-        rule.principal(Credential.session(session, Actor.Lane.SYNC)));
     assertEquals(
         Optional.of(new Actor("raj", Role.ADMIN, Actor.Lane.API)),
         rule.principal(Credential.token("raj", "admin")));
     assertEquals(
         Optional.of(new Actor("raj", Role.ADMIN, Actor.Lane.CLI)),
-        rule.principal(new Credential.Person("raj", Role.ADMIN, Actor.Lane.CLI)));
-    var raj = sessions.create(roster.byHandle("raj").orElseThrow().id(), MINUTE).token();
+        rule.principal(Credential.person("raj", Actor.Lane.CLI)));
     assertEquals(
         Optional.of(new Actor("raj", Role.ADMIN, Actor.Lane.API)),
-        rule.principal(Credential.session(sessions.validate(raj).orElseThrow(), Actor.Lane.API)),
-        "a session carries its person's whole role");
+        rule.principal(Credential.person("raj", Actor.Lane.API)),
+        "a person's own credential carries their whole role");
   }
 
   @Test
   void aCredentialNamingNoOneHereIsRefused() {
     var rule = new RoleRule(() -> MAIN, roster);
-    var gone = new AuthSessionStore.SessionInfo("no-such-fde", null, null);
     db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'mady'");
 
-    assertEquals(Optional.empty(), rule.principal(Credential.person(" ")));
+    assertEquals(Optional.empty(), rule.principal(Credential.person(" ", Actor.Lane.API)));
     assertEquals(Optional.empty(), rule.principal(Credential.token("mady", "member")));
-    assertEquals(Optional.empty(), rule.principal(Credential.session(gone, Actor.Lane.SYNC)));
-    var stranger = roster.add("stranger", null, null, "admin");
+    roster.add("stranger", null, null, "admin");
     assertEquals(
         Optional.empty(),
-        new RoleRule(() -> MAIN, null)
-            .principal(
-                Credential.session(
-                    new AuthSessionStore.SessionInfo(stranger.id(), null, null), Actor.Lane.API)),
-        "a box that keeps no roster knows no session's FDE");
+        new RoleRule(() -> MAIN, null).principal(Credential.person("stranger", Actor.Lane.API)),
+        "a box that keeps no roster knows no one but its operator");
     assertThrows(NullPointerException.class, () -> rule.principal(null));
-    assertThrows(NullPointerException.class, () -> Credential.session(null, Actor.Lane.API));
     assertThrows(NullPointerException.class, () -> Credential.run(null));
   }
 

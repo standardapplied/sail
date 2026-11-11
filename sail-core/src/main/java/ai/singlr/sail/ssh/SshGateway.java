@@ -11,6 +11,7 @@ import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.identity.RoleRule.Credential;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -110,7 +111,7 @@ public final class SshGateway {
               + " SSH to the host directly to run it.");
     }
     var fde = roster.byHandle(fdeHandle);
-    var principal = roles.principal(Credential.person(fdeHandle));
+    var principal = roles.principal(Credential.person(fdeHandle, Actor.Lane.API));
     if (fde.isEmpty() || principal.isEmpty()) {
       return new Rejected("Unknown or disabled FDE.");
     }
