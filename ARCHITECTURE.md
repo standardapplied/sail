@@ -2433,7 +2433,8 @@ it implies the room rule's Change), stop (Operate a run), posting into a room wi
 (the terminal's room pin and a room session's report ask the message rule's own post,
 `MessageAuthority.post`, the one decision of a rule a door asks, since a post with no message to
 journal still answers to the rule's fact that a post is someone's), serving a stack, restoring a
-snapshot and reading a definition (`ProjectGate`, the one project gate), pruning, resolving a
+snapshot, reading a definition, and sharing or removing a skill before its folder is read
+(`ProjectGate`, the one project gate), pruning, resolving a
 conflict, reading a run's log and attaching to it (Operate a run, then placement, as a stop), sync
 now, sync health,
 bus stats and pointing the box at another main (Operate the box), managing people (the passkey

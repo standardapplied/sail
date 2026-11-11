@@ -291,6 +291,39 @@ class AccessScenarioTest {
         Actor.call(ENGS_AGENT, () -> specs.decide("d2", edited("d2", "title", "edited"))));
   }
 
+  /**
+   * Row 15 once history has moved on: a draft whose first revision compaction dropped is no longer
+   * known to be the agent's by creation, so it is the agent's work only when it is the spec its run
+   * works. Losing the revision narrows the agent; it never widens anyone.
+   */
+  @Test
+  void row15ADraftWhoseFirstRevisionHistoryDroppedIsOwnWorkOnlyByTheRun() {
+    Actor.run(ENGS_AGENT, () -> specs.create(draft("d1")));
+    for (var i = 0; i < ChangeLog.HISTORY_REVISIONS; i++) {
+      var body = "revision " + i;
+      Actor.run(ENG, () -> specs.setContent("d1", body, ""));
+    }
+    var retitled = edited("d1", "title", "retitled");
+    assertEquals(
+        Optional.empty(), Actor.call(ENGS_AGENT, () -> specs.decide("d1", retitled)), "before");
+
+    new ChangeLog(db).compact("spec", List.of("d1"), id -> null);
+
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.NOT_OWNER,
+                "'" + ENGS_AGENT.handle() + "' may change only its own work, not spec 'd1'.",
+                OUTSIDE_WORK)),
+        Actor.call(ENGS_AGENT, () -> specs.decide("d1", retitled)));
+    assertEquals(
+        Optional.empty(),
+        Actor.call(
+            ENGS_AGENT.withWork(new Actor.Work("acme", "d1", "d1")),
+            () -> specs.decide("d1", retitled)),
+        "a run that works d1 still may");
+  }
+
   @Test
   void row16EngsAgentSettingE1DoneIsRefused() {
     assertEquals(

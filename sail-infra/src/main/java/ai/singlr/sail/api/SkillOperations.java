@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Action;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
@@ -13,6 +14,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SkillFolders;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.store.ProjectStore;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -34,17 +36,24 @@ import java.util.concurrent.TimeoutException;
  * synced; sail's; and the ones someone made by hand in an installed agent's skills folder, which
  * reach that agent alone and no other box until someone shares them. A folder is never shared but
  * on a person's word: sail lists a hand-made skill and names the line that shares it, nothing more.
+ *
+ * <p>Sharing and removing are {@link Action#SHARE} of the project, asked of the bound actor ({@link
+ * ProjectGate#taking}) before anything is read, the container's folder or the box's: a refused
+ * caller costs no read, and hears what the journal would have said of the write.
  */
 public final class SkillOperations {
 
   private final ProjectSkills skills;
   private final ShellExec shell;
   private final ProjectLoader projects;
+  private final ProjectStore catalog;
 
-  SkillOperations(ProjectSkills skills, ShellExec shell, ProjectLoader projects) {
+  SkillOperations(
+      ProjectSkills skills, ShellExec shell, ProjectLoader projects, ProjectStore catalog) {
     this.skills = Objects.requireNonNull(skills, "skills");
     this.shell = Objects.requireNonNull(shell, "shell");
     this.projects = Objects.requireNonNull(projects, "projects");
+    this.catalog = Objects.requireNonNull(catalog, "catalog");
   }
 
   /** Where a skill an agent sees comes from. */
@@ -178,6 +187,7 @@ public final class SkillOperations {
    */
   public Shared shareFromContainer(String project, String folder, String name)
       throws IOException, InterruptedException, TimeoutException {
+    ProjectGate.taking(catalog, Action.SHARE, project);
     var harnesses = ProjectProvisioner.installedHarnesses(projects.loadRunning(project).config());
     var skillName = nameOf(folder, name);
     var skill =
@@ -200,6 +210,7 @@ public final class SkillOperations {
 
   /** Shares the folder at {@code folder} on this box as skill {@code name}, or its own name. */
   public Shared shareFromHost(String project, Path folder, String name) throws IOException {
+    ProjectGate.taking(catalog, Action.SHARE, project);
     var harnesses = ProjectProvisioner.installedHarnesses(projects.definition(project));
     var source = folder.toAbsolutePath().normalize();
     var skillName = nameOf(source.toString(), name);
@@ -214,6 +225,7 @@ public final class SkillOperations {
    * @throws ApiException {@code NOT_FOUND} when the project shares no skill of that name
    */
   public int remove(String project, String name) throws IOException {
+    ProjectGate.taking(catalog, Action.SHARE, project);
     var removed = skills.remove(project, name);
     if (removed == 0) {
       throw new ApiException(

@@ -768,7 +768,7 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public SkillOperations skills() {
-    return new SkillOperations(projectSkills, shell, projects);
+    return new SkillOperations(projectSkills, shell, projects, projectCatalog());
   }
 
   @Override

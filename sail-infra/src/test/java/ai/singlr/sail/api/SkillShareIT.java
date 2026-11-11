@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
@@ -56,9 +57,14 @@ class SkillShareIT extends AbstractIncusIT {
                   new SharedProjectFiles(
                       files, dir.resolve("projects"), project, FileLimits.defaults()));
       var definition = TestDefinitions.yaml(DEFINITION);
+      var catalog = new ProjectStore(db);
+      Acting.system(() -> catalog.upsert(definition));
       var skills =
           new SkillOperations(
-              projectSkills, shell, new ProjectLoader(shell, project -> Optional.of(definition)));
+              projectSkills,
+              shell,
+              new ProjectLoader(shell, project -> Optional.of(definition)),
+              catalog);
       var codex = ProjectSkillInstaller.skillsDirOf(Harnesses.of("codex"));
       var claude = ProjectSkillInstaller.skillsDirOf(Harnesses.of("claude-code"));
       launchPrepared(CONTAINER);

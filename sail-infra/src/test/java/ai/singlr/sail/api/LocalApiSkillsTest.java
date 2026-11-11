@@ -19,6 +19,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayInputStream;
@@ -58,6 +59,7 @@ class LocalApiSkillsTest {
   private Sqlite db;
   private FileStore files;
   private ScriptedShellExecutor shell;
+  private ProjectStore catalog;
   private TestOperations operations;
   private SocketDoor router;
 
@@ -69,6 +71,12 @@ class LocalApiSkillsTest {
     shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var acme = TestDefinitions.yaml(ACME);
     var zeta = TestDefinitions.yaml(ACME.replace("acme", "zeta"));
+    catalog = new ProjectStore(db);
+    Acting.system(
+        () -> {
+          catalog.upsert(acme);
+          catalog.upsert(zeta);
+        });
     var skills =
         new SkillOperations(
             new ProjectSkills(
@@ -83,7 +91,8 @@ class LocalApiSkillsTest {
                       case "acme" -> Optional.of(acme);
                       case "zeta" -> Optional.of(zeta);
                       default -> Optional.empty();
-                    }));
+                    }),
+            catalog);
     operations =
         new TestOperations() {
           @Override
@@ -258,6 +267,7 @@ class LocalApiSkillsTest {
     shareJava();
     containerHolds(JAVA_MD);
 
+    var asked = shell.invocations().size();
     var share = box("POST", SKILLS, "folder=%2Fhome%2Fdev%2F.agents%2Fskills%2Fjava");
     var remove = box("DELETE", SKILLS + "/java", "");
 
@@ -272,6 +282,8 @@ class LocalApiSkillsTest {
           assertInstanceOf(Map.class, refused.body().get("error")).get("action"));
     }
     assertEquals(List.of(".sail/skills/java/SKILL.md"), shared());
+    assertEquals(
+        asked, shell.invocations().size(), "a refusal reads nothing of the container's folder");
   }
 
   /**
@@ -314,6 +326,7 @@ class LocalApiSkillsTest {
                 "Your credential is read-only and cannot share files and skills in projects.",
                 "Ask an admin for a member or admin credential."));
 
+    var asked = shell.invocations().size();
     for (var refused : refusals.entrySet()) {
       var credential = refused.getKey();
       var share =
@@ -330,6 +343,8 @@ class LocalApiSkillsTest {
       }
     }
     assertEquals(List.of(".sail/skills/java/SKILL.md"), shared());
+    assertEquals(
+        asked, shell.invocations().size(), "a refusal reads nothing of the container's folder");
   }
 
   @Test
@@ -369,7 +384,7 @@ class LocalApiSkillsTest {
   void aFolderThatIsNoSkillIsRefusedWithStageSkillsSentence() {
     containerHolds("---\nname: java\n---\nApply them.\n");
 
-    var refused = box("POST", SKILLS, "folder=%2Fhome%2Fdev%2Fjava");
+    var refused = router.ask("POST", SKILLS, ALLOWED, "folder=%2Fhome%2Fdev%2Fjava");
 
     assertEquals(400, refused.status());
     assertEquals(
@@ -385,7 +400,7 @@ class LocalApiSkillsTest {
         .onOk("incus list", "[{\"name\": \"acme\", \"status\": \"Running\"}]")
         .onThrow("-printf", new IOException("incus went away"));
 
-    var failed = box("POST", SKILLS, "folder=%2Fhome%2Fdev%2Fjava");
+    var failed = router.ask("POST", SKILLS, ALLOWED, "folder=%2Fhome%2Fdev%2Fjava");
 
     assertEquals(500, failed.status());
     assertEquals("incus went away", message(failed));
@@ -421,7 +436,8 @@ class LocalApiSkillsTest {
             new ProjectLoader(
                 new ScriptedShellExecutor()
                     .onOk("incus list", "[{\"name\": \"acme\", \"status\": \"Running\"}]"),
-                project -> Optional.of(TestDefinitions.yaml(ACME))));
+                project -> Optional.of(TestDefinitions.yaml(ACME))),
+            catalog);
     var interrupted =
         new SocketDoor(
             new TestOperations() {
@@ -429,11 +445,14 @@ class LocalApiSkillsTest {
               public SkillOperations skills() {
                 return skills;
               }
+
+              @Override
+              public Optional<Actor> boxActorForCredential(String credential) {
+                return operations.boxActorForCredential(credential);
+              }
             });
 
-    var failed =
-        interrupted.ask(
-            "POST", SKILLS, TestOperations.BOX_CREDENTIAL, "folder=%2Fhome%2Fdev%2Fjava");
+    var failed = interrupted.ask("POST", SKILLS, ALLOWED, "folder=%2Fhome%2Fdev%2Fjava");
 
     assertEquals(500, failed.status());
     assertEquals(true, Thread.interrupted(), "the interrupt is kept for whoever waits on it");

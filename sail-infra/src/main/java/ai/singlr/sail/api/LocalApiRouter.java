@@ -86,6 +86,7 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
     var reads = Gate.READS_IN_SCOPE;
     var journal = Gate.JOURNAL;
     var serving = Gate.decides(Action.SERVE);
+    var sharing = Gate.decides(Action.SHARE);
     this.routes =
         List.of(
             route(GET, CONFLICTS, reads, this::conflicts),
@@ -119,10 +120,10 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
                 Gate.UNSERVED,
                 aRoomsOrARunsOwn(answering("run session accepts POST"))),
             route(GET, SKILLS, reads, this::skills),
-            route(POST, SKILLS, journal, this::share),
+            route(POST, SKILLS, sharing, this::share),
             unserved(SKILLS, "skills accepts GET or POST"),
             route(GET, SKILL, reads, this::skill),
-            route(DELETE, SKILL, journal, this::unshare),
+            route(DELETE, SKILL, sharing, this::unshare),
             unserved(SKILL, "a skill accepts GET or DELETE"),
             route(POST, SERVE, serving, this::serve),
             route(DELETE, SERVE, serving, this::stop),
@@ -501,9 +502,9 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
   }
 
   /**
-   * Shares a folder in the container as a skill, as the journal decides the write: a shared skill
-   * is instructions every other agent and every other box will follow, so no credential in a
-   * container may share one, a run's or the box's; a person shares it from outside.
+   * Shares a folder in the container as a skill, as its operation decides before it reads the
+   * folder: a shared skill is instructions every other agent and every other box will follow, so no
+   * credential in a container may share one, a run's or the box's; a person shares it from outside.
    */
   private ApiResponse share(LocalApiRequest request, Caller caller, Map<String, String> path)
       throws IOException, InterruptedException, TimeoutException {
@@ -525,7 +526,7 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
         Map.of("name", name, "skill_md", operations.skills().manifest(path.get(PROJECT), name)));
   }
 
-  /** Stops sharing one skill, which like sharing the journal refuses every container credential. */
+  /** Stops sharing one skill, which like sharing is refused to every container credential. */
   private ApiResponse unshare(LocalApiRequest request, Caller caller, Map<String, String> path)
       throws IOException, InterruptedException, TimeoutException {
     var project = path.get(PROJECT);

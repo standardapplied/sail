@@ -16,7 +16,10 @@ import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayInputStream;
@@ -32,6 +35,7 @@ import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.function.Executable;
 import org.junit.jupiter.api.io.TempDir;
 
 class SkillOperationsTest {
@@ -47,6 +51,7 @@ class SkillOperationsTest {
   private Sqlite db;
   private FileStore files;
   private ScriptedShellExecutor shell;
+  private ProjectStore catalog;
   private SkillOperations skills;
 
   @BeforeEach
@@ -56,6 +61,8 @@ class SkillOperationsTest {
     files = new FileStore(db);
     shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var definition = TestDefinitions.yaml(ACME);
+    catalog = new ProjectStore(db);
+    Acting.system(() -> catalog.upsert(definition));
     skills =
         new SkillOperations(
             new ProjectSkills(
@@ -65,7 +72,8 @@ class SkillOperationsTest {
             shell,
             new ProjectLoader(
                 shell,
-                project -> "acme".equals(project) ? Optional.of(definition) : Optional.empty()));
+                project -> "acme".equals(project) ? Optional.of(definition) : Optional.empty()),
+            catalog);
   }
 
   @AfterEach
@@ -247,7 +255,8 @@ class SkillOperationsTest {
                     new SharedProjectFiles(
                         files, dir.resolve("projects"), project, FileLimits.defaults())),
             interrupting,
-            new ProjectLoader(shell, project -> Optional.of(TestDefinitions.yaml(ACME))));
+            new ProjectLoader(shell, project -> Optional.of(TestDefinitions.yaml(ACME))),
+            catalog);
 
     var shared =
         Acting.as(
@@ -290,6 +299,27 @@ class SkillOperationsTest {
         Acting.as("uday", () -> skills.shareFromContainer("acme", "/home/dev/java/", "")).name());
   }
 
+  /**
+   * Sharing and removing are decided before anything is read: a viewer is refused on the host and
+   * in the container alike, before the folder is looked for and before the container is asked.
+   */
+  @Test
+  void aCallerWhoMayNotShareIsRefusedBeforeAnyFolderIsRead() {
+    var viewer = new Actor("vic", Role.VIEWER, Actor.Lane.API);
+    var asked = shell.invocations().size();
+
+    for (var refused :
+        List.<Executable>of(
+            () -> skills.shareFromHost("acme", dir.resolve("no-such-folder"), null),
+            () -> skills.shareFromContainer("acme", "/home/dev/no-such-folder", null),
+            () -> skills.remove("acme", "java"))) {
+      assertEquals(
+          "Your credential is read-only and cannot share files and skills in projects.",
+          assertThrows(ApiException.class, () -> Acting.by(viewer, refused::execute)).getMessage());
+    }
+    assertEquals(asked, shell.invocations().size(), "nothing was asked of the container");
+  }
+
   @Test
   void aStoppedContainerSharesNothingAndSaysHowToStartIt() {
     shell.onOk("incus list", "[{\"name\": \"acme\", \"status\": \"Stopped\"}]");
@@ -297,7 +327,11 @@ class SkillOperationsTest {
     var refused =
         assertThrows(
             ApiException.class,
-            () -> skills.shareFromContainer("acme", "/home/dev/.agents/skills/java", null));
+            () ->
+                Acting.as(
+                    "uday",
+                    () ->
+                        skills.shareFromContainer("acme", "/home/dev/.agents/skills/java", null)));
 
     assertEquals("Project 'acme' is stopped.", refused.getMessage());
     assertEquals(List.of(), shared());
