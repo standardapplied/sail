@@ -122,11 +122,14 @@ public final class SshGateway {
     var subcommand = tokens.getFirst();
     if (subcommand.equals("agent") && !runsAsTheFde(tokens)) {
       return new Rejected(
-          "'"
-              + String.join(" ", tokens.subList(0, Math.min(2, tokens.size())))
-              + "' reads this box's control plane directly, as the box's own person, so it is not"
-              + " available over an SSH-key session. Follow the work with 'sail spec' and the"
-              + " board, or SSH to the host directly to run it.");
+          Remedy.of(
+                  "'"
+                      + String.join(" ", tokens.subList(0, Math.min(2, tokens.size())))
+                      + "' reads this box's control plane directly, as the box's own person, so it"
+                      + " is not available over an SSH-key session. Follow the work with '",
+                  Remedy.client("spec"),
+                  "' and the board, or SSH to the host directly to run it.")
+              .plain());
     }
     if (!runsAsTheFde(tokens) && !SYNC_COMMANDS.contains(subcommand)) {
       return new Rejected(
