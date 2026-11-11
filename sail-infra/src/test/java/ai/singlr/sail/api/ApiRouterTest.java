@@ -922,13 +922,46 @@ class ApiRouterTest {
                   .build(),
               HttpResponse.BodyHandlers.ofString());
 
+      var trailing = new ArrayList<Integer>();
+      for (var path : List.of("/v1/runs/r1/stream/", "/v1/runs/r1/stream//")) {
+        trailing.add(
+            client
+                .send(
+                    HttpRequest.newBuilder(URI.create(base + path))
+                        .header("Authorization", "Bearer token")
+                        .build(),
+                    HttpResponse.BodyHandlers.ofString())
+                .statusCode());
+      }
+
       assertEquals(404, blank.statusCode());
       assertEquals("No run ''.", YamlUtil.parseMap(blank.body()).get("message"));
-      assertEquals(List.of(""), asked);
+      assertEquals(List.of(404, 404), trailing, "a trailing slash still reaches the run's stream");
+      assertEquals(List.of("", "r1", "r1"), asked);
       assertEquals(404, collapsed.statusCode());
       assertEquals("API endpoint was not found.", errorOf(collapsed).get("message"));
     } finally {
       http.stop(0);
+    }
+  }
+
+  @Test
+  void aMethodIsMatchedAsSentSoALowercaseOneIsAnUnknownMethod() throws Exception {
+    try (var server = serverWith(new FakeOperations(), true)) {
+      var lowercase = send(server, "get /v1/whoami", "token");
+
+      assertEquals(404, lowercase.statusCode());
+      assertEquals("API endpoint was not found.", errorOf(lowercase).get("message"));
+    }
+  }
+
+  @Test
+  void aPathNoRouteServesIsRefusedOnlyOnceItsCallerIsAuthenticated() throws Exception {
+    try (var server = serverWith(new FakeOperations(), true)) {
+      assertEquals(401, get(server, "/v1/nothing", null).statusCode());
+      var known = get(server, "/v1/nothing", "token");
+      assertEquals(404, known.statusCode());
+      assertEquals("API endpoint was not found.", errorOf(known).get("message"));
     }
   }
 

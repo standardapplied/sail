@@ -127,6 +127,63 @@ class LocalApiRouterTest {
   }
 
   @Test
+  void eachPatternAnswersAMethodItDoesNotServeInTheSocketsOwnWords() {
+    var answers = new LinkedHashMap<String, String>();
+    for (var asked :
+        List.of(
+            "POST /v1/sync",
+            "POST /v1/conflicts",
+            "GET /v1/conflicts/auth/resolve",
+            "POST /v1/whoami",
+            "GET /v1/events",
+            "PUT /v1/run/messages",
+            "GET /v1/run/session",
+            "PUT /v1/projects/acme/skills",
+            "PUT /v1/projects/acme/skills/java",
+            "GET /v1/projects/acme/serve",
+            "POST /v1/projects/acme/ports",
+            "PUT /v1/specs",
+            "POST /v1/specs/board",
+            "POST /v1/specs/auth",
+            "POST /v1/specs/auth/content",
+            "PUT /v1/specs/auth/messages")) {
+      var parts = asked.split(" ");
+      answers.put(asked, answer(router.ask(form(parts[0], parts[1], ""))));
+    }
+
+    assertEquals(
+        List.of(
+            "405 {error=Only GET is available.}",
+            "405 {error=Only GET is available.}",
+            "405 {error=Conflict resolution accepts POST}",
+            "405 {error=whoami accepts GET}",
+            "405 {error=events accepts POST}",
+            "405 {error=run messages accepts GET or POST}",
+            "405 {error=run session accepts POST}",
+            "405 {error=skills accepts GET or POST}",
+            "405 {error=a skill accepts GET or DELETE}",
+            "405 {error=serve accepts POST or DELETE}",
+            "405 {error=ports accepts GET}",
+            "405 {error=specs accepts GET or POST}",
+            "405 {error=board accepts GET}",
+            "405 {error=spec accepts GET, PUT, or DELETE}",
+            "405 {error=content accepts GET or PUT}",
+            "405 {error=messages accepts GET or POST}"),
+        List.copyOf(answers.values()),
+        answers.toString());
+    assertEquals(
+        "405 {error=A merge template accepts GET}",
+        answer(
+            router.ask(
+                new LocalApiRequest(
+                    "POST",
+                    "/v1/conflicts/auth",
+                    Map.of("template", "true"),
+                    auth(),
+                    new byte[0]))));
+  }
+
+  @Test
   void aPathAsSentIsAnsweredAsTheSocketAlwaysAnsweredIt() {
     assertEquals(
         "400 bad_request Invalid project name: ''. Must match [a-z0-9][a-z0-9-]*, max 63"
@@ -986,6 +1043,7 @@ class LocalApiRouterTest {
             + "', whom this box cannot place: its roster has disabled that FDE or does not know it"
             + " yet, or this box names no FDE of its own.";
     var error = (Map<?, ?>) refused.body().get("error");
+    assertEquals("forbidden", error.get("code"));
     assertEquals(reason, error.get("message"));
     assertEquals(
         List.of(

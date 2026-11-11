@@ -6,7 +6,9 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Map;
@@ -25,6 +27,14 @@ class RouteTest {
       new Route<>("PUT", "/v1/projects/{project}/files/{path...}", Gate.JOURNAL, "file");
   private static final Route<String> BOARD =
       new Route<>("GET", "/v1/specs/board", Gate.READS_IN_SCOPE, "board");
+
+  @Test
+  void aRouteServesItsMethodAsSentAndAnyRouteEveryMethod() {
+    assertTrue(SPEC.serves("GET"));
+    assertFalse(SPEC.serves("get"), "a method is matched as the client sent it");
+    assertFalse(SPEC.serves("PUT"));
+    assertTrue(new Route<>(Route.ANY, "/x", Gate.UNSERVED, "any").serves("get"));
+  }
 
   @Test
   void aLiteralMatchesItselfAndAPlaceholderOneSegmentAsSentEmptyOrNot() {
