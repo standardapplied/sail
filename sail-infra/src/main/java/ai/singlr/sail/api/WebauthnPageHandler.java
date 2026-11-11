@@ -43,13 +43,13 @@ public final class WebauthnPageHandler implements HttpHandler, RouteTable {
   @Override
   public void handle(HttpExchange exchange) throws IOException {
     try {
-      if (!GET.equals(exchange.getRequestMethod())) {
-        send(exchange, 405, "text/plain; charset=utf-8", "Method Not Allowed");
-      } else if (RouteTable.serve(routes, GET, exchange.getRequestURI().getPath())
-          instanceof RouteTable.Served.Match<String>(var page, var params)) {
-        send(exchange, 200, "text/html; charset=utf-8", page.handler());
-      } else {
-        send(exchange, 404, "text/plain; charset=utf-8", "Not Found");
+      var method = exchange.getRequestMethod();
+      switch (RouteTable.serve(routes, method, exchange.getRequestURI().getPath())) {
+        case RouteTable.Served.Match<String>(var route, _) ->
+            send(exchange, 200, "text/html; charset=utf-8", route.handler());
+        case RouteTable.Served.NotFound<String> none when GET.equals(method) ->
+            send(exchange, 404, "text/plain; charset=utf-8", "Not Found");
+        default -> send(exchange, 405, "text/plain; charset=utf-8", "Method Not Allowed");
       }
     } finally {
       exchange.close();

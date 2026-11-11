@@ -5,12 +5,10 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.api.AgentLogStreamer;
 import ai.singlr.sail.api.ApiResponse;
-import ai.singlr.sail.api.ApiRouter;
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.api.RateLimitGate;
+import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SocketDoor;
@@ -31,9 +29,7 @@ import ai.singlr.sail.store.PendingChallengeStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.WebauthnCredentialStore;
 import ai.singlr.sail.webauthn.RelyingParty;
-import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
-import java.net.InetSocketAddress;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -44,7 +40,7 @@ import java.util.Set;
  * person is the FDE that config names, its web door with its passkey routes, and its socket. Its
  * host runs acme's container and nothing else; it never reaches main.
  */
-record DoorBox(SyncConfig config, Sqlite db, SailOperations operations, HttpServer http)
+record DoorBox(SyncConfig config, Sqlite db, SailOperations operations, SailApiServer http)
     implements AutoCloseable {
 
   /** The relying party its passkey routes serve. */
@@ -62,22 +58,26 @@ record DoorBox(SyncConfig config, Sqlite db, SailOperations operations, HttpServ
             dir,
             config);
     var auth = TestAuth.sessions(db, config);
-    var http = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-    http.createContext(
-        "/", new ApiRouter(operations, auth, new RateLimitGate(), new AgentLogStreamer(auth)));
-    http.createContext(
-        "/v1/auth",
-        new WebauthnAuthHandler(
-            new PasskeyService(
-                new RelyingParty(RP_ID, "Sail", Set.of(ORIGIN)),
-                new FdeStore(db),
-                new WebauthnCredentialStore(db),
-                new AuthSessionStore(db),
-                new PendingChallengeStore(db),
-                Duration.ofDays(30)),
-            new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db)),
+    var http =
+        new SailApiServer(
+            "127.0.0.1",
+            0,
+            operations,
             auth,
-            List.of(ORIGIN)));
+            null,
+            null,
+            null,
+            new WebauthnAuthHandler(
+                new PasskeyService(
+                    new RelyingParty(RP_ID, "Sail", Set.of(ORIGIN)),
+                    new FdeStore(db),
+                    new WebauthnCredentialStore(db),
+                    new AuthSessionStore(db),
+                    new PendingChallengeStore(db),
+                    Duration.ofDays(30)),
+                new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db)),
+                auth,
+                List.of(ORIGIN)));
     http.start();
     return new DoorBox(config, db, operations, http);
   }
@@ -102,7 +102,7 @@ record DoorBox(SyncConfig config, Sqlite db, SailOperations operations, HttpServ
   }
 
   String url() {
-    return "http://127.0.0.1:" + http.getAddress().getPort();
+    return "http://127.0.0.1:" + http.port();
   }
 
   /** What this box's socket answers its box credential, {@code method} on {@code path}. */
@@ -113,7 +113,7 @@ record DoorBox(SyncConfig config, Sqlite db, SailOperations operations, HttpServ
 
   @Override
   public void close() {
-    http.stop(0);
+    http.close();
     operations.close();
   }
 

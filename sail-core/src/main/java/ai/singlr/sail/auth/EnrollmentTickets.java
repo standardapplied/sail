@@ -22,13 +22,13 @@ public interface EnrollmentTickets {
   /**
    * Issues a ticket authorizing one enrollment for the FDE with {@code fdeHandle}. Throws {@link
    * PasskeyException.Kind#NOT_FOUND} when no such FDE exists, and {@link
-   * PasskeyException.Kind#UNAUTHORIZED} when the roster disables it.
+   * PasskeyException.Kind#DISABLED} when the roster disables it.
    */
   Ticket issue(String fdeHandle);
 
   /**
    * Resolves a live ticket to the handle of the FDE it enrolls, or empty if invalid/expired. Throws
-   * {@link PasskeyException.Kind#UNAUTHORIZED} when the roster disables that FDE.
+   * {@link PasskeyException.Kind#DISABLED} when the roster disables that FDE.
    */
   Optional<String> authorize(String ticket);
 

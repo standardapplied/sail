@@ -47,6 +47,9 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
   private static final String TICKET_HEADER = "X-Enrollment-Ticket";
   private static final String POST = "POST";
 
+  /** The exchange attribute {@link #admit} sets once its caller passed the people gate. */
+  private static final String PEOPLE_GATE_PASSED = "passkey.admitted";
+
   private static final Gate ENROLLMENT =
       Gate.unauthenticated("an enrollment ticket authorizes it; without one, the people gate does");
   private static final Gate SIGN_IN =
@@ -119,7 +122,10 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
   }
 
   private ApiResponse route(HttpExchange exchange) throws IOException {
-    if (!"POST".equals(exchange.getRequestMethod())) {
+    var method = exchange.getRequestMethod();
+    var served = RouteTable.serve(routes, method, exchange.getRequestURI().getPath());
+    if (served instanceof RouteTable.Served.MethodNotAllowed<Ceremony>
+        || served instanceof RouteTable.Served.NotFound<Ceremony> && !POST.equals(method)) {
       throw new ApiException(ErrorCode.METHOD_NOT_ALLOWED, "Passkey endpoints accept POST only.");
     }
     if (ceremonies == null) {
@@ -131,8 +137,7 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
               Remedy.sail("server start"),
               "'."));
     }
-    if (!(RouteTable.serve(routes, POST, exchange.getRequestURI().getPath())
-        instanceof RouteTable.Served.Match<Ceremony>(var route, var params))) {
+    if (!(served instanceof RouteTable.Served.Match<Ceremony>(var route, _))) {
       throw new ApiException(ErrorCode.NOT_FOUND, "Unknown passkey endpoint.");
     }
     try {
@@ -141,7 +146,7 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
       }
       return route.handler().answer(exchange);
     } catch (PasskeyException e) {
-      throw refusal(e, byPeopleGate(route.gate(), exchange));
+      throw refusal(e, exchange.getAttribute(PEOPLE_GATE_PASSED) != null);
     }
   }
 
@@ -245,6 +250,7 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
   private void admit(HttpExchange exchange, Gate gate) {
     auth.require(exchange);
     gate.admit(ApiRouter.actorOf(exchange));
+    exchange.setAttribute(PEOPLE_GATE_PASSED, gate);
   }
 
   private static Map<String, Object> ceremonyBody(PasskeyCeremonies.Ceremony ceremony) {
@@ -252,14 +258,6 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
     body.put("challenge_id", ceremony.challengeId());
     body.put("public_key", ceremony.publicKey());
     return body;
-  }
-
-  /**
-   * Whether the caller of a route behind {@code gate} passed the people gate: minting a ticket, or
-   * registering with no enrollment ticket, which only an authenticated admin does.
-   */
-  private static boolean byPeopleGate(Gate gate, HttpExchange exchange) {
-    return gate == Gate.PEOPLE || gate == ENROLLMENT && enrollmentTicket(exchange) == null;
   }
 
   /**

@@ -31,7 +31,7 @@ public interface PasskeyCeremonies {
   /**
    * Begins enrolling a passkey for the FDE identified by {@code fdeHandle}. Throws {@link
    * PasskeyException.Kind#NOT_FOUND} when no such FDE exists, and {@link
-   * PasskeyException.Kind#UNAUTHORIZED} when the roster disables it.
+   * PasskeyException.Kind#DISABLED} when the roster disables it.
    */
   Ceremony startRegistration(String fdeHandle);
 
