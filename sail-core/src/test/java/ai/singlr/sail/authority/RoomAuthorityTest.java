@@ -244,6 +244,7 @@ class RoomAuthorityTest {
     var beta = with(LOBBY, "project", "beta");
 
     assertEquals(Optional.empty(), rule.decide(adHoc, "lobby", LOBBY, with(LOBBY, "wake", "off")));
+    assertEquals(Optional.empty(), rule.decide(adHoc, "lobby", LOBBY, null), "its deletion too");
     assertEquals(
         Optional.of(Kind.NOT_OWNER),
         rule.decide(adHoc, "lobby", beta, with(beta, "wake", "off")).map(Refusal::kind),
