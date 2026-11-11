@@ -2338,7 +2338,7 @@ grant on its own work alone is refused there, since no work is in hand.
 - A spec runs only on its assignee's box, and a room's agents only on its owner's box: placement
   (`DispatchPolicy`, `LaunchAdmission`), asked after `Access`.
 - Opening a terminal needs only that its person holds the project on this box, whatever their
-  role, so a viewer opens one too (`HostAccess.admitProject`).
+  role, so a viewer opens one too (`HostLanes.Pty.admitProject`, through `ProjectGate.readable`).
 - Admins are never scoped.
 
 **Whose a resource is.** `Resources` builds each resource from the row in hand, with the project

@@ -185,11 +185,8 @@ class LocalApiRouterTest {
 
   @Test
   void theBoxCredentialHearsItHasNoRunBeforeTheMethodItAsked() {
-    var inbox =
-        router.ask(
-            new LocalApiRequest("PUT", "/v1/run/messages", Map.of(), boxAuth(), new byte[0]));
-    var session =
-        router.ask(new LocalApiRequest("GET", "/v1/run/session", Map.of(), boxAuth(), new byte[0]));
+    var inbox = router.ask("PUT", "/v1/run/messages", TestOperations.BOX_CREDENTIAL, "");
+    var session = router.ask("GET", "/v1/run/session", TestOperations.BOX_CREDENTIAL, "");
 
     assertEquals(
         "403 {error=Run message delivery requires a run credential; the box credential has no run"

@@ -416,6 +416,9 @@ class SseHandlerTest {
                     .build(),
                 HttpResponse.BodyHandlers.ofString());
         assertEquals(401, anonymousPost.statusCode(), "the caller is asked before the method");
+        assertTrue(
+            anonymousPost.body().contains("missing_bearer_token"),
+            "the refusal names the missing credential, not the method: " + anonymousPost.body());
       }
     }
   }
