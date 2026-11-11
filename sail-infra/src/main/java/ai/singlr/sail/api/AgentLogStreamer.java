@@ -7,7 +7,6 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.NodeIdentity;
@@ -16,7 +15,6 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpHandler;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -42,18 +40,17 @@ import java.util.function.Supplier;
  * verdict for an identical caller. {@code ?since=N} replays from a line number for client
  * reconnection.
  *
- * <p>Mounted by {@link ApiRouter} as its {@code /v1/runs/{id}/stream} route, whose handler hands
- * the exchange straight to this one so the long-lived connection never runs through the buffered
- * request/response path. It is not registered as its own {@code createContext} because the path
- * carries a variable run id, which prefix-matching cannot isolate from the rest of {@code
- * /v1/runs/...}.
+ * <p>Served by {@link ApiRouter} as its {@code GET /v1/runs/{id}/stream} route, which has already
+ * authenticated the caller and read the run id from the path, and hands the exchange straight to
+ * this one so the long-lived connection never runs through the buffered request/response path;
+ * every other method of the path is answered {@link #refuseMethod}.
  *
  * <p>Authentication is the {@code Authorization: Bearer} header only — the same gate {@code
  * /v1/events/stream} uses. A browser {@code EventSource} cannot set headers and is unsupported; a
  * native client that sets the header (a GUI client's Rust core, {@code sail agent stream})
  * authenticates normally.
  */
-public final class AgentLogStreamer implements HttpHandler {
+public final class AgentLogStreamer {
 
   private static final byte[] HEARTBEAT = ": heartbeat\n\n".getBytes(StandardCharsets.UTF_8);
   private static final long HEARTBEAT_INTERVAL_NANOS = Duration.ofSeconds(15).toNanos();
@@ -136,25 +133,12 @@ public final class AgentLogStreamer implements HttpHandler {
     }
   }
 
-  @Override
-  public void handle(HttpExchange exchange) throws IOException {
+  /**
+   * Streams run {@code runId}'s log to {@code exchange}'s caller, whom the router authenticated,
+   * once the caller may read it.
+   */
+  void stream(HttpExchange exchange, String runId) throws IOException {
     try {
-      if (!"GET".equals(exchange.getRequestMethod())) {
-        sendError(exchange, 405, "method_not_allowed", "Method not allowed", null);
-        return;
-      }
-      try {
-        auth.require(exchange);
-      } catch (ApiException e) {
-        send(exchange, e.status(), YamlUtil.dumpJson(e.error().toMap()));
-        return;
-      }
-
-      var runId = extractRunId(exchange.getRequestURI().getPath());
-      if (runId == null) {
-        sendError(exchange, 400, "invalid_request", "Missing run id", null);
-        return;
-      }
       var admission = admit(exchange, runId);
       if (admission instanceof Refused refused) {
         sendError(exchange, refused.status(), refused.code(), refused.message(), refused.extra());
@@ -348,15 +332,6 @@ public final class AgentLogStreamer implements HttpHandler {
         .toArray(String[]::new);
   }
 
-  /** The run id in {@code /v1/runs/{id}/stream}, or null when the path is not that shape. */
-  static String extractRunId(String path) {
-    var segments = path.split("/");
-    if (segments.length >= 4 && "runs".equals(segments[2])) {
-      return segments[3];
-    }
-    return null;
-  }
-
   /** True when {@code path} is exactly {@code /v1/runs/{id}/stream}. */
   static boolean isStreamPath(String path) {
     var segments = path.split("/");
@@ -389,6 +364,11 @@ public final class AgentLogStreamer implements HttpHandler {
   private static void writeComment(OutputStream out, String comment) throws IOException {
     out.write((": " + comment + "\n\n").getBytes(StandardCharsets.UTF_8));
     out.flush();
+  }
+
+  /** Refuses a method of the stream's path other than GET, in the stream's own envelope. */
+  static void refuseMethod(HttpExchange exchange) throws IOException {
+    sendError(exchange, 405, "method_not_allowed", "Method not allowed", null);
   }
 
   private static void sendError(

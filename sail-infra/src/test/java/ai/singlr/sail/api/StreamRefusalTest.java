@@ -65,43 +65,47 @@ class StreamRefusalTest {
 
   @Test
   void aStreamRefusedAtTheDoorCarriesItsRemedyAsData() throws Exception {
-    var response =
-        HttpClient.newHttpClient()
-            .send(
-                HttpRequest.newBuilder(
-                        URI.create("http://127.0.0.1:" + server.port() + "/v1/events/stream"))
-                    .header("Authorization", "Bearer " + token)
-                    .GET()
-                    .build(),
-                HttpResponse.BodyHandlers.ofString());
+    for (var path : List.of("/v1/events/stream", "/v1/runs/r1/stream")) {
+      var response =
+          HttpClient.newHttpClient()
+              .send(
+                  HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
+                      .header("Authorization", "Bearer " + token)
+                      .GET()
+                      .build(),
+                  HttpResponse.BodyHandlers.ofString());
 
-    assertEquals(409, response.statusCode());
-    assertEquals(
-        Map.of(
-            "code",
-            "conflict",
-            "message",
-            REASON,
-            "action",
-            "Run 'sync' first. If it still refuses, ask an admin whether 'ada' is disabled.",
-            "remedy",
-            REMEDY,
-            "field_errors",
-            List.of()),
-        YamlUtil.parseMap(response.body()).get("error"));
-    var refused = SailApiClient.Refused.fromBody(response.statusCode(), response.body());
-    assertEquals(
-        List.of(
-            REASON
-                + " Run 'sudo sail sync' first. If it still refuses, ask an admin whether 'ada' is"
-                + " disabled. (HTTP 409)"),
-        CliCommand.lines(refused, OperatorCommand.SUDO));
-    assertEquals(
-        List.of(
-            REASON
-                + " Run 'sail sync' first. If it still refuses, ask an admin whether 'ada' is"
-                + " disabled. (HTTP 409)"),
-        CliCommand.lines(refused, OperatorCommand.PLAIN));
+      assertEquals(409, response.statusCode(), path);
+      assertEquals(
+          Map.of(
+              "code",
+              "conflict",
+              "message",
+              REASON,
+              "action",
+              "Run 'sync' first. If it still refuses, ask an admin whether 'ada' is disabled.",
+              "remedy",
+              REMEDY,
+              "field_errors",
+              List.of()),
+          YamlUtil.parseMap(response.body()).get("error"),
+          path);
+      var refused = SailApiClient.Refused.fromBody(response.statusCode(), response.body());
+      assertEquals(
+          List.of(
+              REASON
+                  + " Run 'sudo sail sync' first. If it still refuses, ask an admin whether 'ada'"
+                  + " is disabled. (HTTP 409)"),
+          CliCommand.lines(refused, OperatorCommand.SUDO),
+          path);
+      assertEquals(
+          List.of(
+              REASON
+                  + " Run 'sail sync' first. If it still refuses, ask an admin whether 'ada' is"
+                  + " disabled. (HTTP 409)"),
+          CliCommand.lines(refused, OperatorCommand.PLAIN),
+          path);
+    }
   }
 
   @Test

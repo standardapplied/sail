@@ -89,4 +89,26 @@ class AgentLogStreamerWiringTest {
           }
         });
   }
+
+  @Test
+  void aMethodOtherThanGetOfTheStreamIsRefusedInTheStreamsOwnEnvelope(@TempDir Path tmp)
+      throws Exception {
+    try (var server = server(tmp)) {
+      server.start();
+      var response =
+          HttpClient.newHttpClient()
+              .send(
+                  HttpRequest.newBuilder(
+                          URI.create("http://127.0.0.1:" + server.port() + "/v1/runs/nope/stream"))
+                      .header("Authorization", "Bearer tok")
+                      .POST(HttpRequest.BodyPublishers.noBody())
+                      .build(),
+                  HttpResponse.BodyHandlers.ofString());
+
+      assertEquals(405, response.statusCode());
+      assertEquals(
+          "{\"code\": \"method_not_allowed\", \"message\": \"Method not allowed\"}",
+          response.body());
+    }
+  }
 }

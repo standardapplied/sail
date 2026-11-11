@@ -7,7 +7,6 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,7 +14,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -127,10 +125,10 @@ class AgentLogStreamerTest {
     var out = new CapturingExchange("/v1/runs/r1/stream").as("raj", "member");
 
     streamer(
-            id -> Optional.of(run("node-a", "review", "/home/dev/.sail/runs/r1/agent.log")),
-            id -> Optional.of("uday"),
-            "node-a")
-        .handle(out);
+        id -> Optional.of(run("node-a", "review", "/home/dev/.sail/runs/r1/agent.log")),
+        id -> Optional.of("uday"),
+        "node-a")
+        .stream(out, "r1");
 
     assertEquals(403, out.status);
     assertTrue(out.body().contains("forbidden_not_assignee"), out.body());
@@ -139,34 +137,11 @@ class AgentLogStreamerTest {
   }
 
   @Test
-  void aCallerRefusedAtTheDoorIsToldTheRemedyAsData() throws Exception {
-    var out = new CapturingExchange("/v1/runs/r1/stream");
-
-    new AgentLogStreamer(
-            exchange -> {
-              throw CliOperator.unplaced("ada");
-            },
-            id -> Optional.of(runOn("node-a")),
-            id -> Optional.empty(),
-            () -> "node-a")
-        .handle(out);
-
-    assertEquals(409, out.status);
-    assertEquals(
-        "{\"code\": \"conflict\", \"message\": \"This box does not know its FDE's role ('ada'),"
-            + " so it cannot tell what you may do.\", \"action\": \"Run 'sync' first. If it still"
-            + " refuses, ask an admin whether 'ada' is disabled.\", \"remedy\": [{\"text\": \"Run"
-            + " '\"}, {\"run\": \"sail\", \"verb\": \"sync\", \"args\": []}, {\"text\": \"' first."
-            + " If it still refuses, ask an admin whether 'ada' is disabled.\"}], \"field_errors\":"
-            + " []}",
-        out.body());
-  }
-
-  @Test
   void streamLetsTheRunSpecAssigneePastThePolicyGate() throws Exception {
     var out = new CapturingExchange("/v1/runs/r1/stream").as("uday", "member");
 
-    streamer(id -> Optional.of(run("node-a", "")), id -> Optional.of("uday"), "node-a").handle(out);
+    streamer(id -> Optional.of(run("node-a", "")), id -> Optional.of("uday"), "node-a").stream(
+        out, "r1");
 
     assertEquals(404, out.status);
     assertTrue(out.body().contains("This run has no log file."), out.body());
@@ -176,7 +151,8 @@ class AgentLogStreamerTest {
   void streamLetsAnAdminPastThePolicyGate() throws Exception {
     var out = new CapturingExchange("/v1/runs/r1/stream").as("ops", "admin");
 
-    streamer(id -> Optional.of(run("node-a", "")), id -> Optional.of("uday"), "node-a").handle(out);
+    streamer(id -> Optional.of(run("node-a", "")), id -> Optional.of("uday"), "node-a").stream(
+        out, "r1");
 
     assertEquals(404, out.status);
     assertTrue(out.body().contains("This run has no log file."), out.body());
@@ -186,7 +162,7 @@ class AgentLogStreamerTest {
   void handleRefusesAForeignRunWithA409AndNames() throws Exception {
     var out = new CapturingExchange("/v1/runs/r1/stream").as("ops", "admin");
 
-    streamer(id -> Optional.of(runOn("node-b")), "node-a").handle(out);
+    streamer(id -> Optional.of(runOn("node-b")), "node-a").stream(out, "r1");
 
     assertEquals(409, out.status);
     assertEquals(
@@ -201,9 +177,8 @@ class AgentLogStreamerTest {
     var out = new CapturingExchange("/v1/runs/r1/stream").as("ops", "admin");
 
     streamer(
-            id -> Optional.of(run("node-b", "review", "/home/dev/.sail/runs/r1/agent.log")),
-            "node-a")
-        .handle(out);
+        id -> Optional.of(run("node-b", "review", "/home/dev/.sail/runs/r1/agent.log")), "node-a")
+        .stream(out, "r1");
 
     assertEquals(409, out.status);
     assertTrue(out.body().contains("run_on_other_node"), out.body());
@@ -217,8 +192,8 @@ class AgentLogStreamerTest {
             .scoped(ProjectScope.of(List.of("nautilus")));
     var unknown = new CapturingExchange("/v1/runs/r1/stream").as("sam", "admin");
 
-    streamer(id -> Optional.of(runOn("node-b")), "node-a").handle(outside);
-    streamer(id -> Optional.empty(), "node-a").handle(unknown);
+    streamer(id -> Optional.of(runOn("node-b")), "node-a").stream(outside, "r1");
+    streamer(id -> Optional.empty(), "node-a").stream(unknown, "r1");
 
     assertEquals(404, outside.status);
     assertEquals("{\"code\": \"run_not_found\", \"message\": \"No run 'r1'.\"}", outside.body());
@@ -232,7 +207,7 @@ class AgentLogStreamerTest {
             .as("sam", "admin")
             .scoped(ProjectScope.of(List.of("acme")));
 
-    streamer(id -> Optional.of(runOn("node-b")), "node-a").handle(inside);
+    streamer(id -> Optional.of(runOn("node-b")), "node-a").stream(inside, "r1");
 
     assertEquals(409, inside.status);
     assertTrue(inside.body().contains("run_on_other_node"), inside.body());
@@ -242,7 +217,7 @@ class AgentLogStreamerTest {
   void handleReturns404ForAnUnknownRun() throws Exception {
     var out = new CapturingExchange("/v1/runs/nope/stream");
 
-    streamer(id -> Optional.empty(), "node-a").handle(out);
+    streamer(id -> Optional.empty(), "node-a").stream(out, "nope");
 
     assertEquals(404, out.status);
     assertTrue(out.body().contains("run_not_found"), out.body());
@@ -270,12 +245,12 @@ class AgentLogStreamerTest {
                   "",
                   "sail-agent-" + id));
       var before = new CapturingExchange("/v1/runs/" + id + "/stream").as("ops", "admin");
-      streamer(runs::findById, "node-a").handle(before);
+      streamer(runs::findById, "node-a").stream(before, id);
       assertEquals(409, before.status, "no box's run yet");
 
       runs.stamp("node-a", runs.unacknowledged());
       var after = new CapturingExchange("/v1/runs/" + id + "/stream").as("ops", "admin");
-      streamer(runs::findById, "node-a").handle(after);
+      streamer(runs::findById, "node-a").stream(after, id);
 
       assertEquals(404, after.status, after.body());
       assertTrue(after.body().contains("This run has no log file."), after.body());
@@ -286,25 +261,10 @@ class AgentLogStreamerTest {
   void handleFailsClosedOnABlankNodeRun() throws Exception {
     var out = new CapturingExchange("/v1/runs/r1/stream").as("ops", "admin");
 
-    streamer(id -> Optional.of(runOn("")), "node-a").handle(out);
+    streamer(id -> Optional.of(runOn("")), "node-a").stream(out, "r1");
 
     assertEquals(409, out.status);
     assertTrue(out.body().contains("run_on_other_node"), out.body());
-  }
-
-  @Test
-  void extractRunIdFromValidPath() {
-    assertEquals("run-1", AgentLogStreamer.extractRunId("/v1/runs/run-1/stream"));
-  }
-
-  @Test
-  void extractRunIdFromShortPath() {
-    assertNull(AgentLogStreamer.extractRunId("/v1/health"));
-  }
-
-  @Test
-  void extractRunIdFromInvalidPrefix() {
-    assertNull(AgentLogStreamer.extractRunId("/v1/other/run-1/stream"));
   }
 
   @Test

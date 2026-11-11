@@ -203,11 +203,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             call -> ApiResponse.from(operations.run(call.param("run")))),
         route(GET, "/v1/runs/{run}/log", Gate.decides(Action.OPERATE_RUN), this::runLog),
         route(POST, "/v1/runs/{run}/stop", Gate.decides(Action.OPERATE_RUN), this::stopRun),
-        route(
-            Route.ANY,
-            "/v1/runs/{run}/stream",
-            Gate.decides(Action.OPERATE_RUN),
-            this::streamRunLog),
+        route(GET, "/v1/runs/{run}/stream", Gate.decides(Action.OPERATE_RUN), this::streamRunLog),
+        route(Route.ANY, "/v1/runs/{run}/stream", unserved, ApiRouter::refuseStreamMethod),
         route(GET, "/v1/projects", reads, call -> ApiResponse.from(operations.projects())),
         route(POST, "/v1/projects", journal, this::createProject),
         route(GET, PROJECT, reads, call -> ApiResponse.from(operations.project(call.project()))),
@@ -821,7 +818,12 @@ public final class ApiRouter implements HttpHandler, RouteTable {
 
   /** The run's log as a stream, which {@link AgentLogStreamer} answers and closes itself. */
   private ApiResponse streamRunLog(Call call) throws IOException {
-    agentStreamer.handle(call.exchange());
+    agentStreamer.stream(call.exchange(), call.param("run"));
+    return null;
+  }
+
+  private static ApiResponse refuseStreamMethod(Call call) throws IOException {
+    AgentLogStreamer.refuseMethod(call.exchange());
     return null;
   }
 
