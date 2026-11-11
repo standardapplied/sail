@@ -88,7 +88,7 @@ class SkillShareIT extends AbstractIncusIT {
               0,
               List.of("Codex CLI"),
               "not synced",
-              "skill add ~/.agents/skills/java"),
+              "project skills add --container /home/dev/.agents/skills/java -p " + CONTAINER),
           before);
 
       var shared =

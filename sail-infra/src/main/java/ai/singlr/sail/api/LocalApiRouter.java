@@ -501,24 +501,20 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
   }
 
   /**
-   * Shares a folder in the container as a skill. Sharing is a person's: a shared skill is
-   * instructions every other agent and every other box will follow, so a run's credential, whatever
-   * its lane, is refused it, and the box credential writes as the box's person, whose write the
-   * journal decides.
+   * Shares a folder in the container as a skill, as the journal decides the write: a shared skill
+   * is instructions every other agent and every other box will follow, so no credential in a
+   * container may share one, a run's or the box's; a person shares it from outside.
    */
   private ApiResponse share(LocalApiRequest request, Caller caller, Map<String, String> path)
       throws IOException, InterruptedException, TimeoutException {
     var form = request.form();
-    var folder = Objects.requireNonNullElse(form.get("folder"), "");
-    requirePerson(
-        caller,
-        "share",
-        Remedy.of(
-            "Ask them to run 'skill add ",
-            folder.isBlank() ? "<folder>" : folder,
-            "' in their own session."));
     return ApiResponse.ok(
-        operations.skills().shareFromContainer(path.get(PROJECT), folder, form.get("name")));
+        operations
+            .skills()
+            .shareFromContainer(
+                path.get(PROJECT),
+                Objects.requireNonNullElse(form.get("folder"), ""),
+                form.get("name")));
   }
 
   /** One shared skill's {@code SKILL.md}. */
@@ -529,34 +525,12 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
         Map.of("name", name, "skill_md", operations.skills().manifest(path.get(PROJECT), name)));
   }
 
-  /** Stops sharing one skill, which like sharing is a person's. */
+  /** Stops sharing one skill, which like sharing the journal refuses every container credential. */
   private ApiResponse unshare(LocalApiRequest request, Caller caller, Map<String, String> path)
       throws IOException, InterruptedException, TimeoutException {
     var project = path.get(PROJECT);
     var name = path.get("name");
-    requirePerson(
-        caller,
-        "remove",
-        Remedy.of(
-            "Ask them to run 'skill rm ",
-            name,
-            "' in their own session, or '",
-            Remedy.sail("project skills rm", name, "-p", project),
-            "' on the devbox."));
     return ApiResponse.ok(Map.of("name", name, "files", operations.skills().remove(project, name)));
-  }
-
-  /**
-   * Refuses a run's credential a write only a person makes, naming the line the person types: in
-   * their own session in the container, or, for a removal, on the devbox too.
-   */
-  private static void requirePerson(Caller caller, String verb, Remedy remedy) {
-    if (caller instanceof Caller.Run) {
-      throw new ApiException(
-          ErrorCode.FORBIDDEN,
-          "A skill is shared by a person, so an agent sail launched may not " + verb + " one.",
-          remedy);
-    }
   }
 
   private ApiResponse specs(LocalApiRequest request, Caller caller, Map<String, String> path) {

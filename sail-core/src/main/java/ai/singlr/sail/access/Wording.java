@@ -106,23 +106,28 @@ final class Wording {
 
   /**
    * Where a person takes {@code action}, which the credential in a project container may not: on
-   * the host, naming the command for a spec's status or assignee, or in Mast. The command is words,
-   * not a command a door renders for its reader: the reader is in the container, and the command
-   * runs on the host.
+   * the host, naming the command for a spec's status or assignee and for a project's skills, or in
+   * Mast. The command is rendered as words, not kept as a command a door renders for its reader:
+   * the reader is in the container, and the command runs on the host.
    */
   private static Remedy fromOutside(Action action, Resource.Kind kind, Resource resource) {
     var id = resource == null ? "<id>" : resource.id();
     var command =
         switch (action) {
           case APPROVE ->
-              kind == Resource.Kind.SPEC ? "spec update " + id + " --status <status>" : null;
-          case ASSIGN -> "spec update " + id + " --assignee <fde>";
+              kind == Resource.Kind.SPEC
+                  ? Remedy.sail("spec update", id, "--status", "<status>")
+                  : null;
+          case ASSIGN -> Remedy.sail("spec update", id, "--assignee", "<fde>");
+          case SHARE -> Remedy.sail("project skills add", "--container", "<folder>", "-p", id);
           default -> null;
         };
     return Remedy.of(
         command == null
             ? "Do it from outside the container: with sail on the host, or in Mast."
-            : "Do it from outside the container: 'sail " + command + "' on the host, or Mast.");
+            : "Do it from outside the container: '"
+                + Remedy.of(command).plain()
+                + "' on the host, or Mast.");
   }
 
   /**

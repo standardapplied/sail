@@ -167,6 +167,8 @@ class RouteGateSweepTest {
               "DELETE /v1/projects/{project}/files/{path...} the journal decides",
               "* /v1/projects/{project}/files serves nothing",
               "* /v1/projects/{project}/files/{path...} serves nothing",
+              "POST /v1/projects/{project}/skills the journal decides",
+              "DELETE /v1/projects/{project}/skills/{name} the journal decides",
               "POST /v1/projects/{project}/serve decides SERVE",
               "DELETE /v1/projects/{project}/serve decides SERVE",
               "GET /v1/projects/{project}/ports reads in scope",

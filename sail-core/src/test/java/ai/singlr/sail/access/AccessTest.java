@@ -1151,10 +1151,15 @@ class AccessTest {
                   new Refusal(
                       Refusal.Kind.LANE_FORBIDDEN,
                       "The credential in a project container cannot " + row.act() + ".",
-                      row.action() == Action.ASSIGN
-                          ? "Do it from outside the container: 'sail spec update auth --assignee <fde>'"
-                              + " on the host, or Mast."
-                          : FROM_OUTSIDE))
+                      switch (row.action()) {
+                        case ASSIGN ->
+                            "Do it from outside the container: 'sail spec update auth --assignee"
+                                + " <fde>' on the host, or Mast.";
+                        case SHARE ->
+                            "Do it from outside the container: 'sail project skills add --container"
+                                + " <folder> -p acme' on the host, or Mast.";
+                        default -> FROM_OUTSIDE;
+                      }))
               : refused(
                   Refusal.Kind.LANE_FORBIDDEN,
                   "Agent principals cannot " + row.act() + ".",

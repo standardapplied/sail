@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.SailSkills;
@@ -62,7 +63,8 @@ public final class SkillOperations {
    * @param files how many files its folder holds; for a local one, unknown and 0
    * @param agents the agents that see it, by display name
    * @param status {@code ok}, {@code invalid: <why>}, or for a local one {@code not synced}
-   * @param share for a local one, the command that shares it; otherwise empty
+   * @param share for a local one, the arguments of the host sail command that shares it from
+   *     outside the container; otherwise empty
    */
   public record Row(
       String name, Kind kind, int files, List<String> agents, String status, String share)
@@ -163,7 +165,7 @@ public final class SkillOperations {
     }
     local.entrySet().stream()
         .sorted(Map.Entry.comparingByKey())
-        .map(entry -> local(entry.getKey(), entry.getValue()))
+        .map(entry -> local(project, entry.getKey(), entry.getValue()))
         .forEach(rows::add);
     return new Rows(List.copyOf(rows), Optional.empty());
   }
@@ -270,7 +272,11 @@ public final class SkillOperations {
     };
   }
 
-  private static Row local(String name, List<Harness> harnesses) {
+  /**
+   * A skill only {@code harnesses} of {@code project}'s container hold, with the command a person
+   * outside the container shares it by: nothing inside it may.
+   */
+  private static Row local(String project, String name, List<Harness> harnesses) {
     var first = harnesses.getFirst();
     return new Row(
         name,
@@ -278,6 +284,11 @@ public final class SkillOperations {
         0,
         harnesses.stream().map(Harness::displayName).toList(),
         "not synced",
-        "skill add ~/" + first.skillFolder(name));
+        "project skills add --container "
+            + ContainerExec.DEV_HOME
+            + "/"
+            + first.skillFolder(name)
+            + " -p "
+            + project);
   }
 }

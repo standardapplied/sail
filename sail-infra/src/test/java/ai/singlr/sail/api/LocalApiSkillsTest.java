@@ -8,9 +8,9 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
-import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.TestDefinitions;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
@@ -23,6 +23,10 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -37,8 +41,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The socket's skills routes: who may list, read, share and remove a project's skills from inside
- * its container, and which project a run reaches.
+ * The skills routes: who may list and read a project's skills from inside its container, and which
+ * projects a run reaches; that no credential in a container shares or removes one; and that a
+ * person shares a folder of the container, and removes a skill, from outside it over the web API.
  */
 class LocalApiSkillsTest {
 
@@ -47,13 +52,12 @@ class LocalApiSkillsTest {
       "---\nname: java\ndescription: Java standards.\n---\nApply them.\n";
   private static final String SKILLS = "/v1/projects/acme/skills";
   private static final String SCOPED = "sailbox_scoped_to_acme";
-  private static final String PERSON_ONLY =
-      "A skill is shared by a person, so an agent sail launched may not %s one.";
 
   @TempDir Path dir;
   private Sqlite db;
   private FileStore files;
   private ScriptedShellExecutor shell;
+  private TestOperations operations;
   private SocketDoor router;
 
   @BeforeEach
@@ -79,23 +83,90 @@ class LocalApiSkillsTest {
                       case "zeta" -> Optional.of(zeta);
                       default -> Optional.empty();
                     }));
-    router =
-        new SocketDoor(
-            new TestOperations() {
-              @Override
-              public SkillOperations skills() {
-                return skills;
-              }
+    operations =
+        new TestOperations() {
+          @Override
+          public SkillOperations skills() {
+            return skills;
+          }
 
-              @Override
-              public Optional<Actor> boxActorForCredential(String credential) {
-                return SCOPED.equals(credential)
-                    ? Optional.of(
-                        new Actor(TestOperations.BOX_HANDLE, Role.MEMBER, Actor.Lane.CONTAINER)
-                            .withScope(ProjectScope.of(List.of("acme"))))
-                    : super.boxActorForCredential(credential);
-              }
-            });
+          @Override
+          public Optional<Actor> boxActorForCredential(String credential) {
+            return SCOPED.equals(credential)
+                ? Optional.of(
+                    new Actor(TestOperations.BOX_HANDLE, Role.MEMBER, Actor.Lane.CONTAINER)
+                        .withScope(ProjectScope.of(List.of("acme"))))
+                : super.boxActorForCredential(credential);
+          }
+        };
+    router = new SocketDoor(operations);
+  }
+
+  /** The web API over the same box, every request made as {@code person}. */
+  private SailApiServer web(Actor person) throws IOException {
+    var server =
+        new SailApiServer(
+            "127.0.0.1",
+            0,
+            operations,
+            exchange -> exchange.setAttribute(ApiAuth.ACTOR, person),
+            null,
+            null,
+            null);
+    server.start();
+    return server;
+  }
+
+  private static HttpResponse<String> send(
+      SailApiServer server, String method, String path, String json) throws Exception {
+    var request =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
+            .header("Content-Type", "application/json")
+            .method(
+                method,
+                json == null
+                    ? HttpRequest.BodyPublishers.noBody()
+                    : HttpRequest.BodyPublishers.ofString(json))
+            .build();
+    try (var client = HttpClient.newHttpClient()) {
+      return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+  }
+
+  /**
+   * A person outside the container shares a folder that lives in it over the web API, as Mast does,
+   * and removes the skill; a viewer is read-only there, as everywhere.
+   */
+  @Test
+  void aPersonSharesAFolderOfTheContainerOverTheWebAndAViewerIsReadOnly() throws Exception {
+    containerHolds(JAVA_MD);
+
+    try (var member = web(new Actor("uday", Role.MEMBER, Actor.Lane.API));
+        var viewer = web(new Actor("vic", Role.VIEWER, Actor.Lane.API))) {
+      var folder = "{\"folder\": \"/home/dev/.agents/skills/java\"}";
+      var refused = send(viewer, "POST", SKILLS, folder);
+      assertEquals(403, refused.statusCode(), refused.body());
+      assertEquals(
+          "Your credential is read-only and cannot share files and skills in projects.",
+          ((Map<?, ?>) YamlUtil.parseMap(refused.body()).get("error")).get("message"));
+      assertEquals(List.of(), shared());
+
+      var shared = send(member, "POST", SKILLS, folder);
+      assertEquals(200, shared.statusCode(), shared.body());
+      assertEquals("java", YamlUtil.parseMap(shared.body()).get("name"));
+      assertEquals(List.of(".sail/skills/java/SKILL.md"), shared());
+      assertEquals(403, send(viewer, "DELETE", SKILLS + "/java", null).statusCode());
+
+      var removed = send(member, "DELETE", SKILLS + "/java", null);
+      assertEquals(200, removed.statusCode(), removed.body());
+      assertEquals(1, YamlUtil.parseMap(removed.body()).get("files"));
+      assertEquals(List.of(), shared());
+      var again = send(member, "DELETE", SKILLS + "/java", null);
+      assertEquals(404, again.statusCode(), again.body());
+      assertEquals(
+          "No skill 'java' is shared on acme.",
+          ((Map<?, ?>) YamlUtil.parseMap(again.body()).get("error")).get("message"));
+    }
   }
 
   @AfterEach
@@ -109,11 +180,6 @@ class LocalApiSkillsTest {
 
   private static String message(ApiResponse response) {
     return (String) assertInstanceOf(Map.class, response.body().get("error")).get("message");
-  }
-
-  private static String remedy(ApiResponse response) {
-    var error = assertInstanceOf(Map.class, response.body().get("error"));
-    return Remedy.fromMaps((List<?>) error.get("remedy")).plain();
   }
 
   private void shareJava() {
@@ -197,46 +263,52 @@ class LocalApiSkillsTest {
           "The credential in a project container cannot share files and skills in projects.",
           message(refused));
       assertEquals(
-          "Do it from outside the container: with sail on the host, or in Mast.",
+          "Do it from outside the container: 'sail project skills add --container <folder> -p"
+              + " acme' on the host, or Mast.",
           assertInstanceOf(Map.class, refused.body().get("error")).get("action"));
     }
     assertEquals(List.of(".sail/skills/java/SKILL.md"), shared());
   }
 
+  /**
+   * No run shares or removes a skill: the journal refuses a work agent by its lane and a room agent
+   * as read-only, in the words every other write of theirs hears.
+   */
   @Test
   void aRunOfAnyLaneMayNotShareOrRemoveASkill() {
     shareJava();
     containerHolds(JAVA_MD);
+    var refusals =
+        Map.of(
+            TestOperations.RUN_CREDENTIAL,
+            List.of(
+                "agent_lane_forbidden",
+                "Agent principals cannot share files and skills in projects.",
+                "Only an operator lane (CLI or API token) may do this."),
+            TestOperations.ROOM_RUN_CREDENTIAL,
+            List.of(
+                "read_only_credential",
+                "Your credential is read-only and cannot share files and skills in projects.",
+                "Ask an admin for a member or admin credential."));
 
-    for (var credential :
-        List.of(TestOperations.RUN_CREDENTIAL, TestOperations.ROOM_RUN_CREDENTIAL)) {
-      var share = router.ask("POST", SKILLS, credential, "folder=%2Fhome%2Fdev%2Fdrafts%2Flint");
+    for (var refused : refusals.entrySet()) {
+      var credential = refused.getKey();
+      var share =
+          router.ask("POST", SKILLS, credential, "folder=%2Fhome%2Fdev%2F.agents%2Fskills%2Fjava");
       var remove = router.ask("DELETE", SKILLS + "/java", credential, "");
 
-      assertEquals(403, share.status(), credential);
-      assertEquals(PERSON_ONLY.formatted("share"), message(share));
-      assertEquals(
-          "Ask them to run 'skill add /home/dev/drafts/lint' in their own session.",
-          assertInstanceOf(Map.class, share.body().get("error")).get("action"));
-      assertEquals(403, remove.status(), credential);
-      assertEquals(PERSON_ONLY.formatted("remove"), message(remove));
-      assertEquals(
-          "Ask them to run 'skill rm java' in their own session, or 'sail project skills rm java -p"
-              + " acme' on the devbox.",
-          remedy(remove));
+      for (var answer : List.of(share, remove)) {
+        var error = assertInstanceOf(Map.class, answer.body().get("error"));
+        assertEquals(403, answer.status(), credential);
+        assertEquals(
+            refused.getValue(),
+            List.of(error.get("code"), error.get("message"), error.get("action")),
+            credential);
+      }
     }
     assertEquals(List.of(".sail/skills/java/SKILL.md"), shared());
-    var unnamed = router.ask("POST", SKILLS, TestOperations.RUN_CREDENTIAL, "");
-    assertEquals(
-        "Ask them to run 'skill add <folder>' in their own session.",
-        assertInstanceOf(Map.class, unnamed.body().get("error")).get("action"));
   }
 
-  /**
-   * A run reads the skills of every project its person reads, as the table's Read says, and a
-   * scoped person's credential reaches only the projects they are granted: one outside is not
-   * there, and nothing is asked of its container.
-   */
   @Test
   void aRunReadsItsPersonsOtherProjectsSkillsAndAScopedPersonOnlyTheirs() {
     shareJava("zeta");

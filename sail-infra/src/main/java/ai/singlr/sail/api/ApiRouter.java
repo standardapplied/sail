@@ -246,6 +246,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(DELETE, PROJECT + "/files/{path...}", journal, this::removeFile),
         route(Route.ANY, PROJECT + "/files", unserved, this::unservedFile),
         route(Route.ANY, PROJECT + "/files/{path...}", unserved, this::unservedFile),
+        route(POST, PROJECT + "/skills", journal, this::shareSkill),
+        route(DELETE, PROJECT + "/skills/{name}", journal, this::unshareSkill),
         route(POST, PROJECT + "/serve", Gate.decides(Action.SERVE), this::serve),
         route(
             DELETE,
@@ -557,6 +559,29 @@ public final class ApiRouter implements HttpHandler, RouteTable {
    * {@code POST} brings the project's stack up and answers when every declared port listens or its
    * process exits, or {@code timeout} seconds (default 60) have passed.
    */
+  /**
+   * Shares the folder {@code folder}, a path inside the project's container, as skill {@code name}
+   * (the folder's own name when absent): the door a person outside the container shares one by,
+   * whose write the journal decides.
+   */
+  private ApiResponse shareSkill(Call call) throws Exception {
+    var body = call.body();
+    return ApiResponse.ok(
+        operations
+            .skills()
+            .shareFromContainer(
+                call.project(),
+                Objects.toString(body.get("folder"), ""),
+                Objects.toString(body.get("name"), null)));
+  }
+
+  /** Stops sharing the project's skill {@code name}, as the journal decides. */
+  private ApiResponse unshareSkill(Call call) throws IOException {
+    var name = call.param("name");
+    return ApiResponse.ok(
+        Map.of("name", name, "files", operations.skills().remove(call.project(), name)));
+  }
+
   private ApiResponse serve(Call call) throws Exception {
     var project = call.project();
     var timeout = call.query().getOrDefault("timeout", "60");

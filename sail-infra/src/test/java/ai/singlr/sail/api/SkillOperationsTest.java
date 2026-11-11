@@ -108,8 +108,14 @@ class SkillOperationsTest {
                 0,
                 List.of("Codex CLI"),
                 "not synced",
-                "skill add ~/.agents/skills/java"),
-            new Row("lint", Kind.LOCAL, 0, BOTH, "not synced", "skill add ~/.claude/skills/lint")),
+                "project skills add --container /home/dev/.agents/skills/java -p acme"),
+            new Row(
+                "lint",
+                Kind.LOCAL,
+                0,
+                BOTH,
+                "not synced",
+                "project skills add --container /home/dev/.claude/skills/lint -p acme")),
         rows.rows());
     assertEquals(Optional.empty(), rows.note());
   }
@@ -326,14 +332,14 @@ class SkillOperationsTest {
             "files", 0,
             "agents", List.of("Codex CLI"),
             "status", "not synced",
-            "share", "skill add ~/.agents/skills/java"),
+            "share", "project skills add --container /home/dev/.agents/skills/java -p acme"),
         new Row(
                 "java",
                 Kind.LOCAL,
                 0,
                 List.of("Codex CLI"),
                 "not synced",
-                "skill add ~/.agents/skills/java")
+                "project skills add --container /home/dev/.agents/skills/java -p acme")
             .toMap());
     var sail = new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", "").toMap();
     assertEquals(null, sail.get("share"));

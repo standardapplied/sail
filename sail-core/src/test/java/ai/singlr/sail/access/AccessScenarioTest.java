@@ -394,7 +394,8 @@ class AccessScenarioTest {
             new Refusal(
                 Refusal.Kind.LANE_FORBIDDEN,
                 "The credential in a project container cannot share files and skills in projects.",
-                "Do it from outside the container: with sail on the host, or in Mast."));
+                "Do it from outside the container: 'sail project skills add --container <folder>"
+                    + " -p acme' on the host, or Mast."));
 
     assertEquals(
         Optional.of(

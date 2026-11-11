@@ -127,14 +127,12 @@ class OneDecisionSweepTest {
   private static final String RULES = "ai/singlr/sail/authority/";
   private static final String STORES = "ai/singlr/sail/store/";
   private static final String SYNC_SERVER = "ai/singlr/sail/sync/SyncRpcServer";
-  private static final String OWN_WORK = "sail-agents-act-on-their-own-work";
 
   /** Every member that still reads a role, a lane or a scope, and why it may. */
   private static final Map<String, String> ALLOWED = allowed();
 
   private static Map<String, String> allowed() {
     var allowed = new TreeMap<String, String>();
-    allowed.put(API + "LocalApiRouter#requirePerson", OWN_WORK);
     allowed.put(
         API + "Event$Publisher#of", "fact: the role and lane an event's publisher acted on");
     allowed.put(API + "LocalApiRouter#events", "fact: only a run credential has a run to narrate");

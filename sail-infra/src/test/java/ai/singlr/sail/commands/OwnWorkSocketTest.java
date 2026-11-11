@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.api.ApiResponse;
@@ -13,8 +14,10 @@ import ai.singlr.sail.api.SocketDoor;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.RunStore;
+import java.io.ByteArrayInputStream;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -42,6 +45,11 @@ class OwnWorkSocketTest {
       " | An agent acts only on the work sail launched it for; draft a follow-up spec for anything"
           + " else.";
 
+  private static final String CANNOT_SHARE =
+      "403 agent_lane_forbidden The credential in a project container cannot share files and"
+          + " skills in projects. | Do it from outside the container: 'sail project skills add"
+          + " --container <folder> -p acme' on the host, or Mast.";
+
   private static final String CANNOT_APPROVE =
       "403 agent_lane_forbidden The credential in a project container cannot approve specs."
           + " | Do it from outside the container: 'sail spec update <id> --status <status>' on the"
@@ -53,6 +61,15 @@ class OwnWorkSocketTest {
   @BeforeEach
   void setUp() throws Exception {
     fleet = DoorFleet.open(tempDir);
+    Acting.system(
+        () ->
+            new FileStore(fleet.db())
+                .put(
+                    "acme",
+                    ".sail/skills/java/SKILL.md",
+                    new ByteArrayInputStream(
+                        "---\nname: java\ndescription: Java.\n---\n".getBytes(UTF_8)),
+                    0644));
   }
 
   @AfterEach
@@ -72,6 +89,7 @@ class OwnWorkSocketTest {
             + " spec only while it is unassigned.",
         said(socket("eng", "PUT", "/v1/specs/e1", "assignee=client")));
     assertEquals(CANNOT_APPROVE, said(socket("eng", "PUT", "/v1/specs/e1", "status=done")));
+    assertEquals(CANNOT_SHARE, said(socket("eng", "DELETE", "/v1/projects/acme/skills/java", "")));
     assertEquals(
         "allowed", said(socket("eng", "PUT", "/v1/specs/e1", "title=retitled")), "control");
   }
@@ -91,6 +109,7 @@ class OwnWorkSocketTest {
             socket("uday", "POST", "/v1/specs", "id=u-ready&project=acme&title=u&status=pending")));
     assertEquals(
         CANNOT_APPROVE, said(socket("uday", "PUT", "/v1/specs/a2", "status=archived")), "archive");
+    assertEquals(CANNOT_SHARE, said(socket("uday", "DELETE", "/v1/projects/acme/skills/java", "")));
     assertEquals(
         "allowed",
         said(socket("uday", "POST", "/v1/specs", "id=u-draft&project=acme&title=u")),
