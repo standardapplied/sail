@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -199,7 +200,7 @@ class SyncBlobTest {
                 "main",
                 null,
                 new Actor("viewer", Role.VIEWER, Actor.Lane.SYNC),
-                FdeRoster.EMPTY,
+                List::of,
                 SyncTransitionSink.NONE,
                 "1.0.0")
             .serve(input, OutputStream.nullOutputStream());
@@ -456,7 +457,7 @@ class SyncBlobTest {
           new SyncRpcServer(
                   served,
                   new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
-                  FdeRoster.EMPTY,
+                  List::of,
                   SyncTransitionSink.NONE,
                   new ChangeLog(main.db)::headsAfter,
                   "1.0.0")

@@ -187,7 +187,7 @@ class ScopedSyncServerTest {
   void aScopedFdeWithNoGrantPullsNothingButItsOwnRosterEntry() throws Exception {
     var round = roundAs(tokenOf("bob"));
 
-    assertEquals(ProjectScope.none(), round.scope());
+    assertEquals(ProjectScope.of(List.of()), round.scope());
     assertEquals(0L, count("SELECT count(*) FROM change_log"));
     assertEquals(
         List.of(entry("bob", "bob", "bob@x.dev", "member")),

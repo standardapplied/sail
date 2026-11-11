@@ -53,7 +53,6 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.ConflictMerge;
-import ai.singlr.sail.sync.FdeRoster;
 import ai.singlr.sail.sync.MainReplica;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
@@ -1056,13 +1055,7 @@ class SailOperationsSeamTest {
         target ->
             channel(
                 SyncRpcServer.over(
-                    main.db,
-                    "main",
-                    null,
-                    session,
-                    FdeRoster.EMPTY,
-                    SyncTransitionSink.NONE,
-                    "1.0.0")),
+                    main.db, "main", null, session, List::of, SyncTransitionSink.NONE, "1.0.0")),
         SyncOperations.PLAIN_NOTICES);
   }
 

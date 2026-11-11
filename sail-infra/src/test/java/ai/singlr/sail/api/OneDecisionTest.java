@@ -31,7 +31,6 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
-import ai.singlr.sail.sync.FdeRoster;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncSession;
@@ -301,7 +300,7 @@ class OneDecisionTest {
             "main",
             null,
             new Actor("ada", Role.MEMBER, Actor.Lane.SYNC),
-            FdeRoster.EMPTY,
+            List::of,
             SyncTransitionSink.NONE,
             "1.0.0");
     try (var link = SyncBox.connect(server, node)) {

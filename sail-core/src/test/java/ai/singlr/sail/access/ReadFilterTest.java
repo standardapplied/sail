@@ -28,7 +28,7 @@ class ReadFilterTest {
   private static final Actor OF_ALPHA =
       new Actor("sam", Role.MEMBER, Actor.Lane.API).withScope(ProjectScope.of(List.of("alpha")));
   private static final Actor OF_NOTHING =
-      new Actor("nia", Role.MEMBER, Actor.Lane.API).withScope(ProjectScope.none());
+      new Actor("nia", Role.MEMBER, Actor.Lane.API).withScope(ProjectScope.of(List.of()));
 
   /** The project of each row id; a row the map does not hold is of no known project. */
   private static final Function<String, String> PROJECT =
@@ -64,7 +64,8 @@ class ReadFilterTest {
 
     assertEquals(rows, ReadFilter.readable(UNRESTRICTED, rows, filed));
     assertEquals(
-        rows, ReadFilter.readable(Actors.SYSTEM.withScope(ProjectScope.none()), rows, filed));
+        rows,
+        ReadFilter.readable(Actors.SYSTEM.withScope(ProjectScope.of(List.of())), rows, filed));
     assertEquals(Optional.of("b1"), ReadFilter.readable(Actors.MAIN, Optional.of("b1"), filed));
     assertEquals(List.of(), asked);
     assertEquals(List.of(), ReadFilter.readable(OF_ALPHA, rows, filed));
@@ -82,7 +83,7 @@ class ReadFilterTest {
             Actors.AGENT.withScope(ProjectScope.of(List.of("alpha"))),
             Actors.ROOM.withScope(ProjectScope.of(List.of("bravo"))),
             Actors.OWNER_SYNC.withScope(ProjectScope.of(List.of("alpha"))),
-            Actors.SYSTEM.withScope(ProjectScope.none()));
+            Actors.SYSTEM.withScope(ProjectScope.of(List.of())));
     for (var actor : principals) {
       for (var project : new String[] {"alpha", "bravo", null}) {
         assertEquals(

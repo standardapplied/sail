@@ -753,7 +753,7 @@ class EventAuthorityTest {
     assertEquals(
         Optional.empty(),
         rule.decide(
-            OWNER_API.withScope(ProjectScope.none()),
+            OWNER_API.withScope(ProjectScope.of(List.of())),
             BOARD,
             rule.subject("acme", null, null),
             false));

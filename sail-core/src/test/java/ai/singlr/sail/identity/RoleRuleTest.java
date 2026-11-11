@@ -219,7 +219,7 @@ class RoleRuleTest {
 
     assertEquals(
         Optional.of(new Actor("mady", Role.MEMBER, Actor.Lane.SYNC).withScope(alpha)),
-        rule.principal(Credential.person("mady", Actor.Lane.SYNC)));
+        rule.principal(new Credential.Person("mady", Role.ADMIN, Actor.Lane.SYNC)));
     assertEquals(
         Optional.of(new Actor("mady", Role.VIEWER, Actor.Lane.API).withScope(alpha)),
         rule.principal(Credential.token("mady", "viewer")));
@@ -231,7 +231,7 @@ class RoleRuleTest {
         rule.principal(Credential.token("raj", "admin")));
     assertEquals(
         Optional.of(new Actor("raj", Role.ADMIN, Actor.Lane.CLI)),
-        rule.principal(Credential.person("raj", Actor.Lane.CLI)));
+        rule.principal(new Credential.Person("raj", Role.ADMIN, Actor.Lane.CLI)));
     var raj = sessions.create(roster.byHandle("raj").orElseThrow().id(), MINUTE).token();
     assertEquals(
         Optional.of(new Actor("raj", Role.ADMIN, Actor.Lane.API)),
@@ -245,7 +245,7 @@ class RoleRuleTest {
     var gone = new AuthSessionStore.SessionInfo("no-such-fde", null, null);
     db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'mady'");
 
-    assertEquals(Optional.empty(), rule.principal(Credential.person(" ", Actor.Lane.API)));
+    assertEquals(Optional.empty(), rule.principal(Credential.person(" ")));
     assertEquals(Optional.empty(), rule.principal(Credential.token("mady", "member")));
     assertEquals(Optional.empty(), rule.principal(Credential.session(gone, Actor.Lane.SYNC)));
     var stranger = roster.add("stranger", null, null, "admin");
@@ -270,7 +270,7 @@ class RoleRuleTest {
 
     assertEquals(
         Optional.of(new Actor("uday", Role.MEMBER, Actor.Lane.CLI).withScope(alpha)),
-        node.principal(Credential.box(Actor.Lane.CLI)));
+        node.principal(Credential.box()));
     assertEquals(
         Optional.of(new Actor("uday", Role.VIEWER, Actor.Lane.API).withScope(alpha)),
         node.principal(Credential.hostToken("viewer")));
@@ -284,14 +284,14 @@ class RoleRuleTest {
         "and no more than it was minted with");
     assertEquals(
         Optional.of(new Actor("uday", Role.ADMIN, Actor.Lane.CLI)),
-        new RoleRule(() -> MAIN, roster).principal(Credential.box(Actor.Lane.CLI)),
+        new RoleRule(() -> MAIN, roster).principal(Credential.box()),
         "main's own FDE is its admin, never scoped");
     assertEquals(
         Optional.of(new Actor(null, Role.ADMIN, Actor.Lane.CLI)),
-        new RoleRule(SyncConfig::unset, roster).principal(Credential.box(Actor.Lane.CLI)),
+        new RoleRule(SyncConfig::unset, roster).principal(Credential.box()),
         "a box with no sync handle has no FDE to be, and its root is an admin");
     var anonymous = new RoleRule(() -> new SyncConfig("node", "sail@main", null, "n"), roster);
-    assertEquals(Optional.empty(), anonymous.principal(Credential.box(Actor.Lane.CLI)));
+    assertEquals(Optional.empty(), anonymous.principal(Credential.box()));
     assertEquals(Optional.empty(), anonymous.principal(Credential.machine("member")));
   }
 

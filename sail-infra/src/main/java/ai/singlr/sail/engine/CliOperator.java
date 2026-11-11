@@ -31,7 +31,7 @@ public final class CliOperator {
   public static Actor of(SyncConfig config, FdeStore roster) {
     var roles = new RoleRule(() -> config, roster);
     return roles
-        .principal(RoleRule.Credential.box(Actor.Lane.CLI))
+        .principal(RoleRule.Credential.box())
         .orElseThrow(() -> unplaced(roles.boxFde().orElse(null)));
   }
 

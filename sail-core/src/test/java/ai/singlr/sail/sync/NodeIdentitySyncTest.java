@@ -173,8 +173,7 @@ class NodeIdentitySyncTest {
   @Test
   void mainsOwnFdeSyncsFromNoBoxButMain() throws IOException {
     var server =
-        SyncRpcServer.over(
-            main.db, "main", "ada", ADA, FdeRoster.EMPTY, SyncTransitionSink.NONE, "1.0.0");
+        SyncRpcServer.over(main.db, "main", "ada", ADA, List::of, SyncTransitionSink.NONE, "1.0.0");
 
     var refused =
         assertThrows(SyncTransportException.class, () -> SyncBox.connect(server, ada).close());

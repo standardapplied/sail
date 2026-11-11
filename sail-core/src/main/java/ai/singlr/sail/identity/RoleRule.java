@@ -50,11 +50,11 @@ public final class RoleRule {
   public sealed interface Credential {
 
     /**
-     * A person's own credential naming FDE {@code handle}, on {@code lane}, with their full role:
-     * the SSH gateway's key.
+     * A person's own credential naming FDE {@code handle}, with their full role, on the API lane
+     * its commands reach: the SSH gateway's key.
      */
-    static Credential person(String handle, Actor.Lane lane) {
-      return new Person(handle, Role.ADMIN, lane);
+    static Credential person(String handle) {
+      return new Person(handle, Role.ADMIN, Actor.Lane.API);
     }
 
     /** An API token bound to FDE {@code handle}, minted with the role {@code minted} names. */
@@ -68,11 +68,11 @@ public final class RoleRule {
     }
 
     /**
-     * The box's own person on {@code lane}, with their full role: the host CLI's root, the box
+     * The box's own person with their full role, on the CLI lane of its root: the host CLI, the box
      * credential in a project container, the terminal's blank token.
      */
-    static Credential box(Actor.Lane lane) {
-      return new Box(Role.ADMIN, lane);
+    static Credential box() {
+      return new Box(Role.ADMIN, Actor.Lane.CLI);
     }
 
     /** The host CLI's API token, minted with the role {@code minted} names: the box's person. */

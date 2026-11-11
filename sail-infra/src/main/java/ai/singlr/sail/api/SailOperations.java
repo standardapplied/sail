@@ -510,7 +510,7 @@ public final class SailOperations implements HostOperations {
     return boxCredentialStore
         .resolve(credential)
         .filter(minted -> roles.boxFde().filter(minted::equals).isPresent())
-        .flatMap(minted -> roles.principal(RoleRule.Credential.box(Actor.Lane.CLI)));
+        .flatMap(minted -> roles.principal(RoleRule.Credential.box()));
   }
 
   SailOperations(

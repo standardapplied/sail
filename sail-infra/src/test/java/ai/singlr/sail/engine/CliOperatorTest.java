@@ -96,7 +96,7 @@ class CliOperatorTest {
       assertTrue(operator.scope().admits("acme"));
       assertFalse(operator.scope().admits("beta"));
       assertEquals(
-          new RoleRule(() -> NODE, roster).principal(RoleRule.Credential.box(Actor.Lane.CLI)),
+          new RoleRule(() -> NODE, roster).principal(RoleRule.Credential.box()),
           Optional.of(operator));
     }
   }

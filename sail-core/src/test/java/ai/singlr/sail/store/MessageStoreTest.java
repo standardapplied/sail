@@ -109,7 +109,8 @@ class MessageStoreTest {
     var back = messages.append("mover", "bea", "said in beta again", null);
     var ann = reader("alpha");
     var bea = reader("beta");
-    var nobody = new Actor("nan", Role.MEMBER, Actor.Lane.API).withScope(ProjectScope.none());
+    var nobody =
+        new Actor("nan", Role.MEMBER, Actor.Lane.API).withScope(ProjectScope.of(List.of()));
     var everything = List.of(asked.id(), beta.id(), first.id(), second.id(), back.id());
 
     assertEquals(everything, ids(messages.list("mover", null, 10)));

@@ -77,7 +77,7 @@ class SyncRpcServerTest {
   }
 
   private static SyncRpcServer server(MainReplica main, String type, Actor principal) {
-    return new SyncRpcServer(Map.of(type, main), principal, FdeRoster.EMPTY);
+    return new SyncRpcServer(Map.of(type, main), principal, List::of);
   }
 
   /** A server of {@code main}'s specs to a member's session. */
@@ -292,7 +292,7 @@ class SyncRpcServerTest {
         new SyncRpcServer(
             Map.of("spec", new FakeMain()),
             new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
-            FdeRoster.EMPTY,
+            List::of,
             SyncTransitionSink.NONE,
             SyncRpcServer.ChangeHeads.NONE,
             "1.0.0");
@@ -662,7 +662,7 @@ class SyncRpcServerTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new SyncRpcServer(Map.of(), Actor.system(), FdeRoster.EMPTY));
+            () -> new SyncRpcServer(Map.of(), Actor.system(), List::of));
     assertTrue(failure.getMessage().contains("SYNC lane"), failure.getMessage());
   }
 
@@ -927,7 +927,7 @@ class SyncRpcServerTest {
             new SyncRpcServer(
                 Map.of("spec", remembering()),
                 new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
-                FdeRoster.EMPTY,
+                List::of,
                 seen::add),
             push("spec", new MainReplica.Offer("auth", Map.of("status", "in_progress"), null)));
     assertInstanceOf(SyncWire.Accepted.class, only(accepted));
@@ -948,7 +948,7 @@ class SyncRpcServerTest {
             new SyncRpcServer(
                 Map.of("spec", rejecting),
                 new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
-                FdeRoster.EMPTY,
+                List::of,
                 quiet::add),
             push("spec", new MainReplica.Offer("auth", Map.of("status", "in_progress"), "1-x")));
     assertInstanceOf(SyncWire.Stale.class, only(rejected));
@@ -967,7 +967,7 @@ class SyncRpcServerTest {
               new SyncRpcServer(
                   Map.of("spec", remembering()),
                   new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
-                  FdeRoster.EMPTY,
+                  List::of,
                   transition -> {
                     throw new IllegalStateException("slack is down");
                   }),

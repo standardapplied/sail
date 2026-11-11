@@ -331,7 +331,7 @@ class AccessTest {
       }
       for (var sail : List.of(Actors.MAIN, Actors.SYSTEM)) {
         for (var resource : List.of(row.own(), row.others())) {
-          var actor = sail.withScope(ProjectScope.none());
+          var actor = sail.withScope(ProjectScope.of(List.of()));
           cases.add(
               new Case(
                   row.action() + " by " + sail.lane() + " seeing nothing",
@@ -571,7 +571,8 @@ class AccessTest {
 
     assertEquals(acme, Access.audience(Actors.VIEWER.withScope(acme)));
     assertEquals(ProjectScope.all(), Access.audience(Actors.SYSTEM.withScope(acme)));
-    assertEquals(ProjectScope.all(), Access.audience(Actors.MAIN.withScope(ProjectScope.none())));
+    assertEquals(
+        ProjectScope.all(), Access.audience(Actors.MAIN.withScope(ProjectScope.of(List.of()))));
   }
 
   @Test
@@ -664,7 +665,7 @@ class AccessTest {
 
   @Test
   void whetherAnActorMayEverTakeAnActionIsItsRoleAndLaneAlone() {
-    var unplaced = Actors.OTHER_API.withScope(ProjectScope.none());
+    var unplaced = Actors.OTHER_API.withScope(ProjectScope.of(List.of()));
 
     assertEquals(
         Optional.empty(),
@@ -715,7 +716,7 @@ class AccessTest {
 
   @Test
   void aBoxAndThePeopleAreFiledUnderNoProjectSoNoScopeHidesThem() {
-    var unplaced = Actors.OWNER_API.withScope(ProjectScope.none());
+    var unplaced = Actors.OWNER_API.withScope(ProjectScope.of(List.of()));
 
     assertEquals(new Decision.Allowed(), Access.decide(unplaced, Action.OPERATE_BOX, BOX_ADA));
     assertEquals(

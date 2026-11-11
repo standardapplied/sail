@@ -82,7 +82,7 @@ class BannerTest {
     assertTrue(text.contains("SCOPE"));
     assertTrue(text.contains("2: alpha, beta"));
     assertEquals("all", Banner.scopeLabel(ProjectScope.all()));
-    assertEquals("none", Banner.scopeLabel(ProjectScope.none()));
+    assertEquals("none", Banner.scopeLabel(ProjectScope.of(List.of())));
   }
 
   @Test

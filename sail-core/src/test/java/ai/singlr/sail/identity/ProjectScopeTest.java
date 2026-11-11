@@ -49,13 +49,13 @@ class ProjectScopeTest {
     assertTrue(granted.admits("alpha"));
     assertFalse(granted.admits("gamma"));
     assertFalse(granted.admits(null));
-    assertFalse(ProjectScope.none().admits("alpha"));
-    assertFalse(ProjectScope.none().admits(null));
+    assertFalse(ProjectScope.of(List.of()).admits("alpha"));
+    assertFalse(ProjectScope.of(List.of()).admits(null));
     assertEquals(List.of("alpha", "beta"), List.copyOf(granted.projects()));
-    assertSame(ProjectScope.none(), ProjectScope.of(List.of()));
+    assertSame(ProjectScope.of(List.of()), ProjectScope.of(List.of()));
     assertEquals(ProjectScope.all(), new ProjectScope(true, Set.of("ignored")));
     assertTrue(ProjectScope.all().unrestricted());
-    assertFalse(ProjectScope.none().unrestricted());
+    assertFalse(ProjectScope.of(List.of()).unrestricted());
   }
 
   @Test
@@ -68,8 +68,9 @@ class ProjectScopeTest {
     assertEquals(ProjectScope.all(), Actor.main().scope());
     assertEquals(ProjectScope.all(), Actor.system().scope());
     assertEquals(ProjectScope.all(), new Actor("ada", Role.ADMIN, Actor.Lane.CLI).scope());
-    var scoped = actor.withScope(ProjectScope.none());
-    assertEquals(new Actor("ada", Role.MEMBER, Actor.Lane.API, null, ProjectScope.none()), scoped);
+    var scoped = actor.withScope(ProjectScope.of(List.of()));
+    assertEquals(
+        new Actor("ada", Role.MEMBER, Actor.Lane.API, null, ProjectScope.of(List.of())), scoped);
     assertThrows(
         NullPointerException.class,
         () -> new Actor("ada", Role.MEMBER, Actor.Lane.API, null, null));
@@ -88,7 +89,7 @@ class ProjectScopeTest {
     assertTrue(fdes.restrict("bob"));
     assertFalse(fdes.restrict("unknown"));
 
-    assertEquals(ProjectScope.none(), fdes.scopeOf("bob"));
+    assertEquals(ProjectScope.of(List.of()), fdes.scopeOf("bob"));
     assertEquals(ProjectScope.all(), fdes.scopeOf("ada"));
     fdes.grant("bob", "alpha");
     fdes.grant("bob", "alpha");
@@ -115,7 +116,7 @@ class ProjectScopeTest {
 
     assertEquals(ProjectScope.all(), fdes.scopeOf("bob"));
     fdes.restrict("bob");
-    assertEquals(ProjectScope.none(), fdes.scopeOf("bob"));
+    assertEquals(ProjectScope.of(List.of()), fdes.scopeOf("bob"));
     assertEquals(ProjectScope.of(List.of("alpha")), fdes.scopeOf("cy"));
   }
 
@@ -192,7 +193,7 @@ class ProjectScopeTest {
         List.of("bob"),
         fdes.visibleTo("bob", fdes.scopeOf("bob")).stream().map(FdeStore.Fde::handle).toList(),
         "a scoped FDE with no grant reads no one but itself");
-    assertEquals(List.of(), fdes.visibleTo(null, ProjectScope.none()));
+    assertEquals(List.of(), fdes.visibleTo(null, ProjectScope.of(List.of())));
     assertEquals(fdes.list(), fdes.visibleTo("ada", ProjectScope.all()));
   }
 

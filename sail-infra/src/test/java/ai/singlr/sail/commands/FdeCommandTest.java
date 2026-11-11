@@ -1850,14 +1850,14 @@ class FdeCommandTest {
         printed());
     assertEquals(0, fde("add", "uma"));
     assertEquals(List.of("  ✓ FDE added: uma (member)"), printed());
-    assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("nia")));
+    assertEquals(ProjectScope.of(List.of()), inDb(db -> new FdeStore(db).scopeOf("nia")));
     assertEquals(ProjectScope.all(), inDb(db -> new FdeStore(db).scopeOf("uma")));
 
     assertEquals(0, fde("grant", "nia", "alpha", "--dry-run"));
     assertEquals(
         List.of("  ✓ Would grant alpha to nia. Its box holds the project after its next sync."),
         printed());
-    assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("nia")));
+    assertEquals(ProjectScope.of(List.of()), inDb(db -> new FdeStore(db).scopeOf("nia")));
 
     assertEquals(0, fde("grant", "nia", "alpha"));
     assertEquals(
@@ -1955,7 +1955,7 @@ class FdeCommandTest {
         refusal);
     assertEquals(1, fde("revoke", "Bad Handle", "alpha"));
     assertEquals(0, fde("revoke", "nia", "ghost"), "a project since pruned is still revocable");
-    assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("nia")));
+    assertEquals(ProjectScope.of(List.of()), inDb(db -> new FdeStore(db).scopeOf("nia")));
   }
 
   @Test
@@ -2219,7 +2219,7 @@ class FdeCommandTest {
                 + " Its box drops acme, beta with their containers and unpushed work on its next"
                 + " sync."),
         printed());
-    assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("client")));
+    assertEquals(ProjectScope.of(List.of()), inDb(db -> new FdeStore(db).scopeOf("client")));
 
     assertEquals(0, fde("update", "client", "--unscoped", "--role", "admin", "--name", "Cli"));
     assertEquals(

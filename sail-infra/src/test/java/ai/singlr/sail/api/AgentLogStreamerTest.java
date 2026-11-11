@@ -510,7 +510,7 @@ class AgentLogStreamerTest {
             }
             var line = lines.next();
             if ("second".equals(line)) {
-              scope.set(ProjectScope.none());
+              scope.set(ProjectScope.of(List.of()));
               clock.advance(Duration.ofSeconds(1));
             }
             return line;

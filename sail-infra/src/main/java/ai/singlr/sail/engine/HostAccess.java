@@ -44,9 +44,7 @@ public record HostAccess(Sqlite db, RoleRule roles) {
                               Remedy.sail("host config set sync-handle", "<handle>"),
                               "' or connect through the gateway.")));
       return new PtyIdentity.Person(
-          roles
-              .principal(RoleRule.Credential.box(Actor.Lane.CLI))
-              .orElseThrow(() -> disabled(handle)));
+          roles.principal(RoleRule.Credential.box()).orElseThrow(() -> disabled(handle)));
     }
     var session =
         new AuthSessionStore(db)

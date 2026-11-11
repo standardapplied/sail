@@ -127,7 +127,7 @@ class RosterChangeTest {
 
   /** Whom every door on the node resolves for the box's own person. */
   private Optional<Actor> nodesPerson() {
-    return new RoleRule(() -> NODE, new FdeStore(nodeDb)).principal(Credential.box(Actor.Lane.CLI));
+    return new RoleRule(() -> NODE, new FdeStore(nodeDb)).principal(Credential.box());
   }
 
   private void onMain(String sql, Object... params) {
