@@ -10,6 +10,7 @@ import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.identity.Actor;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import picocli.CommandLine;
@@ -54,19 +55,23 @@ public final class SailCommandLine {
    * {@code root}'s command line, its every command but {@link #AS_THE_BOX} read as the operator.
    */
   public static CommandLine of(Object root) {
-    return of(root, SailCommandLine::operator);
+    return of(root, SailCommandLine::operator, AS_THE_BOX.keySet());
   }
 
-  /** As {@link #of(Object)}, with the operator {@code operator} resolves. */
-  static CommandLine of(Object root, Supplier<Actor> operator) {
+  /**
+   * As {@link #of(Object)}, with the operator {@code operator} resolves, and the commands {@code
+   * asTheBox} names reading as the box.
+   */
+  static CommandLine of(Object root, Supplier<Actor> operator, Set<Class<?>> asTheBox) {
     var line = new CommandLine(root);
-    line.setExecutionStrategy(parsed -> execute(parsed, operator));
+    line.setExecutionStrategy(parsed -> execute(parsed, operator, asTheBox));
     return line;
   }
 
-  private static int execute(CommandLine.ParseResult parsed, Supplier<Actor> operator) {
+  private static int execute(
+      CommandLine.ParseResult parsed, Supplier<Actor> operator, Set<Class<?>> asTheBox) {
     var run = new CommandLine.RunLast();
-    if (AS_THE_BOX.containsKey(leaf(parsed).commandSpec().userObject().getClass())) {
+    if (asTheBox.contains(leaf(parsed).commandSpec().userObject().getClass())) {
       return run.execute(parsed);
     }
     return Actor.readingAs(once(operator), () -> run.execute(parsed));

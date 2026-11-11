@@ -98,7 +98,8 @@ class SailCommandLineTest {
             () -> {
               asked.incrementAndGet();
               return ADA;
-            });
+            },
+            Set.of());
 
     var exit = line.execute("reads");
     Probe.Reads reads = line.getSubcommands().get("reads").getCommand();
@@ -119,17 +120,28 @@ class SailCommandLineTest {
                 new Probe(),
                 () -> {
                   throw new AssertionError("a command that reads nothing places no one");
-                })
+                },
+                Set.of())
             .execute("quiet");
 
     assertEquals(0, exit);
   }
 
   @Test
-  void onlyTheBoxsOwnMachineryAndItsDoorsReadAsTheBox() {
-    assertTrue(SailCommandLine.AS_THE_BOX.containsKey(SyncCommand.class));
-    assertEquals(false, SailCommandLine.AS_THE_BOX.containsKey(ProjectConfigGetCommand.class));
-    assertEquals(Actor.system(), Actor.reader(), "outside a command, the box reads as itself");
+  void aCommandNamedAsTheBoxsOwnReadsAsTheBoxAndPlacesNoOne() {
+    var line =
+        SailCommandLine.of(
+            new Probe(),
+            () -> {
+              throw new AssertionError("the box's own machinery places no one");
+            },
+            Set.of(Probe.Reads.class));
+
+    var exit = line.execute("reads");
+    Probe.Reads reads = line.getSubcommands().get("reads").getCommand();
+
+    assertEquals(0, exit);
+    assertEquals(List.of(Actor.system(), Actor.system()), reads.read);
   }
 
   private static void walk(CommandLine line, String path, Set<String> tree, Set<String> asTheBox) {
