@@ -237,6 +237,7 @@ class PtyRoomSessionIT extends AbstractIncusIT {
             List.of(
                 new String[] {"brainstorm", "it", "design-talk"},
                 new String[] {"plain", "it", null},
+                new String[] {"promote", "it", null},
                 new String[] {"mast-term", "mady", "design-talk"})) {
           var session = expected[0];
           var owner = expected[1];
@@ -248,13 +249,14 @@ class PtyRoomSessionIT extends AbstractIncusIT {
 
         bridge.publishNewRows();
         var deadline = System.nanoTime() + 10_000_000_000L;
-        while (live.size() < 9 && System.nanoTime() < deadline) {
+        while (live.size() < 12 && System.nanoTime() < deadline) {
           Thread.sleep(10);
         }
         assertEquals(
-            9,
+            12,
             live.size(),
-            "all nine lifecycle facts must reach the live event lane: "
+            "all twelve lifecycle facts, three of each of the four sessions, must reach the live"
+                + " event lane: "
                 + live.stream().map(e -> e.type() + ":" + e.data().get("session")).toList());
         bridge.close();
       }
