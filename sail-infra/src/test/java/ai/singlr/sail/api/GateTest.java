@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 /**
  * A route's gate: what the router decides itself before the handler runs (operating the box,
  * managing people), refused in the words and code every door answers that refusal with, and nothing
- * for a gate an operation's seam, the read filter or the journal applies.
+ * for a gate an operation, the read filter or the journal applies.
  */
 class GateTest {
 
@@ -87,7 +87,7 @@ class GateTest {
         List.of(
             Gate.READS_IN_SCOPE,
             Gate.JOURNAL,
-            Gate.decides(Action.OPERATE_RUN, StopOperations.class),
+            Gate.decides(Action.OPERATE_RUN),
             Gate.UNSERVED,
             Gate.unauthenticated("the health probe answers before any credential"))) {
       assertDoesNotThrow(() -> gate.admit(ADA_VIEWER), gate.toString());

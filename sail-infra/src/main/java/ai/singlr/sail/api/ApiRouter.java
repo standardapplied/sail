@@ -8,13 +8,11 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Whoami;
 import ai.singlr.sail.api.RouteTable.Served;
-import ai.singlr.sail.authority.EraseAuthority;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.FilePicker;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.identity.Actor;
@@ -133,10 +131,10 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     var journal = Gate.JOURNAL;
     var unserved = Gate.UNSERVED;
     var box = Gate.box(operations::boxFde);
-    var serving = Gate.decides(Action.SERVE, StackOperations.class);
-    var restoring = Gate.decides(Action.RESTORE, SailOperations.class);
-    var seating = Gate.decides(Action.DISPATCH, LaunchAdmission.class);
-    var runOperated = Gate.decides(Action.OPERATE_RUN, LogAdmission.class);
+    var serving = Gate.decides(Action.SERVE);
+    var restoring = Gate.decides(Action.RESTORE);
+    var seating = Gate.decides(Action.DISPATCH);
+    var runOperated = Gate.decides(Action.OPERATE_RUN);
     return List.of(
         route(GET, "/v1/health", Gate.unauthenticated("the liveness probe"), this::health),
         route(ANY, "/v1/health", unserved, ApiRouter::absent),
@@ -150,11 +148,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(POST, "/v1/sync", box, this::sync),
         route(GET, "/v1/conflicts", reads, this::conflicts),
         route(GET, "/v1/conflicts/{id...}", reads, this::conflict),
-        route(
-            POST,
-            "/v1/conflicts/{id...}",
-            Gate.decides(Action.CHANGE, ConflictOperations.class),
-            this::resolveConflict),
+        route(POST, "/v1/conflicts/{id...}", Gate.decides(Action.CHANGE), this::resolveConflict),
         route(GET, "/v1/events", reads, this::specEvents),
         route(
             POST,
@@ -163,8 +157,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             call -> ApiResponse.from(operations.publishEvent(JsonBody.readEvent(call.exchange())))),
         route(GET, "/v1/events/recent", reads, this::recentEvents),
         route(GET, "/v1/events/stats", box, this::eventBusStats),
-        route(
-            POST, "/v1/specs:prune", Gate.decides(Action.PRUNE, EraseAuthority.class), this::prune),
+        route(POST, "/v1/specs:prune", Gate.decides(Action.PRUNE), this::prune),
         route(GET, "/v1/specs", reads, this::globalSpecs),
         route(POST, "/v1/specs", journal, this::createGlobalSpec),
         route(GET, "/v1/specs/board", reads, this::globalBoard),
@@ -211,11 +204,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             reads,
             call -> ApiResponse.from(operations.run(call.param("run")))),
         route(GET, "/v1/runs/{run}/log", runOperated, this::runLog),
-        route(
-            POST,
-            "/v1/runs/{run}/stop",
-            Gate.decides(Action.OPERATE_RUN, StopOperations.class),
-            this::stopRun),
+        route(POST, "/v1/runs/{run}/stop", Gate.decides(Action.OPERATE_RUN), this::stopRun),
         route(ANY, "/v1/runs/{run}/stream", runOperated, this::streamRunLog),
         route(GET, "/v1/projects", reads, call -> ApiResponse.from(operations.projects())),
         route(POST, "/v1/projects", journal, this::createProject),
@@ -227,11 +216,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             call -> ApiResponse.from(operations.specs(call.project()))),
         route(GET, PROJECT + "/specs/{id}", reads, this::projectSpec),
         route(ANY, PROJECT + "/specs/{id}/{rest...}", unserved, ApiRouter::malformed),
-        route(
-            POST,
-            PROJECT + "/dispatch",
-            Gate.decides(Action.DISPATCH, LaunchAdmission.class),
-            this::dispatch),
+        route(POST, PROJECT + "/dispatch", Gate.decides(Action.DISPATCH), this::dispatch),
         route(ANY, PROJECT + "/dispatch/{rest...}", unserved, ApiRouter::malformed),
         route(GET, PROJECT + "/agent", reads, this::agentStatus),
         route(POST, PROJECT + "/agent/report", reads, this::agentReport),
@@ -268,7 +253,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(
             GET,
             PROJECT + "/definition",
-            Gate.decides(Action.READ_DEFINITION, ProjectDefinitionOperations.class),
+            Gate.decides(Action.READ_DEFINITION),
             call -> ApiResponse.from(operations.projectDefinition(call.project()))),
         route(PUT, PROJECT + "/definition/{section}", journal, this::writeProjectSection),
         route(ANY, PROJECT + "/{rest...}", unserved, ApiRouter::absent));

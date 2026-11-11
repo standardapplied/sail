@@ -14,7 +14,6 @@ import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
@@ -88,25 +87,17 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
     this.operations = operations;
     var reads = Gate.READS_IN_SCOPE;
     var journal = Gate.JOURNAL;
-    var serving = Gate.decides(Action.SERVE, StackOperations.class);
+    var serving = Gate.decides(Action.SERVE);
     this.routes =
         List.of(
             route(GET, SYNC, Gate.box(operations::boxFde), this::sync),
             route(GET, CONFLICTS, reads, this::conflicts),
-            route(
-                POST,
-                RESOLVE,
-                Gate.decides(Action.CHANGE, ConflictOperations.class),
-                this::resolve),
+            route(POST, RESOLVE, Gate.decides(Action.CHANGE), this::resolve),
             route(GET, CONFLICT, reads, this::template),
             route(GET, WHOAMI, reads, LocalApiRouter::whoami),
             route(POST, EVENTS, journal, this::events),
             route(GET, RUN_MESSAGES, reads, this::runMessages),
-            route(
-                POST,
-                RUN_MESSAGES,
-                Gate.decides(Action.NARRATE, SailOperations.class),
-                this::runAck),
+            route(POST, RUN_MESSAGES, Gate.decides(Action.NARRATE), this::runAck),
             route(POST, RUN_SESSION, journal, this::runSession),
             route(GET, SKILLS, reads, this::skills),
             route(POST, SKILLS, journal, this::share),

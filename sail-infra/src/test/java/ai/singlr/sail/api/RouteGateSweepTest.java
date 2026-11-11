@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.access.Action;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Actors;
@@ -22,9 +21,7 @@ import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.SyncEngine;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.lang.classfile.ClassFile;
-import java.lang.classfile.instruction.FieldInstruction;
 import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.reflect.Proxy;
 import java.net.InetSocketAddress;
@@ -39,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -108,12 +106,12 @@ class RouteGateSweepTest {
               "POST /v1/sync operates the box",
               "GET /v1/conflicts reads in scope",
               "GET /v1/conflicts/{id...} reads in scope",
-              "POST /v1/conflicts/{id...} decides CHANGE through ConflictOperations",
+              "POST /v1/conflicts/{id...} decides CHANGE",
               "GET /v1/events reads in scope",
               "POST /v1/events the journal decides",
               "GET /v1/events/recent reads in scope",
               "GET /v1/events/stats operates the box",
-              "POST /v1/specs:prune decides PRUNE through EraseAuthority",
+              "POST /v1/specs:prune decides PRUNE",
               "GET /v1/specs reads in scope",
               "POST /v1/specs the journal decides",
               "GET /v1/specs/board reads in scope",
@@ -132,8 +130,8 @@ class RouteGateSweepTest {
               "GET /v1/rooms/{room} reads in scope",
               "DELETE /v1/rooms/{room} the journal decides",
               "GET /v1/rooms/{room}/members reads in scope",
-              "POST /v1/rooms/{room}/members decides DISPATCH through LaunchAdmission",
-              "DELETE /v1/rooms/{room}/members decides DISPATCH through LaunchAdmission",
+              "POST /v1/rooms/{room}/members decides DISPATCH",
+              "DELETE /v1/rooms/{room}/members decides DISPATCH",
               "* /v1/rooms/{room}/invite serves nothing",
               "GET /v1/rooms/{room}/messages reads in scope",
               "POST /v1/rooms/{room}/messages the journal decides",
@@ -143,34 +141,34 @@ class RouteGateSweepTest {
               "POST /v1/reviews/{review}/dismiss/{finding} the journal decides",
               "GET /v1/runs reads in scope",
               "GET /v1/runs/{run} reads in scope",
-              "GET /v1/runs/{run}/log decides OPERATE_RUN through LogAdmission",
-              "POST /v1/runs/{run}/stop decides OPERATE_RUN through StopOperations",
-              "* /v1/runs/{run}/stream decides OPERATE_RUN through LogAdmission",
+              "GET /v1/runs/{run}/log decides OPERATE_RUN",
+              "POST /v1/runs/{run}/stop decides OPERATE_RUN",
+              "* /v1/runs/{run}/stream decides OPERATE_RUN",
               "GET /v1/projects reads in scope",
               "POST /v1/projects the journal decides",
               "GET /v1/projects/{project} reads in scope",
               "GET /v1/projects/{project}/specs reads in scope",
               "GET /v1/projects/{project}/specs/{id} reads in scope",
               "* /v1/projects/{project}/specs/{id}/{rest...} serves nothing",
-              "POST /v1/projects/{project}/dispatch decides DISPATCH through LaunchAdmission",
+              "POST /v1/projects/{project}/dispatch decides DISPATCH",
               "* /v1/projects/{project}/dispatch/{rest...} serves nothing",
               "GET /v1/projects/{project}/agent reads in scope",
               "POST /v1/projects/{project}/agent/report reads in scope",
               "* /v1/projects/{project}/agent/{sub}/{rest...} serves nothing",
               "GET /v1/projects/{project}/connect reads in scope",
               "GET /v1/projects/{project}/snapshots reads in scope",
-              "DELETE /v1/projects/{project}/snapshots/{label} decides RESTORE through SailOperations",
-              "POST /v1/projects/{project}/snapshots/{label}/restore decides RESTORE through SailOperations",
+              "DELETE /v1/projects/{project}/snapshots/{label} decides RESTORE",
+              "POST /v1/projects/{project}/snapshots/{label}/restore decides RESTORE",
               "GET /v1/projects/{project}/files reads in scope",
               "GET /v1/projects/{project}/files/{path...} reads in scope",
               "PUT /v1/projects/{project}/files/{path...} the journal decides",
               "DELETE /v1/projects/{project}/files/{path...} the journal decides",
               "* /v1/projects/{project}/files serves nothing",
               "* /v1/projects/{project}/files/{path...} serves nothing",
-              "POST /v1/projects/{project}/serve decides SERVE through StackOperations",
-              "DELETE /v1/projects/{project}/serve decides SERVE through StackOperations",
+              "POST /v1/projects/{project}/serve decides SERVE",
+              "DELETE /v1/projects/{project}/serve decides SERVE",
               "GET /v1/projects/{project}/ports reads in scope",
-              "GET /v1/projects/{project}/definition decides READ_DEFINITION through ProjectDefinitionOperations",
+              "GET /v1/projects/{project}/definition decides READ_DEFINITION",
               "PUT /v1/projects/{project}/definition/{section} the journal decides",
               "* /v1/projects/{project}/{rest...} serves nothing",
               "POST /v1/auth/register/ticket manages people",
@@ -209,60 +207,64 @@ class RouteGateSweepTest {
   }
 
   @Test
-  void everyDecidingGateNamesASeamThatAsksAccessForItsAction() throws Exception {
-    try (var server = everyContext()) {
-      var deciding =
-          Stream.concat(
-                  server.tables().stream().flatMap(table -> table.routes().stream()),
-                  socket(new ArrayList<>()).routes().stream())
-              .map(Route::gate)
-              .filter(Gate.Decides.class::isInstance)
-              .map(Gate.Decides.class::cast)
-              .distinct()
-              .toList();
+  void noContextIsServedButThroughSailApiServerServe() throws Exception {
+    var creates = new TreeSet<String>();
+    for (var bytes : OneDecisionPointTest.everyMainClass()) {
+      creates.addAll(contextsCreated(bytes));
+    }
 
+    assertEquals(
+        Set.of(
+            "ai/singlr/sail/api/PrivateAttributes#context",
+            "ai/singlr/sail/api/SailApiServer#serve",
+            "ai/singlr/sail/commands/LoopbackCallbackServer#<init>"),
+        creates,
+        "a context is mounted through SailApiServer.serve, which records its route table; the"
+            + " CLI's local login callback is no server route");
+  }
+
+  @Test
+  void theContextGuardSeesAContextMountedBesideServe() throws IOException {
+    try (var bytes = Backdoor.class.getResourceAsStream("RouteGateSweepTest$Backdoor.class")) {
       assertEquals(
-          List.of(), deciding.stream().filter(gate -> !asks(gate.seam(), gate.action())).toList());
-      assertEquals(
-          List.of(new Gate.Decides(Action.PRUNE, SpecPruner.class)),
-          Stream.of(new Gate.Decides(Action.PRUNE, SpecPruner.class))
-              .filter(gate -> !asks(gate.seam(), gate.action()))
-              .toList(),
-          "a seam that hands the decision to another class is not the seam");
+          Set.of(
+              "ai/singlr/sail/api/RouteGateSweepTest$Backdoor#mount",
+              "ai/singlr/sail/api/RouteGateSweepTest$Backdoor#mountRaw"),
+          contextsCreated(bytes.readAllBytes()));
     }
   }
 
-  /**
-   * Whether {@code seam}'s own bytecode names {@code action} and asks {@code Access}, or the
-   * project gate that does, of it.
-   */
-  private static boolean asks(Class<?> seam, Action action) {
-    try (var bytes = seam.getResourceAsStream(seam.getSimpleName() + ".class")) {
-      var instructions =
-          ClassFile.of().parse(bytes.readAllBytes()).methods().stream()
-              .flatMap(method -> method.code().stream())
+  /** The members of the class {@code bytes} holds that create a context on a web server. */
+  private static Set<String> contextsCreated(byte[] bytes) {
+    var model = ClassFile.of().parse(bytes);
+    var found = new TreeSet<String>();
+    for (var method : model.methods()) {
+      var creates =
+          method.code().stream()
               .flatMap(code -> code.elementStream())
-              .toList();
-      var names =
-          instructions.stream()
-              .anyMatch(
-                  element ->
-                      element instanceof FieldInstruction field
-                          && field.owner().asInternalName().equals("ai/singlr/sail/access/Action")
-                          && field.name().equalsString(action.name()));
-      var decides =
-          instructions.stream()
               .anyMatch(
                   element ->
                       element instanceof InvokeInstruction call
-                          && (call.owner().asInternalName().equals("ai/singlr/sail/access/Access")
-                              || call.owner()
+                          && (call.owner()
                                       .asInternalName()
-                                      .equals("ai/singlr/sail/api/ProjectGate")
-                                  && call.name().equalsString("taking")));
-      return names && decides;
-    } catch (IOException unreadable) {
-      throw new UncheckedIOException(unreadable);
+                                      .equals("ai/singlr/sail/api/PrivateAttributes")
+                                  && call.name().equalsString("context")
+                              || call.name().equalsString("createContext")));
+      if (creates) {
+        found.add(model.thisClass().asInternalName() + "#" + method.methodName().stringValue());
+      }
+    }
+    return found;
+  }
+
+  /** What no class but {@code SailApiServer} does: mount a context it records no table of. */
+  private static final class Backdoor {
+    void mount(HttpServer server) {
+      PrivateAttributes.context(server, "/v1/backdoor", exchange -> exchange.close());
+    }
+
+    void mountRaw(HttpServer server) {
+      server.createContext("/v1/raw", exchange -> exchange.close());
     }
   }
 
@@ -366,19 +368,19 @@ class RouteGateSweepTest {
         List.of(
             "GET /v1/sync operates the box",
             "GET /v1/conflicts reads in scope",
-            "POST /v1/conflicts/{id...}/resolve decides CHANGE through ConflictOperations",
+            "POST /v1/conflicts/{id...}/resolve decides CHANGE",
             "GET /v1/conflicts/{id...} reads in scope",
             "GET /v1/whoami reads in scope",
             "POST /v1/events the journal decides",
             "GET /v1/run/messages reads in scope",
-            "POST /v1/run/messages decides NARRATE through SailOperations",
+            "POST /v1/run/messages decides NARRATE",
             "POST /v1/run/session the journal decides",
             "GET /v1/projects/{project}/skills reads in scope",
             "POST /v1/projects/{project}/skills the journal decides",
             "GET /v1/projects/{project}/skills/{name} reads in scope",
             "DELETE /v1/projects/{project}/skills/{name} the journal decides",
-            "POST /v1/projects/{project}/serve decides SERVE through StackOperations",
-            "DELETE /v1/projects/{project}/serve decides SERVE through StackOperations",
+            "POST /v1/projects/{project}/serve decides SERVE",
+            "DELETE /v1/projects/{project}/serve decides SERVE",
             "GET /v1/projects/{project}/ports reads in scope",
             "* /v1/projects/{project}/{rest...} serves nothing",
             "GET /v1/specs reads in scope",
@@ -465,8 +467,7 @@ class RouteGateSweepTest {
           case Gate.OperatesBox box -> "operates the box";
           case Gate.ManagesPeople people -> "manages people";
           case Gate.Unserved unserved -> "serves nothing";
-          case Gate.Decides(var action, var seam) ->
-              "decides " + action.name() + " through " + seam.getSimpleName();
+          case Gate.Decides(var action) -> "decides " + action.name();
           case Gate.Unauthenticated(var reason) -> "unauthenticated: " + reason;
         };
   }

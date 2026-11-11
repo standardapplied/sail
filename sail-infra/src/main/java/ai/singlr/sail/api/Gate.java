@@ -17,11 +17,11 @@ import java.util.function.Supplier;
 /**
  * How a route is decided (A3): every route an HTTP or socket router serves declares one gate, and
  * the router applies it ({@link #admit}) as the caller before the route's handler runs. A route
- * either decides an action through its operation's one seam, which holds the row the decision
- * reads; or reads in scope, every row through {@code ReadFilter}; or makes a write the journal
- * decides by its type's rule; or serves nothing, answering a request as the API always has; or is
- * unauthenticated, for a reason, before any credential is asked. What no row is needed to decide,
- * the router decides itself: operating the box, and managing people.
+ * either declares the action its operation decides on the row it resolves; or reads in scope, every
+ * row through {@code ReadFilter}; or makes a write the journal decides by its type's rule; or
+ * serves nothing, answering a request as the API always has; or is unauthenticated, for a reason,
+ * before any credential is asked. What no row is needed to decide, the router decides itself:
+ * operating the box, and managing people.
  */
 sealed interface Gate {
 
@@ -45,9 +45,9 @@ sealed interface Gate {
     return new OperatesBox(boxFde);
   }
 
-  /** A route whose operation decides {@code action} through {@code seam}, its one seam. */
-  static Gate decides(Action action, Class<?> seam) {
-    return new Decides(action, seam);
+  /** A route whose operation decides {@code action} on the resource it resolves. */
+  static Gate decides(Action action) {
+    return new Decides(action);
   }
 
   /** A route served before any credential is asked, for {@code reason}. */
@@ -62,13 +62,12 @@ sealed interface Gate {
   default void admit(Actor actor) {}
 
   /**
-   * The operation decides {@code action} on the resource it resolves, through {@code seam}, so the
-   * router admits every caller and the seam refuses.
+   * The operation decides {@code action} on the resource it resolves, so the router admits every
+   * caller and the operation refuses.
    */
-  record Decides(Action action, Class<?> seam) implements Gate {
+  record Decides(Action action) implements Gate {
     public Decides {
       Objects.requireNonNull(action, "action");
-      Objects.requireNonNull(seam, "seam");
     }
   }
 
