@@ -2062,12 +2062,15 @@ class SailOperationsTest {
             "claude/r1",
             null);
 
+    var actor = operations.runActor(ownerless).orElseThrow();
+
     assertEquals(
-        Optional.of(
-            new Actor("claude/r1", Role.MEMBER, Actor.Lane.AGENT, null)
-                .withScope(ProjectScope.of(List.of("acme")))
-                .withWork(Actor.Work.of("acme", "auth", "auth"))),
-        operations.runActor(ownerless),
+        new Actor("claude/r1", Role.MEMBER, Actor.Lane.AGENT, null)
+            .withScope(ProjectScope.of(List.of("acme"))),
+        actor.withWork(null));
+    assertEquals(
+        List.of("acme", "auth", "auth"),
+        List.of(actor.work().project(), actor.work().spec(), actor.work().room()),
         "it works its spec, conversing in the spec's own id once this box holds the spec no more");
   }
 
