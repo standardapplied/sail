@@ -32,7 +32,7 @@ final class SailCli {
 
   /** What {@code command} run with {@code args} as {@link Main} runs it exited with and printed. */
   static Ran run(Object command, String... args) {
-    return run(new CommandLine(command), args);
+    return run(() -> new CommandLine(command), args);
   }
 
   /**
@@ -40,10 +40,14 @@ final class SailCli {
    * the box's person {@code operator} resolves.
    */
   static Ran run(Supplier<Actor> operator, Object command, String... args) {
-    return run(SailCommandLine.of(command, operator), args);
+    return run(() -> SailCommandLine.of(command, operator), args);
   }
 
-  private static Ran run(CommandLine sail, String... args) {
+  /**
+   * Runs the command line {@code sail} builds once stdout is captured: picocli writes its help to
+   * the stdout it found when the command line was built.
+   */
+  private static Ran run(Supplier<CommandLine> sail, String... args) {
     var originalOut = System.out;
     var originalErr = System.err;
     var out = new ByteArrayOutputStream();
@@ -51,9 +55,10 @@ final class SailCli {
     System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
     System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
     try {
-      sail.setErr(new PrintWriter(err, true, StandardCharsets.UTF_8));
-      sail.setExecutionExceptionHandler((failure, line, parsed) -> Main.report(failure, line));
-      var exit = sail.execute(args);
+      var line = sail.get();
+      line.setErr(new PrintWriter(err, true, StandardCharsets.UTF_8));
+      line.setExecutionExceptionHandler((failure, cli, parsed) -> Main.report(failure, cli));
+      var exit = line.execute(args);
       return new Ran(
           exit, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
     } finally {
