@@ -32,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -73,6 +74,16 @@ public final class AgentLogCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
+  private final Function<OperatorCommand, HostOperations> operations;
+
+  public AgentLogCommand() {
+    this(operator -> OperationsFactory.open(operator::warn));
+  }
+
+  AgentLogCommand(Function<OperatorCommand, HostOperations> operations) {
+    this.operations = operations;
+  }
+
   @Override
   public void run() {
     CliCommand.run(this::execute);
@@ -82,7 +93,7 @@ public final class AgentLogCommand implements Runnable {
     var operator = OperatorCommand.here();
     name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
-    var logPath = resolveLogPath(name, lane());
+    var logPath = resolveLogPath(name, lane(), operator);
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
 
@@ -156,8 +167,8 @@ public final class AgentLogCommand implements Runnable {
    * selects which run, never another file shape. A refusal is said; a store that cannot answer
    * shows no log.
    */
-  private static String resolveLogPath(String project, Optional<Lane> lane) {
-    try (var operations = OperationsFactory.open()) {
+  private String resolveLogPath(String project, Optional<Lane> lane, OperatorCommand operator) {
+    try (var operations = this.operations.apply(operator)) {
       return logPath(operations, project, NodeIdentity.handle(), lane);
     } catch (ApiException refused) {
       throw refused;

@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.SqliteException;
 import java.io.IOException;
 import java.net.StandardProtocolFamily;
 import java.net.UnixDomainSocketAddress;
@@ -79,7 +80,7 @@ class PtySessionHostTest {
         @Override
         public void project(String project, PtyIdentity.Person who) throws IOException {
           if (project.equals("outage")) {
-            throw new IllegalStateException("database is locked");
+            throw new SqliteException("database is locked", 5);
           }
           if (unheld.contains(project + ":" + who.fde())) {
             throw new IOException("Project '" + project + "' is not in the catalog.");

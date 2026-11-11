@@ -23,6 +23,7 @@ import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Actor;
 import java.time.Duration;
@@ -52,13 +53,18 @@ public final class AgentStatusCommand implements Runnable {
   private boolean json;
 
   private final Function<OperatorCommand, HostOperations> operations;
+  private final ShellExec shell;
 
   public AgentStatusCommand() {
-    this(operator -> OperationsFactory.open(operator::warn));
+    this(operator -> OperationsFactory.open(operator::warn), new ShellExecutor(false));
   }
 
-  AgentStatusCommand(Function<OperatorCommand, HostOperations> operations) {
+  /**
+   * The status command over {@code operations}, asking this box's containers through {@code shell}.
+   */
+  AgentStatusCommand(Function<OperatorCommand, HostOperations> operations, ShellExec shell) {
     this.operations = operations;
+    this.shell = shell;
   }
 
   @Override
@@ -76,7 +82,6 @@ public final class AgentStatusCommand implements Runnable {
   }
 
   private void executeAll(OperatorCommand operator) throws Exception {
-    var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
     var running =
         mgr.listAll().stream().filter(c -> c.state() instanceof ContainerState.Running).toList();
@@ -183,7 +188,6 @@ public final class AgentStatusCommand implements Runnable {
     try (var operations = this.operations.apply(operator)) {
       operations.catalog().readable(name);
     }
-    var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);

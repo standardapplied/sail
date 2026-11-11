@@ -10,9 +10,19 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
+import ai.singlr.sail.api.HostOperations;
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.SyncScheduler;
+import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.constantpool.MemberRefEntry;
@@ -23,7 +33,9 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 
@@ -97,6 +109,43 @@ class SailCommandLineTest {
         "No actor is bound: every write must name who is acting. Bind one with Actor.run or"
             + " Actor.call at the entry point that started this work.",
         reads.unbound.getMessage());
+  }
+
+  @Test
+  void theOperatorIsTheBoxsPersonWithTheScopeTheRosterGivesThem(@TempDir Path dir) {
+    try (var db = Sqlite.open(dir.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+      var roster = new FdeStore(db);
+      roster.add("mady", null, null, "member");
+      roster.restrict("mady");
+      roster.grant("mady", "alpha");
+      Supplier<HostOperations> node =
+          () ->
+              OperationsFactory.create(
+                      db,
+                      new ScriptedShellExecutor(),
+                      null,
+                      null,
+                      SyncScheduler.disabled(),
+                      SessionYield.NONE)
+                  .useControlPlane(
+                      db,
+                      dir,
+                      new SyncOperations(
+                          db,
+                          "box",
+                          dir,
+                          () -> new SyncConfig("node", "sail@main", "mady", "box"),
+                          target -> {
+                            throw new IOException("main is not asked here");
+                          },
+                          SyncOperations.PLAIN_NOTICES));
+
+      assertEquals(
+          new Actor("mady", Role.MEMBER, Actor.Lane.CLI)
+              .withScope(ProjectScope.of(List.of("alpha"))),
+          SailCommandLine.operator(node));
+    }
   }
 
   @Test

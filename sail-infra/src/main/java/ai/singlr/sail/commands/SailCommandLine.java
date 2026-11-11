@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.identity.Actor;
@@ -84,7 +85,12 @@ public final class SailCommandLine {
 
   /** This box's operator, as its operations name it: the one resolver of the host CLI's person. */
   static Actor operator() {
-    try (var operations = OperationsFactory.open()) {
+    return operator(OperationsFactory::open);
+  }
+
+  /** The operator the operations {@code open} opens name, closed once read. */
+  static Actor operator(Supplier<HostOperations> open) {
+    try (var operations = open.get()) {
       return operations.identity().operator();
     }
   }
