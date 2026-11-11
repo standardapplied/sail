@@ -59,6 +59,9 @@ public final class MessageAuthority implements WriteAuthority {
       return posting;
     }
     var author = Snapshots.text(next, "author");
+    if (Strings.isBlank(author)) {
+      return Optional.of(noOne(roomId));
+    }
     if (!mayPostAs(actor, author, roomId)) {
       return Refusal.of(
           Refusal.Kind.NOT_AUTHOR,
@@ -110,17 +113,21 @@ public final class MessageAuthority implements WriteAuthority {
 
   /**
    * Why a post by {@code actor} in {@code roomId} would be no one's: its credential acts for no
-   * FDE. What no one here can own is an admin's to write ({@link Access#unowned}).
+   * FDE. A door asking before a post with no message (a terminal's room pin) leaves what no one
+   * here can own to an admin ({@link Access#unowned}); a message itself is refused it whoever
+   * writes it, since a message with no author is no one's ({@link #decide}).
    */
   private static Optional<Refusal> noOnes(Actor actor, String roomId) {
     return Strings.isNotBlank(actor.actingFde())
         ? Optional.empty()
-        : Access.unowned(
-            actor,
-            new Refusal(
-                Refusal.Kind.NOT_AUTHOR,
-                "This credential acts for no FDE, so a post in '" + roomId + "' would be no one's.",
-                "Post with an FDE's own credential."));
+        : Access.unowned(actor, noOne(roomId));
+  }
+
+  private static Refusal noOne(String roomId) {
+    return new Refusal(
+        Refusal.Kind.NOT_AUTHOR,
+        "This credential acts for no FDE, so a post in '" + roomId + "' would be no one's.",
+        "Post with an FDE's own credential.");
   }
 
   private boolean mayPostAs(Actor actor, String author, String roomId) {

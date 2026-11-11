@@ -6,7 +6,9 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
+import ai.singlr.sail.SailVersion;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.OperationHooks;
 import ai.singlr.sail.api.OperationsFactory;
@@ -25,12 +27,19 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
+import ai.singlr.sail.sync.MainReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncSession;
 import ai.singlr.sail.sync.SyncTransitionSink;
+import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.webauthn.TestAuthenticator;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.PipedInputStream;
+import java.io.PipedOutputStream;
 import java.io.PrintStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -44,6 +53,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -402,6 +412,78 @@ class DoorParityTest {
                   .findFirst()
                   .orElse("no denial")));
     }
+  }
+
+  /**
+   * Row 4, at sync, the one door that takes a push. Client's box holds nothing of beta, so no node
+   * of main's pushes a beta spec of client's; the push is forged, a revision of b1 offered over a
+   * session main's gateway minted for client, and main's sync server refuses it as in no project
+   * client is granted.
+   */
+  @Test
+  void row4ClientsPushOfABetaSpecIsRefusedInNoProjectItIsGranted() throws Exception {
+    var retitled = new LinkedHashMap<>(new SpecStore(db).currentForSync("b1"));
+    retitled.put("title", "retitled");
+
+    var denied =
+        forgedPush(
+            "client",
+            new SyncWire.Push(
+                "spec",
+                List.of(new MainReplica.Offer("b1", retitled, new SpecStore(db).latestRev("b1")))));
+
+    assertEveryDoor(
+        Expected.refused(0, null, "Spec 'b1' is in no project this FDE is granted.", null),
+        new Said("sync", denied));
+    assertEquals("b1", new SpecStore(db).findById("b1").orElseThrow().title(), "main took none");
+  }
+
+  /**
+   * What main's sync server answers {@code push} over a session its gateway minted for {@code
+   * person}, said as a denial's reason: the client is forged, speaking the wire itself.
+   */
+  private String forgedPush(String person, SyncWire.Push push) throws Exception {
+    var token =
+        assertInstanceOf(
+                SshGateway.Authorized.class, GatewayNode.gateway(main, MAIN, "sail _sync", person))
+            .sessionToken();
+    var toMain = new PipedOutputStream();
+    var mainIn = new PipedInputStream(toMain, SyncWire.MAX_FRAME);
+    var fromMain = new PipedOutputStream();
+    var nodeIn = new PipedInputStream(fromMain, SyncWire.MAX_FRAME);
+    var served =
+        Executors.newVirtualThreadPerTaskExecutor()
+            .submit(
+                () -> {
+                  try (fromMain) {
+                    return SyncServerCommand.serve(
+                        main, "main", token, mainIn, fromMain, SyncTransitionSink.NONE, () -> MAIN);
+                  }
+                });
+    try (toMain) {
+      assertInstanceOf(
+          SyncWire.Welcome.class,
+          exchange(toMain, nodeIn, SyncWire.Hello.of(SailVersion.version(), person)));
+      var results = assertInstanceOf(SyncWire.Results.class, exchange(toMain, nodeIn, push));
+      send(toMain, new SyncWire.Bye());
+      return results.results().stream()
+          .map(result -> assertInstanceOf(SyncWire.Denied.class, result).reason())
+          .findFirst()
+          .orElse("no denial");
+    } finally {
+      served.get();
+    }
+  }
+
+  private static SyncWire.Response exchange(
+      OutputStream toMain, InputStream fromMain, SyncWire.Request request) throws IOException {
+    send(toMain, request);
+    return SyncWire.decodeResponse(SyncWire.readFramed(fromMain));
+  }
+
+  private static void send(OutputStream toMain, SyncWire.Request request) throws IOException {
+    toMain.write((SyncWire.encode(request) + "\n").getBytes(StandardCharsets.UTF_8));
+    toMain.flush();
   }
 
   @Test

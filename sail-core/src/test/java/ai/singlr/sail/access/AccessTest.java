@@ -755,16 +755,15 @@ class AccessTest {
   @Test
   void aPrincipalIsShownItsRoleItsLaneAndWhatItsRolesColumnGrants() {
     assertEquals(
-        new Principal("admin", "api", List.of("read", "write", "admin")),
-        Principal.of(Actors.ADMIN));
+        new Standing("admin", "api", List.of("read", "write", "admin")), Standing.of(Actors.ADMIN));
     assertEquals(
-        new Principal("member", "cli", List.of("read", "write")), Principal.of(Actors.OWNER_CLI));
-    assertEquals(new Principal("viewer", "api", List.of("read")), Principal.of(Actors.VIEWER));
-    assertEquals(new Principal("viewer", "room", List.of("read")), Principal.of(Actors.ROOM));
+        new Standing("member", "cli", List.of("read", "write")), Standing.of(Actors.OWNER_CLI));
+    assertEquals(new Standing("viewer", "api", List.of("read")), Standing.of(Actors.VIEWER));
+    assertEquals(new Standing("viewer", "room", List.of("read")), Standing.of(Actors.ROOM));
     assertEquals(
-        new Principal("member", "agent", List.of("read", "write")), Principal.of(Actors.AGENT));
-    assertThrows(NullPointerException.class, () -> new Principal(null, "api", List.of()));
-    assertThrows(NullPointerException.class, () -> new Principal("viewer", null, List.of()));
+        new Standing("member", "agent", List.of("read", "write")), Standing.of(Actors.AGENT));
+    assertThrows(NullPointerException.class, () -> new Standing(null, "api", List.of()));
+    assertThrows(NullPointerException.class, () -> new Standing("viewer", null, List.of()));
   }
 
   @Test

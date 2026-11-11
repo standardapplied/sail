@@ -6,8 +6,8 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Action;
-import ai.singlr.sail.access.Principal;
 import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.access.Standing;
 import ai.singlr.sail.api.RouteTable.Served;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Remedied;
@@ -78,7 +78,7 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
   private static final String SPEC = "/v1/specs/{id}";
   private static final String CONTENT = "/v1/specs/{id}/content";
   private static final String MESSAGES = "/v1/specs/{id}/messages";
-  private static final String SPEC_PATH = "/v1/specs/{id}/{sub}";
+  private static final String SPEC_PATH = "/v1/specs/{id}/{sub...}";
 
   private final LocalLaneOperations operations;
   private final List<Route<Handler>> routes;
@@ -181,7 +181,7 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
     Actor actor();
 
     /** What {@code whoami} shows of the credential and the principal it resolved to. */
-    Map<String, Object> whoami(Principal principal);
+    Map<String, Object> whoami(Standing standing);
 
     /**
      * A run's credential, acting as {@code actor} ({@link LocalLaneOperations#runActor}): a
@@ -192,12 +192,12 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
      */
     record Run(RunStore.RunRow run, Actor actor) implements Caller {
       @Override
-      public Map<String, Object> whoami(Principal principal) {
+      public Map<String, Object> whoami(Standing standing) {
         var shown = new LinkedHashMap<String, Object>();
         shown.put("handle", actor.handle());
         shown.put("owner", run.owner());
-        shown.put("role", principal.role());
-        shown.put("lane", principal.lane());
+        shown.put("role", standing.role());
+        shown.put("lane", standing.lane());
         shown.put("run_id", run.id());
         shown.put("project", run.project());
         return shown;
@@ -207,11 +207,11 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
     /** The box credential, acting as the box's own person. */
     record Box(Actor actor) implements Caller {
       @Override
-      public Map<String, Object> whoami(Principal principal) {
+      public Map<String, Object> whoami(Standing standing) {
         var shown = new LinkedHashMap<String, Object>();
         shown.put("handle", actor.handle());
-        shown.put("role", principal.role());
-        shown.put("lane", principal.lane());
+        shown.put("role", standing.role());
+        shown.put("lane", standing.lane());
         shown.put("credential", "box");
         return shown;
       }
@@ -394,12 +394,12 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
 
   /**
    * Reflects the authenticated identity as the access rule shows a principal its own ({@link
-   * Principal}): a run's minted principal with the FDE it acts for, or the box's person the ambient
+   * Standing}): a run's minted principal with the FDE it acts for, or the box's person the ambient
    * credential stands for.
    */
   private static ApiResponse whoami(
       LocalApiRequest request, Caller caller, Map<String, String> path) {
-    return new ApiResponse(200, caller.whoami(Principal.of(caller.actor())));
+    return new ApiResponse(200, caller.whoami(Standing.of(caller.actor())));
   }
 
   /**

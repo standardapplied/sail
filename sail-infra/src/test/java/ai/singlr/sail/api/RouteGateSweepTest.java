@@ -390,7 +390,7 @@ class RouteGateSweepTest {
             "PUT /v1/specs/{id}/content the journal decides",
             "GET /v1/specs/{id}/messages reads in scope",
             "POST /v1/specs/{id}/messages the journal decides",
-            "* /v1/specs/{id}/{sub} serves nothing"),
+            "* /v1/specs/{id}/{sub...} serves nothing"),
         socket(new ArrayList<>()).routes().stream().map(RouteGateSweepTest::described).toList());
   }
 

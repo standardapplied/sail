@@ -136,6 +136,9 @@ class LocalApiRouterTest {
         "404 {error=No route for spec sub-resource zz}",
         answer(router.ask(form("PATCH", "/v1/specs/e1/zz", ""))));
     assertEquals(
+        "404 {error=No route for spec sub-resource content/x}",
+        answer(router.ask(form("GET", "/v1/specs/e1/content/x", ""))));
+    assertEquals(
         "405 {error=spec accepts GET, PUT, or DELETE}",
         answer(router.ask(form("POST", "/v1/specs/", ""))));
     assertEquals(

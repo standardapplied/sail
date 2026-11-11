@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.access.Principal;
+import ai.singlr.sail.access.Standing;
 import ai.singlr.sail.api.HostPty;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
@@ -144,19 +144,19 @@ class RosterChangeTest {
     round();
     write("before");
     round();
-    assertEquals("member", Principal.of(nodesPerson().orElseThrow()).role());
+    assertEquals("member", Standing.of(nodesPerson().orElseThrow()).role());
     assertTrue(new SpecStore(mainDb).findById("before").isPresent(), "a member's push lands");
 
     onMain("UPDATE fdes SET role = 'viewer' WHERE handle = 'nia'");
     write("after");
     assertEquals(
         "member",
-        Principal.of(nodesPerson().orElseThrow()).role(),
+        Standing.of(nodesPerson().orElseThrow()).role(),
         "the node knows only what its last round told it");
 
     round();
 
-    assertEquals("viewer", Principal.of(nodesPerson().orElseThrow()).role());
+    assertEquals("viewer", Standing.of(nodesPerson().orElseThrow()).role());
     assertTrue(
         new SpecStore(mainDb).findById("after").isEmpty(),
         "main's next session decided the push as a viewer's");
@@ -280,7 +280,7 @@ class RosterChangeTest {
           201,
           box.socket("POST", "/v1/specs", "id=n2&title=N&project=acme").status(),
           "the node knows only what its last round told it");
-      assertEquals("member", Principal.of(CliOperator.of(NODE, new FdeStore(nodeDb))).role());
+      assertEquals("member", Standing.of(CliOperator.of(NODE, new FdeStore(nodeDb))).role());
 
       round();
 
@@ -289,7 +289,7 @@ class RosterChangeTest {
       assertEquals(
           "Your credential is read-only and cannot create specs.",
           ((Map<?, ?>) refused.body().get("error")).get("message"));
-      assertEquals("viewer", Principal.of(CliOperator.of(NODE, new FdeStore(nodeDb))).role());
+      assertEquals("viewer", Standing.of(CliOperator.of(NODE, new FdeStore(nodeDb))).role());
     }
   }
 

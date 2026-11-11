@@ -78,8 +78,10 @@ tests bite, and the deletion count in the body.
   (`ai.singlr.sail.access`), every read of a row `ReadFilter`, every resource and its owners
   built by `Resources` from the facts its caller selects of the row, every door's credential
   resolved to its principal by `RoleRule.principal`, one `Actor` bound at each door, and every
-  web and socket route declaring one `Gate` its router applies (`RouteGateSweepTest`). A type rule (`ai.singlr.sail.authority`) names the
-  actions a revision takes and keeps only its own facts. Nothing else reads a role, a lane, a
+  web and socket route declaring one `Gate` (`RouteGateSweepTest`): the router applies the box
+  and people gates; a deciding gate names the seam that asks `Access`. Every host command line is
+  `SailCommandLine`'s, which reads as the box's person (`SailCommandLineTest`). A type rule
+  (`ai.singlr.sail.authority`) names the actions a revision takes and keeps only its own facts. Nothing else reads a role, a lane, a
   scope or a capability to decide (`OneDecisionSweepTest`); a second derivation is a bug, not a
   convenience. The journal decides every write as it records the revision; a door asks `Access`,
   or the journal of the write it is about to make, never a write rule, and a rule never reads

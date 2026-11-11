@@ -557,7 +557,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           if (existing.isPresent() && !comparableSnapshot(id).equals(snapshot)) {
             throw new IllegalArgumentException("message '" + id + "' is immutable");
           }
-          var row = fromSnapshot(id, snapshot);
+          var row = authored(fromSnapshot(id, snapshot));
           requireReplyTarget(row);
           write(row, rev, rev);
           if (!Objects.equals(existing.map(MessageRow::rev).orElse(null), rev)) {
@@ -668,7 +668,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   private void adoptMainCopy(String id, Map<String, Object> remote, String rev) {
     db.transaction(
         () -> {
-          var row = fromSnapshot(id, remote);
+          var row = authored(fromSnapshot(id, remote));
           requireReplyTarget(row);
           replace(row, rev);
           journal(row, rev, ChangeLog.Entry.SYNC, remote);
@@ -750,14 +750,22 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
             .isPresent();
   }
 
+  /**
+   * {@code row}, which main decided, refused when it names no author. A pushed message is the
+   * message rule's to refuse, as a local post is, so it is not asked here.
+   */
+  private static MessageRow authored(MessageRow row) {
+    if (Strings.isBlank(row.author())) {
+      throw new IllegalArgumentException("message author is required");
+    }
+    return row;
+  }
+
   private static MessageRow fromSnapshot(String id, Map<String, Object> snapshot) {
     Ids.requireUuid(id);
     var body = Objects.toString(snapshot.get("body"), null);
     requireBody(body);
     var author = Objects.toString(snapshot.get("author"), null);
-    if (Strings.isBlank(author)) {
-      throw new IllegalArgumentException("message author is required");
-    }
     var replyTo = nullable(snapshot.get("reply_to"));
     if (replyTo != null) {
       Ids.requireUuid(replyTo);

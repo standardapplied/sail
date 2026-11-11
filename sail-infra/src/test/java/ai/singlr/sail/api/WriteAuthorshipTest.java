@@ -145,7 +145,7 @@ class WriteAuthorshipTest {
   }
 
   @Test
-  void anAdminMachineTokenTheMessageRuleAdmitsStillPostsNothingWithoutAnAuthor() throws Exception {
+  void anAdminMachineTokenIsRefusedAPostAsAnyNoOnesPostIs() throws Exception {
     try (var operations = operations(() -> SyncConfig.unset());
         var server = server(operations)) {
       var uday = token("uday", "member");
@@ -159,10 +159,18 @@ class WriteAuthorshipTest {
 
       var posted = send(server, "POST", "/v1/rooms/lobby/messages", machine, "{\"body\": \"hi\"}");
 
-      assertEquals(400, posted.statusCode(), posted.body());
+      assertEquals(403, posted.statusCode(), posted.body());
       assertEquals(
-          "message author is required",
-          ((Map<?, ?>) YamlUtil.parseMap(posted.body()).get("error")).get("message"));
+          Map.of(
+              "code",
+              "forbidden_not_author",
+              "message",
+              "This credential acts for no FDE, so a post in 'lobby' would be no one's.",
+              "action",
+              "Post with an FDE's own credential.",
+              "field_errors",
+              List.of()),
+          YamlUtil.parseMap(posted.body()).get("error"));
     }
   }
 

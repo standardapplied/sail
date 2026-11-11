@@ -394,8 +394,12 @@ through the same filter, so a run whose FDE lost the project is answered as a ru
 read reads as the actor
 its door bound (`Actor.reader`); one no door bound an actor to is the box's own machinery
 describing what the box holds, and sees every project. The HTTP and local-socket routers bind
-their caller before they route, the host CLI binds its operator, the box's person, to every read
-and preview, and a run's principal carries its owning FDE's scope.
+their caller before they route, and a run's principal carries its owning FDE's scope. Every host
+command runs through the one command line `SailCommandLine` builds, which reads as the box's person
+(`Actor.readingAs`), resolved at the command's first read, so a command that reads nothing needs
+no placed person; only the box's own machinery and its doors (sync, join, init, migrate, upgrade,
+the server, the gateway, the terminal host and main's end of sync) read as the box, each named
+with its reason (`SailCommandLineTest`, which also fails a command line built anywhere else).
 
 **A write over a row** is decided by where that row is filed (`ScopeRule`, reading the head
 as a push over it is decided), so a review or a message is no more a scoped actor's to
@@ -2407,7 +2411,8 @@ it implies the room rule's Change), stop (Operate a run), posting into a room wi
 `MessageAuthority.post`, the one decision of a rule a door asks, since a post with no message to
 journal still answers to the rule's fact that a post is someone's), serving a stack, restoring a
 snapshot and reading a definition (`ProjectGate`, the one project gate), pruning, resolving a
-conflict, reading a run's log (Operate a run, then placement, as a stop), sync now, sync health,
+conflict, reading a run's log and attaching to it (Operate a run, then placement, as a stop), sync
+now, sync health,
 bus stats and pointing the box at another main (Operate the box), managing people (the passkey
 ticket and registration without a ticket, `fde` at the host CLI and at the SSH gateway, asked
 before whether the roster lives on this box). Every door reads the row it acts on in its caller's
@@ -2422,8 +2427,9 @@ role, lane and scope) or refuses it; no door names a role or resolves a scope. A
 FDE, a passkey session and the gateway's session are that FDE. A credential that names no one is
 the box's own person, its role capped by what the credential was minted with: the host CLI's
 operator, the host token, a terminal's blank token, a run acting for no FDE, and the box
-credential, while the box is still the FDE it was minted for. A machine token acts for no one, with the box's person's role and scope, so it owns nothing
-and operates the box only when minted admin. A run is its own principal, for the FDE it acts for.
+credential, while the box is still the FDE it was minted for. A machine token acts for no one,
+with the box's person's role, capped by what it was minted with, and their scope, so it owns
+nothing and operates the box only when that role is admin. A run is its own principal, for the FDE it acts for.
 Scope is always the person's the credential resolves to. A disabled or unknown FDE, a session
 whose FDE is gone and a node that cannot place its own FDE are refused, and sync serves no session
 that no FDE stands behind. A credential is resolved again at every request, command and sync
@@ -2440,10 +2446,14 @@ kind of credential gets the same answer in the same words at every door that off
 router's table (`RouteTable`), and a route cannot be built without one: it decides an action
 through its operation's one seam; it reads in scope; the journal decides its write; it operates
 the box; it manages people; or it is served before any credential is asked, for a reason (the
-liveness probe, passkey login, and registration with an enrollment ticket). The router applies
-the gates no row decides, Operate the box and Manage people, before the route's handler runs; both
-routers decide the box gate on the FDE `host.yaml` names (`NodeIdentity.handle`), the box's person
-the role rule resolves. `RouteGateSweepTest` pins both tables whole.
+liveness probe, passkey login, the enrollment and sign-in pages, and registration with an
+enrollment ticket). One dispatch (`RouteTable.serve`) matches a method and path for every table to
+its route, a method the path does not serve, or nothing. The router applies the gates no row
+decides, Operate the box and Manage people, before the route's handler runs, and both routers
+decide the box gate on the box's person the role rule resolves (`RoleRule.boxFde`). A deciding
+route names the seam that decides its action, and `RouteGateSweepTest` reads that seam's bytecode
+for the `Access` call with that action; it pins every table the server mounts, and the socket's,
+whole.
 
 The facts that read a lane or role to know which applies, and the checks of an agent's own work
 until `sail-agents-act-on-their-own-work`, are the allowlist of `OneDecisionSweepTest`. It sees
