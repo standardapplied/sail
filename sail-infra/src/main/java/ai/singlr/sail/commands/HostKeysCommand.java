@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.OperatorCommand;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -29,7 +30,7 @@ public final class HostKeysCommand implements Runnable {
 
   @Override
   public void run() {
-    SailCommandLine.of(this).usage(System.out);
+    CommandLine.usage(this, System.out);
   }
 
   @Command(

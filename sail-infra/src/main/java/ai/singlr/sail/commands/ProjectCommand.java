@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 
 @Command(
@@ -41,6 +42,6 @@ public final class ProjectCommand implements Runnable {
 
   @Override
   public void run() {
-    SailCommandLine.of(this).usage(System.out);
+    CommandLine.usage(this, System.out);
   }
 }

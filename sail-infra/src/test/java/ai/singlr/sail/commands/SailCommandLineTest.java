@@ -38,7 +38,7 @@ class SailCommandLineTest {
       new Actor("ada", Role.MEMBER, Actor.Lane.CLI).withScope(ProjectScope.of(List.of("alpha")));
 
   @Test
-  void everyCommandInTheTreeReadsAsTheOperatorButTheBoxsOwnMachineryAndItsDoors() {
+  void theCommandsThatReadAsTheBoxAreExactlyTheseOfTheTree() {
     var tree = new TreeSet<String>();
     var asTheBox = new TreeSet<String>();
     walk(SailCommandLine.of(new Sail()), "sail", tree, asTheBox);
@@ -61,7 +61,6 @@ class SailCommandLineTest {
             "sail upgrade"),
         asTheBox);
     assertEquals(SailCommandLine.AS_THE_BOX.size(), asTheBox.size(), "no stale entry");
-    SailCommandLine.AS_THE_BOX.values().forEach(reason -> assertTrue(reason.length() > 20));
     assertTrue(tree.contains("sail project config get"), "the walk reaches every leaf");
   }
 

@@ -26,6 +26,7 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -46,7 +47,7 @@ public final class HostIncusCommand implements Runnable {
 
   @Override
   public void run() {
-    SailCommandLine.of(this).usage(System.out);
+    CommandLine.usage(this, System.out);
   }
 
   @Command(

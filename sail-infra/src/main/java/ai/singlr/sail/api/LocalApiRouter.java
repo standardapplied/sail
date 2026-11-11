@@ -26,7 +26,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -91,21 +90,48 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
     this.routes =
         List.of(
             route(GET, SYNC, Gate.box(operations::boxFde), this::sync),
+            unserved(SYNC, "Only GET is available."),
             route(GET, CONFLICTS, reads, this::conflicts),
+            unserved(CONFLICTS, "Only GET is available."),
             route(POST, RESOLVE, Gate.decides(Action.CHANGE), this::resolve),
+            unserved(RESOLVE, "Conflict resolution accepts POST"),
             route(GET, CONFLICT, reads, this::template),
+            route(
+                Route.ANY,
+                CONFLICT,
+                Gate.UNSERVED,
+                (request, caller, path) ->
+                    template(request)
+                        ? problem(405, "A merge template accepts GET")
+                        : noRoute(request)),
             route(GET, WHOAMI, reads, LocalApiRouter::whoami),
+            unserved(WHOAMI, "whoami accepts GET"),
             route(POST, EVENTS, journal, this::events),
-            route(GET, RUN_MESSAGES, reads, this::runMessages),
-            route(POST, RUN_MESSAGES, Gate.decides(Action.NARRATE), this::runAck),
-            route(POST, RUN_SESSION, journal, this::runSession),
+            unserved(EVENTS, "events accepts POST"),
+            route(GET, RUN_MESSAGES, reads, aRunsOwn(this::runMessages)),
+            route(POST, RUN_MESSAGES, Gate.decides(Action.NARRATE), aRunsOwn(this::runAck)),
+            route(
+                Route.ANY,
+                RUN_MESSAGES,
+                Gate.UNSERVED,
+                aRunsOwn(answering("run messages accepts GET or POST"))),
+            route(POST, RUN_SESSION, journal, aRoomsOrARunsOwn(this::runSession)),
+            route(
+                Route.ANY,
+                RUN_SESSION,
+                Gate.UNSERVED,
+                aRoomsOrARunsOwn(answering("run session accepts POST"))),
             route(GET, SKILLS, reads, this::skills),
             route(POST, SKILLS, journal, this::share),
+            unserved(SKILLS, "skills accepts GET or POST"),
             route(GET, SKILL, reads, this::skill),
             route(DELETE, SKILL, journal, this::unshare),
+            unserved(SKILL, "a skill accepts GET or DELETE"),
             route(POST, SERVE, serving, this::serve),
             route(DELETE, SERVE, serving, this::stop),
+            unserved(SERVE, "serve accepts POST or DELETE"),
             route(GET, PORTS, reads, this::ports),
+            unserved(PORTS, "ports accepts GET"),
             route(
                 Route.ANY,
                 PROJECT_PATH,
@@ -113,14 +139,19 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
                 (request, caller, path) -> noRoute(request)),
             route(GET, SPECS, reads, this::specs),
             route(POST, SPECS, journal, this::create),
+            unserved(SPECS, "specs accepts GET or POST"),
             route(GET, BOARD, reads, this::board),
+            unserved(BOARD, "board accepts GET"),
             route(GET, SPEC, reads, this::spec),
             route(PUT, SPEC, journal, this::update),
             route(DELETE, SPEC, journal, this::delete),
+            unserved(SPEC, "spec accepts GET, PUT, or DELETE"),
             route(GET, CONTENT, reads, this::content),
             route(PUT, CONTENT, journal, this::setContent),
+            unserved(CONTENT, "content accepts GET or PUT"),
             route(GET, MESSAGES, reads, this::roomMessages),
             route(POST, MESSAGES, journal, this::messages),
+            unserved(MESSAGES, "messages accepts GET or POST"),
             route(
                 Route.ANY,
                 SPEC_PATH,
@@ -161,6 +192,44 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
 
   private static Route<Handler> route(String method, String pattern, Gate gate, Handler handler) {
     return new Route<>(method, pattern, gate, handler);
+  }
+
+  /** Every method of {@code pattern} its routes above do not serve, answered as {@code why}. */
+  private static Route<Handler> unserved(String pattern, String why) {
+    return route(Route.ANY, pattern, Gate.UNSERVED, answering(why));
+  }
+
+  private static Handler answering(String methodNotAllowed) {
+    return (request, caller, path) -> problem(405, methodNotAllowed);
+  }
+
+  /**
+   * {@code handler} for a run, whose inbox the route is; the box credential has no run to deliver
+   * to, which it hears before what its method is.
+   */
+  private static Handler aRunsOwn(Handler handler) {
+    return (request, caller, path) ->
+        caller instanceof Caller.Box
+            ? problem(
+                403,
+                "Run message delivery requires a run credential; the box credential has no run"
+                    + " to deliver to.")
+            : handler.handle(request, caller, path);
+  }
+
+  /**
+   * {@code handler} for a run's session report, or the box credential's report of a room-bound one
+   * ({@code room_id}): the box has no run whose conversation to report.
+   */
+  private static Handler aRoomsOrARunsOwn(Handler handler) {
+    return (request, caller, path) ->
+        caller instanceof Caller.Box && Strings.isBlank(request.form().get("room_id"))
+            ? problem(
+                403,
+                "Session reports name a run's conversation and require a run credential;"
+                    + " the box credential reports only a room-bound conversation"
+                    + " (room_id).")
+            : handler.handle(request, caller, path);
   }
 
   /**
@@ -254,21 +323,18 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
 
   /**
    * Routes an authenticated request, acting as its caller, as every router dispatches ({@link
-   * RouteTable#serve}). What a request hears before its method is asked comes first ({@link
-   * #beforeItsMethod}); then the route of its method admits the caller through its gate and serves
-   * it, or a method none serves hears what the socket has always answered it.
+   * RouteTable#serve}): a project the path names that the caller cannot read is not there; then the
+   * route admits the caller through its gate and serves it. Every pattern's table answers every
+   * method, its own words for one it does not serve, so a path no pattern matches is the one
+   * request without a route.
    */
   private ApiResponse route(LocalApiRequest request, Caller caller) {
     try {
       return switch (RouteTable.serve(routes, request.method(), request.path())) {
-        case Served.NotFound<Handler> none -> noRoute(request);
-        case Served.MethodNotAllowed<Handler>(var pattern, var path) ->
-            beforeItsMethod(pattern, caller, request, path)
-                .orElseGet(() -> unservedMethod(pattern, request));
+        case Served.NotFound<Handler> _, Served.MethodNotAllowed<Handler> _ -> noRoute(request);
         case Served.Match<Handler>(var route, var path) -> {
-          var refused = beforeItsMethod(route.pattern(), caller, request, path);
-          if (refused.isPresent()) {
-            yield refused.get();
+          if (path.containsKey(PROJECT)) {
+            project(caller, path.get(PROJECT));
           }
           route.gate().admit(caller.actor());
           yield route.handler().handle(request, caller, path);
@@ -280,62 +346,6 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
       Thread.currentThread().interrupt();
       throw ApiException.of(ErrorCode.CONTAINER_ERROR, interrupted);
     }
-  }
-
-  /**
-   * What a request on {@code pattern} hears before its method is asked: a project the path names
-   * that the caller cannot read is not there, and the box credential, which has no run, delivers no
-   * run's messages and reports no run's session, only a room's.
-   */
-  private static Optional<ApiResponse> beforeItsMethod(
-      String pattern, Caller caller, LocalApiRequest request, Map<String, String> path) {
-    if (path.containsKey(PROJECT)) {
-      project(caller, path.get(PROJECT));
-    }
-    if (!(caller instanceof Caller.Box)) {
-      return Optional.empty();
-    }
-    return switch (pattern) {
-      case RUN_MESSAGES ->
-          Optional.of(
-              problem(
-                  403,
-                  "Run message delivery requires a run credential; the box credential has no run"
-                      + " to deliver to."));
-      case RUN_SESSION ->
-          Strings.isBlank(request.form().get("room_id"))
-              ? Optional.of(
-                  problem(
-                      403,
-                      "Session reports name a run's conversation and require a run credential;"
-                          + " the box credential reports only a room-bound conversation"
-                          + " (room_id)."))
-              : Optional.empty();
-      default -> Optional.empty();
-    };
-  }
-
-  /** What the socket has always answered a method no route of {@code pattern} serves. */
-  private static ApiResponse unservedMethod(String pattern, LocalApiRequest request) {
-    return switch (pattern) {
-      case SYNC, CONFLICTS -> problem(405, "Only GET is available.");
-      case RESOLVE -> problem(405, "Conflict resolution accepts POST");
-      case CONFLICT ->
-          template(request) ? problem(405, "A merge template accepts GET") : noRoute(request);
-      case WHOAMI -> problem(405, "whoami accepts GET");
-      case EVENTS -> problem(405, "events accepts POST");
-      case RUN_MESSAGES -> problem(405, "run messages accepts GET or POST");
-      case RUN_SESSION -> problem(405, "run session accepts POST");
-      case SKILLS -> problem(405, "skills accepts GET or POST");
-      case SKILL -> problem(405, "a skill accepts GET or DELETE");
-      case SERVE -> problem(405, "serve accepts POST or DELETE");
-      case PORTS -> problem(405, "ports accepts GET");
-      case SPECS -> problem(405, "specs accepts GET or POST");
-      case BOARD -> problem(405, "board accepts GET");
-      case SPEC -> problem(405, "spec accepts GET, PUT, or DELETE");
-      case CONTENT -> problem(405, "content accepts GET or PUT");
-      default -> problem(405, "messages accepts GET or POST");
-    };
   }
 
   private ApiResponse sync(LocalApiRequest request, Caller caller, Map<String, String> path) {
@@ -645,7 +655,7 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
    * The run-scoped delivery lane: the relay and the stop gate know only their run credential — the
    * fix lane deliberately carries no {@code SAIL_SPEC_ID} — so the credential names the run and the
    * run names the spec. A run reads its undelivered inbox here; the box has none ({@link
-   * #beforeItsMethod}).
+   * #aRunsOwn}).
    */
   private ApiResponse runMessages(
       LocalApiRequest request, Caller caller, Map<String, String> path) {

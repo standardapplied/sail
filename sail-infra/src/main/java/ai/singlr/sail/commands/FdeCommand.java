@@ -65,6 +65,7 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -175,7 +176,7 @@ public final class FdeCommand implements Runnable {
 
   @Override
   public void run() {
-    SailCommandLine.of(this).usage(System.out);
+    CommandLine.usage(this, System.out);
   }
 
   private static OperatorCommand operator() {
@@ -1508,7 +1509,7 @@ public final class FdeCommand implements Runnable {
 
     @Override
     public void run() {
-      SailCommandLine.of(this).usage(System.out);
+      CommandLine.usage(this, System.out);
     }
 
     private Path database() {
@@ -1665,7 +1666,7 @@ public final class FdeCommand implements Runnable {
 
     @Override
     public void run() {
-      SailCommandLine.of(this).usage(System.out);
+      CommandLine.usage(this, System.out);
     }
 
     private Path database() {

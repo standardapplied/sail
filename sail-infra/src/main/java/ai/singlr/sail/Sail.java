@@ -21,7 +21,6 @@ import ai.singlr.sail.commands.ProjectCommand;
 import ai.singlr.sail.commands.PtyChildCommand;
 import ai.singlr.sail.commands.PtyHostCommand;
 import ai.singlr.sail.commands.PtySelfTestCommand;
-import ai.singlr.sail.commands.SailCommandLine;
 import ai.singlr.sail.commands.ServerCommand;
 import ai.singlr.sail.commands.SessionCommand;
 import ai.singlr.sail.commands.SpecCommand;
@@ -29,6 +28,7 @@ import ai.singlr.sail.commands.SyncCommand;
 import ai.singlr.sail.commands.SyncServerCommand;
 import ai.singlr.sail.commands.UpgradeCommand;
 import ai.singlr.sail.engine.Banner;
+import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 
@@ -67,6 +67,6 @@ public final class Sail implements Runnable {
   public void run() {
     Banner.printBranding(System.out, Ansi.AUTO);
     System.out.println();
-    SailCommandLine.of(this).usage(System.out);
+    CommandLine.usage(this, System.out);
   }
 }

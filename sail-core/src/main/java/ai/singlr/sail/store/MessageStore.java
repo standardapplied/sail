@@ -122,9 +122,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           requireReplyTarget(row);
           var snapshot = snapshot(row);
           WriteAuthority.admit(db, decide(id, snapshot));
-          if (row.author() == null) {
-            throw new IllegalArgumentException("message author is required");
-          }
+          authored(row);
           var rev = Revisions.next(null, YamlUtil.dumpJson(snapshot));
           write(row, rev, null);
           journal(row, rev, ChangeLog.Entry.LOCAL, snapshot);
@@ -751,8 +749,8 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * {@code row}, which main decided, refused when it names no author. A pushed message is the
-   * message rule's to refuse, as a local post is, so it is not asked here.
+   * {@code row}, refused when it names no author: a message main decided, or one this box's own
+   * machinery writes past the rules. A pushed or posted message is the message rule's to refuse.
    */
   private static MessageRow authored(MessageRow row) {
     if (Strings.isBlank(row.author())) {
