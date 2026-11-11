@@ -17,6 +17,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -495,7 +496,14 @@ class DoorParityTest {
             "Only an admin may manage people.",
             "Ask an admin to do it."),
         web("uday", "eng", "POST", "/v1/auth/register/ticket", "{\"fde\": \"zed\"}"),
-        hostCli(SailCli.run(fde("eng"), "add", "zed", "--name", "Zed")),
+        hostCli(
+            SailCli.run(
+                () -> CliOperator.of(boxes.get("eng").config(), new FdeStore(db)),
+                fde("eng"),
+                "add",
+                "zed",
+                "--name",
+                "Zed")),
         new Said(
             "gateway",
             ((SshGateway.Rejected)

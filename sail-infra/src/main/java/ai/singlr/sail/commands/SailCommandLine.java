@@ -10,9 +10,6 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.identity.Actor;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import picocli.CommandLine;
 
@@ -48,23 +45,24 @@ public final class SailCommandLine {
    * {@code root}'s command line, its every command but {@link #AS_THE_BOX} read as the operator.
    */
   public static CommandLine of(Object root) {
-    return of(root, SailCommandLine::operator, AS_THE_BOX.keySet());
+    return of(root, SailCommandLine::operator);
   }
 
-  /**
-   * As {@link #of(Object)}, with the operator {@code operator} resolves, and the commands {@code
-   * asTheBox} names reading as the box.
-   */
-  static CommandLine of(Object root, Supplier<Actor> operator, Set<Class<?>> asTheBox) {
+  /** As {@link #of(Object)}, with the operator {@code operator} resolves. */
+  static CommandLine of(Object root, Supplier<Actor> operator) {
     var line = new CommandLine(root);
-    line.setExecutionStrategy(parsed -> execute(parsed, operator, asTheBox));
+    line.setExecutionStrategy(parsed -> execute(parsed, operator));
     return line;
   }
 
-  private static int execute(
-      CommandLine.ParseResult parsed, Supplier<Actor> operator, Set<Class<?>> asTheBox) {
+  /** Whether {@code command} reads as the box itself, not its person ({@link #AS_THE_BOX}). */
+  static boolean readsAsTheBox(Object command) {
+    return AS_THE_BOX.containsKey(command.getClass());
+  }
+
+  private static int execute(CommandLine.ParseResult parsed, Supplier<Actor> operator) {
     var run = new CommandLine.RunLast();
-    if (asTheBox.contains(leaf(parsed).commandSpec().userObject().getClass())) {
+    if (readsAsTheBox(leaf(parsed).commandSpec().userObject())) {
       return run.execute(parsed);
     }
     return Actor.readingAs(once(operator), () -> run.execute(parsed));
@@ -79,8 +77,17 @@ public final class SailCommandLine {
   }
 
   private static Supplier<Actor> once(Supplier<Actor> resolve) {
-    var resolved = new AtomicReference<Actor>();
-    return () -> resolved.updateAndGet(held -> Objects.requireNonNullElseGet(held, resolve));
+    return new Supplier<>() {
+      private Actor resolved;
+
+      @Override
+      public synchronized Actor get() {
+        if (resolved == null) {
+          resolved = resolve.get();
+        }
+        return resolved;
+      }
+    };
   }
 
   /** This box's operator, as its operations name it: the one resolver of the host CLI's person. */

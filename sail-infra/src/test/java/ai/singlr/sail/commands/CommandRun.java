@@ -9,7 +9,6 @@ import ai.singlr.sail.identity.Actor;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
-import java.util.Set;
 import picocli.CommandLine;
 
 /** One run of a command: its exit code and what it wrote to stdout and stderr. */
@@ -25,7 +24,7 @@ record CommandRun(int exit, String out, String err) {
    * {@code person}, stdout and stderr captured for the run alone.
    */
   static CommandRun as(Actor person, Object command, String... args) {
-    return run(SailCommandLine.of(command, () -> person, Set.of()), args);
+    return run(SailCommandLine.of(command, () -> person), args);
   }
 
   private static CommandRun run(CommandLine cli, String... args) {

@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -88,6 +89,16 @@ class SailCommandLineTest {
   }
 
   @Test
+  void theGuardSeesACommandRunByPicocliItself() throws IOException {
+    try (var bytes =
+        BypassByRun.class.getResourceAsStream("SailCommandLineTest$BypassByRun.class")) {
+      assertEquals(
+          List.of("ai/singlr/sail/commands/SailCommandLineTest$BypassByRun"),
+          buildsACommandLine(bytes.readAllBytes()));
+    }
+  }
+
+  @Test
   void aCommandReadsAsTheOperatorResolvedOnceAtItsFirstReadAndWritesAsNoOneUnbound() {
     var asked = new AtomicInteger();
     var line =
@@ -96,8 +107,7 @@ class SailCommandLineTest {
             () -> {
               asked.incrementAndGet();
               return ADA;
-            },
-            Set.of());
+            });
 
     var exit = line.execute("reads");
     Probe.Reads reads = line.getSubcommands().get("reads").getCommand();
@@ -155,28 +165,16 @@ class SailCommandLineTest {
                 new Probe(),
                 () -> {
                   throw new AssertionError("a command that reads nothing places no one");
-                },
-                Set.of())
+                })
             .execute("quiet");
 
     assertEquals(0, exit);
   }
 
   @Test
-  void aCommandNamedAsTheBoxsOwnReadsAsTheBoxAndPlacesNoOne() {
-    var line =
-        SailCommandLine.of(
-            new Probe(),
-            () -> {
-              throw new AssertionError("the box's own machinery places no one");
-            },
-            Set.of(Probe.Reads.class));
-
-    var exit = line.execute("reads");
-    Probe.Reads reads = line.getSubcommands().get("reads").getCommand();
-
-    assertEquals(0, exit);
-    assertEquals(List.of(Actor.system(), Actor.system()), reads.read);
+  void onlyTheCommandsNamedAsTheBoxsOwnReadAsTheBox() {
+    assertTrue(SailCommandLine.readsAsTheBox(new SyncCommand()));
+    assertFalse(SailCommandLine.readsAsTheBox(new ProjectListCommand()));
   }
 
   private static void walk(CommandLine line, String path, Set<String> tree, Set<String> asTheBox) {
@@ -199,7 +197,8 @@ class SailCommandLineTest {
     for (var entry : model.constantPool()) {
       if (entry instanceof MemberRefEntry member
           && member.owner().asInternalName().equals("picocli/CommandLine")
-          && member.name().stringValue().equals("<init>")) {
+          && Set.of("<init>", "run", "call").contains(member.name().stringValue())
+          && !built.contains(model.thisClass().asInternalName())) {
         built.add(model.thisClass().asInternalName());
       }
     }
@@ -236,6 +235,12 @@ class SailCommandLineTest {
   private static final class Bypass {
     CommandLine line() {
       return new CommandLine(new Sail());
+    }
+  }
+
+  private static final class BypassByRun {
+    void run() {
+      CommandLine.run(new Sail(), "--version");
     }
   }
 }

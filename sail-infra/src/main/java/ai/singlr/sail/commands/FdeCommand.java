@@ -19,7 +19,6 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerAuthorizedKeys;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorAuthorizedKeys;
@@ -143,11 +142,6 @@ public final class FdeCommand implements Runnable {
     /** Whether this box is a node, whose roster is a copy of main's. */
     boolean node() {
       return HostSync.isNode(sync);
-    }
-
-    /** Whom this box's root acts for, as {@code roster} places this box's FDE. */
-    Actor person(FdeStore roster) {
-      return CliOperator.of(sync, roster);
     }
 
     /**
@@ -379,10 +373,7 @@ public final class FdeCommand implements Runnable {
    * may is sent to main.
    */
   private static void requireRosterEdit(Box box, String action) {
-    try (var db = Sqlite.open(box.database())) {
-      Refusals.enforce(
-          Access.atAll(box.person(new FdeStore(db)), Action.MANAGE_PEOPLE, Resource.Kind.PEOPLE));
-    }
+    Refusals.enforce(Access.atAll(Actor.reader(), Action.MANAGE_PEOPLE, Resource.Kind.PEOPLE));
     if (box.node()) {
       throw new IllegalStateException(rosterEditOnNodeMessage(action));
     }

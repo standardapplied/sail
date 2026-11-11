@@ -7,10 +7,12 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.Main;
 import ai.singlr.sail.Sail;
+import ai.singlr.sail.identity.Actor;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
+import java.util.function.Supplier;
 import picocli.CommandLine;
 
 /**
@@ -30,6 +32,18 @@ final class SailCli {
 
   /** What {@code command} run with {@code args} as {@link Main} runs it exited with and printed. */
   static Ran run(Object command, String... args) {
+    return run(new CommandLine(command), args);
+  }
+
+  /**
+   * What {@code command} run with {@code args} exited with and printed, as the host CLI runs it for
+   * the box's person {@code operator} resolves.
+   */
+  static Ran run(Supplier<Actor> operator, Object command, String... args) {
+    return run(SailCommandLine.of(command, operator), args);
+  }
+
+  private static Ran run(CommandLine sail, String... args) {
     var originalOut = System.out;
     var originalErr = System.err;
     var out = new ByteArrayOutputStream();
@@ -37,7 +51,6 @@ final class SailCli {
     System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
     System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
     try {
-      var sail = new CommandLine(command);
       sail.setErr(new PrintWriter(err, true, StandardCharsets.UTF_8));
       sail.setExecutionExceptionHandler((failure, line, parsed) -> Main.report(failure, line));
       var exit = sail.execute(args);

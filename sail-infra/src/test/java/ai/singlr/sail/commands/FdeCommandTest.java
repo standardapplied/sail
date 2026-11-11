@@ -165,7 +165,10 @@ class FdeCommandTest {
   }
 
   private CommandLine fdeCommand() {
-    var command = new CommandLine(new FdeCommand(this::box));
+    var command =
+        SailCommandLine.of(
+            new FdeCommand(this::box),
+            () -> inDb(db -> CliOperator.of(box().sync(), new FdeStore(db))));
     command.setExecutionExceptionHandler(
         (failure, line, parsed) -> {
           refusal = failure.getMessage();
