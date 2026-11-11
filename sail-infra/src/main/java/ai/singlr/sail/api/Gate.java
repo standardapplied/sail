@@ -15,13 +15,14 @@ import java.util.Objects;
 import java.util.function.Supplier;
 
 /**
- * How a route is decided (A3): every route an HTTP or socket router serves declares one gate, and
- * the router applies it ({@link #admit}) as the caller before the route's handler runs. A route
- * either declares the action its operation decides on the row it resolves; or reads in scope, every
- * row through {@code ReadFilter}; or makes a write the journal decides by its type's rule; or
- * serves nothing, answering a request as the API always has; or is unauthenticated, for a reason,
- * before any credential is asked. What no row is needed to decide, the router decides itself:
- * operating the box, and managing people.
+ * How a route is decided (A3): every route an HTTP or socket router's table declares names one
+ * gate, and a router that authenticates applies it ({@link #admit}) as the caller before the
+ * route's handler runs; the pages, which authenticate no one, declare only unauthenticated routes.
+ * A route either declares the action its operation decides on the row it resolves; or reads in
+ * scope, every row through {@code ReadFilter}; or makes a write the journal decides by its type's
+ * rule; or serves nothing, answering a request as the API always has; or is unauthenticated, for a
+ * reason, before any credential is asked. What no row is needed to decide, the router decides
+ * itself: operating the box, and managing people.
  */
 sealed interface Gate {
 

@@ -2453,14 +2453,16 @@ an action, which the gate names; it reads in scope; the journal decides its writ
 the box; it manages people; or it is served before any credential is asked, for a reason (the
 liveness probe, passkey login, the enrollment and sign-in pages, and registration with an
 enrollment ticket). One dispatch (`RouteTable.serve`) matches a method and path for every table to
-its route, a method the path does not serve, or nothing. The router applies the gates no row
-decides, Operate the box and Manage people, before the route's handler runs, and both routers
-decide the box gate on the box's person the role rule resolves (`RoleRule.boxFde`). A deciding
-gate is a declaration: the router admits every caller and the operation refuses, as its own tests
-and the permission snapshot prove. `RouteGateSweepTest` pins every table the server mounts, and
-the socket's, whole, and fails a context mounted anywhere but `SailApiServer.serve`, the one way
-a context is created. The socket's table also carries what it has always answered a method a
-pattern does not serve, each pattern's last route.
+its route, a method the path does not serve, or nothing. Every router that authenticates applies
+its matched route's gate before the route's handler runs; only the gates no row decides, Operate
+the box and Manage people, refuse there, and both routers decide the box gate on the box's person
+the role rule resolves (`RoleRule.boxFde`). The pages authenticate no one and declare only
+unauthenticated routes. A deciding gate is a declaration: the router admits every caller and the
+operation refuses, as its own tests and the permission snapshot prove. `RouteGateSweepTest` pins
+every table the server mounts, and the socket's, whole; fails a context created anywhere but
+`SailApiServer.serve`; and drives the API's box routes. What a handler answers beside its table
+is proven by that router's own tests, not by the sweep. The socket's table also carries what it
+has always answered a method a pattern does not serve, each pattern's last route.
 
 The facts that read a lane or role to know which applies, and the checks of an agent's own work
 until `sail-agents-act-on-their-own-work`, are the allowlist of `OneDecisionSweepTest`. It sees

@@ -137,21 +137,19 @@ public final class SseHandler implements HttpHandler, RouteTable {
     try {
       try {
         auth.require(exchange);
+        switch (RouteTable.serve(
+            routes, exchange.getRequestMethod(), exchange.getRequestURI().getPath())) {
+          case RouteTable.Served.NotFound<SseHandler> _ -> throw ApiRouter.notFound();
+          case RouteTable.Served.MethodNotAllowed<SseHandler> _ -> {
+            sendMethodNotAllowed(exchange);
+            return;
+          }
+          case RouteTable.Served.Match<SseHandler>(var route, _) ->
+              route.gate().admit(ApiAuth.actorOf(exchange));
+        }
       } catch (ApiException e) {
         ApiResponse.sendError(exchange, e);
         return;
-      }
-      switch (RouteTable.serve(
-          routes, exchange.getRequestMethod(), exchange.getRequestURI().getPath())) {
-        case RouteTable.Served.NotFound<SseHandler> _ -> {
-          ApiResponse.sendError(exchange, ApiRouter.notFound());
-          return;
-        }
-        case RouteTable.Served.MethodNotAllowed<SseHandler> _ -> {
-          sendMethodNotAllowed(exchange);
-          return;
-        }
-        case RouteTable.Served.Match<SseHandler> _ -> {}
       }
       if (!connectionPermits.tryAcquire()) {
         rejected.increment();

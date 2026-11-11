@@ -46,12 +46,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * A3 at the web API and the container socket: every route declares one gate, the table each router
- * dispatches through is the whole of what it serves, and the router applies the gates that need no
- * row (operating the box, managing people) before any handler runs. Each table is pinned whole, so
- * a route added, removed or re-gated is a change to its list; the box routes are driven, so a gate
- * taken off one is a caller served what is not theirs; and a request no route of the socket
- * declares reaches no operation.
+ * A3 at the web API and the container socket: every route a table declares names one gate. Each
+ * table is pinned whole, so a route declared, removed or re-gated is a change to its list; a
+ * context is created only through {@code SailApiServer.serve}, which records its table; the box
+ * routes of the API are driven, so a gate taken off one is a caller served what is not theirs; the
+ * pages, which authenticate no one, declare only unauthenticated routes; and a request no route of
+ * the socket declares reaches no operation. What a handler answers beside its table is not proven
+ * here: each router's own tests drive the paths it serves.
  */
 class RouteGateSweepTest {
 
@@ -202,6 +203,24 @@ class RouteGateSweepTest {
         assertTrue(
             !(route.gate() instanceof Gate.Unauthenticated),
             "every request on the socket presents a credential: " + described(route));
+      }
+    }
+  }
+
+  @Test
+  void thePagesAskNoCredentialSoEachOfTheirRoutesIsUnauthenticated() throws Exception {
+    try (var server = everyContext()) {
+      var pages =
+          server.tables().stream()
+              .filter(WebauthnPageHandler.class::isInstance)
+              .flatMap(table -> table.routes().stream())
+              .toList();
+      assertEquals(2, pages.size());
+      for (var route : pages) {
+        assertTrue(
+            route.gate() instanceof Gate.Unauthenticated,
+            "the page handler authenticates no one, so no gate of its could be applied: "
+                + described(route));
       }
     }
   }
@@ -378,9 +397,9 @@ class RouteGateSweepTest {
             "* /v1/whoami serves nothing",
             "POST /v1/events the journal decides",
             "* /v1/events serves nothing",
-            "GET /v1/run/messages reads in scope",
+            "GET /v1/run/messages acts on its own run",
             "POST /v1/run/messages acts on its own run",
-            "* /v1/run/messages serves nothing",
+            "* /v1/run/messages acts on its own run",
             "POST /v1/run/session the journal decides",
             "* /v1/run/session serves nothing",
             "GET /v1/projects/{project}/skills reads in scope",

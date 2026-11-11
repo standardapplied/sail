@@ -180,7 +180,10 @@ public final class SailApiServer implements AutoCloseable {
     }
   }
 
-  /** The route table of every context this server serves, in the order it mounted them. */
+  /**
+   * The route table of every context this server serves, in the order it mounted them: the hook
+   * {@code RouteGateSweepTest} pins the tables through, read by nothing else.
+   */
   List<RouteTable> tables() {
     return List.copyOf(tables);
   }
