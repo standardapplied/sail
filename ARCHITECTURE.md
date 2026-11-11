@@ -397,9 +397,12 @@ describing what the box holds, and sees every project. The HTTP and local-socket
 their caller before they route, and a run's principal carries its owning FDE's scope. Every host
 command runs through the one command line `SailCommandLine` builds, which reads as the box's person
 (`Actor.readingAs`), resolved at the command's first read, so a command that reads nothing needs
-no placed person; only the box's own machinery and its doors (sync, join, init, migrate, upgrade,
-the server, the gateway, the terminal host and main's end of sync) read as the box, each named
-with its reason (`SailCommandLineTest`, which also fails a command line built anywhere else).
+no placed person. Only five commands read as the box, each named with its reason: the server,
+`sync`, `sync status`, `migrate` and `upgrade` (`SailCommandLineTest`, which also fails a command
+line built anywhere else). The commands that read the catalog read it as the box's person; the
+container verbs (`project start`, `stop`, `switch`, `containers`, `logs`, `exec`, `shell`,
+`connect` and `project snapshot`) act on this box's containers by name with its own privileges,
+which its root shell already has, and never consult the catalog.
 
 **A write over a row** is decided by where that row is filed (`ScopeRule`, reading the head
 as a push over it is decided), so a review or a message is no more a scoped actor's to
@@ -894,7 +897,9 @@ clone a project's source repos into its container at provision time, not to move
   SSH by `RemoteCommandRunner`, in lanes:
   - Local commands (`--version`, `upgrade`, `init`, `client`, `login`) run on the client.
   - Host-only commands (`host …`) error with guidance to SSH in.
-  - FDE-gateway commands (`spec`, `agent`, `events`, `fde`) target `sail@host`. The
+  - FDE-gateway commands (`spec`, `events`, `fde`, and `agent stream|sessions|review`) target
+    `sail@host`; the other `agent` verbs read the control plane directly as the box's own
+    person, so the gateway refuses them and the client sends them to the plain host. The
     engineer's SSH key hits the forced command `sail _gateway --fde <handle>`, which
     resolves their FDE, mints a short-lived session token, and re-executes the command, so
     the loopback API sees who is acting and asks `Access` for each thing they do.
