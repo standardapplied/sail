@@ -167,7 +167,7 @@ class RouteGateSweepTest {
               "DELETE /v1/projects/{project}/files/{path...} the journal decides",
               "* /v1/projects/{project}/files serves nothing",
               "* /v1/projects/{project}/files/{path...} serves nothing",
-              "POST /v1/projects/{project}/skills decides SHARE",
+              "POST /v1/projects/{project}/skills operates the box",
               "DELETE /v1/projects/{project}/skills/{name} decides SHARE",
               "POST /v1/projects/{project}/serve decides SERVE",
               "DELETE /v1/projects/{project}/serve decides SERVE",
@@ -331,6 +331,11 @@ class RouteGateSweepTest {
     assertEquals(List.of(), operations.reached);
   }
 
+  /**
+   * The box's own routes, which name no project, are its person's or an admin's. A project's route
+   * that reads its container, sharing a skill from a folder there, takes the same gate, and is
+   * tested at its own route ({@code ApiRouterTest}).
+   */
   @Test
   void theBoxIsOperatedByItsOwnPersonOrAnAdminAtEveryBoxRoute() throws Exception {
     var roster = new FdeStore(db);
@@ -341,7 +346,10 @@ class RouteGateSweepTest {
     var machine = tokens.create("ci-bot", "member");
     var adminMachine = tokens.create("ops-bot", "admin");
     var boxRoutes =
-        router.routes().stream().filter(route -> route.gate() instanceof Gate.OperatesBox).toList();
+        router.routes().stream()
+            .filter(route -> route.gate() instanceof Gate.OperatesBox)
+            .filter(route -> !route.pattern().contains("{project}"))
+            .toList();
     assertEquals(3, boxRoutes.size());
 
     for (var refused : List.of(eng.token(), machine.token())) {

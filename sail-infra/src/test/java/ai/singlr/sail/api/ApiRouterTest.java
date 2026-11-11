@@ -1358,9 +1358,11 @@ class ApiRouterTest {
   }
 
   /**
-   * A person outside the container shares a folder that lives in it, as Mast does, and removes the
-   * skill; a viewer is refused whole before the container is asked, and a folder that is no skill
-   * is refused in the standard's words.
+   * The box's own person shares a folder that lives in its container, as Mast does: that reads a
+   * container on this box, so anyone else, a member of the project or a viewer, is refused as not
+   * operating the box, whole and before the container is asked. A member removes a skill, which
+   * reads no container; a viewer may not. A folder that is no skill is refused in the standard's
+   * words.
    */
   @Test
   void aPersonSharesAFolderOfTheContainerAndAViewerIsRefusedBeforeItIsAsked(@TempDir Path dir)
@@ -1404,26 +1406,44 @@ class ApiRouterTest {
       ApiAuth member =
           exchange ->
               exchange.setAttribute(ApiAuth.ACTOR, new Actor("uday", Role.MEMBER, Actor.Lane.API));
+      ApiAuth client =
+          exchange ->
+              exchange.setAttribute(
+                  ApiAuth.ACTOR, new Actor("client", Role.MEMBER, Actor.Lane.API));
       try (var asViewer = serverWith(operations, true, viewer);
-          var asMember = serverWith(operations, true, member)) {
+          var asMember = serverWith(operations, true, member);
+          var asClient = serverWith(operations, true, client)) {
         var folder = "{\"folder\": \"/home/dev/drafts/standards\", \"name\": \"java\"}";
         for (var refused :
             List.of(
                 post(asViewer, skillsPath, null, folder),
-                delete(asViewer, skillsPath + "/java", null))) {
+                post(asClient, skillsPath, null, folder))) {
           assertEquals(403, refused.statusCode(), refused.body());
           assertEquals(
               Map.of(
                   "code",
-                  "read_only_credential",
+                  "forbidden_not_assignee",
                   "message",
-                  "Your credential is read-only and cannot share files and skills in projects.",
+                  "Box 'uday' belongs to 'uday', not you.",
                   "action",
-                  "Ask an admin for a member or admin credential.",
+                  "Ask uday to operate it, or have an admin do it.",
                   "field_errors",
                   List.of()),
               errorOf(refused));
         }
+        var removedByAViewer = delete(asViewer, skillsPath + "/java", null);
+        assertEquals(403, removedByAViewer.statusCode(), removedByAViewer.body());
+        assertEquals(
+            Map.of(
+                "code",
+                "read_only_credential",
+                "message",
+                "Your credential is read-only and cannot share files and skills in projects.",
+                "action",
+                "Ask an admin for a member or admin credential.",
+                "field_errors",
+                List.of()),
+            errorOf(removedByAViewer));
         assertEquals(List.of(), shell.invocations(), "a refusal asks nothing of the container");
 
         holds.accept("---\nname: java\n---\nApply them.\n");
@@ -1444,7 +1464,7 @@ class ApiRouterTest {
             List.of(".sail/skills/java/SKILL.md"),
             files.list("acme").stream().map(FileStore.FileRow::path).toList());
 
-        var removed = delete(asMember, skillsPath + "/java", null);
+        var removed = delete(asClient, skillsPath + "/java", null);
         assertEquals(200, removed.statusCode(), removed.body());
         assertEquals(1, YamlUtil.parseMap(removed.body()).get("files"));
         assertEquals(List.of(), files.list("acme"));
