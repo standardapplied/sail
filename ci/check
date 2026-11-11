@@ -64,7 +64,7 @@ unit() {
   local upstream
   upstream=$(upstream_of "$module")
   if [[ -n $upstream ]]; then
-    mvn -B -q install -pl "$upstream" -am -DskipTests -Djacoco.skip=true
+    mvn -B -q install -pl "$upstream" -am -DskipTests -Djacoco.skip=true -Dspotless.check.skip=true
   fi
   if $coverage; then
     mvn -B verify -pl "$module"
@@ -131,6 +131,7 @@ its() {
     -Dtest=NoUnitTests \
     -Dsurefire.failIfNoSpecifiedTests=false \
     -Djacoco.skip=true \
+    -Dspotless.check.skip=true \
     "$@"
 }
 

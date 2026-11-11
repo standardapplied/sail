@@ -114,6 +114,7 @@ jobs:
           mvn -B install org.owasp:dependency-check-maven:12.1.8:aggregate
           -DskipTests
           -Djacoco.skip=true
+          -Dspotless.check.skip=true
           -Dformat=HTML
           -DfailBuildOnCVSS=7
           -DskipTestScope=true
@@ -209,6 +210,7 @@ jobs:
             -Dsurefire.failIfNoSpecifiedTests=false \
             -Dfailsafe.failIfNoSpecifiedTests=false \
             -Djacoco.skip=true \
+            -Dspotless.check.skip=true \
             -Dsail.it.requireIncus=false \
             -Dsail.it.requireSystemd=false \
             -Dsail.it.requireNative=true \
@@ -251,6 +253,7 @@ jobs:
           -Dtest=NoUnitTests
           -Dsurefire.failIfNoSpecifiedTests=false
           -Djacoco.skip=true
+          -Dspotless.check.skip=true
           2>&1 | tee "$RUNNER_TEMP/maven.log"
 
       - name: Leave the test evidence
@@ -348,6 +351,7 @@ jobs:
             -Dsurefire.failIfNoSpecifiedTests=false \
             -Dfailsafe.failIfNoSpecifiedTests=false \
             -Djacoco.skip=true \
+            -Dspotless.check.skip=true \
             -Dsail.it.requireNative=true \
             -Dsail.it.nativeBinary="$RUNNER_TEMP/native/sail" \
             -Dsail.it.releasedBinary="$RUNNER_TEMP/native/sail-linux-amd64" \
