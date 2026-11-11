@@ -2469,11 +2469,13 @@ until `sail-agents-act-on-their-own-work`, are the allowlist of `OneDecisionSwee
 every such read compiled code makes: of a role, a lane (`peer` and `owner` included), a scope or
 whom an actor acts for, a scope widened (`withScope`), a principal minted with its role
 (`agentPrincipal`, `roomPrincipal`, `main`), whoami's view of a role outside the two whoami
-handlers, a role constant, resolver or `switch`, a type check of the socket's run or box caller,
-and an audience asked of a project in Java (`Access.audience` with `ProjectScope.admits` or
-`unrestricted`). It does not see a door that binds `Actor.system()`, which this box's own
-machinery binds in about twenty places, nor a read made as data, in SQL or from a map, which is
-why a filter inside a query takes its scope from `Access.audience`. The sync server's tracking of
+handlers, a role constant, resolver (`values` and `valueOf` included) or `switch`, a type check
+of the socket's run or box caller, and an audience asked of a project in Java (`Access.audience`
+with `ProjectScope.admits` or `unrestricted`), a lambda counted with the member it is written in.
+The classes that define what is read are exempt by their exact names. It does not see a read
+made by reflection, a door that binds `Actor.system()`, which this box's own machinery binds in
+about twenty places, nor a read made as data, in SQL or from a map, which is why a filter inside
+a query takes its scope from `Access.audience`. The sync server's tracking of
 the content a scoped session was served, by hash, where no row names a project, stays on its
 allowlist as the Read rule's own shape there.
 
