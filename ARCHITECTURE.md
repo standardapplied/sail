@@ -2306,7 +2306,7 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | Assign | give or move a spec to someone | no | no | yes | no | no |
 | Approve | promote a draft to ready; approve or dismiss findings; mark done | no | owner | yes | yes | no |
 | Dispatch | dispatch or resume a spec; seat or remove a room agent | no | owner | yes | no | no |
-| Operate a run | stop it; read its log | no | owner | yes | no | no |
+| Operate a run | stop it; attach to it; read its log | no | owner | yes | no | no |
 | Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | own work | own work |
 | Share | add, change or remove project files and skills | no | yes | yes | yes | no |
 | Serve | start and stop the project's processes | no | yes | yes | yes | no |
@@ -2443,25 +2443,32 @@ kind of credential gets the same answer in the same words at every door that off
 (`DoorParityTest`).
 
 **Route gates.** Every route of the web API and of the container socket declares one `Gate` in its
-router's table (`RouteTable`), and a route cannot be built without one: it decides an action
-through its operation's one seam; it reads in scope; the journal decides its write; it operates
+router's table (`RouteTable`), and a route cannot be built without one: its operation decides
+an action, which the gate names; it reads in scope; the journal decides its write; it operates
 the box; it manages people; or it is served before any credential is asked, for a reason (the
 liveness probe, passkey login, the enrollment and sign-in pages, and registration with an
 enrollment ticket). One dispatch (`RouteTable.serve`) matches a method and path for every table to
 its route, a method the path does not serve, or nothing. The router applies the gates no row
 decides, Operate the box and Manage people, before the route's handler runs, and both routers
 decide the box gate on the box's person the role rule resolves (`RoleRule.boxFde`). A deciding
-route names the seam that decides its action, and `RouteGateSweepTest` reads that seam's bytecode
-for the `Access` call with that action; it pins every table the server mounts, and the socket's,
-whole.
+gate is a declaration: the router admits every caller and the operation refuses, as its own tests
+and the permission snapshot prove. `RouteGateSweepTest` pins every table the server mounts, and
+the socket's, whole, and fails a context mounted anywhere but `SailApiServer.serve`, the one way
+a context is created. The socket's table also carries what it has always answered a method a
+pattern does not serve, each pattern's last route.
 
 The facts that read a lane or role to know which applies, and the checks of an agent's own work
 until `sail-agents-act-on-their-own-work`, are the allowlist of `OneDecisionSweepTest`. It sees
-every such read compiled code makes: of a role, a lane, a scope or whom an actor acts for, a
-role constant, resolver or `switch`, a type check of the socket's run or box caller, and an
-audience asked of a project in Java (`Access.audience` with `ProjectScope.admits` or
-`unrestricted`); it cannot see one read as data, in SQL or from a map, which is why a filter
-inside a query takes its scope from `Access.audience`.
+every such read compiled code makes: of a role, a lane (`peer` and `owner` included), a scope or
+whom an actor acts for, a scope widened (`withScope`), a principal minted with its role
+(`agentPrincipal`, `roomPrincipal`, `main`), whoami's view of a role outside the two whoami
+handlers, a role constant, resolver or `switch`, a type check of the socket's run or box caller,
+and an audience asked of a project in Java (`Access.audience` with `ProjectScope.admits` or
+`unrestricted`). It does not see a door that binds `Actor.system()`, which this box's own
+machinery binds in about twenty places, nor a read made as data, in SQL or from a map, which is
+why a filter inside a query takes its scope from `Access.audience`. The sync server's tracking of
+the content a scoped session was served, by hash, where no row names a project, stays on its
+allowlist as the Read rule's own shape there.
 
 ## Security model
 

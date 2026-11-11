@@ -145,7 +145,7 @@ class AgentLogCommandTest {
 
       assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, readOnly.failure().errorCode());
       assertEquals(
-          "Your credential is read-only and cannot stop runs or read their logs.",
+          "Your credential is read-only and cannot stop or attach to runs or read their logs.",
           readOnly.getMessage());
       assertEquals(
           "Ask an admin for a member or admin credential.", readOnly.failure().remedy().plain());

@@ -1300,8 +1300,8 @@ class SailOperationsTest {
     var codes = List.of(ErrorCode.READ_ONLY_CREDENTIAL, ErrorCode.AGENT_LANE_FORBIDDEN);
     var messages =
         List.of(
-            "Your credential is read-only and cannot stop runs or read their logs.",
-            "Agent principals cannot stop runs or read their logs.");
+            "Your credential is read-only and cannot stop or attach to runs or read their logs.",
+            "Agent principals cannot stop or attach to runs or read their logs.");
     var fixes =
         List.of(
             "Ask an admin for a member or admin credential.",

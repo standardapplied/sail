@@ -463,8 +463,8 @@ class StopOperationsTest {
             ErrorCode.FORBIDDEN_NOT_ASSIGNEE);
     var messages =
         List.of(
-            "Your credential is read-only and cannot stop runs or read their logs.",
-            "Agent principals cannot stop runs or read their logs.",
+            "Your credential is read-only and cannot stop or attach to runs or read their logs.",
+            "Agent principals cannot stop or attach to runs or read their logs.",
             "Run " + R1 + " belongs to spec 'auth', owned by 'me', not you.");
 
     for (var i = 0; i < asked.size(); i++) {
@@ -816,8 +816,8 @@ class StopOperationsTest {
             ErrorCode.FORBIDDEN_NOT_ASSIGNEE);
     var messages =
         List.of(
-            "Your credential is read-only and cannot stop runs or read their logs.",
-            "Agent principals cannot stop runs or read their logs.",
+            "Your credential is read-only and cannot stop or attach to runs or read their logs.",
+            "Agent principals cannot stop or attach to runs or read their logs.",
             "Run " + R1 + " belongs to spec 'auth', owned by 'me', not you.");
     var fixes =
         List.of(

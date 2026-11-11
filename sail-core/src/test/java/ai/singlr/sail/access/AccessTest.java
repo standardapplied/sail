@@ -206,7 +206,7 @@ class AccessTest {
               Action.OPERATE_RUN,
               RUN_ADA,
               RUN_BOB,
-              "stop runs or read their logs",
+              "stop or attach to runs or read their logs",
               List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY),
               RUN_NOT_OWNER,
               null),
