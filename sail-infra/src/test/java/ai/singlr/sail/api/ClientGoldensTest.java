@@ -58,6 +58,7 @@ import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -142,6 +143,7 @@ class ClientGoldensTest {
       box.seed("POST", "/v1/specs", uday, spec());
       box.seat(Engagement.of("claude-code", "read_only", "opus", DateTimeUtils.format(AT)));
       box.ask("claude/run-1", "uday", "Shall I take the south berth?");
+      box.seed("POST", "/v1/events", uday, published());
 
       box.record(http, "whoami", "GET", "/v1/whoami", uday, null);
       box.record(http, "projects", "GET", "/v1/projects", uday, null);
@@ -210,6 +212,11 @@ class ClientGoldensTest {
     vocabulary.put("event_types", List.copyOf(wellKnownTypes()));
     vocabulary.put(
         "member_modes", Arrays.stream(EngagementMode.values()).map(EngagementMode::wire).toList());
+    vocabulary.put(
+        "remedy_runners",
+        Arrays.stream(Remedy.Runs.values())
+            .map(runs -> runs.name().toLowerCase(Locale.ROOT))
+            .toList());
     vocabulary.put("roles", Arrays.stream(Role.values()).map(Role::attribute).toList());
     vocabulary.put(
         "spec_statuses", Arrays.stream(SpecStatus.values()).map(SpecStatus::wire).toList());
@@ -230,6 +237,22 @@ class ClientGoldensTest {
 
   private static Map<String, Object> unroomed() {
     return Map.of("id", "harbor-ferry", "project", PROJECT, "title", "A ferry timetable");
+  }
+
+  private static Map<String, Object> published() {
+    return Map.of(
+        "v",
+        1,
+        "ts",
+        DateTimeUtils.format(AT),
+        "project",
+        PROJECT,
+        "type",
+        "board_updated",
+        "agent",
+        "mast",
+        "host",
+        "laptop");
   }
 
   private static Map<String, Object> room() {

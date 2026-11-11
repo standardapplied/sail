@@ -13,100 +13,103 @@ id: 4
 data: {"agent": "claude/run-1", "data": {"message_id": "00000000-0000-7000-8000-000000000003", "preview": "Shall I take the south berth?", "question": true}, "host": "box", "id": 4, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "spec_message_posted", "v": 1}
 
 id: 5
-data: {"agent": "sail", "data": {"detail": "refused", "error_kind": "unreachable", "peer": "main@host", "source": "sync"}, "host": "box", "id": 5, "project": "sail", "ts": "2026-11-11T09:00:00.000Z", "type": "sync_degraded", "v": 1}
+data: {"agent": "mast", "host": "laptop", "id": 5, "project": "harbor", "publisher": {"handle": "uday", "lane": "api", "role": "admin"}, "ts": "2026-11-11T09:00:00.000Z", "type": "board_updated", "v": 1}
 
 id: 6
-data: {"agent": "sail", "data": {"peer": "main@host", "source": "sync"}, "host": "box", "id": 6, "project": "sail", "ts": "2026-11-11T09:00:00.000Z", "type": "sync_recovered", "v": 1}
+data: {"agent": "sail", "data": {"detail": "refused", "error_kind": "unreachable", "peer": "main@host", "source": "sync"}, "host": "box", "id": 6, "project": "sail", "ts": "2026-11-11T09:00:00.000Z", "type": "sync_degraded", "v": 1}
 
 id: 7
-data: {"agent": "sail", "data": {"agent": "claude-code", "run_id": "run-1"}, "host": "box", "id": 7, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "spec_dispatched", "v": 1}
+data: {"agent": "sail", "data": {"peer": "main@host", "source": "sync"}, "host": "box", "id": 7, "project": "sail", "ts": "2026-11-11T09:00:00.000Z", "type": "sync_recovered", "v": 1}
 
 id: 8
-data: {"agent": "sail", "data": {"run_id": "run-1"}, "host": "box", "id": 8, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "spec_restarted", "v": 1}
+data: {"agent": "sail", "data": {"agent": "claude-code", "run_id": "run-1"}, "host": "box", "id": 8, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "spec_dispatched", "v": 1}
 
 id: 9
-data: {"agent": "sail", "data": {"from": "pending", "to": "in_progress"}, "host": "box", "id": 9, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "spec_status_changed", "v": 1}
+data: {"agent": "sail", "data": {"run_id": "run-1"}, "host": "box", "id": 9, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "spec_restarted", "v": 1}
 
 id: 10
-data: {"agent": "sail", "data": {"run_id": "run-1"}, "host": "box", "id": 10, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_session_started", "v": 1}
+data: {"agent": "sail", "data": {"from": "pending", "to": "in_progress"}, "host": "box", "id": 10, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "spec_status_changed", "v": 1}
 
 id: 11
-data: {"agent": "sail", "data": {"exit_code": 0, "run_id": "run-1", "source": "watcher"}, "host": "box", "id": 11, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_session_stopped", "v": 1}
+data: {"agent": "sail", "data": {"run_id": "run-1"}, "host": "box", "id": 11, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_session_started", "v": 1}
 
 id: 12
-data: {"agent": "sail", "data": {"exit_code": 0, "run_id": "run-1", "source": "watcher"}, "host": "box", "id": 12, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_session_completed", "v": 1}
+data: {"agent": "sail", "data": {"exit_code": 0, "run_id": "run-1", "source": "watcher"}, "host": "box", "id": 12, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_session_stopped", "v": 1}
 
 id: 13
-data: {"agent": "sail", "data": {"room_id": "harbor-design", "session_id": "s-1"}, "host": "box", "id": 13, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_conversation_started", "v": 1}
+data: {"agent": "sail", "data": {"exit_code": 0, "run_id": "run-1", "source": "watcher"}, "host": "box", "id": 13, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_session_completed", "v": 1}
 
 id: 14
-data: {"agent": "sail", "data": {"run_id": "run-1", "source": "operator"}, "host": "box", "id": 14, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_cancelled", "v": 1}
+data: {"agent": "sail", "data": {"room_id": "harbor-design", "session_id": "s-1"}, "host": "box", "id": 14, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_conversation_started", "v": 1}
 
 id: 15
-data: {"agent": "sail", "data": {"reason": "Commit and push before you stop."}, "host": "box", "id": 15, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_stop_nudged", "v": 1}
+data: {"agent": "sail", "data": {"run_id": "run-1", "source": "operator"}, "host": "box", "id": 15, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_cancelled", "v": 1}
 
 id: 16
-data: {"agent": "sail", "data": {"tool": "Bash"}, "host": "box", "id": 16, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_tool_started", "v": 1}
+data: {"agent": "sail", "data": {"reason": "Commit and push before you stop."}, "host": "box", "id": 16, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_stop_nudged", "v": 1}
 
 id: 17
-data: {"agent": "sail", "data": {"batch": true, "tool": "Bash"}, "host": "box", "id": 17, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_tool_finished", "v": 1}
+data: {"agent": "sail", "data": {"tool": "Bash"}, "host": "box", "id": 17, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_tool_started", "v": 1}
 
 id: 18
-data: {"agent": "sail", "data": {"lines": ["building"], "run_id": "run-1"}, "host": "box", "id": 18, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_log_chunk", "v": 1}
+data: {"agent": "sail", "data": {"batch": true, "tool": "Bash"}, "host": "box", "id": 18, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_tool_finished", "v": 1}
 
 id: 19
-data: {"agent": "sail", "data": {"name": "before-docks"}, "host": "box", "id": 19, "project": "harbor", "ts": "2026-11-11T09:00:00.000Z", "type": "snapshot_created", "v": 1}
+data: {"agent": "sail", "data": {"lines": ["building"], "run_id": "run-1"}, "host": "box", "id": 19, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_log_chunk", "v": 1}
 
 id: 20
-data: {"agent": "sail", "data": {"name": "before-docks"}, "host": "box", "id": 20, "project": "harbor", "ts": "2026-11-11T09:00:00.000Z", "type": "snapshot_restored", "v": 1}
+data: {"agent": "sail", "data": {"name": "before-docks"}, "host": "box", "id": 20, "project": "harbor", "ts": "2026-11-11T09:00:00.000Z", "type": "snapshot_created", "v": 1}
 
 id: 21
-data: {"agent": "sail", "data": {"name": "before-docks"}, "host": "box", "id": 21, "project": "harbor", "ts": "2026-11-11T09:00:00.000Z", "type": "snapshot_deleted", "v": 1}
+data: {"agent": "sail", "data": {"name": "before-docks"}, "host": "box", "id": 21, "project": "harbor", "ts": "2026-11-11T09:00:00.000Z", "type": "snapshot_restored", "v": 1}
 
 id: 22
-data: {"agent": "sail", "data": {"reason": "stall (20m)", "run_id": "run-1"}, "host": "box", "id": 22, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "guardrail_triggered", "v": 1}
+data: {"agent": "sail", "data": {"name": "before-docks"}, "host": "box", "id": 22, "project": "harbor", "ts": "2026-11-11T09:00:00.000Z", "type": "snapshot_deleted", "v": 1}
 
 id: 23
-data: {"agent": "sail", "host": "box", "id": 23, "project": "harbor", "ts": "2026-11-11T09:00:00.000Z", "type": "board_updated", "v": 1}
+data: {"agent": "sail", "data": {"reason": "stall (20m)", "run_id": "run-1"}, "host": "box", "id": 23, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "guardrail_triggered", "v": 1}
 
 id: 24
-data: {"agent": "sail", "data": {"agent": "claude-code", "mode": "full"}, "host": "box", "id": 24, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "spec_engaged", "v": 1}
+data: {"agent": "sail", "host": "box", "id": 24, "project": "harbor", "ts": "2026-11-11T09:00:00.000Z", "type": "board_updated", "v": 1}
 
 id: 25
-data: {"agent": "sail", "data": {"agent": "claude-code"}, "host": "box", "id": 25, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "spec_disengaged", "v": 1}
+data: {"agent": "sail", "data": {"agent": "claude-code", "mode": "full"}, "host": "box", "id": 25, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "spec_engaged", "v": 1}
 
 id: 26
-data: {"agent": "sail", "data": {"agent": "claude-code", "reason": "no space"}, "host": "box", "id": 26, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "spec_engage_failed", "v": 1}
+data: {"agent": "sail", "data": {"agent": "claude-code"}, "host": "box", "id": 26, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "spec_disengaged", "v": 1}
 
 id: 27
-data: {"agent": "sail", "data": {"presence": "working", "run_id": "run-1"}, "host": "box", "id": 27, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_presence", "v": 1}
+data: {"agent": "sail", "data": {"agent": "claude-code", "reason": "no space"}, "host": "box", "id": 27, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "spec_engage_failed", "v": 1}
 
 id: 28
-data: {"agent": "sail", "data": {"principal": "agent:claude", "room_id": "harbor-design", "turn": 1}, "host": "box", "id": 28, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_turn_began", "v": 1}
+data: {"agent": "sail", "data": {"presence": "working", "run_id": "run-1"}, "host": "box", "id": 28, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_presence", "v": 1}
 
 id: 29
-data: {"agent": "sail", "data": {"principal": "agent:claude", "room_id": "harbor-design", "text": "South berth — 12 m draft ✅", "turn": 1}, "host": "box", "id": 29, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_text_delta", "v": 1}
+data: {"agent": "sail", "data": {"principal": "agent:claude", "room_id": "harbor-design", "turn": 1}, "host": "box", "id": 29, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_turn_began", "v": 1}
 
 id: 30
-data: {"agent": "sail", "data": {"principal": "agent:claude", "room_id": "harbor-design", "status": "started", "turn": 1}, "host": "box", "id": 30, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_tool_call", "v": 1}
+data: {"agent": "sail", "data": {"principal": "agent:claude", "room_id": "harbor-design", "text": "South berth — 12 m draft ✅", "turn": 1}, "host": "box", "id": 30, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_text_delta", "v": 1}
 
 id: 31
-data: {"agent": "sail", "data": {"message_id": "ended-turn", "principal": "agent:claude", "room_id": "harbor-design", "turn": 1}, "host": "box", "id": 31, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_turn_ended", "v": 1}
+data: {"agent": "sail", "data": {"principal": "agent:claude", "room_id": "harbor-design", "status": "started", "turn": 1}, "host": "box", "id": 31, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_tool_call", "v": 1}
 
 id: 32
-data: {"agent": "sail", "data": {"status": "in_progress"}, "host": "box", "id": 32, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "spec_stranded", "v": 1}
+data: {"agent": "sail", "data": {"message_id": "ended-turn", "principal": "agent:claude", "room_id": "harbor-design", "turn": 1}, "host": "box", "id": 32, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_turn_ended", "v": 1}
 
 id: 33
-data: {"agent": "sail", "data": {"exit_code": 2, "run_id": "run-1"}, "host": "box", "id": 33, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_failed", "v": 1}
+data: {"agent": "sail", "data": {"status": "in_progress"}, "host": "box", "id": 33, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "spec_stranded", "v": 1}
 
 id: 34
-data: {"agent": "sail", "data": {"room_id": "harbor-design", "session": "lounge"}, "host": "box", "id": 34, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "pty_session_started", "v": 1}
+data: {"agent": "sail", "data": {"exit_code": 2, "run_id": "run-1"}, "host": "box", "id": 34, "project": "harbor", "spec": "harbor-docks", "ts": "2026-11-11T09:00:00.000Z", "type": "agent_failed", "v": 1}
 
 id: 35
-data: {"agent": "sail", "data": {"session": "lounge"}, "host": "box", "id": 35, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "pty_session_attached", "v": 1}
+data: {"agent": "sail", "data": {"room_id": "harbor-design", "session": "lounge"}, "host": "box", "id": 35, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "pty_session_started", "v": 1}
 
 id: 36
-data: {"agent": "sail", "data": {"reason": "exited(0)", "session": "lounge"}, "host": "box", "id": 36, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "pty_session_ended", "v": 1}
+data: {"agent": "sail", "data": {"session": "lounge"}, "host": "box", "id": 36, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "pty_session_attached", "v": 1}
+
+id: 37
+data: {"agent": "sail", "data": {"reason": "exited(0)", "session": "lounge"}, "host": "box", "id": 37, "project": "harbor", "spec": "harbor-design", "ts": "2026-11-11T09:00:00.000Z", "type": "pty_session_ended", "v": 1}
 
 event: error
 data: {"action": null, "code": "invalid_bearer_token", "field_errors": [], "message": "Session token is invalid or expired."}

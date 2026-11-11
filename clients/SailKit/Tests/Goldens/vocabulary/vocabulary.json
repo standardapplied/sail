@@ -245,6 +245,11 @@
     "full",
     "read_only"
   ],
+  "remedy_runners": [
+    "sail",
+    "client",
+    "program"
+  ],
   "roles": [
     "admin",
     "member",
