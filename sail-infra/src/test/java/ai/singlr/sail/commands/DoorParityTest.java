@@ -504,6 +504,32 @@ class DoorParityTest {
   }
 
   /**
+   * At the gateway, the {@code agent} verbs that read the control plane directly would run as the
+   * box's own person, so a viewer asking one is refused there, while a verb that asks the API runs
+   * as the viewer.
+   */
+  @Test
+  void theGatewayRefusesAnAgentVerbThatWouldRunAsTheBoxsOwnPerson() {
+    assertEveryDoor(
+        Expected.refused(
+            0,
+            null,
+            "'agent stop' reads this box's control plane directly, as the box's own person, so it"
+                + " is not available over an SSH-key session.",
+            "Follow the work with 'sail spec' and the board, or SSH to the host directly to run"
+                + " it."),
+        new Said(
+            "gateway",
+            ((SshGateway.Rejected)
+                    GatewayNode.gateway(main, MAIN, "sail agent stop beta --dry-run", "obs"))
+                .reason()));
+    assertInstanceOf(
+        SshGateway.Authorized.class,
+        GatewayNode.gateway(main, MAIN, "sail agent sessions acme", "obs"),
+        "an agent verb that asks the API runs as the viewer");
+  }
+
+  /**
    * Row 26, at the passkey routes, the one door that enrolls: a person the roster disables gets no
    * ticket, uses none minted before, starts and finishes no registration, and signs in to no
    * session. The admin minting the ticket did authenticate, so is told it as a conflict.

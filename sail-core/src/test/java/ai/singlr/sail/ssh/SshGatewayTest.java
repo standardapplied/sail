@@ -66,6 +66,32 @@ class SshGatewayTest {
   }
 
   @Test
+  void anAgentVerbThatReadsTheControlPlaneDirectlyIsRefusedAndOneThatAsksTheApiRuns() {
+    for (var verb :
+        List.of("stop", "logs", "status", "attach", "report", "sweep", "run", "watch")) {
+      var refused =
+          assertInstanceOf(
+              SshGateway.Rejected.class,
+              authorize("sail agent " + verb + " beta --dry-run", "uday"));
+      assertEquals(
+          "'agent "
+              + verb
+              + "' reads this box's control plane directly, as the box's own person, so it is not"
+              + " available over an SSH-key session. Follow the work with 'sail spec' and the"
+              + " board, or SSH to the host directly to run it.",
+          refused.reason());
+    }
+    for (var verb : List.of("stream", "sessions", "review")) {
+      assertEquals(
+          List.of("agent", verb, "r1"),
+          assertInstanceOf(
+                  SshGateway.Authorized.class, authorize("sail agent " + verb + " r1", "uday"))
+              .args());
+    }
+    assertInstanceOf(SshGateway.Rejected.class, authorize("sail agent", "uday"));
+  }
+
+  @Test
   void stripsLeadingSailToken() {
     var authorized = assertInstanceOf(SshGateway.Authorized.class, authorize("spec list", "uday"));
     assertEquals(List.of("spec", "list"), authorized.args());

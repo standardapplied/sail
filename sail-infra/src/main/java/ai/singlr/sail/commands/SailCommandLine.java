@@ -24,30 +24,22 @@ import picocli.CommandLine;
 public final class SailCommandLine {
 
   /**
-   * The commands that read as this box itself, not its person, and why: each is the box's own
-   * machinery or a door that binds the caller it serves.
+   * The commands that read as this box itself, not its person, and why: each makes a read that is
+   * the box's, not one person's. A command that reads nothing scoped needs no entry, since the
+   * person is resolved only at a first read.
    */
   static final Map<Class<?>, String> AS_THE_BOX =
-      Map.ofEntries(
-          Map.entry(
-              ServerStartCommand.class, "the control plane, which binds each request's caller"),
-          Map.entry(
-              GatewayCommand.class, "the SSH gateway, which binds the person whose key it is"),
-          Map.entry(
-              PtyHostCommand.class, "the terminal host, which binds each connection's person"),
-          Map.entry(PtyChildCommand.class, "a terminal session's process, which the host admitted"),
-          Map.entry(
-              SyncServerCommand.class, "main's end of sync, which binds the session's person"),
-          Map.entry(SyncCommand.class, "the box's own sync, which is what places an unplaced box"),
-          Map.entry(
-              SyncCommand.Status.class, "the box's own sync health, read before it is placed"),
-          Map.entry(SyncCommand.Gc.class, "the box's own journal, collected for every project"),
-          Map.entry(HostKeysCommand.Sync.class, "the gateway's keys for every FDE the box knows"),
-          Map.entry(JoinCommand.class, "makes the box a node; it places its person at first sync"),
-          Map.entry(InitCommand.class, "sets the box up before it has a person to place"),
-          Map.entry(HostSyncCommand.class, "names the box's FDE, before which it has no person"),
-          Map.entry(MigrateCommand.class, "the box's own schema, converted for every project"),
-          Map.entry(UpgradeCommand.class, "the box's own binary and schema, for every project"));
+      Map.of(
+          ServerStartCommand.class,
+          "the control plane, whose startup reads on a box that may not have placed its person",
+          SyncCommand.class,
+          "the box's own sync, which places its person, so it cannot wait on one",
+          SyncCommand.Status.class,
+          "the box's sync health, every conflict it holds counted",
+          MigrateCommand.class,
+          "the box's own schema, converted for every project",
+          UpgradeCommand.class,
+          "the box's own binary and schema, for every project");
 
   private SailCommandLine() {}
 

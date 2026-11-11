@@ -31,8 +31,10 @@ import java.util.Set;
  * <p>Commands are authorized by kind, default-deny:
  *
  * <ul>
- *   <li>{@link #API_COMMANDS} run for every active FDE — they talk to the loopback API, where the
- *       FDE's role decides what each request may do.
+ *   <li>{@link #API_COMMANDS}, and under {@code agent} only {@link #AGENT_API_VERBS}, run for every
+ *       active FDE — they talk to the loopback API, where the FDE's principal decides each request.
+ *       The other {@code agent} verbs open this box's control plane directly, as its own person, so
+ *       they are refused like any host-privileged command.
  *   <li>{@link #ADMIN_COMMANDS} are database-direct, so no downstream check exists; the gateway
  *       itself asks {@link Access} whether the FDE may manage people — except for {@code fde
  *       passkey list|rm} and {@code fde enroll} on the caller's own pinned handle, which any active
@@ -46,8 +48,11 @@ public final class SshGateway {
 
   static final Duration SESSION_TTL = Duration.ofMinutes(10);
 
-  /** Commands the loopback API authorizes per-request by FDE role. */
-  public static final Set<String> API_COMMANDS = Set.of("spec", "agent", "events");
+  /** Commands the loopback API authorizes per request, as the session's FDE. */
+  public static final Set<String> API_COMMANDS = Set.of("spec", "events");
+
+  /** The {@code agent} verbs that talk to the loopback API, as the session's FDE. */
+  public static final Set<String> AGENT_API_VERBS = Set.of("stream", "sessions", "review");
 
   /** Database-direct administration commands; the gateway admits those who may manage people. */
   public static final Set<String> ADMIN_COMMANDS = Set.of("fde");
@@ -61,6 +66,20 @@ public final class SshGateway {
   public static final Set<String> SYNC_COMMANDS = Set.of("_sync");
 
   private SshGateway() {}
+
+  /**
+   * Whether {@code args}, a {@code sail} command line, is one the gateway runs as the caller's FDE:
+   * a loopback-API command, an {@code agent} verb that is one, or an administration command.
+   */
+  public static boolean runsAsTheFde(List<String> args) {
+    if (args.isEmpty()) {
+      return false;
+    }
+    var subcommand = args.getFirst();
+    return API_COMMANDS.contains(subcommand)
+        || ADMIN_COMMANDS.contains(subcommand)
+        || subcommand.equals("agent") && args.size() > 1 && AGENT_API_VERBS.contains(args.get(1));
+  }
 
   public sealed interface Decision permits Authorized, Rejected {}
 
@@ -101,9 +120,15 @@ public final class SshGateway {
     }
     tokens = withSelfEnrollHandle(tokens, fdeHandle);
     var subcommand = tokens.getFirst();
-    if (!API_COMMANDS.contains(subcommand)
-        && !ADMIN_COMMANDS.contains(subcommand)
-        && !SYNC_COMMANDS.contains(subcommand)) {
+    if (subcommand.equals("agent") && !runsAsTheFde(tokens)) {
+      return new Rejected(
+          "'"
+              + String.join(" ", tokens.subList(0, Math.min(2, tokens.size())))
+              + "' reads this box's control plane directly, as the box's own person, so it is not"
+              + " available over an SSH-key session. Follow the work with 'sail spec' and the"
+              + " board, or SSH to the host directly to run it.");
+    }
+    if (!runsAsTheFde(tokens) && !SYNC_COMMANDS.contains(subcommand)) {
       return new Rejected(
           "'"
               + subcommand

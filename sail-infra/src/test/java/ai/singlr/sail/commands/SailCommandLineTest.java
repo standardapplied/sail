@@ -45,20 +45,7 @@ class SailCommandLineTest {
 
     assertEquals(
         Set.of(
-            "sail _gateway",
-            "sail _pty-child",
-            "sail _pty-host",
-            "sail _sync",
-            "sail host keys sync",
-            "sail host sync",
-            "sail init",
-            "sail join",
-            "sail migrate",
-            "sail server start",
-            "sail sync",
-            "sail sync gc",
-            "sail sync status",
-            "sail upgrade"),
+            "sail migrate", "sail server start", "sail sync", "sail sync status", "sail upgrade"),
         asTheBox);
     assertEquals(SailCommandLine.AS_THE_BOX.size(), asTheBox.size(), "no stale entry");
     assertTrue(tree.contains("sail project config get"), "the walk reaches every leaf");

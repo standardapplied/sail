@@ -328,6 +328,8 @@ readonly ADMIN_MANAGES_PEOPLE='Only an admin may manage people.'
 readonly ASK_AN_ADMIN_TO_DO_IT='Ask an admin to do it.'
 readonly MAIN_IS_UDAYS="Box 'uday' belongs to 'uday', not you."
 readonly ASK_UDAY_TO_OPERATE='Ask uday to operate it, or have an admin do it.'
+readonly AGENT_VERB_RUNS_AS_THE_BOX="'agent stop' reads this box's control plane directly, as the box's own person, so it is not available over an SSH-key session."
+readonly FOLLOW_WITH_SPEC="Follow the work with 'sail spec' and the board, or SSH to the host directly to run it."
 readonly NO_SYNC_SESSION='sync: main serves no session whose token is missing, invalid or expired'
 
 doors() {
@@ -440,6 +442,15 @@ gateway_door() {
   main_ip=$(internal_ip "$run" main)
   [[ -n $main_ip ]] || { echo "main has no address"; return 1; }
   refused "$run" "$box" "$says" \
+    "sudo ssh -o BatchMode=yes -o IdentitiesOnly=yes -i /root/.sail/sync_ed25519 sail@$main_ip sail $*"
+}
+
+gateway_allows() {
+  local run=$1 box=$2 main_ip
+  shift 2
+  main_ip=$(internal_ip "$run" main)
+  [[ -n $main_ip ]] || { echo "main has no address"; return 1; }
+  allowed "$run" "$box" \
     "sudo ssh -o BatchMode=yes -o IdentitiesOnly=yes -i /root/.sail/sync_ed25519 sail@$main_ip sail $*"
 }
 
@@ -692,10 +703,16 @@ access() {
   check "$run" "eng applies acme" apply_project "$run" eng acme
   check "$run" "matrix 10: eng dispatches e1 on its box, as a dry run [HTTP]" \
     http_token_door "$run" eng eng member 200 POST /v1/projects/acme/dispatch '{"spec_id":"e1","dry_run":true}' '"dispatched": true'
+  check "$run" "matrix 10: eng dispatches e1 on its box, as a dry run [CLI]" \
+    allowed "$run" eng "sudo sail spec dispatch -p acme --spec e1 --dry-run --no-snapshot"
   check "$run" "matrix 25: eng adds a person at its node's CLI, refused admin-only [CLI]" \
     naming "$ASK_AN_ADMIN_TO_DO_IT" refused "$run" eng "$ADMIN_MANAGES_PEOPLE" "sudo sail fde add zed --name Zed"
   check "$run" "matrix 25: eng adds a person at main's gateway, refused admin-only [gateway]" \
     naming "$ASK_AN_ADMIN_TO_DO_IT" gateway_door "$run" eng "$ADMIN_MANAGES_PEOPLE" fde add zed --name Zed
+  check "$run" "eng lists its own passkeys at main's gateway [gateway]" \
+    gateway_allows "$run" eng fde passkey list eng
+  check "$run" "obs asks main's gateway to stop a run: agent stop would run as main's own person, refused [gateway]" \
+    naming "$FOLLOW_WITH_SPEC" gateway_door "$run" observer "$AGENT_VERB_RUNS_AS_THE_BOX" agent stop acme --dry-run
   check "$run" "matrix 27: main refuses a sync session whose token is no session [sync]" \
     refused "$run" main "$NO_SYNC_SESSION" "sudo SAIL_TOKEN=bogus sail _sync < /dev/null"
   for path in /v1/sync /v1/events/stats; do
@@ -706,6 +723,7 @@ access() {
   done
   check "$run" "eng triggers a sync round on main, uday's box: refused [HTTP]" \
     naming "$ASK_UDAY_TO_OPERATE" http_token_door "$run" main eng member 403 POST /v1/sync '{}' "$MAIN_IS_UDAYS"
+  check "$run" "eng triggers a sync round on its own box [HTTP]" http_token_door "$run" eng eng member 200 POST /v1/sync '{}'
 }
 
 file_on() {
