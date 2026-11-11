@@ -17,6 +17,7 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
@@ -527,7 +528,7 @@ class FdeCommandTest {
         List.of(
             "  ✓ FDE added: ada (member)",
             "  ✓ Paired ada: Mast logs in as root@34.1.2.3. The code expires "
-                + token.expiresAt()
+                + DateTimeUtils.format(token.expiresAt())
                 + ".",
             "  ✓ Workstation key set.",
             "",
@@ -617,7 +618,7 @@ class FdeCommandTest {
             "  ✓ Unpaired ada first: 1 key line removed from root's authorized_keys and token"
                 + " 'mast-ada' revoked. The workstation key was its key and is removed.",
             "  ✓ Paired ada: Mast logs in as root@box.acme.dev. The code expires "
-                + tokens().getFirst().expiresAt()
+                + DateTimeUtils.format(tokens().getFirst().expiresAt())
                 + ".",
             "  ✓ Workstation key set.",
             "",
@@ -747,7 +748,7 @@ class FdeCommandTest {
         List.of(fields.get("handle"), fields.get("email"), fields.get("host"), fields.get("user")));
     assertEquals(
         "  ✓ Paired client: Mast logs in as root@c.acme.dev. The code expires "
-            + token.expiresAt()
+            + DateTimeUtils.format(token.expiresAt())
             + ".",
         printed().getFirst());
   }
@@ -2555,7 +2556,7 @@ class FdeCommandTest {
     assertEquals(keygen.made.getFirst().line() + "\n", Files.readString(workstationKey()));
     assertEquals(
         "  ✓ Paired ada: Mast logs in as ubuntu@box. The code expires "
-            + tokens().getFirst().expiresAt()
+            + DateTimeUtils.format(tokens().getFirst().expiresAt())
             + ".",
         printed().get(1));
   }
