@@ -244,7 +244,8 @@ public final class SpecSkillGenerator {
         - **done**: PR merged, work complete (set by the engineer via `sail`)
 
         During autonomous execution Sail manages status itself — do not change it. The engineer
-        moves a spec's status themselves, outside the container (`/spec-board update`).
+        moves a spec's status themselves, outside the container: on the board in Mast, or with
+        `sail spec update <id> --status <new-status>` on the host.
 
         ### Fields (set at create or via `spec update`)
         - **id** (required): stable identifier, lowercase with hyphens

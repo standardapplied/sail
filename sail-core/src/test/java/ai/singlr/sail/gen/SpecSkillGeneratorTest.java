@@ -115,6 +115,11 @@ class SpecSkillGeneratorTest {
 
     assertFalse(content.contains("\nspec update <id> --status"), content);
     assertTrue(content.contains("sail spec update <id> --status <new-status>"), content);
+    assertTrue(
+        content.contains(
+            "moves a spec's status themselves, outside the container: on the board in Mast, or"
+                + " with\n`sail spec update <id> --status <new-status>` on the host."),
+        content);
     assertTrue(content.contains("A person claims an unassigned spec"), content);
     assertFalse(content.contains("An agent claims an unassigned spec"), content);
   }
