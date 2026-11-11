@@ -29,10 +29,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * A skill made by hand in one agent's folder of a real container is shared with what {@code skill
- * add} runs, installed for every agent at once, taking over the hand-made copy, and removed with
- * what {@code skill rm} runs: the container's own {@code find}, {@code head}, {@code base64},
- * {@code sha256sum}, {@code flock} and {@code mv -T} do what sail's scripts ask of them.
+ * A skill made by hand in one agent's folder of a real container is shared from outside it, as
+ * {@code sail project skills add --container} does, installed for every agent at once, taking over
+ * the hand-made copy, and removed as {@code sail project skills rm} does: the container's own
+ * {@code find}, {@code head}, {@code base64}, {@code sha256sum}, {@code flock} and {@code mv -T} do
+ * what sail's scripts ask of them.
  */
 class SkillShareIT extends AbstractIncusIT {
 
