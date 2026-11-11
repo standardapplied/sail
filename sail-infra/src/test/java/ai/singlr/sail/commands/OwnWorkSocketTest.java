@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 import ai.singlr.sail.api.ApiResponse;
 import ai.singlr.sail.api.Event;
@@ -22,11 +23,14 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
@@ -123,65 +127,117 @@ class OwnWorkSocketTest {
         "control: a draft");
   }
 
-  /** Row 13: eng's build of e1 comments in e1's room, and not on another of eng's specs. */
-  @ParameterizedTest
-  @ValueSource(strings = {"claude-code", "codex"})
-  void row13EngsAgentCommentsInE1sRoomButNotOnAnotherOfEngsSpecs(String harness) {
-    var build = build("e1", harness);
+  /** Every agent kind sail launches, by its lane, against both harnesses. */
+  static Stream<Arguments> everyAgent() {
+    return Stream.of("build", "review", "fix", "adhoc", "room", "room-full")
+        .flatMap(
+            lane -> Stream.of("claude-code", "codex").map(harness -> arguments(lane, harness)));
+  }
 
-    assertEquals("allowed", said(run(build, "POST", "/v1/specs/e1/messages", "body=done")));
+  /** The room kinds, against both harnesses. */
+  static Stream<Arguments> everyRoomAgent() {
+    return everyAgent().filter(agent -> agent.get()[0].toString().startsWith("room"));
+  }
+
+  /**
+   * Row 13: each agent comments in its own work's conversation and not in another: a run of e1 in
+   * e1's, not in r1 where in-r1 lives; an ad-hoc run in any of acme's, not in beta's b1; eng's room
+   * agent in r1, not in e1's.
+   */
+  @ParameterizedTest(name = "{0} {1}")
+  @MethodSource("everyAgent")
+  void row13EachAgentCommentsInItsOwnWorkAndNowhereElse(String lane, String harness) {
+    var agent = agent(lane, harness);
+    var other =
+        switch (lane) {
+          case "room" -> List.of("e1", "e1");
+          case "adhoc" -> List.of("b1", "b1");
+          default -> List.of("in-r1", "r1");
+        };
+
+    assertEquals(
+        "allowed",
+        said(
+            run(
+                agent,
+                "POST",
+                "/v1/specs/" + (lane.equals("room") ? "r1" : "e1") + "/messages",
+                "body=done")));
     assertEquals(
         "403 forbidden_not_assignee '"
-            + principal(build)
-            + "' may post only in its own work, not in 'r1'."
+            + principal(agent)
+            + "' may post only in its own work, not in '"
+            + other.get(1)
+            + "'."
             + OUTSIDE_WORK,
-        said(run(build, "POST", "/v1/specs/in-r1/messages", "body=hi")),
-        "in-r1 is eng's, born in r1, which is not this agent's work");
+        said(run(agent, "POST", "/v1/specs/" + other.get(0) + "/messages", "body=hi")));
   }
 
-  /** Row 14: eng's agent drafting a ready spec is told to omit the status. */
-  @ParameterizedTest
-  @ValueSource(strings = {"claude-code", "codex"})
-  void row14EngsAgentCreatingAReadySpecIsToldToOmitTheStatus(String harness) {
-    var build = build("e1", harness);
+  /**
+   * Row 14: each agent that may write is told to omit the status of a ready spec and drafts one;
+   * the read-only room agent creates none.
+   */
+  @ParameterizedTest(name = "{0} {1}")
+  @MethodSource("everyAgent")
+  void row14EachAgentCreatingAReadySpecIsToldToOmitTheStatus(String lane, String harness) {
+    var agent = agent(lane, harness);
+    var ready =
+        run(agent, "POST", "/v1/specs", "id=e-ready&project=acme&title=Ready&status=pending");
+    var draft = run(agent, "POST", "/v1/specs", "id=e-draft&project=acme&title=Draft");
 
     assertEquals(
-        DRAFTS_ONLY,
-        said(
-            run(build, "POST", "/v1/specs", "id=e-ready&project=acme&title=Ready&status=pending")));
-    assertEquals(
-        "allowed", said(run(build, "POST", "/v1/specs", "id=e-draft&project=acme&title=Draft")));
+        lane.equals("room")
+            ? List.of(readOnly("create specs"), readOnly("create specs"))
+            : List.of(DRAFTS_ONLY, "allowed"),
+        List.of(said(ready), said(draft)));
   }
 
-  /** Row 15: the draft an agent made is its own work; one another run made is not. */
-  @ParameterizedTest
-  @ValueSource(strings = {"claude-code", "codex"})
-  void row15EngsAgentEditsTheDraftItCreatedButNotOneAnotherRunMade(String harness) {
+  /**
+   * Row 15: the draft an agent made is its own work, and another's is not: one another run made, or
+   * for an ad-hoc run, whose work is all of acme, a spec of beta. The read-only room agent changes
+   * none.
+   */
+  @ParameterizedTest(name = "{0} {1}")
+  @MethodSource("everyAgent")
+  void row15EachAgentEditsTheDraftItCreatedButNotAnothers(String lane, String harness) {
     var another = adHoc(harness);
     run(another, "POST", "/v1/specs", "id=d2&project=acme&title=Theirs");
     Acting.system(
         () -> runs().complete(runs().findByCredential(another).orElseThrow().id(), "completed", 0));
-    var build = build("e1", harness);
-    run(build, "POST", "/v1/specs", "id=d1&project=acme&title=Mine");
+    var agent = agent(lane, harness);
+    var made = said(run(agent, "POST", "/v1/specs", "id=d1&project=acme&title=Mine"));
+    var others = lane.equals("adhoc") ? "b1" : "d2";
 
-    assertEquals("allowed", said(run(build, "PUT", "/v1/specs/d1", "title=Edited")));
+    if (lane.equals("room")) {
+      assertEquals(readOnly("create specs"), made);
+      assertEquals(
+          readOnly("change specs"), said(run(agent, "PUT", "/v1/specs/d2", "title=Edited")));
+      return;
+    }
+    assertEquals("allowed", said(run(agent, "PUT", "/v1/specs/d1", "title=Edited")));
     assertEquals(
         "403 forbidden_not_assignee '"
-            + principal(build)
-            + "' may change only its own work, not spec 'd2'."
+            + principal(agent)
+            + "' may change only its own work, not spec '"
+            + others
+            + "'."
             + OUTSIDE_WORK,
-        said(run(build, "PUT", "/v1/specs/d2", "title=Edited")));
+        said(run(agent, "PUT", "/v1/specs/" + others, "title=Edited")));
   }
 
-  /** Row 16: eng's agent setting e1 done, or archiving it, is refused. */
-  @ParameterizedTest
-  @ValueSource(strings = {"claude-code", "codex"})
-  void row16EngsAgentSettingE1DoneIsRefused(String harness) {
-    var build = build("e1", harness);
+  /** Row 16: no agent sets e1 done or archives it; one that may write still retitles it. */
+  @ParameterizedTest(name = "{0} {1}")
+  @MethodSource("everyAgent")
+  void row16NoAgentSetsE1DoneOrArchivesIt(String lane, String harness) {
+    var agent = agent(lane, harness);
+    var refusal = lane.equals("room") ? readOnly("change specs") : DRAFTS_ONLY;
 
-    assertEquals(DRAFTS_ONLY, said(run(build, "PUT", "/v1/specs/e1", "status=done")));
-    assertEquals(DRAFTS_ONLY, said(run(build, "PUT", "/v1/specs/e1", "status=archived")));
-    assertEquals("allowed", said(run(build, "PUT", "/v1/specs/e1", "title=Built")), "control");
+    assertEquals(refusal, said(run(agent, "PUT", "/v1/specs/e1", "status=done")));
+    assertEquals(refusal, said(run(agent, "PUT", "/v1/specs/e1", "status=archived")));
+    assertEquals(
+        lane.equals("room") ? refusal : "allowed",
+        said(run(agent, "PUT", "/v1/specs/e1", "title=Built")),
+        "control");
   }
 
   /** Row 17, pinned: an agent reports its own session and may not finish its own run. */
@@ -203,31 +259,68 @@ class OwnWorkSocketTest {
   }
 
   /**
-   * Row 18: eng's read-only room agent posts in r1, and posting anywhere else is refused with its
-   * fix.
+   * Row 18: a room agent, read-only or full, posts in its room and nowhere else; and one of e1
+   * reads and acks the inbox of its own run, e1's room, and no message of another's.
    */
-  @ParameterizedTest
-  @ValueSource(strings = {"claude-code", "codex"})
-  void row18EngsRoomAgentPostsInR1ButNowhereElse(String harness) {
-    var room = reserve(null, "r1", Lane.ROOM.wire(), harness);
+  @ParameterizedTest(name = "{0} {1}")
+  @MethodSource("everyRoomAgent")
+  void row18ARoomAgentPostsInItsRoomButNowhereElseAndAcksItsInbox(String lane, String harness) {
+    var room = agent(lane, harness);
+    var own = lane.equals("room") ? "r1" : "e1";
 
-    assertEquals("allowed", said(run(room, "POST", "/v1/specs/r1/messages", "body=noted")));
+    assertEquals(
+        "allowed", said(run(room, "POST", "/v1/specs/" + own + "/messages", "body=noted")));
     assertEquals(
         "403 forbidden_not_assignee '"
             + principal(room)
-            + "' may post only in its own work, not in 'e1'."
+            + "' may post only in its own work, not in '"
+            + (lane.equals("room") ? "e1" : "r1")
+            + "'."
             + OUTSIDE_WORK,
-        said(run(room, "POST", "/v1/specs/e1/messages", "body=hi")));
+        said(
+            run(
+                room,
+                "POST",
+                "/v1/specs/" + (lane.equals("room") ? "e1" : "in-r1") + "/messages",
+                "body=hi")));
+
+    var ofE1 = lane.equals("room") ? reserve("e1", null, lane, harness) : room;
+    var id = idOf(socket("eng", "POST", "/v1/specs/e1/messages", "body=what next?"));
+    var notIts = idOf(socket("eng", "POST", "/v1/specs/in-r1/messages", "body=elsewhere"));
+
+    assertEquals(
+        List.of(id),
+        ((List<?>) run(ofE1, "GET", "/v1/run/messages", "").body().get("messages"))
+            .stream().map(message -> ((Map<?, ?>) message).get("id")).toList());
+    assertEquals(
+        "400 bad_request delivered must name messages on spec 'e1'. | null",
+        said(run(ofE1, "POST", "/v1/run/messages", "delivered=" + notIts)));
+    assertEquals("allowed", said(run(ofE1, "POST", "/v1/run/messages", "delivered=" + id)));
   }
 
-  /** Row 18, pinned: a read-only room agent acks the inbox of its own run. */
-  @Test
-  void row18ARoomAgentAcksItsInbox() {
-    var room = reserve("e1", null, Lane.ROOM.wire(), "claude-code");
-    var asked = socket("eng", "POST", "/v1/specs/e1/messages", "body=what next?");
-    var id = ((Map<?, ?>) asked.body().get("message")).get("id");
+  private static Object idOf(ApiResponse posted) {
+    return ((Map<?, ?>) posted.body().get("message")).get("id");
+  }
 
-    assertEquals("allowed", said(run(room, "POST", "/v1/run/messages", "delivered=" + id)));
+  /**
+   * Row 21 for agents: no agent shares or removes a skill, through its own credential: an agent's
+   * lane may never, and the read-only room agent writes nothing.
+   */
+  @ParameterizedTest(name = "{0} {1}")
+  @MethodSource("everyAgent")
+  void row21NoAgentSharesOrRemovesASkill(String lane, String harness) {
+    var agent = agent(lane, harness);
+    var refusal =
+        lane.equals("room")
+            ? readOnly("share files and skills in projects")
+            : "403 agent_lane_forbidden Agent principals cannot share files and skills in"
+                + " projects. | Only an operator lane (CLI or API token) may do this.";
+
+    assertEquals(
+        List.of(refusal, refusal),
+        List.of(
+            said(run(agent, "POST", "/v1/projects/acme/skills", "folder=%2Fhome%2Fdev%2Fjava")),
+            said(run(agent, "DELETE", "/v1/projects/acme/skills/java", ""))));
   }
 
   /** Row 19, pinned: client's comment on e1 is not in what eng's agent reads of e1's room. */
@@ -318,8 +411,42 @@ class OwnWorkSocketTest {
   void aRoomAgentFindsNoSpecOfItsPersonsOtherProjects() {
     var room = reserve(null, "r1", Lane.ROOM.wire(), "claude-code");
 
-    assertEquals(404, run(room, "GET", "/v1/specs/b1", "").status());
-    assertEquals(200, run(room, "GET", "/v1/specs/e1", "").status());
+    assertEquals(
+        "404 spec_not_found Spec 'b1' was not found. | null",
+        said(run(room, "GET", "/v1/specs/b1", "")));
+    assertEquals("allowed", said(run(room, "GET", "/v1/specs/e1", "")));
+  }
+
+  /**
+   * An agent of {@code lane} on eng's box, of {@code harness}: a build, a review, a fix and a full
+   * room member of e1; an ad-hoc run in acme; a read-only room agent launched in r1.
+   */
+  private String agent(String lane, String harness) {
+    return switch (lane) {
+      case "review", "fix" ->
+          Acting.system(
+              () ->
+                  ReviewRuns.reserve(
+                      new RunStore(fleet.db()),
+                      DateTimeUtils.newId().toString(),
+                      "review-1",
+                      "acme",
+                      "e1",
+                      "eng",
+                      Lane.of(lane).orElseThrow(),
+                      harness,
+                      List.of()));
+      case "adhoc" -> adHoc(harness);
+      case "room" -> reserve(null, "r1", lane, harness);
+      default -> reserve("e1", null, lane, harness);
+    };
+  }
+
+  /** The refusal a read-only credential hears for {@code act}. */
+  private static String readOnly(String act) {
+    return "403 read_only_credential Your credential is read-only and cannot "
+        + act
+        + ". | Ask an admin for a member or admin credential.";
   }
 
   /** A build of e1 on eng's box. */
