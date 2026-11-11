@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.RunStore;
@@ -108,7 +109,8 @@ class AgentLogCommandTest {
    * operate is refused as a stop refuses it, so a viewer does not read its own run's log.
    */
   @Test
-  void aLogIsReadAsTheBoxsOperatorAndDecidedAsTheLogRouteDecidesIt() throws Exception {
+  void aLogIsReadAsTheBoxsOperatorTheCommandLineBindsAndDecidedAsTheLogRouteDecidesIt()
+      throws Exception {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
       HeldProjects.hold(db, "acme", "beta");
@@ -136,12 +138,10 @@ class AgentLogCommandTest {
 
       var readOnly =
           assertThrows(
-              ApiException.class,
-              () -> AgentLogCommand.logPath(operations, "acme", "mady", Optional.empty()));
+              ApiException.class, () -> asTheOperator(operations, "acme", Optional.empty()));
       var outside =
           assertThrows(
-              ApiException.class,
-              () -> AgentLogCommand.logPath(operations, "beta", "mady", Optional.empty()));
+              ApiException.class, () -> asTheOperator(operations, "beta", Optional.empty()));
 
       assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, readOnly.failure().errorCode());
       assertEquals(
@@ -154,10 +154,17 @@ class AgentLogCommandTest {
 
       db.execute("UPDATE fdes SET role = 'member' WHERE handle = 'mady'");
       assertEquals(
-          AgentUnit.forRun(RUN).logPath(),
-          AgentLogCommand.logPath(operations, "acme", "mady", Optional.empty()));
-      assertNull(AgentLogCommand.logPath(operations, "acme", "mady", Optional.of(Lane.REVIEW)));
+          AgentUnit.forRun(RUN).logPath(), asTheOperator(operations, "acme", Optional.empty()));
+      assertNull(asTheOperator(operations, "acme", Optional.of(Lane.REVIEW)));
     }
+  }
+
+  /** The log path the command line finds, reading as the box's operator as it binds one. */
+  private static String asTheOperator(
+      HostOperations operations, String project, Optional<Lane> lane) {
+    return Actor.readingAs(
+        () -> operations.identity().operator(),
+        () -> AgentLogCommand.logPath(operations, project, "mady", lane));
   }
 
   private static HostOperations operations(Sqlite db, Path dir) {

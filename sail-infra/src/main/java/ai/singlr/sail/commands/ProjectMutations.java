@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.ProjectDefinitionJson;
@@ -35,13 +34,7 @@ final class ProjectMutations {
 
   /** Mutations of this box's catalog, written as this box's operator, as its operations say. */
   static ProjectMutations here() {
-    return new ProjectMutations(ProjectCatalog.here(), ProjectMutations::operator);
-  }
-
-  private static Actor operator() {
-    try (var operations = OperationsFactory.open()) {
-      return operations.identity().operator();
-    }
+    return new ProjectMutations(ProjectCatalog.here(), SailCommandLine::operator);
   }
 
   /** The catalog these mutations read and write. */

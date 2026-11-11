@@ -68,7 +68,7 @@ public final class AgentReportCommand implements Runnable {
     name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
     try (var operations = this.operations.apply(operator)) {
-      operations.asOperator(() -> operations.catalog().readable(name));
+      operations.catalog().readable(name);
     }
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);

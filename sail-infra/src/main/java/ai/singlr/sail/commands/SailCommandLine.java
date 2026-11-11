@@ -90,7 +90,8 @@ public final class SailCommandLine {
     return () -> resolved.updateAndGet(held -> Objects.requireNonNullElseGet(held, resolve));
   }
 
-  private static Actor operator() {
+  /** This box's operator, as its operations name it: the one resolver of the host CLI's person. */
+  static Actor operator() {
     try (var operations = OperationsFactory.open()) {
       return operations.identity().operator();
     }

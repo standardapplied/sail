@@ -45,13 +45,9 @@ public final class ProjectListCommand implements Runnable {
     List<ContainerInfo> projects;
     try (var operations = OperationsFactory.open(operator::warn)) {
       projects =
-          operations.asOperator(
-              () ->
-                  merge(
-                      containers,
-                      operations.catalog().projects().stream()
-                          .map(ProjectStore.ProjectRow::name)
-                          .toList()));
+          merge(
+              containers,
+              operations.catalog().projects().stream().map(ProjectStore.ProjectRow::name).toList());
     }
 
     if (json) {

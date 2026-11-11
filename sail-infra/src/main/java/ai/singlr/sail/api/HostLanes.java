@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Lane;
@@ -115,12 +114,10 @@ final class HostLanes {
     }
 
     @Override
-    public Optional<RunStore.RunRow> latestOperable(
-        String project, String node, Optional<Lane> lane) {
-      var actor = Actor.current();
+    public Optional<RunStore.RunRow> latestOperable(String project, String node, Lane lane) {
+      var actor = Actor.reader();
       ProjectGate.requireReads(project);
-      return lane.map(asked -> latestInLane(project, node, asked))
-          .orElseGet(() -> latestRun(project, node))
+      return (lane == null ? latestRun(project, node) : latestInLane(project, node, lane))
           .map(
               run ->
                   switch (LogAdmission.of(actor, Optional.of(run), run.id(), node, specs)) {
@@ -159,11 +156,6 @@ final class HostLanes {
     @Override
     public ProjectStore.ProjectRow readable(String project) {
       return ProjectGate.readable(projectStore, project);
-    }
-
-    @Override
-    public <T> List<T> readable(List<T> items, Function<T, String> projectOf) {
-      return ReadFilter.readable(Actor.reader(), items, projectOf);
     }
 
     @Override

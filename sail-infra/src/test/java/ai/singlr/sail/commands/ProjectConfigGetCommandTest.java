@@ -67,7 +67,7 @@ class ProjectConfigGetCommandTest {
             "",
             "  ✗ No project 'acme' in the catalog. Create it with 'sail project create acme', or"
                 + " sync it from main with 'sail sync'.\n"),
-        Actor.readingAs(() -> scoped, () -> get("acme", "resources")));
+        CommandRun.as(scoped, new ProjectConfigGetCommand(mutations), "acme", "resources"));
   }
 
   private CommandRun get(String... args) {

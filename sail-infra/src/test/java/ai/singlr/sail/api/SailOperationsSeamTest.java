@@ -79,7 +79,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -1492,11 +1491,6 @@ class SailOperationsSeamTest {
           new Actor("owner", Role.MEMBER, Actor.Lane.CLI)
               .withScope(ProjectScope.of(List.of("proj")));
       assertEquals("proj", Actor.call(scoped, () -> operations.catalog().readable("proj")).name());
-      assertEquals(
-          List.of("proj"),
-          Actor.call(
-              scoped, () -> operations.catalog().readable(List.of("proj", "other"), name -> name)));
-      assertEquals(operations.identity().operator(), operations.asOperator(Actor::current));
       operations
           .pty()
           .admitRoom(
@@ -1566,11 +1560,7 @@ class SailOperationsSeamTest {
           operations.dispatching().liveRuns("node").stream().map(RunStore.RunRow::id).toList());
       assertEquals(List.of(), operations.dispatching().liveRuns("other"));
       assertTrue(
-          Acting.system(
-                  () ->
-                      operations
-                          .dispatching()
-                          .latestOperable("proj", "node", Optional.of(Lane.REVIEW)))
+          Acting.system(() -> operations.dispatching().latestOperable("proj", "node", Lane.REVIEW))
               .isEmpty());
       Acting.system(() -> runs.complete(id, "completed", 0));
       var reviewer = DateTimeUtils.newId().toString();
@@ -1588,40 +1578,23 @@ class SailOperationsSeamTest {
                   List.of()));
       assertEquals(
           reviewer,
-          Acting.system(
-                  () ->
-                      operations
-                          .dispatching()
-                          .latestOperable("proj", "node", Optional.of(Lane.REVIEW)))
+          Acting.system(() -> operations.dispatching().latestOperable("proj", "node", Lane.REVIEW))
               .orElseThrow()
               .id());
       assertEquals(
           id,
-          Acting.system(
-                  () ->
-                      operations
-                          .dispatching()
-                          .latestOperable("proj", "node", Optional.of(Lane.BUILD)))
+          Acting.system(() -> operations.dispatching().latestOperable("proj", "node", Lane.BUILD))
               .orElseThrow()
               .id());
       assertTrue(
-          Acting.system(
-                  () ->
-                      operations
-                          .dispatching()
-                          .latestOperable("proj", "node", Optional.of(Lane.FIX)))
+          Acting.system(() -> operations.dispatching().latestOperable("proj", "node", Lane.FIX))
               .isEmpty());
       assertTrue(
-          Acting.system(
-                  () ->
-                      operations
-                          .dispatching()
-                          .latestOperable("proj", "other", Optional.of(Lane.REVIEW)))
+          Acting.system(() -> operations.dispatching().latestOperable("proj", "other", Lane.REVIEW))
               .isEmpty());
       assertEquals(
           reviewer,
-          Acting.system(
-                  () -> operations.dispatching().latestOperable("proj", "node", Optional.empty()))
+          Acting.system(() -> operations.dispatching().latestOperable("proj", "node", null))
               .orElseThrow()
               .id());
     }

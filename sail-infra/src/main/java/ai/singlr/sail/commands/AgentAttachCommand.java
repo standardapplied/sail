@@ -31,7 +31,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -362,20 +361,18 @@ public final class AgentAttachCommand implements Runnable {
         () -> {
           try (var operations = this.operations.apply(operator)) {
             var node = NodeIdentity.handle();
-            return operations.asOperator(
-                () ->
-                    operations
-                        .dispatching()
-                        .latestOperable(name, node, Optional.empty())
-                        .map(
-                            run ->
-                                new Latest(
-                                    run,
-                                    operations.catalog().roomKnown(run.conversationId())
-                                        ? run.conversationId()
-                                        : "",
-                                    operations.dispatching().runningRuns(name, node)))
-                        .orElse(Latest.NONE));
+            return operations
+                .dispatching()
+                .latestOperable(name, node, null)
+                .map(
+                    run ->
+                        new Latest(
+                            run,
+                            operations.catalog().roomKnown(run.conversationId())
+                                ? run.conversationId()
+                                : "",
+                            operations.dispatching().runningRuns(name, node)))
+                .orElse(Latest.NONE);
           }
         });
   }

@@ -22,7 +22,6 @@ import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -173,10 +172,7 @@ public final class AgentLogCommand implements Runnable {
    */
   static String logPath(
       HostOperations operations, String project, String node, Optional<Lane> lane) {
-    return logPathFrom(
-        Actor.call(
-            operations.identity().operator(),
-            () -> operations.dispatching().latestOperable(project, node, lane)));
+    return logPathFrom(operations.dispatching().latestOperable(project, node, lane.orElse(null)));
   }
 
   /** The run's own log path, derived from its id, or null when there is no run. */

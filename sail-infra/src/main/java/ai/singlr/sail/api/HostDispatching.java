@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
@@ -47,9 +48,10 @@ public interface HostDispatching {
 
   /**
    * The newest run of {@code project} the box whose handle is {@code node} executed, in {@code
-   * lane} when one is asked, when the bound actor may operate it — read its log, attach to it — as
-   * every log door admits it ({@link LogAdmission}): a project outside its scope is not in the
-   * catalog, and a run it may not operate is refused. Empty when there is no such run.
+   * lane} or in any lane when it is null, when whoever reads ({@link Actor#reader}) may operate it
+   * — read its log, attach to it — as every log door admits it ({@link LogAdmission}): a project
+   * outside its scope is not in the catalog, and a run it may not operate is refused. Empty when
+   * there is no such run.
    */
-  Optional<RunStore.RunRow> latestOperable(String project, String node, Optional<Lane> lane);
+  Optional<RunStore.RunRow> latestOperable(String project, String node, Lane lane);
 }
