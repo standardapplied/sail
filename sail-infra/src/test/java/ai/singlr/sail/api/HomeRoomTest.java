@@ -269,6 +269,26 @@ class HomeRoomTest {
     assertTrue(roomStore.listAll().isEmpty());
   }
 
+  /**
+   * An agent's refusal of the room is no read-only credential's: the door says it, refusing to seat
+   * the member, as it always has, and no room is made.
+   */
+  @Test
+  void anAgentIsRefusedSeatingTheMemberAndMakesNoRoom() {
+    var ops = operations();
+    var agent =
+        Actor.agentPrincipal("claude/019fee00-0000-7000-8000-0000000000a1", "ada")
+            .withWork(Actor.Work.of("acme", "auth", "auth"));
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () -> Actor.call(agent, () -> HomeRoom.ensure(ops, definition(CLAUDE_ONLY), "ada")));
+
+    assertEquals("Agent principals cannot manage room membership.", refused.getMessage());
+    assertTrue(roomStore.listAll().isEmpty());
+  }
+
   @Test
   void anFdeWhoDoesNotReadTheProjectHasNoHomeRoomThere() {
     var ops = operations();
