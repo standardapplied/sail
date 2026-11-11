@@ -19,6 +19,16 @@ import Testing
         #expect(requests.allSatisfy { $0.headers["Accept"] == "text/event-stream" })
     }
 
+    @Test func anEventSentWithoutAnIdAfterAReconnectKeepsWhereTheStreamResumes() async throws {
+        let room = try Goldens.bytes("events/room-stream.sse")
+        let opening = try #require(range(of: "id: 2\n", in: room))
+        let server = ScriptedStreams([.answer(200, [Array(room[..<opening.lowerBound])], .close), .answer(200, [room], .close)])
+        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps(2).sleep)
+        let events = try await read(source)
+        #expect(events.map(\.lastEventID).prefix(4) == ["", "1", "1", "1"])
+        #expect(await server.requests.map { $0.headers["Last-Event-ID"] }.prefix(2) == [nil, "1"])
+    }
+
     @Test func aConnectionThatBreaksIsReopenedAfterTheRetryTheServerSet() async throws {
         let server = ScriptedStreams([
             .answer(200, [Array("retry: 2500\nid: 1\ndata: one\n\n".utf8)], .drop),

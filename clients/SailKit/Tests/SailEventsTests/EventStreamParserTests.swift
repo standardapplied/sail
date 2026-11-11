@@ -27,6 +27,14 @@ import Testing
         }
     }
 
+    @Test(arguments: ["\n", "\r\n", "\r"])
+    func anEventOfSeveralDataLinesIsOneEventWhateverEndsItsLines(ending: String) {
+        let stream = Array("data: one\ndata: two\n\n".replacingNewlines(with: ending).utf8)
+        for offset in 0 ... stream.count {
+            #expect(parse(cut(stream, at: offset)) == [ServerSentEvent(type: "message", data: "one\ntwo", lastEventID: "")])
+        }
+    }
+
     @Test func eachEventCarriesItsTypeDataAndTheLastIdTheServerGave() throws {
         let events = parse([try Goldens.bytes("events/room-stream.sse")])
         let turn = try #require(events.first)

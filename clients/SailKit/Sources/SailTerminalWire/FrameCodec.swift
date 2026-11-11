@@ -228,14 +228,13 @@ private struct Cursor {
         try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.string() }
     }
 
-    /// A count, then that many entries: a count larger than the bytes left is a frame cut short,
-    /// since every entry takes at least one byte.
+    /// A count, then that many entries; nothing is reserved for the count, so one larger than the
+    /// frame holds fails at the first entry it cannot read.
     private mutating func list<Entry>(
         _ entry: (inout Cursor) throws(TerminalWireError) -> Entry
     ) throws(TerminalWireError) -> [Entry] {
         let count = try int32()
         guard count >= 0 else { throw .malformed("a list claims \(count) entries") }
-        guard count <= remaining else { throw .truncated }
         var entries: [Entry] = []
         for _ in 0 ..< count {
             entries.append(try entry(&self))
