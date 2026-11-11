@@ -38,8 +38,17 @@ class PolicyTest {
                 new Policy.Row(
                     Action.CHANGE, Cell.NO, Cell.OWNER, Cell.YES, Cell.NO, Cell.NO, Cell.OWNER));
 
+    var itsOwn =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new Policy.Row(
+                    Action.NARRATE, Cell.NO, Cell.ITS_OWN, Cell.YES, Cell.YES, Cell.NO, Cell.NO));
+
     assertEquals(
         "The row of POST gives a role own work, which only an agent has.", ownWork.getMessage());
+    assertEquals(
+        "The row of NARRATE gives a role own work, which only an agent has.", itsOwn.getMessage());
     assertEquals(
         "The row of CHANGE gives a lane ownership, which only a role decides.", owner.getMessage());
     assertThrows(

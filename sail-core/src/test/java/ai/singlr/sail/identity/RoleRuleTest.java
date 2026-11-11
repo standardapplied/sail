@@ -290,6 +290,10 @@ class RoleRuleTest {
         new RoleRule(() -> MAIN, roster).principal(Credential.box()),
         "main's own FDE is its admin, never scoped");
     assertEquals(
+        Optional.of(new Actor("uday", Role.MEMBER, Actor.Lane.CONTAINER).withScope(alpha)),
+        node.principal(Credential.container()),
+        "the box credential in a container is the box's FDE, on the container lane");
+    assertEquals(
         Optional.of(new Actor(null, Role.ADMIN, Actor.Lane.CLI)),
         new RoleRule(SyncConfig::unset, roster).principal(Credential.box()),
         "a box with no sync handle has no FDE to be, and its root is an admin");

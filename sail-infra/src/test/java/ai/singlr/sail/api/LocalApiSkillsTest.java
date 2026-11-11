@@ -52,6 +52,7 @@ class LocalApiSkillsTest {
       "---\nname: java\ndescription: Java standards.\n---\nApply them.\n";
   private static final String SKILLS = "/v1/projects/acme/skills";
   private static final String SCOPED = "sailbox_scoped_to_acme";
+  private static final String ALLOWED = "sailbox_on_a_lane_that_shares";
 
   @TempDir Path dir;
   private Sqlite db;
@@ -92,6 +93,9 @@ class LocalApiSkillsTest {
 
           @Override
           public Optional<Actor> boxActorForCredential(String credential) {
+            if (ALLOWED.equals(credential)) {
+              return Optional.of(new Actor(TestOperations.BOX_HANDLE, Role.MEMBER, Actor.Lane.CLI));
+            }
             return SCOPED.equals(credential)
                 ? Optional.of(
                     new Actor(TestOperations.BOX_HANDLE, Role.MEMBER, Actor.Lane.CONTAINER)
@@ -268,6 +272,25 @@ class LocalApiSkillsTest {
           assertInstanceOf(Map.class, refused.body().get("error")).get("action"));
     }
     assertEquals(List.of(".sail/skills/java/SKILL.md"), shared());
+  }
+
+  /**
+   * The socket's share and remove routes are the one share verb, whatever the caller, decided as
+   * the journal records the write: no credential in a container is let share, so a caller on a lane
+   * the journal lets share stands in, and gets the skill shared from the folder named and removed.
+   */
+  @Test
+  void theShareRoutesAreTheOneShareVerbTheJournalDecides() {
+    containerHolds(JAVA_MD);
+
+    var shared =
+        router.ask("POST", SKILLS, ALLOWED, "folder=%2Fhome%2Fdev%2Fdrafts%2Fjava&name=java");
+    var removed = router.ask("DELETE", SKILLS + "/java", ALLOWED, "");
+
+    assertEquals(200, shared.status(), shared.body().toString());
+    assertEquals("java", shared.body().get("name"));
+    assertEquals(Map.of("name", "java", "files", 1), withoutSchema(removed.body()));
+    assertEquals(List.of(), shared());
   }
 
   /**

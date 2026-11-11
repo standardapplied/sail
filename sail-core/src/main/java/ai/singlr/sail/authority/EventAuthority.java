@@ -200,9 +200,10 @@ public final class EventAuthority {
 
   /**
    * What {@code action} is taken on when an event is about {@code subject}. The box, for an event
-   * that speaks for it. A run's narration, the run it names, as the box that executed it owns it: a
-   * person's only on the box that executed it, and a run's own principal's. Otherwise the work it
-   * names, answering to who drives it here: a run this box executed is also this box's.
+   * that speaks for it. A run's narration, the run it names, answering only to the FDE of the box
+   * that executed it ({@link Resources#launched}): a person's only on that box, and its own
+   * principal's. Otherwise the work it names, answering to who drives it here: a run this box
+   * executed is also this box's.
    */
   private Resource resource(Action action, Subject subject) {
     var executed =
@@ -214,13 +215,11 @@ public final class EventAuthority {
       case NARRATE ->
           subject.runId() == null
               ? work(subject, executed)
-              : Resources.run(
+              : Resources.launched(
                   subject.runId(),
                   subject.project(),
                   null,
-                  null,
-                  executed.stream().findFirst().orElse(null),
-                  spec -> Optional.empty());
+                  executed.stream().findFirst().orElse(null));
       default ->
           work(subject, Stream.concat(subject.owners().stream(), executed.stream()).toList());
     };
