@@ -2859,7 +2859,10 @@ the one native build:
   its own tests see Apple's libraries; a test of Linux-only behaviour says so with
   `@EnabledOnOs(OS.LINUX)`.
 - **One native build per commit.** The `Native binaries` job builds the candidate once and every
-  native suite downloads it. CI tests the quick build (`-Ob`, about half the build time);
+  native suite downloads it. The build is cached under its inputs (the poms, every module's
+  `src/main`, the `native-binaries` action, the optimization level and the GraalVM build), so a
+  commit that changes only tests or CI takes the image its inputs already built, smoke-tested
+  again. CI tests the quick build (`-Ob`, about half the build time);
   `release.yml` builds the optimized one (`-O2`), which only its smoke test (`-V`,
   `_pty-selftest`) runs. The two compile the same program; what only `-O2` could expose — a race
   faster code opens, a miscompile — is the accepted gap.
