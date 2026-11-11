@@ -103,7 +103,6 @@ public final class SpecCliHelper {
         spec comment <id> --body <text>|- [--reply-to <message-id>] [--question]
                     (--question flags a blocking question so the board pages the engineer)
         spec comments <id> [--before <message-id>] [--limit N]
-        spec archive <id>
         spec whoami                        show this run's principal identity
       USAGE
         exit "${1:-0}"

@@ -73,8 +73,9 @@ class SpecCliHelperTest {
   }
 
   /**
-   * The help inside the container no longer teaches setting a status, which nothing there may do:
-   * it says a spec is born a draft and names the host command that moves a status.
+   * The help inside the container no longer teaches setting a status, which nothing there may do,
+   * nor archiving, which is one: it says a spec is born a draft and names the host command that
+   * moves a status. An archive typed anyway reaches the server and hears its refusal.
    */
   @Test
   void theHelpTeachesNoStatusMoveAndNamesTheDoorOutside() {
@@ -84,6 +85,7 @@ class SpecCliHelperTest {
 
     assertFalse(usage.contains("[--status pending]"), usage);
     assertFalse(usage.contains("[--status S] [--title T]"), usage);
+    assertFalse(usage.contains("archive"), usage);
     assertTrue(usage.contains("A spec created here is a draft."), usage);
     assertTrue(
         usage.contains(
