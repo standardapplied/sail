@@ -38,7 +38,7 @@ class RemoteCommandRunnerTest {
     var runner = new RemoteCommandRunner(CONFIG);
 
     assertEquals("sail@kubera-server", runner.sshTarget(new String[] {"spec", "list"}));
-    assertEquals("sail@kubera-server", runner.sshTarget(new String[] {"agent", "stream", "r"}));
+    assertEquals("sail@kubera-server", runner.sshTarget(new String[] {"agent", "status"}));
     assertEquals("sail@kubera-server", runner.sshTarget(new String[] {"events", "tail"}));
     assertEquals("sail@kubera-server", runner.sshTarget(new String[] {"fde", "list"}));
   }
@@ -48,10 +48,6 @@ class RemoteCommandRunnerTest {
     var runner = new RemoteCommandRunner(CONFIG);
 
     assertEquals("kubera-server", runner.sshTarget(new String[] {"project", "up", "demo"}));
-    assertEquals(
-        "kubera-server",
-        runner.sshTarget(new String[] {"agent", "status"}),
-        "an agent verb that reads the control plane directly runs on the host");
     assertEquals("kubera-server", runner.sshTarget(new String[] {"shell", "demo"}));
     assertEquals("kubera-server", runner.sshTarget(new String[] {}));
   }

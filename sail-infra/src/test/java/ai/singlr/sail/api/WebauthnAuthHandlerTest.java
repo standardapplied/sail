@@ -287,6 +287,21 @@ class WebauthnAuthHandlerTest {
   }
 
   @Test
+  void anyMethodButPostIsRefusedTheMethodWhereverItAsksAndOnlyAPostIsToldThePathIsNotThere()
+      throws Exception {
+    startWith(new FakeCeremonies());
+
+    for (var path : List.of("/v1/auth/nothing", "/v1/auth//register/ticket")) {
+      var refused = send("GET", path, adminToken, null);
+      assertEquals(405, refused.statusCode(), path);
+      assertTrue(refused.body().contains("Passkey endpoints accept POST only."), refused.body());
+    }
+    var missing = post("/v1/auth/nothing", adminToken, "{}");
+    assertEquals(404, missing.statusCode());
+    assertTrue(missing.body().contains("Unknown passkey endpoint."), missing.body());
+  }
+
+  @Test
   void unknownPasskeyEndpointIsNotFound() throws Exception {
     startWith(new FakeCeremonies());
     assertEquals(404, post("/v1/auth/bogus", adminToken, "{}").statusCode());
