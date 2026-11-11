@@ -55,6 +55,9 @@ class AccessScenarioTest {
           .withScope(ProjectScope.of(List.of("acme", "beta")));
   private static final Actor ENGS_AGENT = Actor.agentPrincipal("claude/" + RUN, "eng");
   private static final Actor ENGS_ROOM_AGENT = Actor.roomPrincipal("claude/room-" + RUN, "eng");
+  private static final Actor ENG_IN_CONTAINER = new Actor("eng", Role.MEMBER, Actor.Lane.CONTAINER);
+  private static final Actor UDAY_IN_CONTAINER =
+      new Actor("uday", Role.ADMIN, Actor.Lane.CONTAINER);
 
   private static final Resource E1 = Resources.spec("e1", "acme", "eng", "eng");
   private static final Resource E1_ROOM = Resources.conversation("e1", "acme", List.of("eng"));
@@ -283,6 +286,87 @@ class AccessScenarioTest {
             "Ask uday to post it, or have an admin do it."),
         Access.decide(
             ENGS_ROOM_AGENT, Action.POST, Resources.conversation("u1", "acme", List.of("uday"))));
+  }
+
+  @Test
+  void row20TheStolenCredentialCommentsOnE1AsEng() {
+    var posted =
+        Actor.call(ENG_IN_CONTAINER, () -> new MessageStore(db).append("e1", "eng", "hi", null));
+
+    assertEquals("eng", posted.author());
+  }
+
+  /**
+   * Row 21: role before lane, as at every door, so on eng's box reassigning e1 is admin-only and
+   * only marking it done and sharing a skill name the lane; with uday's credential on main, an
+   * admin's, all three name it.
+   */
+  @Test
+  void row21TheStolenCredentialReassignsE1MarksItDoneAndSharesASkill() {
+    var reassigned = edited("e1", "assignee", "client");
+    var done = edited("e1", "status", SpecStatus.DONE.wire());
+    var acme = Resources.project("acme", "uday");
+    var markDone =
+        new Refusal(
+            Refusal.Kind.LANE_FORBIDDEN,
+            "The credential in a project container cannot approve specs.",
+            "Do it from outside the container: 'sail spec update <id> --status <status>'"
+                + " on the host, or Mast.");
+    var share =
+        new Decision.Refused(
+            new Refusal(
+                Refusal.Kind.LANE_FORBIDDEN,
+                "The credential in a project container cannot share files and skills in projects.",
+                "Do it from outside the container: with sail on the host, or in Mast."));
+
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.ADMIN_ONLY,
+                "Reassigning spec 'e1' moves work between FDEs and is an admin-only action"
+                    + " (currently 'eng').",
+                "Ask an admin to reassign it. You may grab a spec only while it is unassigned.")),
+        Actor.call(ENG_IN_CONTAINER, () -> specs.decide("e1", reassigned)));
+    assertEquals(
+        Optional.of(markDone), Actor.call(ENG_IN_CONTAINER, () -> specs.decide("e1", done)));
+    assertEquals(share, Access.decide(ENG_IN_CONTAINER, Action.SHARE, acme));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.LANE_FORBIDDEN,
+                "The credential in a project container cannot assign specs.",
+                "Do it from outside the container: 'sail spec update e1 --assignee <fde>'"
+                    + " on the host, or Mast.")),
+        Actor.call(UDAY_IN_CONTAINER, () -> specs.decide("e1", reassigned)));
+    assertEquals(
+        Optional.of(markDone), Actor.call(UDAY_IN_CONTAINER, () -> specs.decide("e1", done)));
+    assertEquals(share, Access.decide(UDAY_IN_CONTAINER, Action.SHARE, acme));
+  }
+
+  /**
+   * Plus: a person's own terminal in the container comments and creates as at every other door, and
+   * is refused approving with a fix that names the door outside.
+   */
+  @Test
+  void aPersonsTerminalInTheContainerCreatesADraftButIsToldToPromoteItOutside() {
+    var draft = new LinkedHashMap<>(specs.held("e1"));
+    draft.put("title", "e-draft");
+    draft.put("room_id", "e-draft");
+    draft.put("status", SpecStatus.DRAFT.wire());
+    draft.remove("_created_by");
+    var ready = new LinkedHashMap<>(draft);
+    ready.put("status", SpecStatus.PENDING.wire());
+
+    assertEquals(
+        Optional.empty(), Actor.call(ENG_IN_CONTAINER, () -> specs.decide("e-draft", draft)));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.LANE_FORBIDDEN,
+                "The credential in a project container cannot approve specs.",
+                "Do it from outside the container: 'sail spec update <id> --status <status>'"
+                    + " on the host, or Mast.")),
+        Actor.call(ENG_IN_CONTAINER, () -> specs.decide("e-draft", ready)));
   }
 
   @Test

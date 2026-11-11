@@ -31,7 +31,8 @@ import java.util.Set;
  *   <li>Role: the cell of the actor's role says no: refused, read-only or admin-only; unless the
  *       actor's lane grants the action on its own work, whatever its role, which decides it alone —
  *       a room agent, read-only by construction, posts in its room and narrates its run.
- *   <li>Lane: an agent's lane says no: refused, naming the lane.
+ *   <li>Lane: the lane of an agent or of the in-container credential says no: refused, naming the
+ *       lane.
  *   <li>Ownership: the role's cell says owner, and the actor neither is an admin nor acts for an
  *       owner; or it starts work in the room a spec was born in ({@link Resource#bornIn}) — creates
  *       or claims the spec there — and does not act for that room's owners: refused, naming the
@@ -139,7 +140,7 @@ public final class Access {
       return Optional.of(Wording.belowRole(actor, action, kind, resource));
     }
     if (lane == Cell.NO) {
-      return Optional.of(Wording.laneForbidden(action, kind));
+      return Optional.of(Wording.laneForbidden(actor, action, kind, resource));
     }
     if (resource == null) {
       return Optional.empty();

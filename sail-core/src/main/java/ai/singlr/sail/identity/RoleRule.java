@@ -63,11 +63,20 @@ public final class RoleRule {
     }
 
     /**
-     * The box's own person with their full role, on the CLI lane of its root: the host CLI, the box
-     * credential in a project container, the terminal's blank token.
+     * The box's own person with their full role, on the CLI lane of its root: the host CLI and the
+     * terminal's blank token.
      */
     static Credential box() {
       return new Box(Role.ADMIN, Actor.Lane.CLI);
+    }
+
+    /**
+     * The box's own person as the box credential presents them in a project container, where
+     * anything that runs can read it: their full role, on the {@link Actor.Lane#CONTAINER} lane,
+     * whose column narrows it.
+     */
+    static Credential container() {
+      return new Box(Role.ADMIN, Actor.Lane.CONTAINER);
     }
 
     /** The host CLI's API token, minted with the role {@code minted} names: the box's person. */

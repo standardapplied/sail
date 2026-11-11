@@ -69,7 +69,13 @@ class EventsBaselineTest {
       var corpus = new Corpus(world.minted());
       var rule = new EventAuthority(world.db, () -> Cast.OWNER);
       var cast =
-          Cast.unscoped(Set.of(Actor.Lane.CLI, Actor.Lane.API, Actor.Lane.AGENT, Actor.Lane.ROOM));
+          Cast.unscoped(
+              Set.of(
+                  Actor.Lane.CLI,
+                  Actor.Lane.API,
+                  Actor.Lane.CONTAINER,
+                  Actor.Lane.AGENT,
+                  Actor.Lane.ROOM));
       for (var about : ABOUT) {
         var subject = rule.subject("acme", about.conversation(), about.run());
         for (var type : TYPES) {

@@ -496,10 +496,11 @@ public final class SailOperations implements HostOperations {
 
   /**
    * The box's own person the box credential stands for, resolved when asked: the FDE this box is
-   * now, with the role and scope {@link RoleRule} gives them on the CLI lane, as the host CLI's
-   * root. The credential proves only that it was minted for that FDE, so one minted for an FDE the
-   * box no longer is refuses, and so does a disabled FDE or one the roster does not know. Empty
-   * when the box store is not wired (a lane that never authenticates is a lane that fails closed).
+   * now, with the role and scope {@link RoleRule} gives them on the in-container lane, whose column
+   * narrows a credential anything in the container can read. The credential proves only that it was
+   * minted for that FDE, so one minted for an FDE the box no longer is refuses, and so does a
+   * disabled FDE or one the roster does not know. Empty when the box store is not wired (a lane
+   * that never authenticates is a lane that fails closed).
    */
   @Override
   public Optional<Actor> boxActorForCredential(String credential) {
@@ -510,7 +511,7 @@ public final class SailOperations implements HostOperations {
     return boxCredentialStore
         .resolve(credential)
         .filter(minted -> roles.boxFde().filter(minted::equals).isPresent())
-        .flatMap(minted -> roles.principal(RoleRule.Credential.box()));
+        .flatMap(minted -> roles.principal(RoleRule.Credential.container()));
   }
 
   SailOperations(

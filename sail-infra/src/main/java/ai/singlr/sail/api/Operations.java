@@ -16,6 +16,14 @@ import java.util.Map;
  */
 public interface Operations extends LocalLaneOperations {
 
+  SyncStatus syncStatus();
+
+  /**
+   * The FDE this box stands for, as the role rule that resolves its credentials reads it: whom
+   * operating the box answers to. Null on a box that names none.
+   */
+  String boxFde();
+
   SyncReport sync(SyncRequest request) throws Exception;
 
   /**

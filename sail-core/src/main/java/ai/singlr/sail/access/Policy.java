@@ -26,11 +26,12 @@ import java.util.stream.Stream;
  * here and rendered into ARCHITECTURE.md ({@link #table}) so the doc cannot drift from it.
  *
  * <p>A person reads the column of their role, on whichever lane they came in by: the HTTP API, the
- * host CLI, a push over sync. An agent reads its role's column too, its person's capped by its
- * lane, and its lane's column narrows it: a lane cell is yes (it narrows nothing), no, or {@link
- * Cell#OWN_WORK}, the lane's own grant whatever the role — what a run needs to report on itself and
- * to converse in its room, read-only as a room agent's role is. Whose the work is, is the role
- * column's to say.
+ * host CLI, a push over sync. In a project container, where whatever runs can read the box's
+ * credential, the person's role is narrowed by the in-container credential's column. An agent reads
+ * its role's column too, its person's capped by its lane, and its lane's column narrows it: a lane
+ * cell is yes (it narrows nothing), no, or {@link Cell#OWN_WORK}, the lane's own grant whatever the
+ * role — what a run needs to report on itself and to converse in its room, read-only as a room
+ * agent's role is. Whose the work is, is the role column's to say.
  *
  * <p>Behaviour does not change while every rule moves onto this table, so a cell holds today's
  * answer where the agreed table differs, and the spec that changes it is named here:
@@ -91,7 +92,9 @@ public final class Policy {
     /** A build, review or fix run's principal: {@link Actor.Lane#AGENT}. */
     WORK_AGENT("Work agent"),
     /** A read-only room member's principal: {@link Actor.Lane#ROOM}. */
-    ROOM_AGENT("Read-only room agent");
+    ROOM_AGENT("Read-only room agent"),
+    /** The box's credential presented in a project container: {@link Actor.Lane#CONTAINER}. */
+    CONTAINER("In-container credential");
 
     private final String label;
 
@@ -114,13 +117,15 @@ public final class Policy {
     }
 
     /**
-     * The column {@code lane} narrows its role by, if any: an agent's lane does; a person's lanes
-     * (the API, the CLI, a push over sync) carry their role whole.
+     * The column {@code lane} narrows its role by, if any: an agent's lane and the in-container
+     * credential's do; a person's lanes outside a container (the API, the CLI, a push over sync)
+     * carry their role whole.
      */
     static Optional<Column> lane(Actor.Lane lane) {
       return switch (lane) {
         case AGENT -> Optional.of(WORK_AGENT);
         case ROOM -> Optional.of(ROOM_AGENT);
+        case CONTAINER -> Optional.of(CONTAINER);
         case CLI, API, SYNC, MAIN, SYSTEM -> Optional.empty();
       };
     }
@@ -131,16 +136,23 @@ public final class Policy {
    * an agent's. A lane column never says {@link Cell#OWNER}: it only narrows a role, whose own cell
    * says whose the work is.
    */
-  record Row(Action action, Cell viewer, Cell member, Cell admin, Cell workAgent, Cell roomAgent) {
+  record Row(
+      Action action,
+      Cell viewer,
+      Cell member,
+      Cell admin,
+      Cell workAgent,
+      Cell roomAgent,
+      Cell container) {
 
     Row {
-      Stream.of(action, viewer, member, admin, workAgent, roomAgent)
+      Stream.of(action, viewer, member, admin, workAgent, roomAgent, container)
           .forEach(Objects::requireNonNull);
       if (Stream.of(viewer, member, admin).anyMatch(OWN_WORK::equals)) {
         throw new IllegalArgumentException(
             "The row of " + action + " gives a role own work, which only an agent has.");
       }
-      if (Stream.of(workAgent, roomAgent).anyMatch(OWNER::equals)) {
+      if (Stream.of(workAgent, roomAgent, container).anyMatch(OWNER::equals)) {
         throw new IllegalArgumentException(
             "The row of " + action + " gives a lane ownership, which only a role decides.");
       }
@@ -153,44 +165,46 @@ public final class Policy {
         case ADMIN -> admin;
         case WORK_AGENT -> workAgent;
         case ROOM_AGENT -> roomAgent;
+        case CONTAINER -> container;
       };
     }
   }
 
   private static final List<Row> TABLE =
       List.of(
-          new Row(Action.READ, YES, YES, YES, YES, YES),
-          new Row(Action.READ_DEFINITION, NO, YES, YES, YES, NO),
-          new Row(Action.POST, NO, YES, YES, YES, OWN_WORK),
-          new Row(Action.CREATE, NO, YES, YES, YES, NO),
-          new Row(Action.CHANGE, NO, OWNER, YES, YES, NO),
-          new Row(Action.CLAIM, NO, YES, YES, YES, NO),
-          new Row(Action.ASSIGN, NO, NO, YES, NO, NO),
-          new Row(Action.APPROVE, NO, OWNER, YES, NO, NO),
-          new Row(Action.DISPATCH, NO, OWNER, YES, NO, NO),
-          new Row(Action.OPERATE_RUN, NO, OWNER, YES, NO, NO),
-          new Row(Action.NARRATE, NO, OWNER, YES, OWN_WORK, OWN_WORK),
-          new Row(Action.SHARE, NO, YES, YES, YES, NO),
-          new Row(Action.SERVE, NO, YES, YES, YES, NO),
-          new Row(Action.RESTORE, NO, YES, YES, YES, NO),
-          new Row(Action.CONFIGURE, NO, YES, YES, YES, NO),
-          new Row(Action.PRUNE, NO, OWNER, YES, NO, NO),
-          new Row(Action.PURGE, NO, NO, YES, NO, NO),
-          new Row(Action.MANAGE_PEOPLE, NO, NO, YES, NO, NO),
-          new Row(Action.OPERATE_BOX, OWNER, OWNER, YES, NO, NO));
+          new Row(Action.READ, YES, YES, YES, YES, YES, YES),
+          new Row(Action.READ_DEFINITION, NO, YES, YES, YES, NO, YES),
+          new Row(Action.POST, NO, YES, YES, YES, OWN_WORK, YES),
+          new Row(Action.CREATE, NO, YES, YES, YES, NO, YES),
+          new Row(Action.CHANGE, NO, OWNER, YES, YES, NO, YES),
+          new Row(Action.CLAIM, NO, YES, YES, YES, NO, YES),
+          new Row(Action.ASSIGN, NO, NO, YES, NO, NO, NO),
+          new Row(Action.APPROVE, NO, OWNER, YES, NO, NO, NO),
+          new Row(Action.DISPATCH, NO, OWNER, YES, NO, NO, NO),
+          new Row(Action.OPERATE_RUN, NO, OWNER, YES, NO, NO, NO),
+          new Row(Action.NARRATE, NO, OWNER, YES, OWN_WORK, OWN_WORK, NO),
+          new Row(Action.SHARE, NO, YES, YES, YES, NO, NO),
+          new Row(Action.SERVE, NO, YES, YES, YES, NO, YES),
+          new Row(Action.RESTORE, NO, YES, YES, YES, NO, NO),
+          new Row(Action.CONFIGURE, NO, YES, YES, YES, NO, NO),
+          new Row(Action.PRUNE, NO, OWNER, YES, NO, NO, NO),
+          new Row(Action.PURGE, NO, NO, YES, NO, NO, NO),
+          new Row(Action.MANAGE_PEOPLE, NO, NO, YES, NO, NO, NO),
+          new Row(Action.OPERATE_BOX, OWNER, OWNER, YES, NO, NO, NO));
 
   private static final Map<Action, Row> ROWS = indexed(TABLE);
 
   private Policy() {}
 
   /**
-   * Whether {@code reader} reads a conversation only as the voices that steer it say it (A6): every
-   * lane the table gives a column of its own, an agent's, reads a room's messages through the
-   * steering filter, its owners', its admins' and Sail's words, never a comment another member left
-   * for people. The filter itself is the stores' query; which readers it binds is the table's.
+   * Whether {@code reader} reads a conversation only as the voices that steer it say it (A6): an
+   * agent's lanes read a room's messages through the steering filter, its owners', its admins' and
+   * Sail's words, never a comment another member left for people. The in-container credential is a
+   * person's, who reads every voice. The filter itself is the stores' query; which readers it binds
+   * is the table's.
    */
   public static boolean hearsOnlySteering(Actor reader) {
-    return Column.lane(reader.lane()).isPresent();
+    return reader.agentLane();
   }
 
   /** What {@code column} allows for {@code action}. */

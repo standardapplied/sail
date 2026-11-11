@@ -53,12 +53,14 @@ public final class Cast {
   private Cast() {}
 
   /**
-   * The whole cast: people on the host CLI, an HTTP token and a sync session, a machine token, run
-   * and room agents, and Sail itself as main and as this box.
+   * The whole cast: people on the host CLI, an HTTP token, a sync session and the box credential in
+   * a project container, a machine token, run and room agents, and Sail itself as main and as this
+   * box.
    */
   public static List<Member> everyone() {
     var cast = new ArrayList<Member>();
-    for (var lane : List.of(Actor.Lane.CLI, Actor.Lane.API, Actor.Lane.SYNC)) {
+    for (var lane :
+        List.of(Actor.Lane.CLI, Actor.Lane.API, Actor.Lane.SYNC, Actor.Lane.CONTAINER)) {
       cast.addAll(people(lane, SCOPES));
     }
     cast.add(member("api member machine all", new Actor(null, Role.MEMBER, Actor.Lane.API)));
@@ -79,7 +81,7 @@ public final class Cast {
    */
   public static List<Member> unscoped(Set<Actor.Lane> lanes) {
     var cast = new ArrayList<Member>();
-    for (var lane : List.of(Actor.Lane.CLI, Actor.Lane.API)) {
+    for (var lane : List.of(Actor.Lane.CLI, Actor.Lane.API, Actor.Lane.CONTAINER)) {
       if (lanes.contains(lane)) {
         cast.addAll(people(lane, List.of("all")));
       }

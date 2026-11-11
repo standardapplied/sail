@@ -46,11 +46,10 @@ import java.util.function.BiFunction;
  * with 401 and never falls back to a client-chosen actor.
  *
  * <p>Every route is one of the table's ({@link #routes}), each declaring its {@link Gate}, which
- * this router applies as the caller before the route's handler runs: operating the box (sync
- * health) is the box's person's or an admin's; spec writes are decided by the spec rule ({@code
- * SpecAuthority}) as the journal records them; reads see only the caller's scope, and a project the
- * path names that the caller cannot read is not there, whatever is asked of it. The events route is
- * run-only, and the dispatch/stop routes do not exist here at all.
+ * this router applies as the caller before the route's handler runs: spec writes are decided by the
+ * spec rule ({@code SpecAuthority}) as the journal records them; reads see only the caller's scope,
+ * and a project the path names that the caller cannot read is not there, whatever is asked of it.
+ * The events route is run-only, and the dispatch/stop routes do not exist here at all.
  */
 final class LocalApiRouter implements LocalApiHandler, RouteTable {
 
@@ -59,7 +58,6 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
   private static final String PUT = "PUT";
   private static final String DELETE = "DELETE";
   private static final String PROJECT = "project";
-  private static final String SYNC = "/v1/sync";
   private static final String CONFLICTS = "/v1/conflicts";
   private static final String RESOLVE = "/v1/conflicts/{id...}/resolve";
   private static final String CONFLICT = "/v1/conflicts/{id...}";
@@ -82,7 +80,7 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
   private final LocalLaneOperations operations;
   private final List<Route<Handler>> routes;
 
-  /** A router over {@code operations}, whose box gate decides on the box they stand for. */
+  /** A router over {@code operations}. */
   LocalApiRouter(LocalLaneOperations operations) {
     this.operations = operations;
     var reads = Gate.READS_IN_SCOPE;
@@ -90,8 +88,6 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
     var serving = Gate.decides(Action.SERVE);
     this.routes =
         List.of(
-            route(GET, SYNC, Gate.box(operations::boxFde), this::sync),
-            unserved(SYNC, "Only GET is available."),
             route(GET, CONFLICTS, reads, this::conflicts),
             unserved(CONFLICTS, "Only GET is available."),
             route(POST, RESOLVE, Gate.decides(Action.CHANGE), this::resolve),
@@ -350,10 +346,6 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
       Thread.currentThread().interrupt();
       throw ApiException.of(ErrorCode.CONTAINER_ERROR, interrupted);
     }
-  }
-
-  private ApiResponse sync(LocalApiRequest request, Caller caller, Map<String, String> path) {
-    return ApiResponse.ok(SyncViews.status(operations.syncStatus()));
   }
 
   private ApiResponse conflicts(LocalApiRequest request, Caller caller, Map<String, String> path) {

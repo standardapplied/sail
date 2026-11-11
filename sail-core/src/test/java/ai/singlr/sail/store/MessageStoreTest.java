@@ -458,6 +458,13 @@ class MessageStoreTest {
                 Actor.roomPrincipal("claude/room-x", "ada"),
                 () -> messages.list("room", null, 10))));
     assertEquals(3, messages.list("room", null, 10).size(), "people read every word");
+    assertEquals(
+        3,
+        Acting.by(
+                new Actor("bo", Role.MEMBER, Actor.Lane.CONTAINER),
+                () -> messages.list("room", null, 10))
+            .size(),
+        "a person's credential in the container reads every word too");
   }
 
   @Test

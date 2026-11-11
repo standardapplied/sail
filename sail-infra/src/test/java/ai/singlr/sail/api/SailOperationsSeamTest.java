@@ -166,7 +166,7 @@ class SailOperationsSeamTest {
           BoxCredentialFile.Outcome.ALREADY_PRESENT, BoxCredentialFile.ensure(store, "it", dir));
       assertEquals(minted, Files.readString(file).strip(), "a restart mints nothing new");
       assertEquals(
-          Optional.of(new Actor("it", Role.ADMIN, Actor.Lane.CLI)),
+          Optional.of(new Actor("it", Role.ADMIN, Actor.Lane.CONTAINER)),
           operations.boxActorForCredential(minted));
 
       handle.set("raj");

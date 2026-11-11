@@ -80,10 +80,18 @@ final class Wording {
   }
 
   /**
-   * The lane step's refusal of {@code action} on some resource of {@code kind}: an agent's move of
-   * a spec's status, or a spec it bears ready, says what an agent may make instead.
+   * The lane step's refusal of {@code action} on {@code resource}, or on some resource of {@code
+   * kind} when it is null, in the words of {@code actor}'s lane: the in-container credential is
+   * told the door outside the container that takes it, and an agent's move of a spec's status, or a
+   * spec it bears ready, what an agent may make instead.
    */
-  static Refusal laneForbidden(Action action, Resource.Kind kind) {
+  static Refusal laneForbidden(Actor actor, Action action, Resource.Kind kind, Resource resource) {
+    if (actor.lane() == Actor.Lane.CONTAINER) {
+      return new Refusal(
+          Refusal.Kind.LANE_FORBIDDEN,
+          "The credential in a project container cannot " + action.act(kind) + ".",
+          fromOutside(action, kind, resource));
+    }
     if (action == Action.APPROVE && kind == Resource.Kind.SPEC) {
       return new Refusal(
           Refusal.Kind.LANE_FORBIDDEN,
@@ -94,6 +102,27 @@ final class Wording {
         Refusal.Kind.LANE_FORBIDDEN,
         "Agent principals cannot " + action.act(kind) + ".",
         "Only an operator lane (CLI or API token) may do this.");
+  }
+
+  /**
+   * Where a person takes {@code action}, which the credential in a project container may not: on
+   * the host, naming the command for a spec's status or assignee, or in Mast. The command is words,
+   * not a command a door renders for its reader: the reader is in the container, and the command
+   * runs on the host.
+   */
+  private static Remedy fromOutside(Action action, Resource.Kind kind, Resource resource) {
+    var id = resource == null ? "<id>" : resource.id();
+    var command =
+        switch (action) {
+          case APPROVE ->
+              kind == Resource.Kind.SPEC ? "spec update " + id + " --status <status>" : null;
+          case ASSIGN -> "spec update " + id + " --assignee <fde>";
+          default -> null;
+        };
+    return Remedy.of(
+        command == null
+            ? "Do it from outside the container: with sail on the host, or in Mast."
+            : "Do it from outside the container: 'sail " + command + "' on the host, or Mast.");
   }
 
   /**

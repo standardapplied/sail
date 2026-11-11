@@ -13,21 +13,15 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.OperationHooks;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
-import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
-import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
-import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.MainReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncSession;
@@ -50,7 +44,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,26 +57,26 @@ import org.junit.jupiter.api.io.TempDir;
  * A2 at the doors: each row of the Access arc's scenario matrix, asked through every door that
  * offers it by the same person with the same kind of credential, gets the same decision in the same
  * words. The cast is the fleet's: uday is main's admin, eng a member of every project, client a
- * member of acme only, obs a viewer of acme and beta. {@code e1} is eng's spec in acme, {@code r1}
- * eng's room there, {@code in-r1} a spec born in it, {@code a2} an unassigned acme spec and {@code
- * b1} eng's spec in beta. The web door is the person's own token at main; the host CLI is {@code
- * sail} on the person's own box, its host token at that box's web door; the socket is the box
- * credential at that box's socket. Every credential is resolved as production resolves it. A door
- * says a refusal its own way: the web and the socket as an error's code, words and fix; the CLI as
- * one line, its fix's commands rendered for the terminal and the status it was refused with.
+ * member of acme only, obs a viewer of acme and beta ({@link DoorFleet}). The web door is the
+ * person's own token at main; the host CLI is {@code sail} on the person's own box, its host token
+ * at that box's web door; the socket is the box credential at that box's socket. Every credential
+ * is resolved as production resolves it. A door says a refusal its own way: the web and the socket
+ * as an error's code, words and fix; the CLI as one line, its fix's commands rendered for the
+ * terminal and the status it was refused with.
  */
 class DoorParityTest {
 
-  private static final SyncConfig MAIN = new SyncConfig(SyncConfig.ROLE_MAIN, null, "uday", "main");
+  private static final SyncConfig MAIN = DoorFleet.MAIN;
 
   private static final Base64.Encoder BASE64 = Base64.getUrlEncoder().withoutPadding();
 
   @TempDir Path tempDir;
+  private DoorFleet fleet;
   private SyncDatabase main;
   private Sqlite db;
   private String hostToken;
-  private final Map<String, DoorBox> boxes = new HashMap<>();
-  private final Map<String, String> tokens = new HashMap<>();
+  private Map<String, DoorBox> boxes;
+  private Map<String, String> tokens;
 
   /**
    * A row's answer: allowed, or refused with {@code status} and {@code code}, in {@code message},
@@ -128,61 +121,17 @@ class DoorParityTest {
 
   @BeforeEach
   void setUp() throws Exception {
-    main = GatewayNode.main(tempDir.resolve("sail.db"));
-    db = main.db();
-    var roster = new FdeStore(db);
-    roster.add("uday", null, null, "admin");
-    roster.add("eng", null, null, "member");
-    roster.add("client", null, null, "member");
-    roster.add("obs", null, null, "viewer");
-    roster.restrict("client");
-    roster.grant("client", "acme");
-    roster.restrict("obs");
-    roster.grant("obs", "acme");
-    roster.grant("obs", "beta");
-    for (var person : List.of("uday", "eng", "client", "obs")) {
-      var fde = roster.byHandle(person).orElseThrow();
-      tokens.put(person, new TokenStore(db).create(person, fde.role(), fde.id(), null).token());
-    }
-    hostToken = new TokenStore(db).create(HostToken.NAME, "admin", null, null).token();
-    Acting.system(
-        () ->
-            List.of("acme", "beta")
-                .forEach(
-                    project ->
-                        new ProjectStore(db)
-                            .upsert(
-                                TestDefinitions.yaml(
-                                    "name: "
-                                        + project
-                                        + "\nagent:\n  type: claude-code\n  auto_snapshot:"
-                                        + " false\n"))));
-    var specs = new SpecStore(db);
-    Acting.as(
-        "eng",
-        () -> {
-          new RoomStore(db)
-              .create(
-                  new RoomStore.RoomRow(
-                      "r1", "acme", "r1", "eng", null, null, "eng", null, null, "eng"));
-          specs.create(spec("e1", "acme", "eng"));
-          specs.create(spec("b1", "beta", "eng"));
-          specs.create(spec("in-r1", "acme", null).withRoomId("r1"));
-        });
-    Acting.as("uday", () -> specs.create(spec("a2", "acme", null)));
-    boxes.put("uday", DoorBox.open(db, tempDir, MAIN));
-    for (var person : List.of("eng", "client", "obs")) {
-      boxes.put(
-          person,
-          DoorBox.open(
-              db, tempDir, new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", person, person)));
-    }
+    fleet = DoorFleet.open(tempDir);
+    main = fleet.main();
+    db = fleet.db();
+    hostToken = fleet.hostToken();
+    boxes = fleet.boxes();
+    tokens = fleet.tokens();
   }
 
   @AfterEach
   void tearDown() {
-    boxes.values().forEach(DoorBox::close);
-    main.close();
+    fleet.close();
   }
 
   @Test
@@ -242,6 +191,36 @@ class DoorParityTest {
         web("uday", "client", "POST", "/v1/rooms/e1/messages", "{\"body\": \"hi\"}"),
         cli("client", "spec", "comment", "e1", "--body", "hi"),
         socket("client", "POST", "/v1/specs/e1/messages", "body=hi"));
+  }
+
+  /** Row 20: eng's credential in the container comments on e1 as eng does outside it. */
+  @Test
+  void row20EngsCredentialInTheContainerCommentsOnE1AsHeDoesOutside() throws Exception {
+    assertEveryDoor(
+        Expected.ALLOWED,
+        web("uday", "eng", "POST", "/v1/rooms/e1/messages", "{\"body\": \"hi\"}"),
+        cli("eng", "spec", "comment", "e1", "--body", "hi"),
+        socket("eng", "POST", "/v1/specs/e1/messages", "body=hi"));
+  }
+
+  /** A person's terminal in the container creates a spec and claims it as at the doors outside. */
+  @Test
+  void aPersonsTerminalCreatesAndClaimsAtTheSocketAsOutside() throws Exception {
+    assertEveryDoor(
+        Expected.ALLOWED,
+        web(
+            "uday",
+            "eng",
+            "POST",
+            "/v1/specs",
+            "{\"id\": \"t-web\", \"project\": \"acme\", \"title\": \"t-web\"}"),
+        cli("eng", "spec", "create", "--id", "t-cli", "--project", "acme", "--title", "t-cli"),
+        socket("eng", "POST", "/v1/specs", "id=t-socket&project=acme&title=t-socket"));
+    assertEveryDoor(
+        Expected.ALLOWED,
+        web("uday", "eng", "PUT", "/v1/specs/t-web", "{\"assignee\": \"eng\"}"),
+        cli("eng", "spec", "edit", "t-cli", "--assignee", "eng"),
+        socket("eng", "PUT", "/v1/specs/t-socket", "assignee=eng"));
   }
 
   @Test
@@ -344,16 +323,10 @@ class DoorParityTest {
   @Test
   void theBoxsOwnPersonAndAnAdminReadItsSyncHealthAndBusStats() throws Exception {
     for (var person : List.of("eng", "uday")) {
-      assertEveryDoor(
-          Expected.ALLOWED,
-          web(person, person, "GET", "/v1/sync", null),
-          socket(person, "GET", "/v1/sync", ""));
+      assertEveryDoor(Expected.ALLOWED, web(person, person, "GET", "/v1/sync", null));
       assertEveryDoor(Expected.ALLOWED, web(person, person, "GET", "/v1/events/stats", null));
     }
-    assertEveryDoor(
-        Expected.ALLOWED,
-        web("obs", "obs", "GET", "/v1/sync", null),
-        socket("obs", "GET", "/v1/sync", ""));
+    assertEveryDoor(Expected.ALLOWED, web("obs", "obs", "GET", "/v1/sync", null));
   }
 
   @Test
@@ -388,13 +361,16 @@ class DoorParityTest {
     try (var clients = new GatewayNode(tempDir, main, MAIN, boxes.get("client").config())) {
       clients.round();
       Acting.as(
-          "client", () -> new SpecStore(clients.db()).create(spec("c7", "acme", "client", "c7")));
+          "client",
+          () -> new SpecStore(clients.db()).create(DoorFleet.spec("c7", "acme", "client", "c7")));
       clients.round();
       assertEquals(
           "allowed", web("uday", "uday", "PUT", "/v1/specs/c7", "{\"assignee\": \"eng\"}").text());
       Acting.as(
           "client",
-          () -> new SpecStore(clients.db()).update(spec("c7", "acme", "client", "retitled")));
+          () ->
+              new SpecStore(clients.db())
+                  .update(DoorFleet.spec("c7", "acme", "client", "retitled")));
 
       var denials = clients.round().denials();
 
@@ -808,29 +784,5 @@ class DoorParityTest {
         + error.get("message")
         + " | "
         + error.get("action");
-  }
-
-  private static SpecStore.SpecRow spec(String id, String project, String assignee) {
-    return spec(id, project, assignee, id);
-  }
-
-  private static SpecStore.SpecRow spec(String id, String project, String assignee, String title) {
-    return new SpecStore.SpecRow(
-        id,
-        project,
-        title,
-        SpecStatus.PENDING,
-        assignee,
-        null,
-        null,
-        null,
-        null,
-        0,
-        null,
-        null,
-        null,
-        null,
-        List.of(),
-        List.of());
   }
 }

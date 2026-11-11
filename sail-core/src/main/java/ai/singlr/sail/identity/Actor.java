@@ -52,6 +52,11 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
     AGENT,
     /** A read-and-converse run's principal over the local socket. */
     ROOM,
+    /**
+     * The box's credential presented in a project container: the box's person, whose role its own
+     * column of the permission table narrows, since whatever runs there can read it.
+     */
+    CONTAINER,
     /** An FDE pushing through {@code _sync} to main. */
     SYNC,
     /** A node adopting main's revisions, which main has already decided. */

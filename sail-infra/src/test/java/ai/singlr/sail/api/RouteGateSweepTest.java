@@ -386,8 +386,6 @@ class RouteGateSweepTest {
   void theSocketDeclaresEachOfItsRoutesWithItsGate() {
     assertEquals(
         List.of(
-            "GET /v1/sync operates the box",
-            "* /v1/sync serves nothing",
             "GET /v1/conflicts reads in scope",
             "* /v1/conflicts serves nothing",
             "POST /v1/conflicts/{id...}/resolve decides CHANGE",
@@ -537,7 +535,7 @@ class RouteGateSweepTest {
                       case "runActor" -> Optional.of(Actors.principalOf(RUN));
                       case "boxFde" -> BOX;
                       case "boxActorForCredential" ->
-                          Optional.of(new Actor(BOX, Role.MEMBER, Actor.Lane.CLI))
+                          Optional.of(new Actor(BOX, Role.MEMBER, Actor.Lane.CONTAINER))
                               .filter(_ -> TestOperations.BOX_CREDENTIAL.equals(args[0]));
                       default -> {
                         reached.add(method.getName());

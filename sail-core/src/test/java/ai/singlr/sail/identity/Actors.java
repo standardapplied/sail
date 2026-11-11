@@ -36,6 +36,12 @@ public final class Actors {
   public static final Actor OTHER_SYNC = new Actor(OTHER, Role.MEMBER, Actor.Lane.SYNC);
   public static final Actor ADMIN_SYNC = new Actor(OTHER, Role.ADMIN, Actor.Lane.SYNC);
   public static final Actor VIEWER_SYNC = new Actor(OWNER, Role.VIEWER, Actor.Lane.SYNC);
+  public static final Actor VIEWER_IN_CONTAINER =
+      new Actor(OWNER, Role.VIEWER, Actor.Lane.CONTAINER);
+  public static final Actor OWNER_IN_CONTAINER =
+      new Actor(OWNER, Role.MEMBER, Actor.Lane.CONTAINER);
+  public static final Actor ADMIN_IN_CONTAINER =
+      new Actor("root", Role.ADMIN, Actor.Lane.CONTAINER);
   public static final Actor MAIN = Actor.main(OTHER);
   public static final Actor SYSTEM = Actor.system();
 

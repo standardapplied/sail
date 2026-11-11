@@ -91,7 +91,7 @@ class LocalApiSkillsTest {
               public Optional<Actor> boxActorForCredential(String credential) {
                 return SCOPED.equals(credential)
                     ? Optional.of(
-                        new Actor(TestOperations.BOX_HANDLE, Role.MEMBER, Actor.Lane.CLI)
+                        new Actor(TestOperations.BOX_HANDLE, Role.MEMBER, Actor.Lane.CONTAINER)
                             .withScope(ProjectScope.of(List.of("acme"))))
                     : super.boxActorForCredential(credential);
               }
@@ -179,26 +179,27 @@ class LocalApiSkillsTest {
     return copy;
   }
 
+  /**
+   * The box credential in the container is refused sharing and removing a skill by its lane, as the
+   * journal decides the write, naming the doors outside the container that take it.
+   */
   @Test
-  void aPersonsSessionSharesAFolderOfTheContainerForEveryAgent() throws IOException {
+  void theCredentialInTheContainerMayNotShareOrRemoveASkill() {
+    shareJava();
     containerHolds(JAVA_MD);
 
-    var shared = box("POST", SKILLS, "folder=%2Fhome%2Fdev%2F.agents%2Fskills%2Fjava");
+    var share = box("POST", SKILLS, "folder=%2Fhome%2Fdev%2F.agents%2Fskills%2Fjava");
+    var remove = box("DELETE", SKILLS + "/java", "");
 
-    assertEquals(200, shared.status(), shared.body().toString());
-    assertEquals(
-        Map.of(
-            "name",
-            "java",
-            "files",
-            1,
-            "agents",
-            List.of("Claude Code"),
-            "installed",
-            true,
-            "problems",
-            List.of()),
-        withoutSchema(shared.body()));
+    for (var refused : List.of(share, remove)) {
+      assertEquals(403, refused.status());
+      assertEquals(
+          "The credential in a project container cannot share files and skills in projects.",
+          message(refused));
+      assertEquals(
+          "Do it from outside the container: with sail on the host, or in Mast.",
+          assertInstanceOf(Map.class, refused.body().get("error")).get("action"));
+    }
     assertEquals(List.of(".sail/skills/java/SKILL.md"), shared());
   }
 
@@ -229,20 +230,6 @@ class LocalApiSkillsTest {
     assertEquals(
         "Ask them to run 'skill add <folder>' in their own session.",
         assertInstanceOf(Map.class, unnamed.body().get("error")).get("action"));
-  }
-
-  @Test
-  void aPersonsSessionRemovesASharedSkillAndIsToldWhenNoneIsShared() {
-    shareJava();
-
-    var removed = box("DELETE", SKILLS + "/java", "");
-    var again = box("DELETE", SKILLS + "/java", "");
-
-    assertEquals(200, removed.status());
-    assertEquals(Map.of("name", "java", "files", 1), withoutSchema(removed.body()));
-    assertEquals(List.of(), shared());
-    assertEquals(404, again.status());
-    assertEquals("No skill 'java' is shared on acme.", message(again));
   }
 
   @Test

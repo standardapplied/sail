@@ -2300,35 +2300,38 @@ the rule's own facts. A deletion of an id this box holds no head of is decided a
 a birth, as on main. A door's placement comes after `Access` too. The table is
 `Policy`, and this copy of it is generated (`PolicyTableTest`):
 
-| Action | Covers | Viewer | Member | Admin | Work agent | Read-only room agent |
-| --- | --- | --- | --- | --- | --- | --- |
-| Read | specs, rooms, messages, runs, files, projects | yes | yes | yes | yes | yes |
-| Read a definition | a project's definition | no | yes | yes | yes | no |
-| Post | a message in a conversation | no | yes | yes | yes | own work |
-| Create | a spec, a room, a project | no | yes | yes | yes | no |
-| Change | edit, delete or restore a spec or room; settle a parked conflict | no | owner | yes | yes | no |
-| Claim | take an unassigned spec; one born in a room also needs that room's owners | no | yes | yes | yes | no |
-| Assign | give or move a spec to someone | no | no | yes | no | no |
-| Approve | move a spec's status (promote, done, archive, cancel) or create it ready; approve or dismiss findings | no | owner | yes | no | no |
-| Dispatch | dispatch or resume a spec; seat or remove a room agent | no | owner | yes | no | no |
-| Operate a run | stop it; attach to it; read its log | no | owner | yes | no | no |
-| Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | own work | own work |
-| Share | add, change or remove project files and skills | no | yes | yes | yes | no |
-| Serve | start and stop the project's processes | no | yes | yes | yes | no |
-| Restore | restore or delete a snapshot | no | yes | yes | yes | no |
-| Configure | change a project's definition | no | yes | yes | yes | no |
-| Prune | erase a spec everywhere, once archived, cancelled or deleted | no | owner | yes | no | no |
-| Purge | erase a project everywhere; a retention sweep | no | no | yes | no | no |
-| Manage people | add, change role, grant, remove, pair, mint tokens | no | no | yes | no | no |
-| Operate the box | sync now; read sync health and bus stats; point the box at another main | owner | owner | yes | no | no |
+| Action | Covers | Viewer | Member | Admin | Work agent | Read-only room agent | In-container credential |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Read | specs, rooms, messages, runs, files, projects | yes | yes | yes | yes | yes | yes |
+| Read a definition | a project's definition | no | yes | yes | yes | no | yes |
+| Post | a message in a conversation | no | yes | yes | yes | own work | yes |
+| Create | a spec, a room, a project | no | yes | yes | yes | no | yes |
+| Change | edit, delete or restore a spec or room; settle a parked conflict | no | owner | yes | yes | no | yes |
+| Claim | take an unassigned spec; one born in a room also needs that room's owners | no | yes | yes | yes | no | yes |
+| Assign | give or move a spec to someone | no | no | yes | no | no | no |
+| Approve | move a spec's status (promote, done, archive, cancel) or create it ready; approve or dismiss findings | no | owner | yes | no | no | no |
+| Dispatch | dispatch or resume a spec; seat or remove a room agent | no | owner | yes | no | no | no |
+| Operate a run | stop it; attach to it; read its log | no | owner | yes | no | no | no |
+| Narrate | a run's reports about itself: events, session, inbox acks | no | owner | yes | own work | own work | no |
+| Share | add, change or remove project files and skills | no | yes | yes | yes | no | no |
+| Serve | start and stop the project's processes | no | yes | yes | yes | no | yes |
+| Restore | restore or delete a snapshot | no | yes | yes | yes | no | no |
+| Configure | change a project's definition | no | yes | yes | yes | no | no |
+| Prune | erase a spec everywhere, once archived, cancelled or deleted | no | owner | yes | no | no | no |
+| Purge | erase a project everywhere; a retention sweep | no | no | yes | no | no | no |
+| Manage people | add, change role, grant, remove, pair, mint tokens | no | no | yes | no | no | no |
+| Operate the box | sync now; read sync health and bus stats; point the box at another main | owner | owner | yes | no | no | no |
 
 A person reads the column of their role on every lane they come in by, a push over sync included.
 An agent reads its role's column too (its person's, capped by the lane), and its lane's column
 narrows it: a lane cell is yes (it narrows nothing), no, or own work, the lane's own grant whatever
 the role; whose the work is, is the role column's to say. A cell holds today's answer where the
-agreed design changes it, and `Policy` names the spec that does; the in-container credential is
-its person's on the CLI lane until sail-agents-act-on-their-own-work gives it a lane and a column
-of its own. A question asked before there is one resource, a prune by policy or of a whole
+agreed design changes it, and `Policy` names the spec that does. The box credential presented in
+a project container is its person, narrowed by its own column (`Actor.Lane.CONTAINER`, the
+`In-container credential` column): whatever runs in the container can read it, so it carries no
+human gate (assigning, approving, sharing skills, operating the box), whoever presents it, and the
+role column still says whose the work is; its refusals name the door outside the container that
+takes the action (the host CLI, or Mast). A question asked before there is one resource, a prune by policy or of a whole
 project, a conflict's resolution, or again once an erased spec has nothing left to own, is the
 role and lane alone (`Access.atAll`), answered as a refusal or none, never not found; a lane's
 grant on its own work alone is refused there, since no work is in hand.

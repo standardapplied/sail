@@ -43,12 +43,12 @@ import org.junit.jupiter.api.io.TempDir;
  * answers as the snapshot records it ({@link Baseline}, {@code infra-doors}). The {@link World} of
  * the core corpora is served by the operations every router calls, built as production builds them,
  * on ada's box, whose shell lists no container and runs nothing else; each member of the {@link
- * Cast} a door binds — the host CLI and box credential, an HTTP token, a run's and a room's agent —
- * asks each door, rehearsed so the box is left as it was. A door that takes the box it answers on
- * is asked on ada's box and on bob's. A refusal is its door's code, HTTP status, message and
- * remedy; a success its response type and every id it shows, so a read's audience is recorded with
- * it ({@link #shown}). A door asked directly, rather than through the operations, is asked only by
- * whom production lets reach it ({@link Door#reaches}).
+ * Cast} a door binds — the host CLI, the box credential in a project container, an HTTP token, a
+ * run's and a room's agent — asks each door, rehearsed so the box is left as it was. A door that
+ * takes the box it answers on is asked on ada's box and on bob's. A refusal is its door's code,
+ * HTTP status, message and remedy; a success its response type and every id it shows, so a read's
+ * audience is recorded with it ({@link #shown}). A door asked directly, rather than through the
+ * operations, is asked only by whom production lets reach it ({@link Door#reaches}).
  *
  * <p>It lives beside the routers because the requests they parse are theirs alone; each is built by
  * the router's own parser.
@@ -56,7 +56,8 @@ import org.junit.jupiter.api.io.TempDir;
 class AccessDoorsBaselineTest {
 
   private static final Set<Actor.Lane> DOOR_LANES =
-      Set.of(Actor.Lane.CLI, Actor.Lane.API, Actor.Lane.AGENT, Actor.Lane.ROOM);
+      Set.of(
+          Actor.Lane.CLI, Actor.Lane.API, Actor.Lane.CONTAINER, Actor.Lane.AGENT, Actor.Lane.ROOM);
 
   /**
    * What a prune prints when it erases inside a rehearsal: collecting what it erased needs the

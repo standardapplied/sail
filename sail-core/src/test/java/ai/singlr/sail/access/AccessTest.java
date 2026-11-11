@@ -44,6 +44,8 @@ class AccessTest {
 
   private static final String READ_ONLY_FIX = "Ask an admin for a member or admin credential.";
   private static final String LANE_FIX = "Only an operator lane (CLI or API token) may do this.";
+  private static final String FROM_OUTSIDE =
+      "Do it from outside the container: with sail on the host, or in Mast.";
 
   private static final Resource SPEC_ADA = Resources.spec("auth", "acme", "ada", "ada");
   private static final Resource SPEC_BOB = Resources.spec("auth", "acme", "bob", "bob");
@@ -97,9 +99,9 @@ class AccessTest {
 
   /**
    * One action's expected answers, a column each in {@link Policy.Column} order up to the room
-   * agent: {@code act} is how its refusals word it, {@code refusal} its admin-only refusal or its
-   * refusal of the other's resource, and {@code outsideWork} an agent's refusal of work not its
-   * own.
+   * agent, then the in-container credential of a viewer, a member and an admin: {@code act} is how
+   * its refusals word it, {@code refusal} its admin-only refusal or its refusal of the other's
+   * resource, and {@code outsideWork} an agent's refusal of work not its own.
    */
   record Expected(
       Action action,
@@ -124,7 +126,7 @@ class AccessTest {
               SPEC_ADA,
               SPEC_BOB,
               "read specs",
-              List.of(ALLOWED, ALLOWED, ALLOWED, ALLOWED, ALLOWED),
+              List.of(ALLOWED, ALLOWED, ALLOWED, ALLOWED, ALLOWED, ALLOWED, ALLOWED, ALLOWED),
               null,
               null),
           new Expected(
@@ -132,7 +134,7 @@ class AccessTest {
               PROJECT_ADA,
               PROJECT_BOB,
               "read a project's definition, which holds its services' secrets",
-              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY),
+              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY, READ_ONLY, ALLOWED, ALLOWED),
               null,
               null),
           new Expected(
@@ -140,7 +142,7 @@ class AccessTest {
               LOBBY,
               DEN,
               "post in rooms",
-              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, OWN_WORK),
+              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, OWN_WORK, READ_ONLY, ALLOWED, ALLOWED),
               null,
               actor ->
                   refusal(
@@ -152,7 +154,7 @@ class AccessTest {
               SPEC_ADA,
               SPEC_BOB,
               "create specs",
-              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY),
+              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY, READ_ONLY, ALLOWED, ALLOWED),
               null,
               null),
           new Expected(
@@ -160,7 +162,7 @@ class AccessTest {
               SPEC_ADA,
               SPEC_BOB,
               "change specs",
-              List.of(READ_ONLY, OWNED, ALLOWED, OWNED, READ_ONLY),
+              List.of(READ_ONLY, OWNED, ALLOWED, OWNED, READ_ONLY, READ_ONLY, OWNED, ALLOWED),
               SPEC_NOT_OWNER,
               null),
           new Expected(
@@ -168,7 +170,7 @@ class AccessTest {
               UNASSIGNED_ADA,
               UNASSIGNED_BOB,
               "claim specs",
-              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY),
+              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY, READ_ONLY, ALLOWED, ALLOWED),
               null,
               null),
           new Expected(
@@ -176,7 +178,15 @@ class AccessTest {
               SPEC_BOB,
               SPEC_BOB,
               "assign specs",
-              List.of(READ_ONLY, ADMIN_ONLY, ALLOWED, ADMIN_ONLY, READ_ONLY),
+              List.of(
+                  READ_ONLY,
+                  ADMIN_ONLY,
+                  ALLOWED,
+                  ADMIN_ONLY,
+                  READ_ONLY,
+                  READ_ONLY,
+                  ADMIN_ONLY,
+                  LANE),
               refusal(
                   Refusal.Kind.ADMIN_ONLY,
                   "Reassigning spec 'auth' moves work between FDEs and is an admin-only action"
@@ -188,7 +198,7 @@ class AccessTest {
               REVIEW_ADA,
               REVIEW_BOB,
               "approve reviews",
-              List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY),
+              List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY, READ_ONLY, LANE, LANE),
               refusal(
                   Refusal.Kind.NOT_OWNER,
                   "Review rev-1 is for spec 'auth', owned by 'bob', not you.",
@@ -199,7 +209,7 @@ class AccessTest {
               SPEC_ADA,
               SPEC_BOB,
               "dispatch specs",
-              List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY),
+              List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY, READ_ONLY, LANE, LANE),
               SPEC_NOT_DISPATCHER,
               null),
           new Expected(
@@ -207,7 +217,7 @@ class AccessTest {
               RUN_ADA,
               RUN_BOB,
               "stop or attach to runs or read their logs",
-              List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY),
+              List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY, READ_ONLY, LANE, LANE),
               RUN_NOT_OWNER,
               null),
           new Expected(
@@ -215,7 +225,7 @@ class AccessTest {
               RUN_ADA,
               RUN_BOB,
               "narrate runs",
-              List.of(READ_ONLY, OWNED, ALLOWED, OWN_WORK, OWN_WORK),
+              List.of(READ_ONLY, OWNED, ALLOWED, OWN_WORK, OWN_WORK, READ_ONLY, LANE, LANE),
               RUN_NOT_OWNER,
               actor ->
                   refusal(
@@ -231,7 +241,7 @@ class AccessTest {
               PROJECT_ADA,
               PROJECT_BOB,
               "share files and skills in projects",
-              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY),
+              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY, READ_ONLY, LANE, LANE),
               null,
               null),
           new Expected(
@@ -239,7 +249,7 @@ class AccessTest {
               PROJECT_ADA,
               PROJECT_BOB,
               "start or stop a project's processes",
-              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY),
+              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY, READ_ONLY, ALLOWED, ALLOWED),
               null,
               null),
           new Expected(
@@ -247,7 +257,7 @@ class AccessTest {
               PROJECT_ADA,
               PROJECT_BOB,
               "restore or delete snapshots",
-              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY),
+              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY, READ_ONLY, LANE, LANE),
               null,
               null),
           new Expected(
@@ -255,7 +265,7 @@ class AccessTest {
               PROJECT_ADA,
               PROJECT_BOB,
               "configure projects",
-              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY),
+              List.of(READ_ONLY, ALLOWED, ALLOWED, ALLOWED, READ_ONLY, READ_ONLY, LANE, LANE),
               null,
               null),
           new Expected(
@@ -263,7 +273,7 @@ class AccessTest {
               SPEC_ADA,
               SPEC_BOB,
               "prune specs",
-              List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY),
+              List.of(READ_ONLY, OWNED, ALLOWED, LANE, READ_ONLY, READ_ONLY, LANE, LANE),
               SPEC_NOT_OWNER,
               null),
           new Expected(
@@ -271,7 +281,15 @@ class AccessTest {
               PROJECT_BOB,
               PROJECT_BOB,
               "purge projects",
-              List.of(READ_ONLY, ADMIN_ONLY, ALLOWED, ADMIN_ONLY, READ_ONLY),
+              List.of(
+                  READ_ONLY,
+                  ADMIN_ONLY,
+                  ALLOWED,
+                  ADMIN_ONLY,
+                  READ_ONLY,
+                  READ_ONLY,
+                  ADMIN_ONLY,
+                  LANE),
               new Refusal(
                   Refusal.Kind.ADMIN_ONLY,
                   "Only an admin may erase the name of project 'acme' everywhere, as purging or"
@@ -283,7 +301,15 @@ class AccessTest {
               PEOPLE,
               PEOPLE,
               "manage people",
-              List.of(READ_ONLY, ADMIN_ONLY, ALLOWED, ADMIN_ONLY, READ_ONLY),
+              List.of(
+                  READ_ONLY,
+                  ADMIN_ONLY,
+                  ALLOWED,
+                  ADMIN_ONLY,
+                  READ_ONLY,
+                  READ_ONLY,
+                  ADMIN_ONLY,
+                  LANE),
               refusal(
                   Refusal.Kind.ADMIN_ONLY,
                   "Only an admin may manage people.",
@@ -294,7 +320,7 @@ class AccessTest {
               BOX_ADA,
               BOX_BOB,
               "operate boxes",
-              List.of(OWNED, OWNED, ALLOWED, LANE, LANE),
+              List.of(OWNED, OWNED, ALLOWED, LANE, LANE, LANE, LANE, LANE),
               refusal(
                   Refusal.Kind.NOT_OWNER,
                   "Box 'bob' belongs to 'bob', not you.",
@@ -308,7 +334,10 @@ class AccessTest {
           List.of(Actors.OWNER_API, Actors.OWNER_CLI, Actors.OWNER_SYNC),
           List.of(Actors.ADMIN, Actors.ADMIN_SYNC),
           List.of(Actors.AGENT),
-          List.of(Actors.ROOM));
+          List.of(Actors.ROOM),
+          List.of(Actors.VIEWER_IN_CONTAINER),
+          List.of(Actors.OWNER_IN_CONTAINER),
+          List.of(Actors.ADMIN_IN_CONTAINER));
 
   private static final Map<String, ProjectScope> SCOPES =
       Map.of(
@@ -365,6 +394,9 @@ class AccessTest {
             Actors.ROOM,
             Actors.OWNER_SYNC,
             Actors.VIEWER_SYNC,
+            Actors.VIEWER_IN_CONTAINER,
+            Actors.OWNER_IN_CONTAINER,
+            Actors.ADMIN_IN_CONTAINER,
             new Actor(Actors.AGENT_HANDLE, Role.VIEWER, Actor.Lane.AGENT, Actors.OWNER));
     var kinds = EnumSet.noneOf(Refusal.Kind.class);
     for (var row : EXPECTED) {
@@ -703,6 +735,48 @@ class AccessTest {
         Access.atAll(Actors.AGENT, Action.PRUNE, Resource.Kind.SPEC));
   }
 
+  /**
+   * The in-container credential is its person's role narrowed by its lane, refused after the role
+   * step, so a member's reassignment is admin-only and an admin's names the lane; a refusal of the
+   * lane names the door outside the container that takes it.
+   */
+  @Test
+  void theInContainerCredentialIsRefusedTheHumanGatesNamingTheDoorOutside() {
+    assertEquals(
+        refused(
+            Refusal.Kind.LANE_FORBIDDEN,
+            "The credential in a project container cannot approve specs.",
+            "Do it from outside the container: 'sail spec update auth --status <status>'"
+                + " on the host, or Mast."),
+        Access.decide(Actors.OWNER_IN_CONTAINER, Action.APPROVE, SPEC_ADA));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.LANE_FORBIDDEN,
+                "The credential in a project container cannot approve specs.",
+                "Do it from outside the container: 'sail spec update <id> --status <status>'"
+                    + " on the host, or Mast.")),
+        Access.atAll(Actors.ADMIN_IN_CONTAINER, Action.APPROVE, Resource.Kind.SPEC));
+    assertEquals(
+        refused(
+            Refusal.Kind.ADMIN_ONLY,
+            "Reassigning spec 'auth' moves work between FDEs and is an admin-only action"
+                + " (currently 'bob').",
+            "Ask an admin to reassign it. You may grab a spec only while it is unassigned."),
+        Access.decide(Actors.OWNER_IN_CONTAINER, Action.ASSIGN, SPEC_BOB));
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "Spec 'auth' is assigned to 'bob', not you.",
+            "Ask bob to make this change, or have an admin do it."),
+        Access.decide(Actors.OWNER_IN_CONTAINER, Action.CHANGE, SPEC_BOB),
+        "the role column says whose the work is");
+  }
+
+  private static Decision refused(Refusal.Kind kind, String message, Remedy fix) {
+    return new Decision.Refused(new Refusal(kind, message, fix));
+  }
+
   @Test
   void aMachineCredentialActsForNoFdeSoOwnsNothing() {
     assertEquals(
@@ -761,6 +835,9 @@ class AccessTest {
     assertEquals(new Whoami("viewer", "api", List.of("read")), Whoami.of(Actors.VIEWER));
     assertEquals(new Whoami("viewer", "room", List.of("read")), Whoami.of(Actors.ROOM));
     assertEquals(new Whoami("member", "agent", List.of("read", "write")), Whoami.of(Actors.AGENT));
+    assertEquals(
+        new Whoami("admin", "container", List.of("read", "write", "admin")),
+        Whoami.of(Actors.ADMIN_IN_CONTAINER));
     assertThrows(NullPointerException.class, () -> new Whoami(null, "api", List.of()));
     assertThrows(NullPointerException.class, () -> new Whoami("viewer", null, List.of()));
   }
@@ -886,8 +963,19 @@ class AccessTest {
               READ_ONLY_FIX);
       case ADMIN_ONLY -> new Decision.Refused(row.refusal());
       case LANE ->
-          refused(
-              Refusal.Kind.LANE_FORBIDDEN, "Agent principals cannot " + row.act() + ".", LANE_FIX);
+          actor.lane() == Actor.Lane.CONTAINER
+              ? new Decision.Refused(
+                  new Refusal(
+                      Refusal.Kind.LANE_FORBIDDEN,
+                      "The credential in a project container cannot " + row.act() + ".",
+                      row.action() == Action.ASSIGN
+                          ? "Do it from outside the container: 'sail spec update auth --assignee <fde>'"
+                              + " on the host, or Mast."
+                          : FROM_OUTSIDE))
+              : refused(
+                  Refusal.Kind.LANE_FORBIDDEN,
+                  "Agent principals cannot " + row.act() + ".",
+                  LANE_FIX);
     };
   }
 

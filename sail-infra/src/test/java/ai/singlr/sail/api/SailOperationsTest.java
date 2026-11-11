@@ -2013,7 +2013,7 @@ class SailOperationsTest {
 
     var udays = boxStore.replace("uday");
     assertEquals(
-        Optional.of(new Actor("uday", Role.ADMIN, Actor.Lane.CLI)),
+        Optional.of(new Actor("uday", Role.ADMIN, Actor.Lane.CONTAINER)),
         operations.boxActorForCredential(udays));
     assertTrue(operations.boxActorForCredential("sailbox_wrong").isEmpty());
 
@@ -2024,7 +2024,7 @@ class SailOperationsTest {
         "a credential minted for an FDE the box no longer is stands for no one");
     assertEquals(
         Optional.of(
-            new Actor("ada", Role.MEMBER, Actor.Lane.CLI)
+            new Actor("ada", Role.MEMBER, Actor.Lane.CONTAINER)
                 .withScope(ProjectScope.of(List.of("acme")))),
         operations.boxActorForCredential(boxStore.replace("ada")),
         "the box's person, with their role and scope");
