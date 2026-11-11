@@ -419,7 +419,62 @@ class SseHandlerTest {
         assertTrue(
             anonymousPost.body().contains("missing_bearer_token"),
             "the refusal names the missing credential, not the method: " + anonymousPost.body());
+        var forgedPost =
+            client.send(
+                HttpRequest.newBuilder(URI.create(base + "/v1/events/stream"))
+                    .header("Authorization", "Bearer forged")
+                    .POST(HttpRequest.BodyPublishers.ofString(""))
+                    .build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(403, forgedPost.statusCode(), "a credential is judged before the method");
+        assertTrue(forgedPost.body().contains("invalid_bearer_token"), forgedPost.body());
       }
+    }
+  }
+
+  @Test
+  void theStreamReadsItsPathAsTheApiRouterDoesSoATrailingOrDoubledSlashStillStreams(
+      @TempDir Path tmp) throws Exception {
+    var bus = new EventBus();
+    var persister = new AuditPersister(tmp.resolve("events.jsonl"), 8);
+    try (var server =
+        new SailApiServer(
+            "127.0.0.1",
+            0,
+            new SailOperations(),
+            new FixedTokenTestAuth("tok"),
+            bus,
+            persister,
+            tmp.resolve("api.sock"))) {
+      server.start();
+      var readers = new ArrayList<BufferedReader>();
+      for (var path :
+          List.of("/v1/events/stream/", "/v1/events/stream//", "/v1/events/stream%2F")) {
+        var response =
+            HttpClient.newHttpClient()
+                .send(
+                    HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
+                        .header("Authorization", "Bearer tok")
+                        .GET()
+                        .build(),
+                    HttpResponse.BodyHandlers.ofInputStream());
+        var reader =
+            new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8));
+        readers.add(reader);
+
+        assertEquals(200, response.statusCode(), path);
+        assertEquals(": subscribed", reader.readLine(), path);
+      }
+
+      bus.close();
+
+      assertTimeoutPreemptively(
+          Duration.ofSeconds(BusTesting.DELIVERY_TIMEOUT_SECONDS),
+          () -> {
+            for (var reader : readers) {
+              while (reader.readLine() != null) {}
+            }
+          });
     }
   }
 

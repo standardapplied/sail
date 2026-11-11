@@ -352,7 +352,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
    * that a run's log stream is matched as sent, whatever its run segment holds, and a path only its
    * blank segments make a stream is matched as sent too, which no route serves.
    */
-  private static String canonical(URI uri) {
+  static String canonical(URI uri) {
     var path = Objects.requireNonNullElse(uri.getPath(), "");
     if (AgentLogStreamer.isStreamPath(path)) {
       return path.replaceAll("/+$", "");

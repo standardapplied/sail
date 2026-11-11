@@ -130,7 +130,8 @@ public final class SseHandler implements HttpHandler, RouteTable {
 
   /**
    * Answers {@code exchange} as the API router answers a request: its caller is authenticated
-   * first, then its table serves it, or says the path or the method is not there.
+   * first, then its table serves the path as the router reads it ({@link ApiRouter#canonical}), or
+   * says the path or the method is not there.
    */
   @Override
   public void handle(HttpExchange exchange) throws IOException {
@@ -138,7 +139,7 @@ public final class SseHandler implements HttpHandler, RouteTable {
       try {
         auth.require(exchange);
         switch (RouteTable.serve(
-            routes, exchange.getRequestMethod(), exchange.getRequestURI().getPath())) {
+            routes, exchange.getRequestMethod(), ApiRouter.canonical(exchange.getRequestURI()))) {
           case RouteTable.Served.NotFound<SseHandler> _ -> throw ApiRouter.notFound();
           case RouteTable.Served.MethodNotAllowed<SseHandler> _ -> {
             sendMethodNotAllowed(exchange);
