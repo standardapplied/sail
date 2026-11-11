@@ -32,6 +32,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 import java.util.Map;
@@ -228,6 +229,25 @@ class RoomAuthorityTest {
         Optional.of(Kind.NOT_OWNER),
         rule.decide(OTHERS_AGENT, "drafted", null, room).map(Refusal::kind),
         "another run made nothing of it");
+  }
+
+  /**
+   * An ad-hoc run's work is its whole project: it changes a room of its project, its person's, and
+   * no room of another project, though its person owns that one too.
+   */
+  @Test
+  void anAdHocRunChangesARoomOfItsProjectAndNoOther() {
+    var adHoc =
+        Actor.agentPrincipal("claude/" + OWNER + "-adhoc", OWNER)
+            .withWork(new Actor.Work("acme", null, null));
+    HeldProjects.hold(board.db, "beta");
+    var beta = with(LOBBY, "project", "beta");
+
+    assertEquals(Optional.empty(), rule.decide(adHoc, "lobby", LOBBY, with(LOBBY, "wake", "off")));
+    assertEquals(
+        Optional.of(Kind.NOT_OWNER),
+        rule.decide(adHoc, "lobby", beta, with(beta, "wake", "off")).map(Refusal::kind),
+        "beta is not its project");
   }
 
   @Test

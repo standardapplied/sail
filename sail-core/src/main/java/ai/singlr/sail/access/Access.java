@@ -115,6 +115,16 @@ public final class Access {
   }
 
   /**
+   * Whether {@code actor} is the principal of {@code resource}, a run: the one run an agent
+   * narrates, its own. A rule that takes a narration at its word asks it here, as the lane's grant
+   * decides it, rather than reading the actor's handle.
+   */
+  public static boolean ownRun(Actor actor, Resource resource) {
+    return resource.kind() == Resource.Kind.RUN
+        && PrincipalHandle.namesRun(actor.handle(), resource.id());
+  }
+
+  /**
    * The projects whose resources {@code actor} may read: the audience step of {@link #decide} as a
    * scope, every project for Sail itself. Rows in hand are read through {@link ReadFilter}, and a
    * read that filters many rows inside one query filters by this scope, so the Read rule is the
@@ -172,7 +182,7 @@ public final class Access {
   private static boolean ownWork(Actor actor, Action action, Resource resource) {
     var work = actor.work();
     if (resource.kind() == Resource.Kind.RUN) {
-      return PrincipalHandle.namesRun(actor.handle(), resource.id());
+      return ownRun(actor, resource);
     }
     if (work == null || action == Action.NARRATE) {
       return false;

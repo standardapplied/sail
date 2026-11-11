@@ -61,7 +61,7 @@ public final class Resources {
   /**
    * {@code resource}, a spec or a conversation, as made by {@code principal}: the spec's maker, or
    * the maker of the spec whose own room the conversation is, as the journal's first revision of it
-   * records ({@code ChangeLog.bornBy}); none when the journal no longer keeps that revision.
+   * records ({@code ChangeLog.bornBy}); none, null, when the journal no longer keeps that revision.
    */
   public static Resource madeBy(Resource resource, String principal) {
     return new Resource(
@@ -72,7 +72,7 @@ public final class Resources {
         resource.assignee(),
         resource.spec(),
         resource.bornIn(),
-        Strings.isBlank(principal) ? null : principal);
+        principal);
   }
 
   /**

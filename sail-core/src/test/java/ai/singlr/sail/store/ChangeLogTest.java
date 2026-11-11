@@ -356,14 +356,18 @@ class ChangeLogTest {
       Acting.as("ada", () -> log.append("spec", "a", rev, "local", false, "{}"));
     }
     Acting.as(null, () -> log.append("spec", "nobodys", "1-x", "local", false, "{}"));
+    Acting.by(
+        Actor.agentPrincipal("claude/r-2", "ada"),
+        () -> log.append("room", "r", "1-x", "local", false, "{}"));
 
-    assertEquals(Optional.of("claude/r-1"), log.bornBy("spec", "a"));
-    assertEquals(Optional.empty(), log.bornBy("spec", "never"));
-    assertEquals(Optional.empty(), log.bornBy("spec", "nobodys"), "a write that names no one");
+    assertEquals(Optional.of("claude/r-1"), log.bornBy("a"));
+    assertEquals(Optional.empty(), log.bornBy("never"));
+    assertEquals(Optional.empty(), log.bornBy("nobodys"), "a write that names no one");
+    assertEquals(Optional.empty(), log.bornBy("r"), "a room made on its own is no spec's");
     log.compact("spec", List.of("a"), id -> null);
     assertEquals(
         Optional.empty(),
-        log.bornBy("spec", "a"),
+        log.bornBy("a"),
         "the first revision is compacted away, and no later writer is its maker");
   }
 

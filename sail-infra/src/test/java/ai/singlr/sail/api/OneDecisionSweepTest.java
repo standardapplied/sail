@@ -12,8 +12,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Whoami;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.lang.classfile.ClassFile;
@@ -49,6 +51,9 @@ import org.junit.jupiter.api.Test;
  *       Actor#work}, and the lane tests {@link Actor#peer} and {@link Actor#owner};
  *   <li>{@link Actor#withScope} and {@link Actor#withWork}, which widen or narrow a scope or an
  *       agent's work without asking one;
+ *   <li>{@code PrincipalHandle#namesRun}, {@code #matches} and {@code #runOf}, whether a handle is
+ *       a run's principal and which run's, and {@code ChangeLog#bornBy}, who made a spec: what an
+ *       agent's own work is made of, so a second test of it beside {@code Access} is seen;
  *   <li>the factories that mint a principal with its role, {@link Actor#agentPrincipal}, {@link
  *       Actor#roomPrincipal} and {@link Actor#main}, so a door that binds one instead of asking
  *       {@code RoleRule} is seen;
@@ -66,10 +71,10 @@ import org.junit.jupiter.api.Test;
  * instead of its caller is a finding for review, not for this sweep (its self-test holds one). Nor
  * does it see a role, a lane or a scope read as data: in SQL, from a map, or through a type that
  * hides it, so a filter inside a query takes its scope from {@code Access.audience}. {@code Actor},
- * {@code Role} and the socket's callers define what is read, so their own members are not swept,
- * nor their nested classes, matched by exact name (a class that only shares a name's prefix is
- * swept). An entry that no longer matches a read fails too, so the list shrinks as the later specs
- * land.
+ * {@code Role}, {@code PrincipalHandle} and the socket's callers define what is read, so their own
+ * members are not swept, nor their nested classes, matched by exact name (a class that only shares
+ * a name's prefix is swept). An entry that no longer matches a read fails too, so the list shrinks
+ * as the later specs land.
  */
 class OneDecisionSweepTest {
 
@@ -78,6 +83,8 @@ class OneDecisionSweepTest {
   private static final String ROLE = IDENTITY + "Role";
   private static final String ROLE_RULE = IDENTITY + "RoleRule";
   private static final String RUN_ROW = "ai/singlr/sail/store/RunStore$RunRow";
+  private static final String PRINCIPAL_HANDLE = IDENTITY + "PrincipalHandle";
+  private static final String CHANGE_LOG = "ai/singlr/sail/store/ChangeLog";
   private static final String CALLER = "ai/singlr/sail/api/LocalApiRouter$Caller$";
   private static final String SCOPE = IDENTITY + "ProjectScope";
   private static final String WHOAMI = "ai/singlr/sail/access/Whoami";
@@ -109,7 +116,11 @@ class OneDecisionSweepTest {
           ROLE,
           Set.of("fromAttribute", "cappedBy", "ordinal", "compareTo", "values", "valueOf"),
           RUN_ROW,
-          Set.of("readOnlyLane"));
+          Set.of("readOnlyLane"),
+          PRINCIPAL_HANDLE,
+          Set.of("namesRun", "matches", "runOf"),
+          CHANGE_LOG,
+          Set.of("bornBy"));
 
   private static final List<String> EXEMPT =
       List.of(
@@ -117,6 +128,7 @@ class OneDecisionSweepTest {
           ROLE_RULE,
           "ai/singlr/sail/store/FdeStore",
           ACTOR,
+          PRINCIPAL_HANDLE,
           ROLE,
           CALLER);
 
@@ -149,10 +161,31 @@ class OneDecisionSweepTest {
         "fact: a run's read of its own room is a delivery");
     allowed.put(API + "RoomCommitGuard#guardRoomRun", "fact: which runs are a room's wakes");
     allowed.put(RULES + "Attribution#decide", "fact: a push names only its pusher (attribution)");
+    allowed.put(
+        RULES + "Attribution#made",
+        "fact: who made a spec and its own room, the one read of a maker (attribution)");
+    for (var named : List.of("mayWriteAs", "principalOfOwnedRun")) {
+      allowed.put(
+          RULES + "Attribution#" + named,
+          "fact: a push names a principal of a run its pusher owns (attribution)");
+    }
+    allowed.put(
+        API + "GlobalSpecOperations#validAssignee",
+        "fact: an assignee is an FDE, never a run's principal (the field's shape)");
+    allowed.put(
+        STORES + "Decidability#actorRun",
+        "fact: a revision waits for the run its author names to land (decidability)");
+    allowed.put(
+        STORES + "Decidability#message",
+        "fact: a post waits for the run its author names to land (decidability)");
+    allowed.put(
+        STORES + "RunStore#principalsOf",
+        "fact: the posts a denied run's own principals made leave with it");
     allowed.put(RULES + "MessageAuthority#mayPostAs", "fact: as whom a pusher posts (attribution)");
     allowed.put(
         RULES + "EventAuthority#refused",
-        "fact: whose work a refused event's words describe, and an agent's words its own");
+        "fact: whose work a refused event's words describe, and an agent's words and kind its"
+            + " own");
     allowed.put(STORES + "Snapshots#creator", "fact: whom a write names its creator (attribution)");
     allowed.put(
         STORES + "Snapshots#adoptedCreator", "fact: whom a write names its creator (attribution)");
@@ -252,7 +285,9 @@ class OneDecisionSweepTest {
               leaky + "asMain",
               leaky + "audienceInALambda",
               leaky + "fromTheRoles",
-              leaky + "everyRole"),
+              leaky + "everyRole",
+              leaky + "maker",
+              leaky + "aRunsOwn"),
           reads(bytes.readAllBytes()),
           "every member but asTheBox: a door binding Actor.system() is not seen");
     }
@@ -388,6 +423,14 @@ class OneDecisionSweepTest {
 
     Role[] everyRole() {
       return Role.values();
+    }
+
+    boolean maker(ChangeLog journal, String id) {
+      return journal.bornBy(id).isPresent();
+    }
+
+    boolean aRunsOwn(Actor actor) {
+      return PrincipalHandle.matches(actor.handle());
     }
   }
 

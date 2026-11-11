@@ -51,7 +51,6 @@ public final class SpecAuthority implements WriteAuthority {
   private final RoomStore rooms;
   private final SpecStore specs;
   private final ProjectStore projects;
-  private final ChangeLog journal;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
@@ -59,7 +58,6 @@ public final class SpecAuthority implements WriteAuthority {
     this.rooms = new RoomStore(db);
     this.specs = new SpecStore(db);
     this.projects = new ProjectStore(db);
-    this.journal = new ChangeLog(db);
     this.attribution = new Attribution(db);
   }
 
@@ -181,15 +179,14 @@ public final class SpecAuthority implements WriteAuthority {
 
   /**
    * Spec {@code id} as {@code held} has it: its project and owner, who made it ({@link
-   * ChangeLog#bornBy}), and the conversation it lives in, whose owners count it as held, never as
+   * Attribution#made}), and the conversation it lives in, whose owners count it as held, never as
    * the revision would leave it.
    */
   private Resource asHeld(String id, Map<String, Object> held) {
     var spec =
-        Resources.madeBy(
+        attribution.made(
             Resources.spec(
-                id, projectOf(held), assigneeOf(held), Snapshots.text(held, Snapshots.CREATOR)),
-            journal.bornBy("spec", id).orElse(null));
+                id, projectOf(held), assigneeOf(held), Snapshots.text(held, Snapshots.CREATOR)));
     var bornIn = bornIn(id, held);
     return bornIn == null ? spec : Resources.bornIn(spec, conversation(bornIn, spec, held));
   }

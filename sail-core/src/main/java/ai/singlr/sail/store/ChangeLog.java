@@ -699,22 +699,21 @@ public final class ChangeLog {
   }
 
   /**
-   * Who made an entity: the actor its first revision here recorded, a run's principal for what an
-   * agent made, or the author main recorded for one this box adopted. Empty for an entity this box
-   * never logged, and once history no longer keeps its first revision ({@link #compact}), so no
-   * later writer is taken for its maker.
+   * Who made spec {@code specId}, and so its own room: the actor its first revision here recorded,
+   * a run's principal for what an agent made, or the author main recorded for one this box adopted.
+   * Empty for a spec this box never logged, for a revision that names no one, and once history no
+   * longer keeps its first revision ({@link #compact}), so no later writer is taken for its maker.
    */
-  public Optional<String> bornBy(String entityType, String entityId) {
+  public Optional<String> bornBy(String specId) {
     return db.queryOne(
             """
-            SELECT COALESCE(actor, '') FROM change_log WHERE entity_type = ?1 AND entity_id = ?2
+            SELECT COALESCE(actor, '') FROM change_log WHERE entity_type = 'spec' AND entity_id = ?1
             AND seq = (SELECT MIN(seq) FROM (
-                SELECT seq FROM change_log WHERE entity_type = ?1 AND entity_id = ?2
+                SELECT seq FROM change_log WHERE entity_type = 'spec' AND entity_id = ?1
                 UNION ALL
-                SELECT seq FROM compacted_entries WHERE entity_type = ?1 AND entity_id = ?2))""",
+                SELECT seq FROM compacted_entries WHERE entity_type = 'spec' AND entity_id = ?1))""",
             row -> row.text(0),
-            entityType,
-            entityId)
+            specId)
         .filter(Strings::isNotBlank);
   }
 

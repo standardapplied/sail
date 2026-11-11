@@ -1047,6 +1047,17 @@ class AccessTest {
     assertEquals(new Decision.Allowed(), Access.decide(Actors.VIEWER, Action.READ, placeless));
   }
 
+  /**
+   * An agent's own run is the run its principal names: no other run, and nothing else of its id.
+   */
+  @Test
+  void anAgentsOwnRunIsTheRunItsPrincipalNamesAndNothingElse() {
+    assertTrue(Access.ownRun(Actors.AGENT, RUN_ADA));
+    assertFalse(Access.ownRun(Actors.AGENT, RUN_BOB));
+    assertFalse(Access.ownRun(Actors.AGENT, Resources.spec(Actors.RUN, "acme", "ada", "ada")));
+    assertFalse(Access.ownRun(Actors.OWNER_API, RUN_ADA), "a person narrates no run of its own");
+  }
+
   @Test
   void aResourceNamesEachOwnerOnceAndNeverBlank() {
     var resource =
@@ -1070,7 +1081,7 @@ class AccessTest {
                 IllegalArgumentException.class,
                 () -> Resources.madeBy(Resources.launched("r-1", "acme", "auth", "ada"), "x"))
             .getMessage());
-    assertEquals(null, Resources.madeBy(SPEC_ADA, " ").madeBy());
+    assertEquals(null, Resources.madeBy(SPEC_ADA, null).madeBy());
     assertEquals(
         "Only a spec is born in a room, not RUN r-1",
         assertThrows(

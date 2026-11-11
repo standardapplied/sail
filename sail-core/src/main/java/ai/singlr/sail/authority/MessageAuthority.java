@@ -92,10 +92,9 @@ public final class MessageAuthority implements WriteAuthority {
     }
     return posted(
         actor,
-        Resources.madeBy(
+        attribution.made(
             Resources.conversation(
-                roomId, journal.conversationProject(roomId), rooms.owners(roomId)),
-            journal.bornBy("spec", roomId).orElse(null)));
+                roomId, journal.conversationProject(roomId), rooms.owners(roomId))));
   }
 
   /**

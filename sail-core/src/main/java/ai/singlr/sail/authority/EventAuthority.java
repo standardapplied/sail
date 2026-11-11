@@ -14,7 +14,6 @@ import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.PrincipalHandle;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -187,9 +186,10 @@ public final class EventAuthority {
               + " writes they describe.",
           "Make the change through its own route; the server publishes the event.");
     }
-    return switch (Access.decide(actor, action, resource(action, subject))) {
+    var resource = resource(action, subject);
+    return switch (Access.decide(actor, action, resource)) {
       case Decision.Allowed allowed ->
-          believed(actor, action, subject, retold)
+          believed(actor, action, subject, resource, retold)
               ? Optional.empty()
               : refused(Refusal.Kind.NOT_OWNER, null, actor, type, action, subject);
       case Decision.Refused refused ->
@@ -241,15 +241,16 @@ public final class EventAuthority {
    * never what this box executed itself; an announcement is retold by a voice, about a
    * conversation; a person's narration, an admin's included, only of a run this box executed, since
    * what another box's run did reaches this one by sync, and a run's own principal of itself, since
-   * only the box executing a run holds its credential. An event about the box is decided by the
+   * only the box executing a run holds its credential, as {@link Access#ownRun} decides it of
+   * {@code resource}, what the narration is taken on. An event about the box is decided by the
    * action alone.
    */
-  private boolean believed(Actor actor, Action action, Subject subject, boolean retold) {
+  private boolean believed(
+      Actor actor, Action action, Subject subject, Resource resource, boolean retold) {
     var firstHand = speaksForBox(actor);
     return switch (action) {
       case OPERATE_BOX -> true;
-      case NARRATE ->
-          subject.executedHere() || PrincipalHandle.namesRun(actor.handle(), subject.runId());
+      case NARRATE -> subject.executedHere() || Access.ownRun(actor, resource);
       case POST ->
           firstHand
               || (retold
