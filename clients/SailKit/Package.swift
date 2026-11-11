@@ -9,10 +9,12 @@ let package = Package(
     platforms: [.macOS(.v15), .iOS(.v18)],
     products: [
         .library(name: "SailAPI", targets: ["SailAPI"]),
+        .library(name: "SailEvents", targets: ["SailEvents"]),
         .library(name: "SailTerminalWire", targets: ["SailTerminalWire"]),
     ],
     targets: [
         .target(name: "SailAPI", swiftSettings: strict),
+        .target(name: "SailEvents", dependencies: ["SailAPI"], swiftSettings: strict),
         .target(name: "SailTerminalWire", swiftSettings: strict),
         .target(
             name: "SailKitTestSupport",
@@ -23,6 +25,11 @@ let package = Package(
         .testTarget(
             name: "SailAPITests",
             dependencies: ["SailAPI", "SailKitTestSupport"],
+            swiftSettings: strict
+        ),
+        .testTarget(
+            name: "SailEventsTests",
+            dependencies: ["SailEvents", "SailKitTestSupport"],
             swiftSettings: strict
         ),
         .testTarget(
