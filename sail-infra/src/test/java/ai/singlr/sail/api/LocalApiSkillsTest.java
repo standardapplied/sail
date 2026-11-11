@@ -147,7 +147,7 @@ class LocalApiSkillsTest {
 
     try (var member = web(new Actor("uday", Role.MEMBER, Actor.Lane.API));
         var viewer = web(new Actor("vic", Role.VIEWER, Actor.Lane.API))) {
-      var folder = "{\"folder\": \"/home/dev/.agents/skills/java\"}";
+      var folder = "{\"folder\": \"/home/dev/drafts/standards\", \"name\": \"java\"}";
       var refused = send(viewer, "POST", SKILLS, folder);
       assertEquals(403, refused.statusCode(), refused.body());
       assertEquals(
