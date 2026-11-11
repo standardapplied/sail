@@ -75,6 +75,9 @@
                     <!-- one fork per core: each class runs in some fork, so classes share no state -->
                     <forkCount>1C</forkCount>
                     <reuseForks>true</reuseForks>
+                    <properties>
+                        <configurationParameters>junit.jupiter.execution.parallel.enabled = true</configurationParameters>
+                    </properties>
                     <argLine>
                         @{argLine}
                         -Duser.timezone=UTC
