@@ -21,6 +21,7 @@ import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.BoxCredentialFile;
 import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ProjectFileFixtures;
 import ai.singlr.sail.engine.ShellExec;
@@ -79,12 +80,14 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -125,6 +128,54 @@ class SailOperationsSeamTest {
                 target -> {
                   throw new IOException("main unavailable");
                 }));
+  }
+
+  /**
+   * What a box's server start writes, the ambient file of the FDE its sync handle names, stands for
+   * that person at the socket: across a restart onto a new release, which finds the file and mints
+   * nothing, and on a box whose operator the roster does not list. Once the handle names another
+   * FDE the old credential is refused, until the next start or handle change mints that FDE's.
+   */
+  @Test
+  void theAmbientCredentialAStartMintsStandsForTheBoxsPersonAcrossARestartThatMintsNothing()
+      throws Exception {
+    try (var db = Sqlite.openMemory()) {
+      new SchemaManager(db).migrate();
+      var handle = new AtomicReference<>("it");
+      var operations =
+          OperationsFactory.create(
+                  db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+              .useControlPlane(
+                  db,
+                  tempDir,
+                  new SyncOperations(
+                      db,
+                      "box",
+                      tempDir,
+                      () -> new SyncConfig(null, null, handle.get()),
+                      target -> {
+                        throw new IOException("unused");
+                      }));
+      var store = new BoxCredentialStore(db);
+      var dir = tempDir.resolve("api");
+      var file = dir.resolve(BoxCredentialFile.FILE_NAME);
+      BoxCredentialFile.ensure(store, "it", dir);
+      var minted = Files.readString(file).strip();
+
+      assertEquals(
+          BoxCredentialFile.Outcome.ALREADY_PRESENT, BoxCredentialFile.ensure(store, "it", dir));
+      assertEquals(minted, Files.readString(file).strip(), "a restart mints nothing new");
+      assertEquals(
+          Optional.of(new Actor("it", Role.ADMIN, Actor.Lane.CLI)),
+          operations.boxActorForCredential(minted));
+
+      handle.set("raj");
+      assertEquals(Optional.empty(), operations.boxActorForCredential(minted));
+      BoxCredentialFile.ensure(store, "raj", dir);
+      assertEquals(
+          Optional.of("raj"),
+          operations.boxActorForCredential(Files.readString(file).strip()).map(Actor::handle));
+    }
   }
 
   @Test

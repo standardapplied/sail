@@ -8,14 +8,17 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
-import ai.singlr.sail.pty.PtyAdmissions;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
+import ai.singlr.sail.store.HeldProjects;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayOutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
@@ -38,14 +41,23 @@ class PtyContainerSessionIT extends AbstractIncusIT {
 
   @TempDir Path dir;
 
-  private PtySessionHost startHost() throws Exception {
+  /**
+   * A host whose box holds {@code container}'s project, admitting it as production does: through
+   * the box's catalog ({@link PtyHostAccess}).
+   */
+  private PtySessionHost startHost(String container) throws Exception {
+    var dbPath = dir.resolve("sail.db");
+    try (var db = Sqlite.open(dbPath)) {
+      new SchemaManager(db).migrate();
+      HeldProjects.hold(db, container);
+    }
     var host =
         new PtySessionHost(
             dir.resolve("h.sock"),
             dir.resolve("s"),
             64 * 1024,
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-            PtyAdmissions.NONE,
+            new PtyHostAccess(() -> OperationsFactory.open(dbPath)),
             PtyEvents.NONE,
             "0.0.0-test");
     host.start();
@@ -68,7 +80,7 @@ class PtyContainerSessionIT extends AbstractIncusIT {
       launch(container);
       prepareDevWorkspace(container);
 
-      try (var host = startHost();
+      try (var host = startHost(container);
           var client = SessionClient.connect(dir.resolve("h.sock"))) {
         client.create(
             "c1",
@@ -107,7 +119,7 @@ class PtyContainerSessionIT extends AbstractIncusIT {
       launch(container);
       prepareDevWorkspace(container);
 
-      try (var host = startHost();
+      try (var host = startHost(container);
           var client = SessionClient.connect(dir.resolve("h.sock"))) {
         client.create(
             "c1",

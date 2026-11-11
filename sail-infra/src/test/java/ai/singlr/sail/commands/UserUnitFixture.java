@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.store.BoxDatabase;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -122,6 +123,13 @@ final class UserUnitFixture implements AutoCloseable {
         """);
     try (var db = Sqlite.open(sail.resolve("sail.db"))) {
       BoxDatabase.prepare(db);
+    }
+  }
+
+  /** Puts {@code project} in the box's catalog, as {@code sail project create} does first. */
+  void holds(String project) {
+    try (var db = Sqlite.open(home.resolve(".sail").resolve("sail.db"))) {
+      HeldProjects.hold(db, project);
     }
   }
 

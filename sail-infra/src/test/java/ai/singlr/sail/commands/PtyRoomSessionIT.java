@@ -16,6 +16,7 @@ import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestControlPlane;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.BoxCredentialFile;
@@ -107,7 +108,7 @@ class PtyRoomSessionIT extends AbstractIncusIT {
               .useMessages(new MessageStore(db))
               .useBoxCredentials(boxStore)
               .useRooms(rooms);
-      TestControlPlane.standalone(operations, db, socketDir);
+      TestControlPlane.on(operations, db, socketDir, new SyncConfig(null, null, "it"));
 
       try (var api = new LocalApiSocket(operations, socketDir.resolve("api.sock"));
           var host =

@@ -14,6 +14,7 @@ import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.TestControlPlane;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
@@ -98,7 +99,7 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
               .useMessages(new MessageStore(db))
               .useBoxCredentials(boxStore)
               .useRooms(new RoomStore(db));
-      TestControlPlane.standalone(operations, db, socketDir);
+      TestControlPlane.on(operations, db, socketDir, new SyncConfig(null, null, "it"));
       try (var server = new LocalApiSocket(operations, socketDir.resolve("api.sock"))) {
         server.start();
 
