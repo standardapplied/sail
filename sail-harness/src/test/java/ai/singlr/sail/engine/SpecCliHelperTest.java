@@ -72,6 +72,26 @@ class SpecCliHelperTest {
     }
   }
 
+  /**
+   * The help inside the container no longer teaches setting a status, which nothing there may do:
+   * it says a spec is born a draft and names the host command that moves a status.
+   */
+  @Test
+  void theHelpTeachesNoStatusMoveAndNamesTheDoorOutside() {
+    var content = SpecCliHelper.scriptContent();
+    var start = content.indexOf("<<'USAGE'");
+    var usage = content.substring(start, content.indexOf("\nUSAGE\n", start));
+
+    assertFalse(usage.contains("[--status pending]"), usage);
+    assertFalse(usage.contains("[--status S] [--title T]"), usage);
+    assertTrue(usage.contains("A spec created here is a draft."), usage);
+    assertTrue(
+        usage.contains(
+            "A status moves outside the container: on the board in Mast, or on the host\n"
+                + "              with sail spec update <id> --status <status>."),
+        usage);
+  }
+
   @Test
   void commentAcceptsTheQuestionFlagInAnyOrder() {
     var content = SpecCliHelper.scriptContent();

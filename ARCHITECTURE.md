@@ -2224,8 +2224,8 @@ whether its sender speaks for this box, whether it retells, and whether this box
 Those the machinery acts on are taken first-hand only from whoever speaks for this box (its FDE,
 or an admin), and retold only by one who may take the action on the work, about a run this box
 did not execute. A run's narration is a person's only on the box that executed it; a run's own
-principal narrates its own run alone, and publishes nothing else. An announcement is retold by
-any voice that acts for an FDE, about a conversation.
+principal narrates its own run alone, and publishes nothing else that is taken at its word. An
+announcement is retold by any voice that acts for an FDE, about a conversation.
 
 The host token acts as the box's FDE: an admin on main or a standalone box, the synced
 roster role on a node. The socket's event route takes a run credential only; the box
@@ -2678,8 +2678,12 @@ no pairing is removed through the gateway as before, and no key file is touched.
     the terminal are refused: nothing acts as an FDE the box cannot place
     (`CliOperator.unplaced`).
   - **A run's credential** acts as the run's principal, with the role `RoleRule` gives the FDE
-    the run acts for, capped by its lane (`member` for an agent run, `viewer` for a room run).
-    A run whose FDE is disabled is refused at the socket.
+    the run acts for, capped by its lane (`member` for an agent run, `viewer` for a room run),
+    on the work it was launched for (`Actor.Work`); a room run reads its own project alone. A
+    run whose FDE is disabled is refused at the socket.
+  - **The box credential in a container** acts as the box's person on the
+    `CONTAINER` lane, whose column carries no human gate: whatever runs in the container can
+    read the file.
 - **Whose a row is** is `Resources`' (the Access section above), each owner rule once. Owning
   a spec born in a room gives a voice in its conversation, never its settings. A spec left
   without an assignee stays unassigned, and so does its identity room; dispatch refuses it until
@@ -2804,7 +2808,7 @@ no pairing is removed through the gateway as before, and no key file is touched.
   at rest in the local-only `run_credentials` table. The credential authenticates the
   in-container lane; every run finisher revokes it and the expired-row sweep collects
   stragglers. What an agent principal may do is its lane's column of the Access table, its
-  person's role capped by the lane. Agent-ness is a relationship, not a type: the owner link is
+  person's role capped by the lane, on its own work. Agent-ness is a relationship, not a type: the owner link is
   attribution and its column, never a separate authorization system.
 - **Tokens.** Host-local bearer tokens are SHA-256 hashed at rest, returned in plaintext
   once, and stored `0600` under a `0700` `~/.sail`. They carry a 90-day default expiry, where

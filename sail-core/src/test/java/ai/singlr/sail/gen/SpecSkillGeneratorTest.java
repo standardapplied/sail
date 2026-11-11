@@ -105,6 +105,20 @@ class SpecSkillGeneratorTest {
     assertFalse(content.contains("spec.yaml"), "specs are DB rows, not files");
   }
 
+  /**
+   * The installed skill teaches no status move inside the container: it names the host command the
+   * engineer moves one with, and says an agent claims nothing.
+   */
+  @Test
+  void theManifestTeachesNoStatusMoveInsideTheContainer() {
+    var content = SpecSkillGenerator.skillMd();
+
+    assertFalse(content.contains("\nspec update <id> --status"), content);
+    assertTrue(content.contains("sail spec update <id> --status <new-status>"), content);
+    assertTrue(content.contains("A person claims an unassigned spec"), content);
+    assertFalse(content.contains("An agent claims an unassigned spec"), content);
+  }
+
   @Test
   void theTemplateHasTheSectionsASpecBodyHas() throws IOException {
     var template = SpecSkillGenerator.skill().files().getLast();
