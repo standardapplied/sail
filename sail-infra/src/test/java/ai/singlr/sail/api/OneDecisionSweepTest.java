@@ -6,6 +6,8 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Whoami;
@@ -24,6 +26,7 @@ import java.lang.classfile.instruction.NewReferenceArrayInstruction;
 import java.lang.classfile.instruction.TypeCheckInstruction;
 import java.lang.constant.ClassDesc;
 import java.lang.constant.DirectMethodHandleDesc;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -49,7 +52,8 @@ import org.junit.jupiter.api.Test;
  *       Actor#roomPrincipal} and {@link Actor#main}, so a door that binds one instead of asking
  *       {@code RoleRule} is seen;
  *   <li>{@link Whoami#of}, the role read whoami shows, outside the two whoami handlers;
- *   <li>{@link Role#fromAttribute}, {@link Role#cappedBy} or a role's order;
+ *   <li>{@link Role#fromAttribute}, {@link Role#cappedBy}, {@code Role.values()}, {@code
+ *       Role.valueOf} or a role's order;
  *   <li>{@code RunRow#readOnlyLane};
  * </ul>
  *
@@ -61,8 +65,10 @@ import org.junit.jupiter.api.Test;
  * instead of its caller is a finding for review, not for this sweep (its self-test holds one). Nor
  * does it see a role, a lane or a scope read as data: in SQL, from a map, or through a type that
  * hides it, so a filter inside a query takes its scope from {@code Access.audience}. {@code Actor},
- * {@code Role} and the socket's callers define what is read, so their own members are not swept. An
- * entry that no longer matches a read fails too, so the list shrinks as the later specs land.
+ * {@code Role} and the socket's callers define what is read, so their own members are not swept,
+ * nor their nested classes, matched by exact name (a class that only shares a name's prefix is
+ * swept). An entry that no longer matches a read fails too, so the list shrinks as the later specs
+ * land.
  */
 class OneDecisionSweepTest {
 
@@ -99,7 +105,7 @@ class OneDecisionSweepTest {
           WHOAMI,
           Set.of("of"),
           ROLE,
-          Set.of("fromAttribute", "cappedBy", "ordinal", "compareTo"),
+          Set.of("fromAttribute", "cappedBy", "ordinal", "compareTo", "values", "valueOf"),
           RUN_ROW,
           Set.of("readOnlyLane"));
 
@@ -248,10 +254,22 @@ class OneDecisionSweepTest {
               leaky + "standing",
               leaky + "peer",
               leaky + "owner",
-              leaky + "asMain"),
+              leaky + "asMain",
+              leaky + "audienceInALambda",
+              leaky + "fromTheRoles",
+              leaky + "everyRole"),
           reads(bytes.readAllBytes()),
           "every member but asTheBox: a door binding Actor.system() is not seen");
     }
+  }
+
+  @Test
+  void onlyTheClassesThatDefineWhatIsReadAreExemptNotOnesThatShareTheirNamesPrefix() {
+    assertTrue(exempt("ai/singlr/sail/identity/Actor"));
+    assertTrue(exempt("ai/singlr/sail/identity/Actor$Lane"));
+    assertTrue(exempt("ai/singlr/sail/access/Policy"));
+    assertFalse(exempt("ai/singlr/sail/identity/ActorLookups"));
+    assertFalse(exempt("ai/singlr/sail/store/FdeStoreFacade"));
   }
 
   /** A source of roles that hides where they come from, as a door's resolver might. */
@@ -359,6 +377,19 @@ class OneDecisionSweepTest {
     void asTheBox(Runnable work) {
       Actor.run(Actor.system(), work);
     }
+
+    List<String> audienceInALambda(Actor actor, List<String> projects) {
+      var audience = Access.audience(actor);
+      return projects.stream().filter(project -> audience.admits(project)).toList();
+    }
+
+    Actor fromTheRoles(String handle) {
+      return new Actor(handle, Role.valueOf("ADMIN"), Actor.Lane.CLI);
+    }
+
+    Role[] everyRole() {
+      return Role.values();
+    }
   }
 
   /** Each read {@code allowed} does not name, then each entry of it that names no read. */
@@ -388,25 +419,42 @@ class OneDecisionSweepTest {
     var model = ClassFile.of().parse(bytes);
     var name = model.thisClass().asInternalName();
     var found = new TreeSet<String>();
-    if (EXEMPT.stream().anyMatch(name::startsWith)) {
+    if (exempt(name)) {
       return found;
     }
+    var byMember = new TreeMap<String, List<List<String>>>();
     for (var method : model.methods()) {
-      if (reads(method)) {
-        found.add(name + "#" + member(method));
-      }
+      method
+          .code()
+          .ifPresent(
+              code ->
+                  byMember
+                      .computeIfAbsent(member(method), member -> new ArrayList<>())
+                      .addAll(
+                          code.elementStream().map(OneDecisionSweepTest::referencesOf).toList()));
     }
+    byMember.forEach(
+        (member, references) -> {
+          if (references.stream().anyMatch(OneDecisionSweepTest::reads)
+              || asksAudience(references.stream().flatMap(List::stream).toList())) {
+            found.add(name + "#" + member);
+          }
+        });
     return found;
   }
 
-  private static boolean reads(MethodModel method) {
-    var code = method.code();
-    if (code.isEmpty()) {
-      return false;
-    }
-    var references = code.get().elementStream().map(OneDecisionSweepTest::referencesOf).toList();
-    return references.stream().anyMatch(OneDecisionSweepTest::reads)
-        || asksAudience(references.stream().flatMap(List::stream).toList());
+  /**
+   * Whether class {@code name} defines what is read, so its members are not swept: in a package or
+   * a nesting {@link #EXEMPT} names (an entry ending in {@code /} or {@code $}), or one of its
+   * classes and their nested classes.
+   */
+  static boolean exempt(String name) {
+    return EXEMPT.stream()
+        .anyMatch(
+            entry ->
+                entry.endsWith("/") || entry.endsWith("$")
+                    ? name.startsWith(entry)
+                    : name.equals(entry) || name.startsWith(entry + "$"));
   }
 
   /**
@@ -427,7 +475,7 @@ class OneDecisionSweepTest {
   private static List<String> referencesOf(Object element) {
     return switch (element) {
       case InvokeInstruction invoke ->
-          invoke.typeSymbol().returnType().descriptorString().equals("L" + ROLE + ";")
+          invoke.typeSymbol().returnType().descriptorString().contains("L" + ROLE + ";")
               ? List.of(invoke.owner().asInternalName() + "#" + RETURNS_ROLE)
               : List.of(invoke.owner().asInternalName() + "#" + invoke.name().stringValue());
       case FieldInstruction field ->
