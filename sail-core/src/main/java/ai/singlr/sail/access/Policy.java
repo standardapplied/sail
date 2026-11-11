@@ -196,8 +196,8 @@ public final class Policy {
    * Whether {@code reader} reads a conversation only as the voices that steer it say it (A6): an
    * agent's lanes read a room's messages through the steering filter, its owners', its admins' and
    * Sail's words, never a comment another member left for people. The in-container credential is a
-   * person's, who reads every voice. The filter itself is the stores' query; which readers it binds
-   * is the table's.
+   * person's, who reads every voice. The filter itself is the stores' query; the readers it binds
+   * are the agents' lanes, not the in-container credential.
    */
   public static boolean hearsOnlySteering(Actor reader) {
     return reader.agentLane();
