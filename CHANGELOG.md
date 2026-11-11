@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.66.0
+
+- **A large sync frame is read in time linear in its size.** A sync line, a blob manifest or a live-stream line was parsed in time that grew with the square of its longest string: a 4 MiB message body took seconds to read, and a frame near the 16 MiB ceiling minutes. Each now reads in tens to a few hundred milliseconds.
+
 ## 0.65.0
 
 - **Sync health, bus stats and sync rounds are the box's own person's, or an admin's.** `GET /v1/sync`, `POST /v1/sync` and `GET /v1/events/stats` answered any authenticated caller. Another FDE now gets `403 forbidden_not_assignee` "Box 'uday' belongs to 'uday', not you." with "Ask uday to operate it, or have an admin do it.". On a box that names no FDE of its own (no sync handle, as a standalone box has by default), anyone but an admin now gets `403 forbidden_not_assignee` "This box has no owner, so only an admin may operate it.". A machine token acts for no one, with the role of the box's person capped by the role it was minted with, so one that is not an admin there is refused the same way: one minted below admin, and one minted admin on a box whose person is not an admin. On the container socket, a run or a room agent reading `GET /v1/sync` gets `403 agent_lane_forbidden` "Agent principals cannot operate boxes."; the box credential still reads it.
