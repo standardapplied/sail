@@ -184,6 +184,24 @@ class LocalApiRouterTest {
   }
 
   @Test
+  void theBoxCredentialHearsItHasNoRunBeforeTheMethodItAsked() {
+    var inbox =
+        router.ask(
+            new LocalApiRequest("PUT", "/v1/run/messages", Map.of(), boxAuth(), new byte[0]));
+    var session =
+        router.ask(new LocalApiRequest("GET", "/v1/run/session", Map.of(), boxAuth(), new byte[0]));
+
+    assertEquals(
+        "403 {error=Run message delivery requires a run credential; the box credential has no run"
+            + " to deliver to.}",
+        answer(inbox));
+    assertEquals(
+        "403 {error=Session reports name a run's conversation and require a run credential; the"
+            + " box credential reports only a room-bound conversation (room_id).}",
+        answer(session));
+  }
+
+  @Test
   void aPathAsSentIsAnsweredAsTheSocketAlwaysAnsweredIt() {
     assertEquals(
         "400 bad_request Invalid project name: ''. Must match [a-z0-9][a-z0-9-]*, max 63"
