@@ -16,7 +16,6 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.AuthSessionStore;
-import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
@@ -47,17 +46,11 @@ public record HostAccess(Sqlite db, RoleRule roles) {
           roles.principal(RoleRule.Credential.box()).orElseThrow(() -> disabled(handle)));
     }
     var session =
-        new AuthSessionStore(db)
-            .validate(token)
-            .orElseThrow(() -> new IOException("Session token is not valid or has expired."));
-    var fde =
-        new FdeStore(db)
-            .byId(session.fdeId())
-            .orElseThrow(() -> new IOException("The session's FDE no longer exists."));
-    return new PtyIdentity.Person(
         roles
-            .principal(RoleRule.Credential.person(fde.handle(), Actor.Lane.API))
-            .orElseThrow(() -> disabled(fde.handle())));
+            .session(new AuthSessionStore(db), token, Actor.Lane.API)
+            .orElseThrow(() -> new IOException("Session token is not valid or has expired."));
+    return new PtyIdentity.Person(
+        session.principal().orElseThrow(() -> disabled(session.fde().handle())));
   }
 
   /**

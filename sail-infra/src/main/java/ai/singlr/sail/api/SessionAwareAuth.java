@@ -7,9 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
-import ai.singlr.sail.identity.RoleRule.Credential;
 import ai.singlr.sail.store.AuthSessionStore;
-import ai.singlr.sail.store.FdeStore;
 import com.sun.net.httpserver.HttpExchange;
 import java.util.Objects;
 
@@ -30,14 +28,11 @@ public final class SessionAwareAuth implements ApiAuth {
   public static final String SESSION_PREFIX = "sess_";
 
   private final AuthSessionStore sessions;
-  private final FdeStore roster;
   private final RoleRule roles;
   private final ApiAuth tokenAuth;
 
-  public SessionAwareAuth(
-      AuthSessionStore sessions, FdeStore roster, RoleRule roles, ApiAuth tokenAuth) {
+  public SessionAwareAuth(AuthSessionStore sessions, RoleRule roles, ApiAuth tokenAuth) {
     this.sessions = Objects.requireNonNull(sessions, "sessions");
-    this.roster = Objects.requireNonNull(roster, "roster");
     this.roles = Objects.requireNonNull(roles, "roles");
     this.tokenAuth = Objects.requireNonNull(tokenAuth, "tokenAuth");
   }
@@ -56,15 +51,10 @@ public final class SessionAwareAuth implements ApiAuth {
   }
 
   private void authenticateSession(HttpExchange exchange, String token) {
-    var fde =
-        sessions
-            .validate(token)
-            .flatMap(session -> roster.byId(session.fdeId()))
-            .orElseThrow(SessionAwareAuth::invalid);
-    var actor =
-        roles
-            .principal(Credential.person(fde.handle(), Actor.Lane.API))
-            .orElseThrow(SessionAwareAuth::invalid);
+    var session =
+        roles.session(sessions, token, Actor.Lane.API).orElseThrow(SessionAwareAuth::invalid);
+    var fde = session.fde();
+    var actor = session.principal().orElseThrow(SessionAwareAuth::invalid);
     exchange.setAttribute("token.name", actor.handle());
     exchange.setAttribute(ApiAuth.ACTOR, actor);
     if (fde.displayName() != null) {

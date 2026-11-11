@@ -7,6 +7,7 @@ package ai.singlr.sail.identity;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
 import java.util.Objects;
@@ -98,6 +99,22 @@ public final class RoleRule {
 
     /** A run's principal. */
     record Run(RunStore.RunRow run) implements Credential {}
+  }
+
+  /** The FDE a login session was opened for, and the principal it acts as; empty if refused. */
+  public record Session(FdeStore.Fde fde, Optional<Actor> principal) {}
+
+  /**
+   * What login session {@code token} stands for on {@code lane}: the one way a door turns a session
+   * it was handed into the person it was opened for, and that person into its principal. Empty when
+   * the token names no live session, or this box knows no such person.
+   */
+  public Optional<Session> session(AuthSessionStore sessions, String token, Actor.Lane lane) {
+    return sessions
+        .validate(token)
+        .flatMap(
+            session -> Optional.ofNullable(roster).flatMap(known -> known.byId(session.fdeId())))
+        .map(fde -> new Session(fde, principal(Credential.person(fde.handle(), lane))));
   }
 
   /**

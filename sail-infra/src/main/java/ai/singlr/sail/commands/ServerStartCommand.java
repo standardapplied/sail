@@ -240,8 +240,7 @@ public final class ServerStartCommand implements Runnable {
     var roster = new FdeStore(db);
     var roles = new RoleRule(BoxIdentity::config, roster);
     var auth =
-        new SessionAwareAuth(
-            new AuthSessionStore(db), roster, roles, new TokenAuth(tokenStore, roles));
+        new SessionAwareAuth(new AuthSessionStore(db), roles, new TokenAuth(tokenStore, roles));
     var passkeyHandler =
         new WebauthnAuthHandler(
             passkeyService, enrollment, auth, configured ? webauthn.origins() : null);

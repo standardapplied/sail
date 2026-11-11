@@ -19,7 +19,6 @@ import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
-import ai.singlr.sail.identity.RoleRule.Credential;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -128,8 +127,7 @@ public final class SyncServerCommand implements Callable<Integer> {
       Supplier<SyncConfig> box)
       throws IOException {
     var db = converged.db();
-    var roster = new FdeStore(db);
-    var principal = principal(db, token, roster, new RoleRule(box, roster));
+    var principal = principal(db, token, new RoleRule(box, new FdeStore(db)));
     if (principal.isEmpty()) {
       System.err.println(REFUSED);
       return 1;
@@ -231,13 +229,12 @@ public final class SyncServerCommand implements Callable<Integer> {
    * The FDE {@code token}'s session was opened for, as {@link RoleRule} resolves it on the sync
    * lane; empty when there is no token, it is not a live session, or its FDE is disabled or gone.
    */
-  private static Optional<Actor> principal(
-      Sqlite db, String token, FdeStore roster, RoleRule roles) {
-    return Strings.isBlank(token)
-        ? Optional.empty()
-        : new AuthSessionStore(db)
-            .validate(token)
-            .flatMap(session -> roster.byId(session.fdeId()))
-            .flatMap(fde -> roles.principal(Credential.person(fde.handle(), Actor.Lane.SYNC)));
+  private static Optional<Actor> principal(Sqlite db, String token, RoleRule roles) {
+    if (Strings.isBlank(token)) {
+      return Optional.empty();
+    }
+    return roles
+        .session(new AuthSessionStore(db), token, Actor.Lane.SYNC)
+        .flatMap(RoleRule.Session::principal);
   }
 }

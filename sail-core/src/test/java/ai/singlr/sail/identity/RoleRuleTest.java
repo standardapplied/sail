@@ -10,10 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.RoleRule.Credential;
+import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
@@ -223,6 +225,27 @@ class RoleRuleTest {
         Optional.of(new Actor("raj", Role.ADMIN, Actor.Lane.API)),
         rule.principal(Credential.person("raj", Actor.Lane.API)),
         "a person's own credential carries their whole role");
+  }
+
+  @Test
+  void aSessionIsItsPersonWithThePrincipalTheRuleGivesThemOrNothing() {
+    var rule = new RoleRule(() -> MAIN, roster);
+    var sessions = new AuthSessionStore(db);
+    var mady = sessions.create(roster.byHandle("mady").orElseThrow().id(), Duration.ofMinutes(1));
+
+    assertEquals(Optional.empty(), rule.session(sessions, "sess_bogus", Actor.Lane.API));
+    assertEquals(
+        Optional.of(new Actor("mady", Role.MEMBER, Actor.Lane.SYNC)),
+        rule.session(sessions, mady.token(), Actor.Lane.SYNC).orElseThrow().principal());
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'mady'");
+    assertEquals(
+        Optional.empty(),
+        rule.session(sessions, mady.token(), Actor.Lane.API).orElseThrow().principal(),
+        "a disabled FDE's session is its person, refused a principal");
+    assertEquals(
+        Optional.empty(),
+        new RoleRule(() -> MAIN, null).session(sessions, mady.token(), Actor.Lane.API),
+        "a box that keeps no roster knows no session's person");
   }
 
   @Test
