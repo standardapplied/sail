@@ -25,10 +25,10 @@ interface RouteTable {
     record Match<H>(Route<H> route, Map<String, String> params) implements Served<H> {}
 
     /**
-     * The path matches {@code pattern}, filling {@code params}, but no route of it serves the
-     * request's method.
+     * The path matches a pattern, filling {@code params}, but no route of it serves the request's
+     * method.
      */
-    record MethodNotAllowed<H>(String pattern, Map<String, String> params) implements Served<H> {}
+    record MethodNotAllowed<H>(Map<String, String> params) implements Served<H> {}
 
     /** No route's pattern matches the path. */
     record NotFound<H>() implements Served<H> {}
@@ -47,7 +47,7 @@ interface RouteTable {
             .filter(route -> route.pattern().equals(first.pattern()) && route.serves(method))
             .findFirst()
             .<Served<H>>map(route -> new Served.Match<>(route, params.get()))
-            .orElseGet(() -> new Served.MethodNotAllowed<>(first.pattern(), params.get()));
+            .orElseGet(() -> new Served.MethodNotAllowed<>(params.get()));
       }
     }
     return new Served.NotFound<>();

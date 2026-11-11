@@ -108,7 +108,7 @@ class RouteTest {
         new RouteTable.Served.Match<>(update, Map.of("id", "auth")),
         RouteTable.serve(routes, "PUT", "/v1/specs/auth"));
     assertEquals(
-        new RouteTable.Served.MethodNotAllowed<>("/v1/specs/board", Map.of()),
+        new RouteTable.Served.MethodNotAllowed<>(Map.of()),
         RouteTable.serve(routes, "PUT", "/v1/specs/board"),
         "a literal answers for its own methods, not the placeholder beside it");
     assertEquals(

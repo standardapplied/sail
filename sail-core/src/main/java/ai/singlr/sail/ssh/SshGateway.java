@@ -49,13 +49,13 @@ public final class SshGateway {
   static final Duration SESSION_TTL = Duration.ofMinutes(10);
 
   /** Commands the loopback API authorizes per request, as the session's FDE. */
-  public static final Set<String> API_COMMANDS = Set.of("spec", "events");
+  private static final Set<String> API_COMMANDS = Set.of("spec", "events");
 
   /** The {@code agent} verbs that talk to the loopback API, as the session's FDE. */
-  public static final Set<String> AGENT_API_VERBS = Set.of("stream", "sessions", "review");
+  private static final Set<String> AGENT_API_VERBS = Set.of("stream", "sessions", "review");
 
   /** Database-direct administration commands; the gateway admits those who may manage people. */
-  public static final Set<String> ADMIN_COMMANDS = Set.of("fde");
+  private static final Set<String> ADMIN_COMMANDS = Set.of("fde");
 
   /**
    * Database-direct sync RPC. The gateway admits any active FDE — a {@code viewer} may open a

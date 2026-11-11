@@ -27,6 +27,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BiFunction;
 
 /**
  * Routes requests arriving over the local Unix-domain socket to a deliberately small surface: event
@@ -108,13 +109,13 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
             unserved(WHOAMI, "whoami accepts GET"),
             route(POST, EVENTS, journal, this::events),
             unserved(EVENTS, "events accepts POST"),
-            route(GET, RUN_MESSAGES, reads, aRunsOwn(this::runMessages)),
+            route(GET, RUN_MESSAGES, Gate.RUNS_OWN, aRunsOwn(this::runMessages)),
             route(POST, RUN_MESSAGES, Gate.RUNS_OWN, aRunsOwn(this::runAck)),
             route(
                 Route.ANY,
                 RUN_MESSAGES,
-                Gate.UNSERVED,
-                aRunsOwn(answering("run messages accepts GET or POST"))),
+                Gate.RUNS_OWN,
+                aRunsOwn((request, run) -> problem(405, "run messages accepts GET or POST"))),
             route(POST, RUN_SESSION, journal, aRoomsOrARunsOwn(this::runSession)),
             route(
                 Route.ANY,
@@ -207,14 +208,17 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
    * {@code handler} for a run, whose inbox the route is; the box credential has no run to deliver
    * to, which it hears before what its method is.
    */
-  private static Handler aRunsOwn(Handler handler) {
+  private static Handler aRunsOwn(
+      BiFunction<LocalApiRequest, RunStore.RunRow, ApiResponse> handler) {
     return (request, caller, path) ->
-        caller instanceof Caller.Box
-            ? problem(
-                403,
-                "Run message delivery requires a run credential; the box credential has no run"
-                    + " to deliver to.")
-            : handler.handle(request, caller, path);
+        switch (caller) {
+          case Caller.Box _ ->
+              problem(
+                  403,
+                  "Run message delivery requires a run credential; the box credential has no run"
+                      + " to deliver to.");
+          case Caller.Run(var run, _) -> handler.apply(request, run);
+        };
   }
 
   /**
@@ -657,19 +661,17 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
    * run names the spec. A run reads its undelivered inbox here; the box has none ({@link
    * #aRunsOwn}).
    */
-  private ApiResponse runMessages(
-      LocalApiRequest request, Caller caller, Map<String, String> path) {
-    return ApiResponse.from(operations.runInbox(((Caller.Run) caller).run().id()));
+  private ApiResponse runMessages(LocalApiRequest request, RunStore.RunRow run) {
+    return ApiResponse.from(operations.runInbox(run.id()));
   }
 
   /**
    * A run acknowledges exactly the messages it showed ({@code delivered=<id>[,<id>...]}),
    * idempotently.
    */
-  private ApiResponse runAck(LocalApiRequest request, Caller caller, Map<String, String> path) {
+  private ApiResponse runAck(LocalApiRequest request, RunStore.RunRow run) {
     return ApiResponse.from(
-        operations.ackRunMessages(
-            ((Caller.Run) caller).run().id(), deliveredIds(request.form().get("delivered"))));
+        operations.ackRunMessages(run.id(), deliveredIds(request.form().get("delivered"))));
   }
 
   /**

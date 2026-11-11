@@ -140,10 +140,6 @@ class OneDecisionSweepTest {
         API + "Event$Publisher#of", "fact: the role and lane an event's publisher acted on");
     allowed.put(API + "LocalApiRouter#events", "fact: only a run credential has a run to narrate");
     allowed.put(
-        API + "LocalApiRouter#runMessages", "fact: only a run credential has an inbox to read");
-    allowed.put(
-        API + "LocalApiRouter#runAck", "fact: only a run credential has an inbox to acknowledge");
-    allowed.put(
         API + "LocalApiRouter#aRunsOwn", "fact: the box credential has no run to deliver to");
     allowed.put(
         API + "LocalApiRouter#aRoomsOrARunsOwn",

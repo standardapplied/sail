@@ -50,7 +50,6 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   private static final String PUT = "PUT";
   private static final String DELETE = "DELETE";
 
-  /** A route of this method serves every method. */
   private static final String PROJECT = "/v1/projects/{project}";
 
   private static final String SPEC = "spec";
@@ -130,10 +129,6 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     var journal = Gate.JOURNAL;
     var unserved = Gate.UNSERVED;
     var box = Gate.box(operations::boxFde);
-    var serving = Gate.decides(Action.SERVE);
-    var restoring = Gate.decides(Action.RESTORE);
-    var seating = Gate.decides(Action.DISPATCH);
-    var runOperated = Gate.decides(Action.OPERATE_RUN);
     return List.of(
         route(GET, "/v1/health", Gate.unauthenticated("the liveness probe"), this::health),
         route(Route.ANY, "/v1/health", unserved, ApiRouter::absent),
@@ -187,8 +182,12 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             "/v1/rooms/{room}/members",
             reads,
             call -> ApiResponse.from(operations.roomMembers(call.param(ROOM)))),
-        route(POST, "/v1/rooms/{room}/members", seating, this::addRoomMember),
-        route(DELETE, "/v1/rooms/{room}/members", seating, this::removeRoomMember),
+        route(POST, "/v1/rooms/{room}/members", Gate.decides(Action.DISPATCH), this::addRoomMember),
+        route(
+            DELETE,
+            "/v1/rooms/{room}/members",
+            Gate.decides(Action.DISPATCH),
+            this::removeRoomMember),
         route(Route.ANY, "/v1/rooms/{room}/invite", unserved, ApiRouter::retiredInvite),
         route(GET, "/v1/rooms/{room}/messages", reads, this::roomMessages),
         route(POST, "/v1/rooms/{room}/messages", journal, this::postRoomMessage),
@@ -202,9 +201,13 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             "/v1/runs/{run}",
             reads,
             call -> ApiResponse.from(operations.run(call.param("run")))),
-        route(GET, "/v1/runs/{run}/log", runOperated, this::runLog),
+        route(GET, "/v1/runs/{run}/log", Gate.decides(Action.OPERATE_RUN), this::runLog),
         route(POST, "/v1/runs/{run}/stop", Gate.decides(Action.OPERATE_RUN), this::stopRun),
-        route(Route.ANY, "/v1/runs/{run}/stream", runOperated, this::streamRunLog),
+        route(
+            Route.ANY,
+            "/v1/runs/{run}/stream",
+            Gate.decides(Action.OPERATE_RUN),
+            this::streamRunLog),
         route(GET, "/v1/projects", reads, call -> ApiResponse.from(operations.projects())),
         route(POST, "/v1/projects", journal, this::createProject),
         route(GET, PROJECT, reads, call -> ApiResponse.from(operations.project(call.project()))),
@@ -230,19 +233,27 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             PROJECT + "/snapshots",
             reads,
             call -> ApiResponse.from(operations.snapshots(call.project()))),
-        route(DELETE, PROJECT + "/snapshots/{label}", restoring, this::deleteSnapshot),
-        route(POST, PROJECT + "/snapshots/{label}/restore", restoring, this::restoreSnapshot),
+        route(
+            DELETE,
+            PROJECT + "/snapshots/{label}",
+            Gate.decides(Action.RESTORE),
+            this::deleteSnapshot),
+        route(
+            POST,
+            PROJECT + "/snapshots/{label}/restore",
+            Gate.decides(Action.RESTORE),
+            this::restoreSnapshot),
         route(GET, PROJECT + "/files", reads, this::listFiles),
         route(GET, PROJECT + "/files/{path...}", reads, this::readFile),
         route(PUT, PROJECT + "/files/{path...}", journal, this::putFile),
         route(DELETE, PROJECT + "/files/{path...}", journal, this::removeFile),
         route(Route.ANY, PROJECT + "/files", unserved, this::unservedFile),
         route(Route.ANY, PROJECT + "/files/{path...}", unserved, this::unservedFile),
-        route(POST, PROJECT + "/serve", serving, this::serve),
+        route(POST, PROJECT + "/serve", Gate.decides(Action.SERVE), this::serve),
         route(
             DELETE,
             PROJECT + "/serve",
-            serving,
+            Gate.decides(Action.SERVE),
             call -> ApiResponse.ok(operations.stack().stop(call.project()))),
         route(
             GET,
@@ -312,7 +323,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     rateLimits.require(exchange);
     return switch (served) {
       case Served.NotFound<Handler> none -> throw notFound();
-      case Served.MethodNotAllowed<Handler>(var pattern, var params) -> {
+      case Served.MethodNotAllowed<Handler>(var params) -> {
         requireValidNames(params);
         throw methodNotAllowed();
       }
