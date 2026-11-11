@@ -88,7 +88,8 @@ class ConflictOperationsTest {
     try (var link =
         SyncBox.connect(
             Acting.by(
-                Actor.sync("node", Role.ADMIN), () -> main.server(Actor.sync("node", Role.ADMIN))),
+                new Actor("node", Role.ADMIN, Actor.Lane.SYNC),
+                () -> main.server(new Actor("node", Role.ADMIN, Actor.Lane.SYNC))),
             node)) {
       for (var type : List.of("spec", "room")) {
         link.reconcile(type, replicas.get(type));
@@ -384,7 +385,8 @@ class ConflictOperationsTest {
     try (var link =
         SyncBox.connect(
             Acting.by(
-                Actor.sync("node", Role.ADMIN), () -> main.server(Actor.sync("node", Role.ADMIN))),
+                new Actor("node", Role.ADMIN, Actor.Lane.SYNC),
+                () -> main.server(new Actor("node", Role.ADMIN, Actor.Lane.SYNC))),
             node)) {
       link.reconcile("spec", replicas.get("spec"));
       wire = link.log().toString();
@@ -659,7 +661,8 @@ class ConflictOperationsTest {
 
   @Test
   void aScopedReaderIsShownOnlyTheConflictsOfItsProjects() {
-    var ofProj = Actor.cliOperator("sam").withScope(ProjectScope.of(List.of("proj")));
+    var ofProj =
+        new Actor("sam", Role.ADMIN, Actor.Lane.CLI).withScope(ProjectScope.of(List.of("proj")));
     var rooms = new RoomStore(node.db);
     var messages = new MessageStore(node.db);
     var reviews = new ReviewStore(node.db);

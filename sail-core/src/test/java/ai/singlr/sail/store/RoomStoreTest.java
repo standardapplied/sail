@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -99,7 +100,7 @@ class RoomStoreTest {
     var created = rooms.findById("auth").orElseThrow();
     var firstRev = rooms.latestRev("auth");
 
-    Actor.run(Actor.cliOperator("sam"), () -> rooms.updateRoster("auth", null));
+    Actor.run(new Actor("sam", Role.ADMIN, Actor.Lane.CLI), () -> rooms.updateRoster("auth", null));
     var afterRoster = rooms.findById("auth").orElseThrow();
     assertNull(afterRoster.roster());
     assertEquals(created.wake(), afterRoster.wake(), "a roster write never touches wake");
@@ -130,12 +131,12 @@ class RoomStoreTest {
   void aDeleteAndARestoreEachNameTheirOwnAuthor() {
     rooms.create(room("auth"));
 
-    Actor.run(Actor.cliOperator("mady"), () -> rooms.delete("auth"));
+    Actor.run(new Actor("mady", Role.ADMIN, Actor.Lane.CLI), () -> rooms.delete("auth"));
     var tombstone = new ChangeLog(db).head("room", "auth").orElseThrow();
     assertEquals("mady", tombstone.actor());
     assertEquals("mady", YamlUtil.parseMap(tombstone.snapshot()).get("updated_by"));
 
-    Actor.run(Actor.cliOperator("raj"), () -> rooms.restoreDeleted("auth"));
+    Actor.run(new Actor("raj", Role.ADMIN, Actor.Lane.CLI), () -> rooms.restoreDeleted("auth"));
     assertEquals("raj", rooms.findById("auth").orElseThrow().updatedBy());
     assertEquals("raj", new ChangeLog(db).head("room", "auth").orElseThrow().actor());
   }

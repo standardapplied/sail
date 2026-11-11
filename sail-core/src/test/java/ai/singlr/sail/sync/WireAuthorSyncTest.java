@@ -28,7 +28,7 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class WireAuthorSyncTest {
 
-  private static final Actor CAROL = Actor.cliOperator("carol");
+  private static final Actor CAROL = new Actor("carol", Role.ADMIN, Actor.Lane.CLI);
   private static final Actor MACHINE = new Actor(null, Role.MEMBER, Actor.Lane.API);
 
   @TempDir Path tempDir;
@@ -114,7 +114,7 @@ class WireAuthorSyncTest {
   }
 
   private SyncSession.TypeReport round(SyncBox box, Role role) throws IOException {
-    try (var link = SyncBox.connect(main.server(Actor.sync(box.id, role)), box)) {
+    try (var link = SyncBox.connect(main.server(new Actor(box.id, role, Actor.Lane.SYNC)), box)) {
       return link.reconcile("spec", SyncedEntities.replicas(box.db, box.id, box.id).get("spec"));
     }
   }

@@ -57,8 +57,8 @@ class SyncTransportTest {
   @BeforeEach
   void setUp() {
     main = new SyncBox(tempDir, "main");
-    nodeA = new SyncBox(tempDir, "A").syncsAs(Actor.sync("A", Role.ADMIN));
-    nodeB = new SyncBox(tempDir, "B").syncsAs(Actor.sync("B", Role.ADMIN));
+    nodeA = new SyncBox(tempDir, "A").syncsAs(new Actor("A", Role.ADMIN, Actor.Lane.SYNC));
+    nodeB = new SyncBox(tempDir, "B").syncsAs(new Actor("B", Role.ADMIN, Actor.Lane.SYNC));
   }
 
   private void assertConverged() {
@@ -802,20 +802,21 @@ class SyncTransportTest {
   @Test
   void aReadOnlyFdeMayPullButItsPushIsDenied() throws Exception {
     main.specs.create(spec("board", "Shared", "pending"));
-    var readOnly = main.server(Actor.sync("A", Role.VIEWER));
+    var readOnly = main.server(new Actor("A", Role.VIEWER, Actor.Lane.SYNC));
     try (var link = SyncBox.connect(readOnly, nodeA)) {
       assertEquals(1, link.reconcile("spec", nodeA.replica).report().pulled());
     }
     assertEquals("Shared", nodeA.specs.findById("board").orElseThrow().title());
     nodeA.create(spec("mine", "Local only", "pending"));
-    try (var link = SyncBox.connect(main.server(Actor.sync("A", Role.VIEWER)), nodeA)) {
+    try (var link =
+        SyncBox.connect(main.server(new Actor("A", Role.VIEWER, Actor.Lane.SYNC)), nodeA)) {
       var report = link.reconcile("spec", nodeA.replica);
       assertNull(report.failure());
       assertEquals("mine", report.denials().getFirst().id());
     }
     assertTrue(main.specs.findById("mine").isEmpty(), "the read-only push never reached main");
     nodeA.specs.delete("mine");
-    nodeA.syncsAs(Actor.sync("A", Role.VIEWER));
+    nodeA.syncsAs(new Actor("A", Role.VIEWER, Actor.Lane.SYNC));
     assertConverged();
   }
 
@@ -834,7 +835,7 @@ class SyncTransportTest {
             main.db,
             "main",
             null,
-            Actor.sync("A", Role.MEMBER),
+            new Actor("A", Role.MEMBER, Actor.Lane.SYNC),
             () -> roster,
             SyncTransitionSink.NONE,
             "1.0.0");
@@ -849,7 +850,7 @@ class SyncTransportTest {
         "ZGVwbG95",
         ai.singlr.sail.store.ContentFixtures.text(mainFiles, "acme", "scripts/deploy.sh"));
     assertEquals(0L, new SyncState(nodeA.db).checkpoint("main", "file"));
-    nodeA.syncsAs(Actor.sync("A", Role.MEMBER));
+    nodeA.syncsAs(new Actor("A", Role.MEMBER, Actor.Lane.SYNC));
     assertConverged();
   }
 }

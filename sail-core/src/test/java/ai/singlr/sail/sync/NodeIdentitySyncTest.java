@@ -31,8 +31,8 @@ import org.junit.jupiter.api.Test;
  */
 class NodeIdentitySyncTest {
 
-  private static final Actor ADA = Actor.sync("ada", Role.MEMBER);
-  private static final Actor UDAY = Actor.sync("uday", Role.MEMBER);
+  private static final Actor ADA = new Actor("ada", Role.MEMBER, Actor.Lane.SYNC);
+  private static final Actor UDAY = new Actor("uday", Role.MEMBER, Actor.Lane.SYNC);
 
   private SyncBox main;
   private SyncBox ada;

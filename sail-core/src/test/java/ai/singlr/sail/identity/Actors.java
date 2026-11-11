@@ -31,10 +31,10 @@ public final class Actors {
   public static final Actor AGENT = Actor.agentPrincipal(AGENT_HANDLE, OWNER);
   public static final Actor OTHERS_AGENT = Actor.agentPrincipal("claude/" + OTHER_RUN, OTHER);
   public static final Actor ROOM = Actor.roomPrincipal(ROOM_HANDLE, OWNER);
-  public static final Actor OWNER_SYNC = Actor.sync(OWNER, Role.MEMBER);
-  public static final Actor OTHER_SYNC = Actor.sync(OTHER, Role.MEMBER);
-  public static final Actor ADMIN_SYNC = Actor.sync(OTHER, Role.ADMIN);
-  public static final Actor VIEWER_SYNC = Actor.sync(OWNER, Role.VIEWER);
+  public static final Actor OWNER_SYNC = new Actor(OWNER, Role.MEMBER, Actor.Lane.SYNC);
+  public static final Actor OTHER_SYNC = new Actor(OTHER, Role.MEMBER, Actor.Lane.SYNC);
+  public static final Actor ADMIN_SYNC = new Actor(OTHER, Role.ADMIN, Actor.Lane.SYNC);
+  public static final Actor VIEWER_SYNC = new Actor(OWNER, Role.VIEWER, Actor.Lane.SYNC);
   public static final Actor MAIN = Actor.main(OTHER);
   public static final Actor SYSTEM = Actor.system();
 

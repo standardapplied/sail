@@ -12,6 +12,7 @@ import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
@@ -90,7 +91,8 @@ class RoomsReadTest {
   private void readAsEveryFde(SailOperations ops) {
     for (var handle : List.of("uday", "rajesh")) {
       for (var project : new String[] {"acme", "nautilus", null}) {
-        var result = Actor.call(Actor.cliOperator(handle), () -> ops.rooms(project));
+        var result =
+            Actor.call(new Actor(handle, Role.ADMIN, Actor.Lane.CLI), () -> ops.rooms(project));
         assertTrue(result instanceof Result.Success<RoomsListResponse>, result.toString());
         assertEquals(List.of(), ((Result.Success<RoomsListResponse>) result).value().rooms());
       }

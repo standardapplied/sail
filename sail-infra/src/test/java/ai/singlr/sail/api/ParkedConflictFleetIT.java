@@ -63,7 +63,7 @@ class ParkedConflictFleetIT {
         pushedButNeverAcknowledged.put(
             "last_activity_at", Snapshots.millis(Instant.parse("2000-01-01T00:00:00Z")));
         Actor.call(
-            Actor.sync("mady", Role.MEMBER),
+            new Actor("mady", Role.MEMBER, Actor.Lane.SYNC),
             () ->
                 mainReplica.commit(
                     runId, pushedButNeverAcknowledged, mainReplica.currentRev(runId)));

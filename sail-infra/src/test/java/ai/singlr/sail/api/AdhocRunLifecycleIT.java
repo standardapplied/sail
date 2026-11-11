@@ -20,6 +20,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ReviewStore;
@@ -49,7 +50,7 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
 
   private static final String CONTAINER = "sail-it-adhoc-run";
   private static final String HANDLE = "it-node";
-  private static final Actor OPERATOR = Actor.cliOperator(HANDLE);
+  private static final Actor OPERATOR = new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI);
 
   private static final String FAKE_AGENT =
       """

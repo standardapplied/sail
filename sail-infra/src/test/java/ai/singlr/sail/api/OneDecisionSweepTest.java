@@ -38,16 +38,18 @@ import org.junit.jupiter.api.Test;
  * fact applies. Read from the compiled classes of every module, a member at a time, a lambda
  * counted as the member it is written in, it sees: a call of {@link Actor#isAdmin}, {@link
  * Actor#isSail}, {@link Actor#role}, {@link Actor#lane}, {@link Actor#agentLane}, {@link
- * Actor#roomLane}, {@link Actor#scope} or {@link Actor#actsFor}; of {@link Role#fromAttribute},
- * {@link Role#cappedBy} or a role's order; a {@link Role} constant (so an {@code Actor} built with
- * a role literal), a {@code switch} over a role, a type check of one, and any call that returns
- * one; {@code RunRow#readOnlyLane}; and a type check of the socket's run or box caller, each as a
- * call, a field, a type check, a class constant, or what an {@code invokedynamic} hands its
- * bootstrap (a method reference, the types and constants a pattern {@code switch} tests). It cannot
- * see a role, a lane or a scope read as data: in SQL, from a map, or through a type that hides it,
- * so a filter inside a query takes its scope from {@code Access.audience}. {@code Actor}, {@code
- * Role} and the socket's callers define what is read, so their own members are not swept. An entry
- * that no longer matches a read fails too, so the list shrinks as the later specs land.
+ * Actor#roomLane}, {@link Actor#scope} or {@link Actor#actsFor}; of a factory that mints a
+ * principal with its role ({@link Actor#agentPrincipal}, {@link Actor#roomPrincipal}), so a door
+ * that binds one instead of asking {@code RoleRule} is seen; of {@link Role#fromAttribute}, {@link
+ * Role#cappedBy} or a role's order; a {@link Role} constant (so an {@code Actor} built with a role
+ * literal), a {@code switch} over a role, a type check of one, and any call that returns one;
+ * {@code RunRow#readOnlyLane}; and a type check of the socket's run or box caller, each as a call,
+ * a field, a type check, a class constant, or what an {@code invokedynamic} hands its bootstrap (a
+ * method reference, the types and constants a pattern {@code switch} tests). It cannot see a role,
+ * a lane or a scope read as data: in SQL, from a map, or through a type that hides it, so a filter
+ * inside a query takes its scope from {@code Access.audience}. {@code Actor}, {@code Role} and the
+ * socket's callers define what is read, so their own members are not swept. An entry that no longer
+ * matches a read fails too, so the list shrinks as the later specs land.
  */
 class OneDecisionSweepTest {
 
@@ -65,7 +67,17 @@ class OneDecisionSweepTest {
   private static final Map<String, Set<String>> READS =
       Map.of(
           ACTOR,
-          Set.of("isAdmin", "isSail", "role", "lane", "agentLane", "roomLane", "scope", "actsFor"),
+          Set.of(
+              "isAdmin",
+              "isSail",
+              "role",
+              "lane",
+              "agentLane",
+              "roomLane",
+              "scope",
+              "actsFor",
+              "agentPrincipal",
+              "roomPrincipal"),
           ROLE,
           Set.of("fromAttribute", "cappedBy", "ordinal", "compareTo"),
           RUN_ROW,
@@ -178,6 +190,7 @@ class OneDecisionSweepTest {
               leaky + "scope",
               leaky + "actsFor",
               leaky + "elevated",
+              leaky + "minted",
               leaky + "viaAttribute",
               leaky + "viaSwitch",
               leaky + "viaPattern",
@@ -234,6 +247,10 @@ class OneDecisionSweepTest {
 
     Actor elevated(String handle) {
       return new Actor(handle, Role.ADMIN, Actor.Lane.CLI);
+    }
+
+    Actor minted(String handle) {
+      return Actor.agentPrincipal(handle, "ada");
     }
 
     Object viaAttribute(String attribute) {

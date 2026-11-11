@@ -36,6 +36,7 @@ import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ProjectStore;
@@ -444,7 +445,7 @@ class DispatchCommandWiringTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    Actor.cliOperator(HANDLE),
+                    new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
                     () -> operations.dispatching().dispatch("acme", request, HANDLE)));
 
     assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
@@ -487,7 +488,7 @@ class DispatchCommandWiringTest {
             ApiException.class,
             () ->
                 Actor.call(
-                    Actor.cliOperator(HANDLE),
+                    new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
                     () -> operations.dispatching().dispatch("acme", request(), HANDLE)));
 
     assertTrue(ex.getMessage().contains("roster"));

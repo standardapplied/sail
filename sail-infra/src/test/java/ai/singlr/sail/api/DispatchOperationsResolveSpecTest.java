@@ -16,6 +16,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -34,7 +35,7 @@ class DispatchOperationsResolveSpecTest {
 
   private static final String PROJECT = "acme-health";
   private static final String FDE = "me";
-  private static final Actor OPERATOR = Actor.cliOperator(FDE);
+  private static final Actor OPERATOR = new Actor(FDE, Role.ADMIN, Actor.Lane.CLI);
 
   @TempDir Path dbDir;
 

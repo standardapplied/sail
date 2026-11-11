@@ -36,7 +36,7 @@ class FiledElsewhereTest {
   private static final Actor SCOPED =
       new Actor("uday", Role.MEMBER, Actor.Lane.API).withScope(ProjectScope.of(List.of("acme")));
   private static final Actor SCOPED_PUSHER =
-      Actor.sync("uday", Role.MEMBER).withScope(ProjectScope.of(List.of("acme")));
+      new Actor("uday", Role.MEMBER, Actor.Lane.SYNC).withScope(ProjectScope.of(List.of("acme")));
 
   private Sqlite db;
   private SpecStore specs;

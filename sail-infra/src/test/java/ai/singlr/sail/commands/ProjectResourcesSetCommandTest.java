@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -180,7 +181,8 @@ class ProjectResourcesSetCommandTest {
                             disk: 50GB
                           """)));
     }
-    return new ProjectMutations(new ProjectCatalog(database), () -> Actor.cliOperator("uday"));
+    return new ProjectMutations(
+        new ProjectCatalog(database), () -> new Actor("uday", Role.ADMIN, Actor.Lane.CLI));
   }
 
   private static ProjectDefinition held(ProjectMutations catalog) {

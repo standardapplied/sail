@@ -26,6 +26,7 @@ import ai.singlr.sail.engine.WorkPrompt;
 import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SpecStore;
 import java.nio.file.Path;
@@ -126,7 +127,7 @@ class ProjectSkillLaunchTest {
     return assertInstanceOf(
         DispatchOperations.Dispatched.class,
         Actor.call(
-            Actor.cliOperator(HANDLE),
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
             () ->
                 loop.operations.dispatch(
                     PROJECT,
@@ -212,7 +213,7 @@ class ProjectSkillLaunchTest {
         ApiException.class,
         () ->
             Actor.call(
-                Actor.cliOperator(HANDLE),
+                new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
                 () ->
                     loop.operations.dispatch(
                         PROJECT,
@@ -455,7 +456,7 @@ class ProjectSkillLaunchTest {
 
     var adhoc =
         Actor.call(
-            Actor.cliOperator(HANDLE),
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
             () ->
                 loop.operations.startAdhoc(
                     PROJECT,
@@ -470,7 +471,8 @@ class ProjectSkillLaunchTest {
 
     var room =
         Actor.call(
-            Actor.cliOperator(HANDLE), () -> loop.operations.startRoomRun(PROJECT, "auth", HANDLE));
+            new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI),
+            () -> loop.operations.startRoomRun(PROJECT, "auth", HANDLE));
 
     assertEquals("room", loop.runs.findById(room).orElseThrow().role());
     assertFalse(task(room).contains("spec-board"), task(room));

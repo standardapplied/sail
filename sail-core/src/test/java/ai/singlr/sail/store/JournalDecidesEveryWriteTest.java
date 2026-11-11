@@ -502,7 +502,8 @@ class JournalDecidesEveryWriteTest {
   @Test
   void aPushedRevisionWasDecidedAtMainsCommitAndIsNotDecidedAgain() {
     Acting.by(
-        Actor.sync("ada", Role.MEMBER), () -> box.specs.updateStatus("theirs", SpecStatus.DONE));
+        new Actor("ada", Role.MEMBER, Actor.Lane.SYNC),
+        () -> box.specs.updateStatus("theirs", SpecStatus.DONE));
 
     assertEquals(SpecStatus.DONE, box.specs.findById("theirs").orElseThrow().status());
   }

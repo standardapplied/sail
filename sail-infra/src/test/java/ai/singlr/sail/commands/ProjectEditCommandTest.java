@@ -17,6 +17,7 @@ import ai.singlr.sail.config.ProjectDefinition.Section;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -129,12 +130,13 @@ class ProjectEditCommandTest {
   void anEditWritesEachSectionItChangesAndAnEditThatChangesNothingWritesNothing(@TempDir Path dir) {
     var mutations =
         new ProjectMutations(
-            new ProjectCatalog(dir.resolve("sail.db")), () -> Actor.cliOperator("uday"));
+            new ProjectCatalog(dir.resolve("sail.db")),
+            () -> new Actor("uday", Role.ADMIN, Actor.Lane.CLI));
     mutations
         .catalog()
         .create(
             TestDefinitions.yaml("name: acme\nimage: ubuntu/24.04\ndescription: Storefront\n"),
-            Actor.cliOperator("uday"));
+            new Actor("uday", Role.ADMIN, Actor.Lane.CLI));
     Editor retag =
         file -> {
           Files.writeString(file, Files.readString(file).replace("ubuntu/24.04", "debian/12"));
@@ -158,8 +160,11 @@ class ProjectEditCommandTest {
   void aRefusedEditKeepsWhatWasTypedAndSaysWhere(@TempDir Path dir) throws Exception {
     var mutations =
         new ProjectMutations(
-            new ProjectCatalog(dir.resolve("sail.db")), () -> Actor.cliOperator("uday"));
-    mutations.catalog().create(TestDefinitions.named("acme"), Actor.cliOperator("uday"));
+            new ProjectCatalog(dir.resolve("sail.db")),
+            () -> new Actor("uday", Role.ADMIN, Actor.Lane.CLI));
+    mutations
+        .catalog()
+        .create(TestDefinitions.named("acme"), new Actor("uday", Role.ADMIN, Actor.Lane.CLI));
     var opened = new ArrayList<Path>();
     Editor broken =
         file -> {

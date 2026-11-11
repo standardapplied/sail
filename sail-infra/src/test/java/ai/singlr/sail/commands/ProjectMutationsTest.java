@@ -123,7 +123,9 @@ class ProjectMutationsTest {
 
   @Test
   void aWriterTheJournalWouldRefuseIsRefusedBeforeTheCommandChangesAnything() {
-    mutations().catalog().create(TestDefinitions.named("acme"), Actor.cliOperator("uday"));
+    mutations()
+        .catalog()
+        .create(TestDefinitions.named("acme"), new Actor("uday", Role.ADMIN, Actor.Lane.CLI));
     var viewer =
         new ProjectMutations(
             new ProjectCatalog(dir.resolve("sail.db")),
@@ -136,7 +138,8 @@ class ProjectMutationsTest {
 
   private ProjectMutations mutations() {
     return new ProjectMutations(
-        new ProjectCatalog(dir.resolve("sail.db")), () -> Actor.cliOperator("uday"));
+        new ProjectCatalog(dir.resolve("sail.db")),
+        () -> new Actor("uday", Role.ADMIN, Actor.Lane.CLI));
   }
 
   @Test

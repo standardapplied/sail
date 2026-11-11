@@ -300,7 +300,7 @@ class OneDecisionTest {
             db,
             "main",
             null,
-            Actor.sync("ada", Role.MEMBER),
+            new Actor("ada", Role.MEMBER, Actor.Lane.SYNC),
             FdeRoster.EMPTY,
             SyncTransitionSink.NONE,
             "1.0.0");

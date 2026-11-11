@@ -129,7 +129,7 @@ class AccessScenarioTest {
 
   @Test
   void row4ClientsPushOfABetaSpecIsInNoProjectItIsGranted() {
-    var pushing = Actor.sync("client", Role.MEMBER).withScope(CLIENT.scope());
+    var pushing = new Actor("client", Role.MEMBER, Actor.Lane.SYNC).withScope(CLIENT.scope());
     var revised = edited("b1", "title", "pushed");
 
     assertEquals(

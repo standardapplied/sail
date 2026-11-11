@@ -491,7 +491,7 @@ class RoomWakeLaunchTest {
     try (var main = new SyncBox("main");
         var link =
             SyncBox.connect(
-                main.server(Actor.sync(HANDLE, Role.MEMBER)),
+                main.server(new Actor(HANDLE, Role.MEMBER, Actor.Lane.SYNC)),
                 db,
                 "uday-box",
                 SyncWire.MAX_FRAME,
@@ -505,7 +505,8 @@ class RoomWakeLaunchTest {
       assertEquals(HANDLE, new RunStore(main.db).findById(runId).orElseThrow().owner());
       assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
       try (var box =
-          SyncBox.opening(db.path(), "uday-box").syncsAs(Actor.sync(HANDLE, Role.MEMBER))) {
+          SyncBox.opening(db.path(), "uday-box")
+              .syncsAs(new Actor(HANDLE, Role.MEMBER, Actor.Lane.SYNC))) {
         SyncBox.assertConverged(main, box);
       }
     }

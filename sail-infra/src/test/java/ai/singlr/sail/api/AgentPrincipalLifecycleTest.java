@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ReviewStore;
@@ -49,7 +50,7 @@ import org.junit.jupiter.api.io.TempDir;
 class AgentPrincipalLifecycleTest {
 
   private static final String HANDLE = "uday";
-  private static final Actor ADMIN = Actor.cliOperator(HANDLE);
+  private static final Actor ADMIN = new Actor(HANDLE, Role.ADMIN, Actor.Lane.CLI);
 
   private static final String RUNNING_JSON =
       """
@@ -309,7 +310,7 @@ class AgentPrincipalLifecycleTest {
 
     var outcome =
         Acting.by(
-            Actor.cliOperator("alice"),
+            new Actor("alice", Role.ADMIN, Actor.Lane.CLI),
             () ->
                 dispatchOps.dispatch(
                     "acme",

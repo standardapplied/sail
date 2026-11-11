@@ -100,7 +100,7 @@ public final class SyncBox implements AutoCloseable {
     this.conflicts = new SyncConflicts(db);
     this.syncState = new SyncState(db);
     this.replica = new StoreReplica(id, specs, new ChangeLog(db), conflicts, syncState);
-    syncsAs(Actor.sync(id, Role.MEMBER));
+    syncsAs(new Actor(id, Role.MEMBER, Actor.Lane.SYNC));
   }
 
   /**
@@ -809,7 +809,7 @@ public final class SyncBox implements AutoCloseable {
             main,
             "main",
             null,
-            Actor.sync(handle, Role.MEMBER),
+            new Actor(handle, Role.MEMBER, Actor.Lane.SYNC),
             FdeRoster.EMPTY,
             SyncTransitionSink.NONE,
             "1.0.0");

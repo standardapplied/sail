@@ -64,10 +64,10 @@ class ProjectScopeTest {
 
     assertEquals(ProjectScope.all(), actor.scope());
     assertEquals(ProjectScope.all(), Actor.agentPrincipal("claude/r", "ada").scope());
-    assertEquals(ProjectScope.all(), Actor.sync("ada", Role.MEMBER).scope());
+    assertEquals(ProjectScope.all(), new Actor("ada", Role.MEMBER, Actor.Lane.SYNC).scope());
     assertEquals(ProjectScope.all(), Actor.main().scope());
     assertEquals(ProjectScope.all(), Actor.system().scope());
-    assertEquals(ProjectScope.all(), Actor.cliOperator("ada").scope());
+    assertEquals(ProjectScope.all(), new Actor("ada", Role.ADMIN, Actor.Lane.CLI).scope());
     var scoped = actor.withScope(ProjectScope.none());
     assertEquals(new Actor("ada", Role.MEMBER, Actor.Lane.API, null, ProjectScope.none()), scoped);
     assertThrows(

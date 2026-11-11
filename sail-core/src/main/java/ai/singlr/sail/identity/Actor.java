@@ -75,14 +75,6 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
   }
 
   /**
-   * The local operator of a main or standalone box: the box's own FDE handle with admin authority
-   * (the host operator already holds the admin token).
-   */
-  public static Actor cliOperator(String handle) {
-    return new Actor(handle, Role.ADMIN, Lane.CLI);
-  }
-
-  /**
    * A run's agent principal authenticated over the local socket: write-capable on the spec, event,
    * and content surface, never admin, and refused outright on the dispatch and stop routes.
    */
@@ -97,11 +89,6 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
    */
   public static Actor roomPrincipal(String handle, String owner) {
     return new Actor(handle, Role.VIEWER, Lane.ROOM, owner);
-  }
-
-  /** The FDE behind one {@code _sync} session on main, with the role main's roster gives it. */
-  public static Actor sync(String handle, Role role) {
-    return new Actor(handle, role, Lane.SYNC);
   }
 
   /** Main, as a node adopts what it decided. */

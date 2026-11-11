@@ -1084,7 +1084,9 @@ class SailOperationsSeamTest {
         var node = new SyncBox("node");
         var operations = operations(node.db)) {
       operations.useControlPlane(
-          node.db, tempDir, syncingAs(main, node, "node", Actor.sync("node", Role.MEMBER)));
+          node.db,
+          tempDir,
+          syncingAs(main, node, "node", new Actor("node", Role.MEMBER, Actor.Lane.SYNC)));
       operations.schema().prepareSync();
       var run = finishedRunStampedFor(node, null);
 
@@ -1104,7 +1106,9 @@ class SailOperationsSeamTest {
       var run = finishedRunStampedFor(node, "node");
       Acting.system(() -> main.specs.create(SyncBox.spec("auth", "main spec", "pending")));
       operations.useControlPlane(
-          node.db, tempDir, syncingAs(main, node, "node", Actor.sync("uday", Role.MEMBER)));
+          node.db,
+          tempDir,
+          syncingAs(main, node, "node", new Actor("uday", Role.MEMBER, Actor.Lane.SYNC)));
       operations.schema().prepareSync();
 
       var failure =
@@ -1141,7 +1145,7 @@ class SailOperationsSeamTest {
                           main.db,
                           "main",
                           null,
-                          Actor.sync("node", Role.MEMBER),
+                          new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
                           () ->
                               List.of(
                                   Map.of("handle", "node", "role", "viewer", "status", "active")),
@@ -1181,7 +1185,7 @@ class SailOperationsSeamTest {
                   channel(
                       new SyncRpcServer(
                               replicas,
-                              Actor.sync("node", Role.MEMBER),
+                              new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
                               List::of,
                               SyncTransitionSink.NONE,
                               new ChangeLog(main.db)::headsAfter,
@@ -1232,7 +1236,7 @@ class SailOperationsSeamTest {
                   channel(
                       new SyncRpcServer(
                               replicas,
-                              Actor.sync("node", Role.VIEWER),
+                              new Actor("node", Role.VIEWER, Actor.Lane.SYNC),
                               List::of,
                               SyncTransitionSink.NONE,
                               new ChangeLog(main.db)::headsAfter,
@@ -1637,7 +1641,7 @@ class SailOperationsSeamTest {
           ApiException.class,
           () ->
               Actor.call(
-                  Actor.cliOperator("node"),
+                  new Actor("node", Role.ADMIN, Actor.Lane.CLI),
                   () ->
                       operations
                           .dispatching()
@@ -1656,7 +1660,7 @@ class SailOperationsSeamTest {
             main.db,
             "main",
             null,
-            Actor.sync(handle, Role.MEMBER),
+            new Actor(handle, Role.MEMBER, Actor.Lane.SYNC),
             () -> rosterOf(main),
             SyncTransitionSink.NONE,
             "1.0.0"));

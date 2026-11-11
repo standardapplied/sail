@@ -165,7 +165,7 @@ class UploadFailureRepliesTest {
       expected.append(SyncWire.encode(new SyncWire.Lack(List.of(HASH)))).append('\n');
       for (var reply : replies) expected.append(SyncWire.encode(reply)).append('\n');
       var output = new ByteStreams.Output();
-      main.server(Actor.sync("node", Role.MEMBER))
+      main.server(new Actor("node", Role.MEMBER, Actor.Lane.SYNC))
           .content(main.db, limits)
           .serve(new ByteArrayInputStream(request.toByteArray()), output);
       assertEquals(expected.toString(), output.toString());

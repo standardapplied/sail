@@ -122,7 +122,8 @@ class AuthorshipSyncTest {
   }
 
   private void round(SyncBox box, String type) throws IOException {
-    try (var link = SyncBox.connect(main.server(Actor.sync(box.id, Role.MEMBER)), box)) {
+    try (var link =
+        SyncBox.connect(main.server(new Actor(box.id, Role.MEMBER, Actor.Lane.SYNC)), box)) {
       link.reconcile(type, SyncedEntities.replicas(box.db, box.id, box.id).get(type));
     }
   }

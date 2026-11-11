@@ -100,7 +100,7 @@ class ProjectSyncTest {
   @Test
   void aViewersPushOfAProjectIsDeniedAndMainKeepsItsDefinition() {
     main.projects.upsert(TestDefinitions.described("zenith", "A1"));
-    var viewer = Actor.sync("ada", Role.VIEWER);
+    var viewer = new Actor("ada", Role.VIEWER, Actor.Lane.SYNC);
     var rev = main.replica.currentRev("zenith");
     var edit = new LinkedHashMap<>(main.replica.current("zenith"));
     edit.put("description", "\"A2\"");
@@ -362,7 +362,7 @@ class ProjectSyncTest {
     sync(node);
     Acting.as(node.id, () -> node.projects.delete("p"));
     try (var mainBox = opened(main);
-        var nodeBox = opened(node).syncsAs(Actor.sync(node.id, Role.ADMIN))) {
+        var nodeBox = opened(node).syncsAs(new Actor(node.id, Role.ADMIN, Actor.Lane.SYNC))) {
       SyncBox.pushLosingTheAnswer(mainBox, nodeBox, "project");
       assertFalse(
           Snapshots.isDeletionMark(main.projects.currentForSync("p")),

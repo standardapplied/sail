@@ -212,7 +212,7 @@ class CreatorSyncTest {
   }
 
   private SyncSession.TypeReport round(SyncBox box, String type, Role role) throws IOException {
-    try (var link = SyncBox.connect(main.server(Actor.sync(box.id, role)), box)) {
+    try (var link = SyncBox.connect(main.server(new Actor(box.id, role, Actor.Lane.SYNC)), box)) {
       return link.reconcile(type, SyncedEntities.replicas(box.db, box.id, box.id).get(type));
     }
   }

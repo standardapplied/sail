@@ -102,7 +102,9 @@ public final class Cast {
               member(
                   label(lane, role, who, scope),
                   scoped(
-                      lane == Actor.Lane.SYNC ? Actor.sync(who, role) : new Actor(who, role, lane),
+                      lane == Actor.Lane.SYNC
+                          ? new Actor(who, role, Actor.Lane.SYNC)
+                          : new Actor(who, role, lane),
                       scope)));
         }
       }
@@ -111,7 +113,7 @@ public final class Cast {
         member(
             label(lane, Role.ADMIN, ADMIN, "all"),
             lane == Actor.Lane.SYNC
-                ? Actor.sync(ADMIN, Role.ADMIN)
+                ? new Actor(ADMIN, Role.ADMIN, Actor.Lane.SYNC)
                 : new Actor(ADMIN, Role.ADMIN, lane)));
     return cast;
   }

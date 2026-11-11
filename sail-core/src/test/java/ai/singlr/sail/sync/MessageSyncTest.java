@@ -94,12 +94,18 @@ class MessageSyncTest {
     var fromOther = other.messages.append("room", "other", "other message", null);
     var engine = new SyncEngine();
 
-    Actor.call(Actor.sync("node", Role.ADMIN), () -> engine.reconcile(node.replica, main.replica));
     Actor.call(
-        Actor.sync("other", Role.ADMIN), () -> engine.reconcile(other.replica, main.replica));
-    Actor.call(Actor.sync("node", Role.ADMIN), () -> engine.reconcile(node.replica, main.replica));
+        new Actor("node", Role.ADMIN, Actor.Lane.SYNC),
+        () -> engine.reconcile(node.replica, main.replica));
     Actor.call(
-        Actor.sync("other", Role.ADMIN), () -> engine.reconcile(other.replica, main.replica));
+        new Actor("other", Role.ADMIN, Actor.Lane.SYNC),
+        () -> engine.reconcile(other.replica, main.replica));
+    Actor.call(
+        new Actor("node", Role.ADMIN, Actor.Lane.SYNC),
+        () -> engine.reconcile(node.replica, main.replica));
+    Actor.call(
+        new Actor("other", Role.ADMIN, Actor.Lane.SYNC),
+        () -> engine.reconcile(other.replica, main.replica));
 
     assertEquals(2, main.messages.list("room", null, 10).size());
     assertTrue(node.messages.findById(fromOther.id()).isPresent());
@@ -120,14 +126,18 @@ class MessageSyncTest {
         node.messages.append("room", principal, "Which flow?", null, MessageStore.Mark.QUESTION);
     var engine = new SyncEngine();
 
-    Actor.call(Actor.sync("node", Role.MEMBER), () -> engine.reconcile(node.replica, main.replica));
+    Actor.call(
+        new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
+        () -> engine.reconcile(node.replica, main.replica));
 
     var synced = main.messages.findById(question.id()).orElseThrow();
     assertTrue(synced.question(), "the flag is message data and rides the snapshot");
     assertEquals(Map.of("room", question.id()), main.messages.openQuestions());
 
     main.messages.append("room", "node", "answered", null);
-    Actor.call(Actor.sync("node", Role.MEMBER), () -> engine.reconcile(node.replica, main.replica));
+    Actor.call(
+        new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
+        () -> engine.reconcile(node.replica, main.replica));
     assertEquals(Map.of(), main.messages.openQuestions());
     assertEquals(Map.of(), node.messages.openQuestions());
 
@@ -146,7 +156,7 @@ class MessageSyncTest {
     var plain = node.messages.append("room", principal, "Fine.", null);
 
     Actor.call(
-        Actor.sync("node", Role.MEMBER),
+        new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
         () -> new SyncEngine().reconcile(node.replica, main.replica));
 
     assertEquals(MessageStore.Mark.ERROR, main.messages.findById(failed.id()).orElseThrow().mark());
@@ -200,7 +210,7 @@ class MessageSyncTest {
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var row = node.messages.append("room", "node", "original", null);
     Actor.call(
-        Actor.sync("node", Role.MEMBER),
+        new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
         () -> new SyncEngine().reconcile(node.replica, main.replica));
     var changed = new LinkedHashMap<>(main.messages.comparableSnapshot(row.id()));
     changed.put("body", "changed");
@@ -226,7 +236,7 @@ class MessageSyncTest {
 
     var accepted =
         Actor.call(
-            Actor.sync("node", Role.MEMBER),
+            new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
             () ->
                 main.messages.commitRevision(
                     "019fee00-0000-7000-8000-0000000000ac",
@@ -258,7 +268,7 @@ class MessageSyncTest {
 
     var accepted =
         Actor.call(
-            Actor.sync("node", Role.MEMBER),
+            new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
             () ->
                 main.messages.commitRevision(
                     "019fee00-0000-7000-8000-0000000000bc",
@@ -282,7 +292,7 @@ class MessageSyncTest {
         assertInstanceOf(
             PushOutcome.Denied.class,
             Actor.call(
-                Actor.sync("node", Role.MEMBER),
+                new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
                 () ->
                     main.messages.commitRevision(
                         "019fee00-0000-7000-8000-0000000000bd",
@@ -305,7 +315,7 @@ class MessageSyncTest {
         assertInstanceOf(
             PushOutcome.Denied.class,
             Actor.call(
-                Actor.sync("node", Role.MEMBER),
+                new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
                 () ->
                     main.messages.commitRevision(
                         messageId, snapshot("admin", "room"), null, main.messages.authority())));
@@ -353,7 +363,7 @@ class MessageSyncTest {
           var id = "019fee00-0000-7000-8000-%012d".formatted(++seq);
           var outcome =
               Actor.call(
-                  Actor.sync("mady", Role.MEMBER),
+                  new Actor("mady", Role.MEMBER, Actor.Lane.SYNC),
                   () ->
                       main.messages.commitRevision(
                           id, snapshot("mady", conversation), null, main.messages.authority()));
@@ -376,7 +386,7 @@ class MessageSyncTest {
     assertInstanceOf(
         PushOutcome.Accepted.class,
         Actor.call(
-            Actor.sync("mady", Role.MEMBER),
+            new Actor("mady", Role.MEMBER, Actor.Lane.SYNC),
             () ->
                 main.messages.commitRevision(
                     "00000000-0000-7000-8000-000000000001",
@@ -387,7 +397,8 @@ class MessageSyncTest {
     assertInstanceOf(
         PushOutcome.Denied.class,
         Actor.call(
-            Actor.sync("mallory", Role.MEMBER).withScope(ProjectScope.of(List.of("beta"))),
+            new Actor("mallory", Role.MEMBER, Actor.Lane.SYNC)
+                .withScope(ProjectScope.of(List.of("beta"))),
             () ->
                 main.messages.commitRevision(
                     "00000000-0000-7000-8000-000000000002",
@@ -408,7 +419,7 @@ class MessageSyncTest {
     var id = "00000000-0000-7000-8000-000000000003";
     var refused =
         Actor.call(
-            Actor.sync("node", Role.MEMBER),
+            new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
             () -> main.replica.commit(id, snapshot("node", "missing"), null));
 
     assertInstanceOf(CommitOutcome.Refused.class, refused);
@@ -427,7 +438,7 @@ class MessageSyncTest {
 
     var refused =
         Actor.call(
-            Actor.sync("node", Role.MEMBER),
+            new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
             () -> main.replica.commit(id, snapshot(unheld, "room"), null));
 
     assertInstanceOf(CommitOutcome.Refused.class, refused);
@@ -446,7 +457,7 @@ class MessageSyncTest {
         assertInstanceOf(
             PushOutcome.Denied.class,
             Actor.call(
-                Actor.sync("node", Role.MEMBER),
+                new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
                 () ->
                     main.messages.commitRevision(
                         "00000000-0000-7000-8000-000000000004",
@@ -473,7 +484,7 @@ class MessageSyncTest {
     var acceptedId = "00000000-0000-7000-8000-000000000011";
 
     Actor.call(
-        Actor.sync("node", Role.MEMBER),
+        new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
         () ->
             main.messages.commitRevision(
                 acceptedId,
@@ -493,7 +504,7 @@ class MessageSyncTest {
     assertInstanceOf(
         PushOutcome.Accepted.class,
         Actor.call(
-            Actor.sync("node", Role.MEMBER),
+            new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
             () ->
                 main.messages.commitRevision(
                     "00000000-0000-7000-8000-000000000013",
@@ -504,7 +515,7 @@ class MessageSyncTest {
     assertInstanceOf(
         PushOutcome.Accepted.class,
         Actor.call(
-            Actor.sync("node", Role.MEMBER),
+            new Actor("node", Role.MEMBER, Actor.Lane.SYNC),
             () ->
                 main.messages.commitRevision(
                     "00000000-0000-7000-8000-000000000012",

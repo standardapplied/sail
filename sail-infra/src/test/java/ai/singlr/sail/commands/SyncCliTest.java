@@ -288,7 +288,8 @@ class SyncCliTest {
     }
 
     var projects = new ProjectStore(db);
-    var push = projects.refusesInto(Actor.sync("nia", Role.MEMBER), null, "beta", true);
+    var push =
+        projects.refusesInto(new Actor("nia", Role.MEMBER, Actor.Lane.SYNC), null, "beta", true);
     if (scenario.endsWith("-main") || scenario.endsWith("-standalone")) {
       assertEquals(ProjectScope.all(), new SyncScope(db).held());
       assertEquals(Optional.empty(), new DatabaseCatalog(db).main());

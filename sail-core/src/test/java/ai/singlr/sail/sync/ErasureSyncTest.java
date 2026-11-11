@@ -53,7 +53,7 @@ import org.junit.jupiter.api.io.TempDir;
 @ActingAs
 class ErasureSyncTest {
 
-  private static final Actor NODE = Actor.sync("node", Role.MEMBER);
+  private static final Actor NODE = new Actor("node", Role.MEMBER, Actor.Lane.SYNC);
 
   @TempDir Path dir;
   private SyncBox main;
@@ -205,7 +205,7 @@ class ErasureSyncTest {
   @Test
   void aProjectANodeAsksMainToPruneLeavesNothingOfItInAnyTypeAfterOneRound() throws IOException {
     seedArchivedSpec(main, "old", "node");
-    var admin = Actor.sync("node", Role.ADMIN);
+    var admin = new Actor("node", Role.ADMIN, Actor.Lane.SYNC);
     round(admin);
     new EraseRequests(node.db).request(Erasure.PROJECT, "proj", "node");
 
@@ -328,7 +328,7 @@ class ErasureSyncTest {
     seedArchivedSpec(main, "mine", "node");
     round(NODE);
     new EraseRequests(node.db).request(Erasure.SPEC, "mine", "node");
-    var viewer = Actor.sync("node", Role.VIEWER);
+    var viewer = new Actor("node", Role.VIEWER, Actor.Lane.SYNC);
 
     try (var link = SyncBox.connect(main.server(viewer), node)) {
       var refused =
@@ -351,7 +351,7 @@ class ErasureSyncTest {
   @Test
   void anAdminNodeMayPruneASpecItDoesNotOwn() throws IOException {
     seedArchivedSpec(main, "theirs", "uday");
-    var admin = Actor.sync("node", Role.ADMIN);
+    var admin = new Actor("node", Role.ADMIN, Actor.Lane.SYNC);
     round(admin);
     new EraseRequests(node.db).request(Erasure.SPEC, "theirs", "node");
 
@@ -441,7 +441,8 @@ class ErasureSyncTest {
       assertTrue(refused.getMessage().contains("main holds no spec 'lobby'"), refused.getMessage());
     }
     new EraseRequests(node.db).request(Erasure.SPEC, "lobby", "node");
-    try (var link = SyncBox.connect(main.server(Actor.sync("node", Role.ADMIN)), node)) {
+    try (var link =
+        SyncBox.connect(main.server(new Actor("node", Role.ADMIN, Actor.Lane.SYNC)), node)) {
       var refused =
           assertThrows(
               SyncTransportException.class, () -> link.reconcile("spec", replicas().get("spec")));

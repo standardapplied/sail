@@ -16,6 +16,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -768,7 +769,9 @@ class SpecStoreTest {
   void aStatusOnlyUpdateNamesItsOwnAuthorNotThePreviousEditor() {
     store.create(spec("auth", "Auth", "pending"));
 
-    Actor.run(Actor.cliOperator("mady"), () -> store.updateStatus("auth", SpecStatus.IN_PROGRESS));
+    Actor.run(
+        new Actor("mady", Role.ADMIN, Actor.Lane.CLI),
+        () -> store.updateStatus("auth", SpecStatus.IN_PROGRESS));
     assertAuthoredBy("auth", "mady");
 
     Actor.run(
@@ -777,7 +780,7 @@ class SpecStoreTest {
     assertAuthoredBy("auth", "sail");
 
     Actor.run(
-        Actor.cliOperator("raj"),
+        new Actor("raj", Role.ADMIN, Actor.Lane.CLI),
         () -> store.updateReposAndStatus("auth", List.of("api"), SpecStatus.IN_PROGRESS, "b"));
     assertAuthoredBy("auth", "raj");
   }
@@ -786,7 +789,9 @@ class SpecStoreTest {
   void aContentOnlyUpdateNamesItsOwnAuthorNotThePreviousEditor() {
     store.create(spec("auth", "Auth", "pending"));
 
-    Actor.run(Actor.cliOperator("mady"), () -> store.setContent("auth", "the body", ""));
+    Actor.run(
+        new Actor("mady", Role.ADMIN, Actor.Lane.CLI),
+        () -> store.setContent("auth", "the body", ""));
 
     assertAuthoredBy("auth", "mady");
   }
@@ -796,13 +801,15 @@ class SpecStoreTest {
     store.create(spec("auth", "Auth", "pending"));
     var first = store.latestRev("auth");
 
-    Actor.run(Actor.cliOperator("mady"), () -> store.reproject("test-project", "renamed"));
+    Actor.run(
+        new Actor("mady", Role.ADMIN, Actor.Lane.CLI),
+        () -> store.reproject("test-project", "renamed"));
     assertAuthoredBy("auth", "mady");
 
-    Actor.run(Actor.cliOperator("raj"), () -> store.restore("auth", first));
+    Actor.run(new Actor("raj", Role.ADMIN, Actor.Lane.CLI), () -> store.restore("auth", first));
     assertAuthoredBy("auth", "raj");
 
-    Actor.run(Actor.cliOperator("ada"), () -> store.delete("auth"));
+    Actor.run(new Actor("ada", Role.ADMIN, Actor.Lane.CLI), () -> store.delete("auth"));
     var tombstone = new ChangeLog(db).head("spec", "auth").orElseThrow();
     assertEquals("ada", tombstone.actor());
     assertEquals("ada", YamlUtil.parseMap(tombstone.snapshot()).get("updated_by"));

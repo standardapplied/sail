@@ -54,8 +54,8 @@ import org.junit.jupiter.api.io.TempDir;
 class HandleChangeTest {
 
   private static final SyncConfig STANDALONE = SyncConfig.unset();
-  private static final Actor ADA = Actor.sync("ada", Role.MEMBER);
-  private static final Actor UDAY = Actor.sync("uday", Role.MEMBER);
+  private static final Actor ADA = new Actor("ada", Role.MEMBER, Actor.Lane.SYNC);
+  private static final Actor UDAY = new Actor("uday", Role.MEMBER, Actor.Lane.SYNC);
   private static final SyncOperations.Channels UNREACHABLE =
       target -> {
         throw new IOException("ssh: connect to host main: Connection refused");

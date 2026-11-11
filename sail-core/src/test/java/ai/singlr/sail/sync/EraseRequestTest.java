@@ -27,8 +27,8 @@ import org.junit.jupiter.api.Test;
  */
 class EraseRequestTest {
 
-  private static final Actor MADY = Actor.sync("mady", Role.MEMBER);
-  private static final Actor ADMIN = Actor.sync("uday", Role.ADMIN);
+  private static final Actor MADY = new Actor("mady", Role.MEMBER, Actor.Lane.SYNC);
+  private static final Actor ADMIN = new Actor("uday", Role.ADMIN, Actor.Lane.SYNC);
   private static final SyncWire.Hello HELLO = SyncWire.Hello.of("1.0.0", "node");
 
   private SyncBox main;
@@ -139,7 +139,7 @@ class EraseRequestTest {
         "Pruning by policy or a whole project is admin-only.", refusal(MADY, "project", "acme"));
     assertEquals(
         "Your credential is read-only and cannot prune specs.",
-        refusal(Actor.sync("mady", Role.VIEWER), "spec", "in-acme"));
+        refusal(new Actor("mady", Role.VIEWER, Actor.Lane.SYNC), "spec", "in-acme"));
     assertInstanceOf(SyncWire.Accepted.class, ask(ADMIN, "project", "acme"));
     assertEquals(
         List.of(),

@@ -78,7 +78,7 @@ class ChangeLogTest {
   @Test
   void aRevisionAppendedUnderASyncPeerRecordsThatPeerAsItsProvenance() {
     Actor.run(
-        Actor.sync("sumesh", Role.MEMBER),
+        new Actor("sumesh", Role.MEMBER, Actor.Lane.SYNC),
         () -> log.appendSynced("spec", "a", "1-x", "uday", "sync", false, "{}"));
 
     var entry = log.history("spec", "a").getFirst();
@@ -91,7 +91,7 @@ class ChangeLogTest {
   @Test
   void thePeerBindingIsScopedAndDoesNotLeakToLaterAppends() {
     Actor.run(
-        Actor.sync("sumesh", Role.MEMBER),
+        new Actor("sumesh", Role.MEMBER, Actor.Lane.SYNC),
         () -> log.append("spec", "a", "1-x", "sync", false, "{}"));
     log.append("spec", "b", "1-y", "local", false, "{}");
 
@@ -118,7 +118,7 @@ class ChangeLogTest {
   @Test
   void aPushThatOffersNoAuthorIsAuthoredByThePushingFde() {
     Actor.run(
-        Actor.sync("sumesh", Role.MEMBER),
+        new Actor("sumesh", Role.MEMBER, Actor.Lane.SYNC),
         () -> log.append("spec", "a", "1-x", "sync", false, "{}"));
 
     assertEquals("sumesh", log.history("spec", "a").getFirst().actor());
@@ -139,7 +139,9 @@ class ChangeLogTest {
   @Test
   void anErasureIsRecordedByTheBoundActor() {
     log.append("spec", "a", "1-x", "local", false, "{}");
-    Actor.run(Actor.sync("sumesh", Role.MEMBER), () -> log.erase("spec", "a", "2-x", "sync"));
+    Actor.run(
+        new Actor("sumesh", Role.MEMBER, Actor.Lane.SYNC),
+        () -> log.erase("spec", "a", "2-x", "sync"));
 
     var erasure = log.erasure("spec", "a").orElseThrow();
     assertEquals("sumesh", erasure.actor());

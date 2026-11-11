@@ -37,8 +37,8 @@ class CliOperatorTest {
     var main = new SyncConfig("main", null, "uday", "uday-box");
     var standalone = new SyncConfig(null, null, "raj", null);
 
-    assertEquals(Actor.cliOperator("uday"), CliOperator.of(main, null));
-    assertEquals(Actor.cliOperator("raj"), CliOperator.of(standalone, null));
+    assertEquals(new Actor("uday", Role.ADMIN, Actor.Lane.CLI), CliOperator.of(main, null));
+    assertEquals(new Actor("raj", Role.ADMIN, Actor.Lane.CLI), CliOperator.of(standalone, null));
   }
 
   @Test

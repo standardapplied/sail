@@ -39,8 +39,8 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class ReviewFindingsSyncTest {
 
-  private static final Actor ADA = Actor.sync("ada", Role.MEMBER);
-  private static final Actor BOB = Actor.sync("bob", Role.MEMBER);
+  private static final Actor ADA = new Actor("ada", Role.MEMBER, Actor.Lane.SYNC);
+  private static final Actor BOB = new Actor("bob", Role.MEMBER, Actor.Lane.SYNC);
 
   @TempDir Path dir;
   private SyncBox main;

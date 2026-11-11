@@ -217,7 +217,7 @@ class EventPublishersTest {
                           main.db,
                           "main",
                           null,
-                          Actor.sync(ME, Role.MEMBER),
+                          new Actor(ME, Role.MEMBER, Actor.Lane.SYNC),
                           () -> SyncServerCommand.roster(main.db, Actor.main()),
                           SyncTransitionSink.NONE,
                           "1.0.0")),

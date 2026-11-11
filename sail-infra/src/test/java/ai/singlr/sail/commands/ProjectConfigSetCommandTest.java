@@ -13,6 +13,7 @@ import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -29,12 +30,13 @@ class ProjectConfigSetCommandTest {
   void aCatalogHoldingAcme() {
     mutations =
         new ProjectMutations(
-            new ProjectCatalog(dir.resolve("sail.db")), () -> Actor.cliOperator("uday"));
+            new ProjectCatalog(dir.resolve("sail.db")),
+            () -> new Actor("uday", Role.ADMIN, Actor.Lane.CLI));
     mutations
         .catalog()
         .create(
             TestDefinitions.yaml("name: acme\nimage: ubuntu/24.04\ndescription: Storefront\n"),
-            Actor.cliOperator("uday"));
+            new Actor("uday", Role.ADMIN, Actor.Lane.CLI));
   }
 
   @Test

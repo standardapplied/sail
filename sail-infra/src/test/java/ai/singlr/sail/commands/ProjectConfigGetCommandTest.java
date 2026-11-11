@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,12 +25,13 @@ class ProjectConfigGetCommandTest {
   void aCatalogHoldingAcme() {
     mutations =
         new ProjectMutations(
-            new ProjectCatalog(dir.resolve("sail.db")), () -> Actor.cliOperator("uday"));
+            new ProjectCatalog(dir.resolve("sail.db")),
+            () -> new Actor("uday", Role.ADMIN, Actor.Lane.CLI));
     mutations
         .catalog()
         .create(
             TestDefinitions.yaml("name: acme\nresources: {cpu: 2, memory: 8GB, disk: 50GB}\n"),
-            Actor.cliOperator("uday"));
+            new Actor("uday", Role.ADMIN, Actor.Lane.CLI));
   }
 
   @Test

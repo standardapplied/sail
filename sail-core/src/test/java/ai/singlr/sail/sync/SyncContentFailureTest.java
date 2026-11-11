@@ -43,7 +43,7 @@ class SyncContentFailureTest {
               () -> {
                 try (var link =
                     SyncBox.connect(
-                        main.server(Actor.sync("node", Role.MEMBER)),
+                        main.server(new Actor("node", Role.MEMBER, Actor.Lane.SYNC)),
                         node.db,
                         node.id,
                         SyncWire.MAX_FRAME,
@@ -100,7 +100,7 @@ class SyncContentFailureTest {
               () -> {
                 try (var link =
                     SyncBox.connect(
-                        main.server(Actor.sync("node", Role.MEMBER)),
+                        main.server(new Actor("node", Role.MEMBER, Actor.Lane.SYNC)),
                         node,
                         SyncWire.MAX_FRAME,
                         output -> corruptAnswer(output, fault))) {
@@ -181,7 +181,7 @@ class SyncContentFailureTest {
           () -> {
             try (var link =
                 SyncBox.connect(
-                    main.server(Actor.sync("node", Role.MEMBER)),
+                    main.server(new Actor("node", Role.MEMBER, Actor.Lane.SYNC)),
                     node,
                     SyncWire.MAX_FRAME,
                     output -> output,
@@ -216,7 +216,7 @@ class SyncContentFailureTest {
               () -> {
                 try (var link =
                     SyncBox.connect(
-                        main.server(Actor.sync("node", Role.MEMBER)),
+                        main.server(new Actor("node", Role.MEMBER, Actor.Lane.SYNC)),
                         node,
                         SyncWire.MAX_FRAME,
                         output -> corrupt(output, fault, other))) {

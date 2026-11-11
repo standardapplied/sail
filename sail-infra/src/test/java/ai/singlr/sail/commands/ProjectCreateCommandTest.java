@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.gen.ServicePresets;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -271,6 +272,7 @@ class ProjectCreateCommandTest {
 
   private ProjectMutations mutations() {
     return new ProjectMutations(
-        new ProjectCatalog(dir.resolve("sail.db")), () -> Actor.cliOperator("uday"));
+        new ProjectCatalog(dir.resolve("sail.db")),
+        () -> new Actor("uday", Role.ADMIN, Actor.Lane.CLI));
   }
 }

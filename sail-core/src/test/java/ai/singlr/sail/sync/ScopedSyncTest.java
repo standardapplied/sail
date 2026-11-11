@@ -199,7 +199,7 @@ class ScopedSyncTest {
     assertInstanceOf(
         SyncWire.Manifest.class,
         serve(
-                main.server(Actor.sync("uma", Role.MEMBER)),
+                main.server(new Actor("uma", Role.MEMBER, Actor.Lane.SYNC)),
                 HELLO,
                 new SyncWire.Fetch(List.of(theirs)))
             .get(1),
@@ -217,7 +217,7 @@ class ScopedSyncTest {
 
     var answered =
         serve(
-            main.server(Actor.sync("nia", Role.VIEWER).withScope(ONLY_A)),
+            main.server(new Actor("nia", Role.VIEWER, Actor.Lane.SYNC).withScope(ONLY_A)),
             HELLO,
             new SyncWire.Announce(List.of(secret)),
             new SyncWire.Push("spec", List.of(new MainReplica.Offer("alpha-work", forged, rev))));
@@ -281,14 +281,15 @@ class ScopedSyncTest {
     assertEquals(
         new SyncWire.Lack(List.of()),
         serve(
-                main.server(Actor.sync("uma", Role.MEMBER)),
+                main.server(new Actor("uma", Role.MEMBER, Actor.Lane.SYNC)),
                 HELLO,
                 new SyncWire.Announce(List.of(secret)))
             .get(1),
         "an unscoped session is asked only for what main lacks, as it always has");
     assertInstanceOf(
         SyncWire.Accepted.class,
-        only(serve(main.server(Actor.sync("nia", Role.MEMBER)), HELLO, push).get(1)),
+        only(
+            serve(main.server(new Actor("nia", Role.MEMBER, Actor.Lane.SYNC)), HELLO, push).get(1)),
         "and names content by hash as it always has");
   }
 
@@ -323,7 +324,7 @@ class ScopedSyncTest {
     var denied =
         only(
             serve(
-                    main.server(Actor.sync("nia", Role.VIEWER).withScope(ONLY_A)),
+                    main.server(new Actor("nia", Role.VIEWER, Actor.Lane.SYNC).withScope(ONLY_A)),
                     HELLO,
                     new SyncWire.Push(
                         "spec", List.of(new MainReplica.Offer("alpha-work", offer, rev))))
@@ -419,7 +420,7 @@ class ScopedSyncTest {
         assertInstanceOf(
                 SyncWire.Page.class,
                 serve(
-                        main.server(Actor.sync("nia", Role.MEMBER)),
+                        main.server(new Actor("nia", Role.MEMBER, Actor.Lane.SYNC)),
                         HELLO,
                         new SyncWire.Need("spec", ids))
                     .get(1))
@@ -729,7 +730,8 @@ class ScopedSyncTest {
     SyncBox.assertScopedToMain(main, nia, ONLY_A);
 
     var onlyB = ProjectScope.of(List.of(B));
-    SyncBox.quiesce(main, uma.syncsAs(Actor.sync("uma", Role.MEMBER).withScope(onlyB)));
+    SyncBox.quiesce(
+        main, uma.syncsAs(new Actor("uma", Role.MEMBER, Actor.Lane.SYNC).withScope(onlyB)));
 
     assertEquals(thread, movedRoomTalk(uma), "a node of beta alone holds the thread and no room");
     SyncBox.assertScopedToMain(main, uma, onlyB);
@@ -788,7 +790,9 @@ class ScopedSyncTest {
 
     assertInstanceOf(
         SyncWire.Accepted.class,
-        only(serve(main.server(Actor.sync("nia", Role.MEMBER)), HELLO, erase).getLast()),
+        only(
+            serve(main.server(new Actor("nia", Role.MEMBER, Actor.Lane.SYNC)), HELLO, erase)
+                .getLast()),
         "the same owner, unscoped, erases the spec and all that belongs to it");
     assertTrue(new ChangeLog(main.db).isErased("review", review));
   }
@@ -1259,7 +1263,9 @@ class ScopedSyncTest {
           assertInstanceOf(
               SyncWire.Page.class,
               serve(
-                      main.server(Actor.sync("nia", Role.VIEWER).withScope(ProjectScope.none())),
+                      main.server(
+                          new Actor("nia", Role.VIEWER, Actor.Lane.SYNC)
+                              .withScope(ProjectScope.none())),
                       SyncWire.Hello.of("1.0.0", "nia"),
                       new SyncWire.Pull(entity.type(), 0, 100))
                   .getLast());
@@ -1276,7 +1282,7 @@ class ScopedSyncTest {
     SyncBox.quiesce(main, nia.syncsAs(scoped(ProjectScope.none())));
     assertEquals(ProjectScope.none(), new SyncScope(nia.db).held());
 
-    SyncBox.quiesce(main, nia.syncsAs(Actor.sync("nia", Role.MEMBER)));
+    SyncBox.quiesce(main, nia.syncsAs(new Actor("nia", Role.MEMBER, Actor.Lane.SYNC)));
 
     assertEquals(ProjectScope.all(), new SyncScope(nia.db).held());
     SyncBox.assertEqualToMain(main, nia);
@@ -1300,7 +1306,7 @@ class ScopedSyncTest {
   }
 
   private static Actor scoped(ProjectScope scope) {
-    return Actor.sync("nia", Role.MEMBER).withScope(scope);
+    return new Actor("nia", Role.MEMBER, Actor.Lane.SYNC).withScope(scope);
   }
 
   /**
