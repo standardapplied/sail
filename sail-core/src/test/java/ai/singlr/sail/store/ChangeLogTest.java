@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -17,6 +18,7 @@ import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -338,6 +340,31 @@ class ChangeLogTest {
             new SyncState.Mark(gone, gone, "secret", "guessed"),
             ProjectScope.of(List.of("private"))),
         "the erasure of secret is still to page for a reader that sees it");
+  }
+
+  /**
+   * An entity's maker is the actor its first revision recorded, while history keeps that revision:
+   * once compaction drops it, no later writer is taken for the maker.
+   */
+  @Test
+  void anEntitysMakerIsTheActorOfItsFirstRevisionWhileHistoryKeepsIt() {
+    Acting.by(
+        Actor.agentPrincipal("claude/r-1", "ada"),
+        () -> log.append("spec", "a", "1-x", "local", false, "{}"));
+    for (var i = 2; i <= ChangeLog.HISTORY_REVISIONS + 1; i++) {
+      var rev = i + "-x";
+      Acting.as("ada", () -> log.append("spec", "a", rev, "local", false, "{}"));
+    }
+    Acting.as(null, () -> log.append("spec", "nobodys", "1-x", "local", false, "{}"));
+
+    assertEquals(Optional.of("claude/r-1"), log.bornBy("spec", "a"));
+    assertEquals(Optional.empty(), log.bornBy("spec", "never"));
+    assertEquals(Optional.empty(), log.bornBy("spec", "nobodys"), "a write that names no one");
+    log.compact("spec", List.of("a"), id -> null);
+    assertEquals(
+        Optional.empty(),
+        log.bornBy("spec", "a"),
+        "the first revision is compacted away, and no later writer is its maker");
   }
 
   @Test
