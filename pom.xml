@@ -98,9 +98,6 @@
                         <importOrder>
                             <order>\#,</order>
                         </importOrder>
-                        <removeUnusedImports>
-                            <engine>cleanthat-javaparser-unnecessaryimport</engine>
-                        </removeUnusedImports>
                     </java>
                 </configuration>
                 <executions>
