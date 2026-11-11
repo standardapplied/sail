@@ -190,7 +190,7 @@ public final class AgentLogStreamer implements HttpHandler {
    * log door admits it ({@link LogAdmission#of}), said in this stream's own envelope.
    */
   private Admission admit(HttpExchange exchange, String runId) {
-    var actor = ApiRouter.actorOf(exchange);
+    var actor = ApiAuth.actorOf(exchange);
     return switch (LogAdmission.of(
         actor, runLookup.apply(runId), runId, localHandle.get(), specLookup)) {
       case Result.Success<RunStore.RunRow> readable -> new Admitted(readable.value());

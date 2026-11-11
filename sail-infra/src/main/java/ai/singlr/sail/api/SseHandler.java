@@ -189,7 +189,7 @@ public final class SseHandler implements HttpHandler, RouteTable {
     headers.set("X-Accel-Buffering", "no");
     exchange.sendResponseHeaders(200, 0);
     var recheck = new StreamRecheck(() -> refusal(exchange), clock);
-    var filter = parseFilter(uri, ApiRouter.actorOf(exchange));
+    var filter = parseFilter(uri, ApiAuth.actorOf(exchange));
     try (var out = exchange.getResponseBody()) {
       var lastHeartbeat = clock.instant();
       writeComment(out, "subscribed");
@@ -211,7 +211,7 @@ public final class SseHandler implements HttpHandler, RouteTable {
           }
           if (event != null) {
             if (recheck.recheck()) {
-              filter = parseFilter(uri, ApiRouter.actorOf(exchange));
+              filter = parseFilter(uri, ApiAuth.actorOf(exchange));
             }
             if (filter.test(event)) {
               writeEvent(out, event);
@@ -219,7 +219,7 @@ public final class SseHandler implements HttpHandler, RouteTable {
           }
           if (Duration.between(lastHeartbeat, clock.instant()).toMillis() > HEARTBEAT_MILLIS) {
             if (recheck.recheck()) {
-              filter = parseFilter(uri, ApiRouter.actorOf(exchange));
+              filter = parseFilter(uri, ApiAuth.actorOf(exchange));
             }
             writeComment(out, "keepalive");
             lastHeartbeat = clock.instant();

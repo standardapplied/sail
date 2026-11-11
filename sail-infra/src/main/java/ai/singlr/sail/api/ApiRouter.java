@@ -51,9 +51,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   private static final String DELETE = "DELETE";
 
   /** A route of this method serves every method. */
-  private static final String ANY = Route.ANY;
-
   private static final String PROJECT = "/v1/projects/{project}";
+
   private static final String SPEC = "spec";
   private static final String ROOM = "room";
   private static final String SINCE = "since";
@@ -137,13 +136,13 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     var runOperated = Gate.decides(Action.OPERATE_RUN);
     return List.of(
         route(GET, "/v1/health", Gate.unauthenticated("the liveness probe"), this::health),
-        route(ANY, "/v1/health", unserved, ApiRouter::absent),
+        route(Route.ANY, "/v1/health", unserved, ApiRouter::absent),
         route(GET, "/v1/whoami", reads, this::whoami),
-        route(ANY, "/v1/whoami", unserved, ApiRouter::absent),
+        route(Route.ANY, "/v1/whoami", unserved, ApiRouter::absent),
         route(GET, "/v1/fdes", reads, call -> ApiResponse.from(operations.fdes())),
-        route(ANY, "/v1/fdes", unserved, ApiRouter::absent),
+        route(Route.ANY, "/v1/fdes", unserved, ApiRouter::absent),
         route(GET, "/v1/agents", reads, call -> ApiResponse.from(operations.agents())),
-        route(ANY, "/v1/agents", unserved, ApiRouter::absent),
+        route(Route.ANY, "/v1/agents", unserved, ApiRouter::absent),
         route(GET, "/v1/sync", box, this::syncStatus),
         route(POST, "/v1/sync", box, this::sync),
         route(GET, "/v1/conflicts", reads, this::conflicts),
@@ -170,7 +169,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(GET, "/v1/specs/{spec}/history", reads, this::globalSpecHistory),
         route(POST, "/v1/specs/{spec}/restore", journal, this::restoreGlobalSpec),
         route(POST, "/v1/specs/{spec}/followup", journal, this::createFollowupSpec),
-        route(ANY, "/v1/specs/{spec}/{sub}", unserved, ApiRouter::absent),
+        route(Route.ANY, "/v1/specs/{spec}/{sub}", unserved, ApiRouter::absent),
         route(GET, "/v1/rooms", reads, this::rooms),
         route(POST, "/v1/rooms", journal, this::createRoom),
         route(
@@ -190,10 +189,10 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             call -> ApiResponse.from(operations.roomMembers(call.param(ROOM)))),
         route(POST, "/v1/rooms/{room}/members", seating, this::addRoomMember),
         route(DELETE, "/v1/rooms/{room}/members", seating, this::removeRoomMember),
-        route(ANY, "/v1/rooms/{room}/invite", unserved, ApiRouter::retiredInvite),
+        route(Route.ANY, "/v1/rooms/{room}/invite", unserved, ApiRouter::retiredInvite),
         route(GET, "/v1/rooms/{room}/messages", reads, this::roomMessages),
         route(POST, "/v1/rooms/{room}/messages", journal, this::postRoomMessage),
-        route(ANY, "/v1/rooms/{room}/{sub}", unserved, ApiRouter::absent),
+        route(Route.ANY, "/v1/rooms/{room}/{sub}", unserved, ApiRouter::absent),
         route(GET, "/v1/reviews/{review}", reads, this::reviewDetail),
         route(POST, "/v1/reviews/{review}/approve", journal, this::approveReview),
         route(POST, "/v1/reviews/{review}/dismiss/{finding}", journal, this::dismissFinding),
@@ -205,7 +204,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             call -> ApiResponse.from(operations.run(call.param("run")))),
         route(GET, "/v1/runs/{run}/log", runOperated, this::runLog),
         route(POST, "/v1/runs/{run}/stop", Gate.decides(Action.OPERATE_RUN), this::stopRun),
-        route(ANY, "/v1/runs/{run}/stream", runOperated, this::streamRunLog),
+        route(Route.ANY, "/v1/runs/{run}/stream", runOperated, this::streamRunLog),
         route(GET, "/v1/projects", reads, call -> ApiResponse.from(operations.projects())),
         route(POST, "/v1/projects", journal, this::createProject),
         route(GET, PROJECT, reads, call -> ApiResponse.from(operations.project(call.project()))),
@@ -215,12 +214,12 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             reads,
             call -> ApiResponse.from(operations.specs(call.project()))),
         route(GET, PROJECT + "/specs/{id}", reads, this::projectSpec),
-        route(ANY, PROJECT + "/specs/{id}/{rest...}", unserved, ApiRouter::malformed),
+        route(Route.ANY, PROJECT + "/specs/{id}/{rest...}", unserved, ApiRouter::malformed),
         route(POST, PROJECT + "/dispatch", Gate.decides(Action.DISPATCH), this::dispatch),
-        route(ANY, PROJECT + "/dispatch/{rest...}", unserved, ApiRouter::malformed),
+        route(Route.ANY, PROJECT + "/dispatch/{rest...}", unserved, ApiRouter::malformed),
         route(GET, PROJECT + "/agent", reads, this::agentStatus),
         route(POST, PROJECT + "/agent/report", reads, this::agentReport),
-        route(ANY, PROJECT + "/agent/{sub}/{rest...}", unserved, ApiRouter::malformed),
+        route(Route.ANY, PROJECT + "/agent/{sub}/{rest...}", unserved, ApiRouter::malformed),
         route(
             GET,
             PROJECT + "/connect",
@@ -237,8 +236,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(GET, PROJECT + "/files/{path...}", reads, this::readFile),
         route(PUT, PROJECT + "/files/{path...}", journal, this::putFile),
         route(DELETE, PROJECT + "/files/{path...}", journal, this::removeFile),
-        route(ANY, PROJECT + "/files", unserved, this::unservedFile),
-        route(ANY, PROJECT + "/files/{path...}", unserved, this::unservedFile),
+        route(Route.ANY, PROJECT + "/files", unserved, this::unservedFile),
+        route(Route.ANY, PROJECT + "/files/{path...}", unserved, this::unservedFile),
         route(POST, PROJECT + "/serve", serving, this::serve),
         route(
             DELETE,
@@ -256,7 +255,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             Gate.decides(Action.READ_DEFINITION),
             call -> ApiResponse.from(operations.projectDefinition(call.project()))),
         route(PUT, PROJECT + "/definition/{section}", journal, this::writeProjectSection),
-        route(ANY, PROJECT + "/{rest...}", unserved, ApiRouter::absent));
+        route(Route.ANY, PROJECT + "/{rest...}", unserved, ApiRouter::absent));
   }
 
   private static Route<Handler> route(String method, String pattern, Gate gate, Handler handler) {
@@ -319,7 +318,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
       }
       case Served.Match<Handler>(var route, var params) -> {
         requireValidNames(params);
-        var actor = actorOf(exchange);
+        var actor = ApiAuth.actorOf(exchange);
         yield Actor.call(
             actor,
             () -> {
@@ -355,18 +354,6 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             .filter(segment -> !segment.isBlank())
             .collect(Collectors.joining("/", "/", ""));
     return AgentLogStreamer.isStreamPath(collapsed) ? path : collapsed;
-  }
-
-  /**
-   * The actor {@link ApiAuth} stamped on {@code exchange} as its caller: the router binds it for
-   * the route, and the streams re-read it after each re-authentication. A request no credential
-   * resolved has none, which is a door that skipped its authentication, refused loudly.
-   */
-  static Actor actorOf(HttpExchange exchange) {
-    if (exchange.getAttribute(ApiAuth.ACTOR) instanceof Actor actor) {
-      return actor;
-    }
-    throw new IllegalStateException("No credential was resolved for this request.");
   }
 
   private ApiResponse health(Call call) {
@@ -671,7 +658,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         operations.postRoomMessage(
             roomId,
             SpecMessageRequest.fromMap(JsonBody.readMessageMap(call.exchange())),
-            actorOf(call.exchange()).handle()));
+            ApiAuth.actorOf(call.exchange()).handle()));
   }
 
   private ApiResponse globalSpecs(Call call) {
@@ -852,7 +839,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
    */
   private ApiResponse whoami(Call call) {
     var exchange = call.exchange();
-    var actor = actorOf(exchange);
+    var actor = ApiAuth.actorOf(exchange);
     var shown = Whoami.of(actor);
     var response =
         new WhoamiResponse(
@@ -870,7 +857,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
    * token's name (a machine credential).
    */
   private static String caller(HttpExchange exchange) {
-    var fde = actorOf(exchange).handle();
+    var fde = ApiAuth.actorOf(exchange).handle();
     if (fde != null) {
       return fde;
     }

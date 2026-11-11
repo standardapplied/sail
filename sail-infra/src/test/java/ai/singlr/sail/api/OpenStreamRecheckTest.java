@@ -95,7 +95,7 @@ class OpenStreamRecheckTest {
   /** Holds {@code client}'s check, once asked to, between its authentication and its read. */
   private void holdIfClient(HttpExchange exchange) {
     var hold = holdClient;
-    if (hold == null || !"client".equals(ApiRouter.actorOf(exchange).handle())) {
+    if (hold == null || !"client".equals(ApiAuth.actorOf(exchange).handle())) {
       return;
     }
     holdClient = null;

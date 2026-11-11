@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.identity.Actor;
 import com.sun.net.httpserver.HttpExchange;
 
 /**
@@ -15,8 +16,16 @@ import com.sun.net.httpserver.HttpExchange;
 @FunctionalInterface
 public interface ApiAuth {
 
-  /** The exchange attribute holding the caller's {@link ai.singlr.sail.identity.Actor}. */
+  /** The exchange attribute holding the caller's {@link Actor}. */
   String ACTOR = "token.actor";
 
   void require(HttpExchange exchange);
+
+  /** The caller {@link #require} stamped on {@code exchange}; a door that stamped none fails. */
+  static Actor actorOf(HttpExchange exchange) {
+    if (exchange.getAttribute(ACTOR) instanceof Actor actor) {
+      return actor;
+    }
+    throw new IllegalStateException("No credential was resolved for this request.");
+  }
 }

@@ -171,7 +171,7 @@ class TokenAuthTest {
         "/",
         exchange -> {
           auth.require(exchange);
-          stamped.set(ApiRouter.actorOf(exchange));
+          stamped.set(ApiAuth.actorOf(exchange));
           exchange.sendResponseHeaders(204, -1);
           exchange.close();
         });

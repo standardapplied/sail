@@ -490,7 +490,7 @@ class AgentLogStreamerTest {
             exchange -> {
               asked.incrementAndGet();
               exchange.setAttribute(
-                  ApiAuth.ACTOR, ApiRouter.actorOf(exchange).withScope(scope.get()));
+                  ApiAuth.ACTOR, ApiAuth.actorOf(exchange).withScope(scope.get()));
             },
             id -> Optional.of(runOn("node-a")),
             id -> Optional.of(specOf(id, "raj")),
@@ -579,7 +579,7 @@ class AgentLogStreamerTest {
     }
 
     private CapturingExchange scoped(ProjectScope scope) {
-      attributes.put(ApiAuth.ACTOR, ApiRouter.actorOf(this).withScope(scope));
+      attributes.put(ApiAuth.ACTOR, ApiAuth.actorOf(this).withScope(scope));
       return this;
     }
 

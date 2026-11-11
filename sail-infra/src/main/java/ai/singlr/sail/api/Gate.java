@@ -38,6 +38,12 @@ sealed interface Gate {
   Gate UNSERVED = new Unserved();
 
   /**
+   * A run's own record, which its credential names: the run reaches only its own, so nothing is
+   * left to decide.
+   */
+  Gate RUNS_OWN = new RunsOwn();
+
+  /**
    * Operating the box whose FDE {@code boxFde} names when asked: its sync health, bus stats, sync
    * rounds and main.
    */
@@ -73,6 +79,9 @@ sealed interface Gate {
 
   /** The route reads only what the caller's scope admits. */
   record ReadsInScope() implements Gate {}
+
+  /** The route acts on the run its credential names, and on no other. */
+  record RunsOwn() implements Gate {}
 
   /** The journal decides the route's write by its type's rule. */
   record Journal() implements Gate {}

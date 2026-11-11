@@ -109,7 +109,7 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
             route(POST, EVENTS, journal, this::events),
             unserved(EVENTS, "events accepts POST"),
             route(GET, RUN_MESSAGES, reads, aRunsOwn(this::runMessages)),
-            route(POST, RUN_MESSAGES, Gate.decides(Action.NARRATE), aRunsOwn(this::runAck)),
+            route(POST, RUN_MESSAGES, Gate.RUNS_OWN, aRunsOwn(this::runAck)),
             route(
                 Route.ANY,
                 RUN_MESSAGES,

@@ -249,7 +249,7 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
   /** Authenticates {@code exchange}'s caller and admits it past {@code gate}, or refuses it. */
   private void admit(HttpExchange exchange, Gate gate) {
     auth.require(exchange);
-    gate.admit(ApiRouter.actorOf(exchange));
+    gate.admit(ApiAuth.actorOf(exchange));
     exchange.setAttribute(PEOPLE_GATE_PASSED, gate);
   }
 

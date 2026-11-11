@@ -76,7 +76,7 @@ class SessionAwareAuthTest {
         "/",
         exchange -> {
           auth.require(exchange);
-          var stamped = ApiRouter.actorOf(exchange).toString().getBytes(StandardCharsets.UTF_8);
+          var stamped = ApiAuth.actorOf(exchange).toString().getBytes(StandardCharsets.UTF_8);
           exchange.sendResponseHeaders(200, stamped.length);
           try (var body = exchange.getResponseBody()) {
             body.write(stamped);
