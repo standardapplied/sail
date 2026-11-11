@@ -11,12 +11,22 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 
 /** The project catalog and the spec rows a host command reads or reshapes. */
 public interface HostCatalog {
   Optional<ProjectStore.ProjectRow> project(String project);
 
   List<ProjectStore.ProjectRow> projects();
+
+  /**
+   * The row of {@code project}, when the bound actor reads it; one the catalog does not hold, or
+   * the actor's scope leaves out, is not in the catalog.
+   */
+  ProjectStore.ProjectRow readable(String project);
+
+  /** Of {@code items}, those filed under a project the bound actor reads ({@code projectOf}). */
+  <T> List<T> readable(List<T> items, Function<T, String> projectOf);
 
   /** The definitions of this box's projects, read from the catalog. */
   ProjectReader definitions();

@@ -27,6 +27,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.ssh.SshGateway;
@@ -1496,6 +1497,15 @@ class SailOperationsSeamTest {
           .pty()
           .admitProject(
               "proj", new PtyIdentity.Person(new Actor("owner", Role.ADMIN, Actor.Lane.API)));
+      var scoped =
+          new Actor("owner", Role.MEMBER, Actor.Lane.CLI)
+              .withScope(ProjectScope.of(List.of("proj")));
+      assertEquals("proj", Actor.call(scoped, () -> operations.catalog().readable("proj")).name());
+      assertEquals(
+          List.of("proj"),
+          Actor.call(
+              scoped, () -> operations.catalog().readable(List.of("proj", "other"), name -> name)));
+      assertEquals(operations.identity().operator(), operations.asOperator(Actor::current));
       operations
           .pty()
           .admitRoom(

@@ -219,7 +219,7 @@ public final class StopOperations {
    * nothing to stop.
    */
   private Outcome stopProject(String project, String localHandle, boolean dryRun) {
-    ProjectGate.requireReads(Actor.reader(), project);
+    ProjectGate.requireReads(project);
     var run = runStore.runningForProjectOnNode(project, localHandle).orElse(null);
     if (run != null) {
       authorize(run);

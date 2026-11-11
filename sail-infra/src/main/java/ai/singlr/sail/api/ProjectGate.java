@@ -19,7 +19,7 @@ import java.util.Objects;
  * {@link ProjectReader#absent}, so a caller cannot tell a project it was not granted from one that
  * does not exist; a refusal is its exception.
  */
-public final class ProjectGate {
+final class ProjectGate {
 
   private ProjectGate() {}
 
@@ -36,19 +36,20 @@ public final class ProjectGate {
   }
 
   /** The row of {@code project} in {@code catalog}, when whoever reads may read it. */
-  public static ProjectStore.ProjectRow readable(ProjectStore catalog, String project) {
+  static ProjectStore.ProjectRow readable(ProjectStore catalog, String project) {
     var row = held(catalog, project);
-    requireReads(Actor.reader(), project);
+    requireReads(project);
     return row;
   }
 
   /**
-   * Refuses {@code project} when {@code reader} may not read it, answered as one this box does not
+   * Refuses {@code project} when whoever reads may not read it, answered as one this box does not
    * hold ({@link ProjectReader#absent}), so a caller cannot tell a project it was not granted from
-   * one that does not exist.
+   * one that does not exist. A door with no catalog in hand reads the project first this way, so
+   * nothing it finds in the project, a run's id included, is named to a caller outside it.
    */
-  public static void requireReads(Actor reader, String project) {
-    if (!ReadFilter.reads(reader, () -> project)) {
+  static void requireReads(String project) {
+    if (!ReadFilter.reads(Actor.reader(), () -> project)) {
       throw ProjectReader.absent(project);
     }
   }

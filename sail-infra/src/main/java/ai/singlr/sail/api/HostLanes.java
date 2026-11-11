@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Lane;
@@ -116,9 +117,9 @@ final class HostLanes {
     @Override
     public Optional<RunStore.RunRow> latestLog(String project, String node, Optional<Lane> lane) {
       var actor = Actor.current();
-      ProjectGate.requireReads(actor, project);
+      ProjectGate.requireReads(project);
       return lane.map(asked -> latestInLane(project, node, asked))
-          .orElseGet(() -> runs.latestForProjectOnNode(project, node))
+          .orElseGet(() -> latestRun(project, node))
           .map(
               run ->
                   switch (LogAdmission.of(actor, Optional.of(run), run.id(), node, specs)) {
@@ -152,6 +153,16 @@ final class HostLanes {
     @Override
     public List<ProjectStore.ProjectRow> projects() {
       return projectStore.list();
+    }
+
+    @Override
+    public ProjectStore.ProjectRow readable(String project) {
+      return ProjectGate.readable(projectStore, project);
+    }
+
+    @Override
+    public <T> List<T> readable(List<T> items, Function<T, String> projectOf) {
+      return ReadFilter.readable(Actor.reader(), items, projectOf);
     }
 
     @Override
@@ -300,9 +311,19 @@ final class HostLanes {
       return new HostAccess(db, roles).identity(token);
     }
 
+    /**
+     * Admits {@code identity} into {@code project} when it holds the project on this box ({@link
+     * ProjectGate#readable}): the catalog holds it and its person's scope admits it, whatever their
+     * role. One it does not hold is not in the catalog, as a project this box does not have.
+     */
     @Override
     public void admitProject(String project, PtyIdentity identity) throws IOException {
-      new HostAccess(db, roles).admitProject(project, identity);
+      var actor = HostAccess.actorOf(identity);
+      try {
+        Actor.run(actor, () -> ProjectGate.readable(new ProjectStore(db), project));
+      } catch (ApiException absent) {
+        throw Remedied.io(absent.reason(), absent.remedy());
+      }
     }
 
     @Override

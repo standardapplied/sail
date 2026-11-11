@@ -26,9 +26,7 @@ class ProjectListCommandTest {
 
   @Test
   void cataloguedButUnprovisionedProjectsSurfaceAsNotCreated() {
-    var merged =
-        ProjectListCommand.merge(
-            Actor.system(), List.of(running("acme")), List.of("acme", "billing"));
+    var merged = ProjectListCommand.merge(List.of(running("acme")), List.of("acme", "billing"));
 
     assertEquals(List.of("acme", "billing"), merged.stream().map(ContainerInfo::name).toList());
     var billing = merged.stream().filter(c -> c.name().equals("billing")).findFirst().orElseThrow();
@@ -37,8 +35,7 @@ class ProjectListCommandTest {
 
   @Test
   void aProvisionedContainerWinsOverItsCatalogPlaceholder() {
-    var merged =
-        ProjectListCommand.merge(Actor.system(), List.of(running("acme")), List.of("acme"));
+    var merged = ProjectListCommand.merge(List.of(running("acme")), List.of("acme"));
 
     assertEquals(1, merged.size());
     assertInstanceOf(ContainerState.Running.class, merged.getFirst().state());
@@ -46,7 +43,7 @@ class ProjectListCommandTest {
 
   @Test
   void aLocalContainerWithNoCatalogEntryStillShows() {
-    var merged = ProjectListCommand.merge(Actor.system(), List.of(running("legacy")), List.of());
+    var merged = ProjectListCommand.merge(List.of(running("legacy")), List.of());
 
     assertEquals(List.of("legacy"), merged.stream().map(ContainerInfo::name).toList());
   }
@@ -54,8 +51,7 @@ class ProjectListCommandTest {
   @Test
   void resultIsSortedByName() {
     var merged =
-        ProjectListCommand.merge(
-            Actor.system(), List.of(running("zeta")), List.of("alpha", "zeta", "mid"));
+        ProjectListCommand.merge(List.of(running("zeta")), List.of("alpha", "zeta", "mid"));
 
     assertEquals(
         List.of("alpha", "mid", "zeta"), merged.stream().map(ContainerInfo::name).toList());
@@ -67,15 +63,18 @@ class ProjectListCommandTest {
         new Actor("mady", Role.MEMBER, Actor.Lane.CLI).withScope(ProjectScope.of(List.of("acme")));
 
     var merged =
-        ProjectListCommand.merge(
-            scoped, List.of(running("acme"), running("legacy")), List.of("acme", "beta"));
+        Actor.call(
+            scoped,
+            () ->
+                ProjectListCommand.merge(
+                    List.of(running("acme"), running("legacy")), List.of("acme", "beta")));
 
     assertEquals(List.of("acme"), merged.stream().map(ContainerInfo::name).toList());
   }
 
   @Test
   void emptyEverywhereIsEmpty() {
-    assertEquals(List.of(), ProjectListCommand.merge(Actor.system(), List.of(), List.of()));
+    assertEquals(List.of(), ProjectListCommand.merge(List.of(), List.of()));
   }
 
   @Test

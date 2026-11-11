@@ -9,7 +9,6 @@ import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
 import ai.singlr.sail.engine.ContainerState;
@@ -42,10 +41,18 @@ public final class ProjectListCommand implements Runnable {
 
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
-    var reader = CliOperator.current();
-    var shell = new ShellExecutor(false);
-    var containers = new ContainerManager(shell).listAll();
-    var projects = merge(reader, containers, catalogNames(operator));
+    var containers = new ContainerManager(new ShellExecutor(false)).listAll();
+    List<ContainerInfo> projects;
+    try (var operations = OperationsFactory.open(operator::warn)) {
+      projects =
+          operations.asOperator(
+              () ->
+                  merge(
+                      containers,
+                      operations.catalog().projects().stream()
+                          .map(ProjectStore.ProjectRow::name)
+                          .toList()));
+    }
 
     if (json) {
       System.out.println(renderJson(projects));
@@ -71,14 +78,13 @@ public final class ProjectListCommand implements Runnable {
   }
 
   /**
-   * The project roster {@code reader} sees: every catalogued project plus any container without a
+   * The project roster whoever reads sees: every catalogued project plus any container without a
    * catalog entry, keyed by name so a project that is both catalogued and provisioned shows its
    * live container state rather than a placeholder, and none outside the reader's scope.
    * Catalogued-but-unprovisioned projects (e.g. just synced from main) surface as {@link
    * ContainerState.NotCreated} so they can be found and provisioned.
    */
-  static List<ContainerInfo> merge(
-      Actor reader, List<ContainerInfo> containers, List<String> catalogNames) {
+  static List<ContainerInfo> merge(List<ContainerInfo> containers, List<String> catalogNames) {
     var byName = new LinkedHashMap<String, ContainerInfo>();
     for (var name : catalogNames) {
       byName.put(name, new ContainerInfo(name, new ContainerState.NotCreated(), null));
@@ -87,17 +93,9 @@ public final class ProjectListCommand implements Runnable {
       byName.put(container.name(), container);
     }
     return ReadFilter.readable(
-        reader,
+        Actor.reader(),
         byName.values().stream().sorted(Comparator.comparing(ContainerInfo::name)).toList(),
         ContainerInfo::name);
-  }
-
-  private static List<String> catalogNames(OperatorCommand operator) {
-    try (var operations = OperationsFactory.open()) {
-      return operations.catalog().projects().stream().map(ProjectStore.ProjectRow::name).toList();
-    } catch (RuntimeException e) {
-      return List.of();
-    }
   }
 
   /** Renders the project roster as JSON — pure, so the shape is unit-tested. */

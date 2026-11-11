@@ -545,12 +545,11 @@ class DoorParityTest {
             new FdeCommand.Box(
                 tempDir.resolve("sail.db"),
                 "root",
-                person,
+                boxes.get(person).config(),
                 tempDir,
                 tempDir.resolve("ssh_host_ed25519_key.pub"),
                 tempDir.resolve("workstation_key.pub"),
-                new DoorBox.AcmeRuns(),
-                "sail@main"));
+                new DoorBox.AcmeRuns()));
   }
 
   /**

@@ -80,20 +80,6 @@ class CliOperatorTest {
   }
 
   @Test
-  void theCurrentOperatorOfANodeIsReadFromTheControlPlaneRoster() {
-    var path = dir.resolve("sail.db");
-    try (var db = Sqlite.open(path)) {
-      new SchemaManager(db).migrate();
-      new FdeStore(db).add("mady", null, null, "viewer");
-    }
-
-    assertEquals(new Actor("mady", Role.VIEWER, Actor.Lane.CLI), CliOperator.current(NODE, path));
-    assertEquals(
-        Actor.cliOperator("uday"),
-        CliOperator.current(new SyncConfig("main", null, "uday", null), dir.resolve("absent.db")));
-  }
-
-  @Test
   void aScopedNodesOperatorSeesOnlyItsGrantsAsTheBoxCredentialDoes() {
     try (var db = roster()) {
       var roster = new FdeStore(db);

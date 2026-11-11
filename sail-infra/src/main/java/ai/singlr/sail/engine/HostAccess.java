@@ -7,8 +7,6 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Resources;
-import ai.singlr.sail.api.ApiException;
-import ai.singlr.sail.api.ProjectGate;
 import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.authority.MessageAuthority;
 import ai.singlr.sail.common.Remedied;
@@ -19,7 +17,6 @@ import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
@@ -29,8 +26,8 @@ import java.util.Objects;
  * The terminal door: who a PTY session acts as, and where it may open. The caller is the FDE a
  * session token names, on the API lane as over HTTP, or with no token this box's own person, on the
  * CLI lane as at its root CLI; {@link RoleRule} resolves either, its role and its scope, and
- * refuses a disabled FDE. A session opens only in a project the caller holds on this box, and is
- * pinned only to a room the caller may post in.
+ * refuses a disabled FDE. A session is pinned only to a room the caller may post in; which projects
+ * it opens in is the terminal facet's to say, through the project gate.
  */
 public record HostAccess(Sqlite db, RoleRule roles) {
   public PtyIdentity.Person identity(String token) throws IOException {
@@ -66,20 +63,6 @@ public record HostAccess(Sqlite db, RoleRule roles) {
   }
 
   /**
-   * Admits {@code who} into {@code project} when it holds the project on this box ({@link
-   * ProjectGate#readable}): the catalog holds it and the caller's scope admits it, whatever its
-   * role. One it does not hold is not in the catalog, as a project this box does not have.
-   */
-  public void admitProject(String project, PtyIdentity who) throws IOException {
-    var actor = actorOf(who);
-    try {
-      Actor.run(actor, () -> ProjectGate.readable(new ProjectStore(db), project));
-    } catch (ApiException absent) {
-      throw Remedied.io(absent.reason(), absent.remedy());
-    }
-  }
-
-  /**
    * Admits {@code who} into {@code roomId} when it may post in the room's conversation ({@link
    * MessageAuthority#post}). A room of a project outside the FDE's scope is not found, as one this
    * box does not hold, before anything names its project; then a session opened under another
@@ -112,7 +95,7 @@ public record HostAccess(Sqlite db, RoleRule roles) {
   }
 
   /** The actor a terminal acts as: a person's; the host's dispatch authority opens none. */
-  private static Actor actorOf(PtyIdentity who) throws IOException {
+  public static Actor actorOf(PtyIdentity who) throws IOException {
     if (who instanceof PtyIdentity.Person(var actor)) {
       return actor;
     }

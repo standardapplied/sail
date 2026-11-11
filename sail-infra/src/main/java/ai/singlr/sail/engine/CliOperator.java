@@ -13,9 +13,6 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.Sqlite;
-import java.nio.file.Files;
-import java.nio.file.Path;
 
 /**
  * The operator of this box's root CLI, resolved in one place for every command that acts as it,
@@ -63,19 +60,5 @@ public final class CliOperator {
             "Run '",
             Remedy.sail("sync"),
             "' first. If it still refuses, ask an admin whether '" + handle + "' is disabled."));
-  }
-
-  /** The operator of this box, read from its host configuration and control-plane roster. */
-  public static Actor current() {
-    return current(NodeIdentity.config(), SailPaths.controlPlaneDb());
-  }
-
-  static Actor current(SyncConfig config, Path controlPlane) {
-    if (!Files.exists(controlPlane)) {
-      return of(config, null);
-    }
-    try (var db = Sqlite.open(controlPlane)) {
-      return of(config, new FdeStore(db));
-    }
   }
 }

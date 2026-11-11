@@ -127,50 +127,7 @@ class HostAccessTest {
   }
 
   @Test
-  void aTerminalOpensOnlyInAProjectItsPersonHoldsOnThisBoxWhateverTheirRole() throws IOException {
-    var absent =
-        "Project 'beta' is not in the catalog. Create it with 'sail project create beta', or sync"
-            + " it from main with 'sail sync'.";
-    var held =
-        new Actor("ada", Role.MEMBER, Actor.Lane.API).withScope(ProjectScope.of(List.of("acme")));
-    var viewer =
-        new Actor("vic", Role.VIEWER, Actor.Lane.API).withScope(ProjectScope.of(List.of("acme")));
-    var elsewhere =
-        new Actor("ada", Role.MEMBER, Actor.Lane.API).withScope(ProjectScope.of(List.of("beta")));
-    HeldProjects.hold(db, "beta");
-
-    access.admitProject("acme", new PtyIdentity.Person(held));
-    access.admitProject("acme", new PtyIdentity.Person(viewer));
-    assertEquals(
-        absent,
-        assertThrows(
-                Remedied.Io.class, () -> access.admitProject("beta", new PtyIdentity.Person(held)))
-            .getMessage());
-    assertEquals(
-        "Project 'acme' is not in the catalog. Create it with 'sail project create acme', or sync"
-            + " it from main with 'sail sync'.",
-        assertThrows(
-                Remedied.Io.class,
-                () -> access.admitProject("acme", new PtyIdentity.Person(elsewhere)))
-            .getMessage());
-    assertEquals(
-        "Project 'gone' is not in the catalog. Create it with 'sail project create gone', or sync"
-            + " it from main with 'sail sync'.",
-        assertThrows(
-                Remedied.Io.class,
-                () ->
-                    access.admitProject(
-                        "gone",
-                        new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API))))
-            .getMessage());
-  }
-
-  @Test
-  void theDispatchAuthorityOpensNoTerminalAndPinsNoRoom() {
-    assertEquals(
-        "The host's dispatch authority opens no terminal.",
-        assertThrows(IOException.class, () -> access.admitProject("acme", PtyIdentity.DISPATCH))
-            .getMessage());
+  void theDispatchAuthorityPinsNoRoom() {
     assertEquals(
         "The host's dispatch authority opens no terminal.",
         assertThrows(IOException.class, () -> access.admit("lobby", "acme", PtyIdentity.DISPATCH))

@@ -17,6 +17,7 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
@@ -156,12 +157,11 @@ class FdeCommandTest {
     return new FdeCommand.Box(
         tempDir.resolve("sail.db"),
         operator,
-        handle,
+        new SyncConfig(null, main, handle),
         home(),
         hostKey(),
         workstationKey(),
-        keygen,
-        main);
+        keygen);
   }
 
   private CommandLine fdeCommand() {

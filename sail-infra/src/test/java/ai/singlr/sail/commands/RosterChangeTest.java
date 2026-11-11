@@ -11,12 +11,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.access.Principal;
+import ai.singlr.sail.api.HostPty;
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
-import ai.singlr.sail.engine.HostAccess;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -301,7 +305,19 @@ class RosterChangeTest {
     var nia = roster.byHandle("nia").orElseThrow();
     var session = new AuthSessionStore(mainDb).create(nia.id(), Duration.ofHours(1)).token();
     var socket = tempDir.resolve("pty.sock");
-    try (var host = terminalHost(socket)) {
+    try (var operations =
+            DoorBox.wired(
+                OperationsFactory.create(
+                    mainDb,
+                    new ScriptedShellExecutor(),
+                    null,
+                    null,
+                    SyncScheduler.disabled(),
+                    SessionYield.NONE),
+                mainDb,
+                tempDir,
+                MAIN);
+        var host = terminalHost(socket, tempDir.resolve("sessions"), operations.pty())) {
       host.start();
 
       pinnedUntilTheSweep(
@@ -367,24 +383,23 @@ class RosterChangeTest {
   }
 
   /**
-   * Main's terminal host: the terminal door resolves and admits each connection on main's roster.
+   * Main's terminal host: its terminal facet resolves and admits each connection on main's roster.
    */
-  private PtySessionHost terminalHost(Path socket) {
-    var access = new HostAccess(mainDb, new RoleRule(() -> MAIN, roster));
+  private static PtySessionHost terminalHost(Path socket, Path sessions, HostPty pty) {
     return new PtySessionHost(
         socket,
-        tempDir.resolve("sessions"),
+        sessions,
         64 * 1024,
-        access::identity,
+        pty::identity,
         new PtyAdmission() {
           @Override
           public void project(String project, PtyIdentity who) throws IOException {
-            access.admitProject(project, who);
+            pty.admitProject(project, who);
           }
 
           @Override
           public void room(String room, String project, PtyIdentity who) throws IOException {
-            access.admit(room, project, who);
+            pty.admitRoom(room, project, who);
           }
         },
         PtyEvents.NONE,

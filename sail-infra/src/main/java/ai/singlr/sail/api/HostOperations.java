@@ -5,6 +5,9 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.identity.Actor;
+import java.util.function.Supplier;
+
 /**
  * The host lane: what a command running on the control-plane box may do beyond the web API, grouped
  * by role so a caller depends on the facet it uses and nothing else. Only the in-process factory
@@ -21,6 +24,11 @@ public interface HostOperations extends Operations, AutoCloseable {
   HostPty pty();
 
   HostSchema schema();
+
+  /** {@code work}, done as this box's operator: the one principal its host CLI acts as. */
+  default <T> T asOperator(Supplier<T> work) {
+    return Actor.call(identity().operator(), work::get);
+  }
 
   @Override
   void close();

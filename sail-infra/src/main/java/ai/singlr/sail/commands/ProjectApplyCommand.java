@@ -14,7 +14,6 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSailSetup;
@@ -473,7 +472,8 @@ public final class ProjectApplyCommand implements Runnable {
       homeRoom =
           dryRun
               ? null
-              : ensureHomeRoom(operations, config, HostSync.handle(), () -> CliOperator.current());
+              : ensureHomeRoom(
+                  operations, config, HostSync.handle(), operations.identity()::operator);
     }
 
     var added = results.stream().mapToInt(ProjectApplier.ApplyResult::added).sum();

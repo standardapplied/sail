@@ -105,41 +105,48 @@ public final class FdeCommand implements Runnable {
 
   /**
    * What a pairing touches on this box: the control plane, the operator (the account {@code
-   * sail-api} runs as, whose home holds the pty socket Mast forwards to), the SSH host key a code
-   * pins, the workstation key containers trust and the main a node syncs with ({@code null} on main
-   * or a lone box). A test puts all of it under a temporary directory.
+   * sail-api} runs as, whose home holds the pty socket Mast forwards to), the box's sync
+   * configuration, which names its FDE and the main a node syncs with, the SSH host key a code pins
+   * and the workstation key containers trust. A test puts all of it under a temporary directory.
    */
   record Box(
       Path database,
       String operator,
-      String handle,
+      SyncConfig sync,
       Path home,
       Path hostKey,
       Path workstationKey,
-      ShellExec shell,
-      String main) {
+      ShellExec shell) {
 
     static Box here() {
-      var sync = HostSync.config();
       return new Box(
           SailPaths.controlPlaneDb(),
           System.getProperty("user.name"),
-          sync.handle(),
+          HostSync.config(),
           Path.of(System.getProperty("user.home")),
           Path.of("/etc/ssh/ssh_host_ed25519_key.pub"),
           SailPaths.workstationPublicKeyPath(),
-          new ShellExecutor(false),
-          HostSync.isNode(sync) ? sync.main() : null);
+          new ShellExecutor(false));
+    }
+
+    /** The FDE this box is, named by its sync handle. */
+    String handle() {
+      return sync.handle();
+    }
+
+    /** The main a node syncs with; {@code null} on main or a lone box. */
+    String main() {
+      return node() ? sync.main() : null;
     }
 
     /** Whether this box is a node, whose roster is a copy of main's. */
     boolean node() {
-      return main != null;
+      return HostSync.isNode(sync);
     }
 
     /** Whom this box's root acts for, as {@code roster} places this box's FDE. */
     Actor person(FdeStore roster) {
-      return CliOperator.of(new SyncConfig(null, main, handle), roster);
+      return CliOperator.of(sync, roster);
     }
 
     /**
