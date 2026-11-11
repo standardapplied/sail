@@ -12,7 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
+import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
@@ -72,6 +74,11 @@ class SyncCliTest {
   @ValueSource(ints = {1, 4, 5})
   void cliFreshnessHonorsPersistedBackoffAndExplicitSyncStillProbes(int failures) throws Exception {
     runIsolated(Integer.toString(failures));
+  }
+
+  @Test
+  void syncRunsItsRoundOnANodeThatDoesNotKnowItsPersonYet() throws Exception {
+    runIsolated("unplaced-sync");
   }
 
   @Test
@@ -183,6 +190,34 @@ class SyncCliTest {
     }
   }
 
+  /**
+   * On a node whose roster does not name its person yet, a command that reads as that person is
+   * refused, and {@code sail sync} through the host command line still runs its round: it reaches
+   * for main (here, an ssh that fails) and records the attempt, never asking for the person.
+   */
+  private static void verifySyncOnAnUnplacedNode(HostOperations operations) {
+    var unplaced = assertThrows(ApiException.class, SailCommandLine::operator);
+    assertTrue(
+        unplaced.getMessage().contains("cannot tell what you may do"), unplaced.getMessage());
+    var originalOut = System.out;
+    var originalErr = System.err;
+    var printed = new ByteArrayOutputStream();
+    System.setOut(new PrintStream(printed, true, StandardCharsets.UTF_8));
+    System.setErr(new PrintStream(printed, true, StandardCharsets.UTF_8));
+    int exit;
+    try {
+      exit = SailCommandLine.of(new Sail()).execute("sync");
+    } finally {
+      System.setOut(originalOut);
+      System.setErr(originalErr);
+    }
+    var said = printed.toString(StandardCharsets.UTF_8);
+
+    assertEquals(1, exit, said);
+    assertFalse(said.contains("cannot tell what you may do"), said);
+    assertEquals(1, operations.syncStatus().consecutiveFailures(), said);
+  }
+
   public static void main(String[] args) throws Exception {
     try (var db = Sqlite.open(SailPaths.controlPlaneDb());
         var operations = OperationsFactory.open()) {
@@ -190,6 +225,10 @@ class SyncCliTest {
       schema.migrate();
       if ("scope-mid-write".equals(args[0])) {
         verifyScopeDuringIdentityWrite(db);
+        return;
+      }
+      if ("unplaced-sync".equals(args[0])) {
+        verifySyncOnAnUnplacedNode(operations);
         return;
       }
       if (args[0].startsWith("scope-")) {

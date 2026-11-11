@@ -1594,7 +1594,7 @@ class SailOperationsSeamTest {
               .isEmpty());
       assertEquals(
           reviewer,
-          Acting.system(() -> operations.dispatching().latestOperable("proj", "node", null))
+          Acting.system(() -> operations.dispatching().latestOperable("proj", "node"))
               .orElseThrow()
               .id());
     }

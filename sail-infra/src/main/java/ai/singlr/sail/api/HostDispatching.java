@@ -47,11 +47,13 @@ public interface HostDispatching {
   boolean endLiveMember(String runId, String why);
 
   /**
-   * The newest run of {@code project} the box whose handle is {@code node} executed, in {@code
-   * lane} or in any lane when it is null, when whoever reads ({@link Actor#reader}) may operate it
-   * — read its log, attach to it — as every log door admits it ({@link LogAdmission}): a project
-   * outside its scope is not in the catalog, and a run it may not operate is refused. Empty when
-   * there is no such run.
+   * The newest run of {@code project} the box whose handle is {@code node} executed, in any lane,
+   * when whoever reads ({@link Actor#reader}) may operate it — read its log, attach to it — as
+   * every log door admits it ({@link LogAdmission}): a project outside its scope is not in the
+   * catalog, and a run it may not operate is refused. Empty when there is no such run.
    */
+  Optional<RunStore.RunRow> latestOperable(String project, String node);
+
+  /** {@link #latestOperable(String, String)}, of the runs in {@code lane} alone. */
   Optional<RunStore.RunRow> latestOperable(String project, String node, Lane lane);
 }

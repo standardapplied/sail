@@ -363,7 +363,7 @@ public final class AgentAttachCommand implements Runnable {
             var node = NodeIdentity.handle();
             return operations
                 .dispatching()
-                .latestOperable(name, node, null)
+                .latestOperable(name, node)
                 .map(
                     run ->
                         new Latest(

@@ -41,6 +41,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -114,10 +115,25 @@ final class HostLanes {
     }
 
     @Override
+    public Optional<RunStore.RunRow> latestOperable(String project, String node) {
+      return operable(project, node, () -> latestRun(project, node));
+    }
+
+    @Override
     public Optional<RunStore.RunRow> latestOperable(String project, String node, Lane lane) {
+      Objects.requireNonNull(lane, "lane");
+      return operable(project, node, () -> latestInLane(project, node, lane));
+    }
+
+    /**
+     * The run {@code latest} finds, once the reader reads {@code project}, if it may operate it.
+     */
+    private Optional<RunStore.RunRow> operable(
+        String project, String node, Supplier<Optional<RunStore.RunRow>> latest) {
       var actor = Actor.reader();
       ProjectGate.requireReads(project);
-      return (lane == null ? latestRun(project, node) : latestInLane(project, node, lane))
+      return latest
+          .get()
           .map(
               run ->
                   switch (LogAdmission.of(actor, Optional.of(run), run.id(), node, specs)) {

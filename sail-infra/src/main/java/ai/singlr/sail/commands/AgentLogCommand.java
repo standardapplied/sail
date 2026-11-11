@@ -183,7 +183,10 @@ public final class AgentLogCommand implements Runnable {
    */
   static String logPath(
       HostOperations operations, String project, String node, Optional<Lane> lane) {
-    return logPathFrom(operations.dispatching().latestOperable(project, node, lane.orElse(null)));
+    var dispatching = operations.dispatching();
+    return logPathFrom(
+        lane.map(only -> dispatching.latestOperable(project, node, only))
+            .orElseGet(() -> dispatching.latestOperable(project, node)));
   }
 
   /** The run's own log path, derived from its id, or null when there is no run. */
