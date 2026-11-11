@@ -372,6 +372,20 @@ class EventAuthorityTest {
             POSTED,
             "lobby",
             null,
+            Kind.NOT_OWNER),
+        retold(
+            "a principal retells no message, even in its own work",
+            AGENT,
+            POSTED,
+            "lobby",
+            null,
+            Kind.NOT_OWNER),
+        retold(
+            "a room principal retells no message in its room",
+            ROOM,
+            POSTED,
+            "lobby",
+            null,
             Kind.NOT_OWNER));
   }
 

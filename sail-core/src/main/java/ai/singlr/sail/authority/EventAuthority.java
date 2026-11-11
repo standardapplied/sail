@@ -238,12 +238,12 @@ public final class EventAuthority {
   /**
    * Whether a sender {@link Access} allows is taken at its word: what an event the machinery acts
    * on reports, only whoever speaks for this box reports first-hand, and anyone else only retells,
-   * never what this box executed itself; an announcement is retold by a voice, about a
-   * conversation; a person's narration, an admin's included, only of a run this box executed, since
-   * what another box's run did reaches this one by sync, and a run's own principal of itself, since
-   * only the box executing a run holds its credential, as {@link Access#ownRun} decides it of
-   * {@code resource}, what the narration is taken on. An event about the box is decided by the
-   * action alone.
+   * never what this box executed itself; an announcement is retold by a person's voice, about a
+   * conversation, and never by an agent, which retells nothing (its socket strips the source); a
+   * person's narration, an admin's included, only of a run this box executed, since what another
+   * box's run did reaches this one by sync, and a run's own principal of itself, since only the box
+   * executing a run holds its credential, as {@link Access#ownRun} decides it of {@code resource},
+   * what the narration is taken on. An event about the box is decided by the action alone.
    */
   private boolean believed(
       Actor actor, Action action, Subject subject, Resource resource, boolean retold) {
@@ -254,6 +254,7 @@ public final class EventAuthority {
       case POST ->
           firstHand
               || (retold
+                  && !actor.agentLane()
                   && Strings.isNotBlank(actor.actingFde())
                   && subject.conversation() != null);
       default -> firstHand || (retold && !subject.executedHere());

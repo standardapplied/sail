@@ -160,6 +160,9 @@ class OneDecisionSweepTest {
         API + "LocalApiRouter#markDeliveredOnSelfRead",
         "fact: a run's read of its own room is a delivery");
     allowed.put(API + "RoomCommitGuard#guardRoomRun", "fact: which runs are a room's wakes");
+    allowed.put(
+        RULES + "EventAuthority#believed",
+        "fact: an agent retells nothing, so no announcement of its is taken at its word");
     allowed.put(RULES + "Attribution#decide", "fact: a push names only its pusher (attribution)");
     allowed.put(
         RULES + "Attribution#made",
