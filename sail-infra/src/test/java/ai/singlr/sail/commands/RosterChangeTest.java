@@ -58,6 +58,9 @@ import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.function.ThrowingConsumer;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -294,17 +297,73 @@ class RosterChangeTest {
   }
 
   /**
-   * The terminal host resolves a connection's principal at its hello and again at each sweep. Until
-   * the sweep, an open connection pins rooms and opens sessions as the principal it was admitted
-   * as, after its person is demoted, rescoped or disabled alike: the one window A10 leaves the
-   * terminal. The sweep severs it once its credential resolves to another principal, or to none,
-   * and the reconnect is admitted as what it is now.
+   * The terminal host resolves a connection's principal at its hello and again at each sweep. The
+   * sweep severs an open connection once its credential resolves to another principal, or to none,
+   * after its person is demoted, rescoped or disabled alike, and the reconnect is admitted as what
+   * it is now.
    */
   @Test
-  void aChangeOfAccessSeversAnOpenTerminalAtTheNextSweepAndNotBefore() throws Exception {
+  void aChangeOfAccessSeversAnOpenTerminalAtTheNextSweepAndNotBefore() throws Throwable {
+    var session = niasSession();
+    onMainsTerminal(
+        host -> {
+          severedAtTheSweep(host, session, "UPDATE fdes SET role = 'viewer' WHERE handle = 'nia'");
+          assertEquals(
+              "Refusing room for session 'again': Your credential is read-only and cannot post in"
+                  + " rooms. Ask an admin for a member or admin credential.",
+              refusedAPin(socket(), session));
+
+          onMain("UPDATE fdes SET role = 'member' WHERE handle = 'nia'");
+          severedAtTheSweep(
+              host, session, "UPDATE fdes SET scope = 'granted' WHERE handle = 'nia'");
+          assertEquals(
+              "Project 'acme' is not in the catalog. Create it with 'sail project create acme', or"
+                  + " sync it from main with 'sail sync'.",
+              refusedAPin(socket(), session));
+
+          roster.unrestrict("nia");
+          severedAtTheSweep(
+              host, session, "UPDATE fdes SET status = 'disabled' WHERE handle = 'nia'");
+          assertEquals(
+              "FDE 'nia' is disabled or not in this box's roster. Ask an admin to re-enable it, or"
+                  + " run 'sail sync' on a node that has not synced its roster.",
+              assertThrows(IOException.class, () -> SessionClient.connect(socket(), session))
+                  .getMessage());
+        });
+  }
+
+  /**
+   * Until the sweep, an open connection pins rooms and opens sessions as the principal it was
+   * admitted as: the one window A10 leaves the terminal. Opening the session needs a real pty.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void anOpenTerminalActsAsItWasAdmittedUntilTheSweepAndNotAfter() throws Throwable {
+    var session = niasSession();
+    onMainsTerminal(
+        host -> {
+          try (var open = SessionClient.connect(socket(), session)) {
+            onMain("UPDATE fdes SET role = 'viewer' WHERE handle = 'nia'");
+            open.create("pinned", List.of("sh", "-c", "read a"), "/tmp", "acme", "lobby", 80, 24);
+
+            host.sweep(System.nanoTime());
+
+            assertThrows(IOException.class, open::list, "the sweep severs the connection");
+          }
+        });
+  }
+
+  private String niasSession() {
     var nia = roster.byHandle("nia").orElseThrow();
-    var session = new AuthSessionStore(mainDb).create(nia.id(), Duration.ofHours(1)).token();
-    var socket = tempDir.resolve("pty.sock");
+    return new AuthSessionStore(mainDb).create(nia.id(), Duration.ofHours(1)).token();
+  }
+
+  private Path socket() {
+    return tempDir.resolve("pty.sock");
+  }
+
+  /** Runs {@code check} against main's terminal host, started on {@link #socket}. */
+  private void onMainsTerminal(ThrowingConsumer<PtySessionHost> check) throws Throwable {
     try (var operations =
             DoorBox.wired(
                 OperationsFactory.create(
@@ -317,52 +376,21 @@ class RosterChangeTest {
                 mainDb,
                 tempDir,
                 MAIN);
-        var host = terminalHost(socket, tempDir.resolve("sessions"), operations.pty())) {
+        var host = terminalHost(socket(), tempDir.resolve("sessions"), operations.pty())) {
       host.start();
-
-      pinnedUntilTheSweep(
-          host, socket, session, "UPDATE fdes SET role = 'viewer' WHERE handle = 'nia'");
-      assertEquals(
-          "Refusing room for session 'again': Your credential is read-only and cannot post in"
-              + " rooms. Ask an admin for a member or admin credential.",
-          refusedAPin(socket, session));
-
-      onMain("UPDATE fdes SET role = 'member' WHERE handle = 'nia'");
-      pinnedUntilTheSweep(
-          host, socket, session, "UPDATE fdes SET scope = 'granted' WHERE handle = 'nia'");
-      assertEquals(
-          "Project 'acme' is not in the catalog. Create it with 'sail project create acme', or"
-              + " sync it from main with 'sail sync'.",
-          refusedAPin(socket, session));
-
-      roster.unrestrict("nia");
-      pinnedUntilTheSweep(
-          host, socket, session, "UPDATE fdes SET status = 'disabled' WHERE handle = 'nia'");
-      assertEquals(
-          "FDE 'nia' is disabled or not in this box's roster. Ask an admin to re-enable it, or run"
-              + " 'sail sync' on a node that has not synced its roster.",
-          assertThrows(IOException.class, () -> SessionClient.connect(socket, session))
-              .getMessage());
+      check.accept(host);
     }
   }
 
   /**
-   * Opens a terminal as {@code session}, changes main's roster by {@code change}, pins a session to
-   * the lobby before the sweep, which admits it as the principal it opened as, and sweeps: the
-   * sweep severs the connection.
+   * Opens a terminal as {@code session} and changes main's roster by {@code change}: the connection
+   * still answers until the sweep, which severs it.
    */
-  private void pinnedUntilTheSweep(PtySessionHost host, Path socket, String session, String change)
+  private void severedAtTheSweep(PtySessionHost host, String session, String change)
       throws Exception {
-    try (var open = SessionClient.connect(socket, session)) {
+    try (var open = SessionClient.connect(socket(), session)) {
       onMain(change);
-      open.create(
-          "pinned-" + System.nanoTime(),
-          List.of("sh", "-c", "read a"),
-          "/tmp",
-          "acme",
-          "lobby",
-          80,
-          24);
+      open.list();
 
       host.sweep(System.nanoTime());
 
