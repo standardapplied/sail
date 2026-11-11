@@ -405,7 +405,8 @@ class PasskeyServiceTest {
 
     assertEquals(PasskeyException.Kind.BAD_REQUEST, e.kind());
     assertEquals(
-        "Registration challenge is not for the FDE this enrollment ticket enrolls.",
+        "Registration challenge is not for the FDE this enrollment ticket enrolls. Start the"
+            + " registration again with this ticket.",
         e.getMessage());
     assertEquals(0L, count("SELECT count(*) FROM webauthn_credentials"));
     assertEquals("uday", finish(service.startRegistration("uday"), "uday").fdeHandle());
@@ -497,8 +498,8 @@ class PasskeyServiceTest {
   }
 
   private static void assertDisabled(String handle, PasskeyException e) {
-    assertEquals(PasskeyException.Kind.UNAUTHORIZED, e.kind());
-    assertEquals("FDE '" + handle + "' is disabled. Ask an admin to re-enable it.", e.getMessage());
+    assertEquals(PasskeyException.Kind.DISABLED, e.kind());
+    assertEquals("FDE '" + handle + "' is disabled.", e.getMessage());
   }
 
   private long count(String sql) {

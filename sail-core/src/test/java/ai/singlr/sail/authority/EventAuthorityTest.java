@@ -570,13 +570,13 @@ class EventAuthorityTest {
     boxFde = OWNER;
 
     assertEquals(
-        new Subject("acme", "auth", RUN, List.of(CAROL), true),
+        new Subject("acme", "auth", RUN, List.of(CAROL), true, OWNER),
         rule.subject("elsewhere", "billing", RUN));
     assertEquals(
-        new Subject("acme", "auth", OTHER_RUN, List.of(CAROL), false),
+        new Subject("acme", "auth", OTHER_RUN, List.of(CAROL), false, "bob"),
         rule.subject("elsewhere", "billing", OTHER_RUN));
     assertEquals(
-        new Subject("acme", null, ADHOC, List.of(OTHER), false),
+        new Subject("acme", null, ADHOC, List.of(OTHER), false, OTHER),
         rule.subject("elsewhere", "billing", ADHOC));
   }
 
@@ -597,27 +597,27 @@ class EventAuthorityTest {
     board.db.execute("DELETE FROM specs WHERE id = 'auth'");
 
     assertEquals(
-        new Subject("acme", "auth", OTHER_RUN, List.of(), false),
+        new Subject("acme", "auth", OTHER_RUN, List.of(), false, "bob"),
         rule.subject("elsewhere", null, OTHER_RUN));
   }
 
   @Test
   void aSpecOrRoomDecidesItsProjectItsOwnersAndWhoHasAVoiceInIt() {
     assertEquals(
-        new Subject("acme", "billing", null, List.of(OTHER), false),
+        new Subject("acme", "billing", null, List.of(OTHER), false, null),
         rule.subject("elsewhere", "billing", null));
     assertEquals(
-        new Subject("acme", "den", null, List.of(CAROL, OTHER), false),
+        new Subject("acme", "den", null, List.of(CAROL, OTHER), false, null),
         rule.subject("elsewhere", "den", "no-such-run"));
   }
 
   @Test
   void workThisBoxDoesNotHoldIsAsItsSenderNamedItAndNoOnes() {
     assertEquals(
-        new Subject("elsewhere", "gone", null, List.of(), false),
+        new Subject("elsewhere", "gone", null, List.of(), false, null),
         rule.subject("elsewhere", "gone", null));
     assertEquals(
-        new Subject("elsewhere", null, null, List.of(), false),
+        new Subject("elsewhere", null, null, List.of(), false, null),
         rule.subject("elsewhere", " ", " "));
   }
 
@@ -627,12 +627,24 @@ class EventAuthorityTest {
         Optional.of(
             new Refusal(
                 Kind.NOT_OWNER,
-                "Event type 'agent_tool_started' reports what this box observed of run "
+                "Event type 'agent_tool_started' reports what another box observed of run "
                     + RUN
-                    + " of 'auth' (owned by 'carol'), which you may not drive: only this box's FDE"
-                    + " or an admin reports that.",
-                "What another box did reaches this one by sync.")),
+                    + " of 'auth' (owned by 'carol'): only the box that executed it reports that.",
+                "Publish it from "
+                    + OWNER
+                    + ", which executed it; what it reports reaches this box by sync.")),
         rule.decide(ADMIN, TOOL, rule.subject("acme", "auth", RUN), false));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Event type 'agent_tool_started' reports what another box observed of run "
+                    + RUN
+                    + " of 'auth' (owned by 'carol'): only the box that executed it reports that.",
+                "What another box did reaches this one by sync.")),
+        rule.decide(
+            ADMIN, TOOL, new Subject("acme", "auth", RUN, List.of(CAROL), false, null), false),
+        "a run whose box is not known names none");
   }
 
   @Test

@@ -115,7 +115,8 @@ final class HostLanes {
     }
 
     @Override
-    public Optional<RunStore.RunRow> latestLog(String project, String node, Optional<Lane> lane) {
+    public Optional<RunStore.RunRow> latestOperable(
+        String project, String node, Optional<Lane> lane) {
       var actor = Actor.current();
       ProjectGate.requireReads(project);
       return lane.map(asked -> latestInLane(project, node, asked))

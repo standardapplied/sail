@@ -99,14 +99,16 @@ public final class EventAuthority {
    * runId} is null when no run this box holds is named. {@code owners} are who drives it, whom a
    * sender who is not this box's FDE must act for: the owners of the spec or room, named directly
    * or worked by the run; for a run that works neither, the run's own; and none for work this box
-   * does not hold. {@code executedHere} is whether this box executed the run.
+   * does not hold. {@code executedHere} is whether this box executed the run, and {@code
+   * executedOn} the box that did, null when no run is named or it names none.
    */
   public record Subject(
       String project,
       String conversation,
       String runId,
       List<String> owners,
-      boolean executedHere) {
+      boolean executedHere,
+      String executedOn) {
 
     public Subject {
       owners = List.copyOf(owners);
@@ -138,12 +140,13 @@ public final class EventAuthority {
         worked.conversation() == null
             ? held.resource(Actor.system(), specs::findById).owners()
             : worked.owners(),
-        held.ownedBy(boxFde.get()));
+        held.ownedBy(boxFde.get()),
+        held.node());
   }
 
   private Subject about(String project, String conversation) {
     if (Strings.isBlank(conversation)) {
-      return new Subject(project, null, null, List.of(), false);
+      return new Subject(project, null, null, List.of(), false, null);
     }
     var spec = specs.findById(conversation);
     if (spec.isPresent()) {
@@ -153,14 +156,16 @@ public final class EventAuthority {
           conversation,
           null,
           Stream.ofNullable(row.owner()).filter(Strings::isNotBlank).toList(),
-          false);
+          false,
+          null);
     }
     return rooms
         .findById(conversation)
         .map(
             room ->
-                new Subject(room.project(), conversation, null, rooms.owners(conversation), false))
-        .orElseGet(() -> new Subject(project, conversation, null, List.of(), false));
+                new Subject(
+                    room.project(), conversation, null, rooms.owners(conversation), false, null))
+        .orElseGet(() -> new Subject(project, conversation, null, List.of(), false, null));
   }
 
   /**
@@ -265,6 +270,20 @@ public final class EventAuthority {
               + "' speaks for this box, and you may not drive what it does: only this box's FDE or"
               + " an admin publishes it.",
           "Ask this box's FDE or an admin to publish it.");
+    }
+    if (action == Action.NARRATE && !subject.executedHere()) {
+      return Refusal.of(
+          kind,
+          "Event type '"
+              + type
+              + "' reports what another box observed of "
+              + described(subject)
+              + ": only the box that executed it reports that.",
+          Strings.isBlank(subject.executedOn())
+              ? "What another box did reaches this one by sync."
+              : "Publish it from "
+                  + subject.executedOn()
+                  + ", which executed it; what it reports reaches this box by sync.");
     }
     if (action == Action.NARRATE
         || subject.executedHere()

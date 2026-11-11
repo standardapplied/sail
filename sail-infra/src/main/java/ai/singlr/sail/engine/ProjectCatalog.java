@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Strings;
@@ -125,14 +126,19 @@ public final class ProjectCatalog {
     }
   }
 
-  /** The definition project {@code name} holds in this catalog, or empty when none. */
+  /**
+   * The definition project {@code name} holds in this catalog, or empty when none or when whoever
+   * reads may not read it ({@link Actor#reader}), so a project outside their scope reads as absent.
+   */
   public Optional<ProjectDefinition> read(String name) {
     if (!Files.isRegularFile(database)) {
       return Optional.empty();
     }
     try (var db = Sqlite.open(database)) {
       new SchemaManager(db).migrate();
-      return new ProjectStore(db).findByName(name).map(ProjectStore.ProjectRow::definition);
+      return ReadFilter.readable(
+              Actor.reader(), new ProjectStore(db).findByName(name), ProjectStore.ProjectRow::name)
+          .map(ProjectStore.ProjectRow::definition);
     }
   }
 

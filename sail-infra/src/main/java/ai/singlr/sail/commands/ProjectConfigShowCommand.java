@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.ProjectDefinition;
 import ai.singlr.sail.config.ProjectDefinitionJson;
@@ -21,6 +22,7 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -38,6 +40,16 @@ public final class ProjectConfigShowCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
+  private final Function<OperatorCommand, HostOperations> operations;
+
+  public ProjectConfigShowCommand() {
+    this(operator -> OperationsFactory.open(operator::warn));
+  }
+
+  ProjectConfigShowCommand(Function<OperatorCommand, HostOperations> operations) {
+    this.operations = operations;
+  }
+
   @Override
   public void run() {
     CliCommand.run(this::execute);
@@ -46,7 +58,7 @@ public final class ProjectConfigShowCommand implements Runnable {
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
-    try (var operations = OperationsFactory.open(operator::warn)) {
+    try (var operations = this.operations.apply(operator)) {
       operations.asOperator(() -> operations.catalog().readable(name));
     }
 

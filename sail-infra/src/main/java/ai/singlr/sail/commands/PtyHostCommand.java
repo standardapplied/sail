@@ -8,6 +8,9 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.SailVersion;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.pty.PtyAdmission;
+import ai.singlr.sail.pty.PtyEvents;
+import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
 import java.nio.file.Path;
 import java.util.List;
@@ -38,8 +41,8 @@ public final class PtyHostCommand implements Callable<Integer> {
         startHost(
             SailPaths.ptySocketPath(),
             SailPaths.sessionsDir(),
-            new PtyHostIdentity(),
-            new PtyHostAdmission(),
+            PtyHostAccess.here(),
+            PtyHostAccess.here(),
             new PtyHostEvents(),
             handoff);
     var done = new CountDownLatch(1);
@@ -87,9 +90,9 @@ public final class PtyHostCommand implements Callable<Integer> {
   static PtySessionHost startHost(
       java.nio.file.Path socket,
       java.nio.file.Path sessions,
-      ai.singlr.sail.pty.PtyIdentity.Resolver identity,
-      ai.singlr.sail.pty.PtyAdmission admission,
-      ai.singlr.sail.pty.PtyEvents events)
+      PtyIdentity.Resolver identity,
+      PtyAdmission admission,
+      PtyEvents events)
       throws java.io.IOException {
     return startHost(socket, sessions, identity, admission, events, PtySessionHost.Handoff.NONE);
   }
@@ -98,9 +101,9 @@ public final class PtyHostCommand implements Callable<Integer> {
   static PtySessionHost startHost(
       java.nio.file.Path socket,
       java.nio.file.Path sessions,
-      ai.singlr.sail.pty.PtyIdentity.Resolver identity,
-      ai.singlr.sail.pty.PtyAdmission admission,
-      ai.singlr.sail.pty.PtyEvents events,
+      PtyIdentity.Resolver identity,
+      PtyAdmission admission,
+      PtyEvents events,
       PtySessionHost.Handoff handoff)
       throws java.io.IOException {
     var host =

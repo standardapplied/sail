@@ -8,6 +8,7 @@ package ai.singlr.sail.identity;
 import ai.singlr.sail.common.Strings;
 import java.util.Objects;
 import java.util.concurrent.Callable;
+import java.util.function.Supplier;
 
 /**
  * Who is acting: the one identity every write names, whichever door it came through. {@code handle}
@@ -38,6 +39,8 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
   public static final String MAIN_HANDLE = "main";
 
   private static final ScopedValue<Actor> CURRENT = ScopedValue.newInstance();
+
+  private static final ScopedValue<Supplier<Actor>> READER = ScopedValue.newInstance();
 
   /** The ways a write can be made. */
   public enum Lane {
@@ -126,14 +129,27 @@ public record Actor(String handle, Role role, Lane lane, String owner, ProjectSc
   }
 
   /**
-   * Who is reading. A read leaves nothing behind that must name its author, so this box's own work
-   * that no door bound an actor to — its root CLI describing what the box holds, its machinery
-   * looking a row up — reads as the box itself ({@link #system}), which sees every project. A door
-   * that serves anyone else binds its caller before it routes, and a read then sees no more than
-   * that caller's {@link #scope}. A write never falls back like this: see {@link #current()}.
+   * Who is reading: the actor bound to the current operation; else whoever {@link #readingAs} named
+   * for the work around it; else, for this box's own machinery that no door bound an actor to, the
+   * box itself ({@link #system}), which sees every project. A door that serves anyone else binds
+   * its caller before it routes, and a read then sees no more than that caller's {@link #scope}. A
+   * write never falls back like this: see {@link #current()}.
    */
   public static Actor reader() {
-    return CURRENT.isBound() ? CURRENT.get() : system();
+    if (CURRENT.isBound()) {
+      return CURRENT.get();
+    }
+    return READER.isBound() ? READER.get().get() : system();
+  }
+
+  /**
+   * Runs {@code work} with every read no actor is bound to made as whoever {@code reader} names,
+   * asked at each such read: the host CLI's person, whom a command that reads nothing need not
+   * resolve. Writes still need an actor bound with {@link #run} or {@link #call}.
+   */
+  public static <T, X extends Throwable> T readingAs(
+      Supplier<Actor> reader, ScopedValue.CallableOp<T, X> work) throws X {
+    return ScopedValue.where(READER, Objects.requireNonNull(reader, "reader")).call(work);
   }
 
   /** Runs {@code work} as {@code actor}. */

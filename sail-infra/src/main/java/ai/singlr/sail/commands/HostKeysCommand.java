@@ -29,7 +29,7 @@ public final class HostKeysCommand implements Runnable {
 
   @Override
   public void run() {
-    new picocli.CommandLine(this).usage(System.out);
+    SailCommandLine.of(this).usage(System.out);
   }
 
   @Command(

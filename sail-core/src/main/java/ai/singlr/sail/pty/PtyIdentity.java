@@ -25,9 +25,6 @@ public sealed interface PtyIdentity {
   /** Whom the host names this principal as: a session's owner, and its log's principal. */
   String fde();
 
-  /** Whether this is the host's own dispatch authority rather than a person. */
-  boolean dispatchAuthority();
-
   /** A person, acting as {@code actor}. */
   record Person(Actor actor) implements PtyIdentity {
 
@@ -39,11 +36,6 @@ public sealed interface PtyIdentity {
     public String fde() {
       return actor.handle();
     }
-
-    @Override
-    public boolean dispatchAuthority() {
-      return false;
-    }
   }
 
   /** The host's own dispatch authority. */
@@ -52,11 +44,6 @@ public sealed interface PtyIdentity {
     @Override
     public String fde() {
       return "dispatch";
-    }
-
-    @Override
-    public boolean dispatchAuthority() {
-      return true;
     }
   }
 

@@ -106,7 +106,8 @@ public final class PasskeyService implements PasskeyCeremonies {
     if (enrolling != null && !enrolling.equals(fde.handle())) {
       throw new PasskeyException(
           PasskeyException.Kind.BAD_REQUEST,
-          "Registration challenge is not for the FDE this enrollment ticket enrolls.");
+          "Registration challenge is not for the FDE this enrollment ticket enrolls. Start the"
+              + " registration again with this ticket.");
     }
     return ActivePerson.of(fde);
   }

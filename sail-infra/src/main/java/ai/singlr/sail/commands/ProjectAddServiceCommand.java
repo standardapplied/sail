@@ -70,7 +70,7 @@ public final class ProjectAddServiceCommand implements Runnable {
     var out = System.out;
 
     var mutations = ProjectMutations.here();
-    var actor = mutations.writer(name, dryRun);
+    var actor = mutations.writer(name);
     var config = mutations.current(name, operator);
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);

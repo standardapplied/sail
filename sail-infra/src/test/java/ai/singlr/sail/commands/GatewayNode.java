@@ -11,6 +11,7 @@ import ai.singlr.sail.api.SyncReport;
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.PipedSyncChannel;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.RoleRule;
@@ -26,8 +27,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.time.Duration;
-import java.util.List;
 
 /**
  * A node syncing with main as in the field: each round, main's SSH gateway authorizes {@code _sync}
@@ -71,7 +70,7 @@ final class GatewayNode implements AutoCloseable {
                     }),
             event -> {},
             remedy -> {},
-            new NoContainers());
+            new ScriptedShellExecutor(new ShellExec.Result(0, "[]", "")));
     sync.prepare();
   }
 
@@ -119,23 +118,5 @@ final class GatewayNode implements AutoCloseable {
   @Override
   public void close() {
     db.close();
-  }
-
-  /** A host with no containers. */
-  private static final class NoContainers implements ShellExec {
-    @Override
-    public Result exec(List<String> command) {
-      return new Result(0, "[]", "");
-    }
-
-    @Override
-    public Result exec(List<String> command, Path workDir, Duration timeout) {
-      return exec(command);
-    }
-
-    @Override
-    public boolean isDryRun() {
-      return false;
-    }
   }
 }

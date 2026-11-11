@@ -280,6 +280,11 @@ class DispatchCommandWiringTest {
             ApiException.class,
             () -> AgentStopCommand.stopAsOperator(operations, "acme", HANDLE, false));
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, stop.failure().errorCode());
+    var preview =
+        assertThrows(
+            ApiException.class,
+            () -> AgentStopCommand.stopAsOperator(operations, "acme", HANDLE, true));
+    assertEquals(stop.getMessage(), preview.getMessage(), "a preview is refused as the stop is");
     var dispatch =
         assertThrows(
             IllegalStateException.class,

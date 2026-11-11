@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.LiveMembers;
 import ai.singlr.sail.api.OperationsFactory;
@@ -30,6 +31,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -348,10 +350,11 @@ public final class AgentAttachCommand implements Runnable {
 
   /**
    * The latest local agent session (build or ad-hoc) of the project with its room, read directly
-   * from the control-plane database like the status and log lanes. A run whose room is not on this
-   * box resolves to no room — the session then opens unbound, announced — so a legacy conversation
-   * is never unreachable for want of a room row. An unreadable database fails closed through {@link
-   * #orRefuse}.
+   * from the control-plane database like the status and log lanes, as this box's operator, who must
+   * read the project and may operate the run, decided in stop's order. A run whose room is not on
+   * this box resolves to no room — the session then opens unbound, announced — so a legacy
+   * conversation is never unreachable for want of a room row. An unreadable database fails closed
+   * through {@link #orRefuse}.
    */
   private Latest latest(OperatorCommand operator) {
     return orRefuse(
@@ -359,15 +362,20 @@ public final class AgentAttachCommand implements Runnable {
         () -> {
           try (var operations = this.operations.apply(operator)) {
             var node = NodeIdentity.handle();
-            var run = operations.dispatching().latestRun(name, node).orElse(null);
-            return run == null
-                ? Latest.NONE
-                : new Latest(
-                    run,
-                    operations.catalog().roomKnown(run.conversationId())
-                        ? run.conversationId()
-                        : "",
-                    operations.dispatching().runningRuns(name, node));
+            return operations.asOperator(
+                () ->
+                    operations
+                        .dispatching()
+                        .latestOperable(name, node, Optional.empty())
+                        .map(
+                            run ->
+                                new Latest(
+                                    run,
+                                    operations.catalog().roomKnown(run.conversationId())
+                                        ? run.conversationId()
+                                        : "",
+                                    operations.dispatching().runningRuns(name, node)))
+                        .orElse(Latest.NONE));
           }
         });
   }
@@ -381,11 +389,13 @@ public final class AgentAttachCommand implements Runnable {
    * The fail-closed policy, pure: unknown is never absent. A successful query may find no run —
    * only then may attach fall back to a fresh conversation. A query failure of any kind refuses the
    * attach, because treating an unreadable database as "no run" would bypass the live-run refusal
-   * and fork a second agent over the same worktree.
+   * and fork a second agent over the same worktree. A refusal the query decided is said as it is.
    */
   static <T> T orRefuse(String project, Supplier<T> query) {
     try {
       return query.get();
+    } catch (ApiException decided) {
+      throw decided;
     } catch (RuntimeException e) {
       throw new IllegalStateException(
           "Could not read run state for project '" + project + "'; refusing to attach.", e);

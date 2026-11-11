@@ -453,15 +453,15 @@ class DoorParityTest {
             "FDE 'obs' is disabled. Ask an admin to re-enable it.",
             null);
 
+    var conflict = Expected.refused(409, "conflict", "FDE 'obs' is disabled.", null);
+
     assertEveryDoor(
-        Expected.refused(
-            409, "conflict", "FDE 'obs' is disabled. Ask an admin to re-enable it.", null),
-        web("uday", "uday", "POST", "/v1/auth/register/ticket", "{\"fde\":\"obs\"}"));
+        conflict, web("uday", "uday", "POST", "/v1/auth/register/ticket", "{\"fde\":\"obs\"}"));
     assertEveryDoor(disabled, passkey("POST", "/v1/auth/register/start", ticket, "{}"));
     assertEveryDoor(
-        disabled, web("uday", "uday", "POST", "/v1/auth/register/start", "{\"fde\":\"obs\"}"));
+        conflict, web("uday", "uday", "POST", "/v1/auth/register/start", "{\"fde\":\"obs\"}"));
     assertEveryDoor(
-        disabled,
+        conflict,
         web(
             "uday",
             "uday",
@@ -549,7 +549,7 @@ class DoorParityTest {
                 tempDir,
                 tempDir.resolve("ssh_host_ed25519_key.pub"),
                 tempDir.resolve("workstation_key.pub"),
-                new DoorBox.AcmeRuns()));
+                DoorBox.acmeRuns()));
   }
 
   /**
@@ -628,7 +628,7 @@ class DoorParityTest {
     var config = boxes.get(person).config();
     var command =
         new DispatchCommand(
-            dryRun -> new DoorBox.AcmeRuns(),
+            dryRun -> DoorBox.acmeRuns(),
             (shell, hooks) ->
                 DoorBox.wired(
                     OperationsFactory.create(

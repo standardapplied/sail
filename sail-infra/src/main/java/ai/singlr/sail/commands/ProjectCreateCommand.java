@@ -127,7 +127,7 @@ public final class ProjectCreateCommand implements Runnable {
       out.println(ProjectDefinitionJson.write(created));
       return;
     }
-    catalog.create(created, mutations.writer(created.name(), false));
+    catalog.create(created, mutations.writer(created.name()));
     if (json) {
       out.println(ProjectDefinitionJson.write(created));
       return;

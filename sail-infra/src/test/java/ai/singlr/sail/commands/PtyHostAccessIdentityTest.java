@@ -30,7 +30,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-class PtyHostIdentityTest {
+class PtyHostAccessIdentityTest {
 
   private static final SyncConfig UDAYS_NODE =
       new SyncConfig("node", "sail@main", "uday", "uday-box");
@@ -64,8 +64,8 @@ class PtyHostIdentityTest {
     db.close();
   }
 
-  private PtyHostIdentity resolver(SyncConfig box) {
-    return new PtyHostIdentity(
+  private PtyHostAccess resolver(SyncConfig box) {
+    return new PtyHostAccess(
         () ->
             OperationsFactory.create(
                     db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)

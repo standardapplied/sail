@@ -20,6 +20,7 @@ import ai.singlr.sail.api.WebauthnAuthHandler;
 import ai.singlr.sail.auth.EnrollmentService;
 import ai.singlr.sail.auth.PasskeyService;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -56,12 +57,7 @@ record DoorBox(SyncConfig config, Sqlite db, SailOperations operations, HttpServ
     var operations =
         wired(
             OperationsFactory.create(
-                db,
-                new AcmeRuns(),
-                new EventBus(),
-                null,
-                SyncScheduler.disabled(),
-                SessionYield.NONE),
+                db, acmeRuns(), new EventBus(), null, SyncScheduler.disabled(), SessionYield.NONE),
             db,
             dir,
             config);
@@ -121,23 +117,9 @@ record DoorBox(SyncConfig config, Sqlite db, SailOperations operations, HttpServ
     operations.close();
   }
 
-  /** A host whose only container is acme's, running; every other command does nothing. */
-  static final class AcmeRuns implements ShellExec {
-    @Override
-    public Result exec(List<String> command) {
-      return String.join(" ", command).startsWith("incus list")
-          ? new Result(0, "[{\"name\": \"acme\", \"status\": \"Running\", \"state\": {}}]", "")
-          : new Result(0, "", "");
-    }
-
-    @Override
-    public Result exec(List<String> command, Path workDir, Duration timeout) {
-      return exec(command);
-    }
-
-    @Override
-    public boolean isDryRun() {
-      return false;
-    }
+  /** An Incus whose one container, acme, runs, and that answers every other command. */
+  static ShellExec acmeRuns() {
+    return new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+        .onOk("incus list", "[{\"name\": \"acme\", \"status\": \"Running\", \"state\": {}}]");
   }
 }

@@ -6,7 +6,6 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -20,6 +19,7 @@ import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ProjectStore;
 import java.io.ByteArrayOutputStream;
@@ -68,22 +68,26 @@ class ProjectMutationsTest {
   }
 
   @Test
-  void aDryRunNeedsNoOperator() {
-    var mutations =
-        new ProjectMutations(
-            new ProjectCatalog(dir.resolve("sail.db")),
-            () -> {
-              throw new AssertionError("a dry run asks for no operator");
-            });
+  void aProjectOutsideTheReadersScopeReadsAsOneTheCatalogDoesNotHold() {
+    var mutations = mutations();
+    mutations.catalog().create(TestDefinitions.named("acme"), mutations.writer("acme"));
+    var scoped =
+        new Actor("vic", Role.MEMBER, Actor.Lane.CLI).withScope(ProjectScope.of(List.of("beta")));
 
-    assertNull(mutations.writer("acme", true));
+    assertEquals(
+        "No project 'acme' in the catalog. Create it with 'sail project create acme', or sync it"
+            + " from main with 'sail sync'.",
+        assertThrows(
+                IllegalStateException.class,
+                () -> Actor.call(scoped, () -> mutations.current("acme", OperatorCommand.PLAIN)))
+            .getMessage());
   }
 
   @Test
   void aWriteIsMadeAsTheOperatorOverTheSectionItRead() {
     var mutations = mutations();
     var acme = TestDefinitions.named("acme");
-    mutations.catalog().create(acme, mutations.writer("acme", false));
+    mutations.catalog().create(acme, mutations.writer("acme"));
     var read = mutations.current("acme", OperatorCommand.PLAIN);
 
     mutations.write(
@@ -93,7 +97,7 @@ class ProjectMutationsTest {
         false,
         out,
         "unused",
-        mutations.writer("acme", false));
+        mutations.writer("acme"));
 
     assertEquals("x/1", mutations.current("acme", OperatorCommand.PLAIN).image());
     assertEquals("", captured.toString(StandardCharsets.UTF_8));
@@ -110,7 +114,7 @@ class ProjectMutationsTest {
                         false,
                         out,
                         "unused",
-                        mutations.writer("acme", false)))
+                        mutations.writer("acme")))
             .getMessage());
     assertEquals(
         "No project 'ghost' in the catalog. Create it with 'sail project create ghost', or sync"
@@ -131,7 +135,7 @@ class ProjectMutationsTest {
             new ProjectCatalog(dir.resolve("sail.db")),
             () -> new Actor("vic", Role.VIEWER, Actor.Lane.CLI));
 
-    var refused = assertThrows(WriteRefused.class, () -> viewer.writer("acme", false));
+    var refused = assertThrows(WriteRefused.class, () -> viewer.writer("acme"));
 
     assertEquals(Refusal.Kind.READ_ONLY, refused.refusal().kind());
   }

@@ -10,8 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -52,6 +54,20 @@ class ProjectConfigGetCommandTest {
                 + " sync it from main with 'sail sync'.\n"),
         get("ghost", "resources"));
     assertEquals(1, get("acme", "git").exit());
+  }
+
+  @Test
+  void aProjectOutsideTheOperatorsScopeReadsAsOneTheCatalogDoesNotHold() {
+    var scoped =
+        new Actor("vic", Role.MEMBER, Actor.Lane.CLI).withScope(ProjectScope.of(List.of("beta")));
+
+    assertEquals(
+        new CommandRun(
+            1,
+            "",
+            "  ✗ No project 'acme' in the catalog. Create it with 'sail project create acme', or"
+                + " sync it from main with 'sail sync'.\n"),
+        Actor.readingAs(() -> scoped, () -> get("acme", "resources")));
   }
 
   private CommandRun get(String... args) {

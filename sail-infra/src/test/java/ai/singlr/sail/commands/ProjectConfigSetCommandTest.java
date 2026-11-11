@@ -95,6 +95,19 @@ class ProjectConfigSetCommandTest {
   }
 
   @Test
+  void aDryRunIsRefusedAsTheWriteItRehearses() {
+    mutations =
+        new ProjectMutations(
+            mutations.catalog(), () -> new Actor("vic", Role.VIEWER, Actor.Lane.CLI));
+
+    var run = set("", "acme", "image", "\"x/1\"", "--dry-run");
+
+    assertEquals(1, run.exit());
+    assertEquals("", run.out());
+    assertEquals(set("", "acme", "image", "\"x/1\"").err(), run.err());
+  }
+
+  @Test
   void aProjectTheCatalogDoesNotHoldIsRefusedNamingHowToMakeIt() {
     var run = set("", "ghost", "image", "\"x/1\"");
 

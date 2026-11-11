@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.DispatchOperations;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.RunReservation;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -95,7 +96,7 @@ class AgentResumeSessionIT extends AbstractIncusIT {
               dir.resolve("s"),
               64 * 1024,
               token -> new PtyIdentity.Person(new Actor("it", Role.ADMIN, Actor.Lane.API)),
-              new PtyHostAdmission(dbPath),
+              new PtyHostAccess(() -> OperationsFactory.open(dbPath)),
               new PtyHostEvents(dbPath, dir.resolve("pty-events.drops")),
               "0.0.0-test")) {
         host.start();

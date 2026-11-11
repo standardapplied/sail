@@ -74,6 +74,15 @@ public final class PtySessionHost implements AutoCloseable {
   static final Duration CORPSE_RETENTION = Duration.ofMinutes(10);
   static final String DISPATCH_CREDENTIAL_FILE = "pty-dispatch.token";
   static final String BOOT_ID_FILE = "host.boot";
+
+  /**
+   * What a request hears when the host could not serve it, the store behind its access checks
+   * included: nothing was opened or changed, and asking again is the fix.
+   */
+  static final String UNSERVED =
+      "The host could not serve that request. Nothing was opened or changed; try again, and if it"
+          + " keeps failing, check the pty host's log.";
+
   private static final List<String> SESSION_FILE_SUFFIXES =
       List.of(
           SessionFiles.META_SUFFIX + ".tmp",
@@ -493,7 +502,7 @@ public final class PtySessionHost implements AutoCloseable {
         }
         while (true) {
           var message = PtyWire.read(channel);
-          if (who.dispatchAuthority()
+          if (who instanceof PtyIdentity.Dispatch
               && !(message instanceof PtyMessage.Yield)
               && !(message instanceof PtyMessage.ListSessions)) {
             reply(
@@ -593,7 +602,7 @@ public final class PtySessionHost implements AutoCloseable {
             case PtyMessage.Yield m ->
                 reply(
                     channel,
-                    who.dispatchAuthority()
+                    who instanceof PtyIdentity.Dispatch
                         ? yieldSession(m.session(), m.reason())
                         : new PtyMessage.Err("Yield requires host dispatch authority."));
             default -> reply(channel, new PtyMessage.Err("Unexpected client frame."));
@@ -601,7 +610,7 @@ public final class PtySessionHost implements AutoCloseable {
         }
       } catch (RuntimeException crashed) {
         log("exception", principal, "-", crashed.toString());
-        reply(channel, new PtyMessage.Err("The host could not serve that request."));
+        reply(channel, new PtyMessage.Err(UNSERVED));
       }
     } catch (IOException disconnected) {
       var unused = disconnected;
@@ -778,6 +787,7 @@ public final class PtySessionHost implements AutoCloseable {
   /**
    * Why {@code who} may not open a terminal in {@code project}, or null when it may or the session
    * names none: a project must be one the caller holds on this box ({@link PtyAdmission#project}).
+   * A store that cannot answer opens nothing and keeps the connection, said as {@link #UNSERVED}.
    */
   private PtyMessage.Err projectRefusal(String project, PtyIdentity who) {
     if (project == null || project.isBlank()) {
@@ -788,6 +798,9 @@ public final class PtySessionHost implements AutoCloseable {
       return null;
     } catch (IOException refused) {
       return new PtyMessage.Err(Remedied.whole(refused));
+    } catch (RuntimeException unavailable) {
+      log("project-check-failed", who.fde(), project, unavailable.toString());
+      return new PtyMessage.Err(UNSERVED);
     }
   }
 
@@ -827,7 +840,7 @@ public final class PtySessionHost implements AutoCloseable {
     var limit = Math.clamp(request.limit(), 1, PtyMessage.PAGE_LIMIT);
     var mine =
         sessions.values().stream()
-            .filter(session -> who.dispatchAuthority() || admitted(who, session))
+            .filter(session -> who instanceof PtyIdentity.Dispatch || admitted(who, session))
             .filter(session -> session.name().compareTo(after) > 0)
             .sorted(java.util.Comparator.comparing(PtySession::name))
             .toList();

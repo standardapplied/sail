@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.LocalApiSocket;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
@@ -117,7 +118,7 @@ class PtyRoomSessionIT extends AbstractIncusIT {
                   token ->
                       new PtyIdentity.Person(
                           new Actor(token.isBlank() ? "it" : "mady", Role.ADMIN, Actor.Lane.API)),
-                  new PtyHostAdmission(dbPath),
+                  new PtyHostAccess(() -> OperationsFactory.open(dbPath)),
                   new PtyHostEvents(dbPath, dir.resolve("pty-events.drops")),
                   "0.0.0-test")) {
         api.start();

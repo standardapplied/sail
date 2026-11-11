@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -27,11 +28,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-class PtyHostAdmissionTest {
+class PtyHostAccessAdmissionTest {
 
   @TempDir Path dir;
   private Path path;
-  private PtyHostAdmission admission;
+  private PtyHostAccess admission;
 
   @BeforeEach
   void seed() {
@@ -76,7 +77,7 @@ class PtyHostAdmissionTest {
                                 null,
                                 null)));
           }
-          admission = new PtyHostAdmission(path);
+          admission = new PtyHostAccess(() -> OperationsFactory.open(path));
         });
   }
 

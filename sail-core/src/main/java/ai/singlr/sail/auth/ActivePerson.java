@@ -30,8 +30,7 @@ final class ActivePerson {
   static FdeStore.Fde of(FdeStore.Fde fde) {
     if (!fde.active()) {
       throw new PasskeyException(
-          PasskeyException.Kind.UNAUTHORIZED,
-          "FDE '" + fde.handle() + "' is disabled. Ask an admin to re-enable it.");
+          PasskeyException.Kind.DISABLED, "FDE '" + fde.handle() + "' is disabled.");
     }
     return fde;
   }

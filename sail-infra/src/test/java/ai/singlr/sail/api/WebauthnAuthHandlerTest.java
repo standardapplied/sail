@@ -526,7 +526,7 @@ class WebauthnAuthHandlerTest {
         answer(started),
         "the disabled person's own ticket");
     assertEquals(
-        "409 conflict FDE 'uday' is disabled. Ask an admin to re-enable it.",
+        "409 conflict FDE 'uday' is disabled.",
         answer(minted),
         "an admin, who did authenticate, is told the person is disabled");
     assertEquals(
@@ -557,7 +557,8 @@ class WebauthnAuthHandlerTest {
     var error = (Map<?, ?>) YamlUtil.parseMap(refused.body()).get("error");
     assertEquals("invalid_request", error.get("code"));
     assertEquals(
-        "Registration challenge is not for the FDE this enrollment ticket enrolls.",
+        "Registration challenge is not for the FDE this enrollment ticket enrolls. Start the"
+            + " registration again with this ticket.",
         error.get("message"));
     assertTrue(new WebauthnCredentialStore(db).listForFde(fdeId("uday")).isEmpty());
   }

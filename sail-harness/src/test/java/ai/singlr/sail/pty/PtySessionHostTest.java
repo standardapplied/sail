@@ -23,7 +23,12 @@ import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -37,15 +42,13 @@ class PtySessionHostTest {
   @TempDir Path dir;
 
   private PtySessionHost host;
-  private final java.util.concurrent.ConcurrentLinkedQueue<String> events =
-      new java.util.concurrent.ConcurrentLinkedQueue<>();
+  private final ConcurrentLinkedQueue<String> events = new ConcurrentLinkedQueue<>();
   private volatile CountDownLatch startGate;
   private final CountDownLatch startGated = new CountDownLatch(1);
 
-  private final java.util.Set<String> revoked = java.util.concurrent.ConcurrentHashMap.newKeySet();
+  private final Set<String> revoked = ConcurrentHashMap.newKeySet();
 
-  private final java.util.Map<String, PtyIdentity.Person> reresolved =
-      new java.util.concurrent.ConcurrentHashMap<>();
+  private final Map<String, PtyIdentity.Person> reresolved = new ConcurrentHashMap<>();
   private volatile boolean storeDown;
 
   private final PtyIdentity.Resolver resolver =
@@ -69,12 +72,15 @@ class PtySessionHostTest {
         };
       };
 
-  private final java.util.Set<String> unheld = java.util.concurrent.ConcurrentHashMap.newKeySet();
+  private final Set<String> unheld = ConcurrentHashMap.newKeySet();
 
   private final PtyAdmission admission =
       new PtyAdmission() {
         @Override
         public void project(String project, PtyIdentity who) throws IOException {
+          if (project.equals("outage")) {
+            throw new IllegalStateException("database is locked");
+          }
           if (unheld.contains(project + ":" + who.fde())) {
             throw new IOException("Project '" + project + "' is not in the catalog.");
           }
@@ -502,7 +508,7 @@ class PtySessionHostTest {
   void aCommandOfManyTinyArgumentsIsCappedByItsWireSizeNotItsCharacters() throws Exception {
     try (var host = startHost()) {
       try (var channel = connect()) {
-        var command = new java.util.ArrayList<>(List.of("/bin/true"));
+        var command = new ArrayList<>(List.of("/bin/true"));
         for (var i = 0; i < 20_000; i++) {
           command.add("x");
         }
@@ -587,7 +593,7 @@ class PtySessionHostTest {
         try (var observer = connect("tok-root")) {
           PtyWire.write(observer, new PtyMessage.Attach("sized", true));
           assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(observer));
-          var frames = new java.util.ArrayList<PtyMessage>();
+          var frames = new ArrayList<PtyMessage>();
           PtyMessage frame;
           do {
             frame = PtyWire.read(observer);
@@ -718,9 +724,7 @@ class PtySessionHostTest {
   void aTerminalOpensAndAttachesOnlyInAProjectItsPersonHolds() throws Exception {
     var shim =
         new PtySessionHost.Handoff(
-            SdNotify.NONE,
-            java.util.Map.of(),
-            exit -> List.of("sh", "-c", "echo up; read a", "--"));
+            SdNotify.NONE, Map.of(), exit -> List.of("sh", "-c", "echo up; read a", "--"));
     try (var ignored = startHost(PtySessionHost.Limits.DEFAULTS, shim)) {
       unheld.add("beta:mady");
       try (var mady = connect("tok-mady")) {
@@ -1046,6 +1050,22 @@ class PtySessionHostTest {
   }
 
   @Test
+  void aStoreThatCannotAnswerTheProjectCheckOpensNothingAndKeepsTheConnection() throws Exception {
+    try (var ignored = startHost();
+        var channel = connect()) {
+      PtyWire.write(
+          channel, new PtyMessage.Create("s", List.of("sh"), "/tmp", "outage", "", 80, 24));
+      assertEquals(
+          PtySessionHost.UNSERVED,
+          assertInstanceOf(PtyMessage.Err.class, PtyWire.read(channel)).message());
+      assertEquals(0, host.sessionCount());
+      PtyWire.write(channel, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+      assertInstanceOf(
+          PtyMessage.Sessions.class, PtyWire.read(channel), "the connection survives the outage");
+    }
+  }
+
+  @Test
   void aCreateThatFailsToSpawnLeavesNoRingBehind() throws Exception {
     try (var ignored = startHost(new PtySessionHost.Limits(1, 16, 256, 64));
         var channel = connect()) {
@@ -1228,7 +1248,7 @@ class PtySessionHostTest {
             new PtyMessage.Create("shared", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
       }
-      var held = new java.util.ArrayList<SocketChannel>();
+      var held = new ArrayList<SocketChannel>();
       try {
         for (var i = 0; i < 2; i++) {
           var observer = connect();
@@ -1312,13 +1332,13 @@ class PtySessionHostTest {
             new PtyMessage.Create("shared", List.of("sh", "-c", "read x"), "/tmp", "", "", 80, 24));
         assertInstanceOf(PtyMessage.Ok.class, PtyWire.read(owner));
       }
-      var contenders = new java.util.ArrayList<SocketChannel>();
+      var contenders = new ArrayList<SocketChannel>();
       try {
         for (var i = 0; i < 8; i++) {
           contenders.add(connect());
         }
         var go = new CountDownLatch(1);
-        var replies = new java.util.concurrent.ConcurrentLinkedQueue<PtyMessage>();
+        var replies = new ConcurrentLinkedQueue<PtyMessage>();
         var threads =
             contenders.stream()
                 .map(

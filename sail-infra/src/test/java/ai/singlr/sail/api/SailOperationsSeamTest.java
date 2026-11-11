@@ -1568,7 +1568,9 @@ class SailOperationsSeamTest {
       assertTrue(
           Acting.system(
                   () ->
-                      operations.dispatching().latestLog("proj", "node", Optional.of(Lane.REVIEW)))
+                      operations
+                          .dispatching()
+                          .latestOperable("proj", "node", Optional.of(Lane.REVIEW)))
               .isEmpty());
       Acting.system(() -> runs.complete(id, "completed", 0));
       var reviewer = DateTimeUtils.newId().toString();
@@ -1588,27 +1590,38 @@ class SailOperationsSeamTest {
           reviewer,
           Acting.system(
                   () ->
-                      operations.dispatching().latestLog("proj", "node", Optional.of(Lane.REVIEW)))
+                      operations
+                          .dispatching()
+                          .latestOperable("proj", "node", Optional.of(Lane.REVIEW)))
               .orElseThrow()
               .id());
       assertEquals(
           id,
           Acting.system(
-                  () -> operations.dispatching().latestLog("proj", "node", Optional.of(Lane.BUILD)))
+                  () ->
+                      operations
+                          .dispatching()
+                          .latestOperable("proj", "node", Optional.of(Lane.BUILD)))
               .orElseThrow()
               .id());
       assertTrue(
           Acting.system(
-                  () -> operations.dispatching().latestLog("proj", "node", Optional.of(Lane.FIX)))
+                  () ->
+                      operations
+                          .dispatching()
+                          .latestOperable("proj", "node", Optional.of(Lane.FIX)))
               .isEmpty());
       assertTrue(
           Acting.system(
                   () ->
-                      operations.dispatching().latestLog("proj", "other", Optional.of(Lane.REVIEW)))
+                      operations
+                          .dispatching()
+                          .latestOperable("proj", "other", Optional.of(Lane.REVIEW)))
               .isEmpty());
       assertEquals(
           reviewer,
-          Acting.system(() -> operations.dispatching().latestLog("proj", "node", Optional.empty()))
+          Acting.system(
+                  () -> operations.dispatching().latestOperable("proj", "node", Optional.empty()))
               .orElseThrow()
               .id());
     }

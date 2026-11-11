@@ -65,7 +65,7 @@ public final class ProjectEditCommand implements Runnable {
     var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     var only = section == null ? null : Section.of(section);
-    var actor = mutations.writer(name, false);
+    var actor = mutations.writer(name);
     var current = mutations.current(name, operator);
     var seed = seed(current, only);
     var draft = edit(editor, name, seed);

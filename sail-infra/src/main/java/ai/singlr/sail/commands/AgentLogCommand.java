@@ -176,7 +176,7 @@ public final class AgentLogCommand implements Runnable {
     return logPathFrom(
         Actor.call(
             operations.identity().operator(),
-            () -> operations.dispatching().latestLog(project, node, lane)));
+            () -> operations.dispatching().latestOperable(project, node, lane)));
   }
 
   /** The run's own log path, derived from its id, or null when there is no run. */

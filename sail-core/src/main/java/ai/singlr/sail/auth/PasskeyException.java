@@ -19,7 +19,12 @@ public final class PasskeyException extends RuntimeException {
     /** The request is malformed or the ceremony challenge is unknown/expired. */
     BAD_REQUEST,
     /** Authentication failed (any login-ceremony rejection). */
-    UNAUTHORIZED
+    UNAUTHORIZED,
+    /**
+     * The FDE the ceremony is for is disabled: the person themselves fails to authenticate, and an
+     * admin who authenticated hears a conflict.
+     */
+    DISABLED
   }
 
   private final transient Kind kind;

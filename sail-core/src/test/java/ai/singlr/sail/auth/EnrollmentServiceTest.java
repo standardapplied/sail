@@ -76,8 +76,8 @@ class EnrollmentServiceTest {
     for (var refused :
         List.<Executable>of(() -> service.issue("uday"), () -> service.authorize(ticket))) {
       var e = assertThrows(PasskeyException.class, refused);
-      assertEquals(PasskeyException.Kind.UNAUTHORIZED, e.kind());
-      assertEquals("FDE 'uday' is disabled. Ask an admin to re-enable it.", e.getMessage());
+      assertEquals(PasskeyException.Kind.DISABLED, e.kind());
+      assertEquals("FDE 'uday' is disabled.", e.getMessage());
     }
   }
 

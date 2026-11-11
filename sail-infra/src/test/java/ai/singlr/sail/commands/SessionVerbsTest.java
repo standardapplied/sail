@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.pty.PtyAdmission;
+import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
@@ -22,14 +24,13 @@ import picocli.CommandLine;
 @EnabledOnOs(OS.LINUX)
 class SessionVerbsTest {
 
-  private static final ai.singlr.sail.pty.PtyAdmission ROOMS =
-      new ai.singlr.sail.pty.PtyAdmission() {
+  private static final PtyAdmission ROOMS =
+      new PtyAdmission() {
         @Override
-        public void project(String project, ai.singlr.sail.pty.PtyIdentity who) {}
+        public void project(String project, PtyIdentity who) {}
 
         @Override
-        public void room(String room, String project, ai.singlr.sail.pty.PtyIdentity who)
-            throws java.io.IOException {
+        public void room(String room, String project, PtyIdentity who) throws java.io.IOException {
           if (!room.equals("design-talk")) {
             throw new java.io.IOException("Room '" + room + "' was not found.");
           }
@@ -50,7 +51,7 @@ class SessionVerbsTest {
             dir.resolve("s"),
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
             ROOMS,
-            ai.singlr.sail.pty.PtyEvents.NONE)) {
+            PtyEvents.NONE)) {
       var socket = dir.resolve("h.sock").toString();
 
       assertEquals(0, run("new", "--socket", socket, "t1", "--command", "sh", "-c", "read a"));
@@ -73,7 +74,7 @@ class SessionVerbsTest {
             dir.resolve("s"),
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
             ROOMS,
-            ai.singlr.sail.pty.PtyEvents.NONE)) {
+            PtyEvents.NONE)) {
       var socket = dir.resolve("h.sock").toString();
 
       assertEquals(
@@ -125,7 +126,7 @@ class SessionVerbsTest {
             dir.resolve("s"),
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
             ROOMS,
-            ai.singlr.sail.pty.PtyEvents.NONE)) {
+            PtyEvents.NONE)) {
       var socket = dir.resolve("h.sock").toString();
       assertEquals(0, run("new", "--socket", socket, "t1", "--command", "sh", "-c", "read a"));
       PtyEventDrops.record(
@@ -158,7 +159,7 @@ class SessionVerbsTest {
             dir.resolve("s"),
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
             ROOMS,
-            ai.singlr.sail.pty.PtyEvents.NONE)) {
+            PtyEvents.NONE)) {
       var exit = run("attach", "ghost", "--socket", dir.resolve("h.sock").toString());
       assertNotEquals(0, exit, "a missing session is a loud failure, not a hung raw terminal");
       assertTrue(host.sessionCount() == 0);

@@ -22,6 +22,6 @@ public final class ServerCommand implements Runnable {
 
   @Override
   public void run() {
-    new picocli.CommandLine(this).usage(System.out);
+    SailCommandLine.of(this).usage(System.out);
   }
 }

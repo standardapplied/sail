@@ -57,13 +57,10 @@ final class ProjectMutations {
   /**
    * This box's operator, resolved before a command changes anything, for the catalog write of
    * project {@code name} that ends it: a node that cannot name its operator, or whose operator the
-   * journal will refuse that write, refuses up front, never after cloning, starting or editing.
-   * Null for a dry run, which touches no catalog.
+   * journal will refuse that write, refuses up front, never after cloning, starting or editing. A
+   * dry run is refused as the write it rehearses.
    */
-  Actor writer(String name, boolean dryRun) {
-    if (dryRun) {
-      return null;
-    }
+  Actor writer(String name) {
     var actor = operator.get();
     catalog.requireRecordable(name, actor);
     return actor;

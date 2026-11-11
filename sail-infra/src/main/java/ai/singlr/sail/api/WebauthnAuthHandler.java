@@ -141,12 +141,12 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
       }
       return route.handler().answer(exchange);
     } catch (PasskeyException e) {
-      throw new ApiException(mapped(e.kind()), e.getMessage());
+      throw refusal(e, byPeopleGate(route.gate(), exchange));
     }
   }
 
   private ApiResponse registerTicket(HttpExchange exchange) throws IOException {
-    var ticket = issued(requireString(JsonBody.readMap(exchange), "fde"));
+    var ticket = enrollment.issue(requireString(JsonBody.readMap(exchange), "fde"));
     var result = new LinkedHashMap<String, Object>();
     result.put("ticket", ticket.ticket());
     result.put("fde", ticket.fdeHandle());
@@ -155,21 +155,6 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
       result.put("enroll_url", enrollOrigin + "/enroll?ticket=" + ticket.ticket());
     }
     return ApiResponse.ok(result);
-  }
-
-  /**
-   * A ticket enrolling FDE {@code fde}, minted by the admin the people gate admitted: a person the
-   * roster disables gets none, which the admin, who did authenticate, hears as a conflict.
-   */
-  private EnrollmentTickets.Ticket issued(String fde) {
-    try {
-      return enrollment.issue(fde);
-    } catch (PasskeyException refused) {
-      if (refused.kind() != PasskeyException.Kind.UNAUTHORIZED) {
-        throw refused;
-      }
-      throw new ApiException(ErrorCode.CONFLICT, refused.getMessage());
-    }
   }
 
   private ApiResponse registerStart(HttpExchange exchange) throws IOException {
@@ -269,11 +254,30 @@ public final class WebauthnAuthHandler implements HttpHandler, RouteTable {
     return body;
   }
 
-  private static ErrorCode mapped(PasskeyException.Kind kind) {
-    return switch (kind) {
-      case NOT_FOUND -> ErrorCode.NOT_FOUND;
-      case BAD_REQUEST -> ErrorCode.INVALID_REQUEST;
-      case UNAUTHORIZED -> ErrorCode.AUTHENTICATION_FAILED;
+  /**
+   * Whether the caller of a route behind {@code gate} passed the people gate: minting a ticket, or
+   * registering with no enrollment ticket, which only an authenticated admin does.
+   */
+  private static boolean byPeopleGate(Gate gate, HttpExchange exchange) {
+    return gate == Gate.PEOPLE || gate == ENROLLMENT && enrollmentTicket(exchange) == null;
+  }
+
+  /**
+   * A ceremony's refusal as the API answers it. A disabled person is a failed authentication to
+   * whoever presents their ticket or passkey, and a conflict to an admin who did authenticate,
+   * minting a ticket or registering for them: no admin is told their own credential failed.
+   */
+  private static ApiException refusal(PasskeyException refused, boolean authenticated) {
+    var message = refused.getMessage();
+    return switch (refused.kind()) {
+      case NOT_FOUND -> new ApiException(ErrorCode.NOT_FOUND, message);
+      case BAD_REQUEST -> new ApiException(ErrorCode.INVALID_REQUEST, message);
+      case UNAUTHORIZED -> new ApiException(ErrorCode.AUTHENTICATION_FAILED, message);
+      case DISABLED ->
+          authenticated
+              ? new ApiException(ErrorCode.CONFLICT, message)
+              : new ApiException(
+                  ErrorCode.AUTHENTICATION_FAILED, message + " Ask an admin to re-enable it.");
     };
   }
 

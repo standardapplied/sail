@@ -175,7 +175,7 @@ public final class FdeCommand implements Runnable {
 
   @Override
   public void run() {
-    new picocli.CommandLine(this).usage(System.out);
+    SailCommandLine.of(this).usage(System.out);
   }
 
   private static OperatorCommand operator() {
@@ -1508,7 +1508,7 @@ public final class FdeCommand implements Runnable {
 
     @Override
     public void run() {
-      new picocli.CommandLine(this).usage(System.out);
+      SailCommandLine.of(this).usage(System.out);
     }
 
     private Path database() {
@@ -1665,7 +1665,7 @@ public final class FdeCommand implements Runnable {
 
     @Override
     public void run() {
-      new picocli.CommandLine(this).usage(System.out);
+      SailCommandLine.of(this).usage(System.out);
     }
 
     private Path database() {

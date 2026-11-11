@@ -93,7 +93,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
       throw RootRequired.refusal(spec);
     }
 
-    var actor = mutations.writer(name, dryRun);
+    var actor = mutations.writer(name);
     var config = ProjectMutations.requireResources(mutations.current(name, operator), operator);
 
     var desiredResources = DefinitionEdits.mergeResources(config.resources(), cpu, memory, disk);

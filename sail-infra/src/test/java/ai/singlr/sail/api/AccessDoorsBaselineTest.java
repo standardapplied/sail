@@ -483,12 +483,6 @@ class AccessDoorsBaselineTest {
         });
   }
 
-  /**
-   * Pinning a terminal session to a room ({@link HostAccess#admit}) as each FDE of the roster, on
-   * main, where this box's own FDE is its operator, and on a node, where every FDE has the roster's
-   * role: each FDE is the principal the pty host resolves from a session token of theirs, so the
-   * door is asked once for each, by the box's operator.
-   */
   /** A login session of FDE {@code fde}'s, as the gateway mints one for the pty host. */
   private static String session(World world, String fde) {
     return new AuthSessionStore(world.db)
@@ -496,6 +490,12 @@ class AccessDoorsBaselineTest {
         .token();
   }
 
+  /**
+   * Pinning a terminal session to a room ({@link HostAccess#admit}) as each FDE of the roster, on
+   * main, where this box's own FDE is its operator, and on a node, where every FDE has the roster's
+   * role: each FDE is the principal the pty host resolves from a session token of theirs, so the
+   * door is asked once for each, by the box's operator.
+   */
   private static void terminals(World world, List<Door> doors) {
     var configs =
         Map.of(

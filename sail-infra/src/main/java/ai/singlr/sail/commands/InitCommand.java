@@ -21,7 +21,6 @@ import java.util.ArrayList;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -363,7 +362,7 @@ public final class InitCommand implements Runnable {
    * and without a trace, answering whether it succeeded.
    */
   static boolean runCommand(Object command, String... args) {
-    var line = new CommandLine(command);
+    var line = SailCommandLine.of(command);
     line.setExecutionExceptionHandler((failure, failed, parsed) -> Main.report(failure, failed));
     return line.execute(args) == 0;
   }
