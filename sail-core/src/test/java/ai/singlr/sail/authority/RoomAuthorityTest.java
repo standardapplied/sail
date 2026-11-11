@@ -193,6 +193,43 @@ class RoomAuthorityTest {
         Optional.of(Kind.NOT_OWNER), rule.decide(OTHER_API, "auth", held, next).map(Refusal::kind));
   }
 
+  /**
+   * The one room an agent creates is the own room of a spec it made, as a spec's birth mints it;
+   * any other is no agent's to create.
+   */
+  @Test
+  void anAgentCreatesTheOwnRoomOfASpecItMadeAndNoOther() {
+    Acting.by(
+        AGENT,
+        () ->
+            new SpecStore(board.db)
+                .create(
+                    new SpecStore.SpecRow(
+                        "drafted",
+                        "acme",
+                        "Drafted",
+                        SpecStatus.DRAFT,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0,
+                        null,
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        List.of())));
+    var room = with(LOBBY, "created_by", null);
+
+    assertEquals(Optional.empty(), rule.decide(AGENT, "drafted", null, room));
+    assertEquals(
+        Optional.of(Kind.NOT_OWNER),
+        rule.decide(OTHERS_AGENT, "drafted", null, room).map(Refusal::kind),
+        "another run made nothing of it");
+  }
+
   @Test
   void aDeletedSpecsIdentityRoomIsTheOwnerItsTombstoneNames() {
     var specs = new SpecStore(board.db);
