@@ -51,14 +51,14 @@ final class PtyHostAccess implements PtyIdentity.Resolver, PtyAdmission {
   }
 
   @Override
-  public void project(String project, PtyIdentity who) throws IOException {
+  public void project(String project, PtyIdentity.Person who) throws IOException {
     try (var opened = operations.get()) {
       opened.pty().admitProject(project, who);
     }
   }
 
   @Override
-  public void room(String roomId, String project, PtyIdentity who) throws IOException {
+  public void room(String roomId, String project, PtyIdentity.Person who) throws IOException {
     try (var opened = operations.get()) {
       opened.pty().admitRoom(roomId, project, who);
     }

@@ -18,6 +18,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyAdmission;
+import ai.singlr.sail.pty.PtyAdmissions;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
@@ -44,10 +45,10 @@ class SessionClientTest {
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
             new PtyAdmission() {
               @Override
-              public void project(String project, PtyIdentity who) {}
+              public void project(String project, PtyIdentity.Person who) {}
 
               @Override
-              public void room(String room, String project, PtyIdentity who) {}
+              public void room(String room, String project, PtyIdentity.Person who) {}
             },
             ai.singlr.sail.pty.PtyEvents.NONE,
             "0.0.0-test")) {
@@ -81,7 +82,7 @@ class SessionClientTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new HostAccess(null, new RoleRule(SyncConfig::unset, null)).identity(""),
-            PtyAdmission.NONE,
+            PtyAdmissions.NONE,
             PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();
@@ -111,10 +112,11 @@ class SessionClientTest {
             token -> new PtyIdentity.Person(new Actor("uday", Role.MEMBER, Actor.Lane.API)),
             new PtyAdmission() {
               @Override
-              public void project(String project, PtyIdentity who) {}
+              public void project(String project, PtyIdentity.Person who) {}
 
               @Override
-              public void room(String room, String project, PtyIdentity who) throws IOException {
+              public void room(String room, String project, PtyIdentity.Person who)
+                  throws IOException {
                 throw Remedied.io(
                     "Room " + room + " is not on this box yet.",
                     Remedy.of("Run '", Remedy.sail("sync"), "'."));

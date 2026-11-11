@@ -511,8 +511,9 @@ public final class PtySessionHost implements AutoCloseable {
             continue;
           }
           switch (message) {
-            case PtyMessage.Create m -> reply(channel, create(m, who));
-            case PtyMessage.Attach m -> {
+            case PtyMessage.Create m when who instanceof PtyIdentity.Person person ->
+                reply(channel, create(m, person));
+            case PtyMessage.Attach m when who instanceof PtyIdentity.Person person -> {
               if (attached != null) {
                 reply(channel, new PtyMessage.Err("This connection is already attached."));
                 break;
@@ -531,7 +532,7 @@ public final class PtySessionHost implements AutoCloseable {
                     new PtyMessage.Err("Session '" + m.session() + "' is not yours to attach."));
                 break;
               }
-              var unheld = projectRefusal(session.origin().project(), who);
+              var unheld = projectRefusal(session.origin().project(), person);
               if (unheld != null) {
                 log("refused", principal, m.session(), "project not held");
                 reply(channel, unheld);
@@ -682,7 +683,7 @@ public final class PtySessionHost implements AutoCloseable {
    * has begun — a handoff has snapshotted the sessions, and a create landing after it would replace
    * a handed-off session's ring and sidecar under the successor's feet.
    */
-  private synchronized PtyMessage create(PtyMessage.Create m, PtyIdentity who) {
+  private synchronized PtyMessage create(PtyMessage.Create m, PtyIdentity.Person who) {
     if (closed) {
       return SHUTTING_DOWN;
     }
@@ -789,7 +790,7 @@ public final class PtySessionHost implements AutoCloseable {
    * names none: a project must be one the caller holds on this box ({@link PtyAdmission#project}).
    * A store that cannot answer opens nothing and keeps the connection, said as {@link #UNSERVED}.
    */
-  private PtyMessage.Err projectRefusal(String project, PtyIdentity who) {
+  private PtyMessage.Err projectRefusal(String project, PtyIdentity.Person who) {
     if (project == null || project.isBlank()) {
       return null;
     }

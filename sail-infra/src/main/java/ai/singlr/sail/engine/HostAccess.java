@@ -66,8 +66,8 @@ public record HostAccess(Sqlite db, RoleRule roles) {
    * box does not hold, before anything names its project; then a session opened under another
    * project is told the room's; then a refusal is said as the pty host says one.
    */
-  public void admit(String roomId, String project, PtyIdentity who) throws IOException {
-    var actor = actorOf(who);
+  public void admit(String roomId, String project, PtyIdentity.Person who) throws IOException {
+    var actor = who.actor();
     var rooms = new RoomStore(db);
     var notFound = new IOException(Refusals.roomMissing(roomId));
     var room = rooms.findById(roomId).orElseThrow(() -> notFound);
@@ -90,14 +90,6 @@ public record HostAccess(Sqlite db, RoleRule roles) {
     if (decision instanceof Decision.Refused(var refusal)) {
       throw Remedied.io(refusal.message(), refusal.fix());
     }
-  }
-
-  /** The actor a terminal acts as: a person's; the host's dispatch authority opens none. */
-  public static Actor actorOf(PtyIdentity who) throws IOException {
-    if (who instanceof PtyIdentity.Person(var actor)) {
-      return actor;
-    }
-    throw new IOException("The host's dispatch authority opens no terminal.");
   }
 
   private static IOException disabled(String handle) {

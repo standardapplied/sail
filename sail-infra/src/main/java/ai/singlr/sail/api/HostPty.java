@@ -16,9 +16,9 @@ import java.io.IOException;
 public interface HostPty {
   PtyIdentity.Person identity(String token) throws IOException;
 
-  void admitProject(String project, PtyIdentity identity) throws IOException;
+  void admitProject(String project, PtyIdentity.Person who) throws IOException;
 
-  void admitRoom(String room, String project, PtyIdentity identity) throws IOException;
+  void admitRoom(String room, String project, PtyIdentity.Person who) throws IOException;
 
   void recordEvent(EventStore.EventRow event);
 }

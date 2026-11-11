@@ -82,12 +82,4 @@ class HostPtyTest {
                         new PtyIdentity.Person(new Actor("root", Role.ADMIN, Actor.Lane.API))))
             .getMessage());
   }
-
-  @Test
-  void theDispatchAuthorityOpensNoTerminal() {
-    assertEquals(
-        "The host's dispatch authority opens no terminal.",
-        assertThrows(IOException.class, () -> pty.admitProject("acme", PtyIdentity.DISPATCH))
-            .getMessage());
-  }
 }

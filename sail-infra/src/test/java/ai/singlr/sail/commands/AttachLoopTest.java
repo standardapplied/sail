@@ -13,7 +13,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
-import ai.singlr.sail.pty.PtyAdmission;
+import ai.singlr.sail.pty.PtyAdmissions;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyMessage;
@@ -46,7 +46,7 @@ class AttachLoopTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-            PtyAdmission.NONE,
+            PtyAdmissions.NONE,
             PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();
@@ -171,7 +171,7 @@ class AttachLoopTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-            PtyAdmission.NONE,
+            PtyAdmissions.NONE,
             PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();
@@ -201,7 +201,7 @@ class AttachLoopTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-            PtyAdmission.NONE,
+            PtyAdmissions.NONE,
             PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();
@@ -257,7 +257,7 @@ class AttachLoopTest {
             dir.resolve("s"),
             64 * 1024,
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-            PtyAdmission.NONE,
+            PtyAdmissions.NONE,
             PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();

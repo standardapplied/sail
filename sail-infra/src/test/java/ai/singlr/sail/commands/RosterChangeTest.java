@@ -393,12 +393,12 @@ class RosterChangeTest {
         pty::identity,
         new PtyAdmission() {
           @Override
-          public void project(String project, PtyIdentity who) throws IOException {
+          public void project(String project, PtyIdentity.Person who) throws IOException {
             pty.admitProject(project, who);
           }
 
           @Override
-          public void room(String room, String project, PtyIdentity who) throws IOException {
+          public void room(String room, String project, PtyIdentity.Person who) throws IOException {
             pty.admitRoom(room, project, who);
           }
         },

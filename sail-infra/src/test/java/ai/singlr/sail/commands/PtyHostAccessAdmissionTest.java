@@ -81,7 +81,7 @@ class PtyHostAccessAdmissionTest {
         });
   }
 
-  private String refusal(String room, String project, PtyIdentity who) {
+  private String refusal(String room, String project, PtyIdentity.Person who) {
     return assertThrows(IOException.class, () -> admission.room(room, project, who)).getMessage();
   }
 

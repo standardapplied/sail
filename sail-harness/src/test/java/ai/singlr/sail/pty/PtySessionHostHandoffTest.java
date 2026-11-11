@@ -82,7 +82,7 @@ class PtySessionHostHandoffTest {
             dir.resolve("sessions"),
             64 * 1024,
             RESOLVER,
-            PtyAdmission.NONE,
+            PtyAdmissions.NONE,
             new PtyEvents() {
               @Override
               public void sessionStarted(PtySession.Origin origin) {}

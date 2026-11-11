@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
-import ai.singlr.sail.pty.PtyAdmission;
+import ai.singlr.sail.pty.PtyAdmissions;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyMessage;
@@ -45,7 +45,7 @@ class PtyLifecycleIT extends AbstractIncusIT {
             dir.resolve("s"),
             64 * 1024,
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-            PtyAdmission.NONE,
+            PtyAdmissions.NONE,
             PtyEvents.NONE,
             "0.0.0-test");
     host.start();

@@ -77,7 +77,7 @@ class PtySessionHostTest {
   private final PtyAdmission admission =
       new PtyAdmission() {
         @Override
-        public void project(String project, PtyIdentity who) throws IOException {
+        public void project(String project, PtyIdentity.Person who) throws IOException {
           if (project.equals("outage")) {
             throw new IllegalStateException("database is locked");
           }
@@ -87,7 +87,7 @@ class PtySessionHostTest {
         }
 
         @Override
-        public void room(String room, String project, PtyIdentity who) throws IOException {
+        public void room(String room, String project, PtyIdentity.Person who) throws IOException {
           if (!room.equals("design-talk")) {
             throw new IOException("Room '" + room + "' was not found.");
           }

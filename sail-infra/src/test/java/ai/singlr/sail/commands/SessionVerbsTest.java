@@ -27,10 +27,11 @@ class SessionVerbsTest {
   private static final PtyAdmission ROOMS =
       new PtyAdmission() {
         @Override
-        public void project(String project, PtyIdentity who) {}
+        public void project(String project, PtyIdentity.Person who) {}
 
         @Override
-        public void room(String room, String project, PtyIdentity who) throws java.io.IOException {
+        public void room(String room, String project, PtyIdentity.Person who)
+            throws java.io.IOException {
           if (!room.equals("design-talk")) {
             throw new java.io.IOException("Room '" + room + "' was not found.");
           }

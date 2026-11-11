@@ -17,29 +17,12 @@ import java.io.IOException;
  */
 public interface PtyAdmission {
 
-  /**
-   * A host that keeps no projects and no rooms: every project-bound and room-bound create is
-   * refused.
-   */
-  PtyAdmission NONE =
-      new PtyAdmission() {
-        @Override
-        public void project(String project, PtyIdentity who) throws IOException {
-          throw new IOException("This host keeps no projects, so no session can be opened in one.");
-        }
-
-        @Override
-        public void room(String room, String project, PtyIdentity who) throws IOException {
-          throw new IOException("This host keeps no rooms, so no session can be pinned to one.");
-        }
-      };
-
   /** Throws, with the reason, when {@code who} may not open a session in {@code project}. */
-  void project(String project, PtyIdentity who) throws IOException;
+  void project(String project, PtyIdentity.Person who) throws IOException;
 
   /**
    * Throws, with the reason, when {@code who} may not pin a session in {@code project} to {@code
    * room}.
    */
-  void room(String room, String project, PtyIdentity who) throws IOException;
+  void room(String room, String project, PtyIdentity.Person who) throws IOException;
 }

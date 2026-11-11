@@ -310,18 +310,17 @@ final class HostLanes {
      * role. One it does not hold is not in the catalog, as a project this box does not have.
      */
     @Override
-    public void admitProject(String project, PtyIdentity identity) throws IOException {
-      var actor = HostAccess.actorOf(identity);
+    public void admitProject(String project, PtyIdentity.Person who) throws IOException {
       try {
-        Actor.run(actor, () -> ProjectGate.readable(new ProjectStore(db), project));
+        Actor.run(who.actor(), () -> ProjectGate.readable(new ProjectStore(db), project));
       } catch (ApiException absent) {
         throw Remedied.io(absent.reason(), absent.remedy());
       }
     }
 
     @Override
-    public void admitRoom(String room, String project, PtyIdentity identity) throws IOException {
-      new HostAccess(db, roles).admit(room, project, identity);
+    public void admitRoom(String room, String project, PtyIdentity.Person who) throws IOException {
+      new HostAccess(db, roles).admit(room, project, who);
     }
 
     @Override

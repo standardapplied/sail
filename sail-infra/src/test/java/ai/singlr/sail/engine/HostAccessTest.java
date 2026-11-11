@@ -127,14 +127,6 @@ class HostAccessTest {
   }
 
   @Test
-  void theDispatchAuthorityPinsNoRoom() {
-    assertEquals(
-        "The host's dispatch authority opens no terminal.",
-        assertThrows(IOException.class, () -> access.admit("lobby", "acme", PtyIdentity.DISPATCH))
-            .getMessage());
-  }
-
-  @Test
   void aSessionUnderAnotherProjectIsToldTheRoomsWhoeverAsksAndThenThePostIsDecided()
       throws IOException {
     var mismatch = "Room 'lobby' belongs to project 'acme'; open the session with --project acme.";

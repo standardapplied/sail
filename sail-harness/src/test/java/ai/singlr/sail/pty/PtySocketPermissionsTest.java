@@ -41,7 +41,7 @@ class PtySocketPermissionsTest {
             dir.resolve("sessions"),
             64 * 1024,
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
-            PtyAdmission.NONE,
+            PtyAdmissions.NONE,
             PtyEvents.NONE,
             "0.0.0-test")) {
       host.start();
