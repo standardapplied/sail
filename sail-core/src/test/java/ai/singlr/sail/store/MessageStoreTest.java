@@ -20,6 +20,8 @@ import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -573,5 +575,34 @@ class MessageStoreTest {
         List.of(lateId),
         ids(messages.listUndelivered("room", runId, "claude/r1", 10)),
         "delivery is identity, not id order: an older id syncing in late is still owed delivery");
+  }
+
+  @Test
+  void aCopyFromTheWireThatNamesNoAuthorIsRefusedByNameAndNotWritten() {
+    for (var author : Arrays.asList("", "  ", null)) {
+      var forged = new HashMap<String, Object>();
+      forged.put("spec_id", "room");
+      forged.put("author", author);
+      forged.put("body", "who said this");
+      forged.put("created_at", Snapshots.millis(DateTimeUtils.now()));
+      var pulled = DateTimeUtils.newId().toString();
+      var adopted = DateTimeUtils.newId().toString();
+
+      var pull =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> messages.applyRevision(pulled, forged, "1-abc"));
+      var adopt =
+          assertThrows(
+              IllegalArgumentException.class,
+              () ->
+                  messages.resolveConflict(
+                      adopted, forged, new MainVersion(forged, "1-abc", "ada")));
+
+      assertEquals("message author is required", pull.getMessage(), "author " + author);
+      assertEquals("message author is required", adopt.getMessage(), "author " + author);
+      assertTrue(messages.findById(pulled).isEmpty());
+      assertTrue(messages.findById(adopted).isEmpty());
+    }
   }
 }

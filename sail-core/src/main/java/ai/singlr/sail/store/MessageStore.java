@@ -755,6 +755,9 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     var body = Objects.toString(snapshot.get("body"), null);
     requireBody(body);
     var author = Objects.toString(snapshot.get("author"), null);
+    if (Strings.isBlank(author)) {
+      throw new IllegalArgumentException("message author is required");
+    }
     var replyTo = nullable(snapshot.get("reply_to"));
     if (replyTo != null) {
       Ids.requireUuid(replyTo);
