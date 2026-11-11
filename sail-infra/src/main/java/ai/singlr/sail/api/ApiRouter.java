@@ -6,7 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Action;
-import ai.singlr.sail.access.Standing;
+import ai.singlr.sail.access.Whoami;
 import ai.singlr.sail.api.RouteTable.Served;
 import ai.singlr.sail.authority.EraseAuthority;
 import ai.singlr.sail.authority.WriteRefused;
@@ -861,22 +861,22 @@ public final class ApiRouter implements HttpHandler, RouteTable {
    * Reflects the authenticated caller back: {@code fde} is present only for a credential that acts
    * as an FDE, {@code name} is the credential's name, and {@code display_name} and {@code email}
    * are present only on a passkey session (the {@link SessionAwareAuth} path resolves the FDE
-   * record). Its role and capabilities are {@link Standing}'s view of the caller, so clients gate
-   * UI on a capability rather than a hardcoded role→power map. Marked {@code Cache-Control:
-   * no-store} because the response is per-credential session state.
+   * record). Its role and capabilities are {@link Whoami}'s view of the caller, so clients gate UI
+   * on a capability rather than a hardcoded role→power map. Marked {@code Cache-Control: no-store}
+   * because the response is per-credential session state.
    */
   private ApiResponse whoami(Call call) {
     var exchange = call.exchange();
     var actor = actorOf(exchange);
-    var standing = Standing.of(actor);
+    var shown = Whoami.of(actor);
     var response =
         new WhoamiResponse(
             actor.handle(),
             Objects.toString(exchange.getAttribute("token.name"), null),
             Objects.toString(exchange.getAttribute("token.displayName"), null),
             Objects.toString(exchange.getAttribute("token.email"), null),
-            standing.role(),
-            standing.capabilities());
+            shown.role(),
+            shown.capabilities());
     return ApiResponse.ok(response).withHeader("Cache-Control", "no-store");
   }
 

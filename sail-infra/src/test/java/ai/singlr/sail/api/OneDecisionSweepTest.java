@@ -8,7 +8,9 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Whoami;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
@@ -36,20 +38,31 @@ import org.junit.jupiter.api.Test;
  * rules), no main class reads a role, a lane or a scope but the members {@link #ALLOWED} names,
  * each with the spec that deletes it or the fact, not a permission, that needs it to know which
  * fact applies. Read from the compiled classes of every module, a member at a time, a lambda
- * counted as the member it is written in, it sees: a call of {@link Actor#isAdmin}, {@link
- * Actor#isSail}, {@link Actor#role}, {@link Actor#lane}, {@link Actor#agentLane}, {@link
- * Actor#roomLane}, {@link Actor#scope} or {@link Actor#actsFor}; of a factory that mints a
- * principal with its role ({@link Actor#agentPrincipal}, {@link Actor#roomPrincipal}), so a door
- * that binds one instead of asking {@code RoleRule} is seen; of {@link Role#fromAttribute}, {@link
- * Role#cappedBy} or a role's order; a {@link Role} constant (so an {@code Actor} built with a role
- * literal), a {@code switch} over a role, a type check of one, and any call that returns one;
- * {@code RunRow#readOnlyLane}; and a type check of the socket's run or box caller, each as a call,
- * a field, a type check, a class constant, or what an {@code invokedynamic} hands its bootstrap (a
- * method reference, the types and constants a pattern {@code switch} tests). It cannot see a role,
- * a lane or a scope read as data: in SQL, from a map, or through a type that hides it, so a filter
- * inside a query takes its scope from {@code Access.audience}. {@code Actor}, {@code Role} and the
- * socket's callers define what is read, so their own members are not swept. An entry that no longer
- * matches a read fails too, so the list shrinks as the later specs land.
+ * counted as the member it is written in, it sees a call of:
+ *
+ * <ul>
+ *   <li>{@link Actor#isAdmin}, {@link Actor#isSail}, {@link Actor#role}, {@link Actor#lane}, {@link
+ *       Actor#agentLane}, {@link Actor#roomLane}, {@link Actor#scope}, {@link Actor#actsFor}, and
+ *       the lane tests {@link Actor#peer} and {@link Actor#owner};
+ *   <li>{@link Actor#withScope}, which widens or narrows a scope without asking one;
+ *   <li>the factories that mint a principal with its role, {@link Actor#agentPrincipal}, {@link
+ *       Actor#roomPrincipal} and {@link Actor#main}, so a door that binds one instead of asking
+ *       {@code RoleRule} is seen;
+ *   <li>{@link Whoami#of}, the role read whoami shows, outside the two whoami handlers;
+ *   <li>{@link Role#fromAttribute}, {@link Role#cappedBy} or a role's order;
+ *   <li>{@code RunRow#readOnlyLane};
+ * </ul>
+ *
+ * and a {@link Role} constant (so an {@code Actor} built with a role literal), a {@code switch}
+ * over a role, a type check of one, any call that returns one, a type check of the socket's run or
+ * box caller, and an audience asked of a project in Java, each as a call, a field, a type check, a
+ * class constant, or what an {@code invokedynamic} hands its bootstrap. It does not see {@link
+ * Actor#system}: this box's own machinery binds it in about twenty places, so a door that binds it
+ * instead of its caller is a finding for review, not for this sweep (its self-test holds one). Nor
+ * does it see a role, a lane or a scope read as data: in SQL, from a map, or through a type that
+ * hides it, so a filter inside a query takes its scope from {@code Access.audience}. {@code Actor},
+ * {@code Role} and the socket's callers define what is read, so their own members are not swept. An
+ * entry that no longer matches a read fails too, so the list shrinks as the later specs land.
  */
 class OneDecisionSweepTest {
 
@@ -60,6 +73,7 @@ class OneDecisionSweepTest {
   private static final String RUN_ROW = "ai/singlr/sail/store/RunStore$RunRow";
   private static final String CALLER = "ai/singlr/sail/api/LocalApiRouter$Caller$";
   private static final String SCOPE = IDENTITY + "ProjectScope";
+  private static final String WHOAMI = "ai/singlr/sail/access/Whoami";
   private static final String AUDIENCE = "ai/singlr/sail/access/Access#audience";
   private static final Set<String> SCOPE_ASKED = Set.of(SCOPE + "#unrestricted", SCOPE + "#admits");
 
@@ -77,7 +91,13 @@ class OneDecisionSweepTest {
               "scope",
               "actsFor",
               "agentPrincipal",
-              "roomPrincipal"),
+              "roomPrincipal",
+              "main",
+              "withScope",
+              "owner",
+              "peer"),
+          WHOAMI,
+          Set.of("of"),
           ROLE,
           Set.of("fromAttribute", "cappedBy", "ordinal", "compareTo"),
           RUN_ROW,
@@ -149,6 +169,34 @@ class OneDecisionSweepTest {
           "audience: content named by hash alone is read by a scoped session only as main served"
               + " it rows this session, the Read rule where no row names its project");
     }
+    allowed.put(API + "ApiRouter#whoami", "fact: whoami shows the caller its own standing");
+    allowed.put(API + "LocalApiRouter#whoami", "fact: whoami shows the caller its own standing");
+    for (var journal : List.of("appendAuthored", "appendSynced", "erase")) {
+      allowed.put(
+          STORES + "ChangeLog#" + journal,
+          "fact: the journal records which box a revision came from");
+    }
+    allowed.put(
+        SYNC_SERVER + "#currentOf", "fact: main answers a pusher what it took from that box");
+    for (var adopts :
+        List.of(
+            "ai/singlr/sail/engine/SyncOperations#sync",
+            STORES + "LegacyConversion#adopt",
+            STORES + "MessageStore#resolveConflict",
+            STORES + "RevisionJournal#acknowledge",
+            STORES + "RevisionJournal#resolveConflict",
+            "ai/singlr/sail/sync/NodeRound#acknowledgeHeld",
+            "ai/singlr/sail/sync/NodeRound#acknowledgeOversized",
+            "ai/singlr/sail/sync/PagedSyncSession#acknowledgeLostAnswers",
+            "ai/singlr/sail/sync/PagedSyncSession#adoptErasure",
+            "ai/singlr/sail/sync/PagedSyncSession#withdrawLost",
+            "ai/singlr/sail/sync/Settlement#revertToBase",
+            "ai/singlr/sail/sync/Settlement#settleGone",
+            "ai/singlr/sail/sync/SyncEngine$Round#adopt",
+            "ai/singlr/sail/sync/SyncEngine$Round#converged",
+            "ai/singlr/sail/sync/SyncEngine$Round#settleAccepted")) {
+      allowed.put(adopts, "fact: a node adopts what main decided, as main (Access step 1)");
+    }
     return allowed;
   }
 
@@ -193,8 +241,14 @@ class OneDecisionSweepTest {
               leaky + "viaPattern",
               leaky + "returnsARole",
               leaky + "roomWake",
-              leaky + "audience"),
-          reads(bytes.readAllBytes()));
+              leaky + "audience",
+              leaky + "widened",
+              leaky + "standing",
+              leaky + "peer",
+              leaky + "owner",
+              leaky + "asMain"),
+          reads(bytes.readAllBytes()),
+          "every member but asTheBox: a door binding Actor.system() is not seen");
     }
   }
 
@@ -278,6 +332,30 @@ class OneDecisionSweepTest {
 
     boolean audience(Actor actor) {
       return Access.audience(actor).unrestricted();
+    }
+
+    Actor widened(Actor actor) {
+      return actor.withScope(ProjectScope.all());
+    }
+
+    boolean standing(Actor actor) {
+      return Whoami.of(actor).capabilities().contains("admin");
+    }
+
+    boolean peer(Actor actor) {
+      return actor.peer() != null;
+    }
+
+    boolean owner(Actor actor) {
+      return actor.owner() != null;
+    }
+
+    Actor asMain(String handle) {
+      return Actor.main(handle);
+    }
+
+    void asTheBox(Runnable work) {
+      Actor.run(Actor.system(), work);
     }
   }
 

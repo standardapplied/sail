@@ -755,15 +755,14 @@ class AccessTest {
   @Test
   void aPrincipalIsShownItsRoleItsLaneAndWhatItsRolesColumnGrants() {
     assertEquals(
-        new Standing("admin", "api", List.of("read", "write", "admin")), Standing.of(Actors.ADMIN));
+        new Whoami("admin", "api", List.of("read", "write", "admin")), Whoami.of(Actors.ADMIN));
     assertEquals(
-        new Standing("member", "cli", List.of("read", "write")), Standing.of(Actors.OWNER_CLI));
-    assertEquals(new Standing("viewer", "api", List.of("read")), Standing.of(Actors.VIEWER));
-    assertEquals(new Standing("viewer", "room", List.of("read")), Standing.of(Actors.ROOM));
-    assertEquals(
-        new Standing("member", "agent", List.of("read", "write")), Standing.of(Actors.AGENT));
-    assertThrows(NullPointerException.class, () -> new Standing(null, "api", List.of()));
-    assertThrows(NullPointerException.class, () -> new Standing("viewer", null, List.of()));
+        new Whoami("member", "cli", List.of("read", "write")), Whoami.of(Actors.OWNER_CLI));
+    assertEquals(new Whoami("viewer", "api", List.of("read")), Whoami.of(Actors.VIEWER));
+    assertEquals(new Whoami("viewer", "room", List.of("read")), Whoami.of(Actors.ROOM));
+    assertEquals(new Whoami("member", "agent", List.of("read", "write")), Whoami.of(Actors.AGENT));
+    assertThrows(NullPointerException.class, () -> new Whoami(null, "api", List.of()));
+    assertThrows(NullPointerException.class, () -> new Whoami("viewer", null, List.of()));
   }
 
   @Test
