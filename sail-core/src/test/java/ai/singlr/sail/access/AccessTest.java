@@ -104,7 +104,8 @@ class AccessTest {
    * One action's expected answers, a column each in {@link Policy.Column} order up to the room
    * agent, then the in-container credential of a viewer, a member and an admin: {@code act} is how
    * its refusals word it, {@code refusal} its admin-only refusal or its refusal of the other's
-   * resource, and {@code outsideWork} an agent's refusal of work not its own.
+   * resource, {@code outsideWork} an agent's refusal of work not its own, and {@code fromOutside}
+   * the fix the in-container credential is refused it with.
    */
   record Expected(
       Action action,
@@ -113,7 +114,21 @@ class AccessTest {
       String act,
       List<Outcome> outcomes,
       Refusal refusal,
-      Function<Actor, Refusal> outsideWork) {}
+      Function<Actor, Refusal> outsideWork,
+      String fromOutside) {
+
+    /** An action the in-container credential is told to take outside it, naming no command. */
+    Expected(
+        Action action,
+        Resource own,
+        Resource others,
+        String act,
+        List<Outcome> outcomes,
+        Refusal refusal,
+        Function<Actor, Refusal> outsideWork) {
+      this(action, own, others, act, outcomes, refusal, outsideWork, FROM_OUTSIDE);
+    }
+  }
 
   record Case(String name, Actor actor, Action action, Resource resource, Decision expected) {
     @Override
@@ -195,7 +210,9 @@ class AccessTest {
                   "Reassigning spec 'auth' moves work between FDEs and is an admin-only action"
                       + " (currently 'bob').",
                   "Ask an admin to reassign it. You may grab a spec only while it is unassigned."),
-              null),
+              null,
+              "Do it from outside the container: 'sail spec update auth --assignee <fde>' on the"
+                  + " host, or Mast."),
           new Expected(
               Action.APPROVE,
               REVIEW_ADA,
@@ -246,7 +263,9 @@ class AccessTest {
               "share files and skills in projects",
               List.of(READ_ONLY, ALLOWED, ALLOWED, LANE, READ_ONLY, READ_ONLY, LANE, LANE),
               null,
-              null),
+              null,
+              "Do it from outside the container: 'sail project skills add --container <folder> -p"
+                  + " acme' or 'sail project skills rm <skill> -p acme' on the host, or Mast."),
           new Expected(
               Action.SERVE,
               PROJECT_ADA,
@@ -1151,15 +1170,7 @@ class AccessTest {
                   new Refusal(
                       Refusal.Kind.LANE_FORBIDDEN,
                       "The credential in a project container cannot " + row.act() + ".",
-                      switch (row.action()) {
-                        case ASSIGN ->
-                            "Do it from outside the container: 'sail spec update auth --assignee"
-                                + " <fde>' on the host, or Mast.";
-                        case SHARE ->
-                            "Do it from outside the container: 'sail project skills add --container"
-                                + " <folder> -p acme' on the host, or Mast.";
-                        default -> FROM_OUTSIDE;
-                      }))
+                      row.fromOutside()))
               : refused(
                   Refusal.Kind.LANE_FORBIDDEN,
                   "Agent principals cannot " + row.act() + ".",

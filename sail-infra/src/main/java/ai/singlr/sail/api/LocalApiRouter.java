@@ -494,11 +494,11 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
 
   /**
    * Every skill an agent of the project can see, one of this socket's two project surfaces beside
-   * its stack.
+   * its stack, naming no command its reader in the container cannot run.
    */
   private ApiResponse skills(LocalApiRequest request, Caller caller, Map<String, String> path)
       throws IOException, InterruptedException, TimeoutException {
-    return ApiResponse.ok(operations.skills().rows(path.get(PROJECT)));
+    return ApiResponse.ok(operations.skills().rows(path.get(PROJECT)).inContainer());
   }
 
   /**

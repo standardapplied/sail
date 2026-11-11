@@ -6,7 +6,9 @@
 package ai.singlr.sail.access;
 
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.identity.Actor;
+import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -106,28 +108,33 @@ final class Wording {
 
   /**
    * Where a person takes {@code action}, which the credential in a project container may not: on
-   * the host, naming the command for a spec's status or assignee and for a project's skills, or in
+   * the host, naming the command for a spec's status or assignee, and for a project's skills both
+   * sharing one and removing one, since a refusal on the project cannot tell which was asked; or in
    * Mast. The command is rendered as words, not kept as a command a door renders for its reader:
    * the reader is in the container, and the command runs on the host.
    */
   private static Remedy fromOutside(Action action, Resource.Kind kind, Resource resource) {
     var id = resource == null ? "<id>" : resource.id();
-    var command =
+    var commands =
         switch (action) {
           case APPROVE ->
               kind == Resource.Kind.SPEC
-                  ? Remedy.sail("spec update", id, "--status", "<status>")
-                  : null;
-          case ASSIGN -> Remedy.sail("spec update", id, "--assignee", "<fde>");
-          case SHARE -> Remedy.sail("project skills add", "--container", "<folder>", "-p", id);
-          default -> null;
+                  ? List.of(Remedy.sail("spec update", id, "--status", "<status>"))
+                  : List.<Remedy.Command>of();
+          case ASSIGN -> List.of(Remedy.sail("spec update", id, "--assignee", "<fde>"));
+          case SHARE ->
+              List.of(
+                  StageSkill.shareFromContainer("<folder>", id), StageSkill.unshare("<skill>", id));
+          default -> List.<Remedy.Command>of();
         };
     return Remedy.of(
-        command == null
+        commands.isEmpty()
             ? "Do it from outside the container: with sail on the host, or in Mast."
-            : "Do it from outside the container: '"
-                + Remedy.of(command).plain()
-                + "' on the host, or Mast.");
+            : "Do it from outside the container: "
+                + commands.stream()
+                    .map(command -> "'" + Remedy.of(command).plain() + "'")
+                    .collect(Collectors.joining(" or "))
+                + " on the host, or Mast.");
   }
 
   /**

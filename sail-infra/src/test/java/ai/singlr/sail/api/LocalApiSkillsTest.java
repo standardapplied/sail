@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.TestDefinitions;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
@@ -23,18 +22,13 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,9 +36,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The skills routes: who may list and read a project's skills from inside its container, and which
- * projects a run reaches; that no credential in a container shares or removes one; and that a
- * person shares a folder of the container, and removes a skill, from outside it over the web API.
+ * The socket's skills routes: who may list and read a project's skills from inside its container,
+ * and which projects a run reaches; and that no credential in a container shares or removes one,
+ * refused before anything of the container is read.
  */
 class LocalApiSkillsTest {
 
@@ -53,14 +47,12 @@ class LocalApiSkillsTest {
       "---\nname: java\ndescription: Java standards.\n---\nApply them.\n";
   private static final String SKILLS = "/v1/projects/acme/skills";
   private static final String SCOPED = "sailbox_scoped_to_acme";
-  private static final String ALLOWED = "sailbox_on_a_lane_that_shares";
 
   @TempDir Path dir;
   private Sqlite db;
   private FileStore files;
   private ScriptedShellExecutor shell;
   private ProjectStore catalog;
-  private TestOperations operations;
   private SocketDoor router;
 
   @BeforeEach
@@ -93,7 +85,7 @@ class LocalApiSkillsTest {
                       default -> Optional.empty();
                     }),
             catalog);
-    operations =
+    var operations =
         new TestOperations() {
           @Override
           public SkillOperations skills() {
@@ -102,9 +94,6 @@ class LocalApiSkillsTest {
 
           @Override
           public Optional<Actor> boxActorForCredential(String credential) {
-            if (ALLOWED.equals(credential)) {
-              return Optional.of(new Actor(TestOperations.BOX_HANDLE, Role.MEMBER, Actor.Lane.CLI));
-            }
             return SCOPED.equals(credential)
                 ? Optional.of(
                     new Actor(TestOperations.BOX_HANDLE, Role.MEMBER, Actor.Lane.CONTAINER)
@@ -113,73 +102,6 @@ class LocalApiSkillsTest {
           }
         };
     router = new SocketDoor(operations);
-  }
-
-  /** The web API over the same box, every request made as {@code person}. */
-  private SailApiServer web(Actor person) throws IOException {
-    var server =
-        new SailApiServer(
-            "127.0.0.1",
-            0,
-            operations,
-            exchange -> exchange.setAttribute(ApiAuth.ACTOR, person),
-            null,
-            null,
-            null);
-    server.start();
-    return server;
-  }
-
-  private static HttpResponse<String> send(
-      SailApiServer server, String method, String path, String json) throws Exception {
-    var request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
-            .header("Content-Type", "application/json")
-            .method(
-                method,
-                json == null
-                    ? HttpRequest.BodyPublishers.noBody()
-                    : HttpRequest.BodyPublishers.ofString(json))
-            .build();
-    try (var client = HttpClient.newHttpClient()) {
-      return client.send(request, HttpResponse.BodyHandlers.ofString());
-    }
-  }
-
-  /**
-   * A person outside the container shares a folder that lives in it over the web API, as Mast does,
-   * and removes the skill; a viewer is read-only there, as everywhere.
-   */
-  @Test
-  void aPersonSharesAFolderOfTheContainerOverTheWebAndAViewerIsReadOnly() throws Exception {
-    containerHolds(JAVA_MD);
-
-    try (var member = web(new Actor("uday", Role.MEMBER, Actor.Lane.API));
-        var viewer = web(new Actor("vic", Role.VIEWER, Actor.Lane.API))) {
-      var folder = "{\"folder\": \"/home/dev/drafts/standards\", \"name\": \"java\"}";
-      var refused = send(viewer, "POST", SKILLS, folder);
-      assertEquals(403, refused.statusCode(), refused.body());
-      assertEquals(
-          "Your credential is read-only and cannot share files and skills in projects.",
-          ((Map<?, ?>) YamlUtil.parseMap(refused.body()).get("error")).get("message"));
-      assertEquals(List.of(), shared());
-
-      var shared = send(member, "POST", SKILLS, folder);
-      assertEquals(200, shared.statusCode(), shared.body());
-      assertEquals("java", YamlUtil.parseMap(shared.body()).get("name"));
-      assertEquals(List.of(".sail/skills/java/SKILL.md"), shared());
-      assertEquals(403, send(viewer, "DELETE", SKILLS + "/java", null).statusCode());
-
-      var removed = send(member, "DELETE", SKILLS + "/java", null);
-      assertEquals(200, removed.statusCode(), removed.body());
-      assertEquals(1, YamlUtil.parseMap(removed.body()).get("files"));
-      assertEquals(List.of(), shared());
-      var again = send(member, "DELETE", SKILLS + "/java", null);
-      assertEquals(404, again.statusCode(), again.body());
-      assertEquals(
-          "No skill 'java' is shared on acme.",
-          ((Map<?, ?>) YamlUtil.parseMap(again.body()).get("error")).get("message"));
-    }
   }
 
   @AfterEach
@@ -239,6 +161,14 @@ class LocalApiSkillsTest {
           ((List<?>) listed.body().get("skills"))
               .stream().map(row -> ((Map<?, ?>) row).get("name")).toList(),
           credential);
+      assertEquals(
+          List.of(),
+          ((List<?>) listed.body().get("skills"))
+              .stream()
+                  .map(row -> ((Map<?, ?>) row).get("share"))
+                  .filter(Objects::nonNull)
+                  .toList(),
+          "nothing offered runs from inside the container");
     }
   }
 
@@ -259,8 +189,8 @@ class LocalApiSkillsTest {
   }
 
   /**
-   * The box credential in the container is refused sharing and removing a skill by its lane, as the
-   * journal decides the write, naming the doors outside the container that take it.
+   * The box credential in the container is refused sharing and removing a skill by its lane, before
+   * anything of the container is read, naming both commands outside the container that take it.
    */
   @Test
   void theCredentialInTheContainerMayNotShareOrRemoveASkill() {
@@ -272,37 +202,19 @@ class LocalApiSkillsTest {
     var remove = box("DELETE", SKILLS + "/java", "");
 
     for (var refused : List.of(share, remove)) {
+      var error = assertInstanceOf(Map.class, refused.body().get("error"));
       assertEquals(403, refused.status());
       assertEquals(
-          "The credential in a project container cannot share files and skills in projects.",
-          message(refused));
-      assertEquals(
-          "Do it from outside the container: 'sail project skills add --container <folder> -p"
-              + " acme' on the host, or Mast.",
-          assertInstanceOf(Map.class, refused.body().get("error")).get("action"));
+          List.of(
+              "agent_lane_forbidden",
+              "The credential in a project container cannot share files and skills in projects.",
+              "Do it from outside the container: 'sail project skills add --container <folder> -p"
+                  + " acme' or 'sail project skills rm <skill> -p acme' on the host, or Mast."),
+          List.of(error.get("code"), error.get("message"), error.get("action")));
     }
     assertEquals(List.of(".sail/skills/java/SKILL.md"), shared());
     assertEquals(
         asked, shell.invocations().size(), "a refusal reads nothing of the container's folder");
-  }
-
-  /**
-   * The socket's share and remove routes are the one share verb, whatever the caller, decided as
-   * the journal records the write: no credential in a container is let share, so a caller on a lane
-   * the journal lets share stands in, and gets the skill shared from the folder named and removed.
-   */
-  @Test
-  void theShareRoutesAreTheOneShareVerbTheJournalDecides() {
-    containerHolds(JAVA_MD);
-
-    var shared =
-        router.ask("POST", SKILLS, ALLOWED, "folder=%2Fhome%2Fdev%2Fdrafts%2Fjava&name=java");
-    var removed = router.ask("DELETE", SKILLS + "/java", ALLOWED, "");
-
-    assertEquals(200, shared.status(), shared.body().toString());
-    assertEquals("java", shared.body().get("name"));
-    assertEquals(Map.of("name", "java", "files", 1), withoutSchema(removed.body()));
-    assertEquals(List.of(), shared());
   }
 
   /**
@@ -378,84 +290,6 @@ class LocalApiSkillsTest {
   @Test
   void aRequestWithoutACredentialIsRefused() {
     assertEquals(401, router.ask("GET", SKILLS, null, "").status());
-  }
-
-  @Test
-  void aFolderThatIsNoSkillIsRefusedWithStageSkillsSentence() {
-    containerHolds("---\nname: java\n---\nApply them.\n");
-
-    var refused = router.ask("POST", SKILLS, ALLOWED, "folder=%2Fhome%2Fdev%2Fjava");
-
-    assertEquals(400, refused.status());
-    assertEquals(
-        "Skill 'java' has no description in its front matter: the Agent Skills standard requires"
-            + " one.",
-        message(refused));
-    assertEquals(List.of(), shared());
-  }
-
-  @Test
-  void aContainerThatCannotBeReadIsAContainerError() {
-    shell
-        .onOk("incus list", "[{\"name\": \"acme\", \"status\": \"Running\"}]")
-        .onThrow("-printf", new IOException("incus went away"));
-
-    var failed = router.ask("POST", SKILLS, ALLOWED, "folder=%2Fhome%2Fdev%2Fjava");
-
-    assertEquals(500, failed.status());
-    assertEquals("incus went away", message(failed));
-  }
-
-  @Test
-  void aShareInterruptedWhileTheContainerIsAskedIsAContainerErrorAndKeepsTheInterrupt() {
-    var interrupting =
-        new ShellExec() {
-          @Override
-          public Result exec(List<String> command) throws InterruptedException {
-            throw new InterruptedException("stopping");
-          }
-
-          @Override
-          public Result exec(List<String> command, Path workDir, Duration timeout)
-              throws InterruptedException {
-            throw new InterruptedException("stopping");
-          }
-
-          @Override
-          public boolean isDryRun() {
-            return false;
-          }
-        };
-    var skills =
-        new SkillOperations(
-            new ProjectSkills(
-                project ->
-                    new SharedProjectFiles(
-                        files, dir.resolve("projects"), project, FileLimits.defaults())),
-            interrupting,
-            new ProjectLoader(
-                new ScriptedShellExecutor()
-                    .onOk("incus list", "[{\"name\": \"acme\", \"status\": \"Running\"}]"),
-                project -> Optional.of(TestDefinitions.yaml(ACME))),
-            catalog);
-    var interrupted =
-        new SocketDoor(
-            new TestOperations() {
-              @Override
-              public SkillOperations skills() {
-                return skills;
-              }
-
-              @Override
-              public Optional<Actor> boxActorForCredential(String credential) {
-                return operations.boxActorForCredential(credential);
-              }
-            });
-
-    var failed = interrupted.ask("POST", SKILLS, ALLOWED, "folder=%2Fhome%2Fdev%2Fjava");
-
-    assertEquals(500, failed.status());
-    assertEquals(true, Thread.interrupted(), "the interrupt is kept for whoever waits on it");
   }
 
   @Test

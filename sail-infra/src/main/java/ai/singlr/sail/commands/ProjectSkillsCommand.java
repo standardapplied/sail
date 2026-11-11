@@ -10,6 +10,7 @@ import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SkillOperations;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.NameValidator;
@@ -72,12 +73,14 @@ public final class ProjectSkillsCommand implements Runnable {
                         row.name(),
                         row.kind().name().toLowerCase(Locale.ROOT),
                         String.join(", ", row.agents()),
-                        row.share().isEmpty()
-                            ? row.status()
-                            : row.status()
-                                + ": share it with '"
-                                + operator.sail(row.share())
-                                + "'"))
+                        row.share()
+                            .map(
+                                command ->
+                                    row.status()
+                                        + ": share it with '"
+                                        + operator.render(Remedy.of(command))
+                                        + "'")
+                            .orElse(row.status())))
             .toList();
     var header = List.of("SKILL", "FROM", "AGENTS", "STATUS");
     var widths = new int[3];

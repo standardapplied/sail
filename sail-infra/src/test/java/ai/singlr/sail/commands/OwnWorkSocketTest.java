@@ -48,7 +48,8 @@ class OwnWorkSocketTest {
   private static final String CANNOT_SHARE =
       "403 agent_lane_forbidden The credential in a project container cannot share files and"
           + " skills in projects. | Do it from outside the container: 'sail project skills add"
-          + " --container <folder> -p acme' on the host, or Mast.";
+          + " --container <folder> -p acme' or 'sail project skills rm <skill> -p acme' on the"
+          + " host, or Mast.";
 
   private static final String CANNOT_APPROVE =
       "403 agent_lane_forbidden The credential in a project container cannot approve specs."
@@ -89,6 +90,9 @@ class OwnWorkSocketTest {
             + " spec only while it is unassigned.",
         said(socket("eng", "PUT", "/v1/specs/e1", "assignee=client")));
     assertEquals(CANNOT_APPROVE, said(socket("eng", "PUT", "/v1/specs/e1", "status=done")));
+    assertEquals(
+        CANNOT_SHARE,
+        said(socket("eng", "POST", "/v1/projects/acme/skills", "folder=%2Fhome%2Fdev%2Fjava")));
     assertEquals(CANNOT_SHARE, said(socket("eng", "DELETE", "/v1/projects/acme/skills/java", "")));
     assertEquals(
         "allowed", said(socket("eng", "PUT", "/v1/specs/e1", "title=retitled")), "control");
@@ -109,6 +113,9 @@ class OwnWorkSocketTest {
             socket("uday", "POST", "/v1/specs", "id=u-ready&project=acme&title=u&status=pending")));
     assertEquals(
         CANNOT_APPROVE, said(socket("uday", "PUT", "/v1/specs/a2", "status=archived")), "archive");
+    assertEquals(
+        CANNOT_SHARE,
+        said(socket("uday", "POST", "/v1/projects/acme/skills", "folder=%2Fhome%2Fdev%2Fjava")));
     assertEquals(CANNOT_SHARE, said(socket("uday", "DELETE", "/v1/projects/acme/skills/java", "")));
     assertEquals(
         "allowed",

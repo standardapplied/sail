@@ -15,6 +15,7 @@ import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -107,23 +108,25 @@ class SkillOperationsTest {
 
     assertEquals(
         List.of(
-            new Row("e2e", Kind.SHARED, 1, BOTH, "ok", ""),
-            new Row("sail-portal", Kind.SAIL, 2, BOTH, "ok", ""),
-            new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", ""),
+            new Row("e2e", Kind.SHARED, 1, BOTH, "ok", Optional.empty()),
+            new Row("sail-portal", Kind.SAIL, 2, BOTH, "ok", Optional.empty()),
+            new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", Optional.empty()),
             new Row(
                 "java",
                 Kind.LOCAL,
                 0,
                 List.of("Codex CLI"),
                 "not synced",
-                "project skills add --container /home/dev/.agents/skills/java -p acme"),
+                Optional.of(
+                    StageSkill.shareFromContainer("/home/dev/.agents/skills/java", "acme"))),
             new Row(
                 "lint",
                 Kind.LOCAL,
                 0,
                 BOTH,
                 "not synced",
-                "project skills add --container /home/dev/.claude/skills/lint -p acme")),
+                Optional.of(
+                    StageSkill.shareFromContainer("/home/dev/.claude/skills/lint", "acme")))),
         rows.rows());
     assertEquals(Optional.empty(), rows.note());
   }
@@ -136,8 +139,8 @@ class SkillOperationsTest {
 
     assertEquals(
         List.of(
-            new Row("sail-portal", Kind.SAIL, 2, BOTH, "ok", ""),
-            new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", "")),
+            new Row("sail-portal", Kind.SAIL, 2, BOTH, "ok", Optional.empty()),
+            new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", Optional.empty())),
         rows.rows());
     assertEquals(
         Optional.of(
@@ -366,19 +369,34 @@ class SkillOperationsTest {
             "files", 0,
             "agents", List.of("Codex CLI"),
             "status", "not synced",
-            "share", "project skills add --container /home/dev/.agents/skills/java -p acme"),
+            "share", "sail project skills add --container /home/dev/.agents/skills/java -p acme"),
         new Row(
                 "java",
                 Kind.LOCAL,
                 0,
                 List.of("Codex CLI"),
                 "not synced",
-                "project skills add --container /home/dev/.agents/skills/java -p acme")
+                Optional.of(StageSkill.shareFromContainer("/home/dev/.agents/skills/java", "acme")))
             .toMap());
-    var sail = new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", "").toMap();
+    var sail = new Row("spec-board", Kind.SAIL, 2, BOTH, "ok", Optional.empty()).toMap();
     assertEquals(null, sail.get("share"));
     var rows = new SkillOperations.Rows(List.of(), Optional.of("why")).toMap();
     assertEquals(Map.of("skills", List.of(), "note", "why"), rows);
+    var local =
+        new Row(
+            "java",
+            Kind.LOCAL,
+            0,
+            List.of("Codex CLI"),
+            "not synced",
+            Optional.of(StageSkill.shareFromContainer("/home/dev/.agents/skills/java", "acme")));
+    assertEquals(
+        new SkillOperations.Rows(
+            List.of(
+                new Row(
+                    "java", Kind.LOCAL, 0, List.of("Codex CLI"), "not synced", Optional.empty())),
+            Optional.of("why")),
+        new SkillOperations.Rows(List.of(local), Optional.of("why")).inContainer());
     var advised =
         new SkillOperations.Shared("java", 1, BOTH, false, List.of("blocked"), Optional.of("long"))
             .toMap();

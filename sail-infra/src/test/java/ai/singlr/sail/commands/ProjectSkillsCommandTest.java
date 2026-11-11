@@ -223,7 +223,7 @@ class ProjectSkillsCommandTest {
                 "local",
                 0,
                 "not synced",
-                "project skills add --container /home/dev/.claude/skills/java -p acme")),
+                "sail project skills add --container /home/dev/.claude/skills/java -p acme")),
         parsed.get("skills"));
     assertNull(parsed.get("note"));
   }

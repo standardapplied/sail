@@ -556,10 +556,6 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   }
 
   /**
-   * {@code POST} brings the project's stack up and answers when every declared port listens or its
-   * process exits, or {@code timeout} seconds (default 60) have passed.
-   */
-  /**
    * Shares the folder {@code folder}, a path inside the project's container, as skill {@code name}
    * (the folder's own name when absent): the door a person outside the container shares one by,
    * decided before the folder is read.
@@ -582,6 +578,10 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         Map.of("name", name, "files", operations.skills().remove(call.project(), name)));
   }
 
+  /**
+   * {@code POST} brings the project's stack up and answers when every declared port listens or its
+   * process exits, or {@code timeout} seconds (default 60) have passed.
+   */
   private ApiResponse serve(Call call) throws Exception {
     var project = call.project();
     var timeout = call.query().getOrDefault("timeout", "60");

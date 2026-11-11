@@ -94,13 +94,8 @@ public final class SkillCliHelper {
     return SCRIPT
         .replace("__PREAMBLE__\n", SocketPreamble.of("skill"))
         .replace(
-            "__SHARE__",
-            Remedy.of(
-                    Remedy.sail("project skills add", "--container", "<folder>", "-p", "<project>"))
-                .plain())
-        .replace(
-            "__UNSHARE__",
-            Remedy.of(Remedy.sail("project skills rm", "<skill>", "-p", "<project>")).plain());
+            "__SHARE__", Remedy.of(StageSkill.shareFromContainer("<folder>", "<project>")).plain())
+        .replace("__UNSHARE__", Remedy.of(StageSkill.unshare("<skill>", "<project>")).plain());
   }
 
   /** Installs the helper at {@link #SCRIPT_PATH} in {@code container}, idempotently. */

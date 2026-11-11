@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.access.Action;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
@@ -72,11 +73,16 @@ public final class SkillOperations {
    * @param files how many files its folder holds; for a local one, unknown and 0
    * @param agents the agents that see it, by display name
    * @param status {@code ok}, {@code invalid: <why>}, or for a local one {@code not synced}
-   * @param share for a local one, the arguments of the host sail command that shares it from
-   *     outside the container; otherwise empty
+   * @param share for a local one, the host command a person shares it by from outside the
+   *     container; otherwise empty
    */
   public record Row(
-      String name, Kind kind, int files, List<String> agents, String status, String share)
+      String name,
+      Kind kind,
+      int files,
+      List<String> agents,
+      String status,
+      Optional<Remedy.Command> share)
       implements Mappable {
 
     @Override
@@ -87,7 +93,7 @@ public final class SkillOperations {
       map.put("files", files);
       map.put("agents", agents);
       map.put("status", status);
-      map.put("share", share.isEmpty() ? null : share);
+      map.put("share", share.map(command -> Remedy.of(command).plain()).orElse(null));
       return map;
     }
   }
@@ -105,6 +111,26 @@ public final class SkillOperations {
       map.put("skills", rows.stream().map(Row::toMap).toList());
       map.put("note", note.orElse(null));
       return map;
+    }
+
+    /**
+     * The rows as a reader in the container reads them: with no command, since none it could run
+     * there shares a skill.
+     */
+    public Rows inContainer() {
+      return new Rows(
+          rows.stream()
+              .map(
+                  row ->
+                      new Row(
+                          row.name(),
+                          row.kind(),
+                          row.files(),
+                          row.agents(),
+                          row.status(),
+                          Optional.empty()))
+              .toList(),
+          note);
     }
   }
 
@@ -155,7 +181,14 @@ public final class SkillOperations {
     SailSkills.all()
         .forEach(
             skill ->
-                rows.add(new Row(skill.name(), Kind.SAIL, skill.files().size(), agents, "ok", "")));
+                rows.add(
+                    new Row(
+                        skill.name(),
+                        Kind.SAIL,
+                        skill.files().size(),
+                        agents,
+                        "ok",
+                        Optional.empty())));
     var taken = rows.stream().map(Row::name).toList();
     var local = new LinkedHashMap<String, List<Harness>>();
     try {
@@ -272,7 +305,13 @@ public final class SkillOperations {
   private static Row shared(ProjectSkills.Folder folder, List<String> agents) {
     return switch (folder) {
       case ProjectSkills.Folder.Held held ->
-          new Row(held.name(), Kind.SHARED, held.skill().files().size(), agents, "ok", "");
+          new Row(
+              held.name(),
+              Kind.SHARED,
+              held.skill().files().size(),
+              agents,
+              "ok",
+              Optional.empty());
       case ProjectSkills.Folder.Invalid invalid ->
           new Row(
               invalid.name(),
@@ -280,7 +319,7 @@ public final class SkillOperations {
               invalid.files(),
               List.of(),
               "invalid: " + invalid.why(),
-              "");
+              Optional.empty());
     };
   }
 
@@ -296,11 +335,8 @@ public final class SkillOperations {
         0,
         harnesses.stream().map(Harness::displayName).toList(),
         "not synced",
-        "project skills add --container "
-            + ContainerExec.DEV_HOME
-            + "/"
-            + first.skillFolder(name)
-            + " -p "
-            + project);
+        Optional.of(
+            StageSkill.shareFromContainer(
+                ContainerExec.DEV_HOME + "/" + first.skillFolder(name), project)));
   }
 }
