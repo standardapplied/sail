@@ -2333,8 +2333,9 @@ the work is, is the role column's to say. An agent's work (`Actor.Work`, which o
 builds from the run) is its spec, in that spec's room, for a build, review, fix or a room member
 of a spec's room; its room for a spec-less room member; its whole project for an ad-hoc run; and
 every spec it made, read from the journal's first revision of the spec (`ChangeLog.bornBy`) with
-that spec's own room. It files a spec only under its project, born in no room or its own, and
-creates no room but a spec's own. A read-only room agent reads its room's project alone, which
+that spec's own room, all within its work's project. It files a spec only under its project,
+born in no room or its own, moves none out of it (a revision that moves a spec's or a room's
+project is a Change where it lands as well as where it was), and creates no room but a spec's own. A read-only room agent reads its room's project alone, which
 `RoleRule` narrows its scope to, so the table's Read stays yes. A run credential readable by
 another run of the same person gains only that run's agent column, which is accepted until runs
 are isolated. A cell holds today's answer where the

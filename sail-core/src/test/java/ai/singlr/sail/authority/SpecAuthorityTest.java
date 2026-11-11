@@ -58,13 +58,53 @@ class SpecAuthorityTest {
   private static final String SPEC = "auth";
 
   private static final Map<String, Object> OWNED =
-      projection("title", "Auth", "assignee", OWNER, "room_id", SPEC, "_created_by", OTHER);
+      projection(
+          "title",
+          "Auth",
+          "assignee",
+          OWNER,
+          "project",
+          "acme",
+          "room_id",
+          SPEC,
+          "_created_by",
+          OTHER);
   private static final Map<String, Object> UNASSIGNED =
-      projection("title", "Auth", "assignee", null, "room_id", SPEC, "_created_by", OWNER);
+      projection(
+          "title",
+          "Auth",
+          "assignee",
+          null,
+          "project",
+          "acme",
+          "room_id",
+          SPEC,
+          "_created_by",
+          OWNER);
   private static final Map<String, Object> BORN_IN_LOBBY =
-      projection("title", "Auth", "assignee", null, "room_id", "lobby", "_created_by", OWNER);
+      projection(
+          "title",
+          "Auth",
+          "assignee",
+          null,
+          "project",
+          "acme",
+          "room_id",
+          "lobby",
+          "_created_by",
+          OWNER);
   private static final Map<String, Object> BORN_IN_DEN =
-      projection("title", "Auth", "assignee", null, "room_id", "den", "_created_by", OTHER);
+      projection(
+          "title",
+          "Auth",
+          "assignee",
+          null,
+          "project",
+          "acme",
+          "room_id",
+          "den",
+          "_created_by",
+          OTHER);
 
   private Board board;
   private SpecAuthority rule;
@@ -383,7 +423,8 @@ class SpecAuthorityTest {
 
   @Test
   void aPushNamingARunMainDoesNotHoldYetIsRefusedNotDenied() {
-    var next = with(OWNED, "_actor", "claude/019fee00-0000-7000-8000-0000000000ff");
+    var next =
+        with(with(OWNED, "project", null), "_actor", "claude/019fee00-0000-7000-8000-0000000000ff");
 
     assertInstanceOf(
         Standing.Pending.class,
@@ -392,7 +433,7 @@ class SpecAuthorityTest {
 
   @Test
   void aBirthInARoomThisBoxHasNeverHeldIsRefusedNotDenied() {
-    var next = with(BORN_IN_LOBBY, "room_id", "elsewhere");
+    var next = with(with(BORN_IN_LOBBY, "project", null), "room_id", "elsewhere");
 
     assertInstanceOf(
         Standing.Pending.class,

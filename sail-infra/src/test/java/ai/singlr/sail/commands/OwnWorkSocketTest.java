@@ -225,6 +225,40 @@ class OwnWorkSocketTest {
         said(run(agent, "PUT", "/v1/specs/" + others, "title=Edited")));
   }
 
+  /**
+   * An agent files a spec only under its project: moving the draft it made, or the spec it works,
+   * into beta is refused as outside its work, and both stay in acme. One its person moved there is
+   * no longer its work: it edits it no more.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"claude-code", "codex"})
+  void anAgentMovesNoSpecIntoAnotherProjectAndWorksNoneMovedThere(String harness) {
+    var build = build("e1", harness);
+    run(build, "POST", "/v1/specs", "id=d1&project=acme&title=Mine");
+
+    for (var spec : List.of("d1", "e1")) {
+      assertEquals(
+          "403 forbidden_not_assignee '"
+              + principal(build)
+              + "' may change only its own work, not spec '"
+              + spec
+              + "'."
+              + OUTSIDE_WORK,
+          said(run(build, "PUT", "/v1/specs/" + spec, "project=beta")));
+      assertEquals(
+          "acme",
+          ((Map<?, ?>) run(build, "GET", "/v1/specs/" + spec, "").body().get("spec"))
+              .get("project"));
+    }
+    assertEquals("allowed", said(socket("eng", "PUT", "/v1/specs/d1", "project=beta")), "control");
+    assertEquals(
+        "403 forbidden_not_assignee '"
+            + principal(build)
+            + "' may change only its own work, not spec 'd1'."
+            + OUTSIDE_WORK,
+        said(run(build, "PUT", "/v1/specs/d1", "title=InBeta")));
+  }
+
   /** Row 16: no agent sets e1 done or archives it; one that may write still retitles it. */
   @ParameterizedTest(name = "{0} {1}")
   @MethodSource("everyAgent")
@@ -404,6 +438,25 @@ class OwnWorkSocketTest {
             + "' may create only its own work, not spec 'b-new'."
             + OUTSIDE_WORK,
         said(run(adHoc, "POST", "/v1/specs", "id=b-new&project=beta&title=B")));
+  }
+
+  /**
+   * An ad-hoc run's work is all of its project, so it edits a spec there it did not make; whose the
+   * spec is still decides, so another person's is refused at the owner step.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"claude-code", "codex"})
+  void anAdHocRunEditsItsPersonsSpecsOfItsProjectAndNoOneElses(String harness) {
+    assertEquals(
+        "allowed",
+        said(socket("client", "POST", "/v1/specs", "id=c1&project=acme&title=C&assignee=client")));
+    var adHoc = adHoc(harness);
+
+    assertEquals("allowed", said(run(adHoc, "PUT", "/v1/specs/e1", "title=Edited")));
+    assertEquals(
+        "403 forbidden_not_assignee Spec 'c1' is assigned to 'client', not you. | Ask client to"
+            + " make this change, or have an admin do it.",
+        said(run(adHoc, "PUT", "/v1/specs/c1", "title=Edited")));
   }
 
   /** A room agent reads a spec in another project of its person as not there. */

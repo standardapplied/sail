@@ -233,7 +233,7 @@ class RoomAuthorityTest {
 
   /**
    * An ad-hoc run's work is its whole project: it changes a room of its project, its person's, and
-   * no room of another project, though its person owns that one too.
+   * no room of another project, though its person owns that one too, nor moves one into it.
    */
   @Test
   void anAdHocRunChangesARoomOfItsProjectAndNoOther() {
@@ -249,6 +249,11 @@ class RoomAuthorityTest {
         Optional.of(Kind.NOT_OWNER),
         rule.decide(adHoc, "lobby", beta, with(beta, "wake", "off")).map(Refusal::kind),
         "beta is not its project");
+    assertEquals(
+        Optional.of(Kind.NOT_OWNER),
+        rule.decide(adHoc, "lobby", LOBBY, beta).map(Refusal::kind),
+        "nor may it move one of acme there");
+    assertEquals(Optional.empty(), rule.decide(OWNER_API, "lobby", LOBBY, beta), "its person may");
   }
 
   @Test

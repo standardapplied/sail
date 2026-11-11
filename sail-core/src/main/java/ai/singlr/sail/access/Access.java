@@ -173,11 +173,12 @@ public final class Access {
 
   /**
    * Whether {@code action} on {@code resource} is within {@code actor}'s own work: the run its
-   * principal names, the one thing it narrates; the project of its work; the spec it works, a spec
-   * it made, and for an ad-hoc run any spec of its project; its spec's conversation, addressed by
-   * the spec or by its room, the conversation of a spec it made, and for an ad-hoc run any of its
-   * project. Creating is filing a spec under its work's project, born in no other room or in its
-   * work's room; the one room it creates is the own room of a spec it made, the spec's birth.
+   * principal names, the one thing it narrates; the project of its work; and in that project alone,
+   * the spec it works, a spec it made, and for an ad-hoc run any spec; its spec's conversation,
+   * addressed by the spec or by its room, the conversation of a spec it made, and for an ad-hoc run
+   * any. Creating is filing a spec under its work's project, born in no other room or in its work's
+   * room; the one room it creates is the own room of a spec it made, the spec's birth. A spec or
+   * conversation filed under another project is no agent's work, whoever made it.
    */
   private static boolean ownWork(Actor actor, Action action, Resource resource) {
     var work = actor.work();
@@ -187,16 +188,18 @@ public final class Access {
     if (work == null || action == Action.NARRATE) {
       return false;
     }
-    var project = Objects.equals(work.project(), resource.project());
-    var wholeProject = project && work.spec() == null && work.room() == null;
+    if (resource.kind() == Resource.Kind.PROJECT) {
+      return action != Action.CREATE && Objects.equals(work.project(), resource.id());
+    }
+    if (!Objects.equals(work.project(), resource.project())) {
+      return false;
+    }
+    var wholeProject = work.spec() == null && work.room() == null;
     var made = resource.madeBy() != null && resource.madeBy().equals(actor.handle());
     return switch (resource.kind()) {
-      case PROJECT -> action != Action.CREATE && Objects.equals(work.project(), resource.id());
       case SPEC ->
           action == Action.CREATE
-              ? project
-                  && (resource.bornIn() == null
-                      || Objects.equals(work.room(), resource.bornIn().id()))
+              ? resource.bornIn() == null || Objects.equals(work.room(), resource.bornIn().id())
               : wholeProject || made || Objects.equals(work.spec(), resource.id());
       case ROOM ->
           made

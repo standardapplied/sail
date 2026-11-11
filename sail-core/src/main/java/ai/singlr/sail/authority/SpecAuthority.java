@@ -75,8 +75,30 @@ public final class SpecAuthority implements WriteAuthority {
         WriteAuthority.refused(
                 actor,
                 taking(actor, id, held == null ? asBorn(id, next) : asHeld(id, held), held, next))
+            .or(() -> moving(actor, id, held, next))
             .or(() -> approval(actor, held, next));
     return refused.isPresent() ? refused : facts(actor, id, held, next);
+  }
+
+  /**
+   * Why {@code actor} may not move spec {@code id} from the project {@code held} files it under to
+   * another, {@code next}'s: the spec is changed where it lands as well as where it was, so whoever
+   * may change it in one project only, an agent in its work's, moves it nowhere.
+   */
+  private Optional<Refusal> moving(
+      Actor actor, String id, Map<String, Object> held, Map<String, Object> next) {
+    return held == null || next == null || Objects.equals(projectOf(held), projectOf(next))
+        ? Optional.empty()
+        : WriteAuthority.refused(
+            actor,
+            Taking.of(
+                attribution.made(
+                    Resources.spec(
+                        id,
+                        projectOf(next),
+                        assigneeOf(held),
+                        Snapshots.text(held, Snapshots.CREATOR))),
+                Action.CHANGE));
   }
 
   /**

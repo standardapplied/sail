@@ -15,6 +15,7 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Sqlite;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -51,17 +52,34 @@ public final class RoomAuthority implements WriteAuthority {
     if (unheld.isPresent()) {
       return unheld;
     }
-    var project = Snapshots.text(held == null ? next : held, PROJECT);
     var refused =
-        WriteAuthority.refused(
-            actor,
-            held == null
-                ? Taking.of(attribution.made(Resources.room(id, project, null)), Action.CREATE)
-                : Taking.of(
-                    attribution.made(Resources.room(id, project, rooms.ownerOf(id, held))),
-                    Action.CHANGE));
+        held == null
+            ? WriteAuthority.refused(
+                actor,
+                Taking.of(
+                    attribution.made(Resources.room(id, Snapshots.text(next, PROJECT), null)),
+                    Action.CREATE))
+            : changing(actor, id, held, Snapshots.text(held, PROJECT))
+                .or(
+                    () ->
+                        next == null
+                                || Objects.equals(
+                                    Snapshots.text(held, PROJECT), Snapshots.text(next, PROJECT))
+                            ? Optional.empty()
+                            : changing(actor, id, held, Snapshots.text(next, PROJECT)));
     return refused.isPresent()
         ? refused
         : attribution.decide(actor, held, next, "created_by", null);
+  }
+
+  /**
+   * Why {@code actor} may not change room {@code id}, as {@code held} has it, in {@code project}.
+   */
+  private Optional<Refusal> changing(
+      Actor actor, String id, Map<String, Object> held, String project) {
+    return WriteAuthority.refused(
+        actor,
+        Taking.of(
+            attribution.made(Resources.room(id, project, rooms.ownerOf(id, held))), Action.CHANGE));
   }
 }
