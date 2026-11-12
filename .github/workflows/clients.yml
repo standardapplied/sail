@@ -1,0 +1,40 @@
+name: Clients
+
+on:
+  push:
+    paths:
+      - "clients/**"
+      - "sail-infra/src/test/java/ai/singlr/sail/api/ClientGoldensTest.java"
+      - ".github/workflows/clients.yml"
+  pull_request:
+    paths:
+      - "clients/**"
+      - "sail-infra/src/test/java/ai/singlr/sail/api/ClientGoldensTest.java"
+      - ".github/workflows/clients.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clients-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sailkit:
+    name: SailKit on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: clients/SailKit
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Swift
+        run: swift --version
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Test
+        run: swift test

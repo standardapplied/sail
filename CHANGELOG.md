@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.66.0
+
+- **A Swift core for the native clients, proven against the server's own answers.** `clients/SailKit` is a Swift package (Swift 6, Foundation only) that the macOS and iOS apps will build on: `SailAPI` reads `whoami`, projects, rooms, messages and specs and posts a message, keeping a refusal's code, message and fix; `SailEvents` follows `/v1/events/stream` across reconnects; `SailTerminalWire` reads and writes the `SAILPTY3` frames. `ClientGoldensTest` writes what the server answers for each of them under `clients/SailKit/Tests/Goldens` and fails when the server would answer otherwise (`-Dsail.client.goldens=record` rewrites them), and the new `Clients` workflow builds and tests the package on Linux. No server answer changes.
+
 ## 0.65.0
 
 - **Sync health, bus stats and sync rounds are the box's own person's, or an admin's.** `GET /v1/sync`, `POST /v1/sync` and `GET /v1/events/stats` answered any authenticated caller. Another FDE now gets `403 forbidden_not_assignee` "Box 'uday' belongs to 'uday', not you." with "Ask uday to operate it, or have an admin do it.". On a box that names no FDE of its own (no sync handle, as a standalone box has by default), anyone but an admin now gets `403 forbidden_not_assignee` "This box has no owner, so only an admin may operate it.". A machine token acts for no one, with the role of the box's person capped by the role it was minted with, so one that is not an admin there is refused the same way: one minted below admin, and one minted admin on a box whose person is not an admin. On the container socket, a run or a room agent reading `GET /v1/sync` gets `403 agent_lane_forbidden` "Agent principals cannot operate boxes."; the box credential still reads it.
