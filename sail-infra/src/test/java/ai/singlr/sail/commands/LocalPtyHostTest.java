@@ -269,6 +269,22 @@ class LocalPtyHostTest {
     }
   }
 
+  /** A folder the person may enter but not read is where the session runs, all the same. */
+  @Test
+  void aSessionRunsInAFolderThePersonMayEnterButNotRead() throws Exception {
+    var hidden = folder("hidden");
+    Files.setPosixFilePermissions(hidden, PosixFilePermissions.fromString("-wx------"));
+    start();
+    try (var client = Client.connect(socket())) {
+      client.open("there", hidden, List.of("sh", "-c", "echo \"@$((6*7))@$(pwd)@\"; exec cat"));
+      client.attach("there");
+
+      assertEquals("@42@" + hidden.toRealPath() + "@", client.probed());
+    } finally {
+      Files.setPosixFilePermissions(hidden, PosixFilePermissions.fromString("rwx------"));
+    }
+  }
+
   private static PtyMessage.Create open(String folder) {
     return new PtyMessage.Create("s", List.of(), folder, "", "", 80, 24);
   }
