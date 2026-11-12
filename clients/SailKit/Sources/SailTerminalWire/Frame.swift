@@ -20,6 +20,11 @@ public enum Frame: Equatable, Sendable {
     case kill(session: String)
     /// Ends a session for whatever displaced it; only the host's dispatch authority sends it.
     case yield(session: String, reason: String)
+    /// Asks for a ticket to take `action` on `target`, a project or a session, once over the host's
+    /// TCP listener; the API asks it for a client, which is answered the ticket over HTTP.
+    case issueTicket(action: Open<TicketAction>, target: String)
+    /// A ticket, presented as the `hello` token of one TCP connection to the host.
+    case ticket(String)
     case output(lastInputSequence: Int64, bytes: [UInt8])
     /// What follows until ``replayEnd`` is the session's journal replayed; `safe` says whether it
     /// starts on a clean terminal boundary.
@@ -34,6 +39,14 @@ public enum Frame: Equatable, Sendable {
     case sessions(SessionPage)
     case accepted
     case refused(HostRefusal)
+}
+
+/// What a ticket lets its holder do over the host's TCP listener.
+public enum TicketAction: String, CaseIterable, Sendable {
+    /// Open a session in a project, and attach to it.
+    case open
+    /// Attach to a session.
+    case attach
 }
 
 public struct TerminalSize: Equatable, Sendable {

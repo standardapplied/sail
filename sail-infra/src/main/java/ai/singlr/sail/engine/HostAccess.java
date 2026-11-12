@@ -8,6 +8,8 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.api.Refusals;
+import ai.singlr.sail.api.SessionAwareAuth;
+import ai.singlr.sail.api.TokenAuth;
 import ai.singlr.sail.authority.MessageAuthority;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
@@ -18,15 +20,19 @@ import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
 import java.util.Objects;
 
 /**
  * The terminal door: who a PTY session acts as, and where it may open. The caller is the FDE a
- * session token names, on the API lane as over HTTP, or with no token this box's own person, on the
- * CLI lane as at its root CLI; {@link RoleRule} resolves either, its role and its scope, and
- * refuses a disabled FDE. A session is pinned only to a room the caller may post in; which projects
- * it opens in is the terminal facet's to say, through the project gate.
+ * session token names, or the one an API token names, capped as the token was minted, each on the
+ * API lane as over HTTP, so a ticket the API asks for with its caller's credential is decided for
+ * that caller; or with no token this box's own person, on the CLI lane as at its root CLI. {@link
+ * RoleRule} resolves each, its role and its scope, and refuses a disabled FDE; a token that acts
+ * for no FDE opens nothing, since no session would be anyone's. A session is pinned only to a room
+ * the caller may post in; which projects it opens in is the terminal facet's to say, through the
+ * project gate.
  */
 public record HostAccess(Sqlite db, RoleRule roles) {
   public PtyIdentity.Person identity(String token) throws IOException {
@@ -45,12 +51,35 @@ public record HostAccess(Sqlite db, RoleRule roles) {
       return new PtyIdentity.Person(
           roles.principal(RoleRule.Credential.box()).orElseThrow(() -> disabled(handle)));
     }
+    if (!token.startsWith(SessionAwareAuth.SESSION_PREFIX)) {
+      return apiToken(token);
+    }
     var session =
         roles
             .session(new AuthSessionStore(db), token, Actor.Lane.API)
-            .orElseThrow(() -> new IOException("Session token is not valid or has expired."));
+            .orElseThrow(HostAccess::invalid);
     return new PtyIdentity.Person(
         session.principal().orElseThrow(() -> disabled(session.fde().handle())));
+  }
+
+  private PtyIdentity.Person apiToken(String token) throws IOException {
+    var minted = new TokenStore(db).validate(token).orElseThrow(HostAccess::invalid);
+    var actor =
+        roles
+            .principal(TokenAuth.credential(minted))
+            .orElseThrow(() -> disabled(Objects.toString(minted.fdeHandle(), minted.name())));
+    if (Strings.isBlank(actor.handle())) {
+      throw new IOException(
+          "Token '"
+              + minted.name()
+              + "' acts for no FDE, so no terminal session would be anyone's; use a token of your"
+              + " own.");
+    }
+    return new PtyIdentity.Person(actor);
+  }
+
+  private static IOException invalid() {
+    return new IOException("Session token is not valid or has expired.");
   }
 
   /**

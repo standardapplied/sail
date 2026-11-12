@@ -77,7 +77,9 @@ class RouteGateSweepTest {
     new SchemaManager(db).migrate();
     operations = new BoxOperations();
     var auth = TestAuth.tokens(db);
-    router = new ApiRouter(operations, auth, new RateLimitGate(), new AgentLogStreamer(auth));
+    router =
+        new ApiRouter(
+            operations, auth, new RateLimitGate(), new AgentLogStreamer(auth), Optional.empty());
     http = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     PrivateAttributes.context(http, "/", router);
     http.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
@@ -140,6 +142,8 @@ class RouteGateSweepTest {
               "GET /v1/reviews/{review} reads in scope",
               "POST /v1/reviews/{review}/approve the journal decides",
               "POST /v1/reviews/{review}/dismiss/{finding} the journal decides",
+              "POST /v1/terminal/tickets the terminal host decides",
+              "* /v1/terminal/tickets serves nothing",
               "GET /v1/runs reads in scope",
               "GET /v1/runs/{run} reads in scope",
               "GET /v1/runs/{run}/log decides OPERATE_RUN",
@@ -509,6 +513,7 @@ class RouteGateSweepTest {
         + switch (route.gate()) {
           case Gate.ReadsInScope reads -> "reads in scope";
           case Gate.Journal journal -> "the journal decides";
+          case Gate.Terminal terminal -> "the terminal host decides";
           case Gate.OperatesBox box -> "operates the box";
           case Gate.ManagesPeople people -> "manages people";
           case Gate.Unserved unserved -> "serves nothing";

@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.SailVersion;
+import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.pty.PtyAdmission;
@@ -17,6 +18,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
+import java.util.function.LongConsumer;
 import picocli.CommandLine.Command;
 
 /**
@@ -33,10 +35,16 @@ public final class PtyHostCommand implements Callable<Integer> {
 
   static final long JOURNAL_CAPACITY = 4L * 1024 * 1024;
   static final long SWEEP_INTERVAL_MILLIS = 30_000;
+  static final long REAP_INTERVAL_MILLIS = 1_000;
   static final String STOPPED_REASON = "pty host stopped";
 
   @Override
   public Integer call() throws Exception {
+    var network =
+        ListenConfig.load()
+            .terminalAddress()
+            .map(PtySessionHost.Network::on)
+            .orElse(PtySessionHost.Network.NONE);
     var handoff = PtySessionHost.Handoff.fromEnvironment(PtyHostCommand::shimCommand);
     var host =
         startHost(
@@ -45,7 +53,8 @@ public final class PtyHostCommand implements Callable<Integer> {
             PtyHostAccess.here(),
             PtyHostAccess.here(),
             new PtyHostEvents(),
-            handoff);
+            handoff,
+            network);
     var done = new CountDownLatch(1);
     Runtime.getRuntime()
         .addShutdownHook(
@@ -89,17 +98,28 @@ public final class PtyHostCommand implements Callable<Integer> {
       PtyAdmission admission,
       PtyEvents events)
       throws java.io.IOException {
-    return startHost(socket, sessions, identity, admission, events, PtySessionHost.Handoff.NONE);
+    return startHost(
+        socket,
+        sessions,
+        identity,
+        admission,
+        events,
+        PtySessionHost.Handoff.NONE,
+        PtySessionHost.Network.NONE);
   }
 
-  /** Starts the host and its sweep timer — the process shell around it is {@link #call()}. */
+  /**
+   * Starts the host and its timers, the sweep and the reaping of TCP connections that present no
+   * ticket — the process shell around it is {@link #call()}.
+   */
   static PtySessionHost startHost(
       java.nio.file.Path socket,
       java.nio.file.Path sessions,
       PtyIdentity.Resolver identity,
       PtyAdmission admission,
       PtyEvents events,
-      PtySessionHost.Handoff handoff)
+      PtySessionHost.Handoff handoff,
+      PtySessionHost.Network network)
       throws java.io.IOException {
     var host =
         new PtySessionHost(
@@ -110,20 +130,27 @@ public final class PtyHostCommand implements Callable<Integer> {
             admission,
             events,
             SailVersion.version(),
-            handoff);
+            handoff,
+            network);
     host.start();
+    every(SWEEP_INTERVAL_MILLIS, host::sweep);
+    every(REAP_INTERVAL_MILLIS, host::reapUnticketed);
+    return host;
+  }
+
+  /** Calls {@code tick} with the time every {@code millis}, for as long as the process lives. */
+  private static void every(long millis, LongConsumer tick) {
     Thread.ofVirtual()
         .start(
             () -> {
               try {
                 while (true) {
-                  Thread.sleep(SWEEP_INTERVAL_MILLIS);
-                  host.sweep(System.nanoTime());
+                  Thread.sleep(millis);
+                  tick.accept(System.nanoTime());
                 }
               } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
               }
             });
-    return host;
   }
 }

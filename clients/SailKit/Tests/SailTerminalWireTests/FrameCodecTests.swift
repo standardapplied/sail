@@ -6,7 +6,7 @@ import Testing
 @Suite struct FrameCodecTests {
     @Test func everyFrameTheHostWritesDecodesAsItsTypeAndEncodesToTheSameBytes() throws {
         let frames = try Goldens.frames()
-        #expect(frames.count == 23)
+        #expect(frames.count == 25)
         for (name, wire) in frames {
             let frame = try FrameCodec.decode(payload: wire.dropFirst(4))
             #expect(messageName(of: frame) == name)
@@ -28,6 +28,8 @@ import Testing
         #expect(frames["ListSessions"] == .listSessions(after: "", limit: 16))
         #expect(frames["Sessions"] == .sessions(SessionPage(sessions: [lounge, shell], next: "shell")))
         #expect(frames["SessionInfo"] == .sessionInfo(lounge))
+        #expect(frames["IssueTicket"] == .issueTicket(action: .known(.open), target: "harbor"))
+        #expect(frames["Ticket"] == .ticket("tkt_harbor"))
         #expect(frames["Err"] == .refused(HostRefusal(
             message: "You do not hold the write token. Run sail session take lounge to take it.",
             remedy: [
@@ -203,6 +205,8 @@ func messageName(of frame: Frame) -> String {
     case .listSessions: "ListSessions"
     case .kill: "Kill"
     case .yield: "Yield"
+    case .issueTicket: "IssueTicket"
+    case .ticket: "Ticket"
     case .output: "Output"
     case .replayBegin: "ReplayBegin"
     case .replayEnd: "ReplayEnd"

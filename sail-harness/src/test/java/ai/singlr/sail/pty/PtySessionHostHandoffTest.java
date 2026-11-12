@@ -97,7 +97,8 @@ class PtySessionHostHandoffTest {
               }
             },
             "0.0.0-test",
-            handoff);
+            handoff,
+            PtySessionHost.Network.NONE);
     host.start();
     return host;
   }

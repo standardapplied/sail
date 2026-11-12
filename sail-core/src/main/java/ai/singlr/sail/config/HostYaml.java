@@ -33,13 +33,15 @@ public record HostYaml(
     WebauthnConfig webauthn,
     SyncConfig sync,
     FileLimits limits,
-    RetentionConfig retention) {
+    RetentionConfig retention,
+    ListenConfig listen) {
 
   public HostYaml {
     webauthn = webauthn == null ? WebauthnConfig.disabled() : webauthn;
     sync = sync == null ? SyncConfig.unset() : sync;
     limits = limits == null ? FileLimits.defaults() : limits;
     retention = retention == null ? RetentionConfig.none() : retention;
+    listen = listen == null ? ListenConfig.none() : listen;
   }
 
   public HostYaml(
@@ -67,7 +69,8 @@ public record HostYaml(
         webauthn,
         sync,
         FileLimits.defaults(),
-        RetentionConfig.none());
+        RetentionConfig.none(),
+        ListenConfig.none());
   }
 
   /** Constructor without a sync role; leaves the box undeclared in the sync star. */
@@ -179,7 +182,8 @@ public record HostYaml(
         WebauthnConfig.fromMap((Map<String, Object>) map.get("webauthn")),
         SyncConfig.fromMap((Map<String, Object>) map.get("sync")),
         FileLimits.fromMap((Map<String, Object>) map.get("limits")),
-        RetentionConfig.fromMap((Map<String, Object>) map.get("retention")));
+        RetentionConfig.fromMap((Map<String, Object>) map.get("retention")),
+        ListenConfig.fromMap((Map<String, Object>) map.get("listen")));
   }
 
   /** This host with its sync block replaced and everything else kept. */
@@ -197,7 +201,8 @@ public record HostYaml(
         webauthn,
         sync,
         limits,
-        retention);
+        retention,
+        listen);
   }
 
   /** This host with its server IP replaced and everything else kept. */
@@ -215,7 +220,8 @@ public record HostYaml(
         webauthn,
         sync,
         limits,
-        retention);
+        retention,
+        listen);
   }
 
   /** This host with its passkey settings replaced and everything else kept. */
@@ -233,7 +239,27 @@ public record HostYaml(
         webauthn,
         sync,
         limits,
-        retention);
+        retention,
+        listen);
+  }
+
+  /** This host with its listen block replaced and everything else kept. */
+  public HostYaml withListen(ListenConfig listen) {
+    return new HostYaml(
+        storageBackend,
+        pool,
+        poolDisk,
+        bridge,
+        baseProfile,
+        image,
+        incusVersion,
+        serverIp,
+        initializedAt,
+        webauthn,
+        sync,
+        limits,
+        retention,
+        listen);
   }
 
   public Map<String, Object> toMap() {
@@ -257,6 +283,9 @@ public record HostYaml(
       map.put("limits", Map.of("file_max", limits.fileMax()));
     if (!retention.isEmpty()) {
       map.put("retention", retention.toMap());
+    }
+    if (!listen.isEmpty()) {
+      map.put("listen", listen.toMap());
     }
     return map;
   }

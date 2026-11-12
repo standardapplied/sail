@@ -24,9 +24,12 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -150,8 +153,30 @@ class AccessDoorsBaselineTest {
     specs(world, doors);
     rooms(world, doors);
     projects(doors);
+    tickets(world, doors);
     events(world, doors);
     return doors;
+  }
+
+  /**
+   * The ticket door's own check, which only the web door's callers reach: the project an open
+   * names, read in the caller's scope before the terminal host is asked. What the host decides
+   * behind it, the open or attach itself, is the host's (DirectTerminalTest), so here it issues
+   * what it is asked.
+   */
+  private static void tickets(World world, List<Door> doors) {
+    var tickets =
+        new TerminalTickets(
+            new ProjectStore(world.db),
+            (credential, action, target) -> "tkt_" + target,
+            new InetSocketAddress(InetAddress.getLoopbackAddress(), 7072));
+    for (var project : List.of("acme", "beta", "delta", "omega")) {
+      doors.add(
+          new Door(
+              "ask a terminal ticket to open a session in " + project,
+              ops -> tickets.issue("tok", Map.of("action", "open", "project", project)),
+              actor -> actor.lane() == Actor.Lane.API));
+    }
   }
 
   private static void reads(World world, List<Door> doors) {

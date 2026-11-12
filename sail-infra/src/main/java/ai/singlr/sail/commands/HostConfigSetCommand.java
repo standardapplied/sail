@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -58,7 +59,9 @@ public final class HostConfigSetCommand implements Runnable {
           "sync-role",
           "sync-main",
           "sync-handle",
-          "slack-token");
+          "slack-token",
+          ListenConfig.API,
+          ListenConfig.TERMINAL);
   private static final Set<String> WEBAUTHN_KEYS =
       Set.of("webauthn-rp-id", "webauthn-rp-name", "webauthn-origin", "webauthn-session-ttl-hours");
   private static final Pattern RP_ID = Pattern.compile("[a-z0-9]([a-z0-9.-]*[a-z0-9])?");
@@ -167,9 +170,14 @@ public final class HostConfigSetCommand implements Runnable {
                   + stamped.size()
                   + " run(s) main has not taken with this box's handle.|@"));
     }
-    if (WEBAUTHN_KEYS.contains(key)) {
+    if (WEBAUTHN_KEYS.contains(key) || ListenConfig.API.equals(key)) {
       System.out.println(
           Ansi.AUTO.string("  @|faint Restart to apply: sudo systemctl restart sail-api|@"));
+    }
+    if (ListenConfig.TERMINAL.equals(key)) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|faint Restart to apply: sudo systemctl restart sail-api sail-pty-host|@"));
     }
   }
 
@@ -435,6 +443,7 @@ public final class HostConfigSetCommand implements Runnable {
         }
       }
       case "webauthn-session-ttl-hours" -> parseSessionTtlHours(value);
+      case ListenConfig.API, ListenConfig.TERMINAL -> ListenConfig.address(key, value);
       case "sync-role" -> {
         if (!SyncConfig.ROLE_MAIN.equals(value) && !SyncConfig.ROLE_NODE.equals(value)) {
           throw new IllegalArgumentException(
@@ -484,6 +493,8 @@ public final class HostConfigSetCommand implements Runnable {
           current.withSync(new SyncConfig(sync.role(), value, sync.handle(), sync.boxId()));
       case "sync-handle" ->
           current.withSync(new SyncConfig(sync.role(), sync.main(), value, sync.boxId()));
+      case ListenConfig.API, ListenConfig.TERMINAL ->
+          current.withListen(current.listen().with(key, value));
       default -> throw new IllegalArgumentException("Unhandled key: " + key);
     };
   }

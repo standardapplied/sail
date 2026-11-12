@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.store.SpecStore;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -13,13 +14,26 @@ import java.net.InetSocketAddress;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.UnaryOperator;
 
 public final class SailApiServer implements AutoCloseable {
 
+  /**
+   * How clients on the box's private network reach it beside loopback: {@code api}, one more
+   * address the same routes, gates and credentials answer at, and {@code terminal}, the ticket door
+   * of the terminal host's TCP listener. {@link #NONE} binds nothing more and offers no ticket.
+   */
+  public record PrivateNetwork(
+      Optional<InetSocketAddress> api, Optional<TerminalTickets> terminal) {
+    public static final PrivateNetwork NONE =
+        new PrivateNetwork(Optional.empty(), Optional.empty());
+  }
+
   private final HttpServer server;
+  private final Optional<HttpServer> privateServer;
   private final ExecutorService executor;
   private final EventBus eventBus;
   private final AuditPersister auditPersister;
@@ -110,13 +124,17 @@ public final class SailApiServer implements AutoCloseable {
         reviewController,
         new RateLimitGate(),
         project -> null,
-        SseHandler.RoomTurns.NONE);
+        SseHandler.RoomTurns.NONE,
+        PrivateNetwork.NONE);
   }
 
   /**
    * The constructor the server runs: {@code rateLimits} gates every context served over TCP (a test
-   * pins a tiny budget), {@code notifications} says what each project wants sent by webhook, and
-   * {@code turns} is what a room's stream is first told.
+   * pins a tiny budget), {@code notifications} says what each project wants sent by webhook, {@code
+   * turns} is what a room's stream is first told, and {@code network} where else the API listens
+   * and how a terminal ticket is issued. Every context is served on loopback and, when {@code
+   * network} names one, on the private address; a private address that cannot be bound fails the
+   * construction.
    */
   public SailApiServer(
       String host,
@@ -131,7 +149,8 @@ public final class SailApiServer implements AutoCloseable {
       ReviewPipelineController reviewController,
       RateLimitGate rateLimits,
       ProjectNotificationsResolver notifications,
-      SseHandler.RoomTurns turns)
+      SseHandler.RoomTurns turns,
+      PrivateNetwork network)
       throws IOException {
     this.eventBus = eventBus;
     this.auditPersister = auditSubscriber instanceof AuditPersister ap ? ap : null;
@@ -146,10 +165,11 @@ public final class SailApiServer implements AutoCloseable {
             ? eventBus.subscribe(new SpecLifecycleReactor(specStore))
             : null;
     server = HttpServer.create(new InetSocketAddress(host, port), 32);
+    privateServer = listening(network.api());
     executor = Executors.newVirtualThreadPerTaskExecutor();
     serve(
         "/",
-        new ApiRouter(operations, auth, rateLimits, new AgentLogStreamer(auth)),
+        new ApiRouter(operations, auth, rateLimits, new AgentLogStreamer(auth), network.terminal()),
         UnaryOperator.identity());
     if (passkeyHandler != null) {
       serve("/v1/auth", passkeyHandler, rateLimits::wrap);
@@ -166,6 +186,30 @@ public final class SailApiServer implements AutoCloseable {
       socketListener = null;
     }
     server.setExecutor(executor);
+    privateServer.ifPresent(listener -> listener.setExecutor(executor));
+  }
+
+  /**
+   * A server bound to {@code address}, when one is named; a bind that fails stops the loopback
+   * server already bound and fails, naming the setting.
+   */
+  private Optional<HttpServer> listening(Optional<InetSocketAddress> address) throws IOException {
+    if (address.isEmpty()) {
+      return Optional.empty();
+    }
+    try {
+      return Optional.of(HttpServer.create(address.get(), 32));
+    } catch (IOException unbound) {
+      server.stop(0);
+      throw new IOException(
+          "Could not listen on "
+              + ListenConfig.hostPort(address.get())
+              + ", the API's private address ('"
+              + ListenConfig.API
+              + "'): "
+              + unbound.getMessage(),
+          unbound);
+    }
   }
 
   /**
@@ -175,6 +219,9 @@ public final class SailApiServer implements AutoCloseable {
   private <T extends HttpHandler & RouteTable> void serve(
       String path, T table, UnaryOperator<HttpHandler> limit) {
     PrivateAttributes.context(server, path, limit.apply(table));
+    if (privateServer.isPresent()) {
+      PrivateAttributes.context(privateServer.get(), path, limit.apply(table));
+    }
     if (!tables.contains(table)) {
       tables.add(table);
     }
@@ -190,6 +237,7 @@ public final class SailApiServer implements AutoCloseable {
 
   public void start() throws IOException {
     server.start();
+    privateServer.ifPresent(HttpServer::start);
     if (socketListener != null) {
       socketListener.start();
     }
@@ -197,6 +245,11 @@ public final class SailApiServer implements AutoCloseable {
 
   public int port() {
     return server.getAddress().getPort();
+  }
+
+  /** The private address the API listens on beside loopback, when it does. */
+  public Optional<InetSocketAddress> privateAddress() {
+    return privateServer.map(HttpServer::getAddress);
   }
 
   /** Returns the event bus, or {@code null} when the server was constructed without one. */
@@ -240,6 +293,7 @@ public final class SailApiServer implements AutoCloseable {
       eventBus.close();
     }
     server.stop(0);
+    privateServer.ifPresent(listener -> listener.stop(0));
     executor.close();
   }
 }

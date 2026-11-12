@@ -26,6 +26,7 @@ import ai.singlr.sail.api.SlackReactor;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.api.SyncScheduler;
+import ai.singlr.sail.api.TerminalTickets;
 import ai.singlr.sail.api.TokenAuth;
 import ai.singlr.sail.api.WatcherCoverage;
 import ai.singlr.sail.api.WatcherRearmer;
@@ -36,6 +37,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.BindPolicy;
@@ -142,6 +144,9 @@ public final class ServerStartCommand implements Runnable {
 
   private void execute() throws Exception {
     BindPolicy.requireBindable(host, allowRemote);
+    var listen = ListenConfig.load();
+    var privateApi = listen.apiAddress();
+    var terminal = listen.terminalAddress();
     var dbPath = SailPaths.controlPlaneDb();
     SailPaths.ensureDataDir(dbPath.getParent());
 
@@ -259,7 +264,17 @@ public final class ServerStartCommand implements Runnable {
             reviewController,
             new RateLimitGate(),
             notifications,
-            operations.liveMembers()::turnState);
+            operations.liveMembers()::turnState,
+            new SailApiServer.PrivateNetwork(
+                privateApi,
+                terminal.map(
+                    address ->
+                        new TerminalTickets(
+                            projectStore,
+                            (credential, action, target) ->
+                                SessionClient.ticket(
+                                    SailPaths.ptySocketPath(), credential, action, target),
+                            address))));
     var sweeper = new ExpiredRowSweeper(dbPath);
     var eventSweeper = new EventRetentionSweeper(eventStore);
     var retentionSweeper = operations.retentionSweeper();
@@ -355,6 +370,24 @@ public final class ServerStartCommand implements Runnable {
       System.out.println(
           Ansi.AUTO.string(
               "  @|green ✓|@ Sail server listening on http://" + host + ":" + server.port()));
+      server
+          .privateAddress()
+          .ifPresent(
+              address ->
+                  System.out.println(
+                      Ansi.AUTO.string(
+                          "  @|green ✓|@ Also listening on http://"
+                              + ListenConfig.hostPort(address)
+                              + " ('"
+                              + ListenConfig.API
+                              + "')")));
+      terminal.ifPresent(
+          address ->
+              System.out.println(
+                  Ansi.AUTO.string(
+                      "    @|faint Terminal tickets are presented at "
+                          + ListenConfig.hostPort(address)
+                          + "|@")));
       if (webauthn.isConfigured()) {
         System.out.println(
             Ansi.AUTO.string("    @|faint Passkey login enabled for " + webauthn.rpId() + "|@"));

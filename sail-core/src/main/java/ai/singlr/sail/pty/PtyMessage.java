@@ -6,19 +6,25 @@
 package ai.singlr.sail.pty;
 
 import ai.singlr.sail.common.Remedy;
+import java.io.IOException;
+import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * The session-host wire vocabulary — one sealed hierarchy for both directions. Client to host:
- * create, attach, input, resize, write-token, detach, list, kill, yield. Host to client: welcome
- * (the host's boot id), output (carrying the last applied input sequence — the one enabler
- * client-side predictive echo needs), replay bracketing, writer and size changes, flow control,
- * endings, listings, and errors.
+ * create, attach, input, resize, write-token, detach, list, kill, yield, a ticket asked for. Host
+ * to client: welcome (the host's boot id), output (carrying the last applied input sequence — the
+ * one enabler client-side predictive echo needs), replay bracketing, writer and size changes, flow
+ * control, endings, listings, a ticket, and errors.
  */
 public sealed interface PtyMessage {
 
   int PAGE_LIMIT = 16;
   int MAX_COMMAND_BYTES = 32 * 1024;
+
+  /** How long a {@link Ticket} may wait to be presented. */
+  Duration TICKET_LIFE = Duration.ofSeconds(30);
 
   record Hello(String token) implements PtyMessage {}
 
@@ -77,6 +83,42 @@ public sealed interface PtyMessage {
    * status, so the room's ending event names why.
    */
   record Yield(String session, String reason) implements PtyMessage {}
+
+  /** What a {@link Ticket} lets its holder do: open a session in a project, or attach to one. */
+  enum TicketAction {
+    OPEN,
+    ATTACH;
+
+    /** The action as the wire and the API name it. */
+    public String wire() {
+      return name().toLowerCase(Locale.ROOT);
+    }
+
+    /** The action {@code wire} names, refused when it names none. */
+    public static TicketAction of(String wire) throws IOException {
+      for (var action : values()) {
+        if (action.wire().equals(wire)) {
+          return action;
+        }
+      }
+      throw new IOException("A ticket opens or attaches; '" + wire + "' is neither.");
+    }
+  }
+
+  /**
+   * Asks for a ticket that lets the credential this connection presented take {@code action} on
+   * {@code target} (a project to open a session in, or a session to attach to) once, over the
+   * host's TCP listener. The host decides it as it decides that open or attach, and answers a
+   * {@link Ticket} or an {@link Err}.
+   */
+  record IssueTicket(TicketAction action, String target) implements PtyMessage {}
+
+  /**
+   * A ticket: presented as the {@link Hello} token of one TCP connection within {@link
+   * #TICKET_LIFE}, it admits that connection for the action and target it was issued for, and
+   * nothing else.
+   */
+  record Ticket(String ticket) implements PtyMessage {}
 
   record Output(long lastInputSeq, byte[] bytes) implements PtyMessage {}
 

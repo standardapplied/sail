@@ -12,9 +12,12 @@ import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.StandardProtocolFamily;
+import java.net.StandardSocketOptions;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
@@ -33,10 +36,13 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 
 /**
  * The per-container session host: owns every {@link PtySession}, serves the {@link PtyWire}
@@ -67,6 +73,17 @@ import java.util.function.Function;
  * host.boot}), so a client comparing ids reads the handoff as a reconnect; a host that inherits
  * nothing mints a new one, as before. A descriptor that cannot be adopted is closed, which hangs
  * its child up: closing the master is the kill switch, so nothing can leak.
+ *
+ * <p>A host given a TCP address ({@link Network}) also listens there, for clients that reach the
+ * box over a private network with no SSH. A TCP connection serves nothing until it presents a
+ * {@link PtyMessage.Ticket} as its {@code Hello} token: one this host issued, on its unix socket,
+ * to a connection that presented a credential of its own ({@link PtyMessage.IssueTicket}), deciding
+ * it as it decides that open or attach. The ticket's credential is resolved again when it is
+ * presented and at every sweep after, as a unix connection's is, and the connection may take the
+ * ticket's one action on its one target and nothing else. A connection that has presented no ticket
+ * within {@link #UNTICKETED_DEADLINE} is closed ({@link #reapUnticketed}); until then the host
+ * reads at most {@link #TICKET_FRAME} bytes of it, and counts it against a cap of its own, so
+ * connections from the network never crowd out the unix socket's.
  */
 public final class PtySessionHost implements AutoCloseable {
 
@@ -74,6 +91,8 @@ public final class PtySessionHost implements AutoCloseable {
   static final Duration CORPSE_RETENTION = Duration.ofMinutes(10);
   static final String DISPATCH_CREDENTIAL_FILE = "pty-dispatch.token";
   static final String BOOT_ID_FILE = "host.boot";
+  public static final Duration UNTICKETED_DEADLINE = Duration.ofSeconds(5);
+  static final int TICKET_FRAME = 256;
 
   /**
    * What a request hears when the host could not serve it, the store behind its access checks
@@ -128,6 +147,19 @@ public final class PtySessionHost implements AutoCloseable {
     public static final Limits DEFAULTS = new Limits(32, 16, 256, 256);
   }
 
+  /**
+   * Where the host listens beside its unix socket, if anywhere, and the clock its tickets and its
+   * deadline for connections that present none run on. {@link #NONE} listens nowhere else.
+   */
+  public record Network(Optional<InetSocketAddress> tcp, LongSupplier clock) {
+    public static final Network NONE = new Network(Optional.empty(), System::nanoTime);
+
+    /** Listening on {@code tcp} too, on the system's clock. */
+    public static Network on(InetSocketAddress tcp) {
+      return new Network(Optional.of(tcp), System::nanoTime);
+    }
+  }
+
   private final Path socketPath;
   private final Path sessionsDir;
   private final long journalCapacity;
@@ -137,15 +169,29 @@ public final class PtySessionHost implements AutoCloseable {
   private final String version;
   private final Limits limits;
   private final Handoff handoff;
+  private final Network network;
+  private final PtyTickets tickets;
   private final Map<String, PtySession> sessions = new ConcurrentHashMap<>();
   private final Set<Admitted> admitted = ConcurrentHashMap.newKeySet();
+  private final Map<SocketChannel, Long> unticketed = new ConcurrentHashMap<>();
   private volatile String bootId = "";
   private final AtomicInteger connections = new AtomicInteger();
+  private final AtomicInteger tcpConnections = new AtomicInteger();
   private volatile ServerSocketChannel server;
+  private volatile ServerSocketChannel tcpServer;
   private volatile byte[] dispatchCredential = new byte[0];
   private volatile boolean closed;
 
   private record Admitted(SocketChannel channel, String token, PtyIdentity who) {}
+
+  /** A connection that proved who it is: the token to resolve again, whom, and what it may do. */
+  private record Admission(String token, PtyIdentity who, Bound bound) {}
+
+  /** How a door admits a connection, or answers it and returns null when it does not. */
+  @FunctionalInterface
+  private interface Door {
+    Admission admit(SocketChannel channel) throws IOException;
+  }
 
   public PtySessionHost(
       Path socketPath,
@@ -164,7 +210,8 @@ public final class PtySessionHost implements AutoCloseable {
         events,
         version,
         Limits.DEFAULTS,
-        Handoff.NONE);
+        Handoff.NONE,
+        Network.NONE);
   }
 
   public PtySessionHost(
@@ -175,7 +222,8 @@ public final class PtySessionHost implements AutoCloseable {
       PtyAdmission admission,
       PtyEvents events,
       String version,
-      Handoff handoff) {
+      Handoff handoff,
+      Network network) {
     this(
         socketPath,
         sessionsDir,
@@ -185,7 +233,8 @@ public final class PtySessionHost implements AutoCloseable {
         events,
         version,
         Limits.DEFAULTS,
-        handoff);
+        handoff,
+        network);
   }
 
   PtySessionHost(
@@ -206,7 +255,8 @@ public final class PtySessionHost implements AutoCloseable {
         events,
         version,
         limits,
-        Handoff.NONE);
+        Handoff.NONE,
+        Network.NONE);
   }
 
   PtySessionHost(
@@ -218,7 +268,8 @@ public final class PtySessionHost implements AutoCloseable {
       PtyEvents events,
       String version,
       Limits limits,
-      Handoff handoff) {
+      Handoff handoff,
+      Network network) {
     this.socketPath = socketPath;
     this.sessionsDir = sessionsDir;
     this.journalCapacity = journalCapacity;
@@ -228,6 +279,8 @@ public final class PtySessionHost implements AutoCloseable {
     this.version = version;
     this.limits = limits;
     this.handoff = handoff;
+    this.network = network;
+    this.tickets = new PtyTickets(limits.connections());
   }
 
   /**
@@ -261,10 +314,28 @@ public final class PtySessionHost implements AutoCloseable {
     }
     Files.deleteIfExists(socketPath);
     mintDispatchCredential();
+    if (network.tcp().isPresent()) {
+      tcpServer = ServerSocketChannel.open();
+      tcpServer.bind(network.tcp().get());
+    }
     server = ServerSocketChannel.open(StandardProtocolFamily.UNIX);
     server.bind(UnixDomainSocketAddress.of(socketPath));
     ownerOnly(socketPath);
-    Thread.ofVirtual().name("pty-host-accept").start(this::acceptLoop);
+    Thread.ofVirtual()
+        .name("pty-host-accept")
+        .start(() -> acceptLoop(server, channel -> serve(channel, connections, this::admitLocal)));
+    if (tcpServer != null) {
+      Thread.ofVirtual()
+          .name("pty-host-tcp-accept")
+          .start(() -> acceptLoop(tcpServer, this::serveTcp));
+    }
+  }
+
+  /** The address the host listens on over TCP, once started with one. */
+  public Optional<InetSocketAddress> tcpAddress() throws IOException {
+    return tcpServer == null
+        ? Optional.empty()
+        : Optional.of((InetSocketAddress) tcpServer.getLocalAddress());
   }
 
   /**
@@ -459,11 +530,11 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
-  private void acceptLoop() {
+  private void acceptLoop(ServerSocketChannel listener, Consumer<SocketChannel> serve) {
     while (!closed) {
       try {
-        var channel = server.accept();
-        Thread.ofVirtual().name("pty-host-conn").start(() -> serve(channel));
+        var channel = listener.accept();
+        Thread.ofVirtual().name("pty-host-conn").start(() -> serve.accept(channel));
       } catch (IOException e) {
         if (!closed) {
           throw new IllegalStateException("pty host accept failed", e);
@@ -473,37 +544,115 @@ public final class PtySessionHost implements AutoCloseable {
     }
   }
 
-  private void serve(SocketChannel channel) {
+  /**
+   * The unix door: a {@code Hello} whose token the resolver honors, a blank one being the box's own
+   * person, admitted for everything its person may do.
+   */
+  private Admission admitLocal(SocketChannel channel) throws IOException {
+    PtyWire.handshake(channel, channel);
+    if (!(PtyWire.read(channel) instanceof PtyMessage.Hello(var token))) {
+      reply(channel, new PtyMessage.Err("The first frame must identify you: send Hello."));
+      return null;
+    }
+    try {
+      return new Admission(token, identify(token), Bound.NOTHING);
+    } catch (IOException refused) {
+      reply(channel, new PtyMessage.Err(Remedied.whole(refused)));
+      return null;
+    }
+  }
+
+  /**
+   * The TCP door: {@code TCP_NODELAY}, so a keystroke is not held back for the next, and nothing
+   * served until a {@code Hello} presents a ticket this host issued, whose credential still
+   * resolves. Until it does, the connection reads at most {@link #TICKET_FRAME} bytes and is closed
+   * at {@link #UNTICKETED_DEADLINE}; anything but a {@code Hello} is closed unanswered.
+   */
+  private void serveTcp(SocketChannel channel) {
+    try {
+      channel.setOption(StandardSocketOptions.TCP_NODELAY, true);
+    } catch (IOException e) {
+      log("tcp-nodelay-failed", "-", "-", e.toString());
+    }
+    serve(channel, tcpConnections, this::admitTicketed);
+  }
+
+  private Admission admitTicketed(SocketChannel channel) throws IOException {
+    String presented;
+    unticketed.put(channel, network.clock().getAsLong());
+    try {
+      PtyWire.handshake(channel, channel);
+      if (!(PtyWire.read(channel, TICKET_FRAME) instanceof PtyMessage.Hello(var token))) {
+        log("refused", "?", "-", "tcp: the first frame presented no ticket");
+        return null;
+      }
+      presented = token;
+    } finally {
+      unticketed.remove(channel);
+    }
+    PtyTickets.Ticket ticket;
+    PtyIdentity who;
+    try {
+      ticket = tickets.redeem(presented, network.clock().getAsLong());
+      who = identity.resolve(ticket.token());
+    } catch (IOException refused) {
+      log("refused", "?", "-", "tcp: " + refused.getMessage());
+      reply(channel, new PtyMessage.Err(Remedied.whole(refused)));
+      return null;
+    }
+    return new Admission(ticket.token(), who, ticket::refusal);
+  }
+
+  /**
+   * Closes every TCP connection that has presented no ticket within {@link #UNTICKETED_DEADLINE} of
+   * {@code nowNanos}: a peer that connects and says nothing holds nothing for long. Driven, as
+   * {@link #sweep} is, by the production timer, and by tests with synthetic time.
+   */
+  public void reapUnticketed(long nowNanos) {
+    unticketed.forEach(
+        (channel, connectedAt) -> {
+          if (nowNanos - connectedAt > UNTICKETED_DEADLINE.toNanos()) {
+            log(
+                "refused",
+                "?",
+                "-",
+                "tcp: no ticket within " + UNTICKETED_DEADLINE.toSeconds() + " s");
+            closeQuietly(channel);
+          }
+        });
+  }
+
+  private void serve(SocketChannel channel, AtomicInteger open, Door door) {
     PtySession attached = null;
     Admitted me = null;
     var subscriberId = -1L;
     var principal = "?";
-    var overCap = connections.incrementAndGet() > limits.connections();
+    var overCap = open.incrementAndGet() > limits.connections();
     try (channel) {
       if (overCap) {
         log("refused", principal, "-", "connection cap " + limits.connections());
         return;
       }
       try {
-        PtyWire.handshake(channel, channel);
-        PtyIdentity who;
-        if (PtyWire.read(channel) instanceof PtyMessage.Hello(var token)) {
-          try {
-            who = identify(token);
-          } catch (IOException refused) {
-            reply(channel, new PtyMessage.Err(Remedied.whole(refused)));
-            return;
-          }
-          principal = who.fde();
-          me = new Admitted(channel, token, who);
-          admitted.add(me);
-          reply(channel, new PtyMessage.Welcome(bootId));
-        } else {
-          reply(channel, new PtyMessage.Err("The first frame must identify you: send Hello."));
+        var admission = door.admit(channel);
+        if (admission == null) {
           return;
         }
+        var who = admission.who();
+        var bound = admission.bound();
+        String opened = null;
+        principal = who.fde();
+        me = new Admitted(channel, admission.token(), who);
+        admitted.add(me);
+        reply(channel, new PtyMessage.Welcome(bootId));
         while (true) {
           var message = PtyWire.read(channel);
+          var uncovered = bound.refusal(message, opened);
+          if (uncovered != null) {
+            log("refused", principal, "-", "outside its ticket");
+            reply(channel, uncovered);
+            return;
+          }
           if (who instanceof PtyIdentity.Dispatch
               && !(message instanceof PtyMessage.Yield)
               && !(message instanceof PtyMessage.ListSessions)) {
@@ -513,31 +662,24 @@ public final class PtySessionHost implements AutoCloseable {
             continue;
           }
           switch (message) {
-            case PtyMessage.Create m when who instanceof PtyIdentity.Person person ->
-                reply(channel, create(m, person));
+            case PtyMessage.Create m when who instanceof PtyIdentity.Person person -> {
+              var answer = create(m, person);
+              if (answer instanceof PtyMessage.Ok) {
+                opened = m.session();
+              }
+              reply(channel, answer);
+            }
+            case PtyMessage.IssueTicket m when who instanceof PtyIdentity.Person person ->
+                reply(channel, issueTicket(m, person, admission.token()));
             case PtyMessage.Attach m when who instanceof PtyIdentity.Person person -> {
               if (attached != null) {
                 reply(channel, new PtyMessage.Err("This connection is already attached."));
                 break;
               }
               var session = sessions.get(m.session());
-              if (session == null || !session.live()) {
-                reply(
-                    channel,
-                    new PtyMessage.Err("No live session '" + m.session() + "' to attach."));
-                break;
-              }
-              if (!admitted(who, session)) {
-                log("refused", principal, m.session(), "not admitted");
-                reply(
-                    channel,
-                    new PtyMessage.Err("Session '" + m.session() + "' is not yours to attach."));
-                break;
-              }
-              var unheld = projectRefusal(session.origin().project(), person);
-              if (unheld != null) {
-                log("refused", principal, m.session(), "project not held");
-                reply(channel, unheld);
+              var refused = attachRefusal(m.session(), session, person);
+              if (refused != null) {
+                reply(channel, refused);
                 break;
               }
               // The cap check and the registration it admits are one step, or concurrent attaches
@@ -626,6 +768,86 @@ public final class PtySessionHost implements AutoCloseable {
       }
       connections.decrementAndGet();
     }
+  }
+
+  /**
+   * Why {@code who} may not attach to {@code session}, found under {@code name}, or null when it
+   * may: the session must be live, {@code who} must operate the box of the person who opened it
+   * ({@link #admitted}), and hold the project it runs in. One decision, asked by an attach and by a
+   * ticket to attach.
+   */
+  private PtyMessage.Err attachRefusal(String name, PtySession session, PtyIdentity.Person who) {
+    if (session == null || !session.live()) {
+      return new PtyMessage.Err("No live session '" + name + "' to attach.");
+    }
+    if (!admitted(who, session)) {
+      log("refused", who.fde(), name, "not admitted");
+      return new PtyMessage.Err("Session '" + name + "' is not yours to attach.");
+    }
+    var unheld = projectRefusal(session.origin().project(), who);
+    if (unheld != null) {
+      log("refused", who.fde(), name, "project not held");
+    }
+    return unheld;
+  }
+
+  /**
+   * A ticket for {@code who}, holder of {@code token}, to take the action {@code request} names on
+   * its target over TCP, decided as that open ({@link #projectRefusal}, a project being required:
+   * the network opens no shell on the host) or that attach ({@link #attachRefusal}) is. Refused on
+   * a host that listens on no TCP address, and to a connection that presented no credential: the
+   * box's own person, a blank token, exists only on the unix socket.
+   */
+  private PtyMessage issueTicket(
+      PtyMessage.IssueTicket request, PtyIdentity.Person who, String token) {
+    if (tcpServer == null) {
+      return new PtyMessage.Err(
+          Remedy.of(
+              "This host listens for no terminal over the network. Name an address with '",
+              Remedy.sail("host config set terminal-listen", "<address>:<port>"),
+              "' and restart the sail-pty-host service."));
+    }
+    if (Strings.isBlank(token)) {
+      return new PtyMessage.Err(
+          "A ticket carries the credential it is asked with, and this connection presented none.");
+    }
+    var target = request.target();
+    try {
+      switch (request.action()) {
+        case OPEN -> NameValidator.requireValidProjectName(target);
+        case ATTACH -> NameValidator.requireValidSessionName(target);
+      }
+    } catch (IllegalArgumentException bad) {
+      return new PtyMessage.Err(Remedied.whole(bad));
+    }
+    var refused =
+        switch (request.action()) {
+          case OPEN -> projectRefusal(target, who);
+          case ATTACH -> attachRefusal(target, sessions.get(target), who);
+        };
+    if (refused != null) {
+      return refused;
+    }
+    try {
+      return new PtyMessage.Ticket(
+          tickets.issue(
+              new PtyTickets.Ticket(request.action(), target, token), network.clock().getAsLong()));
+    } catch (IOException full) {
+      return new PtyMessage.Err(Remedied.whole(full));
+    }
+  }
+
+  /**
+   * What a connection may do beyond what its person may: everything on the unix socket ({@link
+   * #NOTHING}), and on TCP what its ticket admits ({@link PtyTickets.Ticket#refusal}). Asked of
+   * every frame before it is served, with the session the connection opened, if any.
+   */
+  @FunctionalInterface
+  private interface Bound {
+    Bound NOTHING = (message, opened) -> null;
+
+    /** Why {@code message} lies outside what this connection may do, or null when it does not. */
+    PtyMessage.Err refusal(PtyMessage message, String opened);
   }
 
   /**
@@ -999,11 +1221,15 @@ public final class PtySessionHost implements AutoCloseable {
         PtyWire.write(channel, message);
       }
     } catch (IOException e) {
-      try {
-        channel.close();
-      } catch (IOException ignored) {
-        var unused = ignored;
-      }
+      closeQuietly(channel);
+    }
+  }
+
+  private static void closeQuietly(SocketChannel channel) {
+    try {
+      channel.close();
+    } catch (IOException ignored) {
+      var unused = ignored;
     }
   }
 
@@ -1062,6 +1288,9 @@ public final class PtySessionHost implements AutoCloseable {
     try {
       if (server != null) {
         server.close();
+      }
+      if (tcpServer != null) {
+        tcpServer.close();
       }
       Files.deleteIfExists(socketPath);
       Files.deleteIfExists(dispatchCredentialOf(socketPath));

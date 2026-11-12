@@ -56,6 +56,62 @@ approve review-ada as room viewer ada-room beta	denied NOT_FOUND 404 Review 'rev
 approve review-ada as room viewer bob-room acme	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot approve reviews. | Ask an admin for a member or admin credential.
 approve review-ada as room viewer bob-room all	denied READ_ONLY_CREDENTIAL 403 Your credential is read-only and cannot approve reviews. | Ask an admin for a member or admin credential.
 approve review-ada as room viewer bob-room beta	denied NOT_FOUND 404 Review 'review-ada' not found. | 
+ask a terminal ticket to open a session in acme as api admin root all	ok TicketResponse
+ask a terminal ticket to open a session in acme as api member ada acme	ok TicketResponse
+ask a terminal ticket to open a session in acme as api member ada all	ok TicketResponse
+ask a terminal ticket to open a session in acme as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in acme as api member bob acme	ok TicketResponse
+ask a terminal ticket to open a session in acme as api member bob all	ok TicketResponse
+ask a terminal ticket to open a session in acme as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in acme as api member machine all	ok TicketResponse
+ask a terminal ticket to open a session in acme as api viewer ada acme	ok TicketResponse
+ask a terminal ticket to open a session in acme as api viewer ada all	ok TicketResponse
+ask a terminal ticket to open a session in acme as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in acme as api viewer bob acme	ok TicketResponse
+ask a terminal ticket to open a session in acme as api viewer bob all	ok TicketResponse
+ask a terminal ticket to open a session in acme as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'acme' is not in the catalog. | Create it with 'sail project create acme', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in beta as api admin root all	ok TicketResponse
+ask a terminal ticket to open a session in beta as api member ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in beta as api member ada all	ok TicketResponse
+ask a terminal ticket to open a session in beta as api member ada beta	ok TicketResponse
+ask a terminal ticket to open a session in beta as api member bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in beta as api member bob all	ok TicketResponse
+ask a terminal ticket to open a session in beta as api member bob beta	ok TicketResponse
+ask a terminal ticket to open a session in beta as api member machine all	ok TicketResponse
+ask a terminal ticket to open a session in beta as api viewer ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in beta as api viewer ada all	ok TicketResponse
+ask a terminal ticket to open a session in beta as api viewer ada beta	ok TicketResponse
+ask a terminal ticket to open a session in beta as api viewer bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'beta' is not in the catalog. | Create it with 'sail project create beta', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in beta as api viewer bob all	ok TicketResponse
+ask a terminal ticket to open a session in beta as api viewer bob beta	ok TicketResponse
+ask a terminal ticket to open a session in delta as api admin root all	ok TicketResponse
+ask a terminal ticket to open a session in delta as api member ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in delta as api member ada all	ok TicketResponse
+ask a terminal ticket to open a session in delta as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in delta as api member bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in delta as api member bob all	ok TicketResponse
+ask a terminal ticket to open a session in delta as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in delta as api member machine all	ok TicketResponse
+ask a terminal ticket to open a session in delta as api viewer ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in delta as api viewer ada all	ok TicketResponse
+ask a terminal ticket to open a session in delta as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in delta as api viewer bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in delta as api viewer bob all	ok TicketResponse
+ask a terminal ticket to open a session in delta as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'delta' is not in the catalog. | Create it with 'sail project create delta', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in omega as api admin root all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in omega as api member ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in omega as api member ada all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in omega as api member ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in omega as api member bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in omega as api member bob all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in omega as api member bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in omega as api member machine all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in omega as api viewer ada acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in omega as api viewer ada all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in omega as api viewer ada beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in omega as api viewer bob acme	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in omega as api viewer bob all	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
+ask a terminal ticket to open a session in omega as api viewer bob beta	denied PROJECT_NOT_IN_CATALOG 404 Project 'omega' is not in the catalog. | Create it with 'sail project create omega', or sync it from main with 'sail sync'.
 assign spec s-ada to bob as agent member ada-agent acme	denied FORBIDDEN_ADMIN_ONLY 403 Reassigning spec 's-ada' moves work between FDEs and is an admin-only action (currently 'ada'). | Ask an admin to reassign it. You may grab a spec only while it is unassigned.
 assign spec s-ada to bob as agent member ada-agent all	denied FORBIDDEN_ADMIN_ONLY 403 Reassigning spec 's-ada' moves work between FDEs and is an admin-only action (currently 'ada'). | Ask an admin to reassign it. You may grab a spec only while it is unassigned.
 assign spec s-ada to bob as agent member ada-agent beta	denied SPEC_NOT_FOUND 404 Spec 's-ada' was not found. | 

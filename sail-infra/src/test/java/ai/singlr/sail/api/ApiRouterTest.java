@@ -911,7 +911,9 @@ class ApiRouterTest {
             () -> "node");
     var http = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     PrivateAttributes.context(
-        http, "/", new ApiRouter(new FakeOperations(), auth, new RateLimitGate(), streamer));
+        http,
+        "/",
+        new ApiRouter(new FakeOperations(), auth, new RateLimitGate(), streamer, Optional.empty()));
     http.start();
     try (var client = HttpClient.newHttpClient()) {
       var base = "http://127.0.0.1:" + http.getAddress().getPort();
