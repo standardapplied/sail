@@ -969,7 +969,9 @@ definition has no field that names another; step 6 is recorded only once that us
 that uid.
 It launches the Incus container from the configured image, bind-mounts the host `sail-api`
 Unix socket in, installs the in-container `spec` CLI and event hooks, applies the disk quota
-(advisory on `dir`, hard via `refquota` on `zfs`) and the cpu and memory limits (with
+(the root disk's `size`: advisory on `dir`; on `zfs`, Incus sets it as the dataset's ZFS
+`quota`, which counts the container's own snapshots, since Sail sets no `zfs.use_refquota`; see
+**Storage**) and the cpu and memory limits (with
 `security.nesting` and unconfined AppArmor so rootless Podman runs inside), installs
 packages, the SSH user and the workstation key it trusts, Podman (with linger and a restart
 service), Testcontainers wiring, and the JDK, Node, and Maven runtimes, configures the box's git
@@ -983,6 +985,56 @@ path, not silently here. Neither path deletes or re-clones a checkout already in
 container, which may hold work: one whose `origin` is not the definition's repository, or that
 is no git checkout, is refused before the step is recorded (`RepoOrigin`, which reads the same
 host and path as one repository whatever the scheme, user, port or `.git`).
+
+**Storage** (`HostProvisioner`, `IncusStorage`, `PoolDevices`, `ZfsCacheCap`). Incus owns
+every pool: `host init` has it create the pool with one `incus storage create`, built only by
+`IncusStorage.createCommand`, and Sail makes no dataset of its own inside one. The sources are
+`--storage dir` (the host filesystem, `incus storage create <pool> dir`), and for `--storage zfs`
+a whole disk or a partition (`--disk <device>`, `source=<device>`), or a sparse file Incus makes
+under `/var/lib/incus/disks/` (`--pool-file-size <size>`, `size=<n>MiB`), slower than a disk and
+said once to be meant for trials. Incus runs `zpool create -m none -O compression=on` itself,
+with `-f` only for `source.wipe=true`. An existing zpool or dataset (`source=<zpool>` or
+`source=<zpool>/<dataset>`, which Incus requires empty) is an Incus form Sail does not offer.
+
+- **Z1. What `host init` reports as done is what Incus has.** The base profile's root disk is
+  converged (added when missing, an existing one kept) and the pool it names must be one Incus
+  lists, else init fails; `host.yaml` states that pool, its driver and its source as Incus has
+  them. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`,
+  `HostProvisionerTest.aProfileThatNamesAPoolIncusLacksIsRefused`, `ZfsPoolIT`.*
+- **Z2. Sail never formats what it was not told to.** `PoolDevices.cleared` resolves the named
+  device and refuses, even with `--force-wipe`, anything in use: mounted (the running system's
+  disk among them) or swap, a RAID member, an LVM physical volume, a device something is built
+  on, anything but a disk or a partition. A device that holds any signature `wipefs` sees, or a
+  partition with a filesystem, is refused unless `--force-wipe` names the same device; that is
+  the one case Incus is passed `source.wipe=true`. It runs when the flags are read and again
+  just before the pool is made. Offered disks (none named) are only whole unused ones.
+  *`PoolDevicesTest`, `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
+- **Z3. One pool, one owner.** Nothing in Sail runs `zpool` or `zfs`; snapshots, copies and
+  deletes go through Incus. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`.*
+- **Z4. The ZFS cache cap is set before ZFS can take memory.** Step 3 writes
+  `/etc/modprobe.d/sail-zfs.conf` (`options zfs zfs_arc_max=`, a tenth of memory, at least the
+  64 MiB ZFS honours) before installing zfsutils-linux, and to the loaded module when ZFS is
+  already in, so it holds from the next load and across reboots.
+  *`HostProvisionerTest.theZfsCacheIsCappedBeforeTheToolsThatLoadZfsAreInstalled`, `ZfsCacheCapTest`.*
+- **Z5. A `dir` box keeps working unchanged.** A re-run of `host init --storage zfs --pool <new>`
+  on a box whose profile exists adds the pool beside the old one and touches no container and no
+  profile device; new containers are placed on it by naming it (`--storage <pool>`). A pool
+  name Incus already has with another driver is refused.
+  *`HostProvisionerTest.aDirBoxWithContainersAddsAZfsPoolBesideItsOwnAndTouchesNoContainer`.*
+
+Incus finds the ZFS tools when a pool is created, not only when it starts (its driver looks
+them up on each load until one succeeds; only `incus info`'s list of supported drivers is read
+at start), so a box whose Incus started first needs no restart. If Incus still says a tool is
+missing, init restarts it only on a box with no container, saying so, and otherwise names
+`systemctl restart incus` and stops. On a `zfs` pool a container's disk limit is the root disk's
+`size`, which Incus sets as the dataset's `quota` (`zfs.use_refquota` would make it `refquota`;
+Sail leaves the Incus default), so a write past it fails inside the container with "Disk quota
+exceeded" and the snapshots of that container count against it. `incus copy <c>/<snap> <new>` is
+a `zfs clone` whose `origin` is the snapshot. `sail host status` lists every pool with its
+driver, source and free space (`incus storage list`, `incus query
+/1.0/storage-pools/<pool>/resources`). A paused container (`incus pause`) reads as
+`ContainerState.Frozen`, `frozen` at the API; apply and `project start` resume it with `incus
+start`.
 
 **The stack** (`ProjectServer`, `StackOperations`): a project's services and its processes,
 each process an app the dev user runs, declared with the port it listens on. `sudo sail project

@@ -31,6 +31,29 @@ agent runs the restart ends, then asks. The rest of the OS is yours to keep curr
 upgrades it. The needrestart policy sail installs (`/etc/needrestart/conf.d/50-sail.conf`) keeps
 a library update from restarting Incus.
 
+## Storage
+
+`sudo sail init` puts containers on a `dir` pool on the host's filesystem, where a snapshot or a
+copy is a full copy and a container's disk limit is advisory. For a ZFS pool, run `sudo sail
+host init --storage zfs` with one source:
+
+```bash
+sudo sail host init --storage zfs --disk /dev/nvme1n1        # a whole unused disk
+sudo sail host init --storage zfs --disk /dev/nvme0n1p5      # a spare partition
+sudo sail host init --storage zfs --pool-file-size 200GiB    # a file, to try ZFS without a spare disk
+```
+
+Incus creates and owns the pool. A disk or partition that holds anything, a filesystem, a
+partition table or an old pool, is refused naming what is on it, and erased only when you name
+it again with `--force-wipe <device>`; one in use (mounted, swap, a RAID member, an LVM volume)
+is refused even then. A file is slower than a disk and meant for trials. `host init` caps the
+ZFS cache at a tenth of memory (`/etc/modprobe.d/sail-zfs.conf`) and says so. On ZFS a
+container's disk limit is enforced: Incus sets the root disk's size as the dataset's ZFS
+`quota`, which its snapshots count against, and a snapshot copy is a clone that costs nothing at
+first. On a box already on `dir`, the same command with `--pool <name>` adds the ZFS pool beside
+it: existing containers and the base profile stay where they are. `sudo sail host status` lists
+every pool with its driver, source and free space.
+
 ## The model: one main, many nodes
 
 An org runs one main box. It holds the team's specs and project definitions in a SQLite
