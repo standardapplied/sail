@@ -131,14 +131,15 @@ final class GlobalSpecOperations {
   GlobalSpecDetailResponse measured(String specId, String box) {
     requireMeasured();
     var row = findOrThrow(specId);
-    var reads = Access.decide(Actor.current(), Action.READ_MEASURES, resourceOf(row));
+    var reads = Access.decide(Actor.reader(), Action.READ_MEASURES, resourceOf(row));
     return detail(
         row, reads instanceof Decision.Allowed ? measuresOf(List.of(row), box).getFirst() : null);
   }
 
   /**
    * {@code spec} as reading its measures decides it: its project and whose it is, so an agent's own
-   * work ({@link Access#decide}) is the spec its run works, in that spec's project.
+   * work ({@link Access#decide}) is the spec its run works, in that spec's project. It is decided
+   * as the reader the spec was found by, so a spec found is never one out of that reader's scope.
    */
   private static Resource resourceOf(SpecStore.SpecRow spec) {
     return Resources.spec(spec.id(), spec.project(), spec.assignee(), spec.createdBy());
@@ -163,9 +164,10 @@ final class GlobalSpecOperations {
   SpecMeasures measures(String specId, String box) {
     requireMeasured();
     var row = findOrThrow(specId);
-    Refusals.require(
-        Access.decide(Actor.current(), Action.READ_MEASURES, resourceOf(row)),
-        () -> Refusals.specNotFound(specId));
+    if (Access.decide(Actor.reader(), Action.READ_MEASURES, resourceOf(row))
+        instanceof Decision.Refused(var refusal)) {
+      throw Refusals.exception(refusal);
+    }
     return measuresOf(List.of(row), box).getFirst();
   }
 
