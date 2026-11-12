@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -118,8 +119,7 @@ class SailPathsTest {
 
     assertEquals(binary.toRealPath(), SailPaths.realPath(link.toString()).orElseThrow());
     assertEquals(binary.toRealPath(), SailPaths.realPath(relative.toString()).orElseThrow());
-    assertEquals(
-        java.util.Optional.empty(), SailPaths.realPath(binary + " (deleted)"), "Linux's replaced");
+    assertEquals(Optional.empty(), SailPaths.realPath(binary + " (deleted)"), "Linux's replaced");
   }
 
   @Test

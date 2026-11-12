@@ -49,6 +49,9 @@ import picocli.CommandLine.Command;
     hidden = true)
 public final class PtySelfTestCommand implements Callable<Integer> {
 
+  /** How long each step of a probe may take before the probe fails instead of waiting on. */
+  static final Duration PROBE_STEP = Duration.ofSeconds(10);
+
   static final List<String> JSON_KEYS =
       List.of("host_boot_id", "instance_id", "event_drops", "spec_title", "dispatched");
 
@@ -93,9 +96,6 @@ public final class PtySelfTestCommand implements Callable<Integer> {
     argv.addAll(List.of("sh", "-c", script));
     return pty.spawn(argv, Map.of("TERM", "dumb"), dir);
   }
-
-  /** How long each step of a probe may take before the probe fails instead of waiting on. */
-  static final Duration PROBE_STEP = Duration.ofSeconds(10);
 
   /** Reads {@code pty} until {@code marker} has been said, or throws with what was. */
   private static void readUntil(Pty pty, String marker) throws IOException {

@@ -44,7 +44,7 @@ class OnePlatformSweepTest {
       if (name.startsWith(PTY)) {
         pty.add(name);
       }
-      if (readsTheSystemsName(bytes)) {
+      if (asksWhichSystem(bytes)) {
         readers.add(name);
       }
     }
@@ -55,9 +55,9 @@ class OnePlatformSweepTest {
 
   @Test
   void theSweepSeesTheSystemAskedEitherWayButNotByNative() throws IOException {
-    assertTrue(readsTheSystemsName(bytesOf(AsksTheName.class)), "an os.name read is seen");
-    assertTrue(readsTheSystemsName(bytesOf(ProbesProc.class)), "a /proc/self probe is seen");
-    assertFalse(readsTheSystemsName(bytesOf(Native.class)), "Native is where it is asked");
+    assertTrue(asksWhichSystem(bytesOf(AsksTheName.class)), "an os.name read is seen");
+    assertTrue(asksWhichSystem(bytesOf(ProbesProc.class)), "a /proc/self probe is seen");
+    assertFalse(asksWhichSystem(bytesOf(Native.class)), "Native is where it is asked");
   }
 
   private static byte[] bytesOf(Class<?> type) throws IOException {
@@ -88,7 +88,7 @@ class OnePlatformSweepTest {
   /**
    * Whether the class {@code bytes} holds is a pty class outside {@link Native} asking the system.
    */
-  private static boolean readsTheSystemsName(byte[] bytes) {
+  private static boolean asksWhichSystem(byte[] bytes) {
     var model = ClassFile.of().parse(bytes);
     var name = model.thisClass().asInternalName();
     if (!name.startsWith(PTY) || name.equals(NATIVE) || name.startsWith(NATIVE + "$")) {

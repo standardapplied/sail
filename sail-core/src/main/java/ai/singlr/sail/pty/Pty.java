@@ -64,6 +64,12 @@ public final class Pty implements AutoCloseable {
   static final Duration CLAIM_WAIT = Duration.ofSeconds(10);
 
   /**
+   * How long {@link #spawn} waits for a shim it killed to be gone, so a refused claim holds its
+   * caller about {@link #CLAIM_WAIT} and not twice that.
+   */
+  private static final Duration STOP_WAIT = Duration.ofSeconds(1);
+
+  /**
    * How long a terminal must have been quiet, once its child is gone, for a read to report end of
    * stream; also how often a blocked read looks again at {@link #release()}. A session is its
    * shell: what is already in the terminal when the shell exits is read, and a job it left running
@@ -295,7 +301,7 @@ public final class Pty implements AutoCloseable {
     shim.descendants().forEach(ProcessHandle::destroyForcibly);
     shim.destroyForcibly();
     try {
-      var unused = shim.waitFor(CLAIM_WAIT.toMillis(), TimeUnit.MILLISECONDS);
+      var unused = shim.waitFor(STOP_WAIT.toMillis(), TimeUnit.MILLISECONDS);
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
     }
