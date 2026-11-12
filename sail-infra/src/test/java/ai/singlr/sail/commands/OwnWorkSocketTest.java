@@ -285,8 +285,43 @@ class OwnWorkSocketTest {
 
     assertEquals("allowed", said(shown));
     assertEquals(
-        Map.of("review_rounds", 0, "dispatch_attempts", 1, "fix_runs", 0, "carried_findings", 0),
-        ((Map<?, ?>) shown.body().get("measures")).get("rework"));
+        Map.of(
+            "review_rounds",
+            Map.of("count", 0L),
+            "review_errors",
+            Map.of("count", 0L),
+            "build_runs",
+            Map.of("unknown", "retention_unknown"),
+            "fix_runs",
+            Map.of("unknown", "retention_unknown"),
+            "carried_findings",
+            Map.of("count", 0L)),
+        ((Map<?, ?>) shown.body().get("measures")).get("rework"),
+        "eng's box is a node, which cannot say which runs main's retention erased");
+  }
+
+  /**
+   * Measures review 1, major 6: in the container, a build agent reads the measures of its own spec
+   * and of no other, in its project or another; it is answered the detail as without asking, and
+   * the box's own person in the container is too.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"claude-code", "codex"})
+  void anAgentAskingTheMeasuresOfAnotherSpecIsAnsweredItsDetailAsWithoutAsking(String harness) {
+    var build = build("e1", harness);
+
+    for (var other : List.of("a2", "in-r1", "b1")) {
+      var asked = run(build, "GET", "/v1/specs/" + other + "?measures=true", "");
+      var plain = run(build, "GET", "/v1/specs/" + other, "");
+
+      assertEquals("allowed", said(asked), other);
+      assertEquals(plain.body(), asked.body(), other);
+      assertEquals(false, asked.body().containsKey("measures"), other);
+    }
+    assertEquals(
+        false,
+        socket("eng", "GET", "/v1/specs/e1?measures=true", "").body().containsKey("measures"),
+        "the box credential runs no work of its own");
   }
 
   /** Row 16: no agent sets e1 done or archives it; one that may write still retitles it. */

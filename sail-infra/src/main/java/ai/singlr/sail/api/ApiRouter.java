@@ -962,12 +962,15 @@ public final class ApiRouter implements HttpHandler, RouteTable {
    * DELETE} to get optimistic-concurrency protection — the server rejects the write with {@code 412
    * Precondition Failed} if anyone modified the row in the meantime.
    */
+  /**
+   * A spec's detail, with its measures when asked; a measured detail carries no ETag, since its
+   * measures change with rows the spec's {@code updated_at} does not follow.
+   */
   private ApiResponse globalSpec(Call call) {
     var specId = call.param(SPEC);
-    return withEtag(
-        SpecMeasures.asked(call.query().get("measures"))
-            ? operations.measuredSpec(specId)
-            : operations.globalSpec(specId));
+    return SpecMeasures.asked(call.query().get("measures"))
+        ? ApiResponse.from(operations.measuredSpec(specId))
+        : withEtag(operations.globalSpec(specId));
   }
 
   private static ApiResponse withEtag(Result<GlobalSpecDetailResponse> result) {

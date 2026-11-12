@@ -34,6 +34,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -1109,6 +1110,30 @@ class RunStoreTest {
     newRun("backend", "payment");
 
     assertEquals(2, store.listForSpec("auth").size());
+  }
+
+  @Test
+  void listForConversationsReadsTheRunsOfManyConversationsAsListReadsOne() {
+    var auth = newRun("backend", "auth");
+    var payment = newRun("backend", "payment");
+    newRun("backend", "other");
+    var lobby = roomTurn("lobby");
+
+    assertEquals(
+        List.of(lobby, payment, auth),
+        ids(store.listForConversations(List.of("auth", "payment", "lobby"))));
+    assertEquals(List.of(auth), ids(store.listForConversations(List.of("auth"))));
+  }
+
+  @Test
+  void lastErasureIsTheLatestErasureOfARunThisBoxRecordedFromAnOrigin() {
+    var run = newRun("backend", "auth");
+    assertEquals(OptionalLong.empty(), store.lastErasure("retention"));
+
+    new Erasure(db).erase(List.of(new Erasure.Target(Erasure.RUN, run)), "retention");
+
+    assertEquals(true, store.lastErasure("retention").isPresent());
+    assertEquals(OptionalLong.empty(), store.lastErasure("local"));
   }
 
   @Test

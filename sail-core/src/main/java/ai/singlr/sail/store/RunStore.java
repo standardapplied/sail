@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -1297,6 +1298,29 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         "SELECT " + COLUMNS + " FROM runs WHERE room_id = ? ORDER BY id DESC",
         this::mapRow,
         roomId);
+  }
+
+  /**
+   * The runs of each of {@code conversationIds}, as {@link #list} reads one conversation's, in one
+   * read, newest first.
+   */
+  public List<RunRow> listForConversations(Collection<String> conversationIds) {
+    return db.query(
+        "SELECT "
+            + COLUMNS
+            + " FROM runs WHERE spec_id IN (SELECT value FROM json_each(?1))"
+            + " OR (spec_id IS NULL AND room_id IN (SELECT value FROM json_each(?1)))"
+            + " ORDER BY id DESC",
+        this::mapRow,
+        YamlUtil.dumpJson(List.copyOf(conversationIds)));
+  }
+
+  /**
+   * The seq of the latest erasure of a run this box recorded from {@code origin}: on a box that
+   * authors erasures, every run it erased.
+   */
+  public OptionalLong lastErasure(String origin) {
+    return changeLog.lastErasure(ENTITY, origin);
   }
 
   public List<RunRow> listForSpec(String specId) {

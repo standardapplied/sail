@@ -19,6 +19,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -386,18 +387,57 @@ class ChangeLogTest {
   }
 
   @Test
-  void compactedNamesTheSeqsCompactionDroppedOfOneEntityOldestFirst() {
+  void compactedNamesTheSeqsCompactionDroppedOfEachEntityOldestFirst() {
     for (var i = 1; i <= ChangeLog.HISTORY_REVISIONS + 2; i++) {
       log.append("spec", "a", i + "-x", "local", false, "{}");
     }
     var seqs = log.history("spec", "a").stream().map(ChangeLog.Entry::seq).toList();
     log.append("spec", "b", "1-y", "local", false, "{}");
-    assertEquals(List.of(), log.compacted("spec", "a"), "nothing is dropped before a compaction");
+    assertEquals(List.of(), log.compacted("spec", List.of("a", "b")), "nothing dropped yet");
 
     log.compact("spec", List.of("a", "b"), id -> null);
 
-    assertEquals(seqs.subList(0, 2), log.compacted("spec", "a"));
-    assertEquals(List.of(), log.compacted("spec", "b"));
+    assertEquals(
+        List.of(
+            new ChangeLog.Head(seqs.get(0), "a", null), new ChangeLog.Head(seqs.get(1), "a", null)),
+        log.compacted("spec", List.of("a", "b")));
+    assertEquals(List.of(), log.compacted("spec", List.of("b")));
+  }
+
+  @Test
+  void historiesReadEveryEntryOfEachEntityInOneReadOldestFirst() {
+    log.append("spec", "a", "1-x", "local", false, "{}");
+    log.append("spec", "b", "1-y", "local", false, "{}");
+    log.append("spec", "a", "2-x", "local", false, "{}");
+    log.append("spec", "c", "1-z", "local", false, "{}");
+
+    assertEquals(
+        List.of("a 1-x", "b 1-y", "a 2-x"),
+        log.histories("spec", List.of("a", "b")).stream()
+            .map(entry -> entry.entityId() + " " + entry.rev())
+            .toList());
+    assertEquals(List.of(), log.histories("spec", List.of()));
+  }
+
+  @Test
+  void headProjectsNameTheProjectEachHeadIsFiledUnderAndLeaveOutThoseNamingNone() {
+    log.append("spec", "a", "1-x", "local", false, "{\"project\": \"acme\"}");
+    log.append("spec", "b", "1-y", "local", false, "{}");
+
+    assertEquals(Map.of("a", "acme"), log.headProjects("spec", List.of("a", "b", "c")));
+  }
+
+  @Test
+  void lastErasureIsTheLatestErasureOfATypeFromOneOrigin() {
+    assertEquals(OptionalLong.empty(), log.lastErasure("run", "retention"));
+    log.append("run", "r1", "1-x", "local", false, "{}");
+    log.append("run", "r2", "1-y", "local", false, "{}");
+    log.erase("run", "r1", "erased", "retention");
+    var first = log.head("run", "r1").orElseThrow().seq();
+    log.erase("run", "r2", "erased", "local");
+
+    assertEquals(OptionalLong.of(first), log.lastErasure("run", "retention"));
+    assertEquals(OptionalLong.empty(), log.lastErasure("spec", "retention"));
   }
 
   @Test

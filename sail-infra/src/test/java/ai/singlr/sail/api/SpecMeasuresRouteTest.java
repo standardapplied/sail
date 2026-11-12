@@ -10,11 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.HeldProjects;
@@ -58,6 +59,7 @@ class SpecMeasuresRouteTest {
 
   private static final Instant T0 = Instant.parse("2026-11-01T09:00:00Z");
   private static final String NODE = "uday";
+  private static final String BOX = "box-7";
 
   @TempDir Path tempDir;
   private final HttpClient client = HttpClient.newHttpClient();
@@ -98,11 +100,12 @@ class SpecMeasuresRouteTest {
     reviews = new ReviewStore(db);
     bus = new EventBus();
     var operations =
-        TestControlPlane.standalone(
+        TestControlPlane.on(
             OperationsFactory.create(
                 db, NO_CONTAINERS, bus, null, SyncScheduler.disabled(), SessionYield.NONE),
             db,
-            tempDir);
+            tempDir,
+            new SyncConfig(null, null, null, BOX));
     var auth = TestAuth.tokens(db);
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext(
@@ -249,20 +252,28 @@ class SpecMeasuresRouteTest {
   }
 
   /**
-   * Every row of every table but the credentials', so a read can be shown to leave the database as
-   * it found it: the door stamps a credential's last use on every request it authenticates,
-   * whatever the request then reads, and that stamp is the door's, not the read's.
+   * Every row of every table, every column but a credential's {@code last_used_at}, so a read can
+   * be shown to leave the database as it found it: the door stamps a credential's last use on every
+   * request it authenticates, whatever the request then reads, and that stamp is the door's.
    */
   private List<String> everyRow() {
     var dump = new ArrayList<String>();
     for (var table :
         db.query(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-                + " AND name NOT IN ('api_tokens', 'sessions') ORDER BY name",
+                + " ORDER BY name",
             row -> row.text(0))) {
+      var columns =
+          db.query("SELECT name FROM pragma_table_info(?)", row -> row.text(0), table).stream()
+              .filter(
+                  column ->
+                      !(column.equals("last_used_at")
+                          && List.of("api_tokens", "sessions").contains(table)))
+              .map(column -> "\"" + column + "\"")
+              .toList();
       dump.addAll(
           db.query(
-              "SELECT * FROM \"" + table + "\"",
+              "SELECT " + String.join(", ", columns) + " FROM \"" + table + "\"",
               row ->
                   table
                       + ": "
@@ -271,9 +282,30 @@ class SpecMeasuresRouteTest {
     return dump;
   }
 
+  private static Map<String, Object> count(int count) {
+    return Map.of("count", count);
+  }
+
+  private static Map<String, Object> rework(
+      Object rounds, Object errors, Object builds, Object fixes, Object carried) {
+    return Map.of(
+        "review_rounds",
+        rounds,
+        "review_errors",
+        errors,
+        "build_runs",
+        builds,
+        "fix_runs",
+        fixes,
+        "carried_findings",
+        carried);
+  }
+
+  private static final Map<String, Object> HIDDEN = Map.of("unknown", "hidden_rows");
+
   /** Scenario 1, and the same record wherever it is read (M10). */
   @Test
-  void aSpecReviewedThreeTimesAcrossTwoDispatchesAnswersThreeRoundsTwoAttemptsAndItsFixRuns()
+  void aSpecReviewedThreeTimesAcrossTwoDispatchesAnswersItsRoundsBuildRunsAndFixRuns()
       throws Exception {
     spec("auth", "alpha");
     move("auth", SpecStatus.DRAFT, SpecStatus.PENDING);
@@ -300,13 +332,17 @@ class SpecMeasuresRouteTest {
 
     var measures = read(ada, "/v1/specs/auth/measures");
 
+    assertEquals(rework(count(3), count(0), count(2), count(1), count(1)), measures.get("rework"));
     assertEquals(
-        Map.of("review_rounds", 3, "dispatch_attempts", 2, "fix_runs", 1, "carried_findings", 1),
-        measures.get("rework"));
-    assertEquals(Map.of("unknown", "not_recorded", "runs_without_usage", 6), measures.get("cost"));
-    assertEquals(HostInfo.hostname(), ((Map<?, ?>) measures.get("times")).get("box"));
+        Map.of("unknown", "not_recorded", "runs_without_usage", count(6)), measures.get("cost"));
+    assertEquals(BOX, ((Map<?, ?>) measures.get("times")).get("box"), "the box's Sail id");
+    var measured = get(ada, "/v1/specs/auth?measures=true");
+    assertEquals(measures, YamlUtil.parseMap(measured.body()).get("measures"), "one computation");
     assertEquals(
-        measures, read(ada, "/v1/specs/auth?measures=true").get("measures"), "one computation");
+        Optional.empty(),
+        measured.headers().firstValue("ETag"),
+        "its measures change with rows its updated_at does not follow");
+    assertEquals(true, get(ada, "/v1/specs/auth").headers().firstValue("ETag").isPresent());
     assertEquals(null, read(ada, "/v1/specs/auth").get("measures"), "asked for, never paid for");
     assertEquals(
         "{\"schema_version\": 1, \"error\": {\"code\": \"invalid_request\", \"message\":"
@@ -342,7 +378,7 @@ class SpecMeasuresRouteTest {
         });
 
     assertEquals(
-        Map.of("unknown", "not_recorded", "runs_without_usage", 1),
+        Map.of("unknown", "not_recorded", "runs_without_usage", count(1)),
         read(ada, "/v1/specs/auth/measures").get("cost"));
   }
 
@@ -369,7 +405,7 @@ class SpecMeasuresRouteTest {
 
     assertEquals(
         Map.of("at", "2026-11-01T09:10:00.000Z", "source", "change_log"), before.get("ready"));
-    assertEquals(1, specs.compacted("auth").size(), "the move to pending, and only it");
+    assertEquals(1, specs.compacted(List.of("auth")).size(), "the move to pending, and only it");
     assertEquals(Map.of("unknown", "history_incomplete"), times.get("ready"));
   }
 
@@ -419,6 +455,118 @@ class SpecMeasuresRouteTest {
                     row.dependsOn(),
                     row.repos(),
                     row.roomIdOrIdentity())));
+  }
+
+  /** A build that asked a question and resumed is a second build run, and is served as one. */
+  @Test
+  void aResumedBuildIsAnotherBuildRunAndNotAnotherDispatch() throws Exception {
+    spec("held", "alpha");
+    move("held", SpecStatus.DRAFT, SpecStatus.PENDING);
+    build("h1", "held", "alpha");
+    build("h2", "held", "alpha");
+    review("held", 1, true);
+
+    var rework = (Map<?, ?>) read(ada, "/v1/specs/held/measures").get("rework");
+
+    assertEquals(count(2), rework.get("build_runs"));
+    assertEquals(false, rework.containsKey("dispatch_attempts"));
+  }
+
+  /**
+   * Majors 2 and 3: a spec built and reviewed in bravo and moved into alpha. To sam, who reads
+   * alpha alone, every number its reviews and runs give is unknown, never none, and his listing
+   * leaves it out; ada, who reads both, is told the numbers.
+   */
+  @Test
+  void aReviewOrRunFiledWhereTheReaderDoesNotReadLeavesItsNumbersUnknownNeverZero()
+      throws Exception {
+    spec("moved", "bravo");
+    move("moved", SpecStatus.DRAFT, SpecStatus.PENDING);
+    build("bm1", "moved", "bravo");
+    review("moved", 1, false, finding("A"));
+    build("bm2", "moved", "bravo");
+    review("moved", 2, true);
+    project("moved", "alpha");
+    move("moved", SpecStatus.PENDING, SpecStatus.AWAITING_MERGE);
+    move("moved", SpecStatus.AWAITING_MERGE, SpecStatus.DONE);
+
+    var forSam = read(sam, "/v1/specs/moved/measures");
+    var forAda = read(ada, "/v1/specs/moved/measures");
+    var samsListing = (Map<?, ?>) read(sam, "/v1/specs:measures?status=done").get("summary");
+
+    assertEquals(rework(HIDDEN, HIDDEN, HIDDEN, HIDDEN, HIDDEN), forSam.get("rework"));
+    assertEquals(HIDDEN, ((Map<?, ?>) forSam.get("cost")).get("runs_without_usage"));
+    assertEquals(HIDDEN, ((Map<?, ?>) forSam.get("times")).get("verified"));
+    assertEquals(HIDDEN, forSam.get("no_recorded_human_code_act"));
+    assertEquals(rework(count(2), count(0), count(2), count(0), count(0)), forAda.get("rework"));
+    assertEquals(
+        Map.of("counted", true, "bound", "upper"), forAda.get("no_recorded_human_code_act"));
+    assertEquals(0, ((Map<?, ?>) samsListing.get("review_rounds")).get("n"));
+    assertEquals(1, ((Map<?, ?>) samsListing.get("review_rounds")).get("left_out_unknown"));
+  }
+
+  /**
+   * Major 4: a run retention erased after the spec arrived may have been one of its own, so its run
+   * counts are a lower bound; one erased before it arrived could not have been.
+   */
+  @Test
+  void aRunErasedByRetentionSinceTheSpecArrivedMakesItsRunCountsALowerBound() throws Exception {
+    spec("old", "alpha");
+    build("o1", "old", "alpha");
+    erase("o1");
+    spec("erased", "alpha");
+    move("erased", SpecStatus.DRAFT, SpecStatus.PENDING);
+    build("e1", "erased", "alpha");
+    build("e2", "erased", "alpha");
+    var before = (Map<?, ?>) read(ada, "/v1/specs/erased/measures").get("rework");
+
+    erase("e1");
+
+    var after = read(ada, "/v1/specs/erased/measures");
+    assertEquals(count(2), before.get("build_runs"), "erased before the spec arrived");
+    assertEquals(
+        Map.of("count", 1, "at_least", true), ((Map<?, ?>) after.get("rework")).get("build_runs"));
+    assertEquals(
+        Map.of("count", 1, "at_least", true),
+        ((Map<?, ?>) after.get("cost")).get("runs_without_usage"));
+  }
+
+  private void erase(String run) {
+    Acting.system(
+        () ->
+            new Erasure(db)
+                .erase(List.of(new Erasure.Target(Erasure.RUN, run)), SpecPruner.RETENTION));
+  }
+
+  /** The listing reads in as many statements for a hundred specs as for one. */
+  @Test
+  void theListingsStatementsDoNotGrowWithItsSpecs() throws Exception {
+    var listing = "/v1/specs:measures?status=done";
+    shipMany(0, 1);
+    var one = List.of(statementsOf(ada, listing), statementsOf(sam, listing));
+    shipMany(1, 100);
+    var hundred = List.of(statementsOf(ada, listing), statementsOf(sam, listing));
+
+    assertEquals(100, ((List<?>) read(sam, listing).get("specs")).size());
+    assertEquals(one, hundred, "an admin's, then a scoped reader's");
+  }
+
+  private void shipMany(int from, int to) {
+    for (var index = from; index < to; index++) {
+      var id = "d" + index;
+      spec(id, "alpha");
+      move(id, SpecStatus.DRAFT, SpecStatus.PENDING);
+      build("bd" + index, id, "alpha");
+      var passed = review(id, 1, true, finding("F" + index));
+      serve("vd" + index, passed, id, Lane.REVIEW);
+      move(id, SpecStatus.PENDING, SpecStatus.DONE);
+    }
+  }
+
+  private long statementsOf(String token, String path) throws Exception {
+    var before = db.statements();
+    assertEquals(200, get(token, path).statusCode());
+    return db.statements() - before;
   }
 
   /** Scenario 9, and a window that is not one. */
@@ -485,10 +633,16 @@ class SpecMeasuresRouteTest {
     move("auth", SpecStatus.IN_PROGRESS, SpecStatus.AWAITING_MERGE);
     var before = everyRow();
 
+    var minute = 100;
     for (var token : List.of(ada, sam)) {
-      read(token, "/v1/specs/auth/measures");
-      read(token, "/v1/specs/auth?measures=true");
-      read(token, "/v1/specs:measures?status=awaiting_merge&done_since=2026-11-01");
+      for (var path :
+          List.of(
+              "/v1/specs/auth/measures",
+              "/v1/specs/auth?measures=true",
+              "/v1/specs:measures?status=awaiting_merge&done_since=2026-11-01")) {
+        at(minute++);
+        read(token, path);
+      }
     }
 
     assertEquals(before, everyRow());

@@ -90,6 +90,9 @@ public final class ApiSpecListCommand implements Runnable {
       throw new IllegalArgumentException(
           "--done-since and --done-until choose which measures to list; add --measures.");
     }
+    if (measures && !"done".equals(status)) {
+      throw new IllegalArgumentException("--measures measures shipped changes; add --status done.");
+    }
     var config = connection.resolve();
     var resolvedProject = CurrentProject.scope(project, allProjects).orElse(null);
     var resolvedStatus = statusFilter(status, allStatuses);

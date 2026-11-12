@@ -616,9 +616,10 @@ class TestOperations implements Operations {
                 "box",
                 List.of(),
                 Set.of(),
+                MeasureRows.Seen.all(List.of()),
                 List.of(),
-                List.of(),
-                List.of())));
+                MeasureRows.Seen.all(List.of()),
+                MeasureRows.RunErasures.NONE)));
   }
 
   @Override

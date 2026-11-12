@@ -28,7 +28,9 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * Global (control-plane) spec CRUD against the {@link SpecStore}. Pure database operations, split
@@ -117,12 +119,13 @@ final class GlobalSpecOperations {
   }
 
   /**
-   * The detail of spec {@code specId} carrying its measures, as {@link #measures} computes them.
+   * The detail of spec {@code specId} carrying its measures, as {@link #measures} computes them on
+   * the box {@code box} names.
    */
-  GlobalSpecDetailResponse measured(String specId) {
+  GlobalSpecDetailResponse measured(String specId, String box) {
     requireMeasured();
     var row = findOrThrow(specId);
-    return detail(row, measuresOf(row, HostInfo.hostname()));
+    return detail(row, measuresOf(List.of(row), box).getFirst());
   }
 
   private GlobalSpecDetailResponse detail(SpecStore.SpecRow row, SpecMeasures measures) {
@@ -138,51 +141,84 @@ final class GlobalSpecOperations {
   }
 
   /**
-   * What spec {@code specId}'s change took, as this box records it ({@link SpecMeasures}): a spec
-   * the reader may not read is one that is not there (M13).
+   * What spec {@code specId}'s change took, as the box {@code box} names records it ({@link
+   * SpecMeasures}): a spec the reader may not read is one that is not there (M13).
    */
-  SpecMeasures measures(String specId) {
+  SpecMeasures measures(String specId, String box) {
     requireMeasured();
-    return measuresOf(findOrThrow(specId), HostInfo.hostname());
+    return measuresOf(List.of(findOrThrow(specId)), box).getFirst();
   }
 
   /**
    * The measures of every spec {@code filter} lists that the reader sees, done within {@code
-   * window}.
+   * window}, read in as many statements however many specs it lists.
    */
-  SpecMeasuresList listMeasures(SpecStore.SpecFilter filter, SpecMeasuresList.Window window) {
+  SpecMeasuresList listMeasures(
+      SpecStore.SpecFilter filter, SpecMeasuresList.Window window, String box) {
     requireMeasured();
-    var box = HostInfo.hostname();
-    return SpecMeasuresList.of(
-        listed(filter).stream().map(spec -> measuresOf(spec, box)).toList(), window);
+    return SpecMeasuresList.of(measuresOf(listed(filter), box), window);
   }
 
   /**
-   * The rows of {@code spec} the reader sees, measured: its revisions on this box, with every entry
-   * compacted away or filed where the reader does not read as a gap; its reviews and their
-   * findings; and its runs, as {@code GET /v1/runs?spec=} lists them, on {@code box}. Only reads.
+   * The rows of {@code specs} the reader sees, measured, one read of each kind for all of them:
+   * their revisions on this box, every entry compacted away or filed where the reader does not read
+   * a gap; their reviews and the findings of those it sees; their runs, as {@code GET
+   * /v1/runs?spec=} lists one spec's; and, on a box that authors erasures, its latest erasure of a
+   * run by retention. A review or run the reader may not see is not counted and is not counted as
+   * none either. Only reads.
    */
-  private SpecMeasures measuresOf(SpecStore.SpecRow spec, String box) {
+  private List<SpecMeasures> measuresOf(List<SpecStore.SpecRow> specs, String box) {
     var reader = Actor.reader();
-    var id = spec.id();
-    var history = specStore.history(id);
+    var ids = specs.stream().map(SpecStore.SpecRow::id).toList();
+    var history = byKey(specStore.histories(ids), ChangeLog.Entry::entityId);
+    var compacted = byKey(specStore.compacted(ids), ChangeLog.Head::entityId);
+    var everyReview = reviewStore.reviewsForSpecs(ids);
+    var filed =
+        reviewStore.projectsOf(everyReview.stream().map(ReviewStore.ReviewRow::id).toList());
+    var seenReviews =
+        ReadFilter.readable(reader, everyReview, review -> filed.get(review.id())).stream()
+            .map(ReviewStore.ReviewRow::id)
+            .collect(Collectors.toSet());
+    var findings = reviewStore.findingsForReviews(seenReviews);
+    var reviews = byKey(everyReview, ReviewStore.ReviewRow::specId);
+    var everyRun = byKey(runStore.listForConversations(ids), RunStore.RunRow::conversationId);
+    var erasures =
+        authoritative.getAsBoolean()
+            ? new MeasureRows.RunErasures(true, runStore.lastErasure(SpecPruner.RETENTION))
+            : MeasureRows.RunErasures.UNTOLD;
     var sees = ReadFilter.<ChangeLog.Entry>readable(reader, GlobalSpecOperations::projectOf);
-    var gaps = new HashSet<>(specStore.compacted(id));
-    history.stream().filter(sees.negate()).map(ChangeLog.Entry::seq).forEach(gaps::add);
-    var reviews =
-        ReadFilter.readable(reader, reviewStore.reviewsForSpec(id), reviewStore::projectOf);
-    return SpecMeasures.of(
-        new MeasureRows(
-            id,
-            spec.status(),
-            box,
-            history.stream().filter(sees).toList(),
-            gaps,
-            reviews,
-            reviews.stream()
-                .flatMap(review -> reviewStore.findingsForReview(review.id()).stream())
-                .toList(),
-            ReadFilter.readable(reader, runStore.list(null, id), RunStore.RunRow::project)));
+    return specs.stream()
+        .map(
+            spec -> {
+              var id = spec.id();
+              var held = history.getOrDefault(id, List.of());
+              var gaps = new HashSet<Long>();
+              compacted.getOrDefault(id, List.of()).forEach(dropped -> gaps.add(dropped.seq()));
+              held.stream().filter(sees.negate()).map(ChangeLog.Entry::seq).forEach(gaps::add);
+              var ofSpec = reviews.getOrDefault(id, List.of());
+              var seen =
+                  ofSpec.stream().filter(review -> seenReviews.contains(review.id())).toList();
+              var runs = everyRun.getOrDefault(id, List.of());
+              var seenRuns = ReadFilter.readable(reader, runs, RunStore.RunRow::project);
+              return SpecMeasures.of(
+                  new MeasureRows(
+                      id,
+                      spec.status(),
+                      box,
+                      held.stream().filter(sees).toList(),
+                      gaps,
+                      new MeasureRows.Seen<>(seen, seen.size() < ofSpec.size()),
+                      seen.stream()
+                          .flatMap(review -> findings.getOrDefault(review.id(), List.of()).stream())
+                          .toList(),
+                      new MeasureRows.Seen<>(seenRuns, seenRuns.size() < runs.size()),
+                      erasures));
+            })
+        .toList();
+  }
+
+  private static <T> Map<String, List<T>> byKey(List<T> rows, Function<T, String> key) {
+    return rows.stream().collect(Collectors.groupingBy(key));
   }
 
   private void requireMeasured() {

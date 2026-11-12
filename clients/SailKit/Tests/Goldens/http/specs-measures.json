@@ -9,7 +9,9 @@
       "specs": [
         {
           "cost": {
-            "runs_without_usage": 1,
+            "runs_without_usage": {
+              "count": 1
+            },
             "unknown": "not_recorded"
           },
           "human_minutes": {
@@ -36,17 +38,27 @@
             "unknown": "not_done"
           },
           "rework": {
-            "carried_findings": 0,
-            "dispatch_attempts": 1,
-            "fix_runs": 0,
-            "review_rounds": 1
+            "build_runs": {
+              "count": 1
+            },
+            "carried_findings": {
+              "count": 0
+            },
+            "fix_runs": {
+              "count": 0
+            },
+            "review_errors": {
+              "count": 0
+            },
+            "review_rounds": {
+              "count": 1
+            }
           },
           "spec_id": "harbor-docks",
           "times": {
             "awaiting_merge": {
               "unknown": "not_reached"
             },
-            "box": "box",
             "done": {
               "unknown": "not_reached"
             },
@@ -62,7 +74,9 @@
         },
         {
           "cost": {
-            "runs_without_usage": 0,
+            "runs_without_usage": {
+              "count": 0
+            },
             "unknown": "not_recorded"
           },
           "human_minutes": {
@@ -90,17 +104,27 @@
             "unknown": "not_done"
           },
           "rework": {
-            "carried_findings": 0,
-            "dispatch_attempts": 0,
-            "fix_runs": 0,
-            "review_rounds": 0
+            "build_runs": {
+              "count": 0
+            },
+            "carried_findings": {
+              "count": 0
+            },
+            "fix_runs": {
+              "count": 0
+            },
+            "review_errors": {
+              "count": 0
+            },
+            "review_rounds": {
+              "count": 0
+            }
           },
           "spec_id": "harbor-buoys",
           "times": {
             "awaiting_merge": {
               "unknown": "not_reached"
             },
-            "box": "box",
             "done": {
               "unknown": "not_reached"
             },
@@ -116,68 +140,118 @@
       ],
       "summary": {
         "awaiting_merge": {
-          "errors": 0,
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 2,
+          "median": {
+            "unknown": "none_known"
+          },
           "n": 0,
-          "unit": "seconds",
-          "unknown": 2
+          "p90": {
+            "unknown": "none_known"
+          }
+        },
+        "build_runs": {
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 0,
+          "median": {
+            "count": 0
+          },
+          "n": 2,
+          "p90": {
+            "count": 1
+          }
         },
         "carried_findings": {
-          "errors": 0,
-          "median": 0,
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 0,
+          "median": {
+            "count": 0
+          },
           "n": 2,
-          "p90": 0,
-          "unit": "count",
-          "unknown": 0
-        },
-        "dispatch_attempts": {
-          "errors": 0,
-          "median": 0,
-          "n": 2,
-          "p90": 1,
-          "unit": "count",
-          "unknown": 0
+          "p90": {
+            "count": 0
+          }
         },
         "fix_runs": {
-          "errors": 0,
-          "median": 0,
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 0,
+          "median": {
+            "count": 0
+          },
           "n": 2,
-          "p90": 0,
-          "unit": "count",
-          "unknown": 0
+          "p90": {
+            "count": 0
+          }
         },
         "no_recorded_human_code_act": {
           "bound": "upper",
           "counted": 0,
-          "of": 0,
-          "unknown": 2
+          "left_out_unknown": 2,
+          "of": 0
         },
         "ready_to_done": {
-          "errors": 0,
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 2,
+          "median": {
+            "unknown": "none_known"
+          },
           "n": 0,
-          "unit": "seconds",
-          "unknown": 2
+          "p90": {
+            "unknown": "none_known"
+          }
         },
         "ready_to_verified": {
-          "errors": 0,
-          "median": 0,
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 1,
+          "median": {
+            "seconds": 0
+          },
           "n": 1,
-          "p90": 0,
-          "unit": "seconds",
-          "unknown": 1
+          "p90": {
+            "seconds": 0
+          }
+        },
+        "review_errors": {
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 0,
+          "median": {
+            "count": 0
+          },
+          "n": 2,
+          "p90": {
+            "count": 0
+          }
         },
         "review_rounds": {
-          "errors": 0,
-          "median": 0,
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 0,
+          "median": {
+            "count": 0
+          },
           "n": 2,
-          "p90": 1,
-          "unit": "count",
-          "unknown": 0
+          "p90": {
+            "count": 1
+          }
         },
         "verified_to_done": {
-          "errors": 0,
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 2,
+          "median": {
+            "unknown": "none_known"
+          },
           "n": 0,
-          "unit": "seconds",
-          "unknown": 2
+          "p90": {
+            "unknown": "none_known"
+          }
         }
       },
       "total": 2

@@ -16,6 +16,16 @@ import java.util.Objects;
  */
 final class MeasuresText {
 
+  private static final String COUNT = "count";
+
+  private static final List<List<String>> REWORK =
+      List.of(
+          List.of("review_rounds", "review round"),
+          List.of("review_errors", "review error"),
+          List.of("build_runs", "build run"),
+          List.of("fix_runs", "fix run"),
+          List.of("carried_findings", "carried finding"));
+
   private MeasuresText() {}
 
   /** The Measures section of one spec's {@code measures} answer. */
@@ -23,7 +33,7 @@ final class MeasuresText {
   static List<String> section(Map<String, Object> measures) {
     var times = (Map<String, Object>) measures.get("times");
     var lines = new ArrayList<String>();
-    lines.add("  @|bold Measures|@ (this box's record, " + times.get("box") + "):");
+    lines.add("  @|bold Measures|@ (" + record(times) + "):");
     for (var moment : List.of("ready", "verified", "awaiting_merge", "done")) {
       lines.add(line(label(moment), moment((Map<String, Object>) times.get(moment))));
     }
@@ -43,7 +53,7 @@ final class MeasuresText {
             "unknown: "
                 + reason(cost)
                 + " ("
-                + plural(cost.get("runs_without_usage"), "run")
+                + count((Map<String, Object>) cost.get("runs_without_usage"), "run")
                 + " without usage)"));
     lines.add(
         line(
@@ -57,15 +67,15 @@ final class MeasuresText {
   static List<String> listing(Map<String, Object> listing) {
     var specs = (List<Map<String, Object>>) listing.get("specs");
     var lines = new ArrayList<String>();
-    var box =
+    var times =
         specs.isEmpty()
-            ? ""
-            : ", " + ((Map<String, Object>) specs.getFirst().get("times")).get("box");
+            ? Map.<String, Object>of()
+            : (Map<String, Object>) specs.getFirst().get("times");
     lines.add(
         "  @|bold Measures of "
             + plural(listing.get("total"), "spec")
-            + "|@ (this box's record"
-            + box
+            + "|@ ("
+            + record(times)
             + ")"
             + window((Map<String, Object>) listing.get("window"))
             + ":");
@@ -82,10 +92,16 @@ final class MeasuresText {
       lines.add("    • @|bold " + spec.get("spec_id") + "|@  " + String.join(" · ", parts));
     }
     var summary = (Map<String, Object>) listing.get("summary");
-    lines.add("  @|bold Median and p90|@, nearest rank, over the specs listed:");
+    lines.add("  @|bold Median and p90|@, nearest rank, over the numbers known exactly:");
     summary.forEach(
         (name, value) -> lines.add(line(summaryLabel(name), spread((Map<String, Object>) value))));
     return lines;
+  }
+
+  private static String record(Map<String, Object> times) {
+    return times.get("box") == null
+        ? "this box's record"
+        : "this box's record, " + times.get("box");
   }
 
   private static String line(String label, String value) {
@@ -118,21 +134,28 @@ final class MeasuresText {
     if (interval.containsKey("error")) {
       return "error: " + interval.get("error");
     }
-    return "unknown (" + missing(interval.get("missing")) + ")";
+    var missing = (Number) interval.get("missing");
+    return "unknown ("
+        + (missing.intValue() == 1 ? "1 input missing" : missing + " inputs missing")
+        + ")";
   }
 
-  private static String missing(Object count) {
-    return ((Number) count).intValue() == 1 ? "1 input missing" : count + " inputs missing";
-  }
-
+  @SuppressWarnings("unchecked")
   private static String rework(Map<String, Object> rework) {
-    return plural(rework.get("review_rounds"), "review round")
-        + ", "
-        + plural(rework.get("dispatch_attempts"), "dispatch attempt")
-        + ", "
-        + plural(rework.get("fix_runs"), "fix run")
-        + ", "
-        + plural(rework.get("carried_findings"), "carried finding");
+    var parts = new ArrayList<String>();
+    for (var named : REWORK) {
+      parts.add(count((Map<String, Object>) rework.get(named.get(0)), named.get(1)));
+    }
+    return String.join(", ", parts);
+  }
+
+  /** A count as the answer serves it: a number, a lower bound, or unknown and why. */
+  private static String count(Map<String, Object> count, String noun) {
+    if (!count.containsKey(COUNT)) {
+      return noun + "s unknown (" + reason(count) + ")";
+    }
+    return (Boolean.TRUE.equals(count.get("at_least")) ? "at least " : "")
+        + plural(count.get(COUNT), noun);
   }
 
   private static String codeAct(Map<String, Object> act) {
@@ -142,48 +165,49 @@ final class MeasuresText {
     return (Boolean.TRUE.equals(act.get("counted")) ? "yes" : "no") + " (an upper bound)";
   }
 
+  @SuppressWarnings("unchecked")
   private static String spread(Map<String, Object> spread) {
     if (spread.containsKey("counted")) {
       return spread.get("counted")
           + " of "
           + spread.get("of")
-          + " done (an upper bound); "
-          + spread.get("unknown")
-          + " not done";
+          + " done (an upper bound); left out "
+          + spread.get("left_out_unknown")
+          + " unknown";
     }
-    var seconds = "seconds".equals(spread.get("unit"));
-    var known =
-        spread.containsKey("median")
-            ? "median "
-                + value(spread.get("median"), seconds)
-                + ", p90 "
-                + value(spread.get("p90"), seconds)
-                + ", over "
-                + spread.get("n")
-            : "none known";
-    return known
+    return "median "
+        + value((Map<String, Object>) spread.get("median"))
+        + ", p90 "
+        + value((Map<String, Object>) spread.get("p90"))
+        + ", over "
+        + spread.get("n")
         + "; left out "
-        + spread.get("unknown")
+        + spread.get("left_out_unknown")
         + " unknown, "
-        + plural(spread.get("errors"), "error");
+        + spread.get("left_out_at_least")
+        + " lower bounds, "
+        + plural(spread.get("left_out_errors"), "error");
   }
 
-  private static String value(Object value, boolean seconds) {
-    return seconds ? duration(((Number) value).longValue()) : value.toString();
-  }
-
-  /** {@code seconds} as days, hours and minutes, or as seconds under a minute. */
-  static String duration(long seconds) {
-    if (seconds < 60) {
-      return seconds + "s";
+  private static String value(Map<String, Object> value) {
+    if (value.containsKey("seconds")) {
+      return duration(((Number) value.get("seconds")).longValue());
     }
+    return value.containsKey(COUNT) ? value.get(COUNT).toString() : "unknown";
+  }
+
+  /** {@code seconds} in days, hours, minutes and seconds, from its largest unit, none dropped. */
+  static String duration(long seconds) {
     var minutes = seconds / 60;
     var hours = minutes / 60;
     var days = hours / 24;
     if (days > 0) {
-      return days + "d " + hours % 24 + "h " + minutes % 60 + "m";
+      return days + "d " + hours % 24 + "h " + minutes % 60 + "m " + seconds % 60 + "s";
     }
-    return hours > 0 ? hours + "h " + minutes % 60 + "m" : minutes + "m";
+    if (hours > 0) {
+      return hours + "h " + minutes % 60 + "m " + seconds % 60 + "s";
+    }
+    return minutes > 0 ? minutes + "m " + seconds % 60 + "s" : seconds + "s";
   }
 
   private static String reason(Map<String, Object> unknown) {

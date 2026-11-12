@@ -404,17 +404,54 @@ class SpecStoreTest {
   }
 
   @Test
-  void compactedNamesTheRevisionsCompactionDroppedFromASpecsHistory() {
+  void compactedAndHistoriesNameWhatEachSpecsLogDroppedAndKeeps() {
     store.create(spec("a", "Test", "draft"));
+    store.create(spec("b", "Other", "draft"));
     for (var i = 1; i <= ChangeLog.HISTORY_REVISIONS; i++) {
       store.setContent("a", "body " + i, "");
     }
     var born = store.history("a").getFirst().seq();
-    assertEquals(List.of(), store.compacted("a"));
+    assertEquals(List.of(), store.compacted(List.of("a", "b")));
 
     new ChangeLog(db).compact("spec", List.of("a"), id -> null);
 
-    assertEquals(List.of(born), store.compacted("a"));
+    assertEquals(List.of(new ChangeLog.Head(born, "a", null)), store.compacted(List.of("a", "b")));
+    assertEquals(
+        ChangeLog.HISTORY_REVISIONS + 1, store.histories(List.of("a", "b")).size(), "20 and 1");
+  }
+
+  @Test
+  void aListHydratesEverySpecInTwoReadsWithItsDependenciesAndReposInOrder() {
+    store.create(spec("z", "Zed", "pending"));
+    var listed =
+        new SpecStore.SpecRow(
+            "a",
+            "test-project",
+            "A",
+            SpecStatus.PENDING,
+            null,
+            null,
+            null,
+            null,
+            null,
+            0,
+            null,
+            null,
+            null,
+            null,
+            List.of("z", "m"),
+            List.of("web", "api"));
+    store.create(listed);
+    store.create(spec("m", "Em", "pending"));
+    var before = db.statements();
+
+    var specs = store.list(new SpecStore.SpecFilter("test-project", null, null, null, null));
+
+    assertEquals(3, db.statements() - before, "the list, its dependencies, its repos");
+    var a = specs.stream().filter(spec -> spec.id().equals("a")).findFirst().orElseThrow();
+    assertEquals(List.of("m", "z"), a.dependsOn());
+    assertEquals(List.of("api", "web"), a.repos());
+    assertEquals(List.of("m", "z"), store.findById("a").orElseThrow().dependsOn());
   }
 
   @Test

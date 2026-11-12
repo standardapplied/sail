@@ -12,16 +12,18 @@ import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 /**
  * The measures of the specs a list names, one {@link SpecMeasures} each, and over them the median
- * and the 90th percentile of every number, nearest-rank, each leaving out the specs whose number is
- * unknown or an error and saying how many it left out of each (M8, M11). A {@link Window} lists
- * only the specs whose move into {@code done}, by this box's record, falls inside it, and counts
- * those with no known move it could test.
+ * and the 90th percentile of every number, nearest-rank, each over the specs whose number is known
+ * exactly, saying how many it left out as unknown, as a lower bound and as an error (M8, M11). A
+ * {@link Window} lists only the specs whose move into {@code done}, by this box's record, falls
+ * inside it, and counts those with no known move it could test.
  */
 record SpecMeasuresList(List<SpecMeasures> specs, Window window, int undated) implements Mappable {
+
+  private static final SpecMeasures.Measure NONE_KNOWN =
+      new SpecMeasures.Measure.Unknown("none_known", 0);
 
   /**
    * The days, UTC and inclusive at both ends, a listing's specs were done within; either end, or
@@ -109,28 +111,44 @@ record SpecMeasuresList(List<SpecMeasures> specs, Window window, int undated) im
 
   private Map<String, Object> summary() {
     var summary = new LinkedHashMap<String, Object>();
-    specs.stream()
-        .flatMap(spec -> spec.figures().stream())
-        .collect(
-            Collectors.groupingBy(
-                figure -> List.of(figure.name(), figure.unit()),
-                LinkedHashMap::new,
-                Collectors.mapping(SpecMeasures.Figure::measure, Collectors.toList())))
-        .forEach((named, measures) -> summary.put(named.get(0), spread(named.get(1), measures)));
+    var figures = specs.stream().map(SpecMeasures::figures).toList();
+    for (var index = 0; index < SpecMeasures.FIGURES.size(); index++) {
+      var at = index;
+      var named = SpecMeasures.FIGURES.get(index);
+      summary.put(
+          named.getKey(),
+          spread(named.getValue(), figures.stream().map(each -> each.get(at).measure()).toList()));
+    }
     var acts = specs.stream().map(SpecMeasures::codeAct).toList();
     var counted = new LinkedHashMap<String, Object>();
     counted.put(
         "counted", (int) acts.stream().filter(SpecMeasures.CodeAct.NONE_RECORDED::equals).count());
     counted.put(
-        "of", (int) acts.stream().filter(act -> act != SpecMeasures.CodeAct.NOT_DONE).count());
+        "of",
+        (int)
+            acts.stream()
+                .filter(
+                    act ->
+                        act == SpecMeasures.CodeAct.NONE_RECORDED
+                            || act == SpecMeasures.CodeAct.RECORDED)
+                .count());
     counted.put(
-        "unknown", (int) acts.stream().filter(SpecMeasures.CodeAct.NOT_DONE::equals).count());
+        "left_out_unknown",
+        (int)
+            acts.stream()
+                .filter(
+                    act ->
+                        act == SpecMeasures.CodeAct.NOT_DONE || act == SpecMeasures.CodeAct.HIDDEN)
+                .count());
     counted.put("bound", "upper");
     summary.put("no_recorded_human_code_act", counted);
     return summary;
   }
 
-  /** The spread of {@code measures}, in {@code unit}: what is known, and what was left out. */
+  /**
+   * The spread of {@code measures} in {@code unit}: over the values known exactly, with how many
+   * were left out as unknown, as lower bounds and as errors.
+   */
   private static Map<String, Object> spread(String unit, List<SpecMeasures.Measure> measures) {
     var known =
         measures.stream()
@@ -139,23 +157,23 @@ record SpecMeasuresList(List<SpecMeasures> specs, Window window, int undated) im
             .sorted()
             .toArray();
     var m = new LinkedHashMap<String, Object>();
-    m.put("unit", unit);
     m.put("n", known.length);
-    if (known.length > 0) {
-      m.put("median", nearestRank(known, 50));
-      m.put("p90", nearestRank(known, 90));
-    }
-    m.put(
-        "unknown",
-        (int) measures.stream().filter(SpecMeasures.Measure.Unknown.class::isInstance).count());
-    m.put(
-        "errors",
-        (int) measures.stream().filter(SpecMeasures.Measure.Negative.class::isInstance).count());
+    m.put("median", rank(known, 50).toMap(unit));
+    m.put("p90", rank(known, 90).toMap(unit));
+    m.put("left_out_unknown", count(measures, SpecMeasures.Measure.Unknown.class));
+    m.put("left_out_at_least", count(measures, SpecMeasures.Measure.AtLeast.class));
+    m.put("left_out_errors", count(measures, SpecMeasures.Measure.Negative.class));
     return m;
   }
 
+  private static int count(List<SpecMeasures.Measure> measures, Class<?> kind) {
+    return (int) measures.stream().filter(kind::isInstance).count();
+  }
+
   /** The value at rank {@code percent} of {@code sorted}: the least with that share at or below. */
-  private static long nearestRank(long[] sorted, int percent) {
-    return sorted[(percent * sorted.length + 99) / 100 - 1];
+  private static SpecMeasures.Measure rank(long[] sorted, int percent) {
+    return sorted.length == 0
+        ? NONE_KNOWN
+        : new SpecMeasures.Measure.Known(sorted[(percent * sorted.length + 99) / 100 - 1]);
   }
 }

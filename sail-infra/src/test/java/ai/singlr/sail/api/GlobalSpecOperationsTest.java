@@ -88,10 +88,38 @@ class GlobalSpecOperationsTest {
 
     assertEquals(
         "Run store not available.",
-        assertThrows(ApiException.class, () -> withoutRuns.measures("auth")).reason());
+        assertThrows(ApiException.class, () -> withoutRuns.measures("auth", "box-7")).reason());
     assertEquals(
         "Review store not available.",
-        assertThrows(ApiException.class, () -> withoutReviews.measured("auth")).reason());
+        assertThrows(ApiException.class, () -> withoutReviews.measured("auth", "box-7")).reason());
+  }
+
+  /**
+   * A node hears of an erasure only for a row it held, so it cannot say whether retention took a
+   * run of a spec, and its run counts are unknown; its review counts are its own.
+   */
+  @Test
+  void aBoxThatAuthorsNoErasuresCannotVouchForItsRunCounts() {
+    Acting.by(UDAY_ADMIN, () -> ops.create(createReq(Map.of())));
+    var node =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, new RunStore(db), () -> null, () -> false);
+
+    var rework = node.measures("auth", "box-7").toMap().get("rework");
+
+    assertEquals(
+        Map.of(
+            "review_rounds",
+            Map.of("count", 0L),
+            "review_errors",
+            Map.of("count", 0L),
+            "build_runs",
+            Map.of("unknown", "retention_unknown"),
+            "fix_runs",
+            Map.of("unknown", "retention_unknown"),
+            "carried_findings",
+            Map.of("count", 0L)),
+        rework);
   }
 
   @Test

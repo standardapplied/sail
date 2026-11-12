@@ -6,7 +6,9 @@
   "response": {
     "body": {
       "cost": {
-        "runs_without_usage": 1,
+        "runs_without_usage": {
+          "count": 1
+        },
         "unknown": "not_recorded"
       },
       "human_minutes": {
@@ -33,10 +35,21 @@
         "unknown": "not_done"
       },
       "rework": {
-        "carried_findings": 0,
-        "dispatch_attempts": 1,
-        "fix_runs": 0,
-        "review_rounds": 1
+        "build_runs": {
+          "count": 1
+        },
+        "carried_findings": {
+          "count": 0
+        },
+        "fix_runs": {
+          "count": 0
+        },
+        "review_errors": {
+          "count": 0
+        },
+        "review_rounds": {
+          "count": 1
+        }
       },
       "schema_version": 1,
       "spec_id": "harbor-docks",
@@ -44,7 +57,6 @@
         "awaiting_merge": {
           "unknown": "not_reached"
         },
-        "box": "box",
         "done": {
           "unknown": "not_reached"
         },

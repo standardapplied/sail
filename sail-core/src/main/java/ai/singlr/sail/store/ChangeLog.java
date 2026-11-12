@@ -21,6 +21,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
@@ -680,16 +681,56 @@ public final class ChangeLog {
         entityId);
   }
 
-  /**
-   * The seqs of the entries of an entity {@link #compact} dropped, oldest first: where its {@link
-   * #history} no longer holds what was there.
-   */
-  public List<Long> compacted(String entityType, String entityId) {
+  /** Every entry of each of {@code ids}, one read whatever their number, oldest first. */
+  public List<Entry> histories(String entityType, Collection<String> ids) {
     return db.query(
-        "SELECT seq FROM compacted_entries WHERE entity_type = ? AND entity_id = ? ORDER BY seq",
-        row -> row.integer(0),
+        SELECT
+            + " WHERE entity_type = ? AND entity_id IN (SELECT value FROM json_each(?)) ORDER BY seq",
+        ChangeLog::map,
         entityType,
-        entityId);
+        YamlUtil.dumpJson(List.copyOf(ids)));
+  }
+
+  /**
+   * The entries of each of {@code ids} that {@link #compact} dropped, as the seq and the id of
+   * each, oldest first: where their {@link #histories} no longer hold what was there.
+   */
+  public List<Head> compacted(String entityType, Collection<String> ids) {
+    return db.query(
+        """
+        SELECT seq, entity_id FROM compacted_entries
+        WHERE entity_type = ? AND entity_id IN (SELECT value FROM json_each(?)) ORDER BY seq""",
+        row -> new Head(row.integer(0), row.text(1), null),
+        entityType,
+        YamlUtil.dumpJson(List.copyOf(ids)));
+  }
+
+  /** The project each of {@code ids} is filed under by its head, for those whose head names one. */
+  public Map<String, String> headProjects(String entityType, Collection<String> ids) {
+    var projects = new HashMap<String, String>();
+    db.query(
+            """
+            SELECT entity_id, project FROM change_heads
+            WHERE entity_type = ? AND project IS NOT NULL
+            AND entity_id IN (SELECT value FROM json_each(?))""",
+            row -> Map.entry(row.text(0), row.text(1)),
+            entityType,
+            YamlUtil.dumpJson(List.copyOf(ids)))
+        .forEach(head -> projects.put(head.getKey(), head.getValue()));
+    return projects;
+  }
+
+  /**
+   * The seq of the latest erasure of an {@code entityType} this box recorded from {@code origin}.
+   */
+  public OptionalLong lastErasure(String entityType, String origin) {
+    return db.queryOne(
+            "SELECT MAX(seq) FROM change_log WHERE entity_type = ? AND kind = ? AND origin = ?",
+            row -> row.isNull(0) ? OptionalLong.empty() : OptionalLong.of(row.integer(0)),
+            entityType,
+            Kind.ERASURE.wire(),
+            origin)
+        .orElse(OptionalLong.empty());
   }
 
   /**

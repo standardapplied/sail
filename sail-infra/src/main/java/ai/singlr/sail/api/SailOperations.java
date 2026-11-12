@@ -1902,7 +1902,7 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public Result<GlobalSpecDetailResponse> measuredSpec(String specId) {
-    return detail(() -> globalSpecOps.measured(specId));
+    return detail(() -> globalSpecOps.measured(specId, box().boxId()));
   }
 
   /** The detail {@code read} answers, with the open question of its room the reader may see. */
@@ -2107,7 +2107,7 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public Result<SpecMeasures> specMeasures(String specId) {
-    return safeRead(() -> globalSpecOps.measures(specId));
+    return safeRead(() -> globalSpecOps.measures(specId, box().boxId()));
   }
 
   @Override
@@ -2116,7 +2116,7 @@ public final class SailOperations implements HostOperations {
     return safeRead(
         () ->
             globalSpecOps.listMeasures(
-                filter, SpecMeasuresList.Window.parse(doneSince, doneUntil)));
+                filter, SpecMeasuresList.Window.parse(doneSince, doneUntil), box().boxId()));
   }
 
   @Override
