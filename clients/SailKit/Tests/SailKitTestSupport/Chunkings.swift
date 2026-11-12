@@ -30,6 +30,12 @@ public func chunking(of bytes: [UInt8], seed: UInt64) -> [[UInt8]] {
     return chunks
 }
 
+/// Where `text` first appears in `bytes`.
+public func range(of text: String, in bytes: [UInt8]) -> Range<Int>? {
+    let needle = Array(text.utf8)
+    return bytes.indices.first { bytes[$0...].starts(with: needle) }.map { $0 ..< $0 + needle.count }
+}
+
 /// `bytes` cut in two at `offset`.
 public func cut(_ bytes: [UInt8], at offset: Int) -> [[UInt8]] {
     [Array(bytes[..<offset]), Array(bytes[offset...])]

@@ -60,7 +60,7 @@ import Testing
     @Test func aNumberTooWideForAnIntegerIsKeptAsANumberAndAnObjectAsAnObject() async throws {
         let line = try dataLines("events/stream.sse")[0]
         let widened = try alter(line) { $0["data"] = ["tonnage": 1e30, "berth": ["north": 4]] }
-        let (updates, ended) = await read(stream([widened]))
+        let (updates, ended) = try await read(stream([widened]))
         #expect(ended == nil)
         #expect(events(in: updates).map(\.data) == [
             ["tonnage": .number(1e30), "berth": .object(["north": .integer(4)])],
@@ -115,13 +115,13 @@ import Testing
     @Test func anEventTypeTheClientDoesNotKnowIsKeptAsUnknown() async throws {
         let line = try dataLines("events/stream.sse")[0]
         let altered = try alter(line) { $0["type"] = "ferry_docked"; $0["berth"] = 4 }
-        let (updates, _) = await read(stream([altered]))
+        let (updates, _) = try await read(stream([altered]))
         #expect(events(in: updates).map(\.type) == [.unknown("ferry_docked")])
     }
 
     @Test func anEventTheClientCannotReadIsToldAsUnreadableAndTheStreamGoesOn() async throws {
         let lines = try dataLines("events/stream.sse")
-        let (updates, ended) = await read(stream([try alter(lines[0]) { $0["ts"] = nil }, try alter(lines[1]) { _ in }]))
+        let (updates, ended) = try await read(stream([alter(lines[0]) { $0["ts"] = nil }, alter(lines[1]) { _ in }]))
         #expect(ended == nil)
         #expect(updates.map(\.summary) == ["connected after nil", "unreadable", "event 2"])
         #expect(updates[1] == .unreadable(Undecodable(route: "GET /v1/events/stream", field: "ts", reason: "it is missing")))
@@ -130,7 +130,7 @@ import Testing
     @Test func aNumberNoClientTypeHoldsMakesItsEventUnreadableNotTheStream() async throws {
         let lines = try dataLines("events/stream.sse")
         let huge = Array("data: \(lines[0].replacingOccurrences(of: #""question": true"#, with: #""question": 1e999"#))\n\n".utf8)
-        let (updates, ended) = await read(stream([huge, try alter(lines[1]) { _ in }]))
+        let (updates, ended) = try await read(stream([huge, alter(lines[1]) { _ in }]))
         #expect(ended == nil)
         #expect(updates.map(\.summary) == ["connected after nil", "unreadable", "event 2"])
     }
@@ -183,7 +183,7 @@ import Testing
 
 /// The updates `golden` gives a client that reads it, and how the stream ended.
 func readGolden(_ golden: String) async throws -> ([StreamUpdate], SailError?) {
-    await read(stream([try Goldens.bytes(golden)]))
+    try await read(stream([Goldens.bytes(golden)]))
 }
 
 /// Every update `stream` yields, and the error it ended with, if any.
@@ -218,19 +218,9 @@ extension StreamUpdate {
 }
 
 /// A client's event stream over one connection that delivers `chunks` and closes.
-func stream(_ chunks: [[UInt8]]) -> SailEventStream {
-    let server = try? ScriptedStreams([.stream(chunks, .close)])
-    return SailClient(transport: server ?? RefusingTransport(), token: "tok").events(EventFilter(), sleep: Naps().sleep)
-}
-
-struct RefusingTransport: Transport {
-    func send(_ request: HTTPRequest) throws(SailError) -> HTTPResponse {
-        throw .unreachable(request.route)
-    }
-
-    func open(_ request: HTTPRequest) throws(SailError) -> HTTPStream {
-        throw .unreachable(request.route)
-    }
+func stream(_ chunks: [[UInt8]]) throws -> SailEventStream {
+    let server = try ScriptedStreams([.stream(chunks, .close)])
+    return SailClient(transport: server, token: "tok").events(EventFilter(), sleep: Naps().sleep)
 }
 
 func dataLines(_ golden: String) throws -> [String] {

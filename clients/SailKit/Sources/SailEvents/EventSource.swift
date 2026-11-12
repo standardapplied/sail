@@ -79,14 +79,13 @@ public struct EventSource: AsyncSequence, Sendable {
                     }
                     continue
                 }
-                do {
-                    guard let chunk = try await connection.next() else { throw CancellationError() }
-                    pending += parser.feed(chunk).map(ServerSentUpdate.event)
-                    reconnectionTime = Self.bounded(parser.retry ?? reconnectionTime)
-                    body = parser.hasOverflowed ? nil : connection
-                } catch {
+                guard let chunk = try? await connection.next() else {
                     body = nil
+                    continue
                 }
+                pending += parser.feed(chunk).map(ServerSentUpdate.event)
+                reconnectionTime = Self.bounded(parser.retry ?? reconnectionTime)
+                body = parser.hasOverflowed ? nil : connection
             }
             return ended || Task.isCancelled ? nil : pending.removeFirst()
         }

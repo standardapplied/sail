@@ -197,11 +197,6 @@ extension ServerSentUpdate {
     }
 }
 
-func range(of text: String, in bytes: [UInt8]) -> Range<Int>? {
-    let needle = Array(text.utf8)
-    return bytes.indices.first { bytes[$0...].starts(with: needle) }.map { $0 ..< $0 + needle.count }
-}
-
 /// Reconnect waits that return at once, each recorded.
 actor Naps {
     private(set) var taken: [Duration] = []

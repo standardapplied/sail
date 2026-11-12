@@ -161,11 +161,6 @@ let shell = SessionInfo(
     name: "shell", instanceID: "inst-2", live: false, attached: 0, writerFDE: "", room: "", command: ["bash"]
 )
 
-func range(of text: String, in bytes: [UInt8]) -> Range<Int>? {
-    let needle = Array(text.utf8)
-    return bytes.indices.first { bytes[$0...].starts(with: needle) }.map { $0 ..< $0 + needle.count }
-}
-
 func golden(_ name: String) throws -> [UInt8] {
     guard let wire = try Goldens.frames().first(where: { $0.name == name })?.wire else {
         throw GoldenError(reason: "no \(name) frame")
