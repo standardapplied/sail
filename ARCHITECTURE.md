@@ -2545,11 +2545,18 @@ through two host settings, each an IP address and a port (`ListenConfig`, the `l
 credentials (`SailApiServer.PrivateNetwork`), and `terminal-listen`, where the terminal host takes TCP
 connections beside its unix socket (`PtyTcpDoor`). With neither, nothing more is bound and every
 answer is as before, on the unix socket too. An address must be private: loopback, RFC 1918,
-100.64.0.0/10, or an IPv6 unique-local or link-local address, written in full; a wildcard,
-multicast, broadcast, public or unparseable one is refused at start naming its setting. A private
-address that cannot be bound yet (the private network is not up at boot) takes nothing down: that
-door binds once it can (`Rebinding`, with backoff, said once per change), loopback and the unix
-socket serve meanwhile, and `sail host status` shows each door listening or not.
+100.64.0.0/10, or an IPv6 unique-local address (`fc00::/7`), written in full, with a port that has
+no leading zero; a wildcard, link-local (with a zone or without: it binds only on one interface),
+deprecated site-local (`fec0::/10`), multicast, broadcast, public or unparseable one is refused at
+start naming its setting, and so are both settings naming one address and port, when they are set
+and at start. A private address that cannot be bound yet (the private network is not up at boot)
+takes nothing down: that door binds once it can (`Rebinding`, with backoff, said once per change),
+loopback and the unix socket serve meanwhile, and a door whose listener is lost later is not
+listening until it is bound again the same way. Each door says what it is bound to in a file beside
+its socket (`api.listening`, `pty.listening`) while it is, and `sail host status` reports that, the
+running services, never the config: a door listening, with the setting its next restart takes when
+that differs, or one set and not listening, or refused at start and why. With neither setting and
+no door bound, its `--json` has no `listen` key, as before.
 
 These doors speak plain HTTP and TCP: use them only on an encrypting overlay (Tailscale,
 WireGuard). On a LAN, a VPC or a bridge, every host on the segment reads the bearer tokens and the
@@ -2563,7 +2570,8 @@ A terminal connection is admitted by a ticket. The caller asks `POST /v1/termina
 `{"action": "open", "project": ...}` or `{"action": "attach", "session": ...}`, and is answered
 `{ticket, address, expires_at}` (`TerminalTickets`). The API asks the terminal host on its unix
 socket as the box's own process, carrying the caller's credential in the request
-(`PtyMessage.IssueTicket`); the host resolves it itself, a login session or an API token bound to an
+(`PtyMessage.IssueTicket`), which the host answers only on a connection that presented no token, so
+a session token's connection keeps main's vocabulary; the host resolves it itself, a login session or an API token bound to an
 FDE (`HostAccess.holder`), for that decision alone, and decides it as it decides that open
 (`openRefusal`, a project being required: the network opens no shell on the host) or that attach
 (`attachRefusal`, the one decision an `Attach` frame asks too), so there is no second rule. Its
@@ -2578,15 +2586,22 @@ that credential's hash (`Secrets.hash`), spent by its first presentation, refuse
 `Limits.connections()` are held unpresented, and at most 8 for one credential. On TCP the door
 serves nothing before a `Hello` whose token is a ticket it issued. Until then it reads at most 256
 bytes, closes the connection 5 s after its connect (`PtySessionHost.tick`, each second), holds at
-most 8 such connections for one peer address and `Limits.connections()` in all, apart from the unix
-socket's, and closes anything but a `Hello` unanswered. A presented ticket's credential is resolved
+most 8 such connections for one peer (an IPv6 peer counted by its /64, since a host chooses its
+addresses from one) and all of them in a pool of a quarter of `Limits.connections()`, whose oldest
+is closed for a newcomer, so a peer with many addresses never fills the door and a ticketed client
+always has room; the door serves `Limits.connections()` in all, apart from the unix socket's, and
+closes anything but a `Hello` unanswered. Refused connections are counted by why and logged once a
+tick, never once each. An accept that fails while the listener stays bound (out of descriptors) is
+passed over after 100 ms and never ends the door. A presented ticket's credential is resolved
 again against the roster. The connection then keeps `TCP_NODELAY` and TCP keepalive (a vanished peer
 found dead within about a minute, its slot, attachment and write token released), speaks the unix
 socket's `SAILPTY3` frames for its ticket's one action on its one target alone (an open ticket
 creates one session in its project and attaches to it), each frame decided again as on the unix
 socket, and is resolved again at every sweep and severed as a unix connection is. No ticket is
 issued for no credential, for the host's own token (the box's person exists only on the unix
-socket) or for a machine token.
+socket) or for a machine token. `sail _pty-selftest`, the release smoke test, opens a loopback
+door, issues a ticket, presents it and hears one echo (`tcp-selftest: ok`), so the native binary
+runs the door and its keepalive options.
 
 **Pairing.** Mast reaches a box as an FDE with one string, the connect code, which `sail fde
 pair <handle> --host <ip-or-dns>` mints and `sail fde unpair <handle>` revokes (`FdeCommand`).

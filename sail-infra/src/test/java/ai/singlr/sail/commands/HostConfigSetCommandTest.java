@@ -224,6 +224,13 @@ class HostConfigSetCommandTest {
         new ListenConfig(null, "100.64.0.7:7072"),
         HostConfigSetCommand.applyChange(both, "api-listen", "none").listen(),
         "a door set to none is closed");
+    assertEquals(
+        "'api-listen' and 'terminal-listen' both name 100.64.0.7:7072; each door needs an address"
+            + " and port of its own.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> HostConfigSetCommand.applyChange(both, "api-listen", "100.64.0.7:7072"))
+            .getMessage());
     HostConfigSetCommand.validate("terminal-listen", "none");
     assertEquals(
         "'terminal-listen' is '0.0.0.0:7072', a wildcard, which would listen on every network the"

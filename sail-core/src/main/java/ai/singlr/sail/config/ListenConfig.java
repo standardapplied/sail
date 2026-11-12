@@ -10,6 +10,7 @@ import java.io.UncheckedIOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -31,8 +32,8 @@ public record ListenConfig(String api, String terminal) {
   private static final Pattern FORM =
       Pattern.compile(
           "(?:((?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3})"
-              + "|\\[([0-9A-Fa-f:.]+(?:%[A-Za-z0-9_.-]+)?)])"
-              + ":(\\d{1,5})");
+              + "|\\[([0-9A-Fa-f:.]+)])"
+              + ":(0|[1-9]\\d{0,4})");
 
   /** The setting that names the API's private address. */
   public static final String API = "api-listen";
@@ -61,14 +62,44 @@ public record ListenConfig(String api, String terminal) {
     }
   }
 
-  /** The API's private address, when one is named. */
+  /** The API's private address, when one is named; refused when it is the terminal's too. */
   public Optional<InetSocketAddress> apiAddress() {
+    requireDistinct();
     return Optional.ofNullable(api).map(value -> address(API, value));
   }
 
-  /** The terminal host's private address, when one is named. */
+  /** The terminal host's private address, when one is named; refused when it is the API's too. */
   public Optional<InetSocketAddress> terminalAddress() {
+    requireDistinct();
     return Optional.ofNullable(terminal).map(value -> address(TERMINAL, value));
+  }
+
+  /**
+   * Refuses the two doors on one address and port, where one would bind and the other wait on it
+   * for good. A setting that names no address of its own is its own door's to refuse.
+   */
+  private void requireDistinct() {
+    if (api == null || terminal == null) {
+      return;
+    }
+    InetSocketAddress apiAt;
+    InetSocketAddress terminalAt;
+    try {
+      apiAt = address(API, api);
+      terminalAt = address(TERMINAL, terminal);
+    } catch (IllegalArgumentException eachItsOwn) {
+      return;
+    }
+    if (apiAt.equals(terminalAt)) {
+      throw new IllegalArgumentException(
+          "'"
+              + API
+              + "' and '"
+              + TERMINAL
+              + "' both name "
+              + hostPort(apiAt)
+              + "; each door needs an address and port of its own.");
+    }
   }
 
   /** This block with {@code setting} set to {@code value}, or unset when it is {@link #NONE}. */
@@ -77,16 +108,19 @@ public record ListenConfig(String api, String terminal) {
     if (named != null) {
       address(setting, named);
     }
-    return API.equals(setting) ? new ListenConfig(named, terminal) : new ListenConfig(api, named);
+    var changed =
+        API.equals(setting) ? new ListenConfig(named, terminal) : new ListenConfig(api, named);
+    changed.requireDistinct();
+    return changed;
   }
 
   /**
    * The address {@code value} of {@code setting} names: four decimal octets, or an IPv6 address in
    * brackets, a colon and a port, with no name to look up and no shortened form. It must be a
    * private address, since these doors speak plain HTTP and TCP and the private network is their
-   * encryption: loopback, RFC 1918, 100.64.0.0/10 (Tailscale's), or an IPv6 unique-local or
-   * link-local address. Anything else, a wildcard, multicast or broadcast address included, is
-   * refused naming the setting.
+   * encryption: loopback, RFC 1918, 100.64.0.0/10 (Tailscale's), or an IPv6 unique-local address.
+   * Anything else, a wildcard, link-local, multicast or broadcast address or a port with a leading
+   * zero included, is refused naming the setting.
    */
   public static InetSocketAddress address(String setting, String value) {
     var form = FORM.matcher(value);
@@ -132,7 +166,7 @@ public record ListenConfig(String api, String terminal) {
               + value
               + "', which is not a private address, and this door speaks plain HTTP and TCP. Name"
               + " the box's address on its private network: loopback, 10/8, 172.16/12, 192.168/16,"
-              + " 100.64/10, or an IPv6 unique-local or link-local address.");
+              + " 100.64/10, or an IPv6 unique-local address.");
     }
     return new InetSocketAddress(ip, port);
   }
@@ -140,11 +174,43 @@ public record ListenConfig(String api, String terminal) {
   /** Whether {@code ip} lies on a private network: one a door may serve in the clear. */
   private static boolean isPrivate(InetAddress ip) {
     var bytes = ip.getAddress();
+    var first = bytes[0] & 0xff;
+    var second = bytes[1] & 0xff;
     return ip.isLoopbackAddress()
-        || ip.isSiteLocalAddress()
-        || ip.isLinkLocalAddress() && bytes.length == 16
-        || bytes.length == 4 && (bytes[0] & 0xff) == 100 && (bytes[1] & 0xc0) == 64
-        || bytes.length == 16 && (bytes[0] & 0xfe) == 0xfc;
+        || bytes.length == 4
+            && (first == 10
+                || first == 172 && (second & 0xf0) == 16
+                || first == 192 && second == 168
+                || first == 100 && (second & 0xc0) == 64)
+        || bytes.length == 16 && (first & 0xfe) == 0xfc;
+  }
+
+  /**
+   * Says in {@code where} that a running service's door is bound to {@code bound}: what {@code sail
+   * host status} reports, rather than what the settings say, which a restart has yet to apply.
+   */
+  public static void say(Path where, InetSocketAddress bound) throws IOException {
+    Files.writeString(where, hostPort(bound));
+  }
+
+  /** Says no more in {@code where} that a door is bound: it is not, or its service ended. */
+  public static void unsay(Path where) {
+    try {
+      Files.deleteIfExists(where);
+    } catch (IOException unremoved) {
+      System.err.println("Could not remove " + where + ": " + unremoved.getMessage());
+    }
+  }
+
+  /** What {@code where} says a running door is bound to, when it says anything. */
+  public static Optional<String> said(Path where) {
+    try {
+      return Files.isRegularFile(where)
+          ? Optional.of(Files.readString(where).strip())
+          : Optional.empty();
+    } catch (IOException unread) {
+      return Optional.empty();
+    }
   }
 
   /** {@code address} as a client dials it: {@code 100.64.0.7:7072}, or {@code [fd7a::7]:7072}. */

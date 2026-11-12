@@ -64,6 +64,18 @@ public final class Rebinding {
     }
   }
 
+  /**
+   * The bound listener was lost at {@code nowNanos} for {@code reason}: the door is not listening,
+   * says so once, and is tried again from the first backoff at its next tick.
+   */
+  public synchronized void lost(long nowNanos, String reason) {
+    listening = false;
+    failing = reason;
+    retryAt = nowNanos;
+    backoff = FIRST_RETRY;
+    say.accept(door + " stopped listening (" + reason + "); it is tried again until it binds.");
+  }
+
   /** Whether the listener is bound. */
   public synchronized boolean listening() {
     return listening;

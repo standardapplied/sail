@@ -90,6 +90,7 @@ public final class PtySessionHost implements AutoCloseable {
   static final Duration CORPSE_RETENTION = Duration.ofMinutes(10);
   static final String DISPATCH_CREDENTIAL_FILE = "pty-dispatch.token";
   static final String BOOT_ID_FILE = "host.boot";
+  static final String LISTENING_FILE = "pty.listening";
   public static final Duration UNTICKETED_DEADLINE = PtyTcpDoor.UNTICKETED_DEADLINE;
 
   /**
@@ -320,6 +321,7 @@ public final class PtySessionHost implements AutoCloseable {
                         network.clock(),
                         tickets,
                         network.holders(),
+                        listeningOf(socketPath),
                         this::converse));
   }
 
@@ -381,6 +383,14 @@ public final class PtySessionHost implements AutoCloseable {
    */
   public static Path dispatchCredentialOf(Path socket) {
     return socket.resolveSibling(DISPATCH_CREDENTIAL_FILE);
+  }
+
+  /**
+   * Where the host serving {@code socket} says what its TCP door is bound to, while it is: the one
+   * account of what the running host listens on, which {@code sail host status} reads.
+   */
+  public static Path listeningOf(Path socket) {
+    return socket.resolveSibling(LISTENING_FILE);
   }
 
   /**
@@ -670,7 +680,12 @@ public final class PtySessionHost implements AutoCloseable {
               reply(channel, answer);
             }
             case PtyMessage.IssueTicket m when who instanceof PtyIdentity.Person ->
-                reply(channel, issueTicket(m));
+                reply(
+                    channel,
+                    admission.credential() instanceof Credential.Hello(var token)
+                            && Strings.isBlank(token)
+                        ? issueTicket(m)
+                        : ASKED_ELSEWHERE);
             case PtyMessage.Attach m when who instanceof PtyIdentity.Person person -> {
               if (attached != null) {
                 reply(channel, new PtyMessage.Err("This connection is already attached."));
@@ -942,6 +957,17 @@ public final class PtySessionHost implements AutoCloseable {
         ? origin.command()
         : ai.singlr.sail.engine.ContainerExec.asDevUserTty(project, env, origin.command());
   }
+
+  /**
+   * What a ticket request hears on a connection that presented a token: tickets are asked by this
+   * box's own process alone, on a connection that presented none, for the credential the request
+   * carries.
+   */
+  private static final PtyMessage.TicketRefused ASKED_ELSEWHERE =
+      new PtyMessage.TicketRefused(
+          PtyMessage.TicketRefusal.FORBIDDEN,
+          "A ticket is asked by this box's own process alone, on a connection that presented no"
+              + " token.");
 
   private static final PtyMessage.Err SHUTTING_DOWN =
       new PtyMessage.Err("The pty host is shutting down; reconnect and try again.");

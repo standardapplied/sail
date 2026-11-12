@@ -39,6 +39,7 @@ public final class SailApiServer implements AutoCloseable {
   private final Optional<PeriodicPass> rebinding;
   private final List<Mount> mounts = new ArrayList<>();
   private volatile HttpServer privateServer;
+  private final Optional<Path> listening;
   private final ExecutorService executor;
   private final EventBus eventBus;
   private final AuditPersister auditPersister;
@@ -173,6 +174,7 @@ public final class SailApiServer implements AutoCloseable {
             ? eventBus.subscribe(new SpecLifecycleReactor(specStore))
             : null;
     server = HttpServer.create(new InetSocketAddress(host, port), 32);
+    listening = Optional.ofNullable(socketPath).map(SailApiServer::listeningOf);
     privateListener =
         network
             .api()
@@ -218,6 +220,18 @@ public final class SailApiServer implements AutoCloseable {
     listener.setExecutor(executor);
     listener.start();
     privateServer = listener;
+    if (listening.isPresent()) {
+      ListenConfig.say(listening.get(), listener.getAddress());
+    }
+  }
+
+  /**
+   * Where the server whose socket is {@code socket} says what its private address is bound to,
+   * while it is: the one account of what the running API listens on, which {@code sail host status}
+   * reads.
+   */
+  public static Path listeningOf(Path socket) {
+    return socket.resolveSibling("api.listening");
   }
 
   /**
@@ -322,6 +336,7 @@ public final class SailApiServer implements AutoCloseable {
     if (privateServer != null) {
       privateServer.stop(0);
     }
+    listening.ifPresent(ListenConfig::unsay);
     executor.close();
   }
 }

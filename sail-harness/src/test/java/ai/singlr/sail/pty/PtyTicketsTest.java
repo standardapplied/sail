@@ -11,7 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -97,6 +99,58 @@ class PtyTicketsTest {
     tickets.issue(new PtyTickets.Ticket(PtyMessage.TicketAction.OPEN, "acme", "tok-mady"), 0);
     tickets.redeem(first, 0);
     tickets.issue(OPEN_ACME, 0);
+  }
+
+  @Test
+  void theCountsHoldWhenManyCallersIssueRedeemAndExpireAtOnce() throws Exception {
+    var tickets = new PtyTickets(256);
+    var clock = new AtomicLong(0);
+    var threads = new ArrayList<Thread>();
+    for (var t = 0; t < 8; t++) {
+      var holder = "h" + t;
+      threads.add(
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    var mine = new ArrayList<String>();
+                    for (var i = 0; i < 5000; i++) {
+                      try {
+                        if (mine.size() < PtyTickets.PER_HOLDER && i % 3 != 2) {
+                          mine.add(
+                              tickets.issue(
+                                  new PtyTickets.Ticket(PtyMessage.TicketAction.OPEN, "p", holder),
+                                  clock.get()));
+                        } else if (!mine.isEmpty()) {
+                          tickets.redeem(mine.removeFirst(), clock.get());
+                        }
+                        if (i % 997 == 0) {
+                          clock.addAndGet(LIFE + 1);
+                          mine.clear();
+                        }
+                      } catch (IOException expiredOrSwept) {
+                        mine.clear();
+                      }
+                    }
+                  }));
+    }
+    for (var thread : threads) {
+      thread.join();
+    }
+    clock.addAndGet(LIFE + 1);
+    var issued = 0;
+    for (var h = 0; h < 40; h++) {
+      for (var i = 0; i < PtyTickets.PER_HOLDER; i++) {
+        try {
+          tickets.issue(
+              new PtyTickets.Ticket(PtyMessage.TicketAction.OPEN, "p", "x" + h), clock.get());
+          issued++;
+        } catch (IOException full) {
+          var unused = full;
+        }
+      }
+    }
+
+    assertEquals(256, issued, "exactly the cap is issuable once every ticket has expired");
   }
 
   @Test

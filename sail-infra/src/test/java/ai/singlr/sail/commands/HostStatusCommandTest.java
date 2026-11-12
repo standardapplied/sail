@@ -21,6 +21,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class HostStatusCommandTest {
@@ -49,6 +50,17 @@ class HostStatusCommandTest {
 
     assertEquals("6.21", json(shell).get("incus_version"));
     assertTrue(text(shell).contains("│  Incus:       6.21 "));
+  }
+
+  @Test
+  void aBoxSetToOpenNoPrivateDoorReportsAsItDidBeforeThereWereAny() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("incus list", "[]")
+            .onOk("incus version", "Client version: 6.21\nServer version: 6.21\n");
+
+    assertFalse(json(shell).containsKey("listen"));
+    assertFalse(text(shell).contains("-listen"));
   }
 
   @Test
@@ -239,23 +251,38 @@ class HostStatusCommandTest {
   }
 
   @Test
-  void eachPrivateDoorTheBoxIsSetToOpenIsShownListeningOrNot() {
-    var listen = new ListenConfig("100.64.0.7:7071", "0.0.0.0:7072");
+  void eachDoorIsShownAsTheRunningServiceSaysItListensAndAsItIsSet() {
     var up = ListenConfig.address(ListenConfig.API, "100.64.0.7:7071");
+    var says = Map.of(ListenConfig.API, "100.64.0.7:7071");
 
     assertEquals(
         List.of(
-            new HostStatusCommand.Door("api-listen", "100.64.0.7:7071", "listening"),
+            new HostStatusCommand.Door("api-listen", "listening on 100.64.0.7:7071"),
             new HostStatusCommand.Door(
                 "terminal-listen",
-                "0.0.0.0:7072",
                 "refused at start: 'terminal-listen' is '0.0.0.0:7072', a wildcard, which would"
                     + " listen on every network the box is on. Name the box's address on the"
                     + " private network, e.g. 100.64.0.7:7071.")),
-        HostStatusCommand.doors(listen, up::equals));
+        HostStatusCommand.doors(
+            new ListenConfig("100.64.0.7:7071", "0.0.0.0:7072"),
+            setting -> Optional.ofNullable(says.get(setting)),
+            up::equals));
     assertEquals(
-        List.of(new HostStatusCommand.Door("api-listen", "100.64.0.7:7071", "not listening")),
-        HostStatusCommand.doors(new ListenConfig("100.64.0.7:7071", null), address -> false));
-    assertEquals(List.of(), HostStatusCommand.doors(ListenConfig.none(), address -> true));
+        List.of(
+            new HostStatusCommand.Door(
+                "api-listen", "listening on 100.64.0.7:7071; set to none, restart to apply")),
+        HostStatusCommand.doors(
+            ListenConfig.none(), setting -> Optional.ofNullable(says.get(setting)), up::equals),
+        "a door still listening after its setting was closed is shown until the restart");
+    assertEquals(
+        List.of(new HostStatusCommand.Door("api-listen", "not listening (set to 100.64.0.7:7071)")),
+        HostStatusCommand.doors(
+            new ListenConfig("100.64.0.7:7071", null),
+            setting -> Optional.ofNullable(says.get(setting)),
+            address -> false),
+        "a service that said it listens but no longer answers is not listening");
+    assertEquals(
+        List.of(),
+        HostStatusCommand.doors(ListenConfig.none(), setting -> Optional.empty(), address -> true));
   }
 }

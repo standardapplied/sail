@@ -77,6 +77,11 @@ import org.junit.jupiter.api.io.TempDir;
 class RosterChangeTest {
 
   private static final SyncConfig MAIN = new SyncConfig(SyncConfig.ROLE_MAIN, null, "ada", "main");
+
+  /** A box of nia's own, reading main's roster: the terminal she operates. */
+  private static final SyncConfig NIAS_BOX =
+      new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "nia", "nia-box");
+
   private static final SyncConfig NODE =
       new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "nia", "node-box");
 
@@ -300,23 +305,27 @@ class RosterChangeTest {
    * The terminal host resolves a connection's principal at its hello and again at each sweep. The
    * sweep severs an open connection once its credential resolves to another principal, or to none,
    * after its person is demoted, rescoped or disabled alike, and the reconnect is admitted as what
-   * it is now: nia, who does not operate ada's box, opens no terminal on it.
+   * it is now. The terminal is nia's own box's, reading main's roster, so she opens on it and her
+   * new role and scope are what the reconnect hears.
    */
   @Test
   void aChangeOfAccessSeversAnOpenTerminalAtTheNextSweepAndNotBefore() throws Throwable {
     var session = niasSession();
-    onMainsTerminal(
+    onTerminal(
+        NIAS_BOX,
         host -> {
           severedAtTheSweep(host, session, "UPDATE fdes SET role = 'viewer' WHERE handle = 'nia'");
           assertEquals(
-              "Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it.",
+              "Refusing room for session 'again': Your credential is read-only and cannot post in"
+                  + " rooms. Ask an admin for a member or admin credential.",
               refusedAPin(socket(), session));
 
           onMain("UPDATE fdes SET role = 'member' WHERE handle = 'nia'");
           severedAtTheSweep(
               host, session, "UPDATE fdes SET scope = 'granted' WHERE handle = 'nia'");
           assertEquals(
-              "Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it.",
+              "Project 'acme' is not in the catalog. Create it with 'sail project create acme', or"
+                  + " sync it from main with 'sail sync'.",
               refusedAPin(socket(), session));
 
           roster.unrestrict("nia");
@@ -327,6 +336,23 @@ class RosterChangeTest {
                   + " run 'sail sync' on a node that has not synced its roster.",
               assertThrows(IOException.class, () -> SessionClient.connect(socket(), session))
                   .getMessage());
+        });
+  }
+
+  /**
+   * On a box someone else operates, nia opens no terminal whatever her role: the box half of the
+   * one open decision is asked before her role and scope are.
+   */
+  @Test
+  void aPersonWhoDoesNotOperateTheBoxOpensNoTerminalOnItWhateverTheirRole() throws Throwable {
+    var session = niasSession();
+    onMainsTerminal(
+        host -> {
+          var notHers =
+              "Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it.";
+          assertEquals(notHers, refusedAPin(socket(), session));
+          onMain("UPDATE fdes SET role = 'viewer' WHERE handle = 'nia'");
+          assertEquals(notHers, refusedAPin(socket(), session));
         });
   }
 
@@ -364,6 +390,14 @@ class RosterChangeTest {
 
   /** Runs {@code check} against main's terminal host, started on {@link #socket}. */
   private void onMainsTerminal(ThrowingConsumer<PtySessionHost> check) throws Throwable {
+    onTerminal(MAIN, check);
+  }
+
+  /**
+   * Runs {@code check} against the terminal host of the box {@code box} configures, over main's
+   * roster, started on {@link #socket}.
+   */
+  private void onTerminal(SyncConfig box, ThrowingConsumer<PtySessionHost> check) throws Throwable {
     try (var operations =
             DoorBox.wired(
                 OperationsFactory.create(
@@ -375,7 +409,7 @@ class RosterChangeTest {
                     SessionYield.NONE),
                 mainDb,
                 tempDir,
-                MAIN);
+                box);
         var host = terminalHost(socket(), tempDir.resolve("sessions"), operations.pty())) {
       host.start();
       check.accept(host);

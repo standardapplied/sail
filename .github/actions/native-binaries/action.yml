@@ -68,7 +68,10 @@ runs:
       shell: bash
       run: |
         ./sail-infra/target/sail -V
-        ./sail-infra/target/sail _pty-selftest
+        selftest=$(./sail-infra/target/sail _pty-selftest)
+        echo "$selftest"
+        grep -qx 'pty-selftest: ok' <<< "$selftest"
+        grep -qx 'tcp-selftest: ok' <<< "$selftest"
 
     - name: Keep the image for a commit built from the same inputs
       if: steps.image.outputs.cache-hit != 'true'
