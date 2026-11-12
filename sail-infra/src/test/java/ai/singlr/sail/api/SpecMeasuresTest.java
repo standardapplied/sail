@@ -399,7 +399,8 @@ class SpecMeasuresTest {
         at(
             Given.done()
                 .reviewed(
-                    review("r1", 1, "passed", at(70), null), review("r2", 2, "passed", at(100), null))
+                    review("r1", 1, "passed", at(70), null),
+                    review("r2", 2, "passed", at(100), null))
                 .wire(),
             "times",
             "verified"),

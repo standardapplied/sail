@@ -39,6 +39,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.AfterEach;
@@ -105,7 +106,9 @@ class SpecMeasuresRouteTest {
     var auth = TestAuth.tokens(db);
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext(
-        "/", new ApiRouter(operations, auth, new RateLimitGate(), new AgentLogStreamer(auth)));
+        "/",
+        new ApiRouter(
+            operations, auth, new RateLimitGate(), new AgentLogStreamer(auth), Optional.empty()));
     server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
     server.start();
   }
