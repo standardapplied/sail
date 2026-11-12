@@ -208,17 +208,18 @@ func readGolden(_ golden: String) async throws -> ([StreamUpdate], SailError?) {
 
 /// Every update `stream` yields, and the error it ended with, if any.
 func read(_ stream: SailEventStream) async -> ([StreamUpdate], SailError?) {
-    await Task {
+    let reading = Task {
         var read: [StreamUpdate] = []
         do throws(SailError) {
             for try await update in stream {
                 read.append(update)
             }
-            return (read, nil)
+            return (read, SailError?.none)
         } catch {
             return (read, error)
         }
-    }.value
+    }
+    return await withTaskCancellationHandler { await reading.value } onCancel: { reading.cancel() }
 }
 
 func events(in updates: [StreamUpdate]) -> [Event] {

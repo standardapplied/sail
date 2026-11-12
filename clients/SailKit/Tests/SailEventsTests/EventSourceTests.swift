@@ -203,15 +203,16 @@ func follow(_ server: ScriptedStreams, naps: Naps = Naps()) -> EventSource {
 }
 
 /// Every update `source` yields until it stops, read in a task of its own, which a script that
-/// runs out cancels.
+/// runs out cancels, as does the test's time limit.
 func read(_ source: EventSource) async throws -> [ServerSentUpdate] {
-    try await Task {
+    let reading = Task {
         var updates: [ServerSentUpdate] = []
         for try await update in source {
             updates.append(update)
         }
         return updates
-    }.value
+    }
+    return try await withTaskCancellationHandler { try await reading.value } onCancel: { reading.cancel() }
 }
 
 func events(in updates: [ServerSentUpdate]) -> [ServerSentEvent] {
