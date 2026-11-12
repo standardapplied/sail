@@ -68,6 +68,7 @@ import Testing
     }
 
     @Test func aLineAsLongAsTheLimitIsReadAndOneByteLongerStopsTheParser() {
+        #expect(EventStreamParser.limit == 1_048_576)
         let longest = [UInt8](repeating: UInt8(ascii: "x"), count: EventStreamParser.limit - 5)
         var parser = EventStreamParser()
         let events = parser.feed(Array("data:".utf8) + longest + Array("\n\n".utf8))
