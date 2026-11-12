@@ -116,6 +116,31 @@ class PtyTcpDoorTest {
   }
 
   @Test
+  void aConnectionTheDoorEndsHasGivenBackItsSlotBeforeItsClientSeesItEnd() throws IOException {
+    try (var single =
+        new PtyTcpDoor(
+            LOOPBACK,
+            1,
+            now::get,
+            new PtyTickets(8),
+            PtyIdentity.Holders.NONE,
+            dir.resolve("single.listening"),
+            (channel, admission) -> {})) {
+      single.tick(now.get());
+      var address = single.address().orElseThrow();
+      for (var round = 0; round < 200; round++) {
+        try (var live = SocketChannel.open(address)) {
+          PtyWire.handshake(live, live);
+          PtyWire.write(live, new PtyMessage.Hello("tkt_" + "0".repeat(64)));
+
+          assertInstanceOf(PtyMessage.Err.class, PtyWire.read(live), "round " + round);
+          assertEquals(-1, live.read(ByteBuffer.allocate(1)), "round " + round + ": it ended");
+        }
+      }
+    }
+  }
+
+  @Test
   void aConnectionTurnedAwayAtTheCapGivesBackTheSlotItTook() throws IOException {
     try (var single =
         new PtyTcpDoor(
