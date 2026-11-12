@@ -210,7 +210,9 @@ final class Signals: Sendable {
 /// Answers each request in the process, by its path: `/unreachable` fails to connect, `/silent`
 /// never answers, `/hang/…` sends a head and a chunk and never ends, `/break` sends them and then
 /// fails, `/stream/…` sends them in pieces and ends, and anything else echoes what it was sent.
-/// Each start and stop is raised as a signal named for the path.
+/// A stream says it is one, as the server's does: Apple's loader holds the head of an answer that
+/// names no content type until it has seen enough of the body to guess one. Each start and stop
+/// is raised as a signal named for the path.
 final class ScriptedProtocol: URLProtocol {
     static let streamed = ": subscribed\n\nid: 1\ndata: {}\n\n"
 
@@ -223,12 +225,15 @@ final class ScriptedProtocol: URLProtocol {
     }
 
     override func startLoading() {
-        guard let url = request.url,
-              let response = HTTPURLResponse(url: url, statusCode: 201, httpVersion: "HTTP/1.1", headerFields: ["X-Echo": "yes"])
-        else { return }
+        guard let url = request.url else { return }
+        let kind = url.path.split(separator: "/").first
+        let contentType = ["hang", "break", "stream"].contains(kind) ? "text/event-stream" : "application/json"
+        guard let response = HTTPURLResponse(
+            url: url, statusCode: 201, httpVersion: "HTTP/1.1", headerFields: ["X-Echo": "yes", "Content-Type": contentType]
+        ) else { return }
         defer { Signals.shared.raise("start \(url.path)") }
         let whole = Data(Self.streamed.utf8)
-        switch url.path.split(separator: "/").first {
+        switch kind {
         case "unreachable":
             client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
         case "silent":
