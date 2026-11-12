@@ -51,6 +51,10 @@ public final class SpecSkillGenerator {
           "spec-template.md",
           Set.of("299a557e66625c8e14a9f784393779f7b3540d8de06ed7f4ceac218251c0c89c"));
 
+  /** The host command that moves a spec's status, which the skill hands the engineer. */
+  private static final String MOVE_STATUS =
+      Remedy.of(Remedy.sail("spec update", "<id>", "--status", "<new-status>")).plain();
+
   private static final Map<String, String> FILES =
       Map.of(StageSkill.MANIFEST, skillMd(), "spec-template.md", specTemplateMd());
 
@@ -205,8 +209,7 @@ public final class SpecSkillGenerator {
         spec's other fields (`--title`, `--wake`, …); to revise the body, write the new markdown to
         a temp file and run `spec content <id> --body-file /tmp/<id>.md`.
         """
-        .formatted(
-            Remedy.of(Remedy.sail("spec update", "<id>", "--status", "<new-status>")).plain());
+        .formatted(MOVE_STATUS);
   }
 
   private static String bulkCreateInstructions() {
@@ -245,7 +248,7 @@ public final class SpecSkillGenerator {
 
         During autonomous execution Sail manages status itself — do not change it. The engineer
         moves a spec's status themselves, outside the container: on the board in Mast, or with
-        `sail spec update <id> --status <new-status>` on the host.
+        `%s` on the host.
 
         ### Fields (set at create or via `spec update`)
         - **id** (required): stable identifier, lowercase with hyphens
@@ -272,7 +275,8 @@ public final class SpecSkillGenerator {
         ### Where specs live
         Specs are rows in the Sail database, replicated across devboxes by sail's sync. There is no
         `specs/` directory to edit — always go through `spec`.
-        """;
+        """
+        .formatted(MOVE_STATUS);
   }
 
   private static String specTemplateMd() {
