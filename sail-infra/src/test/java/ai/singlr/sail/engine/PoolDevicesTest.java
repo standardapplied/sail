@@ -20,20 +20,41 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * Every device here is one real lsblk printed (this devbox, a GitHub runner) or the one
- * hand-written layout of spare disks, kept in the captured format ({@code devices/README.txt}).
- * Probe answers are the runner's captured wipefs and zpool output, or hand-written in their shape
- * where a machine at hand holds no such device.
+ * Every layout here is one a real lsblk printed (this devbox; a GCP VM's two spare disks taken
+ * through blank, partitioned, RAID1 with swap and a mount, stopped, recreated and udev-reassembled
+ * states), or the one hand-written layout of spare disks no machine at hand had ({@code
+ * devices/README.txt}). Probe answers are the GCP VM's captured {@code wipefs} listings and busy
+ * opens; where a hand-written disk needs one, it is a captured listing.
  */
 class PoolDevicesTest {
 
   private static final String LSBLK = DeviceFixtures.LSBLK;
   private static final String DEVBOX = "devbox-raid1-nvme.lsblk.json";
-  private static final String RUNNER = "github-runner.lsblk.json";
+  private static final String BLANK = "blank-disks";
+  private static final String PARTITIONED = "gpt-3-raid-partitions-no-arrays";
+  private static final String OWNER = "raid1-md0-swap-active-md1-ext4-mounted-md2-empty";
+  private static final String STOPPED = "raid-members-arrays-stopped";
   private static final String SPARES = DeviceFixtures.SPARES;
-  private static final String EMPTY = fixture("github-runner-sda14.wipefs.json");
-  private static final String EXT4 = fixture("github-runner-sda1.wipefs.json");
-  private static final String GPT = fixture("github-runner-sda.wipefs.json");
+  private static final List<String> RAID_LAYOUTS =
+      List.of(
+          OWNER,
+          "raid1-md0-swap-active-md1-ext4-unmounted-md2-empty",
+          "raid1-md0-swap-inactive-md1-ext4-unmounted-md2-empty",
+          STOPPED,
+          "raid1-arrays-recreated-stale-swap-ext4-from-earlier-array",
+          "raid1-degraded-auto-assembled-by-udev-md125-127");
+  private static final List<String> SYSTEM_DISK =
+      List.of("/dev/sda", "/dev/sda1", "/dev/sda14", "/dev/sda15", "/dev/sda16");
+  private static final List<String> SPARE_DISKS =
+      List.of(
+          "/dev/sdb",
+          "/dev/sdb1",
+          "/dev/sdb2",
+          "/dev/sdb3",
+          "/dev/sdc",
+          "/dev/sdc1",
+          "/dev/sdc2",
+          "/dev/sdc3");
   private static final List<String> DEVBOX_DEVICES =
       List.of(
           "/dev/nvme0n1",
@@ -46,8 +67,8 @@ class PoolDevicesTest {
           "/dev/nvme1n1p2",
           "/dev/nvme1n1p3",
           "/dev/nvme1n1p4");
-  private static final List<String> RUNNER_DEVICES =
-      List.of("/dev/sda", "/dev/sda1", "/dev/sda14", "/dev/sda15", "/dev/sda16");
+  private static final String EXT4 = DeviceFixtures.listings(OWNER).get("/dev/md1");
+  private static final String RAID_MEMBER = DeviceFixtures.listings(OWNER).get("/dev/sdb1");
 
   @Test
   void theDeviceTreeIsAskedForExplicitly() {
@@ -56,10 +77,12 @@ class PoolDevicesTest {
             "lsblk",
             "--json",
             "--tree",
-            "--bytes",
             "--output",
-            "NAME,PATH,TYPE,FSTYPE,PTTYPE,MOUNTPOINTS,SIZE,MODEL,RM"),
+            "PATH,TYPE,FSTYPE,PTTYPE,MOUNTPOINTS,SIZE,MODEL,RM"),
         PoolDevices.LSBLK);
+    assertEquals(
+        List.of("wipefs", "--all", "--no-act", "--types", "sail_exclusive_probe", "--", "/dev/sdb"),
+        PoolDevices.exclusiveOpen("/dev/sdb"));
   }
 
   @Test
@@ -94,46 +117,89 @@ class PoolDevicesTest {
             + " which carries the running system (/dev/md2 is mounted at /, the running system).",
         refusal(DEVBOX, "/dev/nvme1n1p1", "/dev/nvme1n1p1"));
     assertEquals(
-        "/dev/nvme0n1p2 is refused, even with --force-wipe: it is a partition of /dev/nvme0n1,"
-            + " which carries the running system (/dev/md2 is mounted at /, the running system); /dev/md0"
-            + " (raid1) is built on it.",
-        refusal(DEVBOX, "/dev/nvme0n1p2", null));
+        "/dev/nvme0n1p4 is refused, even with --force-wipe: /dev/md2 is mounted at"
+            + " /var/lib/sail/run; /dev/md2 is mounted at /dev/.incus-systemd-credentials; /dev/md2"
+            + " is mounted at /, the running system; /dev/md2 (raid1) is built on it.",
+        refusal(DEVBOX, "/dev/nvme0n1p4", null));
     assertEquals(
         "/dev/md0 is refused, even with --force-wipe: it is a raid1 device, not a disk or a"
             + " partition; it is a partition of /dev/nvme0n1, which carries the running system"
             + " (/dev/md2 is mounted at /, the running system).",
         refusal(DEVBOX, "/dev/md0", "/dev/md0"));
-    assertEquals(
-        "/dev/nvme0n1p4 is refused, even with --force-wipe: /dev/md2 is mounted at"
-            + " /var/lib/sail/run; /dev/md2 is mounted at /dev/.incus-systemd-credentials; /dev/md2"
-            + " is mounted at /, the running system; /dev/md2 (raid1) is built on it.",
-        refusal(DEVBOX, "/dev/nvme0n1p4", null));
   }
 
   @Test
-  void everyDeviceOfTheRunnerIsRefusedWithAndWithoutTheForceFlag() {
-    for (var device : RUNNER_DEVICES) {
-      for (var force : new String[] {null, device}) {
-        assertTrue(
-            refusal(RUNNER, device, force)
-                .startsWith(device + " is refused, even with --force-wipe: "),
-            device);
+  void theSystemDiskOfEveryCapturedLayoutIsRefusedWithAndWithoutTheForceFlag() {
+    for (var layout : gcpLayouts()) {
+      for (var device : SYSTEM_DISK) {
+        for (var force : new String[] {null, device}) {
+          assertTrue(
+              refusal(gcp(layout), device, force)
+                  .startsWith(device + " is refused, even with --force-wipe: "),
+              layout + " " + device);
+        }
       }
     }
     assertEquals(
         "/dev/sda14 is refused, even with --force-wipe: it is a partition of /dev/sda, which"
             + " carries the running system (/dev/sda1 is mounted at /, the running system).",
-        refusal(RUNNER, "/dev/sda14", "/dev/sda14"));
+        refusal(gcp(BLANK), "/dev/sda14", "/dev/sda14"));
     assertEquals(
-        "/dev/sda (/dev/disk/by-id/scsi-root) is refused, even with --force-wipe: /dev/sda1 is"
-            + " mounted at /, the running system; /dev/sda15 is mounted at /boot/efi, the running"
-            + " system; /dev/sda16 is mounted at /boot, the running system.",
-        refusal(RUNNER, "/dev/disk/by-id/scsi-root", "/dev/sda", "/dev/sda"));
+        "/dev/sda (/dev/disk/by-id/google-persistent-disk-0) is refused, even with --force-wipe:"
+            + " /dev/sda1 is mounted at /, the running system; /dev/sda15 is mounted at /boot/efi,"
+            + " the running system; /dev/sda16 is mounted at /boot, the running system.",
+        refusal(
+            gcp(BLANK).name("/dev/disk/by-id/google-persistent-disk-0", "/dev/sda"),
+            "/dev/disk/by-id/google-persistent-disk-0",
+            "/dev/sda"));
   }
 
   @Test
-  void aFlatListFromLsblkIsUnreadableAndRefused() {
-    for (var flat : List.of("devbox-flat.lsblk.json", "github-runner-flat.lsblk.json")) {
+  void everyDeviceOfEveryRaidLayoutIsRefusedWithAndWithoutTheForceFlag() {
+    for (var layout : RAID_LAYOUTS) {
+      for (var device : SPARE_DISKS) {
+        for (var force : new String[] {null, device}) {
+          assertTrue(
+              refusal(gcp(layout), device, force)
+                  .startsWith(device + " is refused, even with --force-wipe: "),
+              layout + " " + device);
+        }
+      }
+    }
+  }
+
+  @Test
+  void theOwnerLayoutsRefusalsNameTheArraysTheSwapAndTheMount() {
+    assertEquals(
+        "/dev/sdb is refused, even with --force-wipe: /dev/sdb1 is a RAID member: stop its array"
+            + " and clear it with mdadm --zero-superblock /dev/sdb1 yourself; /dev/md0 is in use as"
+            + " swap; /dev/md0 (raid1) is built on it; /dev/sdb2 is a RAID member: stop its array"
+            + " and clear it with mdadm --zero-superblock /dev/sdb2 yourself; /dev/md1 is mounted"
+            + " at /mnt/sailtrial-boot; /dev/md1 (raid1) is built on it; /dev/sdb3 is a RAID"
+            + " member: stop its array and clear it with mdadm --zero-superblock /dev/sdb3"
+            + " yourself; /dev/md2 (raid1) is built on it.",
+        refusal(gcp(OWNER), "/dev/sdb", "/dev/sdb"));
+    assertEquals(
+        "/dev/sdb3 is refused, even with --force-wipe: it is a partition of /dev/sdb, which"
+            + " carries the running system (/dev/md0 is in use as swap); /dev/sdb3 is a RAID"
+            + " member: stop its array and clear it with mdadm --zero-superblock /dev/sdb3"
+            + " yourself; /dev/md2 (raid1) is built on it.",
+        refusal(gcp(OWNER), "/dev/sdb3", "/dev/sdb3"));
+  }
+
+  @Test
+  void aRaidMemberUdevDoesNotKnowIsRefusedOnWhatItsListingShows() {
+    assertEquals(
+        "/dev/sdc1 is refused, even with --force-wipe: /dev/sdc1 is a RAID member: stop its array"
+            + " and clear it with mdadm --zero-superblock /dev/sdc1 yourself.",
+        refusal(gcp(STOPPED), "/dev/sdc1", "/dev/sdc1"));
+  }
+
+  @Test
+  void flatListsFromLsblkAreUnreadableAndRefused() {
+    var flats = new ArrayList<>(List.of("devbox-flat.lsblk.json", "github-runner-flat.lsblk.json"));
+    gcpLayouts().forEach(layout -> flats.add("gcp/" + layout + ".lsblk-flat.json"));
+    for (var flat : flats) {
       var shell = new Box(flat).name("/dev/sdb", "/dev/sdb").shell();
 
       var cleared =
@@ -143,7 +209,8 @@ class PoolDevicesTest {
       assertEquals(
           "lsblk printed a flat list, not a device tree, so what is built on a device cannot be"
               + " read; nothing was wiped.",
-          cleared.getMessage());
+          cleared.getMessage(),
+          flat);
       assertEquals(cleared.getMessage(), offered.getMessage());
     }
   }
@@ -164,45 +231,50 @@ class PoolDevicesTest {
   }
 
   @Test
-  void anUnusedSpareDiskIsClearedAfterEveryProbe() throws Exception {
-    var shell = spares().shell();
+  void aBlankDiskIsClearedAfterEveryProbe() throws Exception {
+    for (var layout : List.of(BLANK, "after-teardown-blank-again")) {
+      var shell = gcp(layout).shell();
 
+      assertEquals(
+          new PoolSource.Device("/dev/sdb", false), devices(shell).cleared("/dev/sdb", null));
+      assertEquals(
+          List.of(
+              "realpath -e -- /dev/sdb",
+              LSBLK,
+              "wipefs -- /dev/sdb",
+              "which zpool",
+              String.join(" ", PoolDevices.exclusiveOpen("/dev/sdb"))),
+          shell.invocations());
+    }
+  }
+
+  @Test
+  void aPartitionedDiskNamesItsTableAndIsClearedWhenNamedAgain() throws Exception {
     assertEquals(
-        new PoolSource.Device("/dev/sdb", false), devices(shell).cleared("/dev/sdb", null));
+        "/dev/sdb holds gpt, PMBR. Nothing on it is erased unless you name it again: add"
+            + " --force-wipe /dev/sdb to erase it and make the pool there.",
+        refusal(gcp(PARTITIONED), "/dev/sdb", null));
     assertEquals(
-        List.of(
-            "realpath -e -- /dev/sdb",
-            LSBLK,
-            "wipefs --no-act --json -- /dev/sdb",
-            "which zpool",
-            "wipefs --all --no-act --types sail_exclusive_probe -- /dev/sdb"),
-        shell.invocations());
+        new PoolSource.Device("/dev/sdb", true),
+        devices(gcp(PARTITIONED).shell()).cleared("/dev/sdb", "/dev/sdb"));
+  }
+
+  @Test
+  void aSparePartitionIsCleared() throws Exception {
+    assertEquals(
+        new PoolSource.Device("/dev/sdb1", false),
+        devices(gcp(PARTITIONED).shell()).cleared("/dev/sdb1", null));
   }
 
   @Test
   void aDiskThatHoldsAFilesystemIsRefusedNamingItAndClearedWhenNamedAgain() throws Exception {
-    var refused = refusal(spares().holds("/dev/sdc", EXT4), "/dev/sdc", null);
-    var shell = spares().holds("/dev/sdc", EXT4).shell();
-
     assertEquals(
-        "/dev/sdc holds ext4. Nothing on it is erased unless you name it again: add --force-wipe"
-            + " /dev/sdc to erase it and make the pool there.",
-        refused);
-    assertEquals(
-        new PoolSource.Device("/dev/sdc", true), devices(shell).cleared("/dev/sdc", "/dev/sdc"));
-  }
-
-  @Test
-  void aPartitionedDiskNamesItsTableAndWhatItsPartitionsHold() throws Exception {
-    var box = spares().holds("/dev/sdd", GPT).holds("/dev/sdd1", EXT4);
-
-    assertEquals(
-        "/dev/sdd holds gpt, PMBR, ext4 on /dev/sdd1. Nothing on it is erased unless you name it"
-            + " again: add --force-wipe /dev/sdd to erase it and make the pool there.",
-        refusal(box, "/dev/sdd", null));
+        "/dev/sdd holds ext4. Nothing on it is erased unless you name it again: add --force-wipe"
+            + " /dev/sdd to erase it and make the pool there.",
+        refusal(spares().holds("/dev/sdd", EXT4), "/dev/sdd", null));
     assertEquals(
         new PoolSource.Device("/dev/sdd", true),
-        devices(box.shell()).cleared("/dev/sdd", "/dev/sdd"));
+        devices(spares().holds("/dev/sdd", EXT4).shell()).cleared("/dev/sdd", "/dev/sdd"));
   }
 
   @Test
@@ -210,14 +282,7 @@ class PoolDevicesTest {
     assertEquals(
         "/dev/sdl2 is refused, even with --force-wipe: it is a partition of /dev/sdl, which"
             + " carries the running system (/dev/sdl1 is in use as swap).",
-        refusal(spares().name("/dev/sdl2", "/dev/sdl2"), "/dev/sdl2", "/dev/sdl2"));
-  }
-
-  @Test
-  void aSparePartitionIsCleared() throws Exception {
-    assertEquals(
-        new PoolSource.Device("/dev/sdd1", false),
-        devices(spares().shell()).cleared("/dev/sdd1", null));
+        refusal(spares(), "/dev/sdl2", "/dev/sdl2"));
   }
 
   @Test
@@ -241,15 +306,16 @@ class PoolDevicesTest {
             + " erase it with cryptsetup erase /dev/sdg yourself; /dev/mapper/secret (crypt) is built"
             + " on it.",
         refusal(spares(), "/dev/sdg", "/dev/sdg"));
+    assertEquals(
+        "/dev/loop0 is refused, even with --force-wipe: it is a loop device, not a disk or a"
+            + " partition; /dev/loop0 is mounted at /snap/core24/2124.",
+        refusal(gcp(BLANK), "/dev/loop0", "/dev/loop0"));
   }
 
   @Test
-  void aMemberLsblkDoesNotKnowIsRefusedOnWhatItsProbeFinds() {
+  void anLvmOrLuksMemberUdevDoesNotKnowIsRefusedOnWhatItsListingShows() {
     var members =
         Map.of(
-            "linux_raid_member",
-            "/dev/sdh is refused, even with --force-wipe: /dev/sdh is a RAID member: stop its array"
-                + " and clear it with mdadm --zero-superblock /dev/sdh yourself.",
             "LVM2_member",
             "/dev/sdh is refused, even with --force-wipe: /dev/sdh is an LVM physical volume: move"
                 + " its volume group off it and clear it with pvremove /dev/sdh yourself.",
@@ -261,24 +327,23 @@ class PoolDevicesTest {
             assertEquals(
                 message,
                 refusal(
-                    spares().holds("/dev/sdh", signatures("sdh", type)), "/dev/sdh", "/dev/sdh")));
+                    spares().holds("/dev/sdh", RAID_MEMBER.replace("linux_raid_member", type)),
+                    "/dev/sdh",
+                    "/dev/sdh")));
   }
 
   @Test
   void aDeviceAnotherHolderHasOpenIsRefusedEvenWithTheForceFlag() {
-    var box = spares().busy("/dev/sdk");
-
     assertEquals(
         "/dev/sdk is refused, even with --force-wipe: /dev/sdk is held open by something lsblk"
             + " does not show.",
-        refusal(box, "/dev/sdk", "/dev/sdk"));
+        refusal(spares().busy("/dev/sdk"), "/dev/sdk", "/dev/sdk"));
   }
 
   @Test
   void anExclusiveOpenThatFailsOtherwiseRefusesTheDevice() {
     var shell =
-        new Box(SPARES)
-            .name("/dev/sdb", "/dev/sdb")
+        gcp(BLANK)
             .shell(
                 new ScriptedShellExecutor()
                     .onFail(
@@ -295,14 +360,14 @@ class PoolDevicesTest {
 
   @Test
   void anEmptyImportedPoolsDeviceIsNeverWipedButHandedToIncusAsItIs() throws Exception {
-    var box = imported("raw-file-pool.zfs-list.txt");
-
-    assertEquals(new PoolSource.Zpool("sail-raw"), devices(box.shell()).cleared("/dev/sdi", null));
+    assertEquals(
+        new PoolSource.Zpool("sail-raw"),
+        devices(imported(fixture("raw-file-pool.zfs-list.txt")).shell()).cleared("/dev/sdi", null));
     assertEquals(
         "/dev/sdi is refused, even with --force-wipe: it is in the imported zpool sail-raw, which"
             + " is never wiped: drop --force-wipe to hand the empty pool to Incus, or destroy the"
             + " pool yourself.",
-        refusal(imported("raw-file-pool.zfs-list.txt"), "/dev/sdi", "/dev/sdi"));
+        refusal(imported(fixture("raw-file-pool.zfs-list.txt")), "/dev/sdi", "/dev/sdi"));
   }
 
   @Test
@@ -312,20 +377,16 @@ class PoolDevicesTest {
             + fixture("raw-file-pool.zpool-list.txt")
                 .replace("sail-raw", "other")
                 .replace("/tmp/other.img", "/dev/sdi9");
-    var box = spares().holds("/dev/sdi", GPT).zpool(pools, "/dev/sdi1\n/dev/sdi9");
 
     assertEquals(
         "/dev/sdi is refused, even with --force-wipe: it holds devices of the imported pools"
             + " sail-raw, other.",
-        refusal(box, "/dev/sdi", null));
+        refusal(spares().zpool(pools, "/dev/sdi1\n/dev/sdi9"), "/dev/sdi", null));
   }
 
   @Test
   void anImportedPoolThatHoldsDatasetsIsRefusedNamingThem() {
-    var box =
-        imported(
-            "raw-file-pool.zfs-list.txt",
-            fixture("incus-file-pool.zfs-list.txt").replace("sail-capture", "sail-raw"));
+    var box = imported(fixture("incus-file-pool.zfs-list.txt").replace("sail-capture", "sail-raw"));
 
     assertEquals(
         "/dev/sdi is refused, even with --force-wipe: it is in the imported zpool sail-raw, which"
@@ -340,7 +401,7 @@ class PoolDevicesTest {
   @Test
   void aPoolIncusHoldsIsRefused() {
     var box =
-        imported("raw-file-pool.zfs-list.txt")
+        imported(fixture("raw-file-pool.zfs-list.txt"))
             .incus(
                 "[{\"name\": \"tank\", \"driver\": \"zfs\", \"config\": {\"source\": \"sail-raw\","
                     + " \"zfs.pool_name\": \"sail-raw\"}}]");
@@ -355,8 +416,8 @@ class PoolDevicesTest {
   void anExportedPoolsDeviceIsErasedOnlyWhenNamedAgain() throws Exception {
     var box =
         spares()
-            .holds("/dev/sdj", GPT)
-            .holds("/dev/sdj1", signatures("sdj1", "zfs_member"))
+            .holds("/dev/sdj", DeviceFixtures.listings(PARTITIONED).get("/dev/sdb"))
+            .holds("/dev/sdj1", RAID_MEMBER.replace("linux_raid_member", "zfs_member"))
             .zpool(fixture("raw-file-pool.zpool-list.txt"), "/tmp/sail-raw.img");
 
     assertEquals(
@@ -371,7 +432,7 @@ class PoolDevicesTest {
   @Test
   void importedPoolsThatCannotBeListedRefuseTheDevice() {
     var shell =
-        spares()
+        gcp(BLANK)
             .shell(
                 new ScriptedShellExecutor()
                     .onOk("which zpool")
@@ -384,20 +445,18 @@ class PoolDevicesTest {
 
   @Test
   void aForceFlagNamingAnotherDeviceIsRefused() {
-    var box = spares().name("/dev/sdb", "/dev/sdb").holds("/dev/sdc", EXT4);
-
     assertEquals(
-        "--force-wipe names /dev/sdb, not the pool's device /dev/sdc. Name the same device to"
+        "--force-wipe names /dev/sdc, not the pool's device /dev/sdb. Name the same device to"
             + " both.",
-        refusal(box, "/dev/sdc", "/dev/sdb"));
+        refusal(gcp(PARTITIONED), "/dev/sdb", "/dev/sdc"));
   }
 
   @Test
   void twoSpellingsOfOneDeviceAreOneDevice() throws Exception {
-    var byId = "/dev/disk/by-id/scsi-SPARE_123";
-    var shell = spares().name(byId, "/dev/sdc").holds("/dev/sdc", EXT4).shell();
+    var byId = "/dev/disk/by-id/google-spare";
+    var shell = gcp(PARTITIONED).name(byId, "/dev/sdb").shell();
 
-    assertEquals(new PoolSource.Device("/dev/sdc", true), devices(shell).cleared(byId, "/dev/sdc"));
+    assertEquals(new PoolSource.Device("/dev/sdb", true), devices(shell).cleared(byId, "/dev/sdb"));
   }
 
   @Test
@@ -405,8 +464,7 @@ class PoolDevicesTest {
     var unnamed =
         new ScriptedShellExecutor().onFail("realpath", "realpath: /dev/sdz: No such file");
     var unforced =
-        spares()
-            .holds("/dev/sdc", EXT4)
+        gcp(PARTITIONED)
             .shell(
                 new ScriptedShellExecutor()
                     .onFail("realpath -e -- /dev/sdq", "realpath: /dev/sdq: No such file"));
@@ -420,7 +478,7 @@ class PoolDevicesTest {
         "--force-wipe /dev/sdq names no device on this box: realpath: /dev/sdq: No such file.",
         assertThrows(
                 IllegalArgumentException.class,
-                () -> devices(unforced).cleared("/dev/sdc", "/dev/sdq"))
+                () -> devices(unforced).cleared("/dev/sdb", "/dev/sdq"))
             .getMessage());
   }
 
@@ -428,18 +486,17 @@ class PoolDevicesTest {
   void aFileIsNotABlockDeviceLsblkLists() {
     assertEquals(
         "/srv/pool.img is not a block device lsblk lists.",
-        refusal(spares().name("/srv/pool.img", "/srv/pool.img"), "/srv/pool.img", null));
+        refusal(gcp(BLANK).name("/srv/pool.img", "/srv/pool.img"), "/srv/pool.img", null));
   }
 
   @Test
   void signaturesThatCannotBeReadRefuseTheDevice() {
     var shell =
-        spares()
+        gcp(BLANK)
             .shell(
                 new ScriptedShellExecutor()
                     .onFail(
-                        "wipefs --no-act --json",
-                        "wipefs: error: /dev/sdb: probing initialization failed"));
+                        "wipefs -- ", "wipefs: error: /dev/sdb: probing initialization failed"));
 
     var failed = assertThrows(IOException.class, () -> devices(shell).cleared("/dev/sdb", null));
 
@@ -451,53 +508,55 @@ class PoolDevicesTest {
 
   @Test
   void onlySpareWholeDisksAreOffered() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk(LSBLK, fixture(SPARES));
-
     assertEquals(
-        List.of("/dev/sdb", "/dev/sdh", "/dev/sdk"),
-        devices(shell).candidates().stream().map(PoolDevices.Candidate::device).toList());
+        List.of(
+            new PoolDevices.Candidate("/dev/sdb", "40G", "PersistentDisk"),
+            new PoolDevices.Candidate("/dev/sdc", "40G", "PersistentDisk")),
+        devices(gcp(BLANK).shell()).candidates());
     assertEquals(
-        new PoolDevices.Candidate("/dev/sdb", "100.0 GiB", "Virtual Disk"),
-        devices(shell).candidates().getFirst());
+        List.of("/dev/sdb", "/dev/sdc", "/dev/sdh", "/dev/sdk"),
+        devices(spares().shell()).candidates().stream()
+            .map(PoolDevices.Candidate::device)
+            .toList());
     assertEquals(List.of(), devices(new Box(DEVBOX).shell()).candidates());
-    assertEquals(List.of(), devices(new Box(RUNNER).shell()).candidates());
+    for (var layout : RAID_LAYOUTS) {
+      assertEquals(List.of(), devices(gcp(layout).shell()).candidates(), layout);
+    }
   }
 
   private static PoolDevices devices(ShellExec shell) {
     return new PoolDevices(shell);
   }
 
+  private static List<String> gcpLayouts() {
+    var layouts = new ArrayList<>(RAID_LAYOUTS);
+    layouts.addAll(List.of(BLANK, PARTITIONED, "after-teardown-blank-again"));
+    return layouts;
+  }
+
+  /** The GCP VM's {@code layout}: its lsblk tree, and each device's listing and busy open. */
+  private static Box gcp(String layout) {
+    var box = names(new Box("gcp/" + layout + ".lsblk-tree.json"));
+    DeviceFixtures.listings(layout).forEach(box::holds);
+    DeviceFixtures.busy(layout).forEach(box::busy);
+    return box;
+  }
+
   private static Box spares() {
-    var box = new Box(SPARES);
-    for (var device :
-        List.of(
-            "/dev/sdb",
-            "/dev/sdc",
-            "/dev/sdd",
-            "/dev/sdd1",
-            "/dev/sde",
-            "/dev/sdf",
-            "/dev/sdg",
-            "/dev/sdh",
-            "/dev/sdi",
-            "/dev/sdj",
-            "/dev/sdk",
-            "/dev/zram0",
-            "/dev/nbd0")) {
-      box.name(device, device);
-    }
+    return names(new Box(SPARES));
+  }
+
+  /** {@code box} with every device of its layout resolving to itself. */
+  private static Box names(Box box) {
+    box.paths().forEach(path -> box.name(path, path));
     return box;
   }
 
   /** The spares, /dev/sdi's first partition in the imported zpool sail-raw, holding {@code zfs}. */
-  private static Box imported(String zfs) {
-    return imported(zfs, fixture(zfs));
-  }
-
-  private static Box imported(String zfs, String datasets) {
+  private static Box imported(String datasets) {
     return spares()
-        .holds("/dev/sdi", GPT)
-        .holds("/dev/sdi1", signatures("sdi1", "zfs_member"))
+        .holds("/dev/sdi", DeviceFixtures.listings(PARTITIONED).get("/dev/sdb"))
+        .holds("/dev/sdi1", RAID_MEMBER.replace("linux_raid_member", "zfs_member"))
         .zpool(
             fixture("raw-file-pool.zpool-list.txt").replace("/tmp/sail-raw.img", "/dev/sdi1"),
             "/dev/sdi1")
@@ -505,11 +564,7 @@ class PoolDevicesTest {
   }
 
   private static String refusal(String layout, String named, String force) {
-    return refusal(new Box(layout).name(named, named), named, force);
-  }
-
-  private static String refusal(String layout, String named, String path, String force) {
-    return refusal(new Box(layout).name(named, path).name(force, force), named, force);
+    return refusal(names(new Box(layout)), named, force);
   }
 
   private static String refusal(Box box, String named, String force) {
@@ -518,38 +573,37 @@ class PoolDevicesTest {
         .getMessage();
   }
 
-  /** {@code wipefs --json} as the runner printed it, reporting {@code type} on {@code device}. */
-  private static String signatures(String device, String type) {
-    return EMPTY.replace(
-        "[\n\n   ]",
-        "[\n      {\n         \"device\": \""
-            + device
-            + "\",\n         \"offset\": \"0x1000\",\n         \"type\": \""
-            + type
-            + "\",\n         \"uuid\": null,\n         \"label\": null\n      }\n   ]");
-  }
-
   private static String fixture(String name) {
     return DeviceFixtures.read(name);
   }
 
   /**
-   * A box whose lsblk prints {@code layout}: each name resolves as given, each device's probes
-   * answer as scripted (empty signatures, free to open, no ZFS tools unless a pool is listed), and
-   * a test's own scripts, passed to {@link #shell(ScriptedShellExecutor)}, come first.
+   * A box whose lsblk prints {@code layout}: each name resolves as given, each device lists what it
+   * holds (nothing unless scripted) and opens free unless scripted busy, ZFS is not installed
+   * unless a pool is listed, and a test's own scripts, passed to {@link
+   * #shell(ScriptedShellExecutor)}, come first.
    */
   private static final class Box {
     private final String layout;
     private final Map<String, String> names = new LinkedHashMap<>();
-    private final Map<String, String> signatures = new LinkedHashMap<>();
-    private final List<String> busy = new ArrayList<>();
+    private final Map<String, String> listings = new LinkedHashMap<>();
+    private final Map<String, String> busy = new LinkedHashMap<>();
     private final Map<String, String> datasets = new LinkedHashMap<>();
     private String zpools;
-    private String vdev;
+    private String vdevs;
     private String incus;
 
     Box(String layout) {
       this.layout = layout;
+    }
+
+    List<String> paths() {
+      return PoolDevices.BlockDevice.listed(YamlUtil.parseMap(fixture(layout)).get("blockdevices"))
+          .stream()
+          .flatMap(PoolDevices.BlockDevice::subtree)
+          .map(PoolDevices.BlockDevice::path)
+          .distinct()
+          .toList();
     }
 
     Box name(String named, String path) {
@@ -559,19 +613,25 @@ class PoolDevicesTest {
       return this;
     }
 
-    Box holds(String path, String wipefs) {
-      signatures.put(path, wipefs);
+    Box holds(String path, String listing) {
+      listings.put(path, listing);
       return this;
     }
 
     Box busy(String path) {
-      busy.add(path);
+      return busy(
+          path,
+          "wipefs: error: " + path + ": probing initialization failed: Device or resource busy");
+    }
+
+    Box busy(String path, String said) {
+      busy.put(path, said);
       return this;
     }
 
-    Box zpool(String listed, String resolvedVdev) {
+    Box zpool(String listed, String resolvedVdevs) {
       zpools = listed;
-      vdev = resolvedVdev;
+      vdevs = resolvedVdevs;
       return this;
     }
 
@@ -593,26 +653,19 @@ class PoolDevicesTest {
       longestFirst(names.keySet())
           .forEach(name -> shell.onOk("realpath -e -- " + name, names.get(name) + "\n"));
       shell.onOk(LSBLK, fixture(layout));
-      var paths = new ArrayList<>(signatures.keySet());
-      PoolDevices.BlockDevice.listed(YamlUtil.parseMap(fixture(layout)).get("blockdevices"))
-          .stream()
-          .flatMap(PoolDevices.BlockDevice::subtree)
-          .forEach(device -> paths.add(device.path()));
+      var paths = new ArrayList<>(paths());
+      paths.addAll(listings.keySet());
       for (var path : longestFirst(paths)) {
-        shell.onOk("wipefs --no-act --json -- " + path, signatures.getOrDefault(path, EMPTY));
-        var probe = "wipefs --all --no-act --types " + PoolDevices.NOTHING + " -- " + path;
-        if (busy.contains(path)) {
-          shell.onFail(
-              probe,
-              "wipefs: error: "
-                  + path
-                  + ": probing initialization failed: Device or resource busy");
+        shell.onOk("wipefs -- " + path, listings.getOrDefault(path, DeviceFixtures.NOTHING_HELD));
+        var open = String.join(" ", PoolDevices.exclusiveOpen(path));
+        if (busy.containsKey(path)) {
+          shell.on(open, new ShellExec.Result(1, "", busy.get(path)));
         } else {
-          shell.onOk(probe);
+          shell.onOk(open);
         }
       }
       if (zpools != null) {
-        shell.onOk("which zpool").onOk("zpool list -vHP", zpools).onOk("realpath -m", vdev + "\n");
+        shell.onOk("which zpool").onOk("zpool list -vHP", zpools).onOk("realpath -m", vdevs + "\n");
       }
       datasets.forEach((pool, listed) -> shell.onOk("zfs list -H -r -o name " + pool, listed));
       if (incus != null) {

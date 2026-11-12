@@ -1,0 +1,4 @@
+### wipefs /dev/sdb
+exit=0
+### wipefs /dev/sdc
+exit=0

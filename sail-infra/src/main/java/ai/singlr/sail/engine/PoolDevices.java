@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -22,7 +21,7 @@ import java.util.stream.Stream;
 /**
  * The one place that decides whether a block device may become a ZFS pool. It reads the whole
  * device tree ({@code lsblk --json --tree}, util-linux 2.37 or newer), then probes the device and
- * each of its partitions directly: {@code wipefs --no-act} for what they hold, {@code zpool list}
+ * each of its partitions directly: {@code wipefs}'s listing for what they hold, {@code zpool list}
  * for an imported pool they belong to, and an exclusive open that writes nothing for any other
  * holder lsblk cannot see (a mount in another namespace, a pool, an array).
  *
@@ -41,9 +40,8 @@ public final class PoolDevices {
           "lsblk",
           "--json",
           "--tree",
-          "--bytes",
           "--output",
-          "NAME,PATH,TYPE,FSTYPE,PTTYPE,MOUNTPOINTS,SIZE,MODEL,RM");
+          "PATH,TYPE,FSTYPE,PTTYPE,MOUNTPOINTS,SIZE,MODEL,RM");
 
   /** A wipefs type filter no signature matches: with it the probe can erase nothing. */
   static final String NOTHING = "sail_exclusive_probe";
@@ -81,7 +79,7 @@ public final class PoolDevices {
   public List<Candidate> candidates() throws IOException, InterruptedException, TimeoutException {
     return tree().stream()
         .filter(disk -> uses(disk, disk).isEmpty() && holds(disk, disk.signature()).isEmpty())
-        .map(disk -> new Candidate(disk.path(), Strings.gibibytes(disk.size()), disk.model()))
+        .map(disk -> new Candidate(disk.path(), disk.size(), disk.model()))
         .toList();
   }
 
@@ -160,11 +158,12 @@ public final class PoolDevices {
     if (disk.removable()) {
       uses.add(disk.path() + " is removable");
     }
-    if (device.size() == 0) {
+    if (device.empty()) {
       uses.add("it has no size");
     }
-    if (disk.name().startsWith("zram") || disk.name().startsWith("nbd")) {
-      uses.add("it is a " + disk.name().replaceAll("[0-9]+$", "") + " device");
+    var name = disk.path().substring(disk.path().lastIndexOf('/') + 1);
+    if (name.startsWith("zram") || name.startsWith("nbd")) {
+      uses.add("it is a " + name.replaceAll("[0-9]+$", "") + " device");
     }
     if (device != disk) {
       disk.subtree()
@@ -291,26 +290,40 @@ public final class PoolDevices {
 
   private record Place(BlockDevice device, BlockDevice disk) {}
 
+  /**
+   * The signature types {@code wipefs} lists on {@code path}: given no {@code --all} and no {@code
+   * --offset} it only reads. Its table's third column is the type; no table means none.
+   */
   private List<String> signatures(String path)
       throws IOException, InterruptedException, TimeoutException {
-    var probed = shell.exec(List.of("wipefs", "--no-act", "--json", "--", path));
+    var probed = shell.exec(List.of("wipefs", "--", path));
     if (!probed.ok()) {
       throw new IOException("Cannot read the signatures on " + path + ": " + probed.reason());
     }
-    var types = new LinkedHashSet<String>();
-    if (YamlUtil.parseMap(probed.stdout()).get("signatures") instanceof List<?> found) {
-      found.forEach(signature -> types.add(String.valueOf(((Map<?, ?>) signature).get("type"))));
-    }
-    return List.copyOf(types);
+    return probed
+        .stdout()
+        .lines()
+        .skip(1)
+        .map(line -> line.strip().split("\\s+"))
+        .filter(fields -> fields.length > 2)
+        .map(fields -> fields[2])
+        .distinct()
+        .toList();
   }
 
   /**
-   * Whether another holder has {@code path} open: the exclusive open {@code wipefs --all} makes
-   * fails with EBUSY. {@code --no-act} skips every write and the type filter matches nothing, so no
-   * signature is erased and no partition table re-read.
+   * The open {@link #busy} makes: {@code wipefs --all} opens the device for exclusive use, which
+   * fails with EBUSY while anything holds it. {@code --no-act} skips every write, and the type
+   * filter matches no signature, so nothing is erased and no partition table is re-read, as an
+   * unfiltered {@code --no-act --all} does.
    */
+  static List<String> exclusiveOpen(String path) {
+    return List.of("wipefs", "--all", "--no-act", "--types", NOTHING, "--", path);
+  }
+
+  /** Whether another holder has {@code path} open, so its {@link #exclusiveOpen} fails. */
   private boolean busy(String path) throws IOException, InterruptedException, TimeoutException {
-    var opened = shell.exec(List.of("wipefs", "--all", "--no-act", "--types", NOTHING, "--", path));
+    var opened = shell.exec(exclusiveOpen(path));
     if (opened.ok()) {
       return false;
     }
@@ -412,13 +425,12 @@ public final class PoolDevices {
 
   /** A block device as {@code lsblk --json --tree} lists it, with what is on it and built on it. */
   record BlockDevice(
-      String name,
       String path,
       String type,
       String fstype,
       String pttype,
       List<String> mountpoints,
-      long size,
+      String size,
       String model,
       boolean removable,
       List<BlockDevice> children) {
@@ -432,18 +444,22 @@ public final class PoolDevices {
     private static BlockDevice of(Map<?, ?> node) {
       var mounts = node.get("mountpoints") instanceof List<?> listed ? listed : List.of();
       return new BlockDevice(
-          Objects.toString(node.get("name"), ""),
           (String) node.get("path"),
           (String) node.get("type"),
           (String) node.get("fstype"),
           (String) node.get("pttype"),
           mounts.stream().filter(Objects::nonNull).map(String::valueOf).toList(),
-          node.get("size") instanceof Number size ? size.longValue() : 0,
+          Objects.toString(node.get("size"), "0B"),
           Optional.ofNullable(node.get("model"))
               .map(model -> model.toString().strip())
               .orElse(null),
           Boolean.TRUE.equals(node.get("rm")),
           listed(node.get("children")));
+    }
+
+    /** Whether lsblk reports it holds no bytes, as an nbd device with nothing attached does. */
+    boolean empty() {
+      return size.equals("0B");
     }
 
     /** This device and everything on it or built on it. */

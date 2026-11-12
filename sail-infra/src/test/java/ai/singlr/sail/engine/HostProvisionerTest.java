@@ -996,7 +996,7 @@ class HostProvisionerTest {
 
   @Test
   void aZfsPoolOnAPartitionIsMadeTheSameWay() throws Exception {
-    var partition = "/dev/sdd1";
+    var partition = "/dev/sdb1";
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onceOnOk("incus storage list --format json", "[]")
@@ -1009,8 +1009,9 @@ class HostProvisionerTest {
             .onOk("incus profile device list", "root\neth0\n")
             .onOk("incus profile device get singlr-base root pool", "devpool\n")
             .onOk("realpath -e -- " + partition, partition + "\n")
-            .onOk(DeviceFixtures.LSBLK, DeviceFixtures.read(DeviceFixtures.SPARES))
-            .onOk("wipefs --no-act", DeviceFixtures.NOTHING_HELD);
+            .onOk(
+                DeviceFixtures.LSBLK,
+                DeviceFixtures.read("gcp/gpt-3-raid-partitions-no-arrays.lsblk-tree.json"));
 
     var hostYaml = provision(shell, new PoolSource.Device(partition, false), null);
 
@@ -1056,7 +1057,7 @@ class HostProvisionerTest {
     var shell =
         fresh(
             new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-                .onOk("wipefs --no-act --json -- /dev/sdb", WIPEFS_EXT4),
+                .onOk("wipefs -- /dev/sdb", EXT4),
             "zfs");
 
     provision(shell, new PoolSource.Device("/dev/sdb", true), null);
@@ -1081,7 +1082,7 @@ class HostProvisionerTest {
     var shell =
         fresh(
             new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-                .onOk("wipefs --no-act --json -- /dev/sdb", WIPEFS_EXT4),
+                .onOk("wipefs -- /dev/sdb", EXT4),
             "zfs");
 
     var refused = assertThrows(IllegalArgumentException.class, () -> provision(shell, SDB, null));
@@ -1417,8 +1418,8 @@ class HostProvisionerTest {
       incus-base hold installed
       """;
 
-  private static final String WIPEFS_EXT4 =
-      "{\"signatures\": [{\"device\": \"sdb\", \"offset\": \"0x438\", \"type\": \"ext4\"}]}";
+  private static final String EXT4 =
+      DeviceFixtures.listings("raid1-md0-swap-active-md1-ext4-mounted-md2-empty").get("/dev/md1");
 
   private static final List<String> APT_UPDATE = apt("-o", "APT::Update::Error-Mode=any", "update");
 
@@ -1445,9 +1446,7 @@ class HostProvisionerTest {
         .onOk("incus profile device list singlr-base", "root\neth0\n")
         .onOk("incus profile device get singlr-base root pool", "devpool\n")
         .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n")
-        .onOk("realpath -e -- /dev/sdd1", "/dev/sdd1\n")
         .onOk(DeviceFixtures.LSBLK, DeviceFixtures.read(DeviceFixtures.SPARES))
-        .onOk("wipefs --no-act", DeviceFixtures.NOTHING_HELD)
         .onOk("wipefs --all --no-act")
         .onOk("zpool list -vHP", "");
   }

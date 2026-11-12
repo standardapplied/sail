@@ -1,0 +1,32 @@
+### wipefs --no-act --all /dev/md0
+wipefs: error: /dev/md0: probing initialization failed: Device or resource busy
+exit=1
+### wipefs --no-act --all /dev/md1
+/dev/md1: 2 bytes were erased at offset 0x00000438 (ext4): 53 ef
+exit=0
+### wipefs --no-act --all /dev/md2
+exit=0
+### wipefs --no-act --all /dev/sdb
+wipefs: error: /dev/sdb: probing initialization failed: Device or resource busy
+exit=1
+### wipefs --no-act --all /dev/sdb1
+wipefs: error: /dev/sdb1: probing initialization failed: Device or resource busy
+exit=1
+### wipefs --no-act --all /dev/sdb2
+wipefs: error: /dev/sdb2: probing initialization failed: Device or resource busy
+exit=1
+### wipefs --no-act --all /dev/sdb3
+wipefs: error: /dev/sdb3: probing initialization failed: Device or resource busy
+exit=1
+### wipefs --no-act --all /dev/sdc
+wipefs: error: /dev/sdc: probing initialization failed: Device or resource busy
+exit=1
+### wipefs --no-act --all /dev/sdc1
+wipefs: error: /dev/sdc1: probing initialization failed: Device or resource busy
+exit=1
+### wipefs --no-act --all /dev/sdc2
+wipefs: error: /dev/sdc2: probing initialization failed: Device or resource busy
+exit=1
+### wipefs --no-act --all /dev/sdc3
+wipefs: error: /dev/sdc3: probing initialization failed: Device or resource busy
+exit=1

@@ -1,0 +1,105 @@
+{
+   "blockdevices": [
+      {
+         "path": "/dev/loop0",
+         "type": "loop",
+         "fstype": "squashfs",
+         "pttype": null,
+         "mountpoints": [
+             "/snap/core24/2124"
+         ],
+         "size": "66.8M",
+         "model": null
+      },{
+         "path": "/dev/loop1",
+         "type": "loop",
+         "fstype": "squashfs",
+         "pttype": null,
+         "mountpoints": [
+             "/snap/google-cloud-cli/519"
+         ],
+         "size": "355.8M",
+         "model": null
+      },{
+         "path": "/dev/loop2",
+         "type": "loop",
+         "fstype": "squashfs",
+         "pttype": null,
+         "mountpoints": [
+             "/snap/snapd/28254"
+         ],
+         "size": "44.7M",
+         "model": null
+      },{
+         "path": "/dev/sda",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "mountpoints": [
+             null
+         ],
+         "size": "50G",
+         "model": "PersistentDisk"
+      },{
+         "path": "/dev/sda1",
+         "type": "part",
+         "fstype": "ext4",
+         "pttype": "gpt",
+         "mountpoints": [
+             "/"
+         ],
+         "size": "49G",
+         "model": null
+      },{
+         "path": "/dev/sda14",
+         "type": "part",
+         "fstype": null,
+         "pttype": "gpt",
+         "mountpoints": [
+             null
+         ],
+         "size": "4M",
+         "model": null
+      },{
+         "path": "/dev/sda15",
+         "type": "part",
+         "fstype": "vfat",
+         "pttype": "gpt",
+         "mountpoints": [
+             "/boot/efi"
+         ],
+         "size": "106M",
+         "model": null
+      },{
+         "path": "/dev/sdb",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "40G",
+         "model": "PersistentDisk"
+      },{
+         "path": "/dev/sdc",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "40G",
+         "model": "PersistentDisk"
+      },{
+         "path": "/dev/sda16",
+         "type": "part",
+         "fstype": "ext4",
+         "pttype": "gpt",
+         "mountpoints": [
+             "/boot"
+         ],
+         "size": "913M",
+         "model": null
+      }
+   ]
+}

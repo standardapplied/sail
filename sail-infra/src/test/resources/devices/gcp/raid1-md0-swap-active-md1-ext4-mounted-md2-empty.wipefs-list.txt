@@ -1,0 +1,46 @@
+### wipefs /dev/md0
+DEVICE OFFSET TYPE UUID                                 LABEL
+md0    0xff6  swap a6db204d-78a2-4986-bc98-fe85d9939309 
+exit=0
+### wipefs /dev/md1
+DEVICE OFFSET TYPE UUID                                 LABEL
+md1    0x438  ext4 de932b60-bbb8-4f76-902e-8bc53de4c3f6 
+exit=0
+### wipefs /dev/md2
+exit=0
+### wipefs /dev/sdb
+DEVICE OFFSET      TYPE UUID LABEL
+sdb    0x200       gpt       
+sdb    0x9fffffe00 gpt       
+sdb    0x1fe       PMBR      
+exit=0
+### wipefs /dev/sdb1
+DEVICE OFFSET TYPE              UUID                                 LABEL
+sdb1   0x1000 linux_raid_member 1104dff5-b15c-8436-5a5b-ad1a08cdc358 0
+exit=0
+### wipefs /dev/sdb2
+DEVICE OFFSET TYPE              UUID                                 LABEL
+sdb2   0x1000 linux_raid_member a9d337a2-56b4-d5bd-db59-7ede2d5837b7 1
+exit=0
+### wipefs /dev/sdb3
+DEVICE OFFSET TYPE              UUID                                 LABEL
+sdb3   0x1000 linux_raid_member 76229a69-7b87-4d18-e18d-bb571e1940d4 2
+exit=0
+### wipefs /dev/sdc
+DEVICE OFFSET      TYPE UUID LABEL
+sdc    0x200       gpt       
+sdc    0x9fffffe00 gpt       
+sdc    0x1fe       PMBR      
+exit=0
+### wipefs /dev/sdc1
+DEVICE OFFSET TYPE              UUID                                 LABEL
+sdc1   0x1000 linux_raid_member 1104dff5-b15c-8436-5a5b-ad1a08cdc358 0
+exit=0
+### wipefs /dev/sdc2
+DEVICE OFFSET TYPE              UUID                                 LABEL
+sdc2   0x1000 linux_raid_member a9d337a2-56b4-d5bd-db59-7ede2d5837b7 1
+exit=0
+### wipefs /dev/sdc3
+DEVICE OFFSET TYPE              UUID                                 LABEL
+sdc3   0x1000 linux_raid_member 76229a69-7b87-4d18-e18d-bb571e1940d4 2
+exit=0

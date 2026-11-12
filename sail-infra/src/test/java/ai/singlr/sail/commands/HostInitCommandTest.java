@@ -237,7 +237,7 @@ class HostInitCommandTest {
 
     assertEquals(
         new PoolSource.Device("/dev/sdb", false), source(shell, "--storage", "zfs", "--yes"));
-    assertTrue(shell.invocations().contains("wipefs --no-act --json -- /dev/sdb"));
+    assertTrue(shell.invocations().contains("wipefs -- /dev/sdb"));
   }
 
   @Test
@@ -360,7 +360,7 @@ class HostInitCommandTest {
     return new ScriptedShellExecutor()
         .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n")
         .onOk(DeviceFixtures.LSBLK, layout)
-        .onOk("wipefs --no-act", DeviceFixtures.NOTHING_HELD)
+        .onOk("wipefs -- ", DeviceFixtures.NOTHING_HELD)
         .onOk("wipefs --all --no-act");
   }
 

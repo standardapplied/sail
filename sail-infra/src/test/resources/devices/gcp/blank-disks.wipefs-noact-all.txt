@@ -1,0 +1,4 @@
+### wipefs --no-act --all /dev/sdb
+exit=0
+### wipefs --no-act --all /dev/sdc
+exit=0

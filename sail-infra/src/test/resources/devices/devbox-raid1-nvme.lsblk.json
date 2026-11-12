@@ -1,7 +1,6 @@
 {
    "blockdevices": [
       {
-         "name": "nvme0n1",
          "path": "/dev/nvme0n1",
          "type": "disk",
          "fstype": null,
@@ -9,12 +8,11 @@
          "mountpoints": [
              null
          ],
-         "size": 1920383410176,
+         "size": "1.7T",
          "model": "KIOXIA KCD81RUG1T92                     ",
          "rm": false,
          "children": [
             {
-               "name": "nvme0n1p1",
                "path": "/dev/nvme0n1p1",
                "type": "part",
                "fstype": null,
@@ -22,11 +20,10 @@
                "mountpoints": [
                    null
                ],
-               "size": 268435456,
+               "size": "256M",
                "model": null,
                "rm": false
             },{
-               "name": "nvme0n1p2",
                "path": "/dev/nvme0n1p2",
                "type": "part",
                "fstype": null,
@@ -34,12 +31,11 @@
                "mountpoints": [
                    null
                ],
-               "size": 4294967296,
+               "size": "4G",
                "model": null,
                "rm": false,
                "children": [
                   {
-                     "name": "md0",
                      "path": "/dev/md0",
                      "type": "raid1",
                      "fstype": null,
@@ -47,13 +43,12 @@
                      "mountpoints": [
                          null
                      ],
-                     "size": 4289724416,
+                     "size": "4G",
                      "model": null,
                      "rm": false
                   }
                ]
             },{
-               "name": "nvme0n1p3",
                "path": "/dev/nvme0n1p3",
                "type": "part",
                "fstype": null,
@@ -61,12 +56,11 @@
                "mountpoints": [
                    null
                ],
-               "size": 1073741824,
+               "size": "1G",
                "model": null,
                "rm": false,
                "children": [
                   {
-                     "name": "md1",
                      "path": "/dev/md1",
                      "type": "raid1",
                      "fstype": null,
@@ -74,13 +68,12 @@
                      "mountpoints": [
                          null
                      ],
-                     "size": 1071644672,
+                     "size": "1022M",
                      "model": null,
                      "rm": false
                   }
                ]
             },{
-               "name": "nvme0n1p4",
                "path": "/dev/nvme0n1p4",
                "type": "part",
                "fstype": null,
@@ -88,12 +81,11 @@
                "mountpoints": [
                    null
                ],
-               "size": 1914744151552,
+               "size": "1.7T",
                "model": null,
                "rm": false,
                "children": [
                   {
-                     "name": "md2",
                      "path": "/dev/md2",
                      "type": "raid1",
                      "fstype": null,
@@ -101,7 +93,7 @@
                      "mountpoints": [
                          "/var/lib/sail/run", "/dev/.incus-systemd-credentials", "/"
                      ],
-                     "size": 1914608877568,
+                     "size": "1.7T",
                      "model": null,
                      "rm": false
                   }
@@ -109,7 +101,6 @@
             }
          ]
       },{
-         "name": "nvme1n1",
          "path": "/dev/nvme1n1",
          "type": "disk",
          "fstype": null,
@@ -117,12 +108,11 @@
          "mountpoints": [
              null
          ],
-         "size": 1920383410176,
+         "size": "1.7T",
          "model": "KIOXIA KCD81RUG1T92                     ",
          "rm": false,
          "children": [
             {
-               "name": "nvme1n1p1",
                "path": "/dev/nvme1n1p1",
                "type": "part",
                "fstype": null,
@@ -130,11 +120,10 @@
                "mountpoints": [
                    null
                ],
-               "size": 268435456,
+               "size": "256M",
                "model": null,
                "rm": false
             },{
-               "name": "nvme1n1p2",
                "path": "/dev/nvme1n1p2",
                "type": "part",
                "fstype": null,
@@ -142,12 +131,11 @@
                "mountpoints": [
                    null
                ],
-               "size": 4294967296,
+               "size": "4G",
                "model": null,
                "rm": false,
                "children": [
                   {
-                     "name": "md0",
                      "path": "/dev/md0",
                      "type": "raid1",
                      "fstype": null,
@@ -155,13 +143,12 @@
                      "mountpoints": [
                          null
                      ],
-                     "size": 4289724416,
+                     "size": "4G",
                      "model": null,
                      "rm": false
                   }
                ]
             },{
-               "name": "nvme1n1p3",
                "path": "/dev/nvme1n1p3",
                "type": "part",
                "fstype": null,
@@ -169,12 +156,11 @@
                "mountpoints": [
                    null
                ],
-               "size": 1073741824,
+               "size": "1G",
                "model": null,
                "rm": false,
                "children": [
                   {
-                     "name": "md1",
                      "path": "/dev/md1",
                      "type": "raid1",
                      "fstype": null,
@@ -182,13 +168,12 @@
                      "mountpoints": [
                          null
                      ],
-                     "size": 1071644672,
+                     "size": "1022M",
                      "model": null,
                      "rm": false
                   }
                ]
             },{
-               "name": "nvme1n1p4",
                "path": "/dev/nvme1n1p4",
                "type": "part",
                "fstype": null,
@@ -196,12 +181,11 @@
                "mountpoints": [
                    null
                ],
-               "size": 1914744151552,
+               "size": "1.7T",
                "model": null,
                "rm": false,
                "children": [
                   {
-                     "name": "md2",
                      "path": "/dev/md2",
                      "type": "raid1",
                      "fstype": null,
@@ -209,7 +193,7 @@
                      "mountpoints": [
                          "/var/lib/sail/run", "/dev/.incus-systemd-credentials", "/"
                      ],
-                     "size": 1914608877568,
+                     "size": "1.7T",
                      "model": null,
                      "rm": false
                   }
