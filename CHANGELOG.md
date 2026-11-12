@@ -14,6 +14,7 @@
 - **The in-container help and the spec-board skill teach no status move.** `spec --help` drops `--status` from `create` and `update`, and `spec archive`, a status move too (typed anyway, it is refused as one), and says a spec created there is a draft and its status moves on the board in Mast or with `sail spec update <id> --status <status>` on the host; the installed `spec-board` skill says the same, and that an agent claims nothing.
 - **The session report finds its credential as every helper does.** `sail-session-report` now falls back to `box.credential` whenever `SAIL_RUN_CREDENTIAL` is unset, as `spec`, `skill` and the portal do, where it did only without `SAIL_RUN_ID`. A run's report on the box credential is refused by the socket, and the hook still exits 0 silently.
 - **Upgrading.** Nothing is migrated: the box credential takes the `container` lane, and every live run its work, when sail-api restarts on this release, so a run under way is narrowed at once. A node still on 0.65 decides its own socket by the old rules until it upgrades.
+- **A large sync frame is read in time linear in its size.** A sync line, a blob manifest or a live-stream line was parsed in time that grew with the square of its longest string: a 4 MiB message body took seconds to read, and a frame near the 16 MiB ceiling minutes. Each now reads in tens to a few hundred milliseconds.
 
 ## 0.65.0
 

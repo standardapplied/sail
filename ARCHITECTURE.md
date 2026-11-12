@@ -2877,13 +2877,18 @@ the one native build:
   the slowest module bounds the verdict, not their sum. Surefire runs one fork per core
   (`forkCount=1C` in the root pom), so a test that cannot share a runner with another class
   belongs to a fork of its own, not to a slower suite. Every failsafe job passes
-  `-Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true`: the unit
-  suite and the gates are the unit jobs'.
+  `-Dtest=NoUnitTests -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true
+  -Dspotless.check.skip=true`, and every other build that is not a unit job (the native builds,
+  the dependency scan, a unit job's install of its upstream modules) skips the two gates too: the
+  unit suite, the coverage gates and the format check are the unit jobs'.
 - **macOS runs the unit suite on every pull request.** A release ships a macOS binary, and only
   its own tests see Apple's libraries; a test of Linux-only behaviour says so with
   `@EnabledOnOs(OS.LINUX)`.
 - **One native build per commit.** The `Native binaries` job builds the candidate once and every
-  native suite downloads it. CI tests the quick build (`-Ob`, about half the build time);
+  native suite downloads it. The build is cached under its inputs (the poms, every module's
+  `src/main`, the `native-binaries` action, the optimization level and the GraalVM build), so a
+  commit that changes only tests or CI takes the image its inputs already built, smoke-tested
+  again. CI tests the quick build (`-Ob`, about half the build time);
   `release.yml` builds the optimized one (`-O2`), which only its smoke test (`-V`,
   `_pty-selftest`) runs. The two compile the same program; what only `-O2` could expose — a race
   faster code opens, a miscompile — is the accepted gap.

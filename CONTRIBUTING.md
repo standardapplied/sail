@@ -9,6 +9,7 @@ JDK 25 or newer and Maven 3.9 or newer.
 
 ```bash
 ci/check                                    # format, then the tests of the classes changed against origin/main
+ci/check quick                              # format, then every unit test, incrementally and without coverage
 ci/check full                               # every unit test and gate, as CI's unit jobs run them together
 ci/check unit sail-infra                    # one module, exactly as its CI job runs it
 mvn -o -Pintegration -Dsail.it.requireIncus=false clean verify     # plus the multi-node ITs; run before pushing
@@ -16,7 +17,9 @@ JAVA_HOME=/path/to/graalvm-jdk-25 mvn clean package -Pnative -DskipTests   # the
 ```
 
 `ci/check` is the loop while working: it names the tests it picked (`Foo*Test` for a changed
-`Foo`, a changed test itself) and runs offline. `ci/check full` before a pull request.
+`Foo`, a changed test itself) and runs offline. It misses a test of a class that uses what you
+changed; `ci/check quick` runs them all, without `clean` and without the coverage gates.
+`ci/check full` before a pull request.
 
 The incus-backed integration tests need a real incus daemon and run in CI only.
 
