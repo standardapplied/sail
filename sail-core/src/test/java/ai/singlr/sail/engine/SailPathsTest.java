@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -99,6 +100,26 @@ class SailPathsTest {
     assertFalse(SailPaths.dataDirOverridden("/var/lib/../lib/sail"));
     assertTrue(SailPaths.dataDirOverridden("/root/rehearsal"));
     assertTrue(SailPaths.dataDirOverridden("/var/lib/sail-copy"));
+  }
+
+  @Test
+  void theBinaryPathIsTheExecutableThisProcessRuns() throws Exception {
+    assertEquals(
+        Path.of(System.getProperty("java.home"), "bin", "java").toRealPath(),
+        SailPaths.binaryPath(),
+        "a JVM runs java, links resolved, and the session shim is spawned from what runs");
+  }
+
+  @Test
+  void anExecutableIsNamedThroughItsLinksFromTheWorkingDirectoryAndNotAtAllOnceReplaced()
+      throws Exception {
+    var binary = Files.createFile(tempDir.resolve("sail"));
+    var link = Files.createSymbolicLink(tempDir.resolve("sail-link"), binary);
+    var relative = Path.of("").toAbsolutePath().relativize(binary.toAbsolutePath());
+
+    assertEquals(binary.toRealPath(), SailPaths.realPath(link.toString()).orElseThrow());
+    assertEquals(binary.toRealPath(), SailPaths.realPath(relative.toString()).orElseThrow());
+    assertEquals(Optional.empty(), SailPaths.realPath(binary + " (deleted)"), "Linux's replaced");
   }
 
   @Test

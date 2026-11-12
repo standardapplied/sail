@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -15,15 +16,20 @@ import org.junit.jupiter.api.condition.OS;
 class PtySelfTestCommandTest {
 
   @Test
-  @EnabledOnOs(OS.LINUX)
-  void openingARealPtySucceeds() {
+  void theSelfTestPassesOnThisSystem() {
     assertEquals(0, new PtySelfTestCommand().call(), "the pty FFM layer initializes and works");
   }
 
   @Test
+  void thePtyProbeSpawnsThroughTheShimResizesAndReadsTheChildsSize() {
+    assertDoesNotThrow(PtySelfTestCommand::ptyProbe);
+  }
+
+  /** systemd's descriptor store, which only Linux has. */
+  @Test
   @EnabledOnOs(OS.LINUX)
   void theStoreProbePushesAMasterThroughTheBindingAndReadsThroughTheCopy() {
-    org.junit.jupiter.api.Assertions.assertDoesNotThrow(PtySelfTestCommand::fdStoreProbe);
+    assertDoesNotThrow(PtySelfTestCommand::fdStoreProbe);
   }
 
   @Test

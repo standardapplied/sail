@@ -195,7 +195,6 @@ class RingJournalTest {
   }
 
   @Test
-  @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.LINUX)
   void aFreshRingIsCreatedOwnerOnly() throws Exception {
     var path = dir.resolve("private.ring");
     try (var ring = RingJournal.open(path, 1024)) {

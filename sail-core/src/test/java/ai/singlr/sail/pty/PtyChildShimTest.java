@@ -9,44 +9,47 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledOnOs;
-import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The shim runs as its own process here — installing its signal handlers inside the test JVM would
- * leave them behind — so every case is a real {@code kill} against a real pid.
+ * The shim runs as its own process here, on a real pty as the host spawns it — installing its
+ * signal handlers inside the test JVM would leave them behind — so every case is a real {@code
+ * kill} against a real pid.
  */
-@EnabledOnOs(OS.LINUX)
 class PtyChildShimTest {
 
   @TempDir Path dir;
 
+  private Pty pty;
+
+  @AfterEach
+  void closeThePty() {
+    if (pty != null) {
+      pty.close();
+    }
+  }
+
   /** {@code java -cp <this class path> PtyChildShim <exit file> <command...>}. */
   static List<String> shim(Path exitFile, String... command) {
-    var argv = new ArrayList<String>();
-    argv.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
-    argv.add("--enable-native-access=ALL-UNNAMED");
-    argv.add("-cp");
-    argv.add(System.getProperty("java.class.path"));
-    argv.add(PtyChildShim.class.getName());
-    argv.add(exitFile.toString());
+    var argv = new ArrayList<>(PtyChildShim.onClassPath(exitFile));
     argv.addAll(List.of(command));
     return argv;
   }
 
   private Process start(Path exitFile, String... command) throws IOException {
-    return new ProcessBuilder(shim(exitFile, command))
-        .redirectErrorStream(true)
-        .redirectOutput(dir.resolve("out.txt").toFile())
-        .start();
+    pty = Pty.open(80, 24);
+    return pty.spawn(shim(exitFile, command), Map.of("TERM", "dumb"), dir);
   }
 
   private static long childPidFrom(Path pidFile) throws Exception {
@@ -63,6 +66,41 @@ class PtyChildShimTest {
   private static void signal(long pid, String name) throws Exception {
     var kill = new ProcessBuilder("kill", "-" + name, Long.toString(pid)).inheritIO().start();
     assertEquals(0, kill.waitFor(), "kill -" + name + " " + pid);
+  }
+
+  @Test
+  void runOutsideAPtyHostTheShimNamesWhatIsMissingAndRunsNothing() throws Exception {
+    var exit = dir.resolve("s.exit");
+    var shim = new ProcessBuilder(shim(exit, "sh", "-c", "exit 7")).redirectErrorStream(true);
+    shim.environment().remove(Pty.TERMINAL);
+    var started = shim.start();
+    var said = new String(started.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+
+    assertTrue(started.waitFor(30, TimeUnit.SECONDS));
+    assertEquals(1, started.exitValue(), "no terminal named, and none on its input");
+    assertEquals(
+        "Exception in thread \"main\" java.lang.IllegalStateException: No terminal is named in"
+            + " SAIL_PTY_TERMINAL: the shim runs only as the pty host spawns it.",
+        said.lines().findFirst().orElseThrow());
+    assertFalse(Files.exists(exit), "no command ran, so no status is recorded");
+  }
+
+  @Test
+  void runByAHostFromBeforeTheShimClaimedTerminalsItRunsOnTheTerminalItIsHanded() throws Exception {
+    var exit = dir.resolve("s.exit");
+    var out = dir.resolve("tty.txt");
+    pty = Pty.open(80, 24);
+    var shim =
+        new ProcessBuilder(shim(exit, "sh", "-c", "tty > " + out + "; exit 5"))
+            .redirectInput(new File(pty.slavePath()));
+    shim.environment().remove(Pty.TERMINAL);
+
+    var started = shim.start();
+
+    assertTrue(started.waitFor(30, TimeUnit.SECONDS));
+    assertEquals(5, started.exitValue());
+    assertEquals("5", Files.readString(exit));
+    assertEquals(pty.slavePath() + "\n", Files.readString(out), "the command ran on that terminal");
   }
 
   @Test

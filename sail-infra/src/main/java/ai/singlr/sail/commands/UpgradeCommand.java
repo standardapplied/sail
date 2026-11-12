@@ -733,7 +733,7 @@ public final class UpgradeCommand implements Runnable {
   private void reExecWithSudo() throws IOException, InterruptedException {
     var args = new ArrayList<String>();
     args.add("sudo");
-    args.add(ProcessHandle.current().info().command().orElse(SailPaths.binaryPath().toString()));
+    args.add(SailPaths.binaryPath().toString());
     args.add("upgrade");
     if (targetVersion != null) {
       args.add("--target");

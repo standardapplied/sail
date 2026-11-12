@@ -65,34 +65,38 @@ public final class SdNotify {
 
   private static Libc loadLibc() {
     return new Libc(
-        Native.downcallCapturingErrno(
+        Native.downcall(
             "socket",
             FunctionDescriptor.of(
                 ValueLayout.JAVA_INT,
                 ValueLayout.JAVA_INT,
                 ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_INT)),
-        Native.downcallCapturingErrno(
+                ValueLayout.JAVA_INT),
+            Native.CAPTURE_ERRNO),
+        Native.downcall(
             "bind",
             FunctionDescriptor.of(
                 ValueLayout.JAVA_INT,
                 ValueLayout.JAVA_INT,
                 ValueLayout.ADDRESS,
-                ValueLayout.JAVA_INT)),
-        Native.downcallCapturingErrno(
+                ValueLayout.JAVA_INT),
+            Native.CAPTURE_ERRNO),
+        Native.downcall(
             "sendmsg",
             FunctionDescriptor.of(
                 ValueLayout.JAVA_LONG,
                 ValueLayout.JAVA_INT,
                 ValueLayout.ADDRESS,
-                ValueLayout.JAVA_INT)),
-        Native.downcallCapturingErrno(
+                ValueLayout.JAVA_INT),
+            Native.CAPTURE_ERRNO),
+        Native.downcall(
             "recvmsg",
             FunctionDescriptor.of(
                 ValueLayout.JAVA_LONG,
                 ValueLayout.JAVA_INT,
                 ValueLayout.ADDRESS,
-                ValueLayout.JAVA_INT)),
+                ValueLayout.JAVA_INT),
+            Native.CAPTURE_ERRNO),
         Native.downcall(
             "close", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT)));
   }
@@ -116,6 +120,14 @@ public final class SdNotify {
 
   public boolean enabled() {
     return !socketPath.isBlank();
+  }
+
+  /**
+   * Whether this system has a descriptor store to speak to at all: systemd's, on Linux. launchd
+   * keeps none, and the layouts here are glibc's.
+   */
+  public static boolean available() {
+    return Native.PLATFORM.descriptorStore();
   }
 
   /**

@@ -38,7 +38,8 @@ import org.junit.jupiter.api.io.TempDir;
  * in the same JVM, adopts from those descriptors under the names the store would hand back. The
  * children are wrapped in the real {@link PtyChildShim} (run from this class path), so exit
  * statuses cross the gap the way they do in production. A datagram receiver stands in for systemd
- * and proves every push and removal.
+ * and proves every push and removal. It runs on Linux alone: the handoff rides systemd's descriptor
+ * store, and launchd keeps no descriptors, so a host on macOS loses its sessions with itself.
  */
 @EnabledOnOs(OS.LINUX)
 class PtySessionHostHandoffTest {

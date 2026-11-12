@@ -15,19 +15,16 @@ import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.authority.MessageAuthority;
 import ai.singlr.sail.authority.WriteAuthority;
+import ai.singlr.sail.common.ModuleClasses;
 import ai.singlr.sail.engine.SpecCliHelper;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.RevisionJournal;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.constantpool.MemberRefEntry;
 import java.net.URISyntaxException;
-import java.nio.file.FileSystems;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -192,39 +189,9 @@ class OneDecisionPointTest {
   static List<byte[]> everyMainClass() throws IOException, URISyntaxException {
     var classes = new ArrayList<byte[]>();
     for (var module : List.of(RevisionJournal.class, SpecCliHelper.class, SailOperations.class)) {
-      classes.addAll(classesOf(module));
+      classes.addAll(ModuleClasses.of(module));
     }
     assertTrue(classes.size() > 500, "every module's classes were read: " + classes.size());
-    return classes;
-  }
-
-  /**
-   * The bytes of every class in the module {@code anchor} was loaded from: a directory or a jar.
-   */
-  static List<byte[]> classesOf(Class<?> anchor) throws IOException, URISyntaxException {
-    var location = Path.of(anchor.getProtectionDomain().getCodeSource().getLocation().toURI());
-    if (Files.isDirectory(location)) {
-      return classesUnder(location);
-    }
-    try (var jar = FileSystems.newFileSystem(location)) {
-      return classesUnder(jar.getPath("/"));
-    }
-  }
-
-  private static List<byte[]> classesUnder(Path root) throws IOException {
-    var classes = new ArrayList<byte[]>();
-    try (var files = Files.walk(root)) {
-      files
-          .filter(file -> file.toString().endsWith(".class"))
-          .forEach(
-              file -> {
-                try {
-                  classes.add(Files.readAllBytes(file));
-                } catch (IOException e) {
-                  throw new UncheckedIOException(e);
-                }
-              });
-    }
     return classes;
   }
 }

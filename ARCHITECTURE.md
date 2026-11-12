@@ -2446,6 +2446,11 @@ before whether the roster lives on this box). Every door reads the row it acts o
 scope first, the host CLI's operator included, who sees the projects main's roster gives the box's
 FDE. The terminal opens a session only in a project its person holds on the box, whatever their
 role, as the catalog holds it and their scope admits it.
+A terminal session is its shell: the session shim (`_pty-child`) leads it, and when the shell
+exits the session ends once what is already in the terminal has been read (`Pty.DRAIN_GRACE_MILLIS`
+of quiet); a job the shell left running keeps nothing it says afterwards
+(`PtySessionTest.aJobTheShellLeftKeepsWhatItSaidBeforeTheExitAndNothingAfter`). Until 0.67.0 a
+Linux session lived until every holder of its terminal let go.
 
 **One way in.** Six doors reach Sail: the web API, the container socket, the host CLI, the SSH
 gateway, the terminal host and sync. Each door's credential code finds whom its credential names
@@ -2940,7 +2945,10 @@ Deliberate limits of the current design, each with its consequence:
    them out everywhere, since every door refuses a disabled FDE and a node disables an FDE
    main no longer lists, but the row lingers on nodes as disabled. Delete propagation is a
    roster protocol change.
-4. **One platform per OS.** Linux amd64 hosts; macOS arm64 as a thin client only.
+4. **One platform per OS.** Linux amd64 hosts; macOS arm64 as a thin client. The terminal host's
+   pty layer runs on macOS through the same spawn chain (the `macos-latest` unit lanes and the
+   darwin release's `_pty-selftest` prove it), but no local host is wired or packaged there, and
+   with no descriptor store its sessions would not survive a restart.
 5. **Sail never talks to the forge.** A passed review parks in `awaiting_merge`; a person
    merges the pull request and marks the spec done. A merge or release stage behind a forge
    adapter is the next step of the loop (`sail-check-stage` on the board).
