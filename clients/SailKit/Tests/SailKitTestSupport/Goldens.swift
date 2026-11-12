@@ -8,6 +8,10 @@ public enum Goldens {
         .deletingLastPathComponent()
         .appending(path: "Goldens")
 
+    /// The instant the server's golden writer pins its clock to, in milliseconds since 1970: one
+    /// with a fraction, so an instant read to the second is not the instant written.
+    public static let pinnedMilliseconds: Int64 = 1_794_387_600_656
+
     public static func bytes(_ path: String) throws -> [UInt8] {
         [UInt8](try Data(contentsOf: root.appending(path: path)))
     }
@@ -42,6 +46,14 @@ public enum Goldens {
     /// The handshake magic the host's `PtyWire` sends.
     public static func magic() throws -> [UInt8] {
         try bytes(hex: object("frames/frames.json")["magic"] as? String ?? "")
+    }
+
+    /// The largest payload the host's `PtyWire` sends.
+    public static func maxPayload() throws -> Int {
+        guard let largest = try object("frames/frames.json")["max_payload"] as? Int else {
+            throw GoldenError(reason: "frames.json names no max_payload")
+        }
+        return largest
     }
 
     /// The words of `vocabulary` the server's own enum holds.
@@ -124,6 +136,13 @@ public struct Exchange: Sendable {
         default:
             throw GoldenError(reason: "no \(step) in \(node)")
         }
+    }
+}
+
+extension Date {
+    /// This instant to the millisecond, as the server writes one.
+    public var milliseconds: Int64 {
+        Int64((timeIntervalSince1970 * 1000).rounded())
     }
 }
 

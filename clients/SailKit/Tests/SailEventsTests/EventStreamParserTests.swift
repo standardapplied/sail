@@ -40,16 +40,22 @@ import Testing
         let turn = try #require(events.first)
         #expect(turn.type == "message")
         #expect(turn.lastEventID == "")
-        #expect(turn.data.hasPrefix(#"{"agent": "sail", "data": {"open": false}"#))
         #expect(events.dropFirst().first?.lastEventID == "1")
         let end = try #require(events.last)
         #expect(end.type == "error")
         #expect(end.lastEventID == events.dropLast().last?.lastEventID)
     }
 
-    @Test func commentsAreNotEventsAndARetryIsExposed() throws {
+    @Test func theServersOwnCommentsAreNotEvents() throws {
+        let stream = try Goldens.bytes("events/stream.sse")
+        let subscribed = try #require(range(of: ": subscribed\n\n", in: stream))
+        let keepalive = try #require(range(of: ": keepalive\n\n", in: stream))
+        #expect(subscribed.lowerBound == 0)
+        #expect(parse([Array(stream[subscribed]), Array(stream[keepalive])]).isEmpty)
+    }
+
+    @Test func aRetryIsExposedAndIsNotAnEvent() throws {
         var parser = EventStreamParser()
-        #expect(parser.feed(Array(": subscribed\n\n: keepalive\n\n".utf8)).isEmpty)
         #expect(parser.retry == nil)
         #expect(parser.feed(Array("retry: 2500\n\n".utf8)).isEmpty)
         #expect(parser.retry == .milliseconds(2500))

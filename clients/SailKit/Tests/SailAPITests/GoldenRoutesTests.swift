@@ -3,20 +3,19 @@ import SailAPI
 import SailKitTestSupport
 import Testing
 
-/// The instant the server's golden writer pins its clock to.
-let pinned = Date(timeIntervalSince1970: 1_794_387_600)
-
 /// The call this client makes for each recorded exchange, by the golden's name.
 let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "whoami": { _ = try await $0.send(.whoami) },
     "projects": { _ = try await $0.send(.projects) },
     "rooms": { _ = try await $0.send(.rooms(project: "harbor")) },
     "room": { _ = try await $0.send(.room("harbor-design")) },
+    "room-bare": { _ = try await $0.send(.room("harbor-quay")) },
     "messages": { _ = try await $0.send(.messages(room: "harbor-design", limit: 50)) },
     "message-posted": { _ = try await $0.send(.post(question, room: "harbor-design")) },
     "message-reply": { _ = try await $0.send(.post(reply, room: "harbor-design")) },
     "specs": { _ = try await $0.send(.specs(SpecFilter(project: "harbor"))) },
     "spec": { _ = try await $0.send(.spec("harbor-docks")) },
+    "spec-bare": { _ = try await $0.send(.spec("harbor-buoys")) },
     "refusal-read-only-credential": { _ = try await $0.send(.post(MessagePost(body: "hello"), room: "harbor-design")) },
     "refusal-room-not-found": { _ = try await $0.send(.room("nowhere")) },
     "refusal-spec-not-found": { _ = try await $0.send(.spec("nothing")) },
@@ -45,7 +44,8 @@ func answer<Response>(
 
 @Suite struct GoldenRoutesTests {
     @Test func everyRecordedExchangeIsOneThisClientMakes() throws {
-        #expect(Set(calls.keys).union(refusalsOfRoutesNotYetCalled) == Set(try Goldens.names(in: "http")))
+        #expect(Set(calls.keys).union(refusalsOfRoutesNotYetCalled).union(exchangesOfSailEvents)
+            == Set(try Goldens.names(in: "http")))
     }
 
     @Test(arguments: calls.keys.sorted())
@@ -87,7 +87,10 @@ func answer<Response>(
 
     @Test func aRoomReadsEveryFieldTheServerSends() throws {
         let room = try Endpoint.room("harbor-design").decode(response(try Exchange("room")))
-        #expect(room == (try Endpoint.rooms().decode(response(try Exchange("rooms")))).rooms.first)
+        let listed = try Endpoint.rooms().decode(response(try Exchange("rooms")))
+        #expect(listed.count == 3)
+        #expect(listed.rooms.map(\.id) == ["harbor-buoys", "harbor-design", "harbor-quay"])
+        #expect(listed.rooms[1] == room)
         #expect(room.id == "harbor-design")
         #expect(room.project == "harbor")
         #expect(room.title == "Docks")
@@ -98,32 +101,50 @@ func answer<Response>(
         expectSeated(room.members.first)
         #expect(room.specIds == ["harbor-docks"])
         #expect(room.createdBy == "uday")
-        #expect(room.createdAt == pinned)
-        #expect(room.updatedAt == pinned)
+        #expect(room.createdAt.milliseconds == Goldens.pinnedMilliseconds)
+        #expect(room.updatedAt.milliseconds == Goldens.pinnedMilliseconds)
         #expect(room.updatedBy == "sail")
-        #expect(room.lastActivityAt == pinned)
+        #expect(room.lastActivityAt?.milliseconds == Goldens.pinnedMilliseconds)
         #expect(room.needsReply)
         #expect(room.questionMessageId == "00000000-0000-7000-8000-000000000003")
+    }
+
+    @Test func aRoomWithNothingOptionalReadsAsNothingSeatedFiledOrAsked() throws {
+        let room = try Endpoint.room("harbor-quay").decode(response(try Exchange("room-bare")))
+        #expect(room.id == "harbor-quay")
+        #expect(room.assignee == "uday")
+        #expect(room.wake == nil)
+        #expect(room.effectiveWake == "on")
+        #expect(room.members.isEmpty)
+        #expect(room.specIds.isEmpty)
+        #expect(room.lastActivityAt == nil)
+        #expect(!room.needsReply)
+        #expect(room.questionMessageId == nil)
     }
 
     @Test func messagesReadEveryFieldWithAReplyAndAQuestion() throws {
         let list = try Endpoint.messages(room: "harbor-design").decode(response(try Exchange("messages")))
         #expect(list.specId == "harbor-design")
-        #expect(list.total == 3)
-        let (asked, answered, agent) = (list.messages[0], list.messages[1], list.messages[2])
+        #expect(list.total == 4)
+        let (asked, answered, failed, agent) = (list.messages[0], list.messages[1], list.messages[2], list.messages[3])
         #expect(asked.id == "00000000-0000-7000-8000-000000000001")
         #expect(asked.specId == "harbor-design")
         #expect(asked.author == "uday")
         #expect(asked.body == question.body)
         #expect(asked.replyTo == nil)
-        #expect(asked.createdAt == pinned)
+        #expect(asked.createdAt.milliseconds == Goldens.pinnedMilliseconds)
         #expect(asked.isQuestion)
         #expect(!asked.isError)
         #expect(answered.body == reply.body)
         #expect(answered.replyTo == asked.id)
         #expect(!answered.isQuestion)
+        #expect(failed.author == "claude/run-1")
+        #expect(failed.body == "The harness exited before it answered.")
+        #expect(failed.isError)
+        #expect(!failed.isQuestion)
         #expect(agent.author == "claude/run-1")
         #expect(agent.isQuestion)
+        #expect(!agent.isError)
         let posted = try Endpoint.post(question, room: "harbor-design").decode(response(try Exchange("message-posted")))
         #expect(posted.message == asked)
         let replied = try Endpoint.post(reply, room: "harbor-design").decode(response(try Exchange("message-reply")))
@@ -132,7 +153,10 @@ func answer<Response>(
 
     @Test func aSpecReadsEveryFieldTheServerSends() throws {
         let detail = try Endpoint.spec("harbor-docks").decode(response(try Exchange("spec")))
-        let listed = try #require(try Endpoint.specs().decode(response(try Exchange("specs"))).specs.first)
+        let list = try Endpoint.specs().decode(response(try Exchange("specs")))
+        #expect(list.total == 2)
+        #expect(list.specs.map(\.id) == ["harbor-docks", "harbor-buoys"])
+        let listed = try #require(list.specs.first)
         #expect(detail.body == "The south berth takes the ferry.")
         #expect(detail.plan == "")
         let spec = detail.spec
@@ -151,14 +175,37 @@ func answer<Response>(
         #expect(spec.wake == "mention")
         expectSeated(spec.engagement)
         #expect(spec.createdBy == "uday")
-        #expect(spec.createdAt == pinned)
-        #expect(spec.updatedAt == pinned)
+        #expect(spec.createdAt.milliseconds == Goldens.pinnedMilliseconds)
+        #expect(spec.updatedAt.milliseconds == Goldens.pinnedMilliseconds)
         #expect(spec.updatedBy == "uday")
         #expect(spec.roomId == "harbor-design")
         #expect(spec.lastActivityAt == nil)
-        #expect(listed.lastActivityAt == pinned)
+        #expect(listed.lastActivityAt?.milliseconds == Goldens.pinnedMilliseconds)
         #expect(spec.needsReply)
         #expect(spec.questionMessageId == "00000000-0000-7000-8000-000000000003")
+    }
+
+    @Test func aSpecWithNothingOptionalReadsAsUnassignedUnfiledAndUnasked() throws {
+        let detail = try Endpoint.spec("harbor-buoys").decode(response(try Exchange("spec-bare")))
+        #expect(detail.body == "")
+        let spec = detail.spec
+        #expect(spec.id == "harbor-buoys")
+        #expect(spec.status == .known(.pending))
+        #expect(spec.assignee == nil)
+        #expect(spec.agent == nil)
+        #expect(spec.model == nil)
+        #expect(spec.reasoningEffort == nil)
+        #expect(spec.branch == nil)
+        #expect(spec.priority == 0)
+        #expect(spec.dependsOn.isEmpty)
+        #expect(spec.repos.isEmpty)
+        #expect(spec.wake == nil)
+        #expect(spec.engagement == nil)
+        #expect(spec.roomId == "harbor-buoys")
+        #expect(spec.updatedAt.milliseconds == Goldens.pinnedMilliseconds + 1)
+        #expect(spec.lastActivityAt == nil)
+        #expect(!spec.needsReply)
+        #expect(spec.questionMessageId == nil)
     }
 
     @Test func aFieldTheClientDoesNotKnowIsIgnored() throws {
@@ -270,7 +317,12 @@ func answer<Response>(
 }
 
 /// Refusals the server writes for routes this client does not call yet; each still decodes.
-let refusalsOfRoutesNotYetCalled: Set<String> = ["refusal-out-of-scope", "refusal-project-not-created"]
+let refusalsOfRoutesNotYetCalled: Set<String> = [
+    "refusal-out-of-scope", "refusal-project-not-created", "refusal-run-on-other-node",
+]
+
+/// The exchange `SailEvents` makes, proven by its own tests.
+let exchangesOfSailEvents: Set<String> = ["events-recent"]
 
 /// The member the golden writer seats in the room.
 func expectSeated(_ member: RoomMember?, sourceLocation: SourceLocation = #_sourceLocation) {
@@ -278,7 +330,7 @@ func expectSeated(_ member: RoomMember?, sourceLocation: SourceLocation = #_sour
     #expect(member?.agentName == "Claude Code", sourceLocation: sourceLocation)
     #expect(member?.mode == .known(.readOnly), sourceLocation: sourceLocation)
     #expect(member?.model == "opus", sourceLocation: sourceLocation)
-    #expect(member?.engagedAt == pinned, sourceLocation: sourceLocation)
+    #expect(member?.engagedAt.milliseconds == Goldens.pinnedMilliseconds, sourceLocation: sourceLocation)
 }
 
 /// That `decode` fails naming `route` and `field`, in whatever words the platform's decoder gives.

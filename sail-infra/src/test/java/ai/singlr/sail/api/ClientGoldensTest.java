@@ -7,9 +7,11 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.access.baseline.GoldenFiles;
+import ai.singlr.sail.api.Event.WellKnownTypes;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Engagement;
@@ -29,14 +31,19 @@ import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyWire;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
+import ai.singlr.sail.sync.SyncTransition;
 import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -83,10 +90,12 @@ import org.junit.jupiter.api.io.TempDir;
  * each route the first native surface calls and each refusal it handles, as one request and the
  * response the real router gave; the event stream the real stream handler wrote while those routes
  * ran, with a sample of every well-known event type; every pty frame type as {@link PtyWire} writes
- * it; and the vocabularies the client's enums mirror. Each file must equal what the server writes
- * now, so a change to a shape a client decodes fails here and arrives in its pull request as a
- * changed golden. They are a snapshot as the permission baseline is ({@link GoldenFiles}), so a
- * change that alters one on purpose re-records them as it does:
+ * it, with the magic it opens with and the largest payload it sends; and the vocabularies the
+ * client's enums mirror. Nothing of the wire is typed here: what a golden holds, the server wrote.
+ * Each file must equal what the server writes now, so a change to a shape a client decodes fails
+ * here and arrives in its pull request as a changed golden. They are a snapshot as the permission
+ * baseline is ({@link GoldenFiles}), so a change that alters one on purpose re-records them as it
+ * does:
  *
  * <pre>
  * mvn -o -pl sail-infra -am test -Dtest=ClientGoldensTest \
@@ -100,12 +109,15 @@ import org.junit.jupiter.api.io.TempDir;
 class ClientGoldensTest {
 
   private static final Path GOLDENS = Path.of("..", "clients", "SailKit", "Tests", "Goldens");
-  private static final Instant AT = Instant.parse("2026-11-11T09:00:00Z");
+  private static final Instant AT = Instant.parse("2026-11-11T09:00:00.656Z");
   private static final Pattern UUID =
       Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
   private static final String PROJECT = "harbor";
   private static final String ROOM = "harbor-design";
+  private static final String QUIET_ROOM = "harbor-quay";
   private static final String SPEC = "harbor-docks";
+  private static final String BARE_SPEC = "harbor-buoys";
+  private static final String RUN = "run-1";
   private static final String DATA = "data: ";
   private static final SyncConfig OWNER = new SyncConfig(null, null, "uday");
 
@@ -133,23 +145,33 @@ class ClientGoldensTest {
       var sam = box.scopedToken("sam");
       var http = new TreeMap<String, String>();
       box.seed("POST", "/v1/rooms", uday, room());
+      box.seed("POST", "/v1/rooms", uday, bare(QUIET_ROOM, "Quay"));
       var stream = box.stream("/v1/events/stream", uday);
       var roomStream = box.stream("/v1/events/stream?room=" + ROOM, uday);
       var asked = box.record(http, "message-posted", "POST", messages(), uday, question());
       var asking = ((Map<?, ?>) asked.get("message")).get("id").toString();
       box.record(http, "message-reply", "POST", messages(), uday, reply(asking));
       box.seed("POST", "/v1/specs", uday, spec());
+      box.seed("POST", "/v1/specs", uday, bare(BARE_SPEC, "Buoys mark the channel"));
       box.seat(Engagement.of("claude-code", "read_only", "opus", DateTimeUtils.format(AT)));
-      box.ask("claude/run-1", "uday", "Shall I take the south berth?");
+      box.post("claude/run-1", "The harness exited before it answered.", MessageStore.Mark.ERROR);
+      box.post("claude/run-1", "Shall I take the south berth?", MessageStore.Mark.QUESTION);
       box.seed("POST", "/v1/events", uday, published());
+      box.seed("PUT", "/v1/specs/" + BARE_SPEC, uday, Map.of("status", "pending"));
+      var run = box.run(RUN, SPEC, OWNER.handle());
+      box.run("run-2", BARE_SPEC, "ada");
+      box.reviewPassedWithAFindingOpen();
 
       box.record(http, "whoami", "GET", "/v1/whoami", uday, null);
       box.record(http, "projects", "GET", "/v1/projects", uday, null);
       box.record(http, "rooms", "GET", "/v1/rooms?project=" + PROJECT, uday, null);
       box.record(http, "room", "GET", "/v1/rooms/" + ROOM, uday, null);
+      box.record(http, "room-bare", "GET", "/v1/rooms/" + QUIET_ROOM, uday, null);
       box.record(http, "messages", "GET", messages() + "?limit=50", uday, null);
       box.record(http, "specs", "GET", "/v1/specs?project=" + PROJECT, uday, null);
       box.record(http, "spec", "GET", "/v1/specs/" + SPEC, uday, null);
+      box.record(http, "spec-bare", "GET", "/v1/specs/" + BARE_SPEC, uday, null);
+      box.record(http, "events-recent", "GET", "/v1/events/recent?limit=3", uday, null);
 
       box.record(http, "refusal-read-only-credential", "POST", messages(), vik, plain("hello"));
       box.record(http, "refusal-room-not-found", "GET", "/v1/rooms/nowhere", uday, null);
@@ -160,9 +182,9 @@ class ClientGoldensTest {
       box.record(http, "refusal-out-of-scope", "POST", "/v1/specs", sam, unroomed());
       box.record(http, "refusal-project-not-created", "POST", members(), uday, member());
       box.record(http, "refusal-not-found", "GET", "/v1/nowhere", uday, null);
+      box.record(http, "refusal-run-on-other-node", "GET", "/v1/runs/run-2/log", uday, null);
 
-      var last = everyOtherWellKnownEvent().stream().map(bus::publish).toList().getLast();
-      box.end(uday, last);
+      box.end(uday, box.publishEveryOtherWellKnownEvent(run));
       var events = new TreeMap<String, String>();
       events.put("stream.sse", Scrub.stream(stream.join(), box::renamed));
       events.put("room-stream.sse", Scrub.stream(roomStream.join(), box::renamed));
@@ -197,7 +219,14 @@ class ClientGoldensTest {
         new TreeMap<>(
             Map.of(
                 "frames.json",
-                json(Map.of("magic", HexFormat.of().formatHex(magic()), "frames", frames)))));
+                json(
+                    Map.of(
+                        "magic",
+                        HexFormat.of().formatHex(magic()),
+                        "max_payload",
+                        largestPayload(),
+                        "frames",
+                        frames)))));
   }
 
   @Test
@@ -211,6 +240,11 @@ class ClientGoldensTest {
     vocabulary.put("event_types", List.copyOf(wellKnownTypes()));
     vocabulary.put(
         "member_modes", Arrays.stream(EngagementMode.values()).map(EngagementMode::wire).toList());
+    vocabulary.put(
+        "publisher_lanes",
+        Arrays.stream(Actor.Lane.values())
+            .map(lane -> Event.Publisher.of(new Actor("uday", Role.MEMBER, lane)).lane())
+            .toList());
     vocabulary.put(
         "remedy_runners",
         Arrays.stream(Remedy.Runs.values())
@@ -244,7 +278,13 @@ class ClientGoldensTest {
     return Map.of("id", "harbor-ferry", "project", PROJECT, "title", "A ferry timetable");
   }
 
+  /**
+   * An event a client publishes, whose data is the client's own: every kind of JSON value, a null
+   * inside a list and an integer past what a double holds exactly among them.
+   */
   private static Map<String, Object> published() {
+    var berths = new ArrayList<Object>(List.of(4, 12.5, true, "south"));
+    berths.add(null);
     return Map.of(
         "v",
         1,
@@ -257,11 +297,18 @@ class ClientGoldensTest {
         "agent",
         "mast",
         "host",
-        "laptop");
+        "laptop",
+        "data",
+        Map.of("berths", berths, "displacement", 9_007_199_254_740_993L));
   }
 
   private static Map<String, Object> room() {
     return Map.of("id", ROOM, "project", PROJECT, "title", "Docks", "wake", "mention");
+  }
+
+  /** A room or a spec as it is created with nothing but what it must have. */
+  private static Map<String, Object> bare(String id, String title) {
+    return Map.of("id", id, "project", PROJECT, "title", title);
   }
 
   private static Map<String, Object> member() {
@@ -294,61 +341,13 @@ class ClientGoldensTest {
         Map.entry("room_id", ROOM));
   }
 
-  /**
-   * One event of each well-known type the routes above did not publish, with the data keys its
-   * emitter writes; the last is the room's, so both streams are sent it.
-   */
-  private static List<Event> everyOtherWellKnownEvent() {
-    var run = Map.<String, Object>of(Event.WellKnownData.RUN_ID, "run-1");
-    var stop = Map.<String, Object>of("run_id", "run-1", "source", "watcher", "exit_code", 0);
-    var room = Map.<String, Object>of("room_id", ROOM, "principal", "agent:claude", "turn", 1);
-    return List.of(
-        SyncTransitionEvents.health("main@host", false, "unreachable", "refused", "box"),
-        SyncTransitionEvents.health("main@host", true, null, null, "box"),
-        event(SPEC, "spec_dispatched", Map.of("run_id", "run-1", "agent", "claude-code")),
-        event(SPEC, "spec_restarted", run),
-        event(SPEC, "spec_status_changed", Map.of("from", "pending", "to", "in_progress")),
-        event(SPEC, "agent_session_started", run),
-        event(SPEC, "agent_session_stopped", stop),
-        event(SPEC, "agent_session_completed", stop),
-        event(ROOM, "agent_conversation_started", Map.of("room_id", ROOM, "session_id", "s-1")),
-        event(SPEC, "agent_cancelled", Map.of("run_id", "run-1", "source", "operator")),
-        event(SPEC, "agent_stop_nudged", Map.of("reason", "Commit and push before you stop.")),
-        event(SPEC, "agent_tool_started", Map.of("tool", "Bash")),
-        event(SPEC, "agent_tool_finished", Map.of("tool", "Bash", "batch", true)),
-        event(SPEC, "agent_log_chunk", Map.of("run_id", "run-1", "lines", List.of("building"))),
-        event(null, "snapshot_created", Map.of("name", "before-docks")),
-        event(null, "snapshot_restored", Map.of("name", "before-docks")),
-        event(null, "snapshot_deleted", Map.of("name", "before-docks")),
-        event(SPEC, "guardrail_triggered", Map.of("run_id", "run-1", "reason", "stall (20m)")),
-        event(null, "board_updated", Map.of()),
-        event(ROOM, "spec_engaged", Map.of("agent", "claude-code", "mode", "full")),
-        event(ROOM, "spec_disengaged", Map.of("agent", "claude-code")),
-        event(ROOM, "spec_engage_failed", Map.of("agent", "claude-code", "reason", "no space")),
-        event(SPEC, "agent_presence", Map.of("run_id", "run-1", "presence", "working")),
-        event(ROOM, "agent_turn_began", room),
-        event(ROOM, "agent_text_delta", with(room, "text", "South berth — 12 m draft ✅")),
-        event(ROOM, "agent_tool_call", with(room, "status", "started")),
-        event(ROOM, "agent_turn_ended", with(room, "message_id", "ended-turn")),
-        event(SPEC, "spec_stranded", Map.of("status", "in_progress")),
-        event(SPEC, "agent_failed", Map.of("run_id", "run-1", "exit_code", 2)),
-        event(ROOM, "pty_session_started", Map.of("session", "lounge", "room_id", ROOM)),
-        event(ROOM, "pty_session_attached", Map.of("session", "lounge")),
-        event(ROOM, "pty_session_ended", Map.of("session", "lounge", "reason", "exited(0)")));
-  }
-
-  private static Map<String, Object> with(Map<String, Object> data, String key, Object value) {
-    var more = new LinkedHashMap<>(data);
-    more.put(key, value);
-    return more;
-  }
-
-  private static Event event(String spec, String type, Map<String, Object> data) {
-    return Event.of(PROJECT, spec, type, Event.SAIL_AGENT, "box", data);
+  /** An event with no data: the envelope every event has, as the box itself publishes one. */
+  private static Event envelope(String spec, String type) {
+    return Event.of(PROJECT, spec, type, Event.SAIL_AGENT, "box");
   }
 
   private static Set<String> wellKnownTypes() {
-    return Arrays.stream(Event.WellKnownTypes.class.getFields())
+    return Arrays.stream(WellKnownTypes.class.getFields())
         .filter(field -> Modifier.isStatic(field.getModifiers()))
         .filter(field -> field.getType() == String.class)
         .map(ClientGoldensTest::constant)
@@ -415,8 +414,45 @@ class ClientGoldensTest {
     return out.toByteArray();
   }
 
+  /** What {@link PtyWire#handshake} writes before it reads its peer's answer. */
   private static byte[] magic() {
-    return "SAILPTY3".getBytes(StandardCharsets.US_ASCII);
+    var sent = new ByteArrayOutputStream();
+    assertThrows(
+        EOFException.class,
+        () ->
+            PtyWire.handshake(
+                Channels.newChannel(InputStream.nullInputStream()), Channels.newChannel(sent)));
+    return sent.toByteArray();
+  }
+
+  /**
+   * The largest payload {@link PtyWire#write} sends: an output's bytes are doubled until it refuses
+   * the frame, then narrowed to the last size it sent.
+   */
+  private static int largestPayload() throws IOException {
+    var refused = 1;
+    while (sends(refused)) {
+      refused *= 2;
+    }
+    var sent = refused / 2;
+    while (refused - sent > 1) {
+      var between = (sent + refused) / 2;
+      if (sends(between)) {
+        sent = between;
+      } else {
+        refused = between;
+      }
+    }
+    return wire(new PtyMessage.Output(0, new byte[sent])).length - Integer.BYTES;
+  }
+
+  private static boolean sends(int bytes) {
+    try {
+      wire(new PtyMessage.Output(0, new byte[bytes]));
+      return true;
+    } catch (IOException refused) {
+      return false;
+    }
   }
 
   /** A box serving the web API and the event stream over its own database and bus. */
@@ -492,17 +528,124 @@ class ClientGoldensTest {
       Acting.system(() -> new RoomStore(db).updateRoster(ROOM, Roster.solo(member).toJson()));
     }
 
-    /** Posts {@code body} as a question from the agent principal {@code agent} of {@code owner}. */
-    void ask(String agent, String owner, String body) {
-      var principal = Actor.agentPrincipal(agent, owner);
+    /** Posts {@code body}, marked {@code mark}, as the agent principal {@code agent} of uday. */
+    void post(String agent, String body, MessageStore.Mark mark) {
+      var principal = Actor.agentPrincipal(agent, OWNER.handle());
       Actor.call(
               principal,
               () ->
                   operations.postRoomMessage(
-                      ROOM,
-                      new SpecMessageRequest(body, null, MessageStore.Mark.QUESTION),
-                      principal.handle()))
+                      ROOM, new SpecMessageRequest(body, null, mark), principal.handle()))
           .orThrow();
+    }
+
+    /** A build run {@code id} of {@code spec} on {@code node}'s box, as a dispatch records one. */
+    RunStore.RunRow run(String id, String spec, String node) {
+      var runs = new RunStore(db);
+      Acting.system(
+          () ->
+              runs.create(
+                  id,
+                  PROJECT,
+                  spec,
+                  node,
+                  "build",
+                  "claude-code",
+                  "agent/" + spec,
+                  null,
+                  null,
+                  null,
+                  "/var/log/sail/" + id + ".log",
+                  "sail-agent-" + id));
+      runs.stampActivity(id, Duration.ZERO);
+      return runs.findById(id).orElseThrow();
+    }
+
+    /** The spec's review as the loop leaves one that passed below its gate: one finding open. */
+    void reviewPassedWithAFindingOpen() {
+      var reviews = new ReviewStore(db);
+      Acting.system(
+          () -> {
+            var review = reviews.createReview(SPEC, 1);
+            reviews.addFinding(
+                reviews.createStage(review, "logic", "agent"),
+                Finding.create(
+                    Finding.Severity.LOW,
+                    Finding.Category.LOGIC,
+                    "docks/Berth.java",
+                    12,
+                    12,
+                    "The berth's depth is unchecked",
+                    "A ferry deeper than the berth is admitted.",
+                    "Berth.admit never reads draft.",
+                    null,
+                    0.6));
+            reviews.pass(review, () -> {});
+          });
+    }
+
+    /**
+     * Publishes one event of each well-known type the routes above did not, and answers the last,
+     * which is the room's, so both streams are sent it. An event whose emitter a test can call is
+     * what that emitter writes. Every other is its envelope alone: data typed here would pin
+     * nothing the server writes, so a client is shown none.
+     */
+    Event publishEveryOtherWellKnownEvent(RunStore.RunRow run) {
+      bus.publish(SyncTransitionEvents.health("main@host", false, "unreachable", "refused", "box"));
+      bus.publish(SyncTransitionEvents.health("main@host", true, null, null, "box"));
+      synced("spec", SPEC, "review", "in_progress", Map.of("branch", run.branch()));
+      synced("run", run.id(), "running", "failed", Map.of("spec_id", SPEC, "exit_code", 2));
+      bus.publish(StopOperations.cancelEvent(run, Event.WellKnownData.SOURCE_OPERATOR, "uday"));
+      new RunPresenceEmitter(
+              new RunStore(db),
+              bus,
+              OWNER::handle,
+              () -> AT.plus(RunPresence.THRESHOLD).plusMillis(1))
+          .sweep();
+      new LoopNarrator(null, bus, null)
+          .publishGuardrail(PROJECT, SPEC, "stall (20m)", "stopped the run");
+      Actor.call(
+              Actor.agentPrincipal("claude/" + RUN, OWNER.handle()),
+              () -> operations.recordRoomConversation(ROOM, "claude", "s-1", "startup", null))
+          .orThrow();
+      Stream.of(
+              WellKnownTypes.AGENT_SESSION_STARTED,
+              WellKnownTypes.AGENT_SESSION_COMPLETED,
+              WellKnownTypes.AGENT_STOP_NUDGED,
+              WellKnownTypes.AGENT_TOOL_STARTED,
+              WellKnownTypes.AGENT_TOOL_FINISHED,
+              WellKnownTypes.AGENT_LOG_CHUNK,
+              WellKnownTypes.SNAPSHOT_CREATED,
+              WellKnownTypes.SNAPSHOT_RESTORED,
+              WellKnownTypes.SNAPSHOT_DELETED,
+              WellKnownTypes.SPEC_STRANDED)
+          .forEach(type -> bus.publish(envelope(SPEC, type)));
+      return Stream.of(
+              WellKnownTypes.SPEC_ENGAGED,
+              WellKnownTypes.SPEC_DISENGAGED,
+              WellKnownTypes.SPEC_ENGAGE_FAILED,
+              WellKnownTypes.AGENT_TURN_BEGAN,
+              WellKnownTypes.AGENT_TEXT_DELTA,
+              WellKnownTypes.AGENT_TOOL_CALL,
+              WellKnownTypes.AGENT_TURN_ENDED,
+              WellKnownTypes.PTY_SESSION_STARTED,
+              WellKnownTypes.PTY_SESSION_ATTACHED,
+              WellKnownTypes.PTY_SESSION_ENDED)
+          .map(type -> bus.publish(envelope(ROOM, type)))
+          .toList()
+          .getLast();
+    }
+
+    /** Publishes what main narrates when a node's {@code type} row moves between two statuses. */
+    private void synced(String type, String id, String from, String to, Map<String, Object> row) {
+      var snapshot = new LinkedHashMap<>(row);
+      snapshot.put("project", PROJECT);
+      SyncTransitionEvents.eventsFor(
+              new SyncTransition(type, id, from, to, snapshot),
+              spec -> PROJECT,
+              spec -> "passed",
+              "box")
+          .forEach(bus::publish);
     }
 
     String token(String handle, Role role) {
@@ -586,17 +729,22 @@ class ClientGoldensTest {
     }
 
     /**
-     * Ends every open stream as a revoked caller's ends, once each has written {@code last}: {@code
-     * token} is revoked, the streams' clock passes their next check, and an event arrives for them
-     * to check on.
+     * Ends every open stream as a revoked caller's ends, once each has written {@code last} and,
+     * its clock moved past a heartbeat with nothing left to send, the comment that keeps an idle
+     * stream open: {@code token} is revoked, the streams' clock passes their next check, and an
+     * event arrives for them to check on.
      */
     void end(String token, Event last) throws InterruptedException {
       for (var stream : streams) {
         stream.awaitLine("id: " + last.id());
       }
+      streamClock.advance(Duration.ofMillis(SseHandler.HEARTBEAT_MILLIS + 1));
+      for (var stream : streams) {
+        stream.awaitLine(": keepalive");
+      }
       new AuthSessionStore(db).revoke(token);
       streamClock.advance(StreamRecheck.INTERVAL);
-      bus.publish(event(ROOM, "board_updated", Map.of()));
+      bus.publish(envelope(ROOM, WellKnownTypes.BOARD_UPDATED));
     }
 
     /** {@code text} with every UUID renamed by the order this box first saw it. */
@@ -692,13 +840,13 @@ class ClientGoldensTest {
 
     /**
      * {@code stream} with each data line's JSON made canonical and the name of the machine that
-     * wrote an event written as {@code box}, its framing as sent.
+     * wrote an event written as {@code box}, its framing as sent: lines are cut at their line feed
+     * alone and joined by it again, so whatever else the server ends a line with stays.
      */
     static String stream(String stream, UnaryOperator<String> rename) {
-      return stream
-          .lines()
+      return Arrays.stream(stream.split("\n", -1))
           .map(line -> line.startsWith(DATA) ? DATA + data(line, rename) : line)
-          .collect(Collectors.joining("\n", "", "\n"));
+          .collect(Collectors.joining("\n"));
     }
 
     private static String data(String line, UnaryOperator<String> rename) {

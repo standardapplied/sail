@@ -23,7 +23,7 @@ import Testing
         let posted = try #require(events.first)
         #expect(posted.v == 1)
         #expect(posted.id == 1)
-        #expect(posted.ts == Date(timeIntervalSince1970: 1_794_387_600))
+        #expect(posted.ts.milliseconds == Goldens.pinnedMilliseconds)
         #expect(posted.project == "harbor")
         #expect(posted.spec == "harbor-design")
         #expect(posted.type == .known(.specMessagePosted))
@@ -38,11 +38,20 @@ import Testing
         let published = try #require(events.first { $0.publisher != nil })
         #expect(published.publisher == Publisher(handle: "uday", role: "admin", lane: "api"))
         #expect(published.spec == nil)
-        #expect(published.data == [:])
-        let failed = try #require(events.first { $0.type == .known(.agentFailed) })
-        #expect(failed.data["exit_code"] == .number(2))
-        let logged = try #require(events.first { $0.type == .known(.agentLogChunk) })
-        #expect(logged.data["lines"] == .array([.string("building")]))
+        #expect(published.agent == "mast")
+        #expect(published.host == "laptop")
+    }
+
+    @Test func anEventsDataKeepsEveryKindOfValueAClientPublished() async throws {
+        let (events, _) = try await readGolden("events/stream.sse")
+        let published = try #require(events.first { $0.publisher != nil })
+        #expect(published.data["berths"] == .array([.number(4), .number(12.5), .bool(true), .string("south"), .null]))
+    }
+
+    @Test func anEventWhoseEmitterWritesNoDataReadsAsNone() async throws {
+        let (events, _) = try await readGolden("events/stream.sse")
+        let filed = try #require(events.first { $0.type == .known(.boardUpdated) })
+        #expect(filed.data == [:])
     }
 
     @Test func aStreamThatEndedWithARefusalAnswersNothingMore() async throws {
@@ -54,7 +63,7 @@ import Testing
                 read += 1
             }
         }
-        #expect(read == 15)
+        #expect(read == 16)
         #expect(try await events.next() == nil)
         #expect(await server.requests.count == 1)
     }

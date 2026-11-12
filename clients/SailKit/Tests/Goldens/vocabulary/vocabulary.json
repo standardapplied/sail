@@ -245,6 +245,15 @@
     "full",
     "read_only"
   ],
+  "publisher_lanes": [
+    "cli",
+    "api",
+    "agent",
+    "room",
+    "sync",
+    "main",
+    "system"
+  ],
   "remedy_runners": [
     "sail",
     "client",

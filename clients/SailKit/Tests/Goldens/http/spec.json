@@ -6,13 +6,23 @@
   "response": {
     "body": {
       "body": "The south berth takes the ferry.",
+      "latest_run": {
+        "id": "run-1",
+        "last_activity_at": "2026-11-11T09:00:00.656Z",
+        "node": "uday",
+        "owner": "uday",
+        "presence": "working",
+        "principal": "claude/run-1",
+        "status": "running"
+      },
+      "open_findings": 1,
       "plan": "",
       "schema_version": 1,
       "spec": {
         "agent": "claude-code",
         "assignee": "uday",
         "branch": "agent/harbor-docks",
-        "created_at": "2026-11-11T09:00:00.000Z",
+        "created_at": "2026-11-11T09:00:00.656Z",
         "created_by": "uday",
         "depends_on": [
           "harbor-berths"
@@ -20,7 +30,7 @@
         "engagement": {
           "agent": "claude-code",
           "agent_name": "Claude Code",
-          "engaged_at": "2026-11-11T09:00:00.000Z",
+          "engaged_at": "2026-11-11T09:00:00.656Z",
           "mode": "read_only",
           "model": "opus"
         },
@@ -37,7 +47,7 @@
         "room_id": "harbor-design",
         "status": "pending",
         "title": "Docks take the ferry",
-        "updated_at": "2026-11-11T09:00:00.000Z",
+        "updated_at": "2026-11-11T09:00:00.656Z",
         "updated_by": "uday",
         "wake": "mention"
       }

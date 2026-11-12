@@ -102,6 +102,10 @@ import Testing
         #expect(throws: TerminalWireError.truncated) { try FrameCodec.decode(payload: []) }
     }
 
+    @Test func theLargestPayloadIsTheLargestTheHostSends() throws {
+        #expect(FrameCodec.maxPayload == (try Goldens.maxPayload()))
+    }
+
     @Test func aFrameLargerThanTheHostAcceptsIsRefusedBeforeItIsSent() throws {
         let largest = FrameCodec.maxPayload - 13
         #expect(try FrameCodec.encode(.input(seq: 1, bytes: Array(repeating: 0, count: largest))).count

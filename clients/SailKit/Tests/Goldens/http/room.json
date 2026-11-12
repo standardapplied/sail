@@ -6,16 +6,16 @@
   "response": {
     "body": {
       "assignee": "uday",
-      "created_at": "2026-11-11T09:00:00.000Z",
+      "created_at": "2026-11-11T09:00:00.656Z",
       "created_by": "uday",
       "effective_wake": "mention",
       "id": "harbor-design",
-      "last_activity_at": "2026-11-11T09:00:00.000Z",
+      "last_activity_at": "2026-11-11T09:00:00.656Z",
       "members": [
         {
           "agent": "claude-code",
           "agent_name": "Claude Code",
-          "engaged_at": "2026-11-11T09:00:00.000Z",
+          "engaged_at": "2026-11-11T09:00:00.656Z",
           "mode": "read_only",
           "model": "opus"
         }
@@ -28,7 +28,7 @@
         "harbor-docks"
       ],
       "title": "Docks",
-      "updated_at": "2026-11-11T09:00:00.000Z",
+      "updated_at": "2026-11-11T09:00:00.656Z",
       "updated_by": "sail",
       "wake": "mention"
     },
