@@ -195,11 +195,11 @@ class RoomAuthorityTest {
   }
 
   /**
-   * The one room an agent creates is the own room of a spec it made, as a spec's birth mints it;
-   * any other is no agent's to create.
+   * The one room an agent creates is the own room of a spec it made, as a spec's birth mints it,
+   * and it changes that room after; any other is no agent's to create, nor another run's to change.
    */
   @Test
-  void anAgentCreatesTheOwnRoomOfASpecItMadeAndNoOther() {
+  void anAgentCreatesAndChangesTheOwnRoomOfASpecItMadeAndNoOther() {
     Acting.by(
         AGENT,
         () ->
@@ -229,6 +229,10 @@ class RoomAuthorityTest {
         Optional.of(Kind.NOT_OWNER),
         rule.decide(OTHERS_AGENT, "drafted", null, room).map(Refusal::kind),
         "another run made nothing of it");
+    assertEquals(Optional.empty(), rule.decide(AGENT, "drafted", room, with(room, "wake", "off")));
+    assertEquals(
+        Optional.of(Kind.NOT_OWNER),
+        rule.decide(OTHERS_AGENT, "drafted", room, with(room, "wake", "off")).map(Refusal::kind));
   }
 
   /**
