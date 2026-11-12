@@ -5,13 +5,14 @@
 
 package ai.singlr.sail.common;
 
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * Null-safe string predicates, and the terminal's measure of a line ({@link #columns}, {@link
- * #fit}). All application code checks emptiness/blankness through this seam rather than inlining
- * {@code s == null || s.isBlank()}, so the intent reads consistently and a null is never
- * dereferenced.
+ * Null-safe string predicates, the terminal's measure of a line ({@link #columns}, {@link #fit}),
+ * and a size as an operator reads it ({@link #gibibytes}). All application code checks
+ * emptiness/blankness through this seam rather than inlining {@code s == null || s.isBlank()}, so
+ * the intent reads consistently and a null is never dereferenced.
  */
 public final class Strings {
 
@@ -129,5 +130,10 @@ public final class Strings {
   /** {@code word} as one shell word to paste back: bare when that is safe, else single-quoted. */
   public static String shellWord(String word) {
     return word.matches("[A-Za-z0-9._/=:@,+-]+") ? word : "'" + word.replace("'", "'\\''") + "'";
+  }
+
+  /** {@code bytes} in GiB to one decimal, as {@code df -h} and Incus print a size: "6.4 GiB". */
+  public static String gibibytes(long bytes) {
+    return String.format(Locale.ROOT, "%.1f GiB", bytes / (double) (1L << 30));
   }
 }

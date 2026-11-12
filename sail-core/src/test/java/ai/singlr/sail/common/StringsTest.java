@@ -160,6 +160,13 @@ class StringsTest {
   }
 
   @Test
+  void aSizeReadsInGibibytesToOneDecimal() {
+    assertEquals("6.4 GiB", Strings.gibibytes(6871947673L));
+    assertEquals("0.0 GiB", Strings.gibibytes(0));
+    assertEquals("894.0 GiB", Strings.gibibytes(959925207040L));
+  }
+
+  @Test
   void shellWordLeavesASafeWordBareAndQuotesAnyOtherToPasteBack() {
     assertEquals("--title", Strings.shellWord("--title"));
     assertEquals("/var/lib/sail=a:b.c", Strings.shellWord("/var/lib/sail=a:b.c"));
