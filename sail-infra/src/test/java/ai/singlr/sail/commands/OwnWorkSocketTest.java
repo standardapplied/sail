@@ -235,7 +235,7 @@ class OwnWorkSocketTest {
   /**
    * An agent files a spec only under its project: moving the draft it made, or the spec it works,
    * into beta is refused as outside its work, and both stay in acme. One its person moved there is
-   * no longer its work: it edits it no more.
+   * no longer its work: it edits it no more, and posts in it no more.
    */
   @ParameterizedTest
   @ValueSource(strings = {"claude-code", "codex"})
@@ -264,6 +264,12 @@ class OwnWorkSocketTest {
             + "' may change only its own work, not spec 'd1'."
             + OUTSIDE_WORK,
         said(run(build, "PUT", "/v1/specs/d1", "title=InBeta")));
+    assertEquals(
+        "403 forbidden_not_assignee '"
+            + principal(build)
+            + "' may post only in its own work, not in 'd1'."
+            + OUTSIDE_WORK,
+        said(run(build, "POST", "/v1/specs/d1/messages", "body=hi")));
   }
 
   /** Row 16: no agent sets e1 done or archives it; one that may write still retitles it. */
