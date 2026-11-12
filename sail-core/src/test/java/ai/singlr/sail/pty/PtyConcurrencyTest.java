@@ -26,7 +26,9 @@ class PtyConcurrencyTest {
    * Types continuously while the child echoes and exits on its own — the read half (a gather
    * thread) and the write half (a keystroke thread) run at once, the normal interactive case. Every
    * line must round-trip intact; a shared native buffer between {@link Pty#read} and {@link
-   * Pty#write} corrupts one stream or the other and drops or garbles lines.
+   * Pty#write} corrupts one stream or the other and drops or garbles lines. The terminal's own echo
+   * is off: Darwin's line discipline may place an echo inside a write it is holding back, which is
+   * the kernel's interleaving, not a corrupted stream.
    */
   @Test
   void concurrentReadAndWriteNeverCorruptEitherStream() throws Exception {
@@ -37,7 +39,7 @@ class PtyConcurrencyTest {
               dir.resolve("echo.exit"),
               "sh",
               "-c",
-              "i=0; while [ $i -lt "
+              "stty -echo; i=0; while [ $i -lt "
                   + lines
                   + " ]; do IFS= read -r l; printf 'R:%s\\n' \"$l\";"
                   + " i=$((i+1)); done"),

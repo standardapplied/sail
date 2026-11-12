@@ -103,9 +103,20 @@ public final class PtySelfTestCommand implements Callable<Integer> {
     }
   }
 
+  /** Reads {@code pty} to its end of stream: the child gone and its terminal drained. */
+  private static String readToEnd(Pty pty) throws IOException {
+    var buf = new byte[4096];
+    var said = new StringBuilder();
+    for (var n = pty.read(buf); n >= 0; n = pty.read(buf)) {
+      said.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+    }
+    return said.toString();
+  }
+
   /**
    * Opens a pty, resizes it once the child is waiting, and reads the new size from the child's own
-   * {@code stty}; the child's exit status comes back through the shim's exit file.
+   * {@code stty}; the child's exit status comes back through the shim's exit file, taken once the
+   * terminal has been read to its end, since on macOS the shim's exit waits for that.
    */
   static void ptyProbe() throws Exception {
     var dir = Files.createTempDirectory("sail-pty");
@@ -114,7 +125,10 @@ public final class PtySelfTestCommand implements Callable<Integer> {
       readUntil(pty, "waiting");
       pty.resize(100, 40);
       pty.write("go\n".getBytes(StandardCharsets.UTF_8));
-      readUntil(pty, "40 100");
+      var said = readToEnd(pty);
+      if (!said.contains("40 100")) {
+        throw new IllegalStateException("the child did not see the new size: " + said);
+      }
       if (child.waitFor() != 0 || !"0".equals(Files.readString(dir.resolve("probe.exit")))) {
         throw new IllegalStateException("the child did not exit cleanly: " + child.exitValue());
       }

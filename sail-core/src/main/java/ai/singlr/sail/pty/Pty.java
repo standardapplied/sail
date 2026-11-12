@@ -282,7 +282,8 @@ public final class Pty implements AutoCloseable {
    * output, a pipe from here, closes as the claim puts the terminal in its place or as the shim
    * exits, and only then does this process let go of the slave. Once the child is gone, reads end
    * as soon as the terminal has drained. The caller owns the returned process's ending: waiting and
-   * exit codes happen there.
+   * exit codes happen there, and it reads the terminal meanwhile, since on macOS a session leader's
+   * exit waits until its terminal's output has been read.
    */
   public Process spawn(List<String> shim, Map<String, String> env, Path cwd) throws IOException {
     requireOpen();

@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -33,21 +34,53 @@ class PtyTest {
 
   @TempDir Path dir;
 
+  /**
+   * Reads {@code pty} until {@code marker} has been said. A read blocks while the child is silent,
+   * so a deadline ends it: past ten seconds the pty drains to end of stream and the read fails.
+   */
   private static String readUntil(Pty pty, String marker) throws Exception {
     var out = new StringBuilder();
     var buf = new byte[4096];
-    var deadline = System.nanoTime() + 10_000_000_000L;
-    while (!out.toString().contains(marker)) {
-      if (System.nanoTime() > deadline) {
-        throw new AssertionError("marker '" + marker + "' not seen; got: " + out);
+    var deadline =
+        CompletableFuture.runAsync(
+            pty::endOnceDrained, CompletableFuture.delayedExecutor(10, TimeUnit.SECONDS));
+    try {
+      while (!out.toString().contains(marker)) {
+        var n = pty.read(buf);
+        if (n < 0) {
+          throw new AssertionError("marker '" + marker + "' not seen; got: " + out);
+        }
+        out.append(new String(buf, 0, n, StandardCharsets.UTF_8));
       }
-      var n = pty.read(buf);
-      if (n < 0) {
-        throw new AssertionError("pty closed before marker '" + marker + "'; got: " + out);
-      }
-      out.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+      return out.toString();
+    } finally {
+      deadline.cancel(false);
     }
-    return out.toString();
+  }
+
+  /**
+   * Reads {@code pty} to its end of stream and returns what was said. A child's status is taken
+   * only after this: on macOS a session leader's exit waits for its terminal's output to be read.
+   */
+  private static String readToEnd(Pty pty) throws Exception {
+    var out = new StringBuilder();
+    var buf = new byte[4096];
+    var deadline =
+        CompletableFuture.runAsync(
+            pty::endOnceDrained, CompletableFuture.delayedExecutor(10, TimeUnit.SECONDS));
+    try {
+      for (var n = pty.read(buf); n >= 0; n = pty.read(buf)) {
+        out.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+      }
+      return out.toString();
+    } finally {
+      deadline.cancel(false);
+    }
+  }
+
+  private static int exitOf(Process child) throws InterruptedException {
+    assertTrue(child.waitFor(10, TimeUnit.SECONDS), "the child is still running");
+    return child.exitValue();
   }
 
   private Process spawn(Pty pty, String script) throws IOException {
@@ -60,7 +93,7 @@ class PtyTest {
   private static String ps(long pid) throws Exception {
     var ps = new ProcessBuilder("ps", "-o", "stat=", "-p", Long.toString(pid)).start();
     var out = new String(ps.getInputStream().readAllBytes(), StandardCharsets.UTF_8).strip();
-    ps.waitFor();
+    exitOf(ps);
     return out;
   }
 
@@ -74,15 +107,9 @@ class PtyTest {
       assertTrue(head.contains("is-a-tty"), "the child must see a controlling terminal: " + head);
 
       pty.write("world\n".getBytes(StandardCharsets.UTF_8));
-      readUntil(pty, "got:world");
 
-      assertEquals(7, child.waitFor(), "the child exit code rides through");
-      var buf = new byte[256];
-      int n;
-      do {
-        n = pty.read(buf);
-      } while (n > 0);
-      assertEquals(-1, n, "a dead child reads as end of stream, never an exception");
+      assertTrue(readToEnd(pty).contains("got:world"), "a dead child reads as end of stream");
+      assertEquals(7, exitOf(child), "the child exit code rides through");
     }
   }
 
@@ -110,7 +137,7 @@ class PtyTest {
               "[ -t 0 ] && tty; ps -o stat= -p $$; ps -o stat= -p $PPID;"
                   + " echo \"leaked:${SAIL_PTY_TERMINAL:-none}\"; echo done");
 
-      var lines = readUntil(pty, "done").lines().map(String::strip).toList();
+      var lines = readToEnd(pty).lines().map(String::strip).toList();
       assertEquals(pty.slavePath(), lines.get(0), "the command's terminal is the pty's: " + lines);
       assertTrue(lines.get(1).contains("+"), "the command is in the foreground group: " + lines);
       assertFalse(lines.get(1).contains("s"), "the shim, not the command, leads: " + lines);
@@ -118,7 +145,7 @@ class PtyTest {
           lines.get(2).contains("s") && lines.get(2).contains("+"),
           "the shim leads the session from the foreground group: " + lines);
       assertEquals("leaked:none", lines.get(3), "the terminal's name stays the shim's");
-      assertEquals(0, child.waitFor());
+      assertEquals(0, exitOf(child));
     }
   }
 
@@ -151,7 +178,7 @@ class PtyTest {
       }
       ptys.forEach(Pty::close);
       for (var child : children) {
-        child.waitFor();
+        exitOf(child);
       }
     }
   }
@@ -168,8 +195,13 @@ class PtyTest {
                 dir.toString())
             .redirectErrorStream(true)
             .start();
+    var finished = process.waitFor(60, TimeUnit.SECONDS);
+    if (!finished) {
+      process.destroyForcibly().waitFor();
+    }
     var said = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertEquals(0, process.waitFor(), said);
+    assertTrue(finished, "the host never finished: " + said);
+    assertEquals(0, process.exitValue(), said);
     return said;
   }
 
@@ -183,7 +215,7 @@ class PtyTest {
     public static void main(String[] args) throws Exception {
       try (var pty = Pty.open(80, 24)) {
         pty.spawn(List.of("sh", "-c", "echo before-a-terminal >&2"), Map.of(), Path.of(args[0]))
-            .waitFor();
+            .waitFor(10, TimeUnit.SECONDS);
       }
     }
   }
@@ -207,9 +239,9 @@ class PtyTest {
                 PtyChildShimTest.shim(Path.of(args[0], "second.exit"), "sh", "-c", "echo ran"),
                 Map.of(),
                 Path.of(args[0]));
-        System.err.println(pty.slavePath() + " " + second.waitFor());
+        System.err.println(pty.slavePath() + " " + exitOf(second));
         pty.close();
-        first.waitFor();
+        exitOf(first);
       }
     }
   }
@@ -229,18 +261,27 @@ class PtyTest {
     assertFalse(Files.exists(dir.resolve("second.exit")));
   }
 
+  /**
+   * The foreground shell traps the interrupt and exits 3, so its arrival is what is read, whatever
+   * the shell was doing when it landed: a shell forking a command runs its handler in the child
+   * until the exec, and bash 3.2 (macOS's {@code /bin/sh}) acts on an untrapped {@code SIGINT} only
+   * at its own checkpoints, either of which would lose an interrupt aimed at a command it runs.
+   */
   @Test
-  void anInterruptEndsTheForegroundCommandWhileTheShimAndTheBackgroundJobRideItOut()
+  void anInterruptReachesTheForegroundCommandWhileTheShimAndTheBackgroundJobRideItOut()
       throws Exception {
     try (var pty = Pty.open(80, 24)) {
-      var child = spawn(pty, "sleep 100 & jobs; echo listed; read a; echo not-reached");
-      var jobs = readUntil(pty, "listed");
+      var child =
+          spawn(
+              pty, "sleep 100 & jobs; trap 'exit 3' INT; echo waiting; while :; do sleep 1; done");
+      var jobs = readUntil(pty, "waiting");
       assertTrue(jobs.contains("Running"), "jobs lists the background job: " + jobs);
 
       pty.write(new byte[] {3});
+      readToEnd(pty);
 
-      assertEquals(130, child.waitFor(), "the foreground read died of SIGINT: 128 + 2");
-      assertEquals("130", Files.readString(dir.resolve("child.exit")), "the shim rode it out");
+      assertEquals(3, exitOf(child), "the foreground shell took the interrupt");
+      assertEquals("3", Files.readString(dir.resolve("child.exit")), "the shim rode it out");
     }
   }
 
