@@ -458,7 +458,8 @@ class PoolDevicesTest {
         "/dev/sdh is refused, even with --force-wipe: it is in the imported zpool tank, and no"
             + " pool's device is taken: export or destroy the pool yourself first.",
         refusal(
-            spares().zpool("tank", listed, "/dev/sdb1\n/dev/loop4\n/dev/loop1\n/dev/sdh\n/dev/loop3"),
+            spares()
+                .zpool("tank", listed, "/dev/sdb1\n/dev/loop4\n/dev/loop1\n/dev/sdh\n/dev/loop3"),
             "/dev/sdh",
             null));
   }
