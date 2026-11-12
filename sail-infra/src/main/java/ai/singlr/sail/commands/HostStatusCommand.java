@@ -10,20 +10,20 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
-import ai.singlr.sail.engine.DirQuery;
 import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.HostPackages;
 import ai.singlr.sail.engine.HostProvisioner;
+import ai.singlr.sail.engine.IncusStorage;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.engine.ZfsQuery;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeoutException;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -76,20 +76,13 @@ public final class HostStatusCommand implements Runnable {
       OperatorCommand operator,
       PrintStream out)
       throws IOException, InterruptedException, TimeoutException {
-    ZfsQuery.PoolUsage poolUsage = null;
-    DirQuery.FsUsage fsUsage = null;
-    if (hostYaml.isZfs()) {
-      poolUsage = ZfsQuery.queryPool(shell, hostYaml.pool());
-    } else {
-      fsUsage = DirQuery.queryFilesystem(shell);
-    }
-
+    var storage = Storage.of(shell);
     var incusVersion = HostProvisioner.incusVersion(shell);
     var versions = new HostPackages(shell, detail -> {}).versions();
     var containers = Containers.of(shell);
 
     if (json) {
-      printJson(hostYaml, incusVersion, versions, hostInfo, poolUsage, fsUsage, containers, out);
+      printJson(hostYaml, incusVersion, versions, hostInfo, storage, containers, out);
       return;
     }
 
@@ -99,8 +92,8 @@ public final class HostStatusCommand implements Runnable {
         incusRow(incusVersion, versions),
         versions.movable() ? operator.sail("host incus upgrade") : null,
         hostInfo,
-        poolUsage,
-        fsUsage,
+        storage.rows(),
+        storage.advisory(),
         containers.summary(),
         out,
         Ansi.AUTO);
@@ -121,8 +114,7 @@ public final class HostStatusCommand implements Runnable {
       String incusVersion,
       HostPackages.Versions versions,
       HostDetector.HostInfo hostInfo,
-      ZfsQuery.PoolUsage poolUsage,
-      DirQuery.FsUsage fsUsage,
+      Storage storage,
       Containers containers,
       PrintStream out) {
     var map = new LinkedHashMap<String, Object>();
@@ -133,21 +125,10 @@ public final class HostStatusCommand implements Runnable {
     map.put("memory_mb", hostInfo.memoryMb());
     map.put("storage_backend", hostYaml.storageBackend());
     map.put("pool", hostYaml.pool());
-    if (hostYaml.isZfs()) {
-      map.put("pool_disk", hostYaml.poolDisk());
-      if (poolUsage != null) {
-        map.put("pool_size", poolUsage.size());
-        map.put("pool_allocated", poolUsage.allocated());
-        map.put("pool_free", poolUsage.free());
-        map.put("pool_capacity", poolUsage.capacityPercent());
-      }
+    if (storage.error() != null) {
+      map.put("storage_error", storage.error());
     } else {
-      if (fsUsage != null) {
-        map.put("disk_size", fsUsage.size());
-        map.put("disk_used", fsUsage.used());
-        map.put("disk_available", fsUsage.available());
-        map.put("disk_use_percent", fsUsage.usePercent());
-      }
+      map.put("pools", storage.pools().stream().map(Storage::toMap).toList());
     }
     map.put("incus_version", incusVersion);
     map.put("incus_installed", versions.installed());
@@ -161,6 +142,46 @@ public final class HostStatusCommand implements Runnable {
       map.put("containers_stopped", containers.stopped());
     }
     out.println(YamlUtil.dumpJson(map));
+  }
+
+  /**
+   * This box's storage pools as Incus lists them, or why it could not, read as {@link Containers}
+   * reads its containers: each row one pool, its driver, its source and its free space.
+   */
+  private record Storage(List<IncusStorage.Pool> pools, String error) {
+
+    static Storage of(ShellExec shell) throws InterruptedException {
+      try {
+        return new Storage(new IncusStorage(shell).pools(), null);
+      } catch (IOException | TimeoutException e) {
+        return new Storage(List.of(), e.getMessage());
+      }
+    }
+
+    List<String> rows() {
+      return error != null
+          ? List.of("unavailable (" + error.strip().lines().findFirst().orElse("") + ")")
+          : pools.stream().map(IncusStorage.Pool::summary).toList();
+    }
+
+    /** Whether a pool's disk limits are only advisory, as they are on a dir pool. */
+    boolean advisory() {
+      return pools.stream().anyMatch(pool -> HostYaml.BACKEND_DIR.equals(pool.driver()));
+    }
+
+    static Map<String, Object> toMap(IncusStorage.Pool pool) {
+      var map = new LinkedHashMap<String, Object>();
+      map.put("name", pool.name());
+      map.put("driver", pool.driver());
+      map.put("source", pool.source());
+      pool.space()
+          .ifPresent(
+              space -> {
+                map.put("used_bytes", space.used());
+                map.put("total_bytes", space.total());
+              });
+      return map;
+    }
   }
 
   /**

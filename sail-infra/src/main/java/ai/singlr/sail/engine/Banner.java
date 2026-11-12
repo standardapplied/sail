@@ -747,19 +747,21 @@ public final class Banner {
         out, ansi, "  @|bold,green \u2713 Restored|@ " + containerName + " to snapshot: " + label);
   }
 
+  private static final String ADVISORY = "Disk limits on a dir pool are advisory";
+
   /**
-   * Prints a bordered host status box showing server info, pool usage, and container summary. The
-   * Incus version is the one installed now, not the one {@code host.yaml} recorded at init; {@code
-   * incusUpgrade}, the command that moves it, has a row of its own when there is one, so neither is
-   * cut to fit.
+   * Prints a bordered host status box showing server info, each storage pool, and container
+   * summary. The Incus version is the one installed now, not the one {@code host.yaml} recorded at
+   * init; {@code incusUpgrade}, the command that moves it, has a row of its own when there is one,
+   * so neither is cut to fit.
    */
   public static void printHostStatus(
       HostYaml hostYaml,
       String incusVersion,
       String incusUpgrade,
       HostDetector.HostInfo hostInfo,
-      ZfsQuery.PoolUsage poolUsage,
-      DirQuery.FsUsage fsUsage,
+      List<String> pools,
+      boolean advisory,
       String containers,
       PrintStream out,
       Ansi ansi) {
@@ -783,28 +785,11 @@ public final class Banner {
     }
     w = Math.max(w, rowWidth("Initialized:", formatTimestamp(hostYaml.initializedAt())));
 
-    if (hostYaml.isZfs()) {
-      var poolInfo =
-          hostYaml.pool() + " on " + Objects.requireNonNullElse(hostYaml.poolDisk(), "?");
-      w = Math.max(w, rowWidth("Pool:", poolInfo));
-      if (poolUsage != null) {
-        w = Math.max(w, rowWidth("Pool Size:", poolUsage.size()));
-        w =
-            Math.max(
-                w,
-                rowWidth(
-                    "Pool Used:",
-                    poolUsage.allocated() + " (" + poolUsage.capacityPercent() + ")"));
-        w = Math.max(w, rowWidth("Pool Free:", poolUsage.free()));
-      }
-    } else {
-      w = Math.max(w, rowWidth("Storage:", hostYaml.pool() + " (dir)"));
-      if (fsUsage != null) {
-        w = Math.max(w, rowWidth("Disk Size:", fsUsage.size()));
-        w = Math.max(w, rowWidth("Disk Used:", fsUsage.used() + " (" + fsUsage.usePercent() + ")"));
-        w = Math.max(w, rowWidth("Disk Free:", fsUsage.available()));
-      }
-      w = Math.max(w, rowWidth("Note:", "Quotas are advisory (not enforced)"));
+    for (var pool : pools) {
+      w = Math.max(w, rowWidth("Pool:", pool));
+    }
+    if (advisory) {
+      w = Math.max(w, rowWidth("Note:", ADVISORY));
     }
     w = boxWidth(w);
 
@@ -818,25 +803,11 @@ public final class Banner {
     labelRow(out, ansi, w, "RAM:", mem, null, null);
     emptyRow(out, ansi, w);
 
-    if (hostYaml.isZfs()) {
-      var poolInfo =
-          hostYaml.pool() + " on " + Objects.requireNonNullElse(hostYaml.poolDisk(), "?");
-      labelRow(out, ansi, w, "Pool:", poolInfo, null, null);
-      if (poolUsage != null) {
-        labelRow(out, ansi, w, "Pool Size:", poolUsage.size(), null, null);
-        var used = poolUsage.allocated() + " (" + poolUsage.capacityPercent() + ")";
-        labelRow(out, ansi, w, "Pool Used:", used, null, null);
-        labelRow(out, ansi, w, "Pool Free:", poolUsage.free(), null, null);
-      }
-    } else {
-      labelRow(out, ansi, w, "Storage:", hostYaml.pool() + " (dir)", null, null);
-      if (fsUsage != null) {
-        labelRow(out, ansi, w, "Disk Size:", fsUsage.size(), null, null);
-        var used = fsUsage.used() + " (" + fsUsage.usePercent() + ")";
-        labelRow(out, ansi, w, "Disk Used:", used, null, null);
-        labelRow(out, ansi, w, "Disk Free:", fsUsage.available(), null, null);
-      }
-      labelRow(out, ansi, w, "Note:", "Quotas are advisory (not enforced)", null, null);
+    for (var pool : pools) {
+      labelRow(out, ansi, w, "Pool:", pool, null, null);
+    }
+    if (advisory) {
+      labelRow(out, ansi, w, "Note:", ADVISORY, null, null);
     }
     emptyRow(out, ansi, w);
 

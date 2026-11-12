@@ -6,22 +6,32 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 
 /**
  * Provisions a bare-metal host: keeps a library update from restarting Incus ({@link
- * NeedrestartPolicy}), installs and holds what sail runs on ({@link HostPackages}), creates the
- * storage pool (dir or ZFS), initializes Incus, creates the base profile, caches the container
- * image, and writes {@code /etc/sail/host.yaml}.
+ * NeedrestartPolicy}), installs and holds what sail runs on ({@link HostPackages}), caps the ZFS
+ * cache before ZFS can take memory ({@link ZfsCacheCap}), initializes Incus, has Incus create the
+ * storage pool ({@link IncusStorage}) from the source the operator chose, creates the base profile,
+ * caches the container image, and writes {@code /etc/sail/host.yaml}.
+ *
+ * <p>The storage {@code host.yaml} states is the pool the base profile puts containers on, as Incus
+ * has it. A box whose profile already exists keeps it: a ZFS pool added to a dir box sits beside
+ * the dir pool, its containers untouched, and new containers are placed on it by naming it.
  *
  * <p>Every step is idempotent — safe to run again on an already-provisioned host. A re-run
  * refreshes only the fields it provisions and keeps the rest of {@code host.yaml}: sync identity,
@@ -35,13 +45,14 @@ public final class HostProvisioner {
 
   private static final int TOTAL_STEPS = 8;
   private static final Duration INIT_TIMEOUT = Duration.ofMinutes(5);
-  private static final Duration POOL_TIMEOUT = Duration.ofMinutes(3);
   private static final Duration IMAGE_TIMEOUT = Duration.ofMinutes(5);
 
   private final ShellExec shell;
   private final ProvisionListener listener;
   private final HostPackages packages;
   private final OperatorCommand operator;
+  private final IncusStorage storage;
+  private final PoolDevices devices;
 
   /**
    * A provisioner whose steps report to {@code listener}, their hints rendered for {@code
@@ -52,44 +63,47 @@ public final class HostProvisioner {
     this.listener = Objects.requireNonNullElse(listener, ProvisionListener.NOOP);
     this.packages = new HostPackages(shell, this.listener::onStepProgress);
     this.operator = operator;
+    this.storage = new IncusStorage(shell);
+    this.devices = new PoolDevices(shell);
   }
 
   /**
    * Runs all provisioning steps and writes host.yaml.
    *
-   * @param storageBackend {@code "dir"} (host filesystem) or {@code "zfs"} (dedicated disk)
-   * @param disk the disk device path (e.g. {@code /dev/sdb}), null for dir backend
+   * @param source what the storage pool is made from; a device as {@link PoolDevices#cleared}
+   *     cleared it
    * @param pool the storage pool name (e.g. {@code devpool})
    * @param bridge the network bridge name (e.g. {@code incusbr0})
    * @param serverIp the server's public IP address (for SSH config generation), may be null
+   * @param memoryMb the box's memory, which the ZFS cache cap is a fraction of
    * @param hostYamlPath where to write host.yaml (usually {@code /etc/sail/host.yaml})
    * @param dbPath the box's database, whose round lock the final write holds
    * @return the written HostYaml
    */
   public HostYaml provision(
-      String storageBackend,
-      String disk,
+      PoolSource source,
       String pool,
       String bridge,
       String serverIp,
+      long memoryMb,
       Path hostYamlPath,
       Path dbPath)
       throws IOException, InterruptedException, TimeoutException {
     configured(hostYamlPath);
 
-    var incusVersion = runSteps(storageBackend, disk, pool, bridge);
+    var outcome = runSteps(source, pool, bridge, memoryMb);
 
     try (var rounds = holdRounds(dbPath)) {
       var kept = configured(hostYamlPath);
       var hostYaml =
           new HostYaml(
-              storageBackend,
-              pool,
-              disk,
+              outcome.pool().driver(),
+              outcome.pool().name(),
+              outcome.pool().source(),
               bridge,
               HostYaml.DEFAULT_PROFILE,
               HostYaml.DEFAULT_IMAGE,
-              incusVersion,
+              outcome.incusVersion(),
               serverIp,
               DateTimeUtils.format(DateTimeUtils.now()),
               kept.webauthn(),
@@ -101,20 +115,22 @@ public final class HostProvisioner {
     }
   }
 
-  /** Runs every step, returning the incus version installed; a step that throws is failed. */
-  private String runSteps(String storageBackend, String disk, String pool, String bridge)
+  /** What the steps leave: the Incus version installed, and the pool the base profile names. */
+  private record Outcome(String incusVersion, IncusStorage.Pool pool) {}
+
+  /** Runs every step; a step that throws is failed. */
+  private Outcome runSteps(PoolSource source, String pool, String bridge, long memoryMb)
       throws IOException, InterruptedException, TimeoutException {
-    var isDir = HostYaml.BACKEND_DIR.equals(storageBackend);
     try {
       writeNeedrestartPolicy();
       installIncus();
-      installZfs(storageBackend);
+      installZfs(source, memoryMb);
       var incusVersion = initIncus(bridge);
-      createStoragePool(isDir, pool, disk);
-      createBaseProfile(pool, bridge);
+      createStoragePool(pool, source);
+      var profiled = ensureBaseProfile(pool, source, bridge);
       cacheImage();
       configureFirewall(bridge);
-      return incusVersion;
+      return new Outcome(incusVersion, profiled);
     } catch (Exception e) {
       listener.onStepFailed();
       throw e;
@@ -153,14 +169,18 @@ public final class HostProvisioner {
         2, packages.hold() ? installed + "; " + operator.render(HostPackages.HELD) : installed);
   }
 
-  private void installZfs(String storageBackend)
+  /** Caps the ZFS cache before the package that loads the module is installed. */
+  private void installZfs(PoolSource source, long memoryMb)
       throws IOException, InterruptedException, TimeoutException {
-    if (!HostPackages.forBackend(storageBackend).contains(HostPackages.ZFS)) {
-      stepSkipped(3, "not needed (" + storageBackend + " backend)");
+    if (!HostPackages.forBackend(source.driver()).contains(HostPackages.ZFS)) {
+      stepSkipped(3, "not needed (" + source.driver() + " backend)");
       return;
     }
     step(3, "Installing ZFS utilities...");
-    stepDone(3, packages.ensure(HostPackages.ZFS) ? "installed" : "already installed");
+    var cap = ZfsCacheCap.forMemory(memoryMb);
+    cap.dropIn().install(shell);
+    var installed = packages.ensure(HostPackages.ZFS) ? "installed" : "already installed";
+    stepDone(3, installed + "; " + cap.said());
   }
 
   private String initIncus(String bridge)
@@ -224,86 +244,157 @@ public final class HostProvisioner {
     }
   }
 
-  private void createStoragePool(boolean isDir, String pool, String disk)
+  /**
+   * Has Incus create {@code pool} from {@code source}, unless Incus has it already with the same
+   * driver. A device is cleared again first, since it may have become busy since the operator named
+   * it.
+   */
+  private void createStoragePool(String pool, PoolSource source)
       throws IOException, InterruptedException, TimeoutException {
     step(5, "Creating storage pool...");
-
-    if (isDir) {
-      var check = shell.exec(List.of("incus", "storage", "show", pool));
-      if (check.ok()) {
-        stepDone(5, pool + " (already exists)");
-        return;
+    var existing = storage.find(pool);
+    if (existing.isPresent()) {
+      var held = existing.get();
+      if (!held.driver().equals(source.driver())) {
+        throw new IllegalArgumentException(
+            "Incus already has a "
+                + held.driver()
+                + " pool named '"
+                + pool
+                + "', so no "
+                + source.driver()
+                + " pool can take that name. Name the new pool with --pool <name>.");
       }
-
-      var result = shell.exec(List.of("incus", "storage", "create", pool, "dir"));
-      if (!result.ok()) {
-        throw new IOException("Failed to create dir storage pool: " + result.stderr());
-      }
-      stepDone(5, pool + " (dir)");
-    } else {
-      var check = shell.exec(List.of("zpool", "list", pool));
-      if (check.ok()) {
-        stepDone(5, pool + " (already exists)");
-        return;
-      }
-
-      var result = shell.exec(List.of("zpool", "create", "-f", pool, disk), null, POOL_TIMEOUT);
-      if (!result.ok()) {
-        throw new IOException("Failed to create ZFS pool: " + result.stderr());
-      }
-      stepDone(5, pool + " (zfs on " + disk + ")");
+      stepDone(5, pool + " (" + held.driver() + " on " + held.source() + ", already exists)");
+      return;
     }
+    if (source instanceof PoolSource.Device device && !shell.isDryRun()) {
+      devices.cleared(device.path(), device.wipe() ? device.path() : null);
+    }
+    var restarted = make(pool, source);
+    stepDone(5, pool + " (" + described(source) + ")" + restarted);
   }
 
-  private void createBaseProfile(String pool, String bridge)
+  /**
+   * Creates the pool. An incusd that started before the ZFS tools were installed and does not see
+   * them is restarted only when it runs no container, since a restart ends every {@code incus exec}
+   * into one; otherwise the operator is told to restart it. Returns what the step says it did.
+   */
+  private String make(String pool, PoolSource source)
+      throws IOException, InterruptedException, TimeoutException {
+    var made = storage.create(pool, source);
+    if (made.ok()) {
+      return "";
+    }
+    if (!IncusStorage.zfsUnseen(made)) {
+      throw new IOException("Failed to create storage pool " + pool + ": " + made.reason());
+    }
+    if (!new ContainerManager(shell).listAll().isEmpty()) {
+      throw Remedied.io(
+          "Incus started before the ZFS tools were installed and does not see them ("
+              + made.reason()
+              + ").",
+          Remedy.of(
+              "Restart it when no terminal or agent run is open: ",
+              Remedy.program("systemctl", "restart", "incus"),
+              ", then run this command again."));
+    }
+    var restart = shell.exec(List.of("systemctl", "restart", "incus"), null, INIT_TIMEOUT);
+    if (!restart.ok()) {
+      throw new IOException("Failed to restart Incus to see ZFS: " + restart.reason());
+    }
+    var again = storage.create(pool, source);
+    if (!again.ok()) {
+      throw new IOException("Failed to create storage pool " + pool + ": " + again.reason());
+    }
+    return "; restarted Incus, which ran no container, to see ZFS";
+  }
+
+  private static String described(PoolSource source) {
+    return switch (source) {
+      case PoolSource.Dir dir -> "dir";
+      case PoolSource.Device device -> "zfs on " + device.path();
+      case PoolSource.File file ->
+          "zfs in a "
+              + Strings.gibibytes(file.sizeMb() << 20)
+              + " file; slower than a disk, meant for trying ZFS";
+    };
+  }
+
+  /**
+   * Converges the base profile: its root disk on {@code pool} and its NIC on {@code bridge} when it
+   * has none, an existing root disk kept wherever it is. Returns the pool its root disk names,
+   * refused unless Incus has that pool, so what {@code host.yaml} states is what Incus has.
+   */
+  private IncusStorage.Pool ensureBaseProfile(String pool, PoolSource source, String bridge)
       throws IOException, InterruptedException, TimeoutException {
     step(6, "Creating base profile...");
 
     var profile = HostYaml.DEFAULT_PROFILE;
+    var existed = shell.exec(List.of("incus", "profile", "show", profile)).ok();
+    if (!existed) {
+      var create = shell.exec(List.of("incus", "profile", "create", profile));
+      if (!create.ok()) {
+        throw new IOException("Failed to create Incus profile: " + create.stderr());
+      }
+    }
+    var held =
+        shell
+            .exec(List.of("incus", "profile", "device", "list", profile))
+            .stdout()
+            .lines()
+            .map(String::strip)
+            .toList();
+    if (!held.contains("root")) {
+      addDevice(profile, List.of("root", "disk", "path=/", "pool=" + pool), "root disk");
+    }
+    if (!held.contains("eth0")) {
+      addDevice(
+          profile, List.of("eth0", "nic", "name=eth0", "network=" + bridge, "type=nic"), "NIC");
+    }
+    var named =
+        held.contains("root")
+            ? shell
+                .exec(List.of("incus", "profile", "device", "get", profile, "root", "pool"))
+                .stdout()
+                .strip()
+            : pool;
+    var found = shell.isDryRun() ? Optional.of(planned(pool, source)) : storage.find(named);
+    var root =
+        found.orElseThrow(
+            () ->
+                new IllegalStateException(
+                    profile
+                        + " puts containers on pool '"
+                        + named
+                        + "', which Incus does not have. Point its root disk at a pool Incus"
+                        + " lists (incus storage list), then run this command again."));
+    stepDone(
+        6,
+        profile
+            + (existed ? " (already exists)" : "")
+            + ": containers on "
+            + root.name()
+            + " ("
+            + root.driver()
+            + ")");
+    return root;
+  }
 
-    var check = shell.exec(List.of("incus", "profile", "show", profile));
-    if (check.ok()) {
-      stepDone(6, profile + " (already exists)");
-      return;
+  private void addDevice(String profile, List<String> device, String what)
+      throws IOException, InterruptedException, TimeoutException {
+    var command = new ArrayList<>(List.of("incus", "profile", "device", "add", profile));
+    command.addAll(device);
+    var added = shell.exec(command);
+    if (!added.ok()) {
+      throw new IOException("Failed to add " + what + " to profile: " + added.stderr());
     }
+  }
 
-    var create = shell.exec(List.of("incus", "profile", "create", profile));
-    if (!create.ok()) {
-      throw new IOException("Failed to create Incus profile: " + create.stderr());
-    }
-    var addDisk =
-        shell.exec(
-            List.of(
-                "incus",
-                "profile",
-                "device",
-                "add",
-                profile,
-                "root",
-                "disk",
-                "path=/",
-                "pool=" + pool));
-    if (!addDisk.ok()) {
-      throw new IOException("Failed to add root disk to profile: " + addDisk.stderr());
-    }
-    var addNic =
-        shell.exec(
-            List.of(
-                "incus",
-                "profile",
-                "device",
-                "add",
-                profile,
-                "eth0",
-                "nic",
-                "name=eth0",
-                "network=" + bridge,
-                "type=nic"));
-    if (!addNic.ok()) {
-      throw new IOException("Failed to add NIC to profile: " + addNic.stderr());
-    }
-
-    stepDone(6, profile);
+  /** The pool a dry run would have made, as {@code host.yaml} would state it. */
+  private static IncusStorage.Pool planned(String pool, PoolSource source) {
+    var from = source instanceof PoolSource.Device device ? device.path() : null;
+    return new IncusStorage.Pool(pool, source.driver(), from, Optional.empty());
   }
 
   private void cacheImage() throws IOException, InterruptedException, TimeoutException {

@@ -8,9 +8,13 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
-import ai.singlr.sail.engine.DiskDetector.Candidate;
+import ai.singlr.sail.engine.PoolDevices;
+import ai.singlr.sail.engine.PoolDevices.Candidate;
+import ai.singlr.sail.engine.PoolSource;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -26,9 +30,7 @@ import picocli.CommandLine;
 class HostInitCommandTest {
 
   private static final List<Candidate> DISKS =
-      List.of(
-          new Candidate("/dev/sdb", "100G", null, "unused"),
-          new Candidate("/dev/sdc", "200G", null, "unused"));
+      List.of(new Candidate("/dev/sdb", "100G", null), new Candidate("/dev/sdc", "200G", null));
 
   private final PrintStream originalOut = System.out;
   private final ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -126,6 +128,131 @@ class HostInitCommandTest {
       System.setErr(originalErr);
     }
     return err.toString(StandardCharsets.UTF_8);
+  }
+
+  @Test
+  void aDirBoxTakesNoZfsSource() throws Exception {
+    assertEquals(new PoolSource.Dir(), source(new ScriptedShellExecutor()));
+    for (var flags :
+        List.of(
+            List.of("--disk", "/dev/sdb"),
+            List.of("--pool-file-size", "50GiB"),
+            List.of("--force-wipe", "/dev/sdb"))) {
+      var refused =
+          assertThrows(
+              IllegalArgumentException.class,
+              () -> source(new ScriptedShellExecutor(), flags.toArray(String[]::new)));
+      assertEquals(
+          "--disk, --pool-file-size and --force-wipe choose a ZFS pool's source: pass them with"
+              + " --storage zfs.",
+          refused.getMessage());
+    }
+  }
+
+  @Test
+  void aZfsPoolIsMadeFromOneSource() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                source(
+                    new ScriptedShellExecutor(),
+                    "--storage",
+                    "zfs",
+                    "--disk",
+                    "/dev/sdb",
+                    "--pool-file-size",
+                    "50GiB"));
+
+    assertEquals(
+        "Pass --disk or --pool-file-size, not both: a pool is made from one source.",
+        refused.getMessage());
+  }
+
+  @Test
+  void theForceFlagNamesTheDiskAgainSoItNeedsTheDisk() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                source(
+                    new ScriptedShellExecutor(),
+                    "--storage",
+                    "zfs",
+                    "--pool-file-size",
+                    "50GiB",
+                    "--force-wipe",
+                    "/dev/sdb"));
+
+    assertEquals(
+        "--force-wipe names the device to erase again: name it with --disk too.",
+        refused.getMessage());
+  }
+
+  @Test
+  void aFileIsSizedAsGivenAndAtLeastAGibibyte() throws Exception {
+    assertEquals(
+        new PoolSource.File(51200),
+        source(new ScriptedShellExecutor(), "--storage", "zfs", "--pool-file-size", "50GiB"));
+    assertEquals(new PoolSource.File(204800), HostInitCommand.file("200GB"));
+    assertEquals(new PoolSource.File(1024), HostInitCommand.file("1GiB"));
+    for (var size : List.of("1023MiB", "lots", "-5GiB", "")) {
+      var refused = assertThrows(IllegalArgumentException.class, () -> HostInitCommand.file(size));
+      assertEquals(
+          "--pool-file-size "
+              + size
+              + " is not a size of at least 1GiB. Give one such as 50GiB or"
+              + " 200GB.",
+          refused.getMessage());
+    }
+  }
+
+  @Test
+  void aNamedDiskIsClearedWithItsForceFlag() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n")
+            .onOk("lsblk", "{\"blockdevices\": [{\"path\": \"/dev/sdb\", \"type\": \"disk\"}]}")
+            .onOk("wipefs", "");
+
+    assertEquals(
+        new PoolSource.Device("/dev/sdb", true),
+        source(shell, "--storage", "zfs", "--disk", "/dev/sdb", "--force-wipe", "/dev/sdb"));
+  }
+
+  @Test
+  void aZfsBoxWithNoDiskNamedAndNoneUnusedIsToldOfPartitionsAndFiles() {
+    var shell = new ScriptedShellExecutor().onOk("lsblk", "{\"blockdevices\": []}");
+
+    var refused = assertThrows(CliCommand.Refused.class, () -> source(shell, "--storage", "zfs"));
+
+    assertEquals(
+        "Not provisioned: no unused disk found. Name a disk or a spare partition with --disk"
+            + " <device>, or make the pool in a file with --pool-file-size <size>.",
+        refused.getMessage());
+  }
+
+  @Test
+  void theOneUnusedDiskIsTakenWithYesAndClearedBeforeUse() throws Exception {
+    answering("", false);
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n")
+            .onOk(
+                "lsblk",
+                "{\"blockdevices\": [{\"path\": \"/dev/sdb\", \"type\": \"disk\","
+                    + " \"size\": \"100G\"}]}")
+            .onOk("wipefs", "");
+
+    assertEquals(
+        new PoolSource.Device("/dev/sdb", false), source(shell, "--storage", "zfs", "--yes"));
+    assertTrue(shell.invocations().contains("wipefs --no-act --json -- /dev/sdb"));
+  }
+
+  private static PoolSource source(ScriptedShellExecutor shell, String... args) throws Exception {
+    var command = new HostInitCommand();
+    new CommandLine(command).parseArgs(args);
+    return command.source(new PoolDevices(shell));
   }
 
   @Test
