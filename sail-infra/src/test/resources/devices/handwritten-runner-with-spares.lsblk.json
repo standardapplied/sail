@@ -1,0 +1,328 @@
+{
+   "blockdevices": [
+      {
+         "name": "sda",
+         "path": "/dev/sda",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "mountpoints": [
+            null
+         ],
+         "size": 161061273600,
+         "model": "Virtual Disk",
+         "rm": false,
+         "children": [
+            {
+               "name": "sda1",
+               "path": "/dev/sda1",
+               "type": "part",
+               "fstype": "ext4",
+               "pttype": "gpt",
+               "mountpoints": [
+                  "/"
+               ],
+               "size": 159986466304,
+               "model": null,
+               "rm": false
+            },
+            {
+               "name": "sda14",
+               "path": "/dev/sda14",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "mountpoints": [
+                  null
+               ],
+               "size": 4194304,
+               "model": null,
+               "rm": false
+            },
+            {
+               "name": "sda15",
+               "path": "/dev/sda15",
+               "type": "part",
+               "fstype": "vfat",
+               "pttype": "gpt",
+               "mountpoints": [
+                  "/boot/efi"
+               ],
+               "size": 111149056,
+               "model": null,
+               "rm": false
+            },
+            {
+               "name": "sda16",
+               "path": "/dev/sda16",
+               "type": "part",
+               "fstype": "ext4",
+               "pttype": "gpt",
+               "mountpoints": [
+                  "/boot"
+               ],
+               "size": 957350400,
+               "model": null,
+               "rm": false
+            }
+         ]
+      },
+      {
+         "name": "sdb",
+         "path": "/dev/sdb",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 107374182400,
+         "model": "Virtual Disk",
+         "rm": false
+      },
+      {
+         "name": "sdc",
+         "path": "/dev/sdc",
+         "type": "disk",
+         "fstype": "ext4",
+         "pttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 107374182400,
+         "model": "Virtual Disk",
+         "rm": false
+      },
+      {
+         "name": "sdd",
+         "path": "/dev/sdd",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "mountpoints": [
+            null
+         ],
+         "size": 107374182400,
+         "model": "Virtual Disk",
+         "rm": false,
+         "children": [
+            {
+               "name": "sdd1",
+               "path": "/dev/sdd1",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "mountpoints": [
+                  null
+               ],
+               "size": 107374182400,
+               "model": null,
+               "rm": false
+            }
+         ]
+      },
+      {
+         "name": "sde",
+         "path": "/dev/sde",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 107374182400,
+         "model": "USB Flash Disk",
+         "rm": true
+      },
+      {
+         "name": "sdf",
+         "path": "/dev/sdf",
+         "type": "disk",
+         "fstype": "LVM2_member",
+         "pttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 107374182400,
+         "model": "Virtual Disk",
+         "rm": false,
+         "children": [
+            {
+               "name": "dm-0",
+               "path": "/dev/mapper/vg-data",
+               "type": "lvm",
+               "fstype": "xfs",
+               "pttype": null,
+               "mountpoints": [
+                  "/srv"
+               ],
+               "size": 107374182400,
+               "model": null,
+               "rm": false
+            }
+         ]
+      },
+      {
+         "name": "sdg",
+         "path": "/dev/sdg",
+         "type": "disk",
+         "fstype": "crypto_LUKS",
+         "pttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 107374182400,
+         "model": "Virtual Disk",
+         "rm": false,
+         "children": [
+            {
+               "name": "dm-1",
+               "path": "/dev/mapper/secret",
+               "type": "crypt",
+               "fstype": null,
+               "pttype": null,
+               "mountpoints": [
+                  null
+               ],
+               "size": 107374182400,
+               "model": null,
+               "rm": false
+            }
+         ]
+      },
+      {
+         "name": "sdh",
+         "path": "/dev/sdh",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 107374182400,
+         "model": "Virtual Disk",
+         "rm": false
+      },
+      {
+         "name": "sdi",
+         "path": "/dev/sdi",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "mountpoints": [
+            null
+         ],
+         "size": 107374182400,
+         "model": "Virtual Disk",
+         "rm": false,
+         "children": [
+            {
+               "name": "sdi1",
+               "path": "/dev/sdi1",
+               "type": "part",
+               "fstype": "zfs_member",
+               "pttype": "gpt",
+               "mountpoints": [
+                  null
+               ],
+               "size": 107374182400,
+               "model": null,
+               "rm": false
+            },
+            {
+               "name": "sdi9",
+               "path": "/dev/sdi9",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "mountpoints": [
+                  null
+               ],
+               "size": 8388608,
+               "model": null,
+               "rm": false
+            }
+         ]
+      },
+      {
+         "name": "sdj",
+         "path": "/dev/sdj",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "mountpoints": [
+            null
+         ],
+         "size": 107374182400,
+         "model": "Virtual Disk",
+         "rm": false,
+         "children": [
+            {
+               "name": "sdj1",
+               "path": "/dev/sdj1",
+               "type": "part",
+               "fstype": "zfs_member",
+               "pttype": "gpt",
+               "mountpoints": [
+                  null
+               ],
+               "size": 107374182400,
+               "model": null,
+               "rm": false
+            },
+            {
+               "name": "sdj9",
+               "path": "/dev/sdj9",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "mountpoints": [
+                  null
+               ],
+               "size": 8388608,
+               "model": null,
+               "rm": false
+            }
+         ]
+      },
+      {
+         "name": "sdk",
+         "path": "/dev/sdk",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 107374182400,
+         "model": "Virtual Disk",
+         "rm": false
+      },
+      {
+         "name": "zram0",
+         "path": "/dev/zram0",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 4294967296,
+         "model": null,
+         "rm": false
+      },
+      {
+         "name": "nbd0",
+         "path": "/dev/nbd0",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 0,
+         "model": null,
+         "rm": false
+      }
+   ]
+}

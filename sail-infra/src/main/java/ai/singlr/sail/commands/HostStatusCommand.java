@@ -139,6 +139,7 @@ public final class HostStatusCommand implements Runnable {
     } else {
       map.put("containers_total", containers.listed().size());
       map.put("containers_running", containers.running());
+      map.put("containers_frozen", containers.frozen());
       map.put("containers_stopped", containers.stopped());
     }
     out.println(YamlUtil.dumpJson(map));
@@ -203,6 +204,10 @@ public final class HostStatusCommand implements Runnable {
       return listed.stream().filter(c -> c.state() instanceof ContainerState.Running).count();
     }
 
+    long frozen() {
+      return listed.stream().filter(c -> c.state() instanceof ContainerState.Frozen).count();
+    }
+
     long stopped() {
       return listed.stream().filter(c -> c.state() instanceof ContainerState.Stopped).count();
     }
@@ -211,7 +216,14 @@ public final class HostStatusCommand implements Runnable {
       if (error != null) {
         return "unavailable (" + error.strip().lines().findFirst().orElse("") + ")";
       }
-      return listed.size() + " total (" + running() + " running, " + stopped() + " stopped)";
+      var frozen = frozen() > 0 ? frozen() + " frozen, " : "";
+      return listed.size()
+          + " total ("
+          + running()
+          + " running, "
+          + frozen
+          + stopped()
+          + " stopped)";
     }
   }
 }

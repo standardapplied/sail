@@ -176,10 +176,9 @@ public final class HostProvisioner {
       return;
     }
     step(3, "Installing ZFS utilities...");
-    var cap = ZfsCacheCap.forMemory(memoryMb);
-    cap.dropIn().install(shell);
+    var capped = ZfsCacheCap.forMemory(memoryMb).install(shell);
     var installed = packages.ensure(HostPackages.ZFS) ? "installed" : "already installed";
-    stepDone(3, installed + "; " + cap.said());
+    stepDone(3, installed + "; " + capped);
   }
 
   private String initIncus(String bridge)
@@ -254,21 +253,16 @@ public final class HostProvisioner {
     var existing = storage.find(pool);
     if (existing.isPresent()) {
       var held = existing.get();
-      if (!held.driver().equals(source.driver())) {
-        throw new IllegalArgumentException(
-            "Incus already has a "
-                + held.driver()
-                + " pool named '"
-                + pool
-                + "', so no "
-                + source.driver()
-                + " pool can take that name. Name the new pool with --pool <name>.");
-      }
+      held.requireDriver(source.driver());
       stepDone(5, pool + " (" + held.driver() + " on " + held.source() + ", already exists)");
       return;
     }
     if (source instanceof PoolSource.Device device && !shell.isDryRun()) {
-      devices.cleared(device.path(), device.wipe() ? device.path() : null);
+      var now = devices.cleared(device.path(), device.wipe() ? device.path() : null);
+      if (!now.equals(source)) {
+        throw new IllegalStateException(
+            device.path() + " changed since it was named: it now reads as " + now.said() + ".");
+      }
     }
     var restarted = make(pool, source);
     var trial =
@@ -386,7 +380,7 @@ public final class HostProvisioner {
   /** The pool a dry run would have made, as {@code host.yaml} would state it. */
   private static IncusStorage.Pool planned(String pool, PoolSource source) {
     var from = source instanceof PoolSource.Device device ? device.path() : null;
-    return new IncusStorage.Pool(pool, source.driver(), from, Optional.empty());
+    return new IncusStorage.Pool(pool, source.driver(), from, null, Optional.empty());
   }
 
   private void cacheImage() throws IOException, InterruptedException, TimeoutException {

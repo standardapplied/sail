@@ -11,6 +11,11 @@ package ai.singlr.sail.engine;
  */
 public sealed interface ContainerState {
 
+  /** Whether its processes exist, running or frozen, so stopping it ends them. */
+  default boolean live() {
+    return this instanceof Running || this instanceof Frozen;
+  }
+
   /** Container does not exist — {@code incus list} returned an empty array. */
   record NotCreated() implements ContainerState {}
 

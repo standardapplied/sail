@@ -1,0 +1,2 @@
+sail-raw	960M	141K	960M	-	-	2%	0%	1.00x	ONLINE	-
+	/tmp/sail-raw.img	1G	141K	960M	-	-	2%	0.01%	-	ONLINE

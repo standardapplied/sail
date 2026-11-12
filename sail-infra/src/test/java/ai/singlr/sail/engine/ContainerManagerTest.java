@@ -221,6 +221,15 @@ class ContainerManagerTest {
   }
 
   @Test
+  void aContainerIsLiveWhenItsProcessesExist() {
+    assertTrue(new ContainerState.Running(null).live());
+    assertTrue(new ContainerState.Frozen().live());
+    assertFalse(new ContainerState.Stopped().live());
+    assertFalse(new ContainerState.NotCreated().live());
+    assertFalse(new ContainerState.Error("boom").live());
+  }
+
+  @Test
   void queryStateReturnsErrorForUnexpectedStatus() throws Exception {
     var shell =
         new ScriptedShellExecutor()

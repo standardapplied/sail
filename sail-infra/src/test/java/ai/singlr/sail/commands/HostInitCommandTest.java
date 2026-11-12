@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
+import ai.singlr.sail.engine.DeviceFixtures;
 import ai.singlr.sail.engine.PoolDevices.Candidate;
 import ai.singlr.sail.engine.PoolSource;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -23,6 +24,7 @@ import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
@@ -209,11 +211,7 @@ class HostInitCommandTest {
 
   @Test
   void aNamedDiskIsClearedWithItsForceFlag() throws Exception {
-    var shell =
-        new ScriptedShellExecutor()
-            .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n")
-            .onOk("lsblk", "{\"blockdevices\": [{\"path\": \"/dev/sdb\", \"type\": \"disk\"}]}")
-            .onOk("wipefs", "");
+    var shell = spare(DeviceFixtures.read(DeviceFixtures.SPARES));
 
     assertEquals(
         new PoolSource.Device("/dev/sdb", true),
@@ -235,14 +233,7 @@ class HostInitCommandTest {
   @Test
   void theOneUnusedDiskIsTakenWithYesAndClearedBeforeUse() throws Exception {
     answering("", false);
-    var shell =
-        new ScriptedShellExecutor()
-            .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n")
-            .onOk(
-                "lsblk",
-                "{\"blockdevices\": [{\"path\": \"/dev/sdb\", \"type\": \"disk\","
-                    + " \"size\": \"100G\"}]}")
-            .onOk("wipefs", "");
+    var shell = spare(DeviceFixtures.spares(Set.of("/dev/sda", "/dev/sdb")));
 
     assertEquals(
         new PoolSource.Device("/dev/sdb", false), source(shell, "--storage", "zfs", "--yes"));
@@ -256,38 +247,97 @@ class HostInitCommandTest {
             .onOk(
                 "incus storage list",
                 "[{\"name\": \"tank\", \"driver\": \"zfs\", \"config\": {\"source\": \"tank\","
-                    + " \"volatile.initial_source\": \"/dev/sdb\"}}]");
+                    + " \"volatile.initial_source\": \"/dev/sdb\", \"zfs.pool_name\": \"tank\"}}]")
+            .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n");
 
     assertEquals(
-        new PoolSource.Device("/dev/sdb", false),
+        new PoolSource.Zpool("tank"),
         source(shell, "--storage", "zfs", "--pool", "tank", "--disk", "/dev/sdb"));
-    assertEquals(
-        new PoolSource.Device("/dev/sdb", false),
-        source(shell, "--storage", "zfs", "--pool", "tank"));
+    assertEquals(new PoolSource.Zpool("tank"), source(shell, "--storage", "zfs", "--pool", "tank"));
     assertFalse(
-        shell.invocations().stream()
-            .anyMatch(
-                c -> c.startsWith("realpath") || c.startsWith("lsblk") || c.startsWith("wipefs")),
+        shell.invocations().stream().anyMatch(c -> c.startsWith("lsblk") || c.startsWith("wipefs")),
         shell.invocations().toString());
   }
 
   @Test
-  void aPoolOfAnotherDriverUnderTheNameIsNoReasonToSkipClearingTheDevice() {
+  void aReRunRefusesTheSourceFlagsItWouldIgnore() {
     var shell =
         new ScriptedShellExecutor()
             .onOk(
                 "incus storage list",
-                "[{\"name\": \"devpool\", \"driver\": \"dir\", \"config\": {\"source\": \"/d\"}}]")
-            .onFail("realpath", "realpath: /dev/sdz: No such file");
+                "[{\"name\": \"tank\", \"driver\": \"zfs\", \"config\": {\"source\": \"tank\","
+                    + " \"volatile.initial_source\": \"/dev/sdb\", \"zfs.pool_name\": \"tank\"}}]")
+            .onOk("realpath -e -- /dev/sdc", "/dev/sdc\n");
 
     var refused =
         assertThrows(
             IllegalArgumentException.class,
-            () -> source(shell, "--storage", "zfs", "--disk", "/dev/sdz"));
+            () ->
+                source(
+                    shell,
+                    "--storage",
+                    "zfs",
+                    "--pool",
+                    "tank",
+                    "--disk",
+                    "/dev/sdc",
+                    "--force-wipe",
+                    "/dev/sdc"));
+    var file =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> source(shell, "--storage", "zfs", "--pool", "tank", "--pool-file-size", "9GiB"));
 
     assertEquals(
-        "--disk /dev/sdz names no device on this box: realpath: /dev/sdz: No such file.",
+        "Incus already has zfs pool 'tank' on /dev/sdb, which a re-run keeps, so --disk /dev/sdc"
+            + " and --force-wipe /dev/sdc would be ignored. Drop it, or name a new pool with --pool"
+            + " <name>.",
         refused.getMessage());
+    assertEquals(
+        "Incus already has zfs pool 'tank' on /dev/sdb, which a re-run keeps, so --pool-file-size"
+            + " 9GiB would be ignored. Drop it, or name a new pool with --pool <name>.",
+        file.getMessage());
+  }
+
+  @Test
+  void anEmptyImportedPoolOnTheNamedDiskIsHandedToIncusAsItIs() throws Exception {
+    var shell =
+        spare(DeviceFixtures.read(DeviceFixtures.SPARES))
+            .onOk("realpath -e -- /dev/sdi", "/dev/sdi\n")
+            .onOk("which zpool")
+            .onOk(
+                "zpool list -vHP",
+                DeviceFixtures.read("raw-file-pool.zpool-list.txt")
+                    .replace("/tmp/sail-raw.img", "/dev/sdi1"))
+            .onOk("realpath -m", "/dev/sdi1\n")
+            .onOk("zfs list", DeviceFixtures.read("raw-file-pool.zfs-list.txt"));
+
+    assertEquals(
+        new PoolSource.Zpool("sail-raw"),
+        source(shell, "--storage", "zfs", "--disk", "/dev/sdi", "--yes"));
+  }
+
+  @Test
+  void aDriverClashIsRefusedBeforeAnythingIsInstalled() {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus storage list",
+                "[{\"name\": \"devpool\", \"driver\": \"dir\", \"config\": {\"source\": \"/d\"}}]");
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> source(shell, "--storage", "zfs", "--pool-file-size", "9GiB"));
+
+    assertEquals(
+        "Incus already has a dir pool named 'devpool', so no zfs pool can take that name. Name the"
+            + " new pool with --pool <name>.",
+        refused.getMessage());
+    assertEquals(
+        List.of(
+            "incus storage list --format json", "incus query /1.0/storage-pools/devpool/resources"),
+        shell.invocations());
   }
 
   @Test
@@ -298,6 +348,15 @@ class HostInitCommandTest {
 
     assertEquals(
         new PoolSource.File(51200), source(shell, "--storage", "zfs", "--pool-file-size", "50GiB"));
+  }
+
+  /** A box whose lsblk prints {@code layout}, /dev/sdb resolving and every probe answering free. */
+  private static ScriptedShellExecutor spare(String layout) {
+    return new ScriptedShellExecutor()
+        .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n")
+        .onOk(DeviceFixtures.LSBLK, layout)
+        .onOk("wipefs --no-act", DeviceFixtures.NOTHING_HELD)
+        .onOk("wipefs --all --no-act");
   }
 
   private static PoolSource source(ScriptedShellExecutor shell, String... args) throws Exception {

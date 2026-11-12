@@ -1,0 +1,55 @@
+{
+   "blockdevices": [
+      {
+         "path": "/dev/sda",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "mountpoints": [
+             null
+         ],
+         "size": "150G",
+         "model": "Virtual Disk"
+      },{
+         "path": "/dev/sda1",
+         "type": "part",
+         "fstype": "ext4",
+         "pttype": "gpt",
+         "mountpoints": [
+             "/"
+         ],
+         "size": "149G",
+         "model": null
+      },{
+         "path": "/dev/sda14",
+         "type": "part",
+         "fstype": null,
+         "pttype": "gpt",
+         "mountpoints": [
+             null
+         ],
+         "size": "4M",
+         "model": null
+      },{
+         "path": "/dev/sda15",
+         "type": "part",
+         "fstype": "vfat",
+         "pttype": "gpt",
+         "mountpoints": [
+             "/boot/efi"
+         ],
+         "size": "106M",
+         "model": null
+      },{
+         "path": "/dev/sda16",
+         "type": "part",
+         "fstype": "ext4",
+         "pttype": "gpt",
+         "mountpoints": [
+             "/boot"
+         ],
+         "size": "913M",
+         "model": null
+      }
+   ]
+}

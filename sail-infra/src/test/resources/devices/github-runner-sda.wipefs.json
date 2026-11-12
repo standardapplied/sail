@@ -1,0 +1,23 @@
+{
+   "signatures": [
+      {
+         "device": "sda",
+         "offset": "0x200",
+         "type": "gpt",
+         "uuid": null,
+         "label": null
+      },{
+         "device": "sda",
+         "offset": "0x257ffffe00",
+         "type": "gpt",
+         "uuid": null,
+         "label": null
+      },{
+         "device": "sda",
+         "offset": "0x1fe",
+         "type": "PMBR",
+         "uuid": null,
+         "label": null
+      }
+   ]
+}

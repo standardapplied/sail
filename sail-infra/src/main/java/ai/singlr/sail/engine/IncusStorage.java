@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 
@@ -33,9 +34,25 @@ public final class IncusStorage {
 
   /**
    * A pool as Incus has it: its {@code source} is what it was made from, the device or file for a
-   * zfs pool, the directory for a dir pool; {@code space} is empty when Incus cannot measure it.
+   * zfs pool, the directory for a dir pool; {@code zpool} is the zpool a zfs pool is, null for
+   * another driver; {@code space} is empty when Incus cannot measure it.
    */
-  public record Pool(String name, String driver, String source, Optional<Space> space) {
+  public record Pool(
+      String name, String driver, String source, String zpool, Optional<Space> space) {
+
+    /** Refuses a pool of {@code driver} under this pool's name, which Incus has with another. */
+    public void requireDriver(String driver) {
+      if (!this.driver.equals(driver)) {
+        throw new IllegalArgumentException(
+            "Incus already has a "
+                + this.driver
+                + " pool named '"
+                + name
+                + "', so no "
+                + driver
+                + " pool can take that name. Name the new pool with --pool <name>.");
+      }
+    }
 
     /** The pool as one line of {@code host status}. */
     public String summary() {
@@ -66,6 +83,7 @@ public final class IncusStorage {
         }
       }
       case PoolSource.File file -> command.add("size=" + file.sizeMb() + "MiB");
+      case PoolSource.Zpool zpool -> command.add("source=" + zpool.name());
     }
     return List.copyOf(command);
   }
@@ -90,9 +108,25 @@ public final class IncusStorage {
     var pools = new ArrayList<Pool>();
     for (var entry : YamlUtil.parseList(listed.stdout())) {
       var name = String.valueOf(entry.get("name"));
-      pools.add(new Pool(name, String.valueOf(entry.get("driver")), source(entry), space(name)));
+      var config = entry.get("config") instanceof Map<?, ?> map ? map : Map.of();
+      pools.add(
+          new Pool(
+              name,
+              String.valueOf(entry.get("driver")),
+              source(config),
+              (String) config.get("zfs.pool_name"),
+              space(name)));
     }
     return pools;
+  }
+
+  /** Every pool Incus has; none where Incus does not answer, as on a box it is not on yet. */
+  public List<Pool> poolsOrNone() throws InterruptedException {
+    try {
+      return pools();
+    } catch (IOException | TimeoutException e) {
+      return List.of();
+    }
   }
 
   /** The pool named {@code name}, when Incus has one. */
@@ -101,11 +135,11 @@ public final class IncusStorage {
     return pools().stream().filter(pool -> pool.name().equals(name)).findFirst();
   }
 
-  private static String source(Map<String, Object> entry) {
-    var config = entry.get("config") instanceof Map<?, ?> map ? map : Map.of();
+  private static String source(Map<?, ?> config) {
     var initial = config.get("volatile.initial_source");
-    return String.valueOf(
-        initial != null && Strings.isNotBlank(initial.toString()) ? initial : config.get("source"));
+    return Objects.toString(
+        initial != null && Strings.isNotBlank(initial.toString()) ? initial : config.get("source"),
+        "unknown");
   }
 
   private Optional<Space> space(String name)

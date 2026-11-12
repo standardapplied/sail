@@ -86,13 +86,7 @@ public final class DownCommand implements Runnable {
 
   private void stopAll(ContainerManager mgr) throws Exception {
     var containers = mgr.listAll();
-    var running =
-        containers.stream()
-            .filter(
-                c ->
-                    c.state() instanceof ContainerState.Running
-                        || c.state() instanceof ContainerState.Frozen)
-            .toList();
+    var running = containers.stream().filter(c -> c.state().live()).toList();
 
     if (running.isEmpty()) {
       if (json) {

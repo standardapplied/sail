@@ -982,8 +982,9 @@ class HostProvisionerTest {
         List.of(),
         shell.invocations().stream()
             .filter(c -> c.startsWith("zpool") || c.startsWith("zfs"))
+            .filter(c -> !c.startsWith("zpool list ") && !c.startsWith("zfs list "))
             .toList(),
-        "sail makes nothing in the pool itself; Incus does");
+        "sail only reads ZFS and makes nothing in the pool itself; Incus does");
     assertTrue(steps.contains("done:5/8:devpool (zfs on /dev/sdb)"), steps.toString());
     assertTrue(
         steps.contains("done:6/8:singlr-base (already exists): containers on devpool (zfs)"),
@@ -995,7 +996,7 @@ class HostProvisionerTest {
 
   @Test
   void aZfsPoolOnAPartitionIsMadeTheSameWay() throws Exception {
-    var partition = "/dev/nvme0n1p5";
+    var partition = "/dev/sdd1";
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onceOnOk("incus storage list --format json", "[]")
@@ -1008,10 +1009,8 @@ class HostProvisionerTest {
             .onOk("incus profile device list", "root\neth0\n")
             .onOk("incus profile device get singlr-base root pool", "devpool\n")
             .onOk("realpath -e -- " + partition, partition + "\n")
-            .onOk(
-                "lsblk --json --output PATH,TYPE,FSTYPE,PTTYPE,MOUNTPOINTS,SIZE,MODEL -- "
-                    + partition,
-                "{\"blockdevices\": [{\"path\": \"" + partition + "\", \"type\": \"part\"}]}");
+            .onOk(DeviceFixtures.LSBLK, DeviceFixtures.read(DeviceFixtures.SPARES))
+            .onOk("wipefs --no-act", DeviceFixtures.NOTHING_HELD);
 
     var hostYaml = provision(shell, new PoolSource.Device(partition, false), null);
 
@@ -1100,9 +1099,8 @@ class HostProvisionerTest {
         fresh(
             new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
                 .onOk(
-                    "lsblk --json --output PATH,TYPE,FSTYPE,PTTYPE,MOUNTPOINTS,SIZE,MODEL -- /dev/sdb",
-                    "{\"blockdevices\": [{\"path\": \"/dev/sdb\", \"type\": \"disk\","
-                        + " \"mountpoints\": [\"/mnt/scratch\"]}]}"),
+                    "lsblk --json --tree",
+                    DeviceFixtures.sparesWithMount("/dev/sdb", "/mnt/scratch")),
             "zfs");
 
     var refused =
@@ -1111,8 +1109,7 @@ class HostProvisionerTest {
             () -> provision(shell, new PoolSource.Device("/dev/sdb", true), null));
 
     assertEquals(
-        "/dev/sdb is in use, so no pool is made on it, even with --force-wipe: /dev/sdb is mounted"
-            + " at /mnt/scratch.",
+        "/dev/sdb is refused, even with --force-wipe: /dev/sdb is mounted at /mnt/scratch.",
         refused.getMessage());
     assertNoPoolCreated(shell);
   }
@@ -1427,10 +1424,11 @@ class HostProvisionerTest {
         .onOk("incus profile device list singlr-base", "root\neth0\n")
         .onOk("incus profile device get singlr-base root pool", "devpool\n")
         .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n")
-        .onOk(
-            "lsblk --json --output PATH,TYPE,FSTYPE,PTTYPE,MOUNTPOINTS,SIZE,MODEL --",
-            "{\"blockdevices\": [{\"path\": \"/dev/sdb\", \"type\": \"disk\"}]}")
-        .onOk("wipefs --no-act", "");
+        .onOk("realpath -e -- /dev/sdd1", "/dev/sdd1\n")
+        .onOk(DeviceFixtures.LSBLK, DeviceFixtures.read(DeviceFixtures.SPARES))
+        .onOk("wipefs --no-act", DeviceFixtures.NOTHING_HELD)
+        .onOk("wipefs --all --no-act")
+        .onOk("zpool list -vHP", "");
   }
 
   /** {@code shell}, on a box whose Incus holds no pool until one is created. */

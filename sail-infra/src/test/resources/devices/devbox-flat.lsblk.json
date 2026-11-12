@@ -1,0 +1,165 @@
+{
+   "blockdevices": [
+      {
+         "path": "/dev/md0",
+         "type": "raid1",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "4G",
+         "model": null
+      },{
+         "path": "/dev/md0",
+         "type": "raid1",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "4G",
+         "model": null
+      },{
+         "path": "/dev/md1",
+         "type": "raid1",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "1022M",
+         "model": null
+      },{
+         "path": "/dev/md1",
+         "type": "raid1",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "1022M",
+         "model": null
+      },{
+         "path": "/dev/md2",
+         "type": "raid1",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             "/var/lib/sail/run", "/dev/.incus-systemd-credentials", "/"
+         ],
+         "size": "1.7T",
+         "model": null
+      },{
+         "path": "/dev/md2",
+         "type": "raid1",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             "/var/lib/sail/run", "/dev/.incus-systemd-credentials", "/"
+         ],
+         "size": "1.7T",
+         "model": null
+      },{
+         "path": "/dev/nvme0n1",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "1.7T",
+         "model": "KIOXIA KCD81RUG1T92                     "
+      },{
+         "path": "/dev/nvme0n1p1",
+         "type": "part",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "256M",
+         "model": null
+      },{
+         "path": "/dev/nvme0n1p2",
+         "type": "part",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "4G",
+         "model": null
+      },{
+         "path": "/dev/nvme0n1p3",
+         "type": "part",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "1G",
+         "model": null
+      },{
+         "path": "/dev/nvme0n1p4",
+         "type": "part",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "1.7T",
+         "model": null
+      },{
+         "path": "/dev/nvme1n1",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "1.7T",
+         "model": "KIOXIA KCD81RUG1T92                     "
+      },{
+         "path": "/dev/nvme1n1p1",
+         "type": "part",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "256M",
+         "model": null
+      },{
+         "path": "/dev/nvme1n1p2",
+         "type": "part",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "4G",
+         "model": null
+      },{
+         "path": "/dev/nvme1n1p3",
+         "type": "part",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "1G",
+         "model": null
+      },{
+         "path": "/dev/nvme1n1p4",
+         "type": "part",
+         "fstype": null,
+         "pttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": "1.7T",
+         "model": null
+      }
+   ]
+}

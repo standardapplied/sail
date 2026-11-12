@@ -10,8 +10,8 @@ import ai.singlr.sail.config.HostYaml;
 
 /**
  * What an Incus storage pool is made from: the host's filesystem, a block device (a whole disk or a
- * partition) that ZFS takes whole, or a file ZFS runs on. {@link IncusStorage} turns each into the
- * one {@code incus storage create} that makes it.
+ * partition) that ZFS takes whole, an existing zpool, or a file ZFS runs on. {@link IncusStorage}
+ * turns each into the one {@code incus storage create} that makes it.
  */
 public sealed interface PoolSource {
 
@@ -47,6 +47,23 @@ public sealed interface PoolSource {
     @Override
     public String said() {
       return "zfs on " + path + (wipe ? ", erased first" : "");
+    }
+  }
+
+  /**
+   * The zpool {@code name}, handed to Incus as it is: one Incus already holds under this pool's
+   * name, or an empty imported pool a device belongs to (an older Sail made one with {@code zpool
+   * create}). Incus requires it empty; nothing on it is erased.
+   */
+  record Zpool(String name) implements PoolSource {
+    @Override
+    public String driver() {
+      return HostYaml.BACKEND_ZFS;
+    }
+
+    @Override
+    public String said() {
+      return "zpool " + name + " as it is";
     }
   }
 

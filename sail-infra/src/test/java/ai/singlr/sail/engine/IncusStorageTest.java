@@ -31,6 +31,9 @@ class IncusStorageTest {
     assertEquals(
         List.of("incus", "storage", "create", "tank", "zfs", "size=51200MiB"),
         IncusStorage.createCommand("tank", new PoolSource.File(51200)));
+    assertEquals(
+        List.of("incus", "storage", "create", "devpool", "zfs", "source=devpool"),
+        IncusStorage.createCommand("devpool", new PoolSource.Zpool("devpool")));
   }
 
   @Test
@@ -39,6 +42,7 @@ class IncusStorageTest {
     assertEquals("zfs on /dev/sdb", new PoolSource.Device("/dev/sdb", false).said());
     assertEquals("zfs on /dev/sdb, erased first", new PoolSource.Device("/dev/sdb", true).said());
     assertEquals("zfs in a 50.0 GiB file", new PoolSource.File(51200).said());
+    assertEquals("zpool devpool as it is", new PoolSource.Zpool("devpool").said());
   }
 
   @Test
@@ -63,7 +67,8 @@ class IncusStorageTest {
                 [{"name": "devpool", "driver": "dir",
                   "config": {"source": "/var/lib/incus/storage-pools/devpool"}},
                  {"name": "tank", "driver": "zfs",
-                  "config": {"source": "tank", "volatile.initial_source": "/dev/sdb"}},
+                  "config": {"source": "tank", "volatile.initial_source": "/dev/sdb",
+                             "zfs.pool_name": "tank"}},
                  {"name": "trial", "driver": "zfs",
                   "config": {"source": "/var/lib/incus/disks/trial.img",
                              "volatile.initial_source": ""}},
@@ -86,17 +91,40 @@ class IncusStorageTest {
                 "devpool",
                 "dir",
                 "/var/lib/incus/storage-pools/devpool",
+                null,
                 Optional.of(new IncusStorage.Space(1073741824L, 10737418240L))),
-            new IncusStorage.Pool("tank", "zfs", "/dev/sdb", Optional.empty()),
+            new IncusStorage.Pool("tank", "zfs", "/dev/sdb", "tank", Optional.empty()),
             new IncusStorage.Pool(
-                "trial", "zfs", "/var/lib/incus/disks/trial.img", Optional.empty()),
-            new IncusStorage.Pool("bare", "dir", "null", Optional.empty())),
+                "trial", "zfs", "/var/lib/incus/disks/trial.img", null, Optional.empty()),
+            new IncusStorage.Pool("bare", "dir", "unknown", null, Optional.empty())),
         pools);
     assertEquals(
         List.of(
             "devpool (dir, /var/lib/incus/storage-pools/devpool): 9.0 GiB free of 10.0 GiB",
             "tank (zfs, /dev/sdb): free space unknown"),
         pools.subList(0, 2).stream().map(IncusStorage.Pool::summary).toList());
+  }
+
+  @Test
+  void anIncusThatDoesNotAnswerHasNoPools() throws Exception {
+    var missing =
+        new ScriptedShellExecutor()
+            .onThrow("incus storage list", new IOException("Cannot run program \"incus\""));
+
+    assertEquals(List.of(), new IncusStorage(missing).poolsOrNone());
+    assertEquals(List.of(), new IncusStorage(new ScriptedShellExecutor()).poolsOrNone());
+  }
+
+  @Test
+  void aPoolRefusesANewPoolOfAnotherDriverUnderItsName() {
+    var devpool = new IncusStorage.Pool("devpool", "dir", "/d", null, Optional.empty());
+
+    devpool.requireDriver("dir");
+    assertEquals(
+        "Incus already has a dir pool named 'devpool', so no zfs pool can take that name. Name the"
+            + " new pool with --pool <name>.",
+        assertThrows(IllegalArgumentException.class, () -> devpool.requireDriver("zfs"))
+            .getMessage());
   }
 
   @Test

@@ -1,0 +1,23 @@
+{
+   "signatures": [
+      {
+         "device": "sda15",
+         "offset": "0x52",
+         "type": "vfat",
+         "uuid": "CF2E-4327",
+         "label": "UEFI"
+      },{
+         "device": "sda15",
+         "offset": "0x0",
+         "type": "vfat",
+         "uuid": "CF2E-4327",
+         "label": "UEFI"
+      },{
+         "device": "sda15",
+         "offset": "0x1fe",
+         "type": "vfat",
+         "uuid": "CF2E-4327",
+         "label": "UEFI"
+      }
+   ]
+}

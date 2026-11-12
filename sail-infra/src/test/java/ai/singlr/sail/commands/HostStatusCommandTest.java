@@ -81,6 +81,22 @@ class HostStatusCommandTest {
   }
 
   @Test
+  void aFrozenContainerIsCountedAsFrozen() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus list",
+                """
+                [{"name": "acme", "type": "container", "status": "Frozen", "state": {}},
+                 {"name": "fintech", "type": "container", "status": "Stopped", "state": {}}]
+                """)
+            .onOk("incus version", "Client version: 6.21\nServer version: 6.21\n");
+
+    assertEquals(1, json(shell).get("containers_frozen"));
+    assertTrue(text(shell).contains("2 total (0 running, 1 frozen, 1 stopped)"));
+  }
+
+  @Test
   void aDaemonThatDoesNotAnswerStillReportsAndNeverClaimsZeroContainers() throws Exception {
     var shell =
         new ScriptedShellExecutor()

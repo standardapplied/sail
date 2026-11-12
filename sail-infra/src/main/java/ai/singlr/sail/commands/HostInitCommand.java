@@ -25,13 +25,12 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.ssh.SshPublicKey;
-import java.io.IOException;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.TimeoutException;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -317,19 +316,24 @@ public final class HostInitCommand implements Runnable {
   }
 
   /**
-   * The pool these flags ask for, read on the machine {@code probe} runs on: dir, the zfs pool
-   * Incus already has under this name (a re-run keeps it whatever source is named, so a device it
-   * took is not refused for holding it), a file, a named device {@link PoolDevices#cleared} clears,
-   * or for zfs with neither, an unused disk the operator picks. Refused when the flags disagree.
+   * The pool these flags ask for, read on the machine {@code probe} runs on: dir; the zfs pool
+   * Incus already holds under this name, which a re-run keeps; a file; a named device {@link
+   * PoolDevices#cleared} clears, or the empty imported pool it belongs to; or for zfs with neither,
+   * an unused disk the operator picks. Refused when the flags disagree, with each other or with the
+   * pool Incus has, before anything is installed.
    */
   PoolSource source(ShellExec probe) throws Exception {
-    var named = disk != null || poolFileSize != null || forceWipe != null;
-    if (!HostYaml.BACKEND_ZFS.equals(storage)) {
-      if (named) {
-        throw new IllegalArgumentException(
-            "--disk, --pool-file-size and --force-wipe choose a ZFS pool's source: pass them with"
-                + " --storage zfs.");
-      }
+    var zfs = HostYaml.BACKEND_ZFS.equals(storage);
+    if (!zfs && (disk != null || poolFileSize != null || forceWipe != null)) {
+      throw new IllegalArgumentException(
+          "--disk, --pool-file-size and --force-wipe choose a ZFS pool's source: pass them with"
+              + " --storage zfs.");
+    }
+    var held =
+        new IncusStorage(probe)
+            .poolsOrNone().stream().filter(found -> found.name().equals(pool)).findFirst();
+    held.ifPresent(found -> found.requireDriver(storage));
+    if (!zfs) {
       return new PoolSource.Dir();
     }
     if (disk != null && poolFileSize != null) {
@@ -340,26 +344,62 @@ public final class HostInitCommand implements Runnable {
       throw new IllegalArgumentException(
           "--force-wipe names the device to erase again: name it with --disk too.");
     }
-    var held = held(new IncusStorage(probe));
+    var devices = new PoolDevices(probe);
     if (held.isPresent()) {
-      return new PoolSource.Device(held.get().source(), false);
+      return kept(held.get(), devices);
     }
     if (poolFileSize != null) {
       return file(poolFileSize);
     }
-    var devices = new PoolDevices(probe);
-    return devices.cleared(disk != null ? disk : detectAndSelectDisk(devices), forceWipe);
+    var source = devices.cleared(disk != null ? disk : detectAndSelectDisk(devices), forceWipe);
+    if (source instanceof PoolSource.Zpool zpool) {
+      handOver(zpool);
+    }
+    return source;
   }
 
   /**
-   * The zfs pool Incus has under this pool's name; none where Incus does not answer, as on a box it
-   * is not installed on yet.
+   * The zfs pool Incus holds under this pool's name, which a re-run keeps; a source flag the re-run
+   * would ignore is refused, naming it.
    */
-  private Optional<IncusStorage.Pool> held(IncusStorage storage) throws InterruptedException {
-    try {
-      return storage.find(pool).filter(found -> HostYaml.BACKEND_ZFS.equals(found.driver()));
-    } catch (IOException | TimeoutException e) {
-      return Optional.empty();
+  private PoolSource kept(IncusStorage.Pool held, PoolDevices devices) throws Exception {
+    var ignored = new ArrayList<String>();
+    if (disk != null && !devices.resolved("--disk", disk).equals(held.source())) {
+      ignored.add("--disk " + disk);
+    }
+    if (poolFileSize != null) {
+      ignored.add("--pool-file-size " + poolFileSize);
+    }
+    if (forceWipe != null) {
+      ignored.add("--force-wipe " + forceWipe);
+    }
+    if (!ignored.isEmpty()) {
+      throw new IllegalArgumentException(
+          "Incus already has zfs pool '"
+              + pool
+              + "' on "
+              + held.source()
+              + ", which a re-run keeps, so "
+              + String.join(" and ", ignored)
+              + " would be ignored. Drop it, or name a new pool with --pool <name>.");
+    }
+    return new PoolSource.Zpool(Objects.requireNonNullElse(held.zpool(), held.name()));
+  }
+
+  /** Says the empty imported pool goes to Incus as it is, and asks unless told yes. */
+  private void handOver(PoolSource.Zpool zpool) {
+    if (!json) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|bold Found:|@   the empty imported zpool "
+                  + zpool.name()
+                  + " on that device, which Incus does not have: it is handed to Incus as it"
+                  + " is (source="
+                  + zpool.name()
+                  + "), and nothing on it is erased."));
+    }
+    if (!yes && !dryRun && !json) {
+      ask("Hand zpool " + zpool.name() + " to Incus?");
     }
   }
 

@@ -1,0 +1,12 @@
+sail-capture
+sail-capture/buckets
+sail-capture/containers
+sail-capture/custom
+sail-capture/deleted
+sail-capture/deleted/buckets
+sail-capture/deleted/containers
+sail-capture/deleted/custom
+sail-capture/deleted/images
+sail-capture/deleted/virtual-machines
+sail-capture/images
+sail-capture/virtual-machines
