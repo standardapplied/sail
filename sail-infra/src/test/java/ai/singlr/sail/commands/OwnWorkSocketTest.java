@@ -281,7 +281,7 @@ class OwnWorkSocketTest {
   void anAgentsSpecShowCarriesTheMeasuresOfItsOwnSpec(String harness) {
     var build = build("e1", harness);
 
-    var shown = run(build, "GET", "/v1/specs/e1", "");
+    var shown = run(build, "GET", "/v1/specs/e1?measures=true", "");
 
     assertEquals("allowed", said(shown));
     assertEquals(

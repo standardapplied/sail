@@ -44,7 +44,7 @@ public final class ApiSpecShowCommand implements Runnable {
     NameValidator.requireValidSpecId(specId);
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
-      var result = client.get("/v1/specs/" + specId);
+      var result = client.get("/v1/specs/" + specId + "?measures=true");
 
       if (json) {
         System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));

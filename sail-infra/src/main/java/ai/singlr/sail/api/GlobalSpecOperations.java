@@ -97,7 +97,7 @@ final class GlobalSpecOperations {
     return new GlobalSpecsListResponse(specs, specs.size());
   }
 
-  /** The specs {@code filter} lists that the reader may see; a filter naming no status refused. */
+  /** The specs {@code filter} lists that the reader may see; a filter it cannot read is refused. */
   private List<SpecStore.SpecRow> listed(SpecStore.SpecFilter filter) {
     try {
       return readable(filter);
@@ -113,15 +113,27 @@ final class GlobalSpecOperations {
 
   GlobalSpecDetailResponse get(String specId) {
     requireStore();
+    return detail(findOrThrow(specId), null);
+  }
+
+  /**
+   * The detail of spec {@code specId} carrying its measures, as {@link #measures} computes them.
+   */
+  GlobalSpecDetailResponse measured(String specId) {
+    requireMeasured();
     var row = findOrThrow(specId);
-    var content = specStore.getContent(specId).orElse(null);
+    return detail(row, measuresOf(row, HostInfo.hostname()));
+  }
+
+  private GlobalSpecDetailResponse detail(SpecStore.SpecRow row, SpecMeasures measures) {
+    var content = specStore.getContent(row.id()).orElse(null);
     return new GlobalSpecDetailResponse(
         viewOf(row),
         content != null ? content.body() : null,
         content != null ? content.plan() : null,
-        openFindingCount(specId),
-        latestRun(specId),
-        runStore == null || reviewStore == null ? null : measuresOf(row),
+        openFindingCount(row.id()),
+        latestRun(row.id()),
+        measures,
         null);
   }
 
@@ -131,24 +143,26 @@ final class GlobalSpecOperations {
    */
   SpecMeasures measures(String specId) {
     requireMeasured();
-    return measuresOf(findOrThrow(specId));
+    return measuresOf(findOrThrow(specId), HostInfo.hostname());
   }
 
   /**
    * The measures of every spec {@code filter} lists that the reader sees, done within {@code
    * window}.
    */
-  SpecMeasuresList measures(SpecStore.SpecFilter filter, SpecMeasuresList.Window window) {
+  SpecMeasuresList listMeasures(SpecStore.SpecFilter filter, SpecMeasuresList.Window window) {
     requireMeasured();
-    return SpecMeasuresList.of(listed(filter).stream().map(this::measuresOf).toList(), window);
+    var box = HostInfo.hostname();
+    return SpecMeasuresList.of(
+        listed(filter).stream().map(spec -> measuresOf(spec, box)).toList(), window);
   }
 
   /**
    * The rows of {@code spec} the reader sees, measured: its revisions on this box, with every entry
    * compacted away or filed where the reader does not read as a gap; its reviews and their
-   * findings; and its runs, as {@code GET /v1/runs?spec=} lists them. Only reads.
+   * findings; and its runs, as {@code GET /v1/runs?spec=} lists them, on {@code box}. Only reads.
    */
-  private SpecMeasures measuresOf(SpecStore.SpecRow spec) {
+  private SpecMeasures measuresOf(SpecStore.SpecRow spec, String box) {
     var reader = Actor.reader();
     var id = spec.id();
     var history = specStore.history(id);
@@ -161,7 +175,7 @@ final class GlobalSpecOperations {
         new MeasureRows(
             id,
             spec.status(),
-            HostInfo.hostname(),
+            box,
             history.stream().filter(sees).toList(),
             gaps,
             reviews,

@@ -1897,9 +1897,19 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public Result<GlobalSpecDetailResponse> globalSpec(String specId) {
+    return detail(() -> globalSpecOps.get(specId));
+  }
+
+  @Override
+  public Result<GlobalSpecDetailResponse> measuredSpec(String specId) {
+    return detail(() -> globalSpecOps.measured(specId));
+  }
+
+  /** The detail {@code read} answers, with the open question of its room the reader may see. */
+  private Result<GlobalSpecDetailResponse> detail(Supplier<GlobalSpecDetailResponse> read) {
     return safeRead(
         () -> {
-          var detail = globalSpecOps.get(specId);
+          var detail = read.get();
           if (messageStore == null) {
             return detail;
           }
@@ -2104,7 +2114,9 @@ public final class SailOperations implements HostOperations {
   public Result<SpecMeasuresList> listMeasures(
       SpecStore.SpecFilter filter, String doneSince, String doneUntil) {
     return safeRead(
-        () -> globalSpecOps.measures(filter, SpecMeasuresList.Window.parse(doneSince, doneUntil)));
+        () ->
+            globalSpecOps.listMeasures(
+                filter, SpecMeasuresList.Window.parse(doneSince, doneUntil)));
   }
 
   @Override

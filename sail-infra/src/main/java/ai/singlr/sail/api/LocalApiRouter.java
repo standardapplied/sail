@@ -538,7 +538,11 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
   }
 
   private ApiResponse spec(LocalApiRequest request, Caller caller, Map<String, String> path) {
-    return ApiResponse.from(operations.globalSpec(path.get("id")));
+    var id = path.get("id");
+    return ApiResponse.from(
+        SpecMeasures.asked(request.query().get("measures"))
+            ? operations.measuredSpec(id)
+            : operations.globalSpec(id));
   }
 
   private ApiResponse update(LocalApiRequest request, Caller caller, Map<String, String> path) {

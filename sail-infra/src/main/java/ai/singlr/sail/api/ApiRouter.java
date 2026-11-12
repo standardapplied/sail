@@ -156,7 +156,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(GET, "/v1/specs", reads, this::globalSpecs),
         route(POST, "/v1/specs", journal, this::createGlobalSpec),
         route(GET, "/v1/specs/board", reads, this::globalBoard),
-        route(GET, "/v1/specs/{spec}", reads, call -> globalSpecWithEtag(call.param(SPEC))),
+        route(GET, "/v1/specs/{spec}", reads, this::globalSpec),
         route(PUT, "/v1/specs/{spec}", journal, this::updateGlobalSpec),
         route(DELETE, "/v1/specs/{spec}", journal, this::deleteGlobalSpec),
         route(GET, "/v1/specs/{spec}/content", reads, this::globalSpecContent),
@@ -947,8 +947,15 @@ public final class ApiRouter implements HttpHandler, RouteTable {
    * DELETE} to get optimistic-concurrency protection — the server rejects the write with {@code 412
    * Precondition Failed} if anyone modified the row in the meantime.
    */
-  private ApiResponse globalSpecWithEtag(String specId) {
-    var result = operations.globalSpec(specId);
+  private ApiResponse globalSpec(Call call) {
+    var specId = call.param(SPEC);
+    return withEtag(
+        SpecMeasures.asked(call.query().get("measures"))
+            ? operations.measuredSpec(specId)
+            : operations.globalSpec(specId));
+  }
+
+  private static ApiResponse withEtag(Result<GlobalSpecDetailResponse> result) {
     var response = ApiResponse.from(result);
     if (result instanceof Result.Success<?> success
         && success.value() instanceof GlobalSpecDetailResponse detail) {

@@ -2195,9 +2195,9 @@ ended; each is the author's time of its revision, from this box's log, which the
 verified is when the current attempt's latest passing review completed. Rework is review rows,
 build runs, fix runs and findings carried forward. "No recorded human code act" is a done spec no
 person decided a human stage of, an upper bound. Cost and human minutes are `unknown`: no row
-records them yet. `GET /v1/specs/{spec}/measures` serves the record, `GET /v1/specs/{spec}`
-carries it as `measures` (so `sail spec show`, its `--json` and the container's `spec show`
-print it), and `GET /v1/specs:measures`, behind `sail spec list --measures [--done-since]
+records them yet. `GET /v1/specs/{spec}/measures` serves the record, `GET
+/v1/specs/{spec}?measures=true` carries it as `measures` (`sail spec show`, its `--json` and the
+container's `spec show` ask for it; no other read of a spec pays for it), and `GET /v1/specs:measures`, behind `sail spec list --measures [--done-since]
 [--done-until]`, lists it per spec with the nearest-rank median and p90 of every number.
 
 | | Invariant | Proven by |

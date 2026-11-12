@@ -30,6 +30,21 @@ record LocalApiRequest(
 
   private static final String BEARER_PREFIX = "bearer ";
 
+  /**
+   * The request a request line's {@code target} names: its path, and its query decoded, as the
+   * socket reads them.
+   */
+  static LocalApiRequest of(
+      String method, String target, Map<String, String> headers, byte[] body) {
+    var queryStart = target.indexOf('?');
+    return new LocalApiRequest(
+        method,
+        queryStart >= 0 ? target.substring(0, queryStart) : target,
+        queryStart >= 0 ? decode(target.substring(queryStart + 1)) : Map.of(),
+        headers,
+        body);
+  }
+
   /** The bearer credential from the {@code Authorization} header, or null when absent. */
   String bearer() {
     var authorization = headers.get("authorization");

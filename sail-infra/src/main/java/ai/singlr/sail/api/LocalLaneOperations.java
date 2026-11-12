@@ -84,6 +84,12 @@ public interface LocalLaneOperations {
   Result<GlobalSpecDetailResponse> globalSpec(String specId);
 
   /**
+   * Spec {@code specId}'s detail carrying its measures ({@link SpecMeasures}), as {@code GET
+   * /v1/specs/{id}?measures=true} answers it at either door.
+   */
+  Result<GlobalSpecDetailResponse> measuredSpec(String specId);
+
+  /**
    * Creates a spec as the bound actor. A spec born into an existing room — named explicitly or
    * sitting on the spec's own id — binds under that room's post right, so a member cannot land work
    * in somebody else's room.

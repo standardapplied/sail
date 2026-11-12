@@ -246,13 +246,7 @@ public final class LocalApiSocket implements AutoCloseable {
         return;
       }
 
-      var queryStart = target.indexOf('?');
-      var path = queryStart >= 0 ? target.substring(0, queryStart) : target;
-      var query =
-          queryStart >= 0
-              ? LocalApiRequest.decode(target.substring(queryStart + 1))
-              : Map.<String, String>of();
-      var response = handler.handle(new LocalApiRequest(method, path, query, headers, body));
+      var response = handler.handle(LocalApiRequest.of(method, target, headers, body));
       writeResponse(out, response);
     } catch (IOException io) {
       // client disconnected mid-stream

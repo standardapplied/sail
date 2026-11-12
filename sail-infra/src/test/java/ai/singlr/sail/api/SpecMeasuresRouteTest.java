@@ -48,9 +48,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * The measures routes through the real web router, over the production operations and stores: what
- * {@code GET /v1/specs/{spec}/measures} answers is what {@code GET /v1/specs/{spec}} carries as
- * {@code measures} (M10), computed from the rows the stores hold (M8, M9), refused to a caller who
- * may not read the spec as a spec that is not there (M13), and read without writing a row.
+ * {@code GET /v1/specs/{spec}/measures} answers is what {@code GET /v1/specs/{spec}?measures=true}
+ * carries as {@code measures} and what {@code GET /v1/specs:measures} lists (M10), computed from
+ * the rows the stores hold (M8, M9), refused to a caller who may not read the spec as a spec that
+ * is not there (M13), and read without writing a row.
  */
 class SpecMeasuresRouteTest {
 
@@ -301,7 +302,13 @@ class SpecMeasuresRouteTest {
         measures.get("rework"));
     assertEquals(Map.of("unknown", "not_recorded", "runs_without_usage", 6), measures.get("cost"));
     assertEquals(HostInfo.hostname(), ((Map<?, ?>) measures.get("times")).get("box"));
-    assertEquals(measures, read(ada, "/v1/specs/auth").get("measures"), "one computation");
+    assertEquals(
+        measures, read(ada, "/v1/specs/auth?measures=true").get("measures"), "one computation");
+    assertEquals(null, read(ada, "/v1/specs/auth").get("measures"), "asked for, never paid for");
+    assertEquals(
+        "{\"schema_version\": 1, \"error\": {\"code\": \"invalid_request\", \"message\":"
+            + " \"measures must be true or false, not 'yes'.\", \"field_errors\": []}}",
+        get(ada, "/v1/specs/auth?measures=yes").body());
     assertEquals(
         List.of(measures),
         read(ada, "/v1/specs:measures?project=alpha").get("specs"),
@@ -336,10 +343,15 @@ class SpecMeasuresRouteTest {
         read(ada, "/v1/specs/auth/measures").get("cost"));
   }
 
-  /** Scenario 4, through the stores' own compaction. */
+  /**
+   * Scenario 4, through the stores' own compaction: the birth is kept as the synced base, but the
+   * revision that made the spec ready was dropped, so the first revision held in {@code pending}, a
+   * later edit, is not taken for it.
+   */
   @Test
   void aSpecWhosePendingRevisionWasCompactedAwaySaysItsReadyTimeIsUnknown() throws Exception {
     spec("auth", "alpha");
+    var birth = specs.revOf("auth");
     at(10);
     move("auth", SpecStatus.DRAFT, SpecStatus.PENDING);
     for (var edit = 1; edit <= ChangeLog.HISTORY_REVISIONS; edit++) {
@@ -348,32 +360,47 @@ class SpecMeasuresRouteTest {
       Acting.system(() -> specs.setContent("auth", body, ""));
     }
     var before = (Map<?, ?>) read(ada, "/v1/specs/auth/measures").get("times");
-    Acting.system(() -> new ChangeLog(db).compact("spec", List.of("auth"), id -> null));
+    Acting.system(() -> new ChangeLog(db).compact("spec", List.of("auth"), id -> birth));
 
     var times = (Map<?, ?>) read(ada, "/v1/specs/auth/measures").get("times");
 
     assertEquals(
         Map.of("at", "2026-11-01T09:10:00.000Z", "source", "change_log"), before.get("ready"));
+    assertEquals(1, specs.compacted("auth").size(), "the move to pending, and only it");
     assertEquals(Map.of("unknown", "history_incomplete"), times.get("ready"));
   }
 
   /**
-   * A spec made ready in bravo and moved into alpha: its revisions filed under bravo are a gap to a
-   * reader of alpha alone, so its ready time is unknown to sam and known to ada.
+   * A spec born in alpha, moved into bravo, made ready there and moved back: its revisions filed
+   * under bravo are a gap to a reader of alpha alone, so the ready time it holds after them is not
+   * taken for the first, and ada, who reads both, is told it.
    */
   @Test
   void aRevisionFiledWhereTheReaderDoesNotReadIsAGapNeverSkippedOver() throws Exception {
-    spec("moved", "bravo");
+    spec("moved", "alpha");
     at(10);
-    move("moved", SpecStatus.DRAFT, SpecStatus.PENDING);
+    project("moved", "bravo");
     at(20);
-    var row = specs.findById("moved").orElseThrow();
+    move("moved", SpecStatus.DRAFT, SpecStatus.PENDING);
+    at(30);
+    project("moved", "alpha");
+
+    assertEquals(
+        Map.of("unknown", "history_incomplete"),
+        ((Map<?, ?>) read(sam, "/v1/specs/moved/measures").get("times")).get("ready"));
+    assertEquals(
+        Map.of("at", "2026-11-01T09:20:00.000Z", "source", "change_log"),
+        ((Map<?, ?>) read(ada, "/v1/specs/moved/measures").get("times")).get("ready"));
+  }
+
+  private void project(String id, String project) {
+    var row = specs.findById(id).orElseThrow();
     Acting.system(
         () ->
             specs.update(
                 new SpecStore.SpecRow(
                     row.id(),
-                    "alpha",
+                    project,
                     row.title(),
                     row.status(),
                     row.assignee(),
@@ -389,13 +416,6 @@ class SpecMeasuresRouteTest {
                     row.dependsOn(),
                     row.repos(),
                     row.roomIdOrIdentity())));
-
-    assertEquals(
-        Map.of("unknown", "history_incomplete"),
-        ((Map<?, ?>) read(sam, "/v1/specs/moved/measures").get("times")).get("ready"));
-    assertEquals(
-        Map.of("at", "2026-11-01T09:10:00.000Z", "source", "change_log"),
-        ((Map<?, ?>) read(ada, "/v1/specs/moved/measures").get("times")).get("ready"));
   }
 
   /** Scenario 9, and a window that is not one. */
@@ -464,7 +484,7 @@ class SpecMeasuresRouteTest {
 
     for (var token : List.of(ada, sam)) {
       read(token, "/v1/specs/auth/measures");
-      read(token, "/v1/specs/auth");
+      read(token, "/v1/specs/auth?measures=true");
       read(token, "/v1/specs:measures?status=awaiting_merge&done_since=2026-11-01");
     }
 

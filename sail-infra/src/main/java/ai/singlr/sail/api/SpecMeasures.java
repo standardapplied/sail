@@ -111,6 +111,21 @@ record SpecMeasures(
     NOT_DONE
   }
 
+  /**
+   * Whether a read of a spec asks for its measures, by {@code measures=true}; anything but {@code
+   * true} or {@code false} is refused.
+   */
+  static boolean asked(String value) {
+    if (value == null || value.equals("false")) {
+      return false;
+    }
+    if (value.equals("true")) {
+      return true;
+    }
+    throw new ApiException(
+        ErrorCode.INVALID_REQUEST, "measures must be true or false, not '" + value + "'.");
+  }
+
   /** The measures of the spec {@code rows} holds, from those rows alone. */
   static SpecMeasures of(MeasureRows rows) {
     var log = Log.of(rows);

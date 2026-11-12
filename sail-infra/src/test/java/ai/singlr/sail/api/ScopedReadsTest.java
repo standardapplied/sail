@@ -143,6 +143,7 @@ class ScopedReadsTest {
           "/v1/specs?project={project}",
           "/v1/specs/board?project={project}",
           "/v1/specs/{spec}",
+          "/v1/specs/{spec}?measures=true",
           "/v1/specs/{spec}/content",
           "/v1/specs/{spec}/reviews",
           "/v1/specs/{spec}/history",

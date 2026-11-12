@@ -602,6 +602,11 @@ class TestOperations implements Operations {
   }
 
   @Override
+  public Result<GlobalSpecDetailResponse> measuredSpec(String specId) {
+    return globalSpec(specId);
+  }
+
+  @Override
   public Result<SpecMeasures> specMeasures(String specId) {
     return Result.success(
         SpecMeasures.of(
