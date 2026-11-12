@@ -557,14 +557,25 @@ public final class SchemaManager {
   }
 
   /**
-   * Creates the schema on a fresh database and stamps it, atomically; does nothing on a database
-   * this release made. Any other database is refused naming what to do: an older one was made by a
-   * release before v1 and is replaced, as is one holding tables but no version, and a newer one
-   * needs a newer binary.
+   * The indexes the change feed reads through, created at every start when missing, so a database
+   * made before them gains them with no change of schema version: a scoped reader's heads, one
+   * project's range at a time in seq order ({@link ChangeLog#changesAfter}).
+   */
+  static final List<String> FEED_INDEXES =
+      List.of(
+          "CREATE INDEX IF NOT EXISTS idx_change_heads_project"
+              + " ON change_heads(entity_type, project, seq)");
+
+  /**
+   * Creates the schema on a fresh database and stamps it, atomically; on a database this release
+   * made, adds only the feed's indexes it lacks ({@link #FEED_INDEXES}). Any other database is
+   * refused naming what to do: an older one was made by a release before v1 and is replaced, as is
+   * one holding tables but no version, and a newer one needs a newer binary.
    */
   public void migrate() {
     db.execute(SCHEMA_VERSION_TABLE);
     if (currentVersion() == CURRENT_VERSION) {
+      FEED_INDEXES.forEach(db::execute);
       return;
     }
     db.transaction(
@@ -585,6 +596,7 @@ public final class SchemaManager {
   void createBaseline() {
     db.execute(SCHEMA_VERSION_TABLE);
     BASELINE.forEach(db::execute);
+    FEED_INDEXES.forEach(db::execute);
     stamp(CURRENT_VERSION);
   }
 

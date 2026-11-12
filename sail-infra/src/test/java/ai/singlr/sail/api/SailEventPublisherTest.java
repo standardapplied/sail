@@ -50,14 +50,10 @@ class SailEventPublisherTest {
     try (var bus = new EventBus();
         var db = Sqlite.open(tmp.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
-      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 32);
       var operations =
           TestControlPlane.standalone(
               new SailOperations(
-                  new ShellExecutor(true),
-                  TestProjects.reading(tmp.resolve("sail.yaml")),
-                  bus,
-                  persister),
+                  new ShellExecutor(true), TestProjects.reading(tmp.resolve("sail.yaml")), bus),
               db,
               tmp);
       try (var server =
@@ -67,7 +63,7 @@ class SailEventPublisherTest {
               operations,
               new FixedTokenTestAuth("tok"),
               bus,
-              persister,
+              null,
               tmp.resolve("api.sock"))) {
         server.start();
         var publisher = new SailEventPublisher("127.0.0.1", server.port(), "tok");
@@ -96,7 +92,6 @@ class SailEventPublisherTest {
   @Test
   void publishThrowsOnAuthFailure(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
-      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 8);
       try (var server =
           new SailApiServer(
               "127.0.0.1",
@@ -104,7 +99,7 @@ class SailEventPublisherTest {
               new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
-              persister,
+              null,
               tmp.resolve("api.sock"))) {
         server.start();
         var publisher = new SailEventPublisher("127.0.0.1", server.port(), "wrong-token");

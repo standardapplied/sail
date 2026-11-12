@@ -162,23 +162,26 @@ public final class SailApiClient implements AutoCloseable {
   }
 
   /**
-   * Hands each event's data in an SSE stream to {@code onData} until the stream ends; a stream the
-   * server ended with an {@code error} event ends in the refusal it names.
+   * Hands the data of each unnamed event in an SSE stream — an event the bus published — to {@code
+   * onData} until the stream ends; a named one, a row change or a resync of the change feed, is not
+   * one, and a stream the server ended with an {@code error} event ends in the refusal it names.
    */
   public static void readStream(Iterator<String> lines, Consumer<String> onData) throws Refused {
-    var ending = false;
+    String named = null;
     while (lines.hasNext()) {
       var line = lines.next();
       if (line.isEmpty()) {
-        ending = false;
-      } else if (line.equals("event: error")) {
-        ending = true;
+        named = null;
+      } else if (line.startsWith("event: ")) {
+        named = line.substring("event: ".length());
       } else if (line.startsWith("data: ")) {
         var data = line.substring("data: ".length());
-        if (ending) {
+        if ("error".equals(named)) {
           throw Refused.of(YamlUtil.parseMap(data));
         }
-        onData.accept(data);
+        if (named == null) {
+          onData.accept(data);
+        }
       }
     }
   }

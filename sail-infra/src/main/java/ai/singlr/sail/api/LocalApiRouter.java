@@ -62,6 +62,7 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
   private static final String RESOLVE = "/v1/conflicts/{id...}/resolve";
   private static final String CONFLICT = "/v1/conflicts/{id...}";
   private static final String WHOAMI = "/v1/whoami";
+  private static final String CHANGES = "/v1/changes";
   private static final String EVENTS = "/v1/events";
   private static final String RUN_MESSAGES = "/v1/run/messages";
   private static final String RUN_SESSION = "/v1/run/session";
@@ -104,6 +105,8 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
                         : noRoute(request)),
             route(GET, WHOAMI, reads, LocalApiRouter::whoami),
             unserved(WHOAMI, "whoami accepts GET"),
+            route(GET, CHANGES, reads, this::changes),
+            unserved(CHANGES, "changes accepts GET"),
             route(POST, EVENTS, journal, this::events),
             unserved(EVENTS, "events accepts POST"),
             route(GET, RUN_MESSAGES, Gate.RUNS_OWN, aRunsOwn(this::runMessages)),
@@ -519,6 +522,11 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
     var name = path.get("name");
     return ApiResponse.ok(
         Map.of("name", name, "skill_md", operations.skills().manifest(path.get(PROJECT), name)));
+  }
+
+  /** The change feed, read as the caller, a run's agent among them, as the web door reads it. */
+  private ApiResponse changes(LocalApiRequest request, Caller caller, Map<String, String> path) {
+    return ChangeFeed.answer(operations.changes(), request.query());
   }
 
   private ApiResponse specs(LocalApiRequest request, Caller caller, Map<String, String> path) {

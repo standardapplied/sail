@@ -28,6 +28,7 @@ import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -101,7 +102,7 @@ final class GlobalSpecOperations {
 
   GlobalSpecsListResponse list(SpecStore.SpecFilter filter) {
     requireStore();
-    var specs = listed(filter).stream().map(this::viewOf).toList();
+    var specs = viewsOf(listed(filter));
     return new GlobalSpecsListResponse(specs, specs.size());
   }
 
@@ -459,16 +460,44 @@ final class GlobalSpecOperations {
    * such a spec reads as one whose room has not arrived.
    */
   private GlobalSpecView viewOf(SpecStore.SpecRow row) {
+    return viewsOf(List.of(row)).getFirst();
+  }
+
+  /**
+   * The specs among {@code ids} the reader may see, as the list route shapes each, by id: the rows
+   * a change feed serves of the type, in a constant number of reads however many.
+   */
+  Map<String, GlobalSpecView> readableViews(List<String> ids) {
+    requireStore();
+    var views = new LinkedHashMap<String, GlobalSpecView>();
+    for (var view :
+        viewsOf(
+            ReadFilter.readable(
+                Actor.reader(), specStore.findByIds(ids), SpecStore.SpecRow::project))) {
+      views.put(view.id(), view);
+    }
+    return views;
+  }
+
+  /**
+   * {@code rows} as the reader sees each: its room's wake and seat when the reader may see that
+   * room, read once for them all.
+   */
+  private List<GlobalSpecView> viewsOf(List<SpecStore.SpecRow> rows) {
     var store = rooms.get();
-    var room =
-        store == null
-            ? null
-            : ReadFilter.readable(
-                    Actor.reader(),
-                    store.findById(row.roomIdOrIdentity()),
-                    RoomStore.RoomRow::project)
-                .orElse(null);
-    return GlobalSpecView.from(row, room);
+    var readable = new HashMap<String, RoomStore.RoomRow>();
+    if (store != null && !rows.isEmpty()) {
+      for (var room :
+          ReadFilter.readable(
+              Actor.reader(),
+              store.findByIds(rows.stream().map(SpecStore.SpecRow::roomIdOrIdentity).toList()),
+              RoomStore.RoomRow::project)) {
+        readable.put(room.id(), room);
+      }
+    }
+    return rows.stream()
+        .map(row -> GlobalSpecView.from(row, readable.get(row.roomIdOrIdentity())))
+        .toList();
   }
 
   /**

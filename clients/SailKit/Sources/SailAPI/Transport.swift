@@ -22,11 +22,15 @@ public struct HTTPRequest: Equatable, Sendable {
     }
 
     /// A request for `segments` and `query`, every character of each but ASCII letters, digits,
-    /// `-`, `_` and `~` percent-encoded: a segment never reads as another segment, `.` or `..`, and
-    /// a `+` never reaches the server's form decoding as a space. A nil query value is left out.
+    /// `-`, `_` and `~` percent-encoded, and `.` too in a segment: a segment never reads as another
+    /// segment, `.` or `..`, and a `+` never reaches the server's form decoding as a space. A query
+    /// keeps its dots, as a position the server handed out spells them. A nil query value is left
+    /// out.
     package init(_ method: HTTPMethod, _ segments: [String], query: [(String, String?)] = [], body: Data? = nil) {
-        let path = segments.map { "/" + Self.escaped($0) }.joined()
-        let parameters = query.compactMap { name, value in value.map { "\(Self.escaped(name))=\(Self.escaped($0))" } }
+        let path = segments.map { "/" + Self.escaped($0, keeping: Self.unescaped) }.joined()
+        let parameters = query.compactMap { name, value in
+            value.map { "\(Self.escaped(name, keeping: Self.queried))=\(Self.escaped($0, keeping: Self.queried))" }
+        }
         self.init(
             method: method,
             path: parameters.isEmpty ? path : path + "?" + parameters.joined(separator: "&"),
@@ -35,15 +39,17 @@ public struct HTTPRequest: Equatable, Sendable {
         )
     }
 
-    private static func escaped(_ text: String) -> String {
+    private static func escaped(_ text: String, keeping kept: Set<UInt8>) -> String {
         text.utf8.map { byte in
-            unescaped.contains(byte)
+            kept.contains(byte)
                 ? String(UnicodeScalar(byte))
                 : "%" + String(byte >> 4, radix: 16, uppercase: true) + String(byte & 0xF, radix: 16, uppercase: true)
         }.joined()
     }
 
     private static let unescaped = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~".utf8)
+
+    private static let queried = unescaped.union(".".utf8)
 
     /// `method path`, as an error names the route that gave it.
     public var route: String {

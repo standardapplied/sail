@@ -42,7 +42,6 @@ public final class SailApiServer implements AutoCloseable {
   private final Optional<Path> listening;
   private final ExecutorService executor;
   private final EventBus eventBus;
-  private final AuditPersister auditPersister;
   private final EventBus.Subscription persisterSubscription;
   private final EventBus.Subscription webhookSubscription;
   private final EventBus.Subscription specLifecycleSubscription;
@@ -162,7 +161,6 @@ public final class SailApiServer implements AutoCloseable {
       PrivateNetwork network)
       throws IOException {
     this.eventBus = eventBus;
-    this.auditPersister = auditSubscriber instanceof AuditPersister ap ? ap : null;
     this.persisterSubscription =
         eventBus != null && auditSubscriber != null ? eventBus.subscribe(auditSubscriber) : null;
     this.webhookSubscription =
@@ -201,7 +199,7 @@ public final class SailApiServer implements AutoCloseable {
       serve("/enroll", pages, rateLimits::wrap);
     }
     if (eventBus != null) {
-      sseHandler = new SseHandler(eventBus, auth, turns);
+      sseHandler = new SseHandler(eventBus, auth, turns, operations.changes());
       serve("/v1/events/stream", sseHandler, rateLimits::wrap);
       socketListener = socketPath == null ? null : new LocalApiSocket(operations, socketPath);
     } else {
@@ -294,11 +292,6 @@ public final class SailApiServer implements AutoCloseable {
   /** Returns the event bus, or {@code null} when the server was constructed without one. */
   public EventBus eventBus() {
     return eventBus;
-  }
-
-  /** Returns the audit persister, or {@code null} when the server was constructed without one. */
-  public AuditPersister auditPersister() {
-    return auditPersister;
   }
 
   /** Returns the SSE handler, or {@code null} when no bus was configured. */

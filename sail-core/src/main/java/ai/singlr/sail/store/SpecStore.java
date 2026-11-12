@@ -260,25 +260,46 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
 
   /** Every spec attached to {@code roomId}, oldest first — the room's work-items. */
   public List<SpecRow> listByRoom(String roomId) {
-    return db.query(
-        """
-        SELECT id, project, title, status, assignee, agent, model, reasoning_effort,
-            branch, priority, created_by, created_at, updated_at, updated_by, room_id
-        FROM specs WHERE room_id = ? ORDER BY created_at, id""",
-        this::mapSpec,
-        roomId);
+    return listByRooms(List.of(roomId)).getOrDefault(roomId, List.of());
+  }
+
+  /**
+   * The specs attached to each of {@code roomIds}, oldest first, keyed by room: what {@link
+   * #listByRoom} answers of each, in one read however many rooms. A room with none is absent.
+   */
+  public Map<String, List<SpecRow>> listByRooms(Collection<String> roomIds) {
+    var byRoom = new LinkedHashMap<String, List<SpecRow>>();
+    for (var spec :
+        db.query(
+            SELECT_SPECS
+                + " WHERE room_id IN (SELECT value FROM json_each(?)) ORDER BY created_at, id",
+            this::mapSpec,
+            YamlUtil.dumpJson(List.copyOf(roomIds)))) {
+      byRoom.computeIfAbsent(spec.roomId(), room -> new ArrayList<>()).add(spec);
+    }
+    return byRoom;
   }
 
   public Optional<SpecRow> findById(String id) {
-    return db.queryOne(
-            """
-            SELECT id, project, title, status, assignee, agent, model, reasoning_effort,
-                branch, priority, created_by, created_at, updated_at, updated_by, room_id
-            FROM specs WHERE id = ?""",
-            this::mapSpec,
-            id)
-        .map(spec -> hydrate(List.of(spec)).getFirst());
+    return findByIds(List.of(id)).stream().findFirst();
   }
+
+  /**
+   * The specs among {@code ids} this box holds, whole, in id order: a constant cost however many.
+   */
+  public List<SpecRow> findByIds(Collection<String> ids) {
+    return hydrate(
+        db.query(
+            SELECT_SPECS + " WHERE id IN (SELECT value FROM json_each(?)) ORDER BY id",
+            this::mapSpec,
+            YamlUtil.dumpJson(List.copyOf(ids))));
+  }
+
+  private static final String SELECT_SPECS =
+      """
+      SELECT id, project, title, status, assignee, agent, model, reasoning_effort,
+          branch, priority, created_by, created_at, updated_at, updated_by, room_id
+      FROM specs""";
 
   public List<SpecRow> list(SpecFilter filter) {
     var sql = new StringBuilder("SELECT DISTINCT s.id, s.project, s.title, s.status, s.assignee,");

@@ -7,10 +7,13 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
@@ -32,7 +35,12 @@ public final class SailEventPublisher {
   private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
   private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
 
+  /** How long a wake waits to connect: a server that is down or slow is not waited on. */
+  static final Duration WAKE_CONNECT = Duration.ofMillis(250);
+
   private final URI uri;
+  private final String host;
+  private final int port;
   private final String token;
   private final HttpClient client;
 
@@ -43,6 +51,11 @@ public final class SailEventPublisher {
       throw new IllegalArgumentException("port must be 1..65535, got " + port);
     }
     this.uri = URI.create("http://" + host + ":" + port + "/v1/events");
+    if (token.indexOf('\r') >= 0 || token.indexOf('\n') >= 0) {
+      throw new IllegalArgumentException("A token is one line; this one breaks across lines.");
+    }
+    this.host = host;
+    this.port = port;
     this.token = token;
     this.client = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
   }
@@ -56,6 +69,29 @@ public final class SailEventPublisher {
     var uri = URI.create(config.serverUrl());
     var port = uri.getPort() == -1 ? 7070 : uri.getPort();
     return new SailEventPublisher(uri.getHost(), port, config.token());
+  }
+
+  /**
+   * Wakes the server's change-feed streams ({@code POST /v1/changes:wake}): this process wrote the
+   * box's database, which the server's streams cannot see. It connects within {@link
+   * #WAKE_CONNECT}, sends the request and closes, waiting for no answer, so a server that takes a
+   * connection and never answers delays the caller by nothing. Throws if it cannot connect.
+   */
+  public void wake() throws IOException {
+    try (var socket = new Socket()) {
+      socket.connect(new InetSocketAddress(host, port), (int) WAKE_CONNECT.toMillis());
+      var out = socket.getOutputStream();
+      out.write(
+          ("POST /v1/changes:wake HTTP/1.1\r\nHost: "
+                  + host
+                  + ":"
+                  + port
+                  + "\r\nAuthorization: Bearer "
+                  + token
+                  + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+              .getBytes(StandardCharsets.US_ASCII));
+      out.flush();
+    }
   }
 
   /**

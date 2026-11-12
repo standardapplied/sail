@@ -295,8 +295,7 @@ class AuthorityAuditTest {
   }
 
   private SailOperations operations(Sqlite box, SyncConfig config, String id) {
-    return OperationsFactory.create(
-            box, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+    return OperationsFactory.create(box, SHELL, null, SyncScheduler.disabled(), SessionYield.NONE)
         .useControlPlane(
             box,
             tempDir,

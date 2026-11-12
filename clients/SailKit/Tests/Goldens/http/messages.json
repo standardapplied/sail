@@ -43,6 +43,9 @@
       "spec_id": "harbor-design",
       "total": 4
     },
+    "headers": {
+      "seq": "golden.17.000000000017"
+    },
     "status": 200
   }
 }

@@ -7,30 +7,33 @@ import Testing
 
 @Suite(.timeLimit(.minutes(1))) struct EventSourceTests {
     @Test func aStreamThatEndsMidEventAsksAgainFromTheLastCompleteEventAndDropsThePart() async throws {
-        let stream = try Goldens.bytes("events/stream.sse")
-        let third = try #require(range(of: "id: 3\n", in: stream))
-        let fourth = try #require(range(of: "id: 4\n", in: stream))
+        let stream = try Goldens.bytes("events/resumed-stream.sse")
+        let ids = try Goldens.changeIds()
+        let third = try #require(range(of: "id: \(ids[2])\n", in: stream))
+        let fourth = try #require(range(of: "event: change\nid: \(ids[3])\n", in: stream))
         let server = try ScriptedStreams([
             .stream([Array(stream[..<(third.upperBound + 20)])], .close),
             .stream([Array(stream[fourth.lowerBound...])], .close),
         ])
         let updates = try await read(follow(server))
-        #expect(updates.prefix(4).map(\.lastEventID) == ["", "1", "2", "2"])
+        #expect(updates.prefix(4).map(\.lastEventID) == ["", ids[0], ids[1], ids[1]])
         #expect(updates[0] == .connected(lastEventID: ""))
-        #expect(updates[3] == .connected(lastEventID: "2"))
-        #expect(events(in: updates).map(\.lastEventID).prefix(4) == ["1", "2", "4", "5"])
+        #expect(updates[3] == .connected(lastEventID: ids[1]))
+        #expect(events(in: updates).map(\.lastEventID) == Array(ids.prefix(2) + ids.dropFirst(3)))
         let requests = await server.requests
-        #expect(requests.map { $0.headers["Last-Event-ID"] } == [nil, "2", "38"])
+        #expect(requests.map { $0.headers["Last-Event-ID"] } == [nil, ids[1], ids.last])
         #expect(requests.allSatisfy { $0.headers["Accept"] == "text/event-stream" })
     }
 
     @Test func anEventSentWithoutAnIdAfterAReconnectKeepsTheLastIdSeen() async throws {
+        let resumed = try Goldens.bytes("events/resumed-stream.sse")
+        let ids = try Goldens.changeIds()
+        let second = try #require(range(of: "event: change\nid: \(ids[1])\n", in: resumed))
         let room = try Goldens.bytes("events/room-stream.sse")
-        let second = try #require(range(of: "id: 2\n", in: room))
-        let server = try ScriptedStreams([.stream([Array(room[..<second.lowerBound])], .close), .stream([room], .close)])
+        let server = try ScriptedStreams([.stream([Array(resumed[..<second.lowerBound])], .close), .stream([room], .close)])
         let updates = try await read(follow(server))
-        #expect(updates.prefix(6).map(\.lastEventID) == ["", "", "1", "1", "1", "1"])
-        #expect(await server.requests.map { $0.headers["Last-Event-ID"] }.prefix(2) == [nil, "1"])
+        #expect(updates.prefix(5).map(\.lastEventID) == ["", ids[0], ids[0], ids[0], ids[0]])
+        #expect(await server.requests.map { $0.headers["Last-Event-ID"] }.prefix(2) == [nil, ids[0]])
     }
 
     @Test func aFailedConnectIsAnnouncedAndAskedAgainAfterTheWaitTheServerSet() async throws {

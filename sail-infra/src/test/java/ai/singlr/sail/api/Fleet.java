@@ -320,7 +320,6 @@ public final class Fleet implements AutoCloseable {
                   TestProjects.reading(descriptor),
                   (command, log) -> 4242L,
                   bus,
-                  null,
                   specs,
                   reviews,
                   runs,

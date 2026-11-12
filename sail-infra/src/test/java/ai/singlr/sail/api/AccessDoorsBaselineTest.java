@@ -124,7 +124,6 @@ class AccessDoorsBaselineTest {
                     world.db,
                     new ScriptedShellExecutor().onOk("incus list", "[]"),
                     bus,
-                    null,
                     SyncScheduler.disabled(),
                     SessionYield.NONE),
                 world.db,
@@ -275,6 +274,22 @@ class AccessDoorsBaselineTest {
     doors.add(new Door("list rooms", ops -> ops.rooms(null)));
     doors.add(new Door("list runs", ops -> ops.runs(null, null)));
     doors.add(new Door("list projects", Operations::projects));
+    doors.add(
+        new Door(
+            "read changes",
+            ops -> {
+              var feed = ops.changes();
+              var newest = feed.newest();
+              var beginning = newest.substring(0, newest.indexOf('.')) + ".0.0";
+              return feed.page(ChangeFeed.Ask.of(Map.of("since", beginning, "limit", "500")));
+            }));
+    doors.add(
+        new Door(
+            "wake changes",
+            ops -> {
+              ops.changes().wake();
+              return Map.of("woken", true);
+            }));
     for (var project : List.of("acme", "beta", "omega")) {
       doors.add(new Door("list specs of " + project, ops -> ops.specs(project)));
       doors.add(new Door("list rooms of " + project, ops -> ops.rooms(project)));

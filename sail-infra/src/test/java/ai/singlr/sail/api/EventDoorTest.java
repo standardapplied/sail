@@ -123,8 +123,7 @@ class EventDoorTest {
     bus = new EventBus();
     operations =
         TestControlPlane.on(
-            OperationsFactory.create(
-                db, SHELL, bus, null, SyncScheduler.disabled(), SessionYield.NONE),
+            OperationsFactory.create(db, SHELL, bus, SyncScheduler.disabled(), SessionYield.NONE),
             db,
             tempDir,
             MAIN);

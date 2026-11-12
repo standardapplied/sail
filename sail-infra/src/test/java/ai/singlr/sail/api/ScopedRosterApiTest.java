@@ -62,7 +62,6 @@ class ScopedRosterApiTest {
             new ScriptedShellExecutor(),
             ProjectReader.ofCatalog(new ProjectStore(db)),
             null,
-            null,
             new SpecStore(db),
             new ReviewStore(db),
             new RunStore(db),

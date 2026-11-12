@@ -404,7 +404,6 @@ class RosterChangeTest {
                     mainDb,
                     new ScriptedShellExecutor(),
                     null,
-                    null,
                     SyncScheduler.disabled(),
                     SessionYield.NONE),
                 mainDb,

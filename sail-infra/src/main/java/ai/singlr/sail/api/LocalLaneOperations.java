@@ -63,6 +63,12 @@ public interface LocalLaneOperations {
   StackOperations stack();
 
   /**
+   * The box's change feed, read as the bound actor: what {@code GET /v1/changes} answers, the event
+   * stream sends as row changes, and every list and detail read of a fed type is positioned by.
+   */
+  ChangeFeed changes();
+
+  /**
    * Resolves the box's ambient credential to the box's own person, as the role rule resolves the
    * box: the FDE this box is when asked, on the in-container lane. Empty when the credential is
    * unknown, was minted for an FDE the box no longer is, or that FDE has left the roster. Serves

@@ -27,6 +27,14 @@ final class ApiJson {
     return map;
   }
 
+  /**
+   * {@code value} as the API encodes it, with no schema version: what an event's data line holds.
+   */
+  @SuppressWarnings("unchecked")
+  static Map<String, Object> encoded(Mappable value) {
+    return (Map<String, Object>) encode(value);
+  }
+
   @SuppressWarnings("unchecked")
   static Object encode(Object value) {
     return switch (value) {

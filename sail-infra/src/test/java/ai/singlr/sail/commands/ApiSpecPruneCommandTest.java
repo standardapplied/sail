@@ -70,7 +70,6 @@ class ApiSpecPruneCommandTest {
                       new ShellExecutor(false),
                       ProjectReader.ofCatalog(new ProjectStore(db)),
                       bus,
-                      persister,
                       specs,
                       new ReviewStore(db))
                   .useRooms(new RoomStore(db))

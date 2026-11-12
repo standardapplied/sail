@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -13,13 +12,14 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
-import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -43,13 +43,29 @@ class ApiCoverageEdgesTest {
   }
 
   @Test
-  void auditPersisterSwallowsIoFailureWhenPathIsADirectory(@TempDir Path dir) throws Exception {
-    var asDir = dir.resolve("events.jsonl");
-    Files.createDirectories(asDir);
-    var persister = new AuditPersister(asDir, 4);
+  void aSpecListedByABoxWithNoMessageStoreIsItsViewAlone() {
+    var view =
+        GlobalSpecView.from(
+            new SpecStore.SpecRow(
+                "s",
+                "acme",
+                "S",
+                SpecStatus.DRAFT,
+                null,
+                null,
+                null,
+                null,
+                null,
+                0,
+                "uday",
+                null,
+                null,
+                "uday",
+                List.of(),
+                List.of()));
 
-    assertDoesNotThrow(() -> persister.onEvent(Event.of("p", null, "t", "a", "h").withId(1L)));
-    assertEquals(1, persister.recent(10).size());
+    assertEquals(
+        List.of(view.toMap()), new GlobalSpecsListResponse(List.of(view), 1).toMap().get("specs"));
   }
 
   @Test
@@ -97,7 +113,6 @@ class ApiCoverageEdgesTest {
   @Test
   void sailApiServerAccessorsReflectBusWiring(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
-      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 16);
       try (var server =
           new SailApiServer(
               "127.0.0.1",
@@ -105,10 +120,9 @@ class ApiCoverageEdgesTest {
               new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
-              persister,
+              null,
               tmp.resolve("api.sock"))) {
         assertSame(bus, server.eventBus());
-        assertSame(persister, server.auditPersister());
         assertNotNull(server.sseHandler());
         assertNotNull(server.socketListener());
       }
@@ -183,7 +197,6 @@ class ApiCoverageEdgesTest {
             null,
             null)) {
       assertNull(server.eventBus());
-      assertNull(server.auditPersister());
       assertNull(server.sseHandler());
       assertNull(server.socketListener());
     }

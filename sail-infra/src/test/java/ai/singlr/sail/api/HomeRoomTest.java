@@ -117,7 +117,6 @@ class HomeRoomTest {
             TestProjects.reading(yaml),
             WatcherSpawner::spawnProcess,
             null,
-            null,
             specStore,
             new ReviewStore(db),
             new RunStore(db))
@@ -520,7 +519,6 @@ class HomeRoomTest {
             shell,
             TestProjects.reading(yaml),
             WatcherSpawner::spawnProcess,
-            null,
             null,
             specStore,
             new ReviewStore(db),

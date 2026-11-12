@@ -200,7 +200,6 @@ class DispatchLaneParityTest {
               TestProjects.reading(api.yaml()),
               (command, logPath) -> 4242L,
               bus,
-              null,
               api.specStore(),
               new ReviewStore(api.db()),
               api.runStore(),

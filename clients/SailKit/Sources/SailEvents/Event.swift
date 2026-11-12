@@ -77,25 +77,3 @@ public struct Publisher: Codable, Equatable, Sendable {
 public enum Lane: String, CaseIterable, Sendable {
     case cli, api, agent, room, container, sync, main, system
 }
-
-/// The newest events the server holds that the caller may read, at most `limit` of them: what a
-/// reader asks for after a stream connects, since a stream carries only what is published while it
-/// is open.
-public struct RecentEvents: Codable, Equatable, Sendable {
-    public let limit: Int
-    public let returned: Int
-    public let events: [Event]
-
-    public init(limit: Int, returned: Int, events: [Event]) {
-        self.limit = limit
-        self.returned = returned
-        self.events = events
-    }
-}
-
-extension Endpoint where Response == RecentEvents {
-    /// The newest events, `limit` of them at most (the server allows 1 through 5000).
-    public static func recentEvents(limit: Int? = nil) -> Self {
-        Self(.get, Route.recentEvents, query: [("limit", limit.map(String.init))])
-    }
-}

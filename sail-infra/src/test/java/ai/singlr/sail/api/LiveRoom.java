@@ -163,7 +163,6 @@ final class LiveRoom implements AutoCloseable {
             reader,
             WatcherSpawner::spawnProcess,
             events,
-            null,
             specs,
             reviews,
             runs,

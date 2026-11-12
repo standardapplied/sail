@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.fail;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SpecCliHelper;
+import ai.singlr.sail.store.FeedFloors;
+import ai.singlr.sail.sync.SyncedEntities;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -25,6 +27,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * A fleet of boxes running sail's native binaries. Each box is a Podman container, the pod shares
@@ -286,7 +289,7 @@ public final class NativeFleet implements AutoCloseable {
           () -> node.name + "'s " + table.getKey() + " are not main's within " + in);
     }
     assertEquals(
-        main.query(HEADS.formatted("WHERE h.project IN " + in)),
+        main.query(HEADS.formatted("AND h.project IN " + in)),
         node.query(HEADS.formatted("")),
         () -> node.name + "'s change-log heads are not main's within " + in);
     assertEquals(
@@ -326,11 +329,20 @@ public final class NativeFleet implements AutoCloseable {
     }
   }
 
+  /**
+   * The heads of every synced type: a box's own bookkeeping in the log, the change feed's floor
+   * ({@link FeedFloors#TYPE}), is no entity's and is never synced, so it is no box's to agree on.
+   */
   private static final String HEADS =
       """
       SELECT l.entity_type, l.entity_id, l.rev, l.kind, l.actor
-      FROM change_heads h JOIN change_log l ON l.seq = h.seq %s
-      ORDER BY l.entity_type, l.entity_id""";
+      FROM change_heads h JOIN change_log l ON l.seq = h.seq
+      WHERE l.entity_type IN (%s) %%s
+      ORDER BY l.entity_type, l.entity_id"""
+          .formatted(
+              SyncedEntities.all().stream()
+                  .map(entity -> "'" + entity.type() + "'")
+                  .collect(Collectors.joining(", ")));
 
   public static Map<String, Object> json(String output) {
     return YamlUtil.parseMap(lastLineStarting("{", output));

@@ -142,7 +142,16 @@ public final class ServerStartCommand implements Runnable {
     CliCommand.run(this::execute);
   }
 
+  /**
+   * Serves the box with no commit announcer bound to the databases it opens: its streams watch this
+   * process's own commits, and an announcement to itself would only wake them twice.
+   */
   private void execute() throws Exception {
+    Runnable none = () -> {};
+    ScopedValue.where(Sqlite.ANNOUNCING, none).call(this::serve);
+  }
+
+  private Void serve() throws Exception {
     BindPolicy.requireBindable(host, allowRemote);
     var listen = ListenConfig.load();
     var privateApi = listen.apiAddress();
@@ -182,12 +191,7 @@ public final class ServerStartCommand implements Runnable {
     }
     var operations =
         OperationsFactory.create(
-            db,
-            new ShellExecutor(false),
-            bus,
-            persister,
-            SyncScheduler.disabled(),
-            new PtyHostYield());
+            db, new ShellExecutor(false), bus, SyncScheduler.disabled(), new PtyHostYield());
     var syncScheduler =
         NodeSync.serverScheduler(
             HostSync::config,
@@ -402,6 +406,7 @@ public final class ServerStartCommand implements Runnable {
     } finally {
       shutdown.shutdown();
     }
+    return null;
   }
 
   /**

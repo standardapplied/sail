@@ -115,8 +115,7 @@ class SailOperationsSeamTest {
       };
 
   private SailOperations operations(Sqlite db) {
-    return OperationsFactory.create(
-            db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+    return OperationsFactory.create(db, shell, null, SyncScheduler.disabled(), SessionYield.NONE)
         .useControlPlane(
             db,
             tempDir,
@@ -143,8 +142,7 @@ class SailOperationsSeamTest {
       new SchemaManager(db).migrate();
       var handle = new AtomicReference<>("it");
       var operations =
-          OperationsFactory.create(
-                  db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+          OperationsFactory.create(db, shell, null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   tempDir,
@@ -234,7 +232,7 @@ class SailOperationsSeamTest {
         var bus = new EventBus();
         var operations =
             OperationsFactory.create(
-                node.db, shell, bus, null, SyncScheduler.disabled(), SessionYield.NONE);
+                node.db, shell, bus, SyncScheduler.disabled(), SessionYield.NONE);
         var server = server(operations, node.db, "owner")) {
       var clock = new BackoffTest.TestClock();
       var nanos = new AtomicLong();
@@ -1376,8 +1374,7 @@ class SailOperationsSeamTest {
       db.execute("UPDATE projects SET base_rev = rev WHERE name = 'old'");
       new FdeStore(db).add("node", "Node", "node@example.com", "admin");
       try (var operations =
-          OperationsFactory.create(
-                  db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+          OperationsFactory.create(db, shell, null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   tempDir,
@@ -1406,8 +1403,7 @@ class SailOperationsSeamTest {
       new SchemaManager(db).migrate();
       Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("old")));
       try (var operations =
-          OperationsFactory.create(
-                  db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+          OperationsFactory.create(db, shell, null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   tempDir,
@@ -1435,8 +1431,7 @@ class SailOperationsSeamTest {
       Acting.system(() -> new ProjectStore(db).upsert(TestDefinitions.named("old")));
       new FdeStore(db).add("node", "Node", "node@example.com", "member");
       try (var operations =
-          OperationsFactory.create(
-                  db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+          OperationsFactory.create(db, shell, null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   tempDir,
