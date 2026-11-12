@@ -244,18 +244,31 @@ class HostInitCommandTest {
   }
 
   @Test
-  void aReRunKeepsTheZfsPoolIncusHasAndClearsNoDeviceAgain() throws Exception {
+  void aReRunKeepsTheZfsPoolIncusHasForcedOrNotAndClearsNoDeviceAgain() throws Exception {
     var shell =
         new ScriptedShellExecutor()
             .onOk(
                 "incus storage list",
                 "[{\"name\": \"tank\", \"driver\": \"zfs\", \"config\": {\"source\": \"tank\","
                     + " \"volatile.initial_source\": \"/dev/sdb\", \"zfs.pool_name\": \"tank\"}}]")
-            .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n");
+            .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n")
+            .onOk("realpath -e -- /dev/disk/by-id/d1", "/dev/sdb\n");
 
     assertEquals(
         new PoolSource.Zpool("tank"),
         source(shell, "--storage", "zfs", "--pool", "tank", "--disk", "/dev/sdb"));
+    assertEquals(
+        new PoolSource.Zpool("tank"),
+        source(
+            shell,
+            "--storage",
+            "zfs",
+            "--pool",
+            "tank",
+            "--disk",
+            "/dev/sdb",
+            "--force-wipe",
+            "/dev/disk/by-id/d1"));
     assertEquals(new PoolSource.Zpool("tank"), source(shell, "--storage", "zfs", "--pool", "tank"));
     assertFalse(
         shell.invocations().stream().anyMatch(c -> c.startsWith("lsblk") || c.startsWith("wipefs")),

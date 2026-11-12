@@ -193,7 +193,8 @@ public final class HostInitCommand implements Runnable {
       }
     }
 
-    var source = source(new ShellExecutor(false));
+    var reads = new ShellExecutor(false);
+    var source = source(reads);
 
     var resolvedServerIp = serverIp;
     if (resolvedServerIp == null) {
@@ -240,7 +241,7 @@ public final class HostInitCommand implements Runnable {
     }
 
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
-    var provisioner = new HostProvisioner(shell, listener, operator);
+    var provisioner = new HostProvisioner(shell, reads, listener, operator);
     var hostYaml =
         provisioner.provision(
             source,
@@ -366,7 +367,7 @@ public final class HostInitCommand implements Runnable {
     if (poolFileSize != null) {
       ignored.add("--pool-file-size " + poolFileSize);
     }
-    if (forceWipe != null) {
+    if (forceWipe != null && !devices.resolved("--force-wipe", forceWipe).equals(held.source())) {
       ignored.add("--force-wipe " + forceWipe);
     }
     if (!ignored.isEmpty()) {

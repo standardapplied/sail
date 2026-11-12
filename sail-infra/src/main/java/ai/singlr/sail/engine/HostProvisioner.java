@@ -48,6 +48,7 @@ public final class HostProvisioner {
   private static final Duration IMAGE_TIMEOUT = Duration.ofMinutes(5);
 
   private final ShellExec shell;
+  private final ShellExec reads;
   private final ProvisionListener listener;
   private final HostPackages packages;
   private final OperatorCommand operator;
@@ -59,7 +60,17 @@ public final class HostProvisioner {
    * operator}.
    */
   public HostProvisioner(ShellExec shell, ProvisionListener listener, OperatorCommand operator) {
+    this(shell, shell, listener, operator);
+  }
+
+  /**
+   * A provisioner that reads what Incus holds through {@code reads}, which a dry run's {@code
+   * shell} cannot, so the plan it shows is what a real run does.
+   */
+  public HostProvisioner(
+      ShellExec shell, ShellExec reads, ProvisionListener listener, OperatorCommand operator) {
     this.shell = shell;
+    this.reads = reads;
     this.listener = Objects.requireNonNullElse(listener, ProvisionListener.NOOP);
     this.packages = new HostPackages(shell, this.listener::onStepProgress);
     this.operator = operator;
@@ -323,7 +334,7 @@ public final class HostProvisioner {
     step(6, "Creating base profile...");
 
     var profile = HostYaml.DEFAULT_PROFILE;
-    var existed = shell.exec(List.of("incus", "profile", "show", profile)).ok();
+    var existed = read(List.of("incus", "profile", "show", profile)).ok();
     if (!existed) {
       var create = shell.exec(List.of("incus", "profile", "create", profile));
       if (!create.ok()) {
@@ -331,8 +342,7 @@ public final class HostProvisioner {
       }
     }
     var held =
-        shell
-            .exec(List.of("incus", "profile", "device", "list", profile))
+        read(List.of("incus", "profile", "device", "list", profile))
             .stdout()
             .lines()
             .map(String::strip)
@@ -346,12 +356,14 @@ public final class HostProvisioner {
     }
     var named =
         held.contains("root")
-            ? shell
-                .exec(List.of("incus", "profile", "device", "get", profile, "root", "pool"))
+            ? read(List.of("incus", "profile", "device", "get", profile, "root", "pool"))
                 .stdout()
                 .strip()
             : pool;
-    var found = shell.isDryRun() ? Optional.of(planned(pool, source)) : storage.find(named);
+    var found =
+        shell.isDryRun() && named.equals(pool)
+            ? Optional.of(planned(pool, source))
+            : new IncusStorage(reads).find(named);
     var root =
         found.orElseThrow(
             () ->
@@ -371,6 +383,19 @@ public final class HostProvisioner {
             + root.driver()
             + ")");
     return root;
+  }
+
+  /**
+   * {@code command}, a read of what Incus holds, run through {@link #reads}; failed where Incus
+   * cannot be run, as before a dry run installs it.
+   */
+  private ShellExec.Result read(List<String> command)
+      throws InterruptedException, TimeoutException {
+    try {
+      return reads.exec(command);
+    } catch (IOException e) {
+      return new ShellExec.Result(1, "", e.getMessage());
+    }
   }
 
   private void addDevice(String profile, List<String> device, String what)

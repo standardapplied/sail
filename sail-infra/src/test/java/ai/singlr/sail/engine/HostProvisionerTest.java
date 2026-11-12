@@ -1204,6 +1204,62 @@ class HostProvisionerTest {
   }
 
   @Test
+  void aDryRunAddingAPoolBesideShowsTheProfileStayingOnItsPool() throws Exception {
+    var reads =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus storage list",
+                pools("devpool", "dir", "/var/lib/incus/storage-pools/devpool"))
+            .onOk("incus profile show singlr-base")
+            .onOk("incus profile device list singlr-base", "root\neth0\n")
+            .onOk("incus profile device get singlr-base root pool", "devpool\n");
+    var steps = new ArrayList<String>();
+
+    var hostYaml =
+        new HostProvisioner(
+                new ShellExecutor(true), reads, new RecordingListener(steps), OperatorCommand.SUDO)
+            .provision(
+                new PoolSource.File(20480),
+                "tank",
+                "incusbr0",
+                null,
+                MEMORY_MB,
+                tempDir.resolve("host.yaml"),
+                tempDir.resolve("sail.db"));
+
+    assertTrue(
+        steps.contains("done:6/8:singlr-base (already exists): containers on devpool (dir)"),
+        steps.toString());
+    assertEquals(
+        List.of("dir", "devpool", "/var/lib/incus/storage-pools/devpool"),
+        List.of(hostYaml.storageBackend(), hostYaml.pool(), hostYaml.poolSource()));
+  }
+
+  @Test
+  void aDryRunOnABoxWithoutIncusShowsTheProfileMadeOnTheNewPool() throws Exception {
+    var reads = new ScriptedShellExecutor().onThrow("incus", new IOException("no incus"));
+    var steps = new ArrayList<String>();
+
+    var hostYaml =
+        new HostProvisioner(
+                new ShellExecutor(true), reads, new RecordingListener(steps), OperatorCommand.SUDO)
+            .provision(
+                SDB,
+                "devpool",
+                "incusbr0",
+                null,
+                MEMORY_MB,
+                tempDir.resolve("host.yaml"),
+                tempDir.resolve("sail.db"));
+
+    assertTrue(
+        steps.contains("done:6/8:singlr-base: containers on devpool (zfs)"), steps.toString());
+    assertEquals(
+        List.of("zfs", "devpool", "/dev/sdb"),
+        List.of(hostYaml.storageBackend(), hostYaml.pool(), hostYaml.poolSource()));
+  }
+
+  @Test
   void aZfsPoolCannotTakeTheNameOfTheDirPoolTheBoxHas() {
     var shell = box(new ScriptedShellExecutor(new ShellExec.Result(0, "", "")), "dir");
 
