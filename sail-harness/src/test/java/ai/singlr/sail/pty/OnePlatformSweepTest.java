@@ -13,6 +13,8 @@ import ai.singlr.sail.common.ModuleClasses;
 import java.io.IOException;
 import java.lang.classfile.ClassFile;
 import java.lang.classfile.constantpool.StringEntry;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Locale;
 import java.util.Set;
@@ -23,7 +25,7 @@ import org.junit.jupiter.api.Test;
  * P1, one path, swept: of every class in {@code ai.singlr.sail.pty}, in the core module and in this
  * one, only {@link Native} and its nested classes know which system they run on; every other class
  * reads the values {@code Native} selected. Read from the compiled classes, a class whose constants
- * name {@code os.name} branches on the system itself.
+ * name {@code os.name}, or probe {@code /proc/self}, branches on the system itself.
  */
 class OnePlatformSweepTest {
 
@@ -52,22 +54,40 @@ class OnePlatformSweepTest {
   }
 
   @Test
-  void theSweepSeesAReadOfTheSystemsNameButNotNativesOwn() throws IOException {
-    try (var leaky = Leaky.class.getResourceAsStream("OnePlatformSweepTest$Leaky.class");
-        var platform = Native.class.getResourceAsStream("Native.class")) {
-      assertTrue(readsTheSystemsName(leaky.readAllBytes()), "a pty class asking is seen");
-      assertFalse(readsTheSystemsName(platform.readAllBytes()), "Native is where it is asked");
+  void theSweepSeesTheSystemAskedEitherWayButNotByNative() throws IOException {
+    assertTrue(readsTheSystemsName(bytesOf(AsksTheName.class)), "an os.name read is seen");
+    assertTrue(readsTheSystemsName(bytesOf(ProbesProc.class)), "a /proc/self probe is seen");
+    assertFalse(readsTheSystemsName(bytesOf(Native.class)), "Native is where it is asked");
+  }
+
+  private static byte[] bytesOf(Class<?> type) throws IOException {
+    var name = type.getName().substring(type.getPackageName().length() + 1);
+    try (var bytes = type.getResourceAsStream(name + ".class")) {
+      return bytes.readAllBytes();
     }
   }
 
-  /** What no pty class but {@link Native} may do. */
-  private static final class Leaky {
+  /** What no pty class but {@link Native} may do: ask the system its name. */
+  private static final class AsksTheName {
     boolean onMac() {
       return System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("mac");
     }
   }
 
-  /** Whether the class {@code bytes} holds is a pty class outside {@link Native} naming os.name. */
+  /** Nor tell the systems apart by what {@code /proc} holds. */
+  private static final class ProbesProc {
+    boolean onLinux() {
+      return Files.exists(Path.of("/proc/self/exe"));
+    }
+  }
+
+  private static boolean asksTheSystem(String constant) {
+    return constant.equals("os.name") || constant.startsWith("/proc/self");
+  }
+
+  /**
+   * Whether the class {@code bytes} holds is a pty class outside {@link Native} asking the system.
+   */
   private static boolean readsTheSystemsName(byte[] bytes) {
     var model = ClassFile.of().parse(bytes);
     var name = model.thisClass().asInternalName();
@@ -75,7 +95,7 @@ class OnePlatformSweepTest {
       return false;
     }
     for (var entry : model.constantPool()) {
-      if (entry instanceof StringEntry string && string.stringValue().equals("os.name")) {
+      if (entry instanceof StringEntry string && asksTheSystem(string.stringValue())) {
         return true;
       }
     }

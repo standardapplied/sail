@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.common.Strings;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -336,24 +337,24 @@ public final class SailPaths {
   }
 
   /**
-   * Returns the path to the running binary: {@code /proc/self/exe} where there is one (Linux), else
-   * the executable the system says this process runs (macOS), made absolute because macOS answers
-   * the path it was started by, else {@link #INSTALLED_BINARY}. A Linux binary replaced under the
-   * running process answers the installed path, never the deleted file's.
+   * Returns the path to the running binary, links resolved: the executable the system says this
+   * process runs, else {@link #INSTALLED_BINARY}. A binary replaced under the running process
+   * answers the installed path, since Linux names the replaced file "{@code ... (deleted)}".
    */
   public static Path binaryPath() {
-    var procSelf = Path.of("/proc/self/exe");
-    if (!Files.exists(procSelf, LinkOption.NOFOLLOW_LINKS)) {
-      return ProcessHandle.current()
-          .info()
-          .command()
-          .map(command -> Path.of(command).toAbsolutePath())
-          .orElse(INSTALLED_BINARY);
-    }
+    return ProcessHandle.current()
+        .info()
+        .command()
+        .flatMap(SailPaths::realPath)
+        .orElse(INSTALLED_BINARY);
+  }
+
+  /** {@code command} resolved against the working directory and through links, if it exists. */
+  static Optional<Path> realPath(String command) {
     try {
-      return procSelf.toRealPath();
-    } catch (IOException replaced) {
-      return INSTALLED_BINARY;
+      return Optional.of(Path.of(command).toRealPath());
+    } catch (IOException | InvalidPathException gone) {
+      return Optional.empty();
     }
   }
 

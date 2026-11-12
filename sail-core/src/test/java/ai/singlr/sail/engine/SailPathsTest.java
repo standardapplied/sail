@@ -105,8 +105,21 @@ class SailPathsTest {
   void theBinaryPathIsTheExecutableThisProcessRuns() throws Exception {
     assertEquals(
         Path.of(System.getProperty("java.home"), "bin", "java").toRealPath(),
-        SailPaths.binaryPath().toRealPath(),
-        "a JVM runs java, and the session shim is spawned from what runs");
+        SailPaths.binaryPath(),
+        "a JVM runs java, links resolved, and the session shim is spawned from what runs");
+  }
+
+  @Test
+  void anExecutableIsNamedThroughItsLinksFromTheWorkingDirectoryAndNotAtAllOnceReplaced()
+      throws Exception {
+    var binary = Files.createFile(tempDir.resolve("sail"));
+    var link = Files.createSymbolicLink(tempDir.resolve("sail-link"), binary);
+    var relative = Path.of("").toAbsolutePath().relativize(binary.toAbsolutePath());
+
+    assertEquals(binary.toRealPath(), SailPaths.realPath(link.toString()).orElseThrow());
+    assertEquals(binary.toRealPath(), SailPaths.realPath(relative.toString()).orElseThrow());
+    assertEquals(
+        java.util.Optional.empty(), SailPaths.realPath(binary + " (deleted)"), "Linux's replaced");
   }
 
   @Test
