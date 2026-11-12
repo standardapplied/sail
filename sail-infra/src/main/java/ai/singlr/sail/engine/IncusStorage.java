@@ -35,10 +35,11 @@ public final class IncusStorage {
   /**
    * A pool as Incus has it: its {@code source} is what it was made from, the device or file for a
    * zfs pool, the directory for a dir pool; {@code zpool} is the zpool a zfs pool is, null for
-   * another driver; {@code space} is empty when Incus cannot measure it.
+   * another driver; {@code size} is the size Incus made a file-backed pool's file, null for any
+   * other; {@code space} is empty when Incus cannot measure it.
    */
   public record Pool(
-      String name, String driver, String source, String zpool, Optional<Space> space) {
+      String name, String driver, String source, String zpool, String size, Optional<Space> space) {
 
     /** Refuses a pool of {@code driver} under this pool's name, which Incus has with another. */
     public void requireDriver(String driver) {
@@ -117,6 +118,7 @@ public final class IncusStorage {
               String.valueOf(entry.get("driver")),
               source(config),
               (String) config.get("zfs.pool_name"),
+              Strings.isBlank((String) config.get("size")) ? null : (String) config.get("size"),
               space(name)));
     }
     return pools;

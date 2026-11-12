@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.common.Strings;
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 
@@ -22,8 +23,9 @@ import java.util.concurrent.TimeoutException;
  * <p>The cap is a module option, so it holds from the module's next load and across reboots, and is
  * written to the loaded module as well. Where the root filesystem is on ZFS the module loads from
  * the initramfs, which carries a copy of {@code /etc/modprobe.d} (Ubuntu's {@code mkinitramfs}), so
- * the initramfs is rebuilt. A cap the operator set in any other file is theirs: Sail writes nothing
- * and says so.
+ * the initramfs is rebuilt. A cap the operator set, in any file modprobe reads, is theirs: Sail
+ * writes nothing, removes the cap it wrote before so theirs is the one modprobe applies, and says
+ * so.
  */
 public record ZfsCacheCap(long bytes, long floor) {
 
@@ -68,31 +70,23 @@ public record ZfsCacheCap(long bytes, long floor) {
 
   /**
    * Writes the cap on the machine {@code shell} runs on, unless the operator set one, and says what
-   * holds. The operator's cap is one in a file modprobe reads ({@code *.conf}) beside Sail's, or
-   * one the loaded module holds that Sail did not write (set on the kernel command line, or by
-   * hand).
+   * holds. The operator's cap is one modprobe applies ({@code modprobe --showconfig}, every file it
+   * reads) that Sail did not write, or one the loaded module holds that Sail did not write (set on
+   * the kernel command line, or by hand).
    */
   public String install(ShellExec shell)
       throws IOException, InterruptedException, TimeoutException {
-    var set =
-        shell.exec(
-            List.of(
-                "grep",
-                "-rsH",
-                "--include=*.conf",
-                "--exclude=sail-zfs.conf",
-                "-E",
-                "^[[:space:]]*options[[:space:]]+zfs[[:space:]].*zfs_arc_max=",
-                "/etc/modprobe.d"));
-    if (set.ok() && Strings.isNotBlank(set.stdout())) {
-      return "ZFS cache cap left as you set it ("
-          + set.stdout().strip().lines().findFirst().orElseThrow()
-          + ")";
+    var ours = shell.exec(List.of("grep", "-ho", "zfs_arc_max=[0-9]*", PATH));
+    var written = ours.ok() ? ours.stdout().strip().replace("zfs_arc_max=", "") : "";
+    var theirs = applied(shell).stream().filter(value -> !value.equals(written)).toList();
+    if (!theirs.isEmpty()) {
+      return "ZFS cache cap left as you set it (zfs_arc_max="
+          + theirs.getLast()
+          + ")"
+          + (written.isEmpty() ? "" : removed(shell));
     }
     var live = shell.exec(List.of("cat", LOADED + "max"));
     var held = live.ok() ? live.stdout().strip() : "0";
-    var ours = shell.exec(List.of("grep", "-ho", "zfs_arc_max=[0-9]*", PATH));
-    var written = ours.ok() ? ours.stdout().strip().replace("zfs_arc_max=", "") : "";
     if (!held.equals("0") && !held.equals(written) && !held.equals(String.valueOf(bytes))) {
       return "ZFS cache cap left as set on the loaded module (zfs_arc_max=" + held + ")";
     }
@@ -107,6 +101,40 @@ public record ZfsCacheCap(long bytes, long floor) {
           "Wrote " + PATH + " but could not rebuild the initramfs: " + rebuilt.reason());
     }
     return said() + "; initramfs rebuilt, since / is on ZFS and the module loads from it";
+  }
+
+  /**
+   * The {@code zfs_arc_max} values modprobe applies, in the order it reads them, the last the one
+   * the module takes; none where modprobe cannot say.
+   */
+  private static List<String> applied(ShellExec shell)
+      throws IOException, InterruptedException, TimeoutException {
+    var config = shell.exec(List.of("modprobe", "--showconfig"));
+    if (!config.ok()) {
+      return List.of();
+    }
+    return config
+        .stdout()
+        .lines()
+        .map(String::strip)
+        .filter(line -> line.startsWith("options zfs "))
+        .flatMap(line -> Arrays.stream(line.split("\\s+")))
+        .filter(word -> word.startsWith("zfs_arc_max="))
+        .map(word -> word.substring("zfs_arc_max=".length()))
+        .toList();
+  }
+
+  /** Removes the cap Sail wrote before, so the operator's is the only one modprobe applies. */
+  private static String removed(ShellExec shell)
+      throws IOException, InterruptedException, TimeoutException {
+    var removed = shell.exec(List.of("rm", "-f", PATH));
+    if (!removed.ok()) {
+      throw new IOException(
+          "Cannot remove " + PATH + ", the cap Sail wrote before yours: " + removed.reason());
+    }
+    return "; removed the cap Sail wrote before ("
+        + PATH
+        + "), so yours is the one modprobe applies";
   }
 
   /** What the step that sets it says. */

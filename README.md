@@ -59,7 +59,8 @@ first). Something that opens a device without holding it exclusively, a virtual 
 or `dd`, is not seen. A disk with no partition table and no signature is blank to Sail, even if a
 filesystem survives further in after its table was erased. A file is slower
 than a disk and meant for trials. `host init` caps the ZFS cache at a tenth of memory, at most
-16 GiB (`/etc/modprobe.d/sail-zfs.conf`), and says so; a cap you set yourself is kept. On ZFS a
+16 GiB (`/etc/modprobe.d/sail-zfs.conf`), and says so; a cap you set yourself is kept, and a cap
+Sail wrote before yours is removed so yours is the one that applies. On ZFS a
 container's disk limit is enforced: Incus sets the root disk's size as the dataset's ZFS `quota`,
 which its snapshots count against, and a snapshot copy is a clone that costs nothing at first.
 On a box already on `dir`, the same command with `--pool <name>` adds the ZFS pool beside it:

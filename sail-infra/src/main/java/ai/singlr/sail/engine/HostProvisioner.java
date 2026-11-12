@@ -175,7 +175,7 @@ public final class HostProvisioner {
 
   private void installIncus() throws IOException, InterruptedException, TimeoutException {
     step(2, "Installing Incus (Zabbly stable)...");
-    var installed = packages.ensure(HostPackages.INCUS) ? "installed" : "already installed";
+    var installed = installed(HostPackages.INCUS);
     stepDone(
         2, packages.hold() ? installed + "; " + operator.render(HostPackages.HELD) : installed);
   }
@@ -189,8 +189,22 @@ public final class HostProvisioner {
     }
     step(3, "Installing ZFS utilities...");
     var capped = ZfsCacheCap.forMemory(memoryMb).install(shell);
-    var installed = packages.ensure(HostPackages.ZFS) ? "installed" : "already installed";
+    var installed = installed(HostPackages.ZFS);
     stepDone(3, installed + "; " + capped);
+  }
+
+  /**
+   * Installs {@code pkg} unless it is there, saying which; a dry run installs nothing and says
+   * whether a real run would, from what the box has.
+   */
+  private String installed(HostPackages.Package pkg)
+      throws IOException, InterruptedException, TimeoutException {
+    if (shell.isDryRun()) {
+      return read(List.of("which", pkg.command())).ok()
+          ? "already installed"
+          : "would be installed";
+    }
+    return packages.ensure(pkg) ? "installed" : "already installed";
   }
 
   private String initIncus(String bridge)
@@ -411,7 +425,7 @@ public final class HostProvisioner {
   /** The pool a dry run would have made, as {@code host.yaml} would state it. */
   private static IncusStorage.Pool planned(String pool, PoolSource source) {
     var from = source instanceof PoolSource.Device device ? device.path() : null;
-    return new IncusStorage.Pool(pool, source.driver(), from, null, Optional.empty());
+    return new IncusStorage.Pool(pool, source.driver(), from, null, null, Optional.empty());
   }
 
   private void cacheImage() throws IOException, InterruptedException, TimeoutException {

@@ -77,7 +77,7 @@ class IncusStorageTest {
                              "zfs.pool_name": "tank"}},
                  {"name": "trial", "driver": "zfs",
                   "config": {"source": "/var/lib/incus/disks/trial.img",
-                             "volatile.initial_source": ""}},
+                             "volatile.initial_source": "", "size": "20480MiB"}},
                  {"name": "bare", "driver": "dir"}]
                 """)
             .onOk(
@@ -98,11 +98,17 @@ class IncusStorageTest {
                 "dir",
                 "/var/lib/incus/storage-pools/devpool",
                 null,
+                null,
                 Optional.of(new IncusStorage.Space(1073741824L, 10737418240L))),
-            new IncusStorage.Pool("tank", "zfs", "/dev/sdb", "tank", Optional.empty()),
+            new IncusStorage.Pool("tank", "zfs", "/dev/sdb", "tank", null, Optional.empty()),
             new IncusStorage.Pool(
-                "trial", "zfs", "/var/lib/incus/disks/trial.img", null, Optional.empty()),
-            new IncusStorage.Pool("bare", "dir", "unknown", null, Optional.empty())),
+                "trial",
+                "zfs",
+                "/var/lib/incus/disks/trial.img",
+                null,
+                "20480MiB",
+                Optional.empty()),
+            new IncusStorage.Pool("bare", "dir", "unknown", null, null, Optional.empty())),
         pools);
     assertEquals(
         List.of(
@@ -123,7 +129,7 @@ class IncusStorageTest {
 
   @Test
   void aPoolRefusesANewPoolOfAnotherDriverUnderItsName() {
-    var devpool = new IncusStorage.Pool("devpool", "dir", "/d", null, Optional.empty());
+    var devpool = new IncusStorage.Pool("devpool", "dir", "/d", null, null, Optional.empty());
 
     devpool.requireDriver("dir");
     assertEquals(

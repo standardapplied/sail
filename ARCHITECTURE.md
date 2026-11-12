@@ -1001,7 +1001,10 @@ never with `-f`: Sail never passes `source.wipe`.
   (`pool_source`) as Incus has them. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`,
   `HostProvisionerTest.aProfileThatNamesAPoolIncusLacksIsRefused`, `HostProvisionerIT`.*
 - **Z2. Sail erases nothing.** No command of Sail wipes, repartitions or overwrites a signature:
-  it never passes `source.wipe`, so Incus never runs `zpool create -f`. `PoolDevices.cleared`
+  it never passes `source.wipe`, so Incus never runs `zpool create -f` (Incus runs `-f`, after
+  zeroing the device's headers, only for `source.wipe`: `driver_zfs.go` `Create`, v6.0.0 and
+  v7.6.0 alike). Incus's own `zpool create` is then the last guard: a device that took a
+  filesystem between Sail's checks and the create is refused by zpool and left as it was. `PoolDevices.cleared`
   resolves the named device (a `/dev/mapper` name by its kernel name) and reads the whole device
   tree (`lsblk --json --tree --bytes`; a flat list fails closed), then takes the device only when
   all of this holds, each refused by name otherwise: it is a plain disk (at the top of the tree, of
@@ -1031,8 +1034,9 @@ never with `-f`: Sail never passes `source.wipe`.
   runner and two GCP proofs taken through blank, partitioned, RAID, pool, swap, btrfs, swapped-disk
   and pivoted root-on-ZFS and btrfs layouts, plus hand-written layouts marked as such),
   `PoolDevicesIT` (the runner's own disks, read-only; the probe on a loop device mounted and
-  mapped; a `/dev/mapper` path refused as a dm device; a pool with every vdev class),
-  `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
+  mapped; a `/dev/mapper` path refused as a dm device; a pool with every vdev class; Incus making
+  the pool Sail asks for on a blank loop device, and zpool refusing one that took ext4 after the
+  checks, its ext4 kept), `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
 - **Z3. One pool, one owner.** Sail only reads ZFS (`zpool list`); every pool,
   dataset, snapshot and copy is made or removed by Incus. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`.*
 - **Z4. The ZFS cache cap is set before ZFS can take memory.** Step 3 writes
@@ -1041,19 +1045,21 @@ never with `-f`: Sail never passes `source.wipe`.
   the ceiling falls under ZFS's default floor of a thirty-second of memory) before installing
   zfsutils-linux, and to the loaded module when ZFS is already in, so it holds from the next load
   and across reboots. Where `/` is on ZFS the module loads from the initramfs, which carries a
-  copy of `/etc/modprobe.d`, so init runs `update-initramfs -u`. A cap the operator set in
-  another `*.conf` under `/etc/modprobe.d` (the only files modprobe reads), or one the loaded
-  module holds that Sail did not write, is kept, nothing written, and the step names it.
+  copy of `/etc/modprobe.d`, so init runs `update-initramfs -u`. A cap the operator set, one
+  `modprobe --showconfig` lists from any file modprobe reads that Sail did not write, or one the
+  loaded module holds that Sail did not write, is kept, nothing written, and the step names it;
+  the cap Sail wrote before is removed, so the operator's is the one modprobe applies whichever
+  file sorts last.
   *`HostProvisionerTest.theZfsCacheIsCappedBeforeTheToolsThatLoadZfsAreInstalled`, `ZfsCacheCapTest`.*
 - **Z5. A `dir` box keeps working unchanged.** A re-run of `host init --storage zfs --pool <new>`
   on a box whose profile exists adds the pool beside the old one and touches no container, no
   profile device and `host.yaml`'s storage; `host status` lists it. Placing a project's
   containers on it is `sail-project-workspaces`. A pool name Incus already has with another
   driver is refused before anything is installed; a zfs pool Incus already has is kept, and a
-  source flag that re-run would ignore is refused by name, while the command that made it runs
-  again as a no-op. A zfs pool Incus no longer has when the pool is made is never made from its
-  zpool. A dry run reads the profile and pools Incus holds, so it shows the base profile staying
-  where it is.
+  source flag that re-run would ignore is refused by name, while the command that made it, a disk
+  or a file of the same size, runs again as a no-op. A zfs pool Incus no longer has when the pool is made is never made from its
+  zpool. A dry run reads the profile, pools and packages the box has, so it shows the base
+  profile staying where it is and says whether Incus and ZFS would be installed.
   *`HostProvisionerTest.aDirBoxWithContainersAddsAZfsPoolBesideItsOwnAndTouchesNoContainer`,
   `HostProvisionerIT`.*
 

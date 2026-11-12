@@ -162,6 +162,45 @@ class PoolDevicesIT extends AbstractIncusIT {
   }
 
   /** A loop device over a new 128 MiB file at {@code file}, made ready by {@code prepare}. */
+  /**
+   * The pool Sail has Incus make on a device, exactly as {@link IncusStorage#createCommand} builds
+   * it: never {@code source.wipe}, so Incus runs {@code zpool create} without {@code -f}. A blank
+   * loop device becomes the pool; one that took ext4 after Sail's checks is refused by zpool
+   * itself, and its ext4 is left as it was.
+   */
+  @Test
+  void zpoolTakesABlankDeviceAndRefusesOneThatTookAFilesystemAfterTheChecks(@TempDir Path dir)
+      throws Exception {
+    ensureIncusOrSkip();
+    var root = new RootShell();
+    var storage = new IncusStorage(shell);
+    var blank = attach(root, dir.resolve("blank.img"), "true");
+    var taken = attach(root, dir.resolve("taken.img"), "true");
+    try {
+      var made = storage.create("sail-it-blank", new PoolSource.Device(blank, "checked"));
+      var listed = storage.find("sail-it-blank");
+      assertTrue(root.exec(List.of("mkfs.ext4", "-qF", taken)).ok());
+      var refused = storage.create("sail-it-taken", new PoolSource.Device(taken, "checked"));
+      var kept = root.exec(List.of("wipefs", "--", taken));
+      System.out.println("BLANK exit " + made.exitCode() + " [" + made.reason() + "] " + listed);
+      System.out.println("TAKEN exit " + refused.exitCode() + " [" + refused.reason() + "]");
+      System.out.println("KEPT [" + kept.stdout() + "]");
+
+      assertTrue(made.ok(), made.reason());
+      assertEquals("zfs", listed.orElseThrow().driver());
+      assertEquals(blank, listed.orElseThrow().source());
+      assertFalse(refused.ok(), "zpool took a device holding ext4");
+      assertTrue(refused.reason().contains("ext4"), refused.reason());
+      assertTrue(storage.find("sail-it-taken").isEmpty());
+      assertTrue(kept.stdout().contains("ext4"), kept.stdout());
+    } finally {
+      shell.exec(List.of("incus", "storage", "delete", "sail-it-blank"));
+      shell.exec(List.of("incus", "storage", "delete", "sail-it-taken"));
+      root.exec(List.of("losetup", "-d", blank));
+      root.exec(List.of("losetup", "-d", taken));
+    }
+  }
+
   private static String attach(RootShell root, Path file, String prepare) throws Exception {
     var attached =
         root.exec(

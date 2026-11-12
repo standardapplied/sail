@@ -4,7 +4,7 @@
          "path": "/dev/loop0",
          "kname": "loop0",
          "type": "loop",
-         "fstype": null,
+         "fstype": "squashfs",
          "pttype": null,
          "parttype": null,
          "mountpoints": [
@@ -21,7 +21,7 @@
          "path": "/dev/loop1",
          "kname": "loop1",
          "type": "loop",
-         "fstype": null,
+         "fstype": "squashfs",
          "pttype": null,
          "parttype": null,
          "mountpoints": [
@@ -38,7 +38,7 @@
          "path": "/dev/loop2",
          "kname": "loop2",
          "type": "loop",
-         "fstype": null,
+         "fstype": "squashfs",
          "pttype": null,
          "parttype": null,
          "mountpoints": [
@@ -56,25 +56,25 @@
          "kname": "sda",
          "type": "disk",
          "fstype": null,
-         "pttype": null,
+         "pttype": "gpt",
          "parttype": null,
          "mountpoints": [
             null
          ],
          "size": 32212254720,
-         "model": "PersistentDisk  ",
+         "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
-         "serial": null,
+         "serial": "persistent-disk-0",
          "maj:min": "8:0",
          "children": [
             {
                "path": "/dev/sda1",
                "kname": "sda1",
                "type": "part",
-               "fstype": null,
-               "pttype": null,
-               "parttype": null,
+               "fstype": "ext4",
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
                "mountpoints": [
                   null
                ],
@@ -90,8 +90,8 @@
                "kname": "sda14",
                "type": "part",
                "fstype": null,
-               "pttype": null,
-               "parttype": null,
+               "pttype": "gpt",
+               "parttype": "21686148-6449-6e6f-744e-656564454649",
                "mountpoints": [
                   null
                ],
@@ -106,11 +106,11 @@
                "path": "/dev/sda15",
                "kname": "sda15",
                "type": "part",
-               "fstype": null,
-               "pttype": null,
-               "parttype": null,
+               "fstype": "vfat",
+               "pttype": "gpt",
+               "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
                "mountpoints": [
-                  null
+                  "/boot/efi"
                ],
                "size": 111149056,
                "model": null,
@@ -123,9 +123,9 @@
                "path": "/dev/sda16",
                "kname": "sda16",
                "type": "part",
-               "fstype": null,
-               "pttype": null,
-               "parttype": null,
+               "fstype": "ext4",
+               "pttype": "gpt",
+               "parttype": "bc13c2ff-59e6-4262-a352-b275fd6f7172",
                "mountpoints": [
                   null
                ],
@@ -143,29 +143,29 @@
          "kname": "sdb",
          "type": "disk",
          "fstype": null,
-         "pttype": null,
+         "pttype": "gpt",
          "parttype": null,
          "mountpoints": [
             null
          ],
          "size": 21474836480,
-         "model": "PersistentDisk  ",
+         "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
-         "serial": null,
+         "serial": "sail-fleet-zfsproof2-f-d1",
          "maj:min": "8:16",
          "children": [
             {
                "path": "/dev/sdb1",
                "kname": "sdb1",
                "type": "part",
-               "fstype": null,
-               "pttype": null,
-               "parttype": null,
+               "fstype": "vfat",
+               "pttype": "gpt",
+               "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
                "mountpoints": [
                   null
                ],
-               "size": 21474836480,
+               "size": 536870912,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -173,21 +173,21 @@
                "maj:min": "8:17"
             },
             {
-               "path": "/dev/sdb9",
-               "kname": "sdb9",
+               "path": "/dev/sdb2",
+               "kname": "sdb2",
                "type": "part",
-               "fstype": null,
-               "pttype": null,
-               "parttype": null,
+               "fstype": "zfs_member",
+               "pttype": "gpt",
+               "parttype": "6a898cc3-1dd2-11b2-99a6-080020736631",
                "mountpoints": [
                   null
                ],
-               "size": 8388608,
+               "size": 20937965568,
                "model": null,
                "rm": false,
                "wwn": null,
                "serial": null,
-               "maj:min": "8:25"
+               "maj:min": "8:18"
             }
          ]
       },
@@ -202,10 +202,10 @@
             null
          ],
          "size": 21474836480,
-         "model": "PersistentDisk  ",
+         "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
-         "serial": null,
+         "serial": "sail-fleet-zfsproof2-f-d2",
          "maj:min": "8:32"
       },
       {
@@ -213,131 +213,25 @@
          "kname": "sdd",
          "type": "disk",
          "fstype": null,
-         "pttype": null,
+         "pttype": "gpt",
          "parttype": null,
          "mountpoints": [
             null
          ],
          "size": 21474836480,
-         "model": "PersistentDisk  ",
+         "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
-         "serial": null,
+         "serial": "sail-fleet-zfsproof2-f-d3",
          "maj:min": "8:48",
          "children": [
             {
                "path": "/dev/sdd1",
                "kname": "sdd1",
                "type": "part",
-               "fstype": null,
-               "pttype": null,
-               "parttype": null,
-               "mountpoints": [
-                  null
-               ],
-               "size": 21474836480,
-               "model": null,
-               "rm": false,
-               "wwn": null,
-               "serial": null,
-               "maj:min": "8:49"
-            },
-            {
-               "path": "/dev/sdd9",
-               "kname": "sdd9",
-               "type": "part",
-               "fstype": null,
-               "pttype": null,
-               "parttype": null,
-               "mountpoints": [
-                  null
-               ],
-               "size": 8388608,
-               "model": null,
-               "rm": false,
-               "wwn": null,
-               "serial": null,
-               "maj:min": "8:57"
-            }
-         ]
-      },
-      {
-         "path": "/dev/sde",
-         "kname": "sde",
-         "type": "disk",
-         "fstype": null,
-         "pttype": null,
-         "parttype": null,
-         "mountpoints": [
-            null
-         ],
-         "size": 21474836480,
-         "model": "PersistentDisk  ",
-         "rm": false,
-         "wwn": null,
-         "serial": null,
-         "maj:min": "8:64",
-         "children": [
-            {
-               "path": "/dev/sde1",
-               "kname": "sde1",
-               "type": "part",
-               "fstype": null,
-               "pttype": null,
-               "parttype": null,
-               "mountpoints": [
-                  null
-               ],
-               "size": 21474836480,
-               "model": null,
-               "rm": false,
-               "wwn": null,
-               "serial": null,
-               "maj:min": "8:65"
-            },
-            {
-               "path": "/dev/sde9",
-               "kname": "sde9",
-               "type": "part",
-               "fstype": null,
-               "pttype": null,
-               "parttype": null,
-               "mountpoints": [
-                  null
-               ],
-               "size": 8388608,
-               "model": null,
-               "rm": false,
-               "wwn": null,
-               "serial": null,
-               "maj:min": "8:73"
-            }
-         ]
-      },
-      {
-         "path": "/dev/sdf",
-         "kname": "sdf",
-         "type": "disk",
-         "fstype": null,
-         "pttype": null,
-         "parttype": null,
-         "mountpoints": [
-            null
-         ],
-         "size": 21474836480,
-         "model": "PersistentDisk  ",
-         "rm": false,
-         "wwn": null,
-         "serial": null,
-         "maj:min": "8:80",
-         "children": [
-            {
-               "path": "/dev/sdf1",
-               "kname": "sdf1",
-               "type": "part",
-               "fstype": null,
-               "pttype": null,
-               "parttype": null,
+               "fstype": "vfat",
+               "pttype": "gpt",
+               "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
                "mountpoints": [
                   null
                ],
@@ -346,15 +240,15 @@
                "rm": false,
                "wwn": null,
                "serial": null,
-               "maj:min": "8:81"
+               "maj:min": "8:49"
             },
             {
-               "path": "/dev/sdf2",
-               "kname": "sdf2",
+               "path": "/dev/sdd2",
+               "kname": "sdd2",
                "type": "part",
-               "fstype": null,
-               "pttype": null,
-               "parttype": null,
+               "fstype": "zfs_member",
+               "pttype": "gpt",
+               "parttype": "6a898cc3-1dd2-11b2-99a6-080020736631",
                "mountpoints": [
                   null
                ],
@@ -363,26 +257,9 @@
                "rm": false,
                "wwn": null,
                "serial": null,
-               "maj:min": "8:82"
+               "maj:min": "8:50"
             }
          ]
-      },
-      {
-         "path": "/dev/sdg",
-         "kname": "sdg",
-         "type": "disk",
-         "fstype": null,
-         "pttype": null,
-         "parttype": null,
-         "mountpoints": [
-            null
-         ],
-         "size": 21474836480,
-         "model": "PersistentDisk  ",
-         "rm": false,
-         "wwn": null,
-         "serial": null,
-         "maj:min": "8:96"
       }
    ]
 }

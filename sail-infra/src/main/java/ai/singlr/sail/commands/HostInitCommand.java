@@ -355,7 +355,7 @@ public final class HostInitCommand implements Runnable {
     if (disk != null && !devices.resolved("--disk", disk).equals(held.source())) {
       ignored.add("--disk " + disk);
     }
-    if (poolFileSize != null) {
+    if (poolFileSize != null && !(file(poolFileSize).sizeMb() + "MiB").equals(held.size())) {
       ignored.add("--pool-file-size " + poolFileSize);
     }
     if (!ignored.isEmpty()) {

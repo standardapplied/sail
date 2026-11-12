@@ -1228,7 +1228,8 @@ class HostProvisionerTest {
   }
 
   @Test
-  void aDryRunOnABoxWithoutIncusShowsTheProfileMadeOnTheNewPool() throws Exception {
+  void aDryRunOnABoxWithoutIncusOrZfsSaysTheyWouldBeInstalledAndMakesTheProfileOnTheNewPool()
+      throws Exception {
     var reads = new ScriptedShellExecutor().onThrow("incus", new IOException("no incus"));
     var steps = new ArrayList<String>();
 
@@ -1244,6 +1245,10 @@ class HostProvisionerTest {
                 tempDir.resolve("host.yaml"),
                 tempDir.resolve("sail.db"));
 
+    assertTrue(steps.contains("done:2/8:would be installed"), steps.toString());
+    assertTrue(
+        steps.contains("done:3/8:would be installed; ZFS cache capped at 6.4 GiB"),
+        steps.toString());
     assertTrue(
         steps.contains("done:6/8:singlr-base: containers on devpool (zfs)"), steps.toString());
     assertEquals(

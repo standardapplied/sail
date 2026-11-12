@@ -36,6 +36,10 @@ class PoolDevicesTest {
   private static final String STOPPED = "raid-members-arrays-stopped";
   private static final String SPARES = DeviceFixtures.SPARES;
   private static final String PROOF = "handwritten-gcp-proof-layouts.lsblk.json";
+  private static final String A_INITIAL = "gcp2/a-layout-initial.lsblk.json";
+  private static final String BTRFS_ROOT = "gcp2/e-root-on-btrfs-raid1-pivot.lsblk.json";
+  private static final String ZFS_ROOT = "gcp2/e-root-on-zfs-mirror-pivot.lsblk.json";
+  private static final String TYPES = "handwritten-review3-layouts.lsblk.json";
   private static final List<String> RAID_LAYOUTS =
       List.of(
           OWNER,
@@ -250,17 +254,25 @@ class PoolDevicesTest {
 
   @Test
   void whatSitsOnARefusedDeviceIsRefusedAndNoZfsVolumeIsOffered() throws Exception {
-    var reasons =
-        Map.of(
-            "/dev/md2p1", "it is a partition of /dev/md2 (raid1), not of a disk",
-            "/dev/loop3p1", "it is a partition of /dev/loop3 (loop), not of a disk",
-            "/dev/zd0", "it is a ZFS volume");
-    reasons.forEach(
-        (device, reason) -> {
-          assertEquals(device + " is refused: " + reason + ".", refusal(PROOF, device));
-        });
-
-    assertEquals(List.of(), devices(names(new Box(PROOF)).shell()).candidates());
+    assertEquals(
+        "/dev/md2p1 is refused: it is a partition of /dev/md2 (raid1), not of a disk.",
+        refusal("gcp2/a-layout-md-array-partitioned.lsblk.json", "/dev/md2p1"));
+    assertEquals(
+        "/dev/md2p1 is refused: it is a partition of /dev/md2 (raid1), not of a disk; it holds"
+            + " ext4.",
+        refusal("gcp2/a-layout-loop-partitioned.lsblk.json", "/dev/md2p1"));
+    assertEquals(
+        "/dev/loop3p1 is refused: it is a partition of /dev/loop3 (loop), not of a disk.",
+        refusal("gcp2/a-layout-loop-partitioned.lsblk.json", "/dev/loop3p1"));
+    assertEquals(
+        "/dev/zd0 is refused: it is a ZFS volume.",
+        refusal("gcp2/a-layout-zvol.lsblk.json", "/dev/zd0"));
+    assertEquals(
+        "/dev/zd0p1 is refused: it is a ZFS volume.",
+        refusal("gcp2/a-layout-zvol-partitioned.lsblk.json", "/dev/zd0p1"));
+    assertTrue(
+        devices(names(new Box("gcp2/a-layout-zvol.lsblk.json")).shell()).candidates().stream()
+            .noneMatch(candidate -> candidate.device().equals("/dev/zd0")));
   }
 
   @Test
@@ -279,16 +291,15 @@ class PoolDevicesTest {
   @Test
   void aMapperPathIsRefusedAsTheDeviceItNames() {
     assertEquals(
-        "/dev/mapper/proofluks is refused: it is an open LUKS volume, not a"
-            + " disk or a partition.",
+        "/dev/mapper/proofluks is refused: it is an open LUKS volume, not a disk or a partition.",
         refusal(
-            names(new Box(PROOF)).name("/dev/mapper/proofluks", "/dev/dm-0"),
+            names(new Box(A_INITIAL)).name("/dev/mapper/proofluks", "/dev/dm-0"),
             "/dev/mapper/proofluks"));
     assertEquals(
-        "/dev/mapper/proofvg-prooflv (/dev/proofvg/prooflv) is refused: it"
-            + " is an LVM logical volume, not a disk or a partition; it holds ext4.",
+        "/dev/mapper/proofvg-prooflv (/dev/proofvg/prooflv) is refused: it is an LVM logical"
+            + " volume, not a disk or a partition.",
         refusal(
-            names(new Box(PROOF)).name("/dev/proofvg/prooflv", "/dev/dm-1"),
+            names(new Box(A_INITIAL)).name("/dev/proofvg/prooflv", "/dev/dm-1"),
             "/dev/proofvg/prooflv"));
   }
 
@@ -302,16 +313,14 @@ class PoolDevicesTest {
   @Test
   void anArrayIsRefusedAsAnArrayNamingWhatItHolds() {
     assertEquals(
-        "/dev/md1 is refused: it is an md array (raid1), not a disk or a"
-            + " partition; it holds ext4.",
-        refusal(PROOF, "/dev/md1"));
+        "/dev/md1 is refused: it is an md array (raid1), not a disk or a partition; it holds ext4.",
+        refusal("gcp2/a-layout-md-unmounted-everywhere.lsblk.json", "/dev/md1"));
   }
 
   @Test
   void aSparePartitionBesideLuksAndLvmIsCleared() throws Exception {
     assertEquals(
-        new PoolSource.Device("/dev/sde4", "sail-fleet-zfsproof-a-d4 8:68 15032385536"),
-        devices(names(new Box(PROOF)).shell()).cleared("/dev/sde4"));
+        "/dev/sde4", devices(names(new Box(A_INITIAL)).shell()).cleared("/dev/sde4").path());
   }
 
   @Test
@@ -477,38 +486,41 @@ class PoolDevicesTest {
 
   @Test
   void bootPartitionsAreRefusedMountedOrNotOnAnyDisk() {
-    var layout = "handwritten-btrfs-raid1-root.lsblk.json";
-
+    var reasons =
+        Map.of(
+            "/dev/sdh1", "/dev/sdh1 is an EFI system partition; it holds vfat",
+            "/dev/sdh2", "/dev/sdh2 is a BIOS boot partition",
+            "/dev/sdh4", "/dev/sdh4 is an XBOOTLDR boot partition; it holds vfat",
+            "/dev/sdi1", "/dev/sdi1 is an EFI system partition; it holds vfat");
+    reasons.forEach(
+        (device, reason) ->
+            assertEquals(device + " is refused: " + reason + ".", refusal(A_INITIAL, device)));
     assertEquals(
-        "/dev/sdb1 is refused: /dev/sdb1 is an EFI system partition; it" + " holds vfat.",
-        refusal(layout, "/dev/sdb1"));
+        "/dev/sdb1 is refused: /dev/sdb1 is an EFI system partition; it holds vfat.",
+        refusal(BTRFS_ROOT, "/dev/sdb1"));
     assertEquals(
-        "/dev/sdc1 is refused: /dev/sdc1 is a BIOS boot partition.", refusal(layout, "/dev/sdc1"));
-    assertEquals(
-        "/dev/sdc is refused: /dev/sdc1 is a BIOS boot partition.", refusal(layout, "/dev/sdc"));
+        "/dev/sdb9 is refused: /dev/sdb9 is ZFS's reserved partition.",
+        refusal("gcp2/b-layout-after-devpool.lsblk.json", "/dev/sdb9"));
   }
 
   @Test
-  void aSecondBtrfsRootDeviceIsRefusedOnTheExclusiveOpenItsFilesystemHolds() {
-    var layout = "handwritten-btrfs-raid1-root.lsblk.json";
-
+  void theSecondDeviceOfABtrfsRootIsRefusedNamingTheBtrfsItHolds() {
     assertEquals(
-        "/dev/sdb2 is refused: /dev/sdb2 is held open by something lsblk" + " does not show.",
-        refusal(names(new Box(layout)).busy("/dev/sdb2"), "/dev/sdb2"));
+        "/dev/sdd2 is refused: /dev/sdd2 holds btrfs and is held open by something lsblk does not"
+            + " show.",
+        refusal(names(new Box(BTRFS_ROOT)).busy("/dev/sdd2"), "/dev/sdd2"));
   }
 
   @Test
   void aBlankSpareDiskIsOfferedAndTaken() throws Exception {
-    var layout = "handwritten-btrfs-raid1-root.lsblk.json";
-
-    assertEquals(
-        List.of("/dev/sdd"),
-        devices(new Box(layout).shell()).candidates().stream()
-            .map(PoolDevices.Candidate::device)
-            .toList());
-    assertEquals(
-        "/dev/sdd",
-        devices(names(new Box(layout)).shell()).cleared("/dev/sdd").said().substring(7));
+    for (var root : List.of(BTRFS_ROOT, ZFS_ROOT)) {
+      assertEquals(
+          List.of("/dev/sdc"),
+          devices(new Box(root).shell()).candidates().stream()
+              .map(PoolDevices.Candidate::device)
+              .toList());
+      assertEquals("/dev/sdc", devices(names(new Box(root)).shell()).cleared("/dev/sdc").path());
+    }
   }
 
   @Test
@@ -592,9 +604,13 @@ class PoolDevicesTest {
   /** The GCP VM's {@code layout}: its lsblk tree, and each device's listing and busy open. */
   @Test
   void aBlankPartitionOnTheSystemDiskIsTakenAndSoIsOneBesideSwapInUse() throws Exception {
-    for (var partition : List.of("/dev/sda2", "/dev/sdg3")) {
-      assertEquals(partition, devices(names(new Box(PROOF)).shell()).cleared(partition).path());
-    }
+    assertEquals(
+        "/dev/sda2", devices(names(new Box(A_INITIAL)).shell()).cleared("/dev/sda2").path());
+    assertEquals(
+        "/dev/sdd3",
+        devices(names(new Box("gcp2/b-layout-initial.lsblk.json")).shell())
+            .cleared("/dev/sdd3")
+            .path());
   }
 
   @Test
@@ -606,33 +622,31 @@ class PoolDevicesTest {
   }
 
   @Test
-  void aPartitionIsTakenOnlyWithAPartitionTypeThatIsNoBootOrReservedOne() {
+  void aPartitionIsTakenOnlyWithAPartitionTypeLsblkReadsThatIsNoBootOrExtendedOne() {
     var reasons =
         Map.of(
             "/dev/sdd1",
-                "lsblk shows no partition type for it: run sudo udevadm settle, then this again",
-            "/dev/sdd2", "/dev/sdd2 is an EFI system partition; it holds vfat",
-            "/dev/sdd3", "/dev/sdd3 is an XBOOTLDR boot partition",
-            "/dev/sde1", "/dev/sde1 is an EFI system partition",
-            "/dev/sde2", "/dev/sde2 is an XBOOTLDR boot partition",
-            "/dev/sde4", "/dev/sde4 is an extended partition, which holds the logical ones",
-            "/dev/sdf1", "/dev/sdf1 is an extended partition, which holds the logical ones",
-            "/dev/sdf2", "/dev/sdf2 is an extended partition, which holds the logical ones");
+            "lsblk shows no partition type for it: run sudo udevadm settle, then this again",
+            "/dev/sdd2",
+            "/dev/sdd2 is an EFI system partition; it holds vfat",
+            "/dev/sde2",
+            "/dev/sde2 is an XBOOTLDR boot partition",
+            "/dev/sde4",
+            "/dev/sde4 is an extended partition, which holds the logical ones",
+            "/dev/sdf1",
+            "/dev/sdf1 is an extended partition, which holds the logical ones",
+            "/dev/sdf2",
+            "/dev/sdf2 is an extended partition, which holds the logical ones");
     reasons.forEach(
         (device, reason) ->
-            assertEquals(
-                device + " is refused: " + reason + ".",
-                refusal("handwritten-review3-layouts.lsblk.json", device)));
-    assertEquals(
-        "/dev/sdd9 is refused: /dev/sdd9 is ZFS's reserved partition.",
-        refusal(PROOF, "/dev/sdd9"));
+            assertEquals(device + " is refused: " + reason + ".", refusal(TYPES, device)));
   }
 
   @Test
   void aDiskTypeDeviceBuiltOnAnotherIsNotAPlainDisk() {
     assertEquals(
         "/dev/bcache0 is refused: it is a disk built on /dev/sdb, not a plain disk.",
-        refusal("handwritten-review3-layouts.lsblk.json", "/dev/bcache0"));
+        refusal(TYPES, "/dev/bcache0"));
   }
 
   @Test
@@ -640,47 +654,22 @@ class PoolDevicesTest {
     assertEquals(
         "/dev/sdc1 holds ext4. Sail erases nothing: if nothing on it is wanted, erase it yourself"
             + " with sudo wipefs --all /dev/sdc1, then run this again.",
-        refusal(
-            names(new Box("handwritten-review3-layouts.lsblk.json")).holds("/dev/sdc1", EXT4),
-            "/dev/sdc1"));
+        refusal(names(new Box(TYPES)).holds("/dev/sdc1", EXT4), "/dev/sdc1"));
   }
 
   @Test
-  void onARootOnZfsBoxWhoseUdevKnowsNothingOnlyTheBlankDiskIsTaken() throws Exception {
-    var pivot = "gcp2/d-root-on-zfs-pivot.lsblk.json";
-
+  void onARootOnZfsMirrorBoxTheRootPoolsDisksAreRefused() {
+    var rpool =
+        fixture("raw-file-pool.zpool-list.txt")
+            .replace("sail-raw", "rpool")
+            .replace("/tmp/rpool.img", "/dev/sdb2");
     assertEquals(
-        new PoolSource.Device("/dev/sdg", "8:96 21474836480"),
-        devices(names(new Box(pivot)).shell()).cleared("/dev/sdg"));
-    assertEquals(
-        "/dev/sdc holds ext4. Sail erases nothing: if nothing on it is wanted, erase it yourself"
-            + " with sudo wipefs --all /dev/sdc, then run this again.",
-        refusal(names(new Box(pivot)).holds("/dev/sdc", EXT4), "/dev/sdc"));
-    assertEquals(
-        "/dev/sdf is refused: it is in the imported zpool rpool, and no pool's device is taken:"
+        "/dev/sdb2 is refused: it is in the imported zpool rpool, and no pool's device is taken:"
             + " export or destroy the pool yourself first.",
-        refusal(
-            names(new Box(pivot))
-                .zpool(
-                    "rpool",
-                    fixture("raw-file-pool.zpool-list.txt")
-                        .replace("sail-raw", "rpool")
-                        .replace("/tmp/rpool.img", "/dev/sdf2"),
-                    "/dev/sdf2"),
-            "/dev/sdf"));
+        refusal(names(new Box(ZFS_ROOT)).zpool("rpool", rpool, "/dev/sdb2"), "/dev/sdb2"));
     assertEquals(
-        "/dev/sdf1 is refused: lsblk shows no partition type for it: run sudo udevadm settle,"
-            + " then this again.",
-        refusal(pivot, "/dev/sdf1"));
-  }
-
-  @Test
-  void aSpareDiskBesideARootLsblkCannotPlaceIsTaken() throws Exception {
-    assertEquals(
-        "/dev/sdb",
-        devices(names(new Box("handwritten-root-on-zfs-mirror.lsblk.json")).shell())
-            .cleared("/dev/sdb")
-            .path());
+        "/dev/sdd1 is refused: /dev/sdd1 is an EFI system partition; it holds vfat.",
+        refusal(ZFS_ROOT, "/dev/sdd1"));
   }
 
   private static Box gcp(String layout) {

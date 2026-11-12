@@ -323,6 +323,31 @@ class HostInitCommandTest {
   }
 
   @Test
+  void aReRunOfTheCommandThatMadeAFilePoolKeepsItAndADifferentSizeIsRefused() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus storage list",
+                "[{\"name\": \"tank\", \"driver\": \"zfs\", \"config\": {\"source\":"
+                    + " \"/var/lib/incus/disks/tank.img\", \"size\": \"20480MiB\","
+                    + " \"zfs.pool_name\": \"tank\"}}]");
+
+    assertEquals(
+        new PoolSource.Zpool("tank"),
+        source(shell, "--storage", "zfs", "--pool", "tank", "--pool-file-size", "20GiB"));
+    assertEquals(
+        "Incus already has zfs pool 'tank' on /var/lib/incus/disks/tank.img, which a re-run keeps,"
+            + " so --pool-file-size 30GiB would be ignored. Drop it, or name a new pool with --pool"
+            + " <name>.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    source(
+                        shell, "--storage", "zfs", "--pool", "tank", "--pool-file-size", "30GiB"))
+            .getMessage());
+  }
+
+  @Test
   void aReRunRefusesTheSourceFlagsItWouldIgnore() {
     var shell =
         new ScriptedShellExecutor()

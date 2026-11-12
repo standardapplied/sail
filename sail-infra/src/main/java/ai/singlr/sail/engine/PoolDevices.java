@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Stream;
 
 /**
  * The one place that decides whether a block device may become a ZFS pool. Sail erases nothing, so
@@ -92,7 +93,14 @@ public final class PoolDevices {
     var busy = new ArrayList<String>();
     for (var member : members) {
       if (busy(member.path())) {
-        busy.add(member.path() + " is held open by something lsblk does not show");
+        var held =
+            Stream.concat(signatures.get(member.path()).stream(), member.signature().stream())
+                .distinct()
+                .toList();
+        busy.add(
+            member.path()
+                + (held.isEmpty() ? "" : " holds " + String.join(", ", held) + " and")
+                + " is held open by something lsblk does not show");
       }
     }
     refuseAny(label, busy);
