@@ -1,0 +1,78 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/specs/harbor-docks/measures"
+  },
+  "response": {
+    "body": {
+      "cost": {
+        "runs_without_usage": {
+          "count": 1
+        },
+        "unknown": "not_recorded"
+      },
+      "human_minutes": {
+        "unknown": "not_recorded"
+      },
+      "intervals": {
+        "awaiting_merge": {
+          "missing": 2,
+          "unknown": "inputs_missing"
+        },
+        "ready_to_done": {
+          "missing": 1,
+          "unknown": "inputs_missing"
+        },
+        "ready_to_verified": {
+          "seconds": 0
+        },
+        "verified_to_done": {
+          "missing": 1,
+          "unknown": "inputs_missing"
+        }
+      },
+      "no_recorded_human_code_act": {
+        "unknown": "not_done"
+      },
+      "rework": {
+        "build_runs": {
+          "count": 1
+        },
+        "carried_findings": {
+          "count": 0
+        },
+        "fix_runs": {
+          "count": 0
+        },
+        "review_errors": {
+          "count": 0
+        },
+        "review_rounds": {
+          "count": 1
+        }
+      },
+      "schema_version": 1,
+      "spec_id": "harbor-docks",
+      "times": {
+        "awaiting_merge": {
+          "unknown": "not_reached"
+        },
+        "box": {
+          "unknown": "no_box_id"
+        },
+        "done": {
+          "unknown": "not_reached"
+        },
+        "ready": {
+          "at": "2026-11-11T09:00:00.656Z",
+          "source": "change_log"
+        },
+        "verified": {
+          "at": "2026-11-11T09:00:00.656Z",
+          "source": "review"
+        }
+      }
+    },
+    "status": 200
+  }
+}

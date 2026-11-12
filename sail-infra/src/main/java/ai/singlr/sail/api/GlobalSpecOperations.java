@@ -5,7 +5,12 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
@@ -21,13 +26,17 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * Global (control-plane) spec CRUD against the {@link SpecStore}. Pure database operations, split
@@ -92,9 +101,14 @@ final class GlobalSpecOperations {
 
   GlobalSpecsListResponse list(SpecStore.SpecFilter filter) {
     requireStore();
+    var specs = listed(filter).stream().map(this::viewOf).toList();
+    return new GlobalSpecsListResponse(specs, specs.size());
+  }
+
+  /** The specs {@code filter} lists that the reader may see; a filter it cannot read is refused. */
+  private List<SpecStore.SpecRow> listed(SpecStore.SpecFilter filter) {
     try {
-      var specs = readable(filter).stream().map(this::viewOf).toList();
-      return new GlobalSpecsListResponse(specs, specs.size());
+      return readable(filter);
     } catch (IllegalArgumentException e) {
       throw ApiException.of(ErrorCode.INVALID_REQUEST, e);
     }
@@ -107,14 +121,142 @@ final class GlobalSpecOperations {
 
   GlobalSpecDetailResponse get(String specId) {
     requireStore();
+    return detail(findOrThrow(specId), null);
+  }
+
+  /**
+   * The detail of spec {@code specId} carrying its measures, as {@link #measures} computes them on
+   * the box {@code box} names.
+   */
+  GlobalSpecDetailResponse measured(String specId, String box) {
+    requireMeasured();
     var row = findOrThrow(specId);
-    var content = specStore.getContent(specId).orElse(null);
+    var reads = Access.decide(Actor.reader(), Action.READ_MEASURES, resourceOf(row));
+    return detail(
+        row, reads instanceof Decision.Allowed ? measuresOf(List.of(row), box).getFirst() : null);
+  }
+
+  /**
+   * {@code spec} as reading its measures decides it: its project and whose it is, so an agent's own
+   * work ({@link Access#decide}) is the spec its run works, in that spec's project. It is decided
+   * as the reader the spec was found by, so a spec found is never one out of that reader's scope.
+   */
+  private static Resource resourceOf(SpecStore.SpecRow spec) {
+    return Resources.spec(spec.id(), spec.project(), spec.assignee(), spec.createdBy());
+  }
+
+  private GlobalSpecDetailResponse detail(SpecStore.SpecRow row, SpecMeasures measures) {
+    var content = specStore.getContent(row.id()).orElse(null);
     return new GlobalSpecDetailResponse(
         viewOf(row),
         content != null ? content.body() : null,
         content != null ? content.plan() : null,
-        openFindingCount(specId),
-        latestRun(specId));
+        openFindingCount(row.id()),
+        latestRun(row.id()),
+        measures,
+        null);
+  }
+
+  /**
+   * What spec {@code specId}'s change took, as the box {@code box} names records it ({@link
+   * SpecMeasures}): a spec the reader may not read is one that is not there (M13).
+   */
+  SpecMeasures measures(String specId, String box) {
+    requireMeasured();
+    var row = findOrThrow(specId);
+    if (Access.decide(Actor.reader(), Action.READ_MEASURES, resourceOf(row))
+        instanceof Decision.Refused(var refusal)) {
+      throw Refusals.exception(refusal);
+    }
+    return measuresOf(List.of(row), box).getFirst();
+  }
+
+  /**
+   * The measures of every spec {@code filter} lists that the reader sees, done within {@code
+   * window}, read in as many statements however many specs it lists.
+   */
+  SpecMeasuresList listMeasures(
+      SpecStore.SpecFilter filter, SpecMeasuresList.Window window, String box) {
+    requireMeasured();
+    return SpecMeasuresList.of(measuresOf(listed(filter), box), window);
+  }
+
+  /**
+   * The rows of {@code specs} the reader sees, measured, one read of each kind for all of them:
+   * their revisions on this box, every entry compacted away or filed where the reader does not read
+   * a gap; their reviews and the findings of those it sees; their runs, as {@code GET
+   * /v1/runs?spec=} lists one spec's; and this box's latest run erasure, by retention here or heard
+   * from main, in each project the reader reads. A review or run the reader may not see is not
+   * counted and is not counted as none either. Only reads.
+   */
+  private List<SpecMeasures> measuresOf(List<SpecStore.SpecRow> specs, String box) {
+    var reader = Actor.reader();
+    var ids = specs.stream().map(SpecStore.SpecRow::id).toList();
+    var history = byKey(specStore.histories(ids), ChangeLog.Entry::entityId);
+    var compacted = byKey(specStore.compacted(ids), ChangeLog.Head::entityId);
+    var everyReview = reviewStore.reviewsForSpecs(ids);
+    var filed =
+        reviewStore.projectsOf(everyReview.stream().map(ReviewStore.ReviewRow::id).toList());
+    var seenReviews =
+        ReadFilter.readable(reader, everyReview, review -> filed.get(review.id())).stream()
+            .map(ReviewStore.ReviewRow::id)
+            .collect(Collectors.toSet());
+    var findings = reviewStore.findingsForReviews(seenReviews);
+    var reviews = byKey(everyReview, ReviewStore.ReviewRow::specId);
+    var everyRun = byKey(runStore.listForConversations(ids), RunStore.RunRow::conversationId);
+    var erasures = new HashMap<String, Long>();
+    runStore
+        .lastErasures(List.of(SpecPruner.RETENTION, ChangeLog.Entry.SYNC))
+        .forEach(
+            (project, seq) -> {
+              if (project == null || ReadFilter.reads(reader, () -> project)) {
+                erasures.put(project, seq);
+              }
+            });
+    var sees = ReadFilter.<ChangeLog.Entry>readable(reader, GlobalSpecOperations::projectOf);
+    return specs.stream()
+        .map(
+            spec -> {
+              var id = spec.id();
+              var held = history.getOrDefault(id, List.of());
+              var gaps = new HashSet<Long>();
+              compacted.getOrDefault(id, List.of()).forEach(dropped -> gaps.add(dropped.seq()));
+              held.stream().filter(sees.negate()).map(ChangeLog.Entry::seq).forEach(gaps::add);
+              var ofSpec = reviews.getOrDefault(id, List.of());
+              var seen =
+                  ofSpec.stream().filter(review -> seenReviews.contains(review.id())).toList();
+              var runs = everyRun.getOrDefault(id, List.of());
+              var seenRuns = ReadFilter.readable(reader, runs, RunStore.RunRow::project);
+              return SpecMeasures.of(
+                  new MeasureRows(
+                      id,
+                      spec.project(),
+                      spec.status(),
+                      box,
+                      held.stream().filter(sees).toList(),
+                      gaps,
+                      new MeasureRows.Seen<>(seen, seen.size() < ofSpec.size()),
+                      seen.stream()
+                          .flatMap(review -> findings.getOrDefault(review.id(), List.of()).stream())
+                          .toList(),
+                      new MeasureRows.Seen<>(seenRuns, seenRuns.size() < runs.size()),
+                      erasures));
+            })
+        .toList();
+  }
+
+  private static <T> Map<String, List<T>> byKey(List<T> rows, Function<T, String> key) {
+    return rows.stream().collect(Collectors.groupingBy(key));
+  }
+
+  private void requireMeasured() {
+    requireStore();
+    if (runStore == null) {
+      throw SailOperations.storeUnavailable("Run store");
+    }
+    if (reviewStore == null) {
+      throw SailOperations.storeUnavailable("Review store");
+    }
   }
 
   /**

@@ -45,8 +45,8 @@ func answer<Response>(
 
 @Suite struct GoldenRoutesTests {
     @Test func everyRecordedExchangeIsOneThisClientMakes() throws {
-        #expect(Set(calls.keys).union(refusalsOfRoutesNotYetCalled).union(exchangesOfSailEvents)
-            == Set(try Goldens.names(in: "http")))
+        #expect(Set(calls.keys).union(refusalsOfRoutesNotYetCalled).union(answersOfRoutesNotYetCalled)
+            .union(exchangesOfSailEvents) == Set(try Goldens.names(in: "http")))
     }
 
     @Test(arguments: calls.keys.sorted())
@@ -372,6 +372,9 @@ func answer<Response>(
 let refusalsOfRoutesNotYetCalled: Set<String> = [
     "refusal-out-of-scope", "refusal-project-not-created", "refusal-run-on-other-node",
 ]
+
+/// The answers of routes this client does not call yet, recorded for the apps that will.
+let answersOfRoutesNotYetCalled: Set<String> = ["spec-measures", "specs-measures"]
 
 /// The exchange `SailEvents` makes, proven by its own tests.
 let exchangesOfSailEvents: Set<String> = ["events-recent"]

@@ -329,6 +329,13 @@ class SpecCliHelperTest {
   }
 
   @Test
+  void showAsksForTheSpecWithItsMeasures() {
+    assertTrue(
+        SpecCliHelper.scriptContent()
+            .contains("api -G --data-urlencode \"measures=true\" \"$BASE/$1\";;"));
+  }
+
+  @Test
   void createPostsAndUpdateAndArchivePut() {
     var content = SpecCliHelper.scriptContent();
     assertTrue(content.contains("-X POST --data-urlencode \"project=$PROJECT\""));

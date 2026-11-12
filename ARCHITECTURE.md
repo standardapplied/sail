@@ -2291,6 +2291,63 @@ reviewer's and fix agent's own run log, and every fix commit intact, so the FDE 
 resolves with `sail spec update <id> --status done` (accept the work as-is) or `--status
 pending` (send it back to be re-dispatched). Nothing is deleted along the way.
 
+**Measures of a change.** What a spec's change took is computed on read, by one pure function
+(`SpecMeasures.of` over the spec's `MeasureRows`), from the rows a box already holds and nothing
+else: the revisions this box's change log keeps of it and the seqs compaction dropped
+(`compacted_entries`), its reviews and their findings, its runs as `GET /v1/runs?spec=` lists
+them, and the latest run erasure this box recorded in each project. Each kind is one read for
+every spec measured, so a listing costs the same statements for one spec as for a hundred.
+
+- **Times.** Ready is the first move into `pending`, known while the log holds every revision
+  before it from the birth; done is the move that began the latest stretch in `done`; the dwell
+  is the stretch in `awaiting_merge` that move ended; verified is when the current attempt's
+  latest review completed, if it passed. Each change-log time is the author's time of its
+  revision, from this box's log, which the answer names by its Sail box id (`times.box`, or
+  `no_box_id`). Times are exact only for moves written on the reading box: a revision heard by sync
+  is one per round, so the moves another box made between two rounds are collapsed into it, and
+  what it says or could hide is `collapsed_by_sync`, never `not_reached` and never a clock-skew
+  error. A box's own write that main took comes back heard, in the same status at the same time;
+  it is that move, not another. An unedited birth heard by sync is one move. The second spec's
+  `ready_at` and `done_at` columns are what make the times equal on every box.
+- **Counts.** Rework is reviews that reached a verdict, reviews that errored (served apart as
+  `review_errors`), build runs (a resumed build is one more), fix runs and findings carried
+  forward. A review or run the reader may not see leaves every number of its kind `hidden_rows`,
+  with no count. Every box records each run erasure, main as retention makes it and a node as it
+  hears it from main, filed under the run's project and naming no spec; a run of a project the
+  spec was filed under, erased after the spec arrived, may have been one of its own, so its run
+  counts are then a lower bound (`at_least`). The row names no spec, so a run erased with a pruned
+  spec of the same project bounds them too; one of another project bounds nothing.
+- **The rest.** "No recorded human code act" is a done spec no person decided a human stage of,
+  in any attempt: an upper bound on changes no person reviewed, except that an approval of a
+  superseded attempt counts though it reviewed other work. Cost and human minutes are `unknown`:
+  no row records them yet.
+- **What is exact where.** On every box: review rounds, review errors, carried findings and
+  verified are exact for every reader who sees the spec's reviews. Build runs, fix runs and runs
+  without usage are exact until retention erases a run of the spec's project, and a lower bound
+  after that. On the box that made a move (a node for the loop's moves, main for a person's moves
+  made there): ready, awaiting merge, done and the intervals between them are exact, unless
+  compaction or a project move out of the reader's scope dropped a revision before them. On any
+  other box those moves are `collapsed_by_sync`. A node therefore reads the times of the work it
+  built, and main reads a person's ready and done but not the loop's awaiting merge; the second
+  spec's columns end the difference.
+- **Where it is read.** `GET /v1/specs/{spec}/measures` serves the record. `GET
+  /v1/specs/{spec}?measures=true` carries it as `measures`, with no ETag; `sail spec show` and its
+  `--json` ask for it, and no other read of a spec pays for it. Reading measures is the permission
+  table's Read measures: a person's as reading the spec; an agent's for its own work alone, in its
+  work's project; and none for the credential in a container, which is answered the detail as
+  without asking. `GET /v1/specs:measures`, behind `sail spec list --status done --measures
+  [--done-since] [--done-until]`, lists it per spec with the nearest-rank median and p90 of every
+  number over the values known exactly, counting what each left out.
+
+| | Invariant | Proven by |
+|---|---|---|
+| M8 | A measure is computed only from recorded rows: a number missing an input is `unknown`, with its reason; nothing is estimated, interpolated or zero-filled. A revision compacted away, filed where the reader does not read, or heard by sync from another box is never read past; a row the reader may not see is never counted as none; a count retention may have shortened is a lower bound. | `SpecMeasuresTest`; `SpecMeasuresSyncTest` (real rounds between main and a node); `SpecMeasuresRouteTest` (compaction, a moved spec read per scope, erasures by project, one heard from main) |
+| M9 | No fact is counted twice: a run counts once by its id, and times come from this box's change log alone, named by its Sail id. | `SpecMeasuresTest` (a run listed twice), `SpecMeasuresRouteTest` (a run of the spec's own room) |
+| M10 | One computation: the route, the spec's detail and both CLI verbs serve the one record. | `SpecMeasuresRouteTest`, `SpecMeasuresCommandTest` (the section and the listing pinned whole; each `--json` is the record) |
+| M11 | A negative interval is an error naming both instants, never clamped; a listing leaves it out of the median and counts it. | `SpecMeasuresTest` |
+| M12 | Served measures name no individual. | `SpecMeasuresTest` |
+| M13 | Reading is reading: a measure read writes no row but the door's stamp of the credential's last use, and a spec the caller may not read is one that is not there; reading measures is the table's Read measures, an agent's own work alone. | `SpecMeasuresRouteTest` (every column before and after, the clock moving; a hidden spec answers as a missing one; a flat statement count), `ScopedReadsTest`, `RouteGateSweepTest`, `AccessDoorsBaselineTest` (`infra-doors`), `OwnWorkSocketTest` (its own spec, no other, and none moved out of its project), `AccessTest`, `PolicyTableTest`, `DoorParityTest` |
+
 **Events:** an in-process `EventBus` (lock-light, with bounded per-subscriber queues that
 are lossy by design so publishers never block) fans out to the SSE stream and to startup
 reactors: audit persistence, the webhook reactor, and the spec lifecycle reactor, which
@@ -2413,6 +2470,7 @@ a birth, as on main. A door's placement comes after `Access` too. The table is
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Read | specs, rooms, messages, runs, files, projects | yes | yes | yes | yes | yes | yes |
 | Read a definition | a project's definition | no | yes | yes | own work | no | yes |
+| Read measures | a spec's times, rework and cost | yes | yes | yes | own work | its own | no |
 | Post | a message in a conversation | no | yes | yes | own work | its own | yes |
 | Create | a spec, a room, a project | no | yes | yes | own work | no | yes |
 | Change | edit, delete or restore a spec or room; settle a parked conflict | no | owner | yes | own work | no | yes |

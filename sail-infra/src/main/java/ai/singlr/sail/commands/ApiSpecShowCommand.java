@@ -44,7 +44,7 @@ public final class ApiSpecShowCommand implements Runnable {
     NameValidator.requireValidSpecId(specId);
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
-      var result = client.get("/v1/specs/" + specId);
+      var result = client.get("/v1/specs/" + specId + "?measures=true");
 
       if (json) {
         System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
@@ -86,6 +86,13 @@ public final class ApiSpecShowCommand implements Runnable {
             Ansi.AUTO.string(
                 "  @|bold,red Needs reply:|@ unanswered question "
                     + spec.get("question_message_id")));
+      }
+
+      if (result.get("measures") instanceof Map<?, ?> measures) {
+        System.out.println();
+        for (var line : MeasuresText.section((Map<String, Object>) measures)) {
+          System.out.println(Ansi.AUTO.string(line));
+        }
       }
 
       var body = (String) result.get("body");

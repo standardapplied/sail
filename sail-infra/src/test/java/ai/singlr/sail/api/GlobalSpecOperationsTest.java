@@ -25,6 +25,7 @@ import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -77,6 +78,52 @@ class GlobalSpecOperationsTest {
         new HashMap<String, Object>(Map.of("id", "auth", "project", "manatee", "title", "Auth"));
     base.putAll(overrides);
     return SpecCreateRequest.fromMap(base);
+  }
+
+  @Test
+  void measuresNeedTheRunsAndTheReviewsAndSayWhichStoreIsMissing() {
+    Acting.by(UDAY_ADMIN, () -> ops.create(createReq(Map.of())));
+    var withoutRuns = new GlobalSpecOperations(specStore, reviewStore);
+    var withoutReviews = new GlobalSpecOperations(specStore, null, null, new RunStore(db));
+
+    assertEquals(
+        "Run store not available.",
+        assertThrows(ApiException.class, () -> withoutRuns.measures("auth", "box-7")).reason());
+    assertEquals(
+        "Review store not available.",
+        assertThrows(ApiException.class, () -> withoutReviews.measured("auth", "box-7")).reason());
+  }
+
+  /**
+   * Reading measures is decided as {@code Action.READ_MEASURES}: an agent's own work alone. Asked
+   * outright, another spec's measures are refused; asked with the detail, the detail comes alone.
+   */
+  @Test
+  void anAgentIsRefusedTheMeasuresOfWorkNotItsOwnAndGivenTheDetailAlone() {
+    Acting.by(UDAY_ADMIN, () -> ops.create(createReq(Map.of())));
+    var measured =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, new RunStore(db), () -> null, () -> true);
+    var agent =
+        Actor.agentPrincipal("claude/019fee00-0000-7000-8000-000000000001", "uday")
+            .withWork(Actor.Work.of("manatee", "other", "other"));
+
+    var refused =
+        assertThrows(
+            ApiException.class, () -> Acting.by(agent, () -> measured.measures("auth", "box-7")));
+    var detail = Acting.by(agent, () -> measured.measured("auth", "box-7"));
+    var own =
+        Acting.by(
+            agent.withWork(Actor.Work.of("manatee", "auth", "auth")),
+            () -> measured.measured("auth", "box-7"));
+
+    assertEquals(
+        "'claude/019fee00-0000-7000-8000-000000000001' may read the measures of only its own"
+            + " work, not spec 'auth'.",
+        refused.reason());
+    assertNull(detail.measures());
+    assertEquals("auth", detail.spec().id());
+    assertNotNull(own.measures());
   }
 
   @Test

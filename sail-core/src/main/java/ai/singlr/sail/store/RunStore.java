@@ -1299,6 +1299,29 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         roomId);
   }
 
+  /**
+   * The runs of each of {@code conversationIds}, as {@link #list} reads one conversation's, in one
+   * read, newest first.
+   */
+  public List<RunRow> listForConversations(Collection<String> conversationIds) {
+    return db.query(
+        "SELECT "
+            + COLUMNS
+            + " FROM runs WHERE spec_id IN (SELECT value FROM json_each(?1))"
+            + " OR (spec_id IS NULL AND room_id IN (SELECT value FROM json_each(?1)))"
+            + " ORDER BY id DESC",
+        this::mapRow,
+        YamlUtil.dumpJson(List.copyOf(conversationIds)));
+  }
+
+  /**
+   * The seq of the latest erasure of a run this box recorded from one of {@code origins}, by the
+   * project the run was filed under; a null key for runs filed under none.
+   */
+  public Map<String, Long> lastErasures(Collection<String> origins) {
+    return changeLog.lastErasures(ENTITY, origins);
+  }
+
   public List<RunRow> listForSpec(String specId) {
     return db.query(
         "SELECT " + COLUMNS + " FROM runs WHERE spec_id = ? ORDER BY id DESC",

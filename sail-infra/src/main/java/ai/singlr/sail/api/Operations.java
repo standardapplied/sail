@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import java.util.Map;
 
@@ -139,6 +140,18 @@ public interface Operations extends LocalLaneOperations {
   Result<FollowupSpecResponse> createFollowupSpec(String specId, FollowupCreateRequest request);
 
   Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId);
+
+  /**
+   * What spec {@code specId}'s change took, as this box's rows record it ({@link SpecMeasures}).
+   */
+  Result<SpecMeasures> specMeasures(String specId);
+
+  /**
+   * The measures of the specs {@code filter} lists, done between {@code doneSince} and {@code
+   * doneUntil} (dates, either blank) by this box's record, with their medians and 90th percentiles.
+   */
+  Result<SpecMeasuresList> listMeasures(
+      SpecStore.SpecFilter filter, String doneSince, String doneUntil);
 
   Result<GlobalSpecRestoredResponse> restoreGlobalSpec(String specId, SpecRestoreRequest request);
 

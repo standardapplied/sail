@@ -59,6 +59,7 @@ Usage:
   ci/fleet loop RUN             on eng, the loop's agents build and review a spec in acme on nocaptcha: its
                                 build asks a question and waits, eng answers, and it goes on to
                                 awaiting_merge; the pull request, the room and every box's status are checked,
+                                main's measures of the spec count the reviews and the build runs listed for it,
                                 no secret reaches a log, and the pull request is closed
   ci/fleet storage RUN           client, a dir box running acme, adds a ZFS pool in a 20 GiB file: Incus has
                                 it beside devpool, acme and the base profile stay on devpool, a copy of a
@@ -1359,6 +1360,28 @@ the_room_shows_the_review() {
   grep -qi review <<< "$said"
 }
 
+measures_match_the_rows() {
+  local run=$1 spec=$2 shown reviews runs
+  shown=$(on "$run" main "sudo sail spec show $spec --no-sync --json") || return 1
+  reviews=$(on "$run" main "sudo sail agent review acme --spec $spec --json") || return 1
+  runs=$(on "$run" main "sudo sail agent sessions acme --json") || return 1
+  python3 -I -c '
+import json, sys
+spec = sys.argv[1]
+rework = json.loads(sys.argv[2])["measures"]["rework"]
+listed = json.loads(sys.argv[3]).get(spec, {}).get("reviews", [])
+rounds = len([r for r in listed if "error" not in r and r["status"] in ("passed", "failed", "escalated")])
+errors = len([r for r in listed if "error" in r])
+builds = len({r["id"] for r in json.loads(sys.argv[4]).get("runs", [])
+              if r.get("spec_id") == spec and r.get("role") == "build"})
+served = tuple(rework[k].get("count") for k in ("review_rounds", "review_errors", "build_runs"))
+print("measures: rounds, errors, build runs %s, exact: %s; listed: %d, %d, %d"
+      % (served, not any("at_least" in rework[k] for k in rework), rounds, errors, builds))
+exact = not any("at_least" in rework[k] or "unknown" in rework[k] for k in rework)
+sys.exit(0 if rounds > 0 and exact and served == (rounds, errors, builds) else 1)
+' "$spec" "$shown" "$reviews" "$runs"
+}
+
 closes_the_pull_request() {
   local number
   number=$(GH_TOKEN=$(secret fleet-github-token) gh pr list --repo "$LOOP_REPO" --head "agent/$1" --json number --jq '.[0].number')
@@ -1406,6 +1429,7 @@ loop() {
   check "$run" "the room shows the review" the_room_shows_the_review "$run" eng "$spec"
   check "$run" "every node syncs twice" sync_all "$run"
   check "$run" "every box sees it awaiting merge" everywhere "$run" "$spec" status awaiting_merge
+  check "$run" "main's measures of it count the reviews and the build runs listed for it" measures_match_the_rows "$run" "$spec"
   check "$run" "the fleet closes its pull request and deletes the branch" closes_the_pull_request "$spec" "$run"
   check "$run" "still no secret appears in the run's logs" no_secret_in_logs "$run"
 }

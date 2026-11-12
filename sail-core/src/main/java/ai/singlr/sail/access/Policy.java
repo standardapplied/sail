@@ -170,6 +170,7 @@ public final class Policy {
       List.of(
           new Row(Action.READ, YES, YES, YES, YES, YES, YES),
           new Row(Action.READ_DEFINITION, NO, YES, YES, OWN_WORK, NO, YES),
+          new Row(Action.READ_MEASURES, YES, YES, YES, OWN_WORK, ITS_OWN, NO),
           new Row(Action.POST, NO, YES, YES, OWN_WORK, ITS_OWN, YES),
           new Row(Action.CREATE, NO, YES, YES, OWN_WORK, NO, YES),
           new Row(Action.CHANGE, NO, OWNER, YES, OWN_WORK, NO, YES),

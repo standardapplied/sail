@@ -51,7 +51,7 @@ public final class Access {
   private static final Decision NOT_FOUND = new Decision.NotFound();
   private static final Set<Action> SEATED = EnumSet.of(Action.CREATE, Action.CLAIM);
   private static final Set<Action> WRITES_NOTHING =
-      EnumSet.of(Action.READ, Action.READ_DEFINITION, Action.OPERATE_BOX);
+      EnumSet.of(Action.READ, Action.READ_DEFINITION, Action.READ_MEASURES, Action.OPERATE_BOX);
 
   private Access() {}
 

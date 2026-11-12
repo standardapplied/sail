@@ -108,8 +108,9 @@ import org.junit.jupiter.api.io.TempDir;
  * </pre>
  *
  * <p>Ids are random and times run on the clock, so the clock is pinned and every UUID is renamed by
- * the order it first appears in; JSON keys are sorted, since a map's iteration order is not part of
- * the wire. Nothing else is rewritten.
+ * the order it first appears in; the name of the machine that answered is written as {@code box};
+ * JSON keys are sorted, since a map's iteration order is not part of the wire. Nothing else is
+ * rewritten.
  */
 class ClientGoldensTest {
 
@@ -176,6 +177,9 @@ class ClientGoldensTest {
       box.record(http, "specs", "GET", "/v1/specs?project=" + PROJECT, uday, null);
       box.record(http, "spec", "GET", "/v1/specs/" + SPEC, uday, null);
       box.record(http, "spec-bare", "GET", "/v1/specs/" + BARE_SPEC, uday, null);
+      box.record(http, "spec-measures", "GET", "/v1/specs/" + SPEC + "/measures", uday, null);
+      box.record(
+          http, "specs-measures", "GET", "/v1/specs:measures?project=" + PROJECT, uday, null);
       box.record(http, "events-recent", "GET", "/v1/events/recent?limit=3", uday, null);
       box.record(
           http,
@@ -802,6 +806,9 @@ class ClientGoldensTest {
 
     /** {@code text} with every UUID renamed by the order this box first saw it. */
     String renamed(String text) {
+      if (text.equals(HostInfo.hostname())) {
+        return "box";
+      }
       return UUID.matcher(text)
           .replaceAll(
               found ->

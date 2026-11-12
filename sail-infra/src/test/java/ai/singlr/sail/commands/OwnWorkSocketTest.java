@@ -272,6 +272,81 @@ class OwnWorkSocketTest {
         said(run(build, "POST", "/v1/specs/d1/messages", "body=hi")));
   }
 
+  /**
+   * Measures scenario 11: a build agent's {@code spec show}, inside its own work, carries the
+   * Measures of its spec, counting the run it is.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"claude-code", "codex"})
+  void anAgentsSpecShowCarriesTheMeasuresOfItsOwnSpec(String harness) {
+    var build = build("e1", harness);
+
+    var shown = run(build, "GET", "/v1/specs/e1?measures=true", "");
+
+    assertEquals("allowed", said(shown));
+    assertEquals(
+        Map.of(
+            "review_rounds",
+            Map.of("count", 0L),
+            "review_errors",
+            Map.of("count", 0L),
+            "build_runs",
+            Map.of("count", 1L),
+            "fix_runs",
+            Map.of("count", 0L),
+            "carried_findings",
+            Map.of("count", 0L)),
+        ((Map<?, ?>) shown.body().get("measures")).get("rework"),
+        "eng's box records main's erasures as main does, and none has taken a run of acme");
+  }
+
+  /**
+   * Review 2, minor 5: reading measures is the own-work rule, so a spec its person moves into
+   * another project mid-run is no more the agent's to read the measures of than to post in.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"claude-code", "codex"})
+  void aSpecMovedOutOfItsWorksProjectMidRunIsServedWithoutMeasuresAsPostingToItIsRefused(
+      String harness) {
+    var build = build("e1", harness);
+    assertEquals("allowed", said(socket("eng", "PUT", "/v1/specs/e1", "project=beta")));
+
+    var asked = run(build, "GET", "/v1/specs/e1?measures=true", "");
+
+    assertEquals("allowed", said(asked));
+    assertEquals(false, asked.body().containsKey("measures"));
+    assertEquals(
+        "403 forbidden_not_assignee '"
+            + principal(build)
+            + "' may post only in its own work, not in 'e1'."
+            + OUTSIDE_WORK,
+        said(run(build, "POST", "/v1/specs/e1/messages", "body=hi")));
+  }
+
+  /**
+   * Measures review 1, major 6: in the container, a build agent reads the measures of its own spec
+   * and of no other, in its project or another; it is answered the detail as without asking, and
+   * the box's own person in the container is too.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"claude-code", "codex"})
+  void anAgentAskingTheMeasuresOfAnotherSpecIsAnsweredItsDetailAsWithoutAsking(String harness) {
+    var build = build("e1", harness);
+
+    for (var other : List.of("a2", "in-r1", "b1")) {
+      var asked = run(build, "GET", "/v1/specs/" + other + "?measures=true", "");
+      var plain = run(build, "GET", "/v1/specs/" + other, "");
+
+      assertEquals("allowed", said(asked), other);
+      assertEquals(plain.body(), asked.body(), other);
+      assertEquals(false, asked.body().containsKey("measures"), other);
+    }
+    assertEquals(
+        false,
+        socket("eng", "GET", "/v1/specs/e1?measures=true", "").body().containsKey("measures"),
+        "the box credential runs no work of its own");
+  }
+
   /** Row 16: no agent sets e1 done or archives it; one that may write still retitles it. */
   @ParameterizedTest(name = "{0} {1}")
   @MethodSource("everyAgent")
