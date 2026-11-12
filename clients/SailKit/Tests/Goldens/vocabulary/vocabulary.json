@@ -250,6 +250,7 @@
     "api",
     "agent",
     "room",
+    "container",
     "sync",
     "main",
     "system"

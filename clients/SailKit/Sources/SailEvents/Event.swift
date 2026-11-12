@@ -71,10 +71,11 @@ public struct Publisher: Codable, Equatable, Sendable {
 }
 
 /// The ways a write reaches the server: the box's own command line, an HTTP token, a run's
-/// principal (`agent`) or a read-and-converse run's (`room`) over the container's socket, a node's
-/// sync, main's revisions adopted by a node, and the box's own machinery.
+/// principal (`agent`) or a read-and-converse run's (`room`) over the container's socket, the
+/// box's credential used inside a project container (`container`), a node's sync, main's revisions
+/// adopted by a node, and the box's own machinery.
 public enum Lane: String, CaseIterable, Sendable {
-    case cli, api, agent, room, sync, main, system
+    case cli, api, agent, room, container, sync, main, system
 }
 
 /// The newest events the server holds that the caller may read, at most `limit` of them: what a

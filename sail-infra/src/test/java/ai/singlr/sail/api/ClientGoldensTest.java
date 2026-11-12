@@ -28,6 +28,7 @@ import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyWire;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -39,6 +40,7 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.SyncTransition;
@@ -156,11 +158,11 @@ class ClientGoldensTest {
       box.seed("POST", "/v1/specs", uday, spec());
       box.seed("POST", "/v1/specs", uday, bare(BARE_SPEC, "Buoys mark the channel"));
       box.seat(Engagement.of("claude-code", "read_only", "opus", DateTimeUtils.format(AT)));
-      box.post("claude/run-1", "The harness exited before it answered.", MessageStore.Mark.ERROR);
-      box.post("claude/run-1", "Shall I take the south berth?", MessageStore.Mark.QUESTION);
+      var run = box.run(RUN, SPEC, OWNER.handle());
+      box.post(run, "The harness exited before it answered.", MessageStore.Mark.ERROR);
+      box.post(run, "Shall I take the south berth?", MessageStore.Mark.QUESTION);
       box.seed("POST", "/v1/events", uday, published());
       box.seed("PUT", "/v1/specs/" + BARE_SPEC, uday, Map.of("status", "pending"));
-      var run = box.run(RUN, SPEC, OWNER.handle());
       box.reviewPassedWithAFindingOpen();
 
       box.record(http, "whoami", "GET", "/v1/whoami", uday, null);
@@ -531,15 +533,25 @@ class ClientGoldensTest {
       Acting.system(() -> new RoomStore(db).updateRoster(ROOM, Roster.solo(member).toJson()));
     }
 
-    /** Posts {@code body}, marked {@code mark}, as the agent principal {@code agent} of uday. */
-    void post(String agent, String body, MessageStore.Mark mark) {
-      var principal = Actor.agentPrincipal(agent, OWNER.handle());
+    /**
+     * Posts {@code body}, marked {@code mark}, in the room as {@code run}'s agent: the room is the
+     * one its spec lives in, so it is the run's own work.
+     */
+    void post(RunStore.RunRow run, String body, MessageStore.Mark mark) {
+      var agent = agent(run);
       Actor.call(
-              principal,
+              agent,
               () ->
                   operations.postRoomMessage(
-                      ROOM, new SpecMessageRequest(body, null, mark), principal.handle()))
+                      ROOM, new SpecMessageRequest(body, null, mark), agent.handle()))
           .orThrow();
+    }
+
+    /** The principal {@code run}'s credential resolves to at a door, its work included. */
+    private Actor agent(RunStore.RunRow run) {
+      return new RoleRule(() -> OWNER, new FdeStore(db), new SpecStore(db))
+          .principal(new RoleRule.Credential.Run(run))
+          .orElseThrow();
     }
 
     /** A build run {@code id} of {@code spec} on {@code node}'s box, as a dispatch records one. */
@@ -608,7 +620,7 @@ class ClientGoldensTest {
       new LoopNarrator(null, bus, null)
           .publishGuardrail(PROJECT, SPEC, "stall (20m)", "stopped the run");
       Actor.call(
-              Actor.agentPrincipal("claude/" + RUN, OWNER.handle()),
+              agent(run),
               () -> operations.recordRoomConversation(ROOM, "claude", "s-1", "startup", null))
           .orThrow();
       Stream.of(
