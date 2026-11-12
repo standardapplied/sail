@@ -2446,6 +2446,11 @@ before whether the roster lives on this box). Every door reads the row it acts o
 scope first, the host CLI's operator included, who sees the projects main's roster gives the box's
 FDE. The terminal opens a session only in a project its person holds on the box, whatever their
 role, as the catalog holds it and their scope admits it.
+A terminal session is its shell: the session shim (`_pty-child`) leads it, and when the shell
+exits the session ends once what is already in the terminal has been read (`Pty.DRAIN_GRACE_MILLIS`
+of quiet); a job the shell left running keeps nothing it says afterwards
+(`PtySessionTest.aJobTheShellLeftKeepsWhatItSaidBeforeTheExitAndNothingAfter`). Until 0.67.0 a
+Linux session lived until every holder of its terminal let go.
 
 **One way in.** Six doors reach Sail: the web API, the container socket, the host CLI, the SSH
 gateway, the terminal host and sync. Each door's credential code finds whom its credential names
