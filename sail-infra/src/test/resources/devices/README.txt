@@ -28,3 +28,5 @@ Hand-written (layouts no machine at hand has), kept in the captured format:
   partition unmounted, a BIOS boot partition on sdc, and a blank sdd
 - handwritten-gcp-blank-with-dm-zero.lsblk.json   the GCP blank-disks capture plus a
   device-mapper device with no parent at the top of the tree
+- handwritten-flat-whole-disk-raid.lsblk.json   the flat list the first version's call prints for
+  an array built on two whole disks: no partition at the top, the array listed once per member

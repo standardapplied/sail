@@ -110,6 +110,21 @@ class ZfsCacheCapTest {
   }
 
   @Test
+  void aCapSailWroteBeforeIsWrittenAgainForThisMemory() throws Exception {
+    var cap = ZfsCacheCap.forMemory(131072);
+    var shell =
+        new ScriptedShellExecutor()
+            .onFail("grep -rsH", "")
+            .onOk("cat /sys/module/zfs/parameters/zfs_arc_max", "6871947673\n")
+            .onOk("grep -ho", "zfs_arc_max=6871947673\n")
+            .onOk("bash -c")
+            .onOk("findmnt", "ext4\n");
+
+    assertEquals("ZFS cache capped at 12.8 GiB", cap.install(shell));
+    assertTrue(shell.arguments().contains(cap.dropIn().installCommand(ZfsCacheCap.PATH)));
+  }
+
+  @Test
   void aCapSetOnTheLoadedModuleIsKeptAndNamed() throws Exception {
     var shell =
         new ScriptedShellExecutor()

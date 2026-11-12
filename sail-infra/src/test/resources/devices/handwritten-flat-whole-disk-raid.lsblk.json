@@ -1,0 +1,59 @@
+{
+   "blockdevices": [
+      {
+         "path": "/dev/sda",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "mountpoints": [
+            null
+         ],
+         "size": "50G",
+         "model": "PersistentDisk"
+      },
+      {
+         "path": "/dev/sdb",
+         "type": "disk",
+         "fstype": "linux_raid_member",
+         "pttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": "40G",
+         "model": "PersistentDisk"
+      },
+      {
+         "path": "/dev/sdc",
+         "type": "disk",
+         "fstype": "linux_raid_member",
+         "pttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": "40G",
+         "model": "PersistentDisk"
+      },
+      {
+         "path": "/dev/md0",
+         "type": "raid1",
+         "fstype": "ext4",
+         "pttype": null,
+         "mountpoints": [
+            "/srv"
+         ],
+         "size": "40G",
+         "model": null
+      },
+      {
+         "path": "/dev/md0",
+         "type": "raid1",
+         "fstype": "ext4",
+         "pttype": null,
+         "mountpoints": [
+            "/srv"
+         ],
+         "size": "40G",
+         "model": null
+      }
+   ]
+}

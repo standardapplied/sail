@@ -197,7 +197,12 @@ class PoolDevicesTest {
 
   @Test
   void flatListsFromLsblkAreUnreadableAndRefused() {
-    var flats = new ArrayList<>(List.of("devbox-flat.lsblk.json", "github-runner-flat.lsblk.json"));
+    var flats =
+        new ArrayList<>(
+            List.of(
+                "devbox-flat.lsblk.json",
+                "github-runner-flat.lsblk.json",
+                "handwritten-flat-whole-disk-raid.lsblk.json"));
     gcpLayouts().forEach(layout -> flats.add("gcp/" + layout + ".lsblk-flat.json"));
     for (var flat : flats) {
       var shell = new Box(flat).name("/dev/sdb", "/dev/sdb").shell();
