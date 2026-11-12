@@ -448,6 +448,55 @@ class PtySessionTest {
   }
 
   @Test
+  void anAdoptedSessionWhoseShellIsGoneWhileASilentJobHoldsItsTerminalEndsOnItsOwn()
+      throws Exception {
+    var files = SessionFiles.in(dir, "r");
+    var original = Pty.open(80, 24);
+    var shell =
+        original.spawn(
+            PtyChildShimTest.shim(
+                files.exit(), "sh", "-c", "trap '' HUP; sleep 60 & echo job:$!:started; read a"),
+            Map.of("TERM", "dumb"),
+            dir);
+    original.release();
+    var meta =
+        new SessionMeta(
+            origin("r", "uday", ""),
+            dir.toString(),
+            80,
+            24,
+            "uday",
+            3,
+            shell.pid(),
+            System.currentTimeMillis(),
+            "t",
+            true);
+    var ending = new Ending();
+    var session =
+        PtySession.resume(
+            meta,
+            ending,
+            Pty.adopt(original.fd()),
+            RingJournal.open(files.ring(), 64 * 1024),
+            files,
+            SdNotify.NONE);
+    var client = new Collector();
+    var id = session.attach(client, true, "uday");
+    client.awaitOutput(":started");
+    var job = Long.parseLong(client.outputText().replaceAll("(?s).*job:(\\d+):started.*", "$1"));
+    try {
+      session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
+      assertTrue(
+          assertTimeoutPreemptively(
+              Duration.ofSeconds(3), ending::await, "within a poll interval of the shell's exit"));
+      assertEquals("exited(0)", session.endedReason());
+    } finally {
+      session.close();
+      ProcessHandle.of(job).ifPresent(ProcessHandle::destroyForcibly);
+    }
+  }
+
+  @Test
   void everyByteOfABurstReachesTheRingBeforeTheSessionEnds() throws Exception {
     var ending = new Ending();
     var burst = "x".repeat(400_000) + "END";

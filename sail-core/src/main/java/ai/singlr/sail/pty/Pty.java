@@ -7,6 +7,7 @@ package ai.singlr.sail.pty;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
@@ -28,17 +29,20 @@ import java.util.Map;
  * {@code grantpt}/{@code unlockpt} (libc through the same Panama discipline as the SQLite layer),
  * and the child is spawned with {@link ProcessBuilder} as the session shim ({@link PtyChildShim}),
  * told its terminal in {@link #TERMINAL}; the shim's first act is {@link #claimTerminal}, the half
- * of {@code forkpty} that runs in the child. The slave is opened by the child alone, never here:
- * this process is itself a session leader under systemd or launchd, and opening the slave here
- * would make it this process's controlling terminal instead of the child's.
+ * of {@code forkpty} that runs in the child. The slave is opened here too, with {@code O_NOCTTY} so
+ * it never becomes this process's controlling terminal (this process is itself a session leader
+ * under systemd or launchd), and held until the child holds it: Darwin refuses every terminal
+ * {@code ioctl} on a master, its size among them, until the master's slave has been opened (XNU's
+ * {@code fix_7070978}), and a slave's last close before the child opened it would end the pty.
  *
  * <p>Reads block the calling thread (the session host dedicates a platform gather thread per
  * session — the ghostty drain discipline); a read against a dead child reports end of stream
  * ({@code EIO} on Linux, a zero-length read on macOS) as {@code -1}, never an exception, so the
- * reaper owns the child's ending. A blocked read polls rather than sleeping in {@code read(2)}
- * forever, so {@link #release()} — which forgets the master without closing it, for a host handing
- * its sessions to its successor — is observed within a poll interval as end of stream. Read and
- * write each allocate their own per-call confined arena, so the two halves — which run on different
+ * reaper owns the child's ending, and so does one whose silent job still holds the terminal once
+ * the terminal has drained. A blocked read polls rather than sleeping in {@code read(2)} forever,
+ * so {@link #release()} — which forgets the master without closing it, for a host handing its
+ * sessions to its successor — is observed within a poll interval as end of stream. Read and write
+ * each allocate their own per-call confined arena, so the two halves — which run on different
  * threads (gather vs. the writer's connection) — share no native buffer and cannot race.
  *
  * <p>A master may also be {@link #adopt(int) adopted}: a descriptor inherited from a previous host
@@ -50,6 +54,7 @@ public final class Pty implements AutoCloseable {
   /** The variable {@link #spawn} names the child's terminal in, for {@link #claimTerminal}. */
   static final String TERMINAL = "SAIL_PTY_TERMINAL";
 
+  private static final int NO_SLAVE = -1;
   private static final int EINTR = 4;
   private static final int EIO = 5;
   private static final int EBADF = 9;
@@ -110,7 +115,8 @@ public final class Pty implements AutoCloseable {
                 ValueLayout.JAVA_INT,
                 ValueLayout.JAVA_LONG,
                 ValueLayout.ADDRESS),
-            Linker.Option.firstVariadicArg(2)),
+            Linker.Option.firstVariadicArg(2),
+            Native.CAPTURE_ERRNO),
         Native.downcallCapturingErrno("read", transfer),
         Native.downcallCapturingErrno("write", transfer),
         Native.downcall("close", fdCall),
@@ -132,7 +138,8 @@ public final class Pty implements AutoCloseable {
                 ValueLayout.ADDRESS,
                 ValueLayout.JAVA_INT,
                 ValueLayout.JAVA_INT),
-            Linker.Option.firstVariadicArg(2)),
+            Linker.Option.firstVariadicArg(2),
+            Native.CAPTURE_ERRNO),
         Native.downcall(
             "dup2",
             FunctionDescriptor.of(
@@ -143,6 +150,7 @@ public final class Pty implements AutoCloseable {
 
   private final int masterFd;
   private final String slavePath;
+  private int slaveFd;
   private volatile boolean closed;
   private volatile boolean childGone;
 
@@ -152,12 +160,13 @@ public final class Pty implements AutoCloseable {
     INTERRUPTED
   }
 
-  private Pty(int masterFd, String slavePath) {
+  private Pty(int masterFd, String slavePath, int slaveFd) {
     this.masterFd = masterFd;
     this.slavePath = slavePath;
+    this.slaveFd = slaveFd;
   }
 
-  /** Allocates a master/slave pair and stamps the initial window size on it. */
+  /** Allocates a master/slave pair, opens its slave, and stamps the initial window size on it. */
   public static Pty open(int cols, int rows) throws IOException {
     try {
       var fd = (int) LIBC.posixOpenpt().invokeExact(Native.O_RDWR | Native.PLATFORM.oNoctty());
@@ -170,7 +179,8 @@ public final class Pty implements AutoCloseable {
       }
       Pty pty;
       try {
-        pty = adopt(fd);
+        var slave = slaveOf(fd);
+        pty = new Pty(fd, slave, openTerminal(slave));
       } catch (IOException e) {
         var unused = (int) LIBC.close().invokeExact(fd);
         throw e;
@@ -196,6 +206,10 @@ public final class Pty implements AutoCloseable {
    * inheritance means.
    */
   public static Pty adopt(int fd) throws IOException {
+    return new Pty(fd, slaveOf(fd), NO_SLAVE);
+  }
+
+  private static String slaveOf(int fd) throws IOException {
     MemorySegment name;
     try {
       name = (MemorySegment) LIBC.ptsname().invokeExact(fd);
@@ -205,7 +219,46 @@ public final class Pty implements AutoCloseable {
     if (name.equals(MemorySegment.NULL)) {
       throw new IOException("File descriptor " + fd + " is not a pty master.");
     }
-    return new Pty(fd, name.reinterpret(256).getString(0));
+    return name.reinterpret(256).getString(0);
+  }
+
+  /** Opens {@code terminal} read-write, never as the opener's controlling terminal. */
+  private static int openTerminal(String terminal) throws IOException {
+    try (var arena = Arena.ofConfined()) {
+      var errno = arena.allocate(Native.ERRNO_STATE);
+      var fd =
+          (int)
+              LIBC.open()
+                  .invokeExact(
+                      errno,
+                      arena.allocateFrom(terminal),
+                      Native.O_RDWR | Native.PLATFORM.oNoctty(),
+                      0);
+      if (fd < 0) {
+        throw new IOException(
+            "Could not open the terminal " + terminal + " (errno " + Native.errno(errno) + ").");
+      }
+      return fd;
+    } catch (IOException e) {
+      throw e;
+    } catch (Throwable t) {
+      throw new IOException("opening the terminal " + terminal + " failed", t);
+    }
+  }
+
+  /** {@code ioctl(fd, request, argument)}, refused as {@code refusal} with the call's errno. */
+  private static void ioctl(int fd, long request, MemorySegment argument, String refusal)
+      throws IOException {
+    try (var arena = Arena.ofConfined()) {
+      var errno = arena.allocate(Native.ERRNO_STATE);
+      if ((int) LIBC.ioctl().invokeExact(errno, fd, request, argument) != 0) {
+        throw new IOException(refusal + " (errno " + Native.errno(errno) + ").");
+      }
+    } catch (IOException e) {
+      throw e;
+    } catch (Throwable t) {
+      throw new IOException("ioctl failed: " + refusal, t);
+    }
   }
 
   /** Closes a raw descriptor this process holds but never wrapped; errors are the caller's. */
@@ -225,8 +278,11 @@ public final class Pty implements AutoCloseable {
    * Spawns {@code shim}, the session shim's command line ({@link PtyChildShim} and the command it
    * runs), with this pty named as its terminal: the shim claims it and becomes the session leader
    * whose controlling terminal it is. What the shim says before it has a terminal goes to this
-   * process's standard error. The caller owns the returned process's ending: waiting, exit codes,
-   * and reaping happen there.
+   * process's standard error. Returns once the shim holds the terminal, or is gone: its standard
+   * output, a pipe from here, closes as the claim puts the terminal in its place or as the shim
+   * exits, and only then does this process let go of the slave. Once the child is gone, reads end
+   * as soon as the terminal has drained. The caller owns the returned process's ending: waiting and
+   * exit codes happen there.
    */
   public Process spawn(List<String> shim, Map<String, String> env, Path cwd) throws IOException {
     requireOpen();
@@ -234,11 +290,15 @@ public final class Pty implements AutoCloseable {
     builder.environment().putAll(env);
     builder.environment().put(TERMINAL, slavePath);
     builder.directory(cwd.toFile());
-    var devNull = new File("/dev/null");
-    builder.redirectInput(devNull);
-    builder.redirectOutput(devNull);
+    builder.redirectInput(new File("/dev/null"));
     builder.redirectError(ProcessBuilder.Redirect.INHERIT);
-    return builder.start();
+    var child = builder.start();
+    try (var claimed = child.getInputStream()) {
+      claimed.transferTo(OutputStream.nullOutputStream());
+    }
+    closeSlave();
+    child.onExit().thenRun(this::endOnceDrained);
+    return child;
   }
 
   /**
@@ -247,25 +307,20 @@ public final class Pty implements AutoCloseable {
    * puts it on standard input, output and error for the command to inherit. The terminal is opened
    * with {@code O_NOCTTY} and claimed with {@code TIOCSCTTY}, the same two steps on every system,
    * rather than left to whether an open by a session leader claims it. The claim makes this
-   * process's group the terminal's foreground group, which the command joins.
+   * process's group the terminal's foreground group, which the command joins. Putting the terminal
+   * on standard output closes the pipe {@code spawn} waits on.
    */
   static void claimTerminal(String terminal) throws IOException {
-    try (var arena = Arena.ofConfined()) {
+    try {
       if ((int) LIBC.setsid().invokeExact() < 0) {
         throw new IOException("setsid failed: the shim already leads a process group.");
       }
-      var fd =
-          (int)
-              LIBC.open()
-                  .invokeExact(
-                      arena.allocateFrom(terminal), Native.O_RDWR | Native.PLATFORM.oNoctty(), 0);
-      if (fd < 0) {
-        throw new IOException("Could not open the session's terminal " + terminal + ".");
-      }
-      if ((int) LIBC.ioctl().invokeExact(fd, Native.PLATFORM.tiocsctty(), MemorySegment.NULL)
-          != 0) {
-        throw new IOException("TIOCSCTTY failed: " + terminal + " is not this session's to claim.");
-      }
+      var fd = openTerminal(terminal);
+      ioctl(
+          fd,
+          Native.PLATFORM.tiocsctty(),
+          MemorySegment.NULL,
+          "TIOCSCTTY failed: " + terminal + " is not this session's to claim");
       for (var stdio = 0; stdio <= 2; stdio++) {
         if ((int) LIBC.dup2().invokeExact(fd, stdio) < 0) {
           throw new IOException("Could not put " + terminal + " on descriptor " + stdio + ".");
@@ -280,7 +335,8 @@ public final class Pty implements AutoCloseable {
 
   /**
    * Reads from the master into {@code buf}, blocking until output arrives. Returns the byte count,
-   * or {@code -1} once the child side is gone ({@code EIO}) or this pty is closed.
+   * or {@code -1} at end of stream: the child gone and the terminal drained, the slave gone, or
+   * this pty closed.
    */
   public int read(byte[] buf) throws IOException {
     while (true) {
@@ -392,14 +448,7 @@ public final class Pty implements AutoCloseable {
       var ws = local.allocate(WINSIZE);
       WS_ROW.set(ws, 0L, (short) rows);
       WS_COL.set(ws, 0L, (short) cols);
-      var rc = (int) LIBC.ioctl().invokeExact(masterFd, Native.PLATFORM.tiocswinsz(), ws);
-      if (rc != 0) {
-        throw new IOException("TIOCSWINSZ failed on the pty master.");
-      }
-    } catch (IOException e) {
-      throw e;
-    } catch (Throwable t) {
-      throw new IOException("pty resize failed", t);
+      ioctl(masterFd, Native.PLATFORM.tiocswinsz(), ws, "TIOCSWINSZ failed on the pty master");
     }
   }
 
@@ -452,6 +501,21 @@ public final class Pty implements AutoCloseable {
       var ignored = (int) LIBC.close().invokeExact(masterFd);
     } catch (Throwable t) {
       throw new IllegalStateException("pty close failed", t);
+    }
+    closeSlave();
+  }
+
+  /** Lets go of the slave this process opened, once: the child holds its own. */
+  private synchronized void closeSlave() {
+    if (slaveFd == NO_SLAVE) {
+      return;
+    }
+    try {
+      var ignored = (int) LIBC.close().invokeExact(slaveFd);
+    } catch (Throwable t) {
+      throw new IllegalStateException("pty slave close failed", t);
+    } finally {
+      slaveFd = NO_SLAVE;
     }
   }
 }

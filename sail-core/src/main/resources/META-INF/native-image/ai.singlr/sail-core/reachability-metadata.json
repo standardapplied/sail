@@ -110,7 +110,8 @@
           "void*"
         ],
         "options": {
-          "firstVariadicArg": 2
+          "firstVariadicArg": 2,
+          "captureCallState": true
         }
       },
       {
@@ -121,7 +122,8 @@
           "jint"
         ],
         "options": {
-          "firstVariadicArg": 2
+          "firstVariadicArg": 2,
+          "captureCallState": true
         }
       },
       {

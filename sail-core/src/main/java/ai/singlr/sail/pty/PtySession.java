@@ -434,7 +434,9 @@ public final class PtySession implements AutoCloseable {
    * the keyboard's last holder is restored (under an id no new subscriber can be given) so the same
    * FDE reclaims it on reconnect exactly as from a ghost attachment; the never-attached grace
    * starts over, since whoever was attached lost the transport with the old host. No start event:
-   * the session is not new.
+   * the session is not new. The orphan's exit ends the gather once the terminal has drained, as
+   * {@link Pty#spawn} has it for a child of this host's own, so a silent job left holding the
+   * terminal never keeps the session open.
    */
   public static PtySession resume(
       SessionMeta meta,
@@ -479,6 +481,7 @@ public final class PtySession implements AutoCloseable {
     session.subscriberIds.set(Math.max(0, meta.writerId()));
     session.everAttached = meta.everAttached();
     session.rebuildBoundary();
+    child.exited().thenRun(pty::endOnceDrained);
     session.startThreads();
     return session;
   }
@@ -510,13 +513,7 @@ public final class PtySession implements AutoCloseable {
     }
   }
 
-  /**
-   * A child gone before it opened the terminal, or whose silent job still holds it, leaves the
-   * master no end of stream to read, so the child's exit ends the gather as soon as the terminal
-   * has drained, on its own or at a close, never at the escalation.
-   */
   private void startThreads() {
-    child.exited().thenRun(pty::endOnceDrained);
     Thread.ofPlatform().name("pty-gather-" + origin.name()).start(this::gather);
     writerThread = Thread.ofPlatform().name("pty-write-" + origin.name()).start(this::drainInput);
   }

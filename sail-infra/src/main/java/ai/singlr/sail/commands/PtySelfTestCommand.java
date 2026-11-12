@@ -83,17 +83,11 @@ public final class PtySelfTestCommand implements Callable<Integer> {
     }
   }
 
-  /**
-   * Spawns {@code sh -c script} on {@code pty} under the shim, its exit file in {@code dir}; once
-   * the child is gone {@code reader} reads to the end of what it left, so a child that never spoke
-   * fails the probe instead of hanging it.
-   */
-  private static Process spawn(Pty pty, Pty reader, Path dir, String script) throws IOException {
+  /** Spawns {@code sh -c script} on {@code pty} under the shim, its exit file in {@code dir}. */
+  private static Process spawn(Pty pty, Path dir, String script) throws IOException {
     var argv = new ArrayList<>(PtyHostCommand.shimCommand(dir.resolve("probe.exit")));
     argv.addAll(List.of("sh", "-c", script));
-    var child = pty.spawn(argv, Map.of("TERM", "dumb"), dir);
-    child.onExit().thenRun(reader::endOnceDrained);
-    return child;
+    return pty.spawn(argv, Map.of("TERM", "dumb"), dir);
   }
 
   /** Reads {@code pty} until {@code marker} has been said, or throws with what was. */
@@ -116,7 +110,7 @@ public final class PtySelfTestCommand implements Callable<Integer> {
   static void ptyProbe() throws Exception {
     var dir = Files.createTempDirectory("sail-pty");
     try (var pty = Pty.open(80, 24)) {
-      var child = spawn(pty, pty, dir, "echo waiting; read go; stty size");
+      var child = spawn(pty, dir, "echo waiting; read go; stty size");
       readUntil(pty, "waiting");
       pty.resize(100, 40);
       pty.write("go\n".getBytes(StandardCharsets.UTF_8));
@@ -145,7 +139,7 @@ public final class PtySelfTestCommand implements Callable<Integer> {
         throw new IllegalStateException("expected one descriptor, got " + stored.fds());
       }
       try (var copy = Pty.adopt(stored.fds().getFirst())) {
-        var child = spawn(pty, copy, dir, "echo through-the-store");
+        var child = spawn(pty, dir, "echo through-the-store");
         readUntil(copy, "through-the-store");
         child.waitFor();
       }

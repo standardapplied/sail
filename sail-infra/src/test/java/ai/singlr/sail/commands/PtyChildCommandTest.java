@@ -48,7 +48,6 @@ class PtyChildCommandTest {
                   "echo shimmed; exit 7"),
               Map.of("TERM", "dumb"),
               dir);
-      shim.onExit().thenRun(pty::endOnceDrained);
       var said = new StringBuilder();
       var buf = new byte[4096];
       for (var n = pty.read(buf); n > 0; n = pty.read(buf)) {

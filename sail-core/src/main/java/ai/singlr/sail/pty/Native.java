@@ -43,6 +43,7 @@ final class Native {
 
   static final int O_RDWR = 2;
 
+  static final Linker.Option CAPTURE_ERRNO = Linker.Option.captureCallState("errno");
   static final StructLayout ERRNO_STATE = Linker.Option.captureStateLayout();
   private static final VarHandle ERRNO =
       ERRNO_STATE.varHandle(MemoryLayout.PathElement.groupElement("errno"));
@@ -74,7 +75,7 @@ final class Native {
   }
 
   static MethodHandle downcallCapturingErrno(String symbol, FunctionDescriptor descriptor) {
-    return downcall(symbol, descriptor, Linker.Option.captureCallState("errno"));
+    return downcall(symbol, descriptor, CAPTURE_ERRNO);
   }
 
   static int errno(MemorySegment state) {

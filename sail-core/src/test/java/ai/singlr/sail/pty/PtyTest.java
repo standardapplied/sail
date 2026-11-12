@@ -193,6 +193,42 @@ class PtyTest {
     assertEquals("before-a-terminal\n", said(SpeakingBeforeATerminalHost.class));
   }
 
+  /** A host that spawns a second session shim onto a terminal the first one has claimed. */
+  static final class ClaimingATakenTerminalHost {
+    public static void main(String[] args) throws Exception {
+      try (var pty = Pty.open(80, 24)) {
+        var first =
+            pty.spawn(
+                PtyChildShimTest.shim(Path.of(args[0], "first.exit"), "sh", "-c", "read a"),
+                Map.of(),
+                Path.of(args[0]));
+        var second =
+            pty.spawn(
+                PtyChildShimTest.shim(Path.of(args[0], "second.exit"), "sh", "-c", "echo ran"),
+                Map.of(),
+                Path.of(args[0]));
+        System.err.println(pty.slavePath() + " " + second.waitFor());
+        pty.close();
+        first.waitFor();
+      }
+    }
+  }
+
+  @Test
+  void aTerminalAnotherSessionHasClaimedIsRefusedWithTheKernelsAnswer() throws Exception {
+    var said = said(ClaimingATakenTerminalHost.class).lines().toList();
+
+    var terminal = said.getLast().split(" ")[0];
+    assertEquals(
+        "Exception in thread \"main\" java.io.IOException: TIOCSCTTY failed: "
+            + terminal
+            + " is not this session's to claim (errno 1).",
+        said.getFirst(),
+        "EPERM: the terminal is the first session's");
+    assertEquals(terminal + " 1", said.getLast(), "the second shim ran nothing and exited 1");
+    assertFalse(Files.exists(dir.resolve("second.exit")));
+  }
+
   @Test
   void anInterruptEndsTheForegroundCommandWhileTheShimAndTheBackgroundJobRideItOut()
       throws Exception {
