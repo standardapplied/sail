@@ -10,7 +10,7 @@ import Testing
         let third = try #require(range(of: "id: 3\n", in: stream))
         let partial = Array(stream[..<(third.upperBound + 20)])
         let server = ScriptedStreams([.answer(200, [partial], .close), .answer(200, [Array("id: 4\ndata: next\n\n".utf8)], .close)])
-        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps().sleep)
+        let source = EventSource(transport: server, request: HTTPRequest(method: .get, path: "/v1/events/stream"), sleep: Naps().sleep)
         let events = try await read(source)
         #expect(events.map(\.lastEventID) == ["1", "2", "4"])
         #expect(events.last?.data == "next")
@@ -23,7 +23,7 @@ import Testing
         let room = try Goldens.bytes("events/room-stream.sse")
         let opening = try #require(range(of: "id: 2\n", in: room))
         let server = ScriptedStreams([.answer(200, [Array(room[..<opening.lowerBound])], .close), .answer(200, [room], .close)])
-        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps().sleep)
+        let source = EventSource(transport: server, request: HTTPRequest(method: .get, path: "/v1/events/stream"), sleep: Naps().sleep)
         let events = try await read(source)
         #expect(events.map(\.lastEventID).prefix(4) == ["", "1", "1", "1"])
         #expect(await server.requests.map { $0.headers["Last-Event-ID"] }.prefix(2) == [nil, "1"])
@@ -37,7 +37,7 @@ import Testing
             .answer(200, [Array("id: 2\ndata: two\n\n".utf8)], .close),
         ])
         let naps = Naps()
-        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: naps.sleep)
+        let source = EventSource(transport: server, request: HTTPRequest(method: .get, path: "/v1/events/stream"), sleep: naps.sleep)
         #expect(try await read(source).map(\.data) == ["one", "two"])
         #expect(await naps.taken == [.milliseconds(2500), .milliseconds(2500), .milliseconds(2500), .milliseconds(2500)])
         #expect(await server.requests.map { $0.headers["Last-Event-ID"] } == [nil, "1", "1", "1", "2"])
@@ -47,7 +47,7 @@ import Testing
         let naps = Naps()
         let source = EventSource(
             transport: ScriptedStreams([.answer(200, [], .close)]),
-            request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: naps.sleep
+            request: HTTPRequest(method: .get, path: "/v1/events/stream"), sleep: naps.sleep
         )
         #expect(try await read(source).isEmpty)
         #expect(await naps.taken == [.seconds(3)])
@@ -56,7 +56,7 @@ import Testing
     @Test func aRefusedStreamIsTheServersRefusalAndIsNotRetried() async throws {
         let refusal = try Exchange("refusal-invalid-bearer-token")
         let server = ScriptedStreams([.answer(refusal.status, [Array(refusal.body)], .close)])
-        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps().sleep)
+        let source = EventSource(transport: server, request: HTTPRequest(method: .get, path: "/v1/events/stream"), sleep: Naps().sleep)
         var events = source.makeAsyncIterator()
         await #expect(throws: SailError.refused(Refusal(
             code: .known(.invalidBearerToken), message: "Bearer token is invalid.", action: nil, remedy: []
@@ -67,13 +67,13 @@ import Testing
 
     @Test func aFailedAnswerWithNoRefusalIsUnexpected() async throws {
         let server = ScriptedStreams([.answer(405, [], .close)])
-        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps().sleep)
+        let source = EventSource(transport: server, request: HTTPRequest(method: .get, path: "/v1/events/stream"), sleep: Naps().sleep)
         await #expect(throws: SailError.unexpected(route: "GET /v1/events/stream", status: 405)) { try await read(source) }
     }
 
     @Test func aCancelledReaderStopsWithoutReconnecting() async throws {
         let server = ScriptedStreams([.answer(200, [Array("data: one\n\n".utf8)], .close)])
-        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps().sleep)
+        let source = EventSource(transport: server, request: HTTPRequest(method: .get, path: "/v1/events/stream"), sleep: Naps().sleep)
         let reader = Task {
             var iterator = source.makeAsyncIterator()
             let first = try await iterator.next()

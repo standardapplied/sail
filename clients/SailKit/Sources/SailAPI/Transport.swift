@@ -1,14 +1,20 @@
 import Foundation
 
+/// The methods this client sends.
+public enum HTTPMethod: String, Sendable {
+    case get = "GET"
+    case post = "POST"
+}
+
 /// A request to the server, relative to wherever a ``Transport`` reaches it.
 public struct HTTPRequest: Equatable, Sendable {
-    public var method: String
-    /// The path and query, percent-encoded: `/v1/rooms?project=harbor`.
+    public var method: HTTPMethod
+    /// The path and query, percent-encoded and starting at the root: `/v1/rooms?project=harbor`.
     public var path: String
     public var headers: [String: String]
     public var body: Data?
 
-    public init(method: String, path: String, headers: [String: String] = [:], body: Data? = nil) {
+    public init(method: HTTPMethod, path: String, headers: [String: String] = [:], body: Data? = nil) {
         self.method = method
         self.path = path
         self.headers = headers
@@ -18,7 +24,7 @@ public struct HTTPRequest: Equatable, Sendable {
     /// A request for `segments` and `query`, every character of each but ASCII letters, digits,
     /// `-`, `_` and `~` percent-encoded: a segment never reads as another segment, `.` or `..`, and
     /// a `+` never reaches the server's form decoding as a space. A nil query value is left out.
-    package init(_ method: String, _ segments: [String], query: [(String, String?)] = [], body: Data? = nil) {
+    package init(_ method: HTTPMethod, _ segments: [String], query: [(String, String?)] = [], body: Data? = nil) {
         let path = segments.map { "/" + Self.escaped($0) }.joined()
         let parameters = query.compactMap { name, value in value.map { "\(Self.escaped(name))=\(Self.escaped($0))" } }
         self.init(
@@ -41,7 +47,7 @@ public struct HTTPRequest: Equatable, Sendable {
 
     /// `method path`, as an error names the route that gave it.
     public var route: String {
-        "\(method) \(path)"
+        "\(method.rawValue) \(path)"
     }
 }
 
@@ -59,6 +65,7 @@ public struct HTTPResponse: Equatable, Sendable {
 }
 
 /// An answer whose body arrives as it is written, in whatever chunks the connection delivers.
+/// Header names are lowercased.
 public struct HTTPStream: Sendable {
     public var status: Int
     public var headers: [String: String]

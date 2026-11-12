@@ -44,7 +44,7 @@ public struct URLSessionTransport: Transport {
             preconditionFailure("'\(request.path)' is not a percent-encoded path; build requests with Endpoint")
         }
         var url = URLRequest(url: target.absoluteURL)
-        url.httpMethod = request.method
+        url.httpMethod = request.method.rawValue
         url.httpBody = request.body
         for (name, value) in request.headers {
             url.setValue(value, forHTTPHeaderField: name)

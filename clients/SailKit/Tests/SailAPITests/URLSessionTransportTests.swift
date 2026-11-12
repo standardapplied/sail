@@ -14,7 +14,7 @@ import Testing
 
     @Test func aRequestReachesTheServerWithItsMethodPathHeadersAndBody() async throws {
         let request = HTTPRequest(
-            method: "POST", path: "/v1/rooms/harbor-design/messages?limit=2",
+            method: .post, path: "/v1/rooms/harbor-design/messages?limit=2",
             headers: ["Authorization": "Bearer tok"], body: Data(#"{"body":"Aye"}"#.utf8)
         )
         let response = try await transport.send(request)
@@ -30,7 +30,7 @@ import Testing
     }
 
     @Test func aStreamYieldsItsBodyAsItArrives() async throws {
-        let stream = try await transport.open(HTTPRequest(method: "GET", path: "/v1/events/stream"))
+        let stream = try await transport.open(HTTPRequest(method: .get, path: "/v1/events/stream"))
         #expect(stream.status == 201)
         var chunks: [[UInt8]] = []
         for try await chunk in stream.body {
@@ -40,7 +40,7 @@ import Testing
     }
 
     @Test func aServerThatCannotBeReachedIsUnreachable() async {
-        let request = HTTPRequest(method: "GET", path: "/unreachable")
+        let request = HTTPRequest(method: .get, path: "/unreachable")
         await #expect(throws: SailError.self) { try await transport.send(request) }
         await #expect(throws: SailError.self) { try await transport.open(request) }
         do {

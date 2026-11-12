@@ -9,6 +9,9 @@ import Testing
         #expect(SpecStatus.allCases.map(\.rawValue) == (try Goldens.vocabulary("spec_statuses")))
         #expect(MemberMode.allCases.map(\.rawValue) == (try Goldens.vocabulary("member_modes")))
         #expect(Runner.allCases.map(\.rawValue) == (try Goldens.vocabulary("remedy_runners")))
+        #expect(WakeMode.allCases.map(\.rawValue) == (try Goldens.vocabulary("wake_modes")))
+        #expect(RunStatus.allCases.map(\.rawValue) == (try Goldens.vocabulary("run_statuses")))
+        #expect(RunPresence.allCases.map(\.rawValue) == (try Goldens.vocabulary("run_presences")))
     }
 
     @Test func aKnownWordReadsAsItsCaseAndAnyOtherAsItself() {

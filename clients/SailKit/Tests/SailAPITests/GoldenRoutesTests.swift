@@ -22,7 +22,7 @@ let calls: [String: @Sendable (SailClient) async throws -> Void] = [
     "refusal-missing-bearer-token": { _ = try await $0.send(.whoami) },
     "refusal-invalid-bearer-token": { _ = try await $0.send(.whoami) },
     "refusal-bad-request": { _ = try await $0.send(.post(MessagePost(body: ""), room: "harbor-design")) },
-    "refusal-not-found": { _ = try await $0.send(Endpoint<Whoami>("GET", ["v1", "nowhere"])) },
+    "refusal-not-found": { _ = try await $0.send(Endpoint<Whoami>(.get, ["v1", "nowhere"])) },
 ]
 
 let question = MessagePost(body: "Which berth takes the ferry — north or south? ⚓", asksQuestion: true)
@@ -53,7 +53,7 @@ func answer<Response>(
         let exchange = try Exchange(name)
         let (result, sent) = try await answer(name) { client in try await calls[name]?(client) }
         let request = try #require(sent)
-        #expect(request.method == exchange.method)
+        #expect(request.method.rawValue == exchange.method)
         #expect(request.path == exchange.path)
         #expect(request.headers["Authorization"] == "Bearer tok")
         #expect(try json(request.body) == json(exchange.requestBody))
@@ -82,7 +82,8 @@ func answer<Response>(
         let list = try Endpoint.projects.decode(response(try Exchange("projects")))
         #expect(list.total == 1)
         #expect(list.projects.map(\.name) == ["harbor"])
-        #expect(list.projects.map(\.containerStatus) == ["not_created"])
+        #expect(list.projects.map(\.containerStatus) == [.known(.notCreated)])
+        #expect(list.projects.map(\.id) == ["harbor"])
     }
 
     @Test func aRoomReadsEveryFieldTheServerSends() throws {
@@ -95,8 +96,8 @@ func answer<Response>(
         #expect(room.project == "harbor")
         #expect(room.title == "Docks")
         #expect(room.assignee == "uday")
-        #expect(room.wake == "mention")
-        #expect(room.effectiveWake == "mention")
+        #expect(room.wake == .known(.mention))
+        #expect(room.effectiveWake == .known(.mention))
         #expect(room.members.count == 1)
         expectSeated(room.members.first)
         #expect(room.specIDs == ["harbor-docks"])
@@ -114,7 +115,7 @@ func answer<Response>(
         #expect(room.id == "harbor-quay")
         #expect(room.assignee == "uday")
         #expect(room.wake == nil)
-        #expect(room.effectiveWake == "on")
+        #expect(room.effectiveWake == .known(.on))
         #expect(room.members.isEmpty)
         #expect(room.specIDs.isEmpty)
         #expect(room.lastActivityAt == nil)
@@ -159,6 +160,18 @@ func answer<Response>(
         let listed = try #require(list.specs.first)
         #expect(detail.body == "The south berth takes the ferry.")
         #expect(detail.plan == "")
+        #expect(detail.openFindings == 1)
+        let run = try #require(detail.latestRun)
+        #expect(run.id == "run-1")
+        #expect(run.node == "uday")
+        #expect(run.status == .known(.running))
+        #expect(run.exitCode == nil)
+        #expect(run.principal == "claude/run-1")
+        #expect(run.owner == "uday")
+        #expect(run.sessionID == nil)
+        #expect(run.sessionSource == nil)
+        #expect(run.lastActivityAt?.milliseconds == Goldens.pinnedMilliseconds)
+        #expect(run.presence == .known(.working))
         let spec = detail.spec
         #expect(spec.id == "harbor-docks")
         #expect(spec.project == "harbor")
@@ -172,7 +185,7 @@ func answer<Response>(
         #expect(spec.priority == 2)
         #expect(spec.dependsOn == ["harbor-berths"])
         #expect(spec.repos == ["harbor-api"])
-        #expect(spec.wake == "mention")
+        #expect(spec.wake == .known(.mention))
         expectSeated(spec.engagement)
         #expect(spec.createdBy == "uday")
         #expect(spec.createdAt.milliseconds == Goldens.pinnedMilliseconds)
@@ -188,6 +201,8 @@ func answer<Response>(
     @Test func aSpecWithNothingOptionalReadsAsUnassignedUnfiledAndUnasked() throws {
         let detail = try Endpoint.spec("harbor-buoys").decode(response(try Exchange("spec-bare")))
         #expect(detail.body == "")
+        #expect(detail.openFindings == 0)
+        #expect(detail.latestRun == nil)
         let spec = detail.spec
         #expect(spec.id == "harbor-buoys")
         #expect(spec.status == .known(.pending))
@@ -290,6 +305,17 @@ func answer<Response>(
                 .words("."),
             ]
         ))) { try Endpoint.whoami.decode(response(try Exchange("refusal-out-of-scope"))) }
+    }
+
+    @Test func aRefusalKeepsWhatItIsAboutFieldByField() throws {
+        #expect(throws: SailError.refused(Refusal(
+            code: .known(.runOnOtherNode),
+            message: "Run run-2 executed on ada; its logs live there, not on this box.",
+            fieldErrors: [
+                FieldError(field: "node", message: "ada"), FieldError(field: "spec", message: "harbor-docks"),
+                FieldError(field: "project", message: "harbor"),
+            ]
+        ))) { try Endpoint.whoami.decode(response(try Exchange("refusal-run-on-other-node"))) }
     }
 
     @Test func aRefusalWithAnUnknownCodeOrRunnerKeepsTheRawWord() throws {

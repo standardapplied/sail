@@ -8,22 +8,33 @@ public enum SailError: Error, Equatable, Sendable {
     case unexpected(route: String, status: Int)
     /// The server could not be reached, or the connection to it broke.
     case unreachable(String)
+    /// What answered a request for an event stream is not one: the content type it named, if any.
+    /// Something between this client and the server answered in its place.
+    case notAnEventStream(route: String, contentType: String?)
+    /// The request cannot be sent as it was written: why.
+    case unsendable(String)
 }
 
 /// A refusal as the server words it, kept verbatim: what it is, what happened, and what to do.
 /// `action` is the fix as a person reads it; `remedy` is the same fix as words and commands, sent
-/// when it names a command, so a client can render each command for its own reader.
+/// when it names a command, so a client can render each command for its own reader. `fieldErrors`
+/// name what the refusal is about, field by field, when the server says.
 public struct Refusal: Equatable, Sendable, Decodable {
     public let code: Open<ErrorCode>
     public let message: String
     public let action: String?
     public let remedy: [RemedyPart]
+    public let fieldErrors: [FieldError]
 
-    public init(code: Open<ErrorCode>, message: String, action: String?, remedy: [RemedyPart]) {
+    public init(
+        code: Open<ErrorCode>, message: String, action: String? = nil, remedy: [RemedyPart] = [],
+        fieldErrors: [FieldError] = []
+    ) {
         self.code = code
         self.message = message
         self.action = action
         self.remedy = remedy
+        self.fieldErrors = fieldErrors
     }
 
     public init(from decoder: any Decoder) throws {
@@ -32,10 +43,24 @@ public struct Refusal: Equatable, Sendable, Decodable {
         message = try fields.decode(String.self, forKey: .message)
         action = try fields.decodeIfPresent(String.self, forKey: .action)
         remedy = try fields.decodeIfPresent([RemedyPart].self, forKey: .remedy) ?? []
+        fieldErrors = try fields.decodeIfPresent([FieldError].self, forKey: .fieldErrors) ?? []
     }
 
     private enum CodingKeys: String, CodingKey {
         case code, message, action, remedy
+        case fieldErrors = "field_errors"
+    }
+}
+
+/// One thing a refusal is about: a field of the request, or a fact the server names (the node a
+/// run executed on, say), and what the server says of it.
+public struct FieldError: Equatable, Sendable, Decodable {
+    public let field: String
+    public let message: String
+
+    public init(field: String, message: String) {
+        self.field = field
+        self.message = message
     }
 }
 

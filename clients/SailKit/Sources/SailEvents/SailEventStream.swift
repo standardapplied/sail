@@ -70,7 +70,7 @@ extension SailClient {
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) -> SailEventStream {
         let request = authorized(HTTPRequest(
-            "GET", ["v1", "events", "stream"],
+            .get, Route.eventStream,
             query: [
                 ("project", filter.project), ("room", filter.room),
                 ("type", filter.types.map { $0.map(\.rawValue).joined(separator: ",") }),

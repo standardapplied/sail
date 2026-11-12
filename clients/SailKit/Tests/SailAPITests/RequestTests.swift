@@ -19,13 +19,26 @@ import Testing
     }
 
     @Test func aReadSendsNoBodyAndAPostSaysItsBodyIsJSON() throws {
-        #expect(Endpoint.whoami.request == HTTPRequest(method: "GET", path: "/v1/whoami"))
-        let post = Endpoint.post(MessagePost(body: "Aye", replyTo: "m-1", asksQuestion: true), room: "harbor-design")
-        #expect(post.request.method == "POST")
+        #expect(Endpoint.whoami.request == HTTPRequest(method: .get, path: "/v1/whoami"))
+        let post = try Endpoint.post(MessagePost(body: "Aye", replyTo: "m-1", asksQuestion: true), room: "harbor-design")
+        #expect(post.request.method == .post)
         #expect(post.request.headers == ["Content-Type": "application/json"])
         #expect(post.request.body == Data(#"{"body":"Aye","question":true,"reply_to":"m-1"}"#.utf8))
         #expect(MessagePost(body: "Aye", asksQuestion: true).asksQuestion)
         #expect(!MessagePost(body: "Aye").asksQuestion)
+    }
+
+    @Test func aBodyThatCannotBeWrittenAsJSONIsUnsendableNotATrap() {
+        do throws(SailError) {
+            _ = try SailJSON.encode(Double.nan)
+            Issue.record("a number JSON cannot hold was encoded")
+        } catch {
+            guard case let .unsendable(reason) = error else {
+                Issue.record("\(error)")
+                return
+            }
+            #expect(reason.hasPrefix("Double does not encode as JSON: "))
+        }
     }
 
     @Test func theClientSendsItsTokenOnEveryRequest() {

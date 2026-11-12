@@ -56,6 +56,17 @@ public enum Goldens {
         return largest
     }
 
+    /// How the server answers a request for its event stream: `open` when it streams, `full` when
+    /// every stream it allows is taken. The status, and the headers a reader acts on.
+    public static func streamAnswer(_ name: String) throws -> (status: Int, headers: [String: String]) {
+        guard var answer = try object("events/answers.json")[name] as? [String: Any],
+              let status = answer.removeValue(forKey: "status") as? Int
+        else {
+            throw GoldenError(reason: "answers.json holds no \(name) answer")
+        }
+        return (status, answer.compactMapValues { $0 as? String })
+    }
+
     /// The words of `vocabulary` the server's own enum holds.
     public static func vocabulary(_ vocabulary: String) throws -> [String] {
         let words = try object("vocabulary/vocabulary.json")[vocabulary] as? [Any] ?? []

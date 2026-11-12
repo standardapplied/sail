@@ -4,7 +4,7 @@ import Foundation
 public struct Endpoint<Response: Decodable & Sendable>: Sendable {
     public let request: HTTPRequest
 
-    package init(_ method: String, _ segments: [String], query: [(String, String?)] = [], body: Data? = nil) {
+    package init(_ method: HTTPMethod, _ segments: [String], query: [(String, String?)] = [], body: Data? = nil) {
         request = HTTPRequest(method, segments, query: query, body: body)
     }
 
@@ -14,7 +14,30 @@ public struct Endpoint<Response: Decodable & Sendable>: Sendable {
     }
 }
 
-/// The server's JSON: each key as its model spells it, and ISO-8601 instants with milliseconds.
+/// The API's paths, each spelled once, as the segments a request escapes.
+package enum Route {
+    package static let whoami = ["v1", "whoami"]
+    package static let projects = ["v1", "projects"]
+    package static let rooms = ["v1", "rooms"]
+    package static let specs = ["v1", "specs"]
+    package static let eventStream = ["v1", "events", "stream"]
+    package static let recentEvents = ["v1", "events", "recent"]
+
+    package static func room(_ id: String) -> [String] {
+        rooms + [id]
+    }
+
+    package static func messages(room id: String) -> [String] {
+        room(id) + ["messages"]
+    }
+
+    package static func spec(_ id: String) -> [String] {
+        specs + [id]
+    }
+}
+
+/// The server's JSON, read and written one way: each key as its model spells it, and an instant as
+/// ISO-8601 with milliseconds, so a model encoded here decodes here to itself.
 package enum SailJSON {
     package static func decode<Response: Decodable>(_ response: HTTPResponse, route: String) throws(SailError) -> Response {
         guard (200 ..< 300).contains(response.status) else {
@@ -33,13 +56,17 @@ package enum SailJSON {
         }
     }
 
-    package static func encode(_ value: some Encodable) -> Data {
+    package static func encode(_ value: some Encodable) throws(SailError) -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = .sortedKeys
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var text = encoder.singleValueContainer()
+            try text.encode(instant(date))
+        }
         do {
             return try encoder.encode(value)
         } catch {
-            preconditionFailure("a request body always encodes: \(error)")
+            throw .unsendable("\(Swift.type(of: value)) does not encode as JSON: \(error)")
         }
     }
 
@@ -53,6 +80,16 @@ package enum SailJSON {
 
     private struct Envelope: Decodable {
         let error: Refusal
+    }
+
+    /// `date` as the server writes an instant: ISO-8601 in UTC to the nearest millisecond. The
+    /// fraction is written here, from the rounded instant, since a formatter that cuts a fraction
+    /// short would write the millisecond before one a `Double` holds a hair under.
+    private static func instant(_ date: Date) -> String {
+        let milliseconds = Int64((date.timeIntervalSince1970 * 1000).rounded())
+        let fraction = (milliseconds % 1000 + 1000) % 1000
+        let second = Date(timeIntervalSince1970: TimeInterval(milliseconds - fraction) / 1000)
+        return Date.ISO8601FormatStyle().format(second).dropLast() + "." + String(fraction + 1000).dropFirst() + "Z"
     }
 
     private static func decoder() -> JSONDecoder {
