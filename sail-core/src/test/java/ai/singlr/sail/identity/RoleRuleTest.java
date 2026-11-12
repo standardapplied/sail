@@ -349,7 +349,7 @@ class RoleRuleTest {
   void aRunWorksWhatItWasLaunchedForAndAReadOnlyRunReadsOnlyItsProject() {
     var main = new RoleRule(() -> MAIN, roster, specs);
     var build = run("019fee00-0000-7000-8000-000000000007", "mady", "build");
-    var adhoc = run("019fee00-0000-7000-8000-000000000004", "mady", "adhoc", null);
+    var adhoc = run("019fee00-0000-7000-8000-000000000004", "mady", "adhoc", "");
     var full = run("019fee00-0000-7000-8000-000000000005", "mady", "room-full", null, "lobby");
     var wake = run("019fee00-0000-7000-8000-000000000006", "mady", "room", null, "lobby");
 
@@ -358,7 +358,10 @@ class RoleRuleTest {
         "INSERT INTO specs (id, project, title, status, room_id, created_at, updated_at)"
             + " VALUES ('s1', 'acme', 'S1', 'draft', 'r1', 'now', 'now')");
     assertEquals(List.of("acme", "s1", "r1"), work(main, build), "s1 was born in r1");
-    assertEquals(Arrays.asList("acme", null, null), work(main, adhoc));
+    assertEquals(
+        Arrays.asList("acme", null, null),
+        work(main, adhoc),
+        "its row names a blank spec, as an ad-hoc launch reserves it");
     assertEquals(Arrays.asList("acme", null, "lobby"), work(main, full));
     assertEquals(ProjectScope.all(), main.principal(Credential.run(full)).orElseThrow().scope());
     assertEquals(

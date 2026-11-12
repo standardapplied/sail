@@ -522,7 +522,7 @@ class OwnWorkSocketTest {
 
   /** An ad-hoc run on eng's box, in acme. */
   private String adHoc(String harness) {
-    return reserve(null, null, Lane.ADHOC.wire(), harness);
+    return reserve("", null, Lane.ADHOC.wire(), harness);
   }
 
   /**

@@ -682,6 +682,30 @@ class AccessTest {
         "its own room, whoever owns it");
   }
 
+  /** Whether a spec is an agent's work asks nothing of the room it converses in, so finds none. */
+  @Test
+  void whetherASpecIsAnAgentsWorkFindsNoRoom() {
+    var build =
+        Actor.agentPrincipal(Actors.AGENT_HANDLE, Actors.OWNER)
+            .withWork(
+                new Actor.Work(
+                    "acme",
+                    "auth",
+                    () -> {
+                      throw new AssertionError("a decision about a spec found the work's room");
+                    }));
+
+    assertEquals(
+        new Decision.Allowed(),
+        Access.decide(build, Action.CHANGE, Resources.spec("auth", "acme", null, "ada")));
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'" + Actors.AGENT_HANDLE + "' may change only its own work, not spec 'other'.",
+            DRAFT_IT),
+        Access.decide(build, Action.CHANGE, Resources.spec("other", "acme", null, "ada")));
+  }
+
   @Test
   void anAgentNarratesOnlyItsOwnRunNotTheOtherRunsOfItsPerson() {
     var sibling =
