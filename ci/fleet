@@ -58,6 +58,10 @@ Usage:
                                 build asks a question and waits, eng answers, and it goes on to
                                 awaiting_merge; the pull request, the room and every box's status are checked,
                                 no secret reaches a log, and the pull request is closed
+  ci/fleet storage RUN           client, a dir box running acme, adds a ZFS pool in a 20 GiB file: Incus has
+                                it beside devpool, acme and the base profile stay on devpool, a copy of a
+                                container's snapshot on it is a clone (zfs get origin), and the ZFS cache
+                                cap holds across a reboot; observer, left on dir, is unchanged
   ci/fleet rebuilt RUN VERSION  main is copied by the README's backup line, takes a spec, and is lost; client
                                 writes while it is gone; a new main installs VERSION and inits empty, which
                                 observer refuses as another org; the copy goes in place, every node re-pins
@@ -907,6 +911,84 @@ resilience() {
   check "$run" "that one reaches main within 30 s too" reaches_main_unasked "$run" after-incus
 }
 
+pools_on() {
+  local run=$1 box=$2 expected=$3 listed
+  listed=$(on "$run" "$box" "sudo incus storage list --format json" \
+    | python3 -I -c 'import json,sys; print(" ".join(sorted(p["name"] + ":" + p["driver"] for p in json.load(sys.stdin))))')
+  echo "$box has: $listed"
+  [[ $listed == "$expected" ]]
+}
+
+status_pools() {
+  local run=$1 box=$2 expected=$3 listed
+  listed=$(on "$run" "$box" "sudo sail host status --json" \
+    | python3 -I -c 'import json,sys; print(" ".join(sorted(p["name"] + ":" + p["driver"] for p in json.load(sys.stdin)["pools"])))')
+  echo "$box's host status names: $listed"
+  [[ $listed == "$expected" ]]
+}
+
+running_on_pool() {
+  local run=$1 box=$2 container=$3 pool=$4 placed
+  placed=$(on "$run" "$box" "sudo incus query /1.0/instances/$container" \
+    | python3 -I -c 'import json,sys; i=json.load(sys.stdin); print(i["status"] + " on " + i["expanded_devices"]["root"]["pool"])')
+  echo "$container: $placed"
+  [[ $placed == "Running on $pool" ]]
+}
+
+profile_on() {
+  local run=$1 box=$2 pool=$3 named
+  named=$(on "$run" "$box" "sudo incus profile device get singlr-base root pool")
+  echo "singlr-base puts containers on $named"
+  [[ $named == "$pool" ]]
+}
+
+clones_on() {
+  local run=$1 box=$2 origin
+  on "$run" "$box" "sudo incus launch ubuntu-24.04 zt --storage tank && sudo incus snapshot create zt s1 && sudo incus copy zt/s1 zc"
+  origin=$(on "$run" "$box" "sudo zfs get -H -o value origin tank/containers/zc")
+  echo "zc's origin: $origin"
+  [[ $origin == "tank/containers/zt@snapshot-s1" ]]
+}
+
+capped_on() {
+  local run=$1 box=$2 written live
+  written=$(on "$run" "$box" "sed -n 's/^options zfs zfs_arc_max=//p' /etc/modprobe.d/sail-zfs.conf")
+  live=$(on "$run" "$box" "cat /sys/module/zfs/parameters/zfs_arc_max")
+  echo "written $written, in force $live"
+  [[ -n $written && $written == "$live" ]]
+}
+
+reboots() {
+  on "$1" "$2" "sudo systemctl reboot" || true
+  sleep 20
+  answers_ssh "$1" "$2"
+}
+
+uncapped_on() {
+  on "$1" "$2" "test ! -e /etc/modprobe.d/sail-zfs.conf"
+}
+
+storage() {
+  local run=${1:-}
+  [[ -n $run ]] || usage
+  check "$run" "client, a dir box running acme, adds a ZFS pool in a file" \
+    allowed "$run" client "sudo sail host init --storage zfs --pool-file-size 20GiB --pool tank --yes"
+  check "$run" "client's Incus has tank as zfs beside devpool as dir" pools_on "$run" client "devpool:dir tank:zfs"
+  check "$run" "acme still runs, on devpool" running_on_pool "$run" client acme devpool
+  check "$run" "the base profile still puts containers on devpool" profile_on "$run" client devpool
+  check "$run" "a container launched on tank and copied from its snapshot is a zfs clone" clones_on "$run" client
+  check "$run" "the ZFS cache cap is in force" capped_on "$run" client
+  check "$run" "client reboots" reboots "$run" client
+  check "$run" "the ZFS cache cap is still in force after the reboot" capped_on "$run" client
+  check "$run" "acme runs after the reboot, on devpool" running_on_pool "$run" client acme devpool
+  check "$run" "host status names both pools" status_pools "$run" client "devpool:dir tank:zfs"
+  check "$run" "client's test containers go" on "$run" client "sudo incus delete --force zc zt"
+  check "$run" "observer, a dir box, has devpool alone" pools_on "$run" observer "devpool:dir"
+  check "$run" "observer's host status names devpool alone" status_pools "$run" observer "devpool:dir"
+  check "$run" "observer has no ZFS cache cap" uncapped_on "$run" observer
+  check "$run" "acme still runs on observer, on devpool" running_on_pool "$run" observer acme devpool
+}
+
 copies_main() {
   local run=$1 copy=$2
   on "$run" main "sudo apt-get install -y -qq sqlite3 > /dev/null 2>&1 && sudo sqlite3 /var/lib/sail/sail.db '.backup /root/sail.db.copy' && sudo install -m 600 -o \$(id -un) /root/sail.db.copy /tmp/sail.db.copy" || return 1
@@ -1293,6 +1375,7 @@ run() {
   step portal "$id"
   step resilience "$id"
   [[ ${FLEET_LOOP:-1} == 0 ]] || step loop "$id"
+  step storage "$id"
   step rebuilt "$id" "${target:-$version}"
   if [[ ${FLEET_KEEP:-0} != always && ( $status == 0 || ${FLEET_KEEP:-0} != 1 ) ]]; then
     down "$id"
@@ -1319,6 +1402,7 @@ case ${1:-} in
   files) shift; files "$@" ;;
   portal) shift; portal "$@" ;;
   resilience) shift; resilience "$@" ;;
+  storage) shift; storage "$@" ;;
   loop) shift; loop "$@" ;;
   rebuilt) shift; rebuilt "$@" ;;
   ssh) shift; [[ $# -ge 3 ]] || usage; r=$1 b=$2; shift 2; on "$r" "$b" "$@" ;;
