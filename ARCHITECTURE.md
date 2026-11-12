@@ -895,7 +895,10 @@ clone a project's source repos into its container at provision time, not to move
     command rendered through the seam, a `Remedy`'s included, against the command tree.
 - **Client mode.** Only `~/.sail/config.yaml` exists. Commands are forwarded to a box over
   SSH by `RemoteCommandRunner`, in lanes:
-  - Local commands (`--version`, `upgrade`, `init`, `client`, `login`) run on the client.
+  - Local commands (`--version`, `upgrade`, `init`, `client`, `login`, `enroll`) run on the
+    client, and so do the terminal host of the client's own person (`_pty-host --local`), the
+    shim it spawns sessions under (`_pty-child`) and the binary's self-test (`_pty-selftest`),
+    which have nothing to do on a server (`RemoteCommandRunnerTest`).
   - Host-only commands (`host …`) error with guidance to SSH in.
   - FDE-gateway commands (`spec`, `events`, `fde`, and `agent stream|sessions|review`) target
     `sail@host`; the other `agent` verbs read the control plane directly as the box's own
@@ -2661,6 +2664,51 @@ socket) or for a machine token. `sail _pty-selftest`, the release smoke test, op
 door, issues a ticket, presents it and hears one echo (`tcp-selftest: ok`), so the native binary
 runs the door and its keepalive options.
 
+**The terminal host on a person's own machine.** `sail _pty-host --local` (`LocalPtyHost`) is the
+same host wired for the account it runs as, with no server: the native app's launchd agent runs
+it, and a client speaks the same frames to it as to a box. `LocalPtyHostTest` holds each rule
+below through the real host on a real unix socket and real ptys; `LocalPtyHostProcessTest` holds
+them of the process an agent runs.
+
+- **L1. One host, two wirings.** `PtySessionHost`, the frames, the ring, the shim and the spawn
+  chain are the server's. The local wiring fills the same seams: `LocalPtyAccess` is its
+  `PtyIdentity.Resolver` and `PtyAdmission`, `PtyEvents.NONE` its events, a `Handoff` with no
+  descriptor store and the binary's own `_pty-child` its shim, `Network.NONE` its listener. Only
+  what a session runs in differs (`PtyAdmission.folder`): the server takes the folder as named,
+  with a login `bash`.
+- **L2. Only this person.** The socket, `~/.sail/local/pty.sock`, and its directory are
+  owner-only, and there is no TCP door. A blank token is the account's person, resolved as a box's
+  own person is (`RoleRule.Credential.box`, with no roster to consult), and every other token is
+  refused. Whoever can open the socket is that person. Attaching, killing and listing ask
+  `Access` as the server's host does, and opening asks whether that person operates this machine,
+  so the open decision (`openRefusal`) is the server's, unchanged. The dispatch credential the
+  host mints beside its socket at each start still admits its yield-and-list principal.
+- **L3. No store, no Incus, no network.** The local host opens no database, runs no `incus`,
+  binds no port and dials nothing. `LocalWiringSweepTest` holds that its classes name no such
+  type, and a running host leaves its data directory empty and holds no internet socket.
+- **L4. A session is a process in a folder.** An open naming a project or a room is refused,
+  saying the local host opens folders. The folder must be an absolute path to an existing
+  directory the person may enter, refused before any process starts, and is run in once
+  resolved. With no command, a session runs the account's login shell from the account database
+  (`Account`, `getpwuid`, never `$SHELL`) as a login shell, whose own start-up builds `PATH`. Its
+  environment holds `HOME`, `USER`, `LOGNAME` and `SHELL` from that entry, `TERM`, and a UTF-8
+  `LANG` (the host's own, else `en_US.UTF-8`): what a terminal emulator's login gives, since a
+  service starts with almost none.
+- **L5. Sessions outlive their clients, not their host.** A stop (`SIGTERM`) ends every session,
+  reading each terminal to its end, since on macOS a session leader's exit waits for that. An
+  interactive shell ignores `SIGTERM`, so it is killed at the session's 5 s escalation. A new
+  host has a new boot id. With no descriptor store, a restart ends every session; surviving one is
+  a later spec.
+- **L6. The server wiring is untouched.** Without `--local`, every answer is as before.
+
+One host serves one person: it holds `pty.lock` in its directory for as long as it runs, so a
+second exits saying where the first serves, and one that finds the lock free, its holder dead,
+replaces the socket. The lock is taken before the socket is touched and let go only after it is
+gone. A socket path longer than 102 bytes (macOS's 104-byte `sun_path`, less the two the JDK
+keeps) is refused at start, naming the path and the limit. `sail _pty-selftest` starts a local
+host, opens a session in a folder, has a line evaluated, detaches, attaches again and stops
+(`local-selftest: ok`).
+
 **Pairing.** Mast reaches a box as an FDE with one string, the connect code, which `sail fde
 pair <handle> --host <ip-or-dns>` mints and `sail fde unpair <handle>` revokes (`FdeCommand`).
 It is no third identity door: the code carries an ordinary API token bound to the FDE, so
@@ -3077,8 +3125,9 @@ Deliberate limits of the current design, each with its consequence:
    roster protocol change.
 4. **One platform per OS.** Linux amd64 hosts; macOS arm64 as a thin client. The terminal host's
    pty layer runs on macOS through the same spawn chain (the `macos-latest` unit lanes and the
-   darwin release's `_pty-selftest` prove it), but no local host is wired or packaged there, and
-   with no descriptor store its sessions would not survive a restart.
+   darwin release's `_pty-selftest` prove it), and `_pty-host --local` serves a Mac's own person
+   there. The app's launchd agent that runs it is the app's to package, and with no descriptor
+   store its sessions do not survive a restart.
 5. **Sail never talks to the forge.** A passed review parks in `awaiting_merge`; a person
    merges the pull request and marks the spec done. A merge or release stage behind a forge
    adapter is the next step of the loop (`sail-check-stage` on the board).

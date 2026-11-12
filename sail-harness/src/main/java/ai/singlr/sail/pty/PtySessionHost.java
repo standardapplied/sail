@@ -920,11 +920,6 @@ public final class PtySessionHost implements AutoCloseable {
             instanceof Decision.Allowed;
   }
 
-  /** The session's command as requested; an empty request means a login shell. */
-  static List<String> requestedOrShell(List<String> requested) {
-    return requested.isEmpty() ? List.of("bash", "-l") : requested;
-  }
-
   /**
    * The environment a session's child inherits: what terminal it is in ({@code TERM} stays {@code
    * xterm-256color} because containers ship no other terminfo; {@code COLORTERM}, {@code
@@ -1041,6 +1036,15 @@ public final class PtySessionHost implements AutoCloseable {
                 .then(Remedied.whole(refused)));
       }
     }
+    PtyAdmission.Folder folder;
+    try {
+      folder = admission.folder(cwd, who);
+    } catch (IOException refused) {
+      log("refused", who.fde(), m.session(), "folder");
+      return new PtyMessage.Err(
+          Remedy.of("Refusing folder for session '" + m.session() + "': ")
+              .then(Remedied.whole(refused)));
+    }
     if (existing != null) {
       remove(m.session(), existing);
     }
@@ -1054,8 +1058,9 @@ public final class PtySessionHost implements AutoCloseable {
               who.fde(),
               m.project(),
               room,
-              requestedOrShell(m.command()));
+              folder.command(m.command()));
       var env = childEnv(room, version);
+      env.putAll(folder.env());
       var argv = new ArrayList<>(handoff.shim().apply(files.exit()));
       argv.addAll(childCommand(origin, env));
       var session =
@@ -1064,7 +1069,7 @@ public final class PtySessionHost implements AutoCloseable {
               events,
               argv,
               env,
-              cwd,
+              folder.path(),
               files,
               journalCapacity,
               m.cols(),

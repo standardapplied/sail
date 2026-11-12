@@ -72,6 +72,7 @@ runs:
         echo "$selftest"
         grep -qx 'pty-selftest: ok' <<< "$selftest"
         grep -qx 'tcp-selftest: ok' <<< "$selftest"
+        grep -qx 'local-selftest: ok' <<< "$selftest"
 
     - name: Keep the image for a commit built from the same inputs
       if: steps.image.outputs.cache-hit != 'true'

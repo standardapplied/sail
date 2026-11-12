@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -29,8 +30,10 @@ class PtySessionHostChildCommandTest {
 
   @Test
   void anEmptyRequestDefaultsToALoginShell() {
-    assertEquals(List.of("bash", "-l"), PtySessionHost.requestedOrShell(List.of()));
-    assertEquals(List.of("claude"), PtySessionHost.requestedOrShell(List.of("claude")));
+    var asNamed = PtyAdmission.Folder.asNamed(Path.of("/srv"));
+
+    assertEquals(List.of("bash", "-l"), asNamed.command(List.of()));
+    assertEquals(List.of("claude"), asNamed.command(List.of("claude")));
   }
 
   @Test

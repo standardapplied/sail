@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.Main;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.commands.SailCommandLine;
 import ai.singlr.sail.config.ClientConfig;
@@ -31,7 +32,17 @@ import picocli.CommandLine.Help.Ansi;
 public final class RemoteCommandRunner {
 
   private static final Set<String> LOCAL_COMMANDS =
-      Set.of("--version", "-V", "upgrade", "init", "client", "login", "enroll");
+      Set.of(
+          "--version",
+          "-V",
+          "upgrade",
+          "init",
+          "client",
+          "login",
+          "enroll",
+          "_pty-child",
+          "_pty-selftest");
+  private static final List<String> LOCAL_TERMINAL_HOST = List.of("_pty-host", "--local");
   private static final Set<String> INTERACTIVE_COMMANDS = Set.of("shell", "exec");
   private static final Set<String> HOST_ONLY_COMMANDS = Set.of("host");
   private static final Set<String> GATEWAY_COMMANDS =
@@ -52,9 +63,11 @@ public final class RemoteCommandRunner {
    *
    * <ul>
    *   <li>Local: {@code --version}, {@code upgrade}, {@code init}, {@code client}, {@code login},
-   *       {@code enroll} — run on the client, not forwarded ({@code login} and {@code enroll} drive
-   *       the client's browser, a loopback callback, and their own SSH tunnel; {@code client}
-   *       writes this machine's client config)
+   *       {@code enroll}, {@code _pty-host --local}, {@code _pty-child}, {@code _pty-selftest} —
+   *       run on the client, not forwarded ({@code login} and {@code enroll} drive the client's
+   *       browser, a loopback callback, and their own SSH tunnel; {@code client} writes this
+   *       machine's client config; the terminal host of this machine, the shim it spawns every
+   *       session under, and the binary's self-test have nothing to do on a server)
    *   <li>Host-only: {@code host init}, {@code host config} — error with guidance
    *   <li>Everything else: forwarded to the remote host via SSH, as {@code sail@host} when the FDE
    *       gateway accepts the command and as the plain host otherwise
@@ -67,7 +80,7 @@ public final class RemoteCommandRunner {
 
     var command = args[0];
 
-    if (LOCAL_COMMANDS.contains(command)) {
+    if (isLocalCommand(args)) {
       return executeLocal(args);
     }
 
@@ -90,7 +103,9 @@ public final class RemoteCommandRunner {
 
   private int executeLocal(String[] args) {
     try {
-      return SailCommandLine.of(new Sail()).execute(args);
+      return SailCommandLine.of(new Sail())
+          .setExecutionExceptionHandler((ex, line, parsed) -> Main.report(ex, line))
+          .execute(args);
     } catch (Exception e) {
       System.err.println(
           Banner.errorLine("Failed to run local command: " + e.getMessage(), Ansi.AUTO));
@@ -171,9 +186,9 @@ public final class RemoteCommandRunner {
     return config.gatewayEnabled() && args.length > 0 && GATEWAY_COMMANDS.contains(args[0]);
   }
 
-  /** Returns the classification of a command for testing. */
-  static boolean isLocalCommand(String command) {
-    return LOCAL_COMMANDS.contains(command);
+  /** Whether {@code args} run on this machine, never forwarded to the server. */
+  static boolean isLocalCommand(String... args) {
+    return LOCAL_COMMANDS.contains(args[0]) || List.of(args).equals(LOCAL_TERMINAL_HOST);
   }
 
   /** Returns the classification of a command for testing. */
