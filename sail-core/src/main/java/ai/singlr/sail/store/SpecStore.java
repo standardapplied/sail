@@ -25,6 +25,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -276,7 +277,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
             FROM specs WHERE id = ?""",
             this::mapSpec,
             id)
-        .map(this::hydrate);
+        .map(spec -> hydrate(List.of(spec)).getFirst());
   }
 
   public List<SpecRow> list(SpecFilter filter) {
@@ -319,9 +320,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     }
     sql.append(" ORDER BY s.project ASC, s.priority DESC, s.created_at ASC, s.id ASC");
 
-    return db.query(sql.toString(), this::mapSpec, params.toArray()).stream()
-        .map(this::hydrate)
-        .toList();
+    return hydrate(db.query(sql.toString(), this::mapSpec, params.toArray()));
   }
 
   /**
@@ -538,6 +537,16 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   /** Every recorded revision of a spec, oldest first. */
   public List<ChangeLog.Entry> history(String id) {
     return changeLog.history(ENTITY, id);
+  }
+
+  /** Every recorded revision of each of {@code ids}, in one read, oldest first. */
+  public List<ChangeLog.Entry> histories(Collection<String> ids) {
+    return changeLog.histories(ENTITY, ids);
+  }
+
+  /** The revisions of each of {@code ids} compaction dropped, as seq and id, oldest first. */
+  public List<ChangeLog.Head> compacted(Collection<String> ids) {
+    return changeLog.compacted(ENTITY, ids);
   }
 
   /**
@@ -1200,8 +1209,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   public List<SpecRow> readySpecs(String projectFilter) {
-    return db
-        .query(
+    return hydrate(
+        db.query(
             """
             SELECT s.id, s.project, s.title, s.status, s.assignee, s.agent, s.model,
                 s.reasoning_effort, s.branch, s.priority, s.created_by, s.created_at, s.updated_at,
@@ -1217,10 +1226,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
             ORDER BY s.priority DESC, s.created_at ASC, s.id ASC""",
             this::mapSpec,
             projectFilter,
-            projectFilter)
-        .stream()
-        .map(this::hydrate)
-        .toList();
+            projectFilter));
   }
 
   public BoardSummary board() {
@@ -1297,14 +1303,47 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         row.text(14));
   }
 
-  private SpecRow hydrate(SpecRow spec) {
-    var deps =
-        db.query(
-            "SELECT depends_on FROM spec_dependencies WHERE spec_id = ?",
-            row -> row.text(0),
-            spec.id());
-    var repos =
-        db.query("SELECT repo FROM spec_repos WHERE spec_id = ?", row -> row.text(0), spec.id());
+  /**
+   * {@code specs} with their dependencies and repos, two reads whatever their number, each list in
+   * the order of its key.
+   */
+  private List<SpecRow> hydrate(List<SpecRow> specs) {
+    if (specs.isEmpty()) {
+      return specs;
+    }
+    var ids = YamlUtil.dumpJson(specs.stream().map(SpecRow::id).toList());
+    var deps = byFirst("spec_dependencies", "depends_on", ids);
+    var repos = byFirst("spec_repos", "repo", ids);
+    return specs.stream()
+        .map(
+            spec ->
+                hydrated(
+                    spec,
+                    deps.getOrDefault(spec.id(), List.of()),
+                    repos.getOrDefault(spec.id(), List.of())))
+        .toList();
+  }
+
+  private Map<String, List<String>> byFirst(String table, String column, String ids) {
+    var grouped = new HashMap<String, List<String>>();
+    db.query(
+            "SELECT spec_id, "
+                + column
+                + " FROM "
+                + table
+                + " WHERE spec_id IN (SELECT value FROM json_each(?)) ORDER BY spec_id, "
+                + column,
+            row -> Map.entry(row.text(0), row.text(1)),
+            ids)
+        .forEach(
+            pair ->
+                grouped
+                    .computeIfAbsent(pair.getKey(), key -> new ArrayList<>())
+                    .add(pair.getValue()));
+    return grouped;
+  }
+
+  private static SpecRow hydrated(SpecRow spec, List<String> deps, List<String> repos) {
     return new SpecRow(
         spec.id(),
         spec.project(),

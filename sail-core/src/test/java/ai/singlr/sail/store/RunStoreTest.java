@@ -1112,6 +1112,30 @@ class RunStoreTest {
   }
 
   @Test
+  void listForConversationsReadsTheRunsOfManyConversationsAsListReadsOne() {
+    var auth = newRun("backend", "auth");
+    var payment = newRun("backend", "payment");
+    newRun("backend", "other");
+    var lobby = roomTurn("lobby");
+
+    assertEquals(
+        List.of(lobby, payment, auth),
+        ids(store.listForConversations(List.of("auth", "payment", "lobby"))));
+    assertEquals(List.of(auth), ids(store.listForConversations(List.of("auth"))));
+  }
+
+  @Test
+  void lastErasuresAreTheLatestRunErasureThisBoxRecordedByProject() {
+    var run = newRun("backend", "auth");
+    assertEquals(Map.of(), store.lastErasures(List.of("retention")));
+
+    new Erasure(db).erase(List.of(new Erasure.Target(Erasure.RUN, run)), "retention");
+
+    assertEquals(Set.of("backend"), store.lastErasures(List.of("retention")).keySet());
+    assertEquals(Map.of(), store.lastErasures(List.of("local")));
+  }
+
+  @Test
   void listNarrowsByProjectAndSpec() {
     newRun("backend", "auth");
     newRun("backend", "payment");

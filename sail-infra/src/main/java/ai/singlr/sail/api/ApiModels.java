@@ -1404,12 +1404,13 @@ record GlobalSpecDetailResponse(
     String plan,
     int openFindings,
     RunSummary latestRun,
+    SpecMeasures measures,
     String questionMessageId)
     implements Mappable {
 
   GlobalSpecDetailResponse(
       GlobalSpecView spec, String body, String plan, int openFindings, RunSummary latestRun) {
-    this(spec, body, plan, openFindings, latestRun, null);
+    this(spec, body, plan, openFindings, latestRun, null, null);
   }
 
   @Override
@@ -1425,6 +1426,7 @@ record GlobalSpecDetailResponse(
     if (plan != null) m.put("plan", plan);
     if (openFindings > 0) m.put("open_findings", openFindings);
     if (latestRun != null) m.put("latest_run", latestRun.toMap());
+    if (measures != null) m.put("measures", measures.toMap());
     return m;
   }
 }

@@ -1897,9 +1897,19 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public Result<GlobalSpecDetailResponse> globalSpec(String specId) {
+    return detail(() -> globalSpecOps.get(specId));
+  }
+
+  @Override
+  public Result<GlobalSpecDetailResponse> measuredSpec(String specId) {
+    return detail(() -> globalSpecOps.measured(specId, box().boxId()));
+  }
+
+  /** The detail {@code read} answers, with the open question of its room the reader may see. */
+  private Result<GlobalSpecDetailResponse> detail(Supplier<GlobalSpecDetailResponse> read) {
     return safeRead(
         () -> {
-          var detail = globalSpecOps.get(specId);
+          var detail = read.get();
           if (messageStore == null) {
             return detail;
           }
@@ -1909,6 +1919,7 @@ public final class SailOperations implements HostOperations {
               detail.plan(),
               detail.openFindings(),
               detail.latestRun(),
+              detail.measures(),
               ofReadableRooms(messageStore.openQuestions()).get(detail.spec().roomId()));
         });
   }
@@ -2092,6 +2103,20 @@ public final class SailOperations implements HostOperations {
   @Override
   public Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId) {
     return safeRead(() -> globalSpecOps.history(specId));
+  }
+
+  @Override
+  public Result<SpecMeasures> specMeasures(String specId) {
+    return safeRead(() -> globalSpecOps.measures(specId, box().boxId()));
+  }
+
+  @Override
+  public Result<SpecMeasuresList> listMeasures(
+      SpecStore.SpecFilter filter, String doneSince, String doneUntil) {
+    return safeRead(
+        () ->
+            globalSpecOps.listMeasures(
+                filter, SpecMeasuresList.Window.parse(doneSince, doneUntil), box().boxId()));
   }
 
   @Override

@@ -74,6 +74,44 @@ class ReviewStoreTest {
     if (db != null) db.close();
   }
 
+  @Test
+  void theReviewsTheirProjectsAndTheirFindingsOfManySpecsAreEachOneRead() {
+    createSpec("other");
+    var first = store.createReview("auth", 1);
+    var stage = store.createStage(first, "logic", "agent");
+    store.addFinding(
+        stage,
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.LOGIC,
+            "A.java",
+            1,
+            1,
+            "Leak",
+            "d",
+            "e",
+            null,
+            0.9));
+    var second = store.createReview("other", 1);
+    createSpec("unlisted");
+    store.createReview("unlisted", 1);
+
+    assertEquals(
+        List.of(first, second),
+        store.reviewsForSpecs(List.of("auth", "other")).stream()
+            .map(ReviewStore.ReviewRow::id)
+            .toList());
+    assertEquals(
+        Map.of(first, "test-project", second, "test-project"),
+        store.projectsOf(List.of(first, second)));
+    assertEquals(
+        List.of("Leak"),
+        store.findingsForReviews(List.of(first, second)).get(first).stream()
+            .map(Finding::title)
+            .toList());
+    assertEquals(false, store.findingsForReviews(List.of(first, second)).containsKey(second));
+  }
+
   private void createSpec(String id) {
     createSpec(id, null);
   }

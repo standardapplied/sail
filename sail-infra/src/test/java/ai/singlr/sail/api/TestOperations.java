@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 class TestOperations implements Operations {
   @Override
@@ -598,6 +599,35 @@ class TestOperations implements Operations {
   @Override
   public Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId) {
     return Result.success(new GlobalSpecHistoryResponse(specId, List.of()));
+  }
+
+  @Override
+  public Result<GlobalSpecDetailResponse> measuredSpec(String specId) {
+    return globalSpec(specId);
+  }
+
+  @Override
+  public Result<SpecMeasures> specMeasures(String specId) {
+    return Result.success(
+        SpecMeasures.of(
+            new MeasureRows(
+                specId,
+                "test-project",
+                SpecStatus.PENDING,
+                "box",
+                List.of(),
+                Set.of(),
+                MeasureRows.Seen.all(List.of()),
+                List.of(),
+                MeasureRows.Seen.all(List.of()),
+                Map.of())));
+  }
+
+  @Override
+  public Result<SpecMeasuresList> listMeasures(
+      SpecStore.SpecFilter filter, String doneSince, String doneUntil) {
+    return Result.success(
+        SpecMeasuresList.of(List.of(), SpecMeasuresList.Window.parse(doneSince, doneUntil)));
   }
 
   @Override

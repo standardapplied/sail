@@ -34,9 +34,7 @@ public final class SocketDoor {
   public ApiResponse ask(String method, String path, String bearer, String body) {
     var headers =
         bearer == null ? Map.<String, String>of() : Map.of("authorization", "Bearer " + bearer);
-    return ask(
-        new LocalApiRequest(
-            method, path, Map.of(), headers, body.getBytes(StandardCharsets.UTF_8)));
+    return ask(LocalApiRequest.of(method, path, headers, body.getBytes(StandardCharsets.UTF_8)));
   }
 
   List<Route<?>> routes() {

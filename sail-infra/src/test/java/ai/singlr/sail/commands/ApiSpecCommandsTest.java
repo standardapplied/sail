@@ -11,19 +11,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.api.EventBus;
-import ai.singlr.sail.api.ProjectReader;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SailApiServer;
-import ai.singlr.sail.api.SailOperations;
+import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
+import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestAuth;
+import ai.singlr.sail.api.TestControlPlane;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.HeldProjects;
-import ai.singlr.sail.store.MessageStore;
-import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -59,21 +59,20 @@ class ApiSpecCommandsTest {
     var tokenStore = new TokenStore(db);
     var fde = new FdeStore(db).add("test", "Test", "test@example.com", "admin");
     token = tokenStore.create("test", "admin", fde.id(), null).token();
-    var specStore = new SpecStore(db);
-    var eventStore = new EventStore(db);
     var bus = new EventBus();
-    var persister = new SpecStoreAuditPersister(eventStore);
+    var persister = new SpecStoreAuditPersister(new EventStore(db));
     reviewStore = new ReviewStore(db);
     var operations =
-        new SailOperations(
+        TestControlPlane.standalone(
+            OperationsFactory.create(
+                db,
                 new ShellExecutor(false),
-                ProjectReader.ofCatalog(new ProjectStore(db)),
                 bus,
                 persister,
-                specStore,
-                reviewStore)
-            .useMessages(new MessageStore(db))
-            .useRooms(new RoomStore(db));
+                SyncScheduler.disabled(),
+                SessionYield.NONE),
+            db,
+            tempDir);
     server =
         new SailApiServer(
             "127.0.0.1", 0, operations, TestAuth.tokens(db), bus, persister, null, null);

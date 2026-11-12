@@ -16,6 +16,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -383,6 +384,68 @@ class ChangeLogTest {
 
     assertTrue(log.holds("spec", new SyncState.Mark(a, a, "a", "1-x"), ProjectScope.all()));
     assertEquals(tip, seqOf("a"));
+  }
+
+  @Test
+  void compactedNamesTheSeqsCompactionDroppedOfEachEntityOldestFirst() {
+    for (var i = 1; i <= ChangeLog.HISTORY_REVISIONS + 2; i++) {
+      log.append("spec", "a", i + "-x", "local", false, "{}");
+    }
+    var seqs = log.history("spec", "a").stream().map(ChangeLog.Entry::seq).toList();
+    log.append("spec", "b", "1-y", "local", false, "{}");
+    assertEquals(List.of(), log.compacted("spec", List.of("a", "b")), "nothing dropped yet");
+
+    log.compact("spec", List.of("a", "b"), id -> null);
+
+    assertEquals(
+        List.of(
+            new ChangeLog.Head(seqs.get(0), "a", null), new ChangeLog.Head(seqs.get(1), "a", null)),
+        log.compacted("spec", List.of("a", "b")));
+    assertEquals(List.of(), log.compacted("spec", List.of("b")));
+  }
+
+  @Test
+  void historiesReadEveryEntryOfEachEntityInOneReadOldestFirst() {
+    log.append("spec", "a", "1-x", "local", false, "{}");
+    log.append("spec", "b", "1-y", "local", false, "{}");
+    log.append("spec", "a", "2-x", "local", false, "{}");
+    log.append("spec", "c", "1-z", "local", false, "{}");
+
+    assertEquals(
+        List.of("a 1-x", "b 1-y", "a 2-x"),
+        log.histories("spec", List.of("a", "b")).stream()
+            .map(entry -> entry.entityId() + " " + entry.rev())
+            .toList());
+    assertEquals(List.of(), log.histories("spec", List.of()));
+  }
+
+  @Test
+  void headProjectsNameTheProjectEachHeadIsFiledUnderAndLeaveOutThoseNamingNone() {
+    log.append("spec", "a", "1-x", "local", false, "{\"project\": \"acme\"}");
+    log.append("spec", "b", "1-y", "local", false, "{}");
+
+    assertEquals(Map.of("a", "acme"), log.headProjects("spec", List.of("a", "b", "c")));
+  }
+
+  @Test
+  void lastErasuresAreTheLatestOfATypeFromTheOriginsAskedByTheProjectEachIsFiledUnder() {
+    log.append("run", "r1", "1-x", "local", false, "{\"project\": \"acme\"}");
+    log.append("run", "r2", "1-y", "local", false, "{\"project\": \"acme\"}");
+    log.append("run", "r3", "1-z", "local", false, "{}");
+    log.append("run", "r4", "1-w", "local", false, "{\"project\": \"beta\"}");
+    assertEquals(Map.of(), log.lastErasures("run", List.of("retention", "sync")));
+    log.erase("run", "r1", "erased", "retention");
+    log.erase("run", "r2", "erased", "sync");
+    log.erase("run", "r3", "erased", "retention");
+    log.erase("run", "r4", "erased", "local");
+
+    var latest = log.lastErasures("run", List.of("retention", "sync"));
+
+    var expected = new HashMap<String, Long>();
+    expected.put("acme", log.head("run", "r2").orElseThrow().seq());
+    expected.put(null, log.head("run", "r3").orElseThrow().seq());
+    assertEquals(expected, latest);
+    assertEquals(Map.of(), log.lastErasures("spec", List.of("retention")));
   }
 
   @Test

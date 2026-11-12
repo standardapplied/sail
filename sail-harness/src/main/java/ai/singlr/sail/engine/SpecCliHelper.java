@@ -117,7 +117,7 @@ public final class SpecCliHelper {
           api -G --data-urlencode "project=$PROJECT" "${FIELDS[@]}" "$BASE";;
         show)
           [ $# -ge 1 ] || die "show needs a spec id"
-          api "$BASE/$1";;
+          api -G --data-urlencode "measures=true" "$BASE/$1";;
         create)
           ROOM_GIVEN=""
           collect_fields "$@"

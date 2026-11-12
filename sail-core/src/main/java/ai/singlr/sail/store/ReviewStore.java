@@ -14,6 +14,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -192,6 +193,42 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
             .formatted(REVIEW_COLUMNS),
         this::mapReview,
         specId);
+  }
+
+  /** Every review ever run for each of {@code specIds}, in one read, oldest first. */
+  public List<ReviewRow> reviewsForSpecs(Collection<String> specIds) {
+    return db.query(
+        """
+        SELECT %s
+        FROM reviews WHERE spec_id IN (SELECT value FROM json_each(?)) ORDER BY id ASC"""
+            .formatted(REVIEW_COLUMNS),
+        this::mapReview,
+        YamlUtil.dumpJson(List.copyOf(specIds)));
+  }
+
+  /** The project each of {@code reviewIds} is filed under ({@link #projectOf}), in one read. */
+  public Map<String, String> projectsOf(Collection<String> reviewIds) {
+    return changeLog.headProjects(ENTITY, reviewIds);
+  }
+
+  /** The findings of each of {@code reviewIds}, by review, in one read. */
+  public Map<String, List<Finding>> findingsForReviews(Collection<String> reviewIds) {
+    var found = new LinkedHashMap<String, List<Finding>>();
+    db.query(
+            """
+            SELECT %s, s.review_id FROM review_findings f
+            JOIN review_stages s ON s.id = f.stage_id
+            WHERE s.review_id IN (SELECT value FROM json_each(?))
+            ORDER BY s.review_id, %s"""
+                .formatted(FINDING_COLUMNS, SEVERITY_ORDER),
+            row -> Map.entry(row.text(row.columnCount() - 1), mapFinding(row)),
+            YamlUtil.dumpJson(List.copyOf(reviewIds)))
+        .forEach(
+            finding ->
+                found
+                    .computeIfAbsent(finding.getKey(), review -> new ArrayList<>())
+                    .add(finding.getValue()));
+    return found;
   }
 
   /**

@@ -1,0 +1,267 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/specs:measures?project=harbor"
+  },
+  "response": {
+    "body": {
+      "schema_version": 1,
+      "specs": [
+        {
+          "cost": {
+            "runs_without_usage": {
+              "count": 1
+            },
+            "unknown": "not_recorded"
+          },
+          "human_minutes": {
+            "unknown": "not_recorded"
+          },
+          "intervals": {
+            "awaiting_merge": {
+              "missing": 2,
+              "unknown": "inputs_missing"
+            },
+            "ready_to_done": {
+              "missing": 1,
+              "unknown": "inputs_missing"
+            },
+            "ready_to_verified": {
+              "seconds": 0
+            },
+            "verified_to_done": {
+              "missing": 1,
+              "unknown": "inputs_missing"
+            }
+          },
+          "no_recorded_human_code_act": {
+            "unknown": "not_done"
+          },
+          "rework": {
+            "build_runs": {
+              "count": 1
+            },
+            "carried_findings": {
+              "count": 0
+            },
+            "fix_runs": {
+              "count": 0
+            },
+            "review_errors": {
+              "count": 0
+            },
+            "review_rounds": {
+              "count": 1
+            }
+          },
+          "spec_id": "harbor-docks",
+          "times": {
+            "awaiting_merge": {
+              "unknown": "not_reached"
+            },
+            "box": {
+              "unknown": "no_box_id"
+            },
+            "done": {
+              "unknown": "not_reached"
+            },
+            "ready": {
+              "at": "2026-11-11T09:00:00.656Z",
+              "source": "change_log"
+            },
+            "verified": {
+              "at": "2026-11-11T09:00:00.656Z",
+              "source": "review"
+            }
+          }
+        },
+        {
+          "cost": {
+            "runs_without_usage": {
+              "count": 0
+            },
+            "unknown": "not_recorded"
+          },
+          "human_minutes": {
+            "unknown": "not_recorded"
+          },
+          "intervals": {
+            "awaiting_merge": {
+              "missing": 2,
+              "unknown": "inputs_missing"
+            },
+            "ready_to_done": {
+              "missing": 1,
+              "unknown": "inputs_missing"
+            },
+            "ready_to_verified": {
+              "missing": 1,
+              "unknown": "inputs_missing"
+            },
+            "verified_to_done": {
+              "missing": 2,
+              "unknown": "inputs_missing"
+            }
+          },
+          "no_recorded_human_code_act": {
+            "unknown": "not_done"
+          },
+          "rework": {
+            "build_runs": {
+              "count": 0
+            },
+            "carried_findings": {
+              "count": 0
+            },
+            "fix_runs": {
+              "count": 0
+            },
+            "review_errors": {
+              "count": 0
+            },
+            "review_rounds": {
+              "count": 0
+            }
+          },
+          "spec_id": "harbor-buoys",
+          "times": {
+            "awaiting_merge": {
+              "unknown": "not_reached"
+            },
+            "box": {
+              "unknown": "no_box_id"
+            },
+            "done": {
+              "unknown": "not_reached"
+            },
+            "ready": {
+              "at": "2026-11-11T09:00:00.657Z",
+              "source": "change_log"
+            },
+            "verified": {
+              "unknown": "not_reached"
+            }
+          }
+        }
+      ],
+      "summary": {
+        "awaiting_merge": {
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 2,
+          "median": {
+            "unknown": "none_known"
+          },
+          "n": 0,
+          "p90": {
+            "unknown": "none_known"
+          }
+        },
+        "build_runs": {
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 0,
+          "median": {
+            "count": 0
+          },
+          "n": 2,
+          "p90": {
+            "count": 1
+          }
+        },
+        "carried_findings": {
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 0,
+          "median": {
+            "count": 0
+          },
+          "n": 2,
+          "p90": {
+            "count": 0
+          }
+        },
+        "fix_runs": {
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 0,
+          "median": {
+            "count": 0
+          },
+          "n": 2,
+          "p90": {
+            "count": 0
+          }
+        },
+        "no_recorded_human_code_act": {
+          "bound": "upper",
+          "counted": 0,
+          "left_out_unknown": 2,
+          "of": 0
+        },
+        "ready_to_done": {
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 2,
+          "median": {
+            "unknown": "none_known"
+          },
+          "n": 0,
+          "p90": {
+            "unknown": "none_known"
+          }
+        },
+        "ready_to_verified": {
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 1,
+          "median": {
+            "seconds": 0
+          },
+          "n": 1,
+          "p90": {
+            "seconds": 0
+          }
+        },
+        "review_errors": {
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 0,
+          "median": {
+            "count": 0
+          },
+          "n": 2,
+          "p90": {
+            "count": 0
+          }
+        },
+        "review_rounds": {
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 0,
+          "median": {
+            "count": 0
+          },
+          "n": 2,
+          "p90": {
+            "count": 1
+          }
+        },
+        "verified_to_done": {
+          "left_out_at_least": 0,
+          "left_out_errors": 0,
+          "left_out_unknown": 2,
+          "median": {
+            "unknown": "none_known"
+          },
+          "n": 0,
+          "p90": {
+            "unknown": "none_known"
+          }
+        }
+      },
+      "total": 2
+    },
+    "status": 200
+  }
+}

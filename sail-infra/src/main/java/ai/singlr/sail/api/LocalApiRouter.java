@@ -537,8 +537,17 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
     return ApiResponse.from(operations.globalBoard(request.query().get("project")));
   }
 
+  /**
+   * A spec's detail, with its measures when asked and reading them is the caller's ({@link
+   * Action#READ_MEASURES}): in a container, an agent's own work alone; any other caller, or another
+   * spec, is answered the detail exactly as without asking.
+   */
   private ApiResponse spec(LocalApiRequest request, Caller caller, Map<String, String> path) {
-    return ApiResponse.from(operations.globalSpec(path.get("id")));
+    var id = path.get("id");
+    return ApiResponse.from(
+        SpecMeasures.asked(request.query().get("measures"))
+            ? operations.measuredSpec(id)
+            : operations.globalSpec(id));
   }
 
   private ApiResponse update(LocalApiRequest request, Caller caller, Map<String, String> path) {
