@@ -173,8 +173,7 @@ final class PtyTcpDoor implements AutoCloseable {
   void acceptLoop(ServerSocketChannel bound) {
     while (!closed) {
       try {
-        var channel = bound.accept();
-        Thread.ofVirtual().name("pty-host-tcp-conn").start(() -> serve(channel));
+        taken(bound.accept());
       } catch (ClosedChannelException | RuntimeException gone) {
         if (!closed) {
           lose(bound, gone);
@@ -208,19 +207,36 @@ final class PtyTcpDoor implements AutoCloseable {
   }
 
   /**
-   * Serves one TCP connection from accept to its end, counting it against this door's cap and
-   * releasing the slot it took whatever happens to it.
+   * Takes {@code channel} on the accept thread, in the order connections arrive: it takes a slot of
+   * the door's cap and, under the cap, a place in the pool of connections with no ticket. The
+   * pool's oldest is therefore the one that connected first and its deadline runs from its accept,
+   * never from whenever its thread first runs, so a connection already gone that is served late can
+   * never displace a newer one. Every channel taken is served on a thread of its own, which
+   * releases the slot.
    */
-  private void serve(SocketChannel channel) {
-    var overCap = open.incrementAndGet() > cap;
-    try (channel) {
-      if (overCap) {
-        refused("connection cap " + cap);
-        return;
-      }
+  private void taken(SocketChannel channel) {
+    var refusal = open.incrementAndGet() > cap ? "connection cap " + cap : registered(channel);
+    Thread.ofVirtual().name("pty-host-tcp-conn").start(() -> serve(channel, refusal));
+  }
+
+  /** Why {@code channel} has no place in the pool, or null once it has one. */
+  private String registered(SocketChannel channel) {
+    try {
       var peer = peerOf(((InetSocketAddress) channel.getRemoteAddress()).getAddress());
-      if (!pending(channel, peer)) {
-        refused(PER_PEER + " connections with no ticket from one peer");
+      return pending(channel, peer) ? null : PER_PEER + " connections with no ticket from one peer";
+    } catch (IOException gone) {
+      return "the connection ended before it was taken";
+    }
+  }
+
+  /**
+   * Serves one TCP connection {@link #taken} to its end, or closes it for {@code refusal}, and
+   * releases the slot it took whatever happens to it.
+   */
+  private void serve(SocketChannel channel, String refusal) {
+    try (channel) {
+      if (refusal != null) {
+        refused(refusal);
         return;
       }
       PtySessionHost.Admission admission;
@@ -285,6 +301,8 @@ final class PtyTcpDoor implements AutoCloseable {
     }
     try {
       channel.setOption(option, value);
+    } catch (ClosedChannelException letGo) {
+      var unused = letGo;
     } catch (IOException | UnsupportedOperationException refused) {
       PtySessionHost.log("tcp-option-failed", "-", "-", option.name() + ": " + refused);
     }
