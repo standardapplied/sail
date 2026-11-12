@@ -52,7 +52,7 @@ class LocalPtyHostProcessTest {
   @BeforeEach
   void aMachine() throws IOException {
     root = Files.createTempDirectory(Path.of("/tmp"), "sail-lh");
-    home = Files.createDirectories(root.resolve("home"));
+    home = LocalPtyHostTest.at(root.resolve("home")).home();
     data = Files.createDirectories(root.resolve("data"));
     calls = root.resolve("calls");
     var bin = Files.createDirectories(root.resolve("bin"));

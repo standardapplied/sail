@@ -23,6 +23,7 @@ import java.nio.file.attribute.PosixFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -36,10 +37,12 @@ import java.util.function.Function;
  * _pty-child} as every session's shim. It opens no database, runs no {@code incus} and binds no
  * port.
  *
- * <p>It serves {@code ~/.sail/local} in the home the account database names. That directory and
- * {@code ~/.sail} above it are made owner-only when absent, and must each be a directory of the
- * person's own that no one else may open, read without following a link, before anything is made in
- * them: whoever could replace either could take the socket the app connects to.
+ * <p>It serves {@code ~/.sail/local} in the home the account database names. Before anything is
+ * made in it, each directory down to it is read without following a link, as ssh's StrictModes
+ * reads {@code ~/.ssh} and its parents: the home and {@code ~/.sail} must be the person's (the home
+ * may be root's) and writable by no one else, and {@code ~/.sail/local}, made owner-only when
+ * absent, must be the person's and open to no one else. Whoever could write in either above could
+ * replace what is below it, and so take the socket the app connects to.
  *
  * <p>The host holds a lock in its directory ({@link #LOCK}) for as long as it runs, which the
  * system lets go of when it dies: a second host for the same person finds it held and leaves the
@@ -67,6 +70,14 @@ final class LocalPtyHost implements AutoCloseable {
 
   private static final Set<PosixFilePermission> OWNER_ONLY =
       PosixFilePermissions.fromString("rwx------");
+
+  /** What no one but the owner may hold on the home and {@code ~/.sail}, as ssh's StrictModes. */
+  private static final Set<PosixFilePermission> WRITTEN_BY_OTHERS =
+      Set.of(PosixFilePermission.GROUP_WRITE, PosixFilePermission.OTHERS_WRITE);
+
+  /** What no one but the owner may hold on {@code ~/.sail/local}: anything at all. */
+  private static final Set<PosixFilePermission> OPENED_BY_OTHERS =
+      EnumSet.complementOf(EnumSet.copyOf(OWNER_ONLY));
 
   private static final Set<Path> HELD = ConcurrentHashMap.newKeySet();
 
@@ -122,8 +133,9 @@ final class LocalPtyHost implements AutoCloseable {
               + " machine's terminal host has nothing to open a session with. Set one with 'chsh"
               + " -s <shell>'.");
     }
-    requirePrivate(account, dir, dir.getParent());
-    requirePrivate(account, dir, dir);
+    requireSafe(account, dir, account.home(), WRITTEN_BY_OTHERS, true);
+    requireSafe(account, dir, dir.getParent(), WRITTEN_BY_OTHERS, false);
+    requireSafe(account, dir, dir, OPENED_BY_OTHERS, false);
     requireOwnEntries(account, dir);
     var claim = claim(dir);
     if (claim == null) {
@@ -153,33 +165,39 @@ final class LocalPtyHost implements AutoCloseable {
   }
 
   /**
-   * Makes {@code path} owner-only when it is absent, then refuses it unless it is, read without
-   * following a link, a directory {@code account} owns that no one else may open.
+   * Refuses {@code path}, read without following a link, unless it is a directory that {@code
+   * account} owns (or root, where {@code rootMayOwn}) and that no one else holds any of the {@code
+   * denied} permissions on. A missing {@code ~/.sail} or {@code ~/.sail/local} is made owner-only
+   * first; the home is never made.
    */
-  private static void requirePrivate(Account account, Path dir, Path path) throws IOException {
-    try {
-      Files.createDirectory(path, PosixFilePermissions.asFileAttribute(OWNER_ONLY));
-    } catch (FileAlreadyExistsException present) {
-      var unused = present;
+  private static void requireSafe(
+      Account account, Path dir, Path path, Set<PosixFilePermission> denied, boolean rootMayOwn)
+      throws IOException {
+    var home = path.equals(account.home());
+    if (!home) {
+      try {
+        Files.createDirectory(path, PosixFilePermissions.asFileAttribute(OWNER_ONLY));
+      } catch (FileAlreadyExistsException present) {
+        var unused = present;
+      }
     }
     var found = Files.readAttributes(path, PosixFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
     var owner = found.owner().getName();
-    var shared = !OWNER_ONLY.containsAll(found.permissions());
-    if (found.isDirectory() && owner.equals(account.name()) && !shared) {
+    var owned = owner.equals(account.name()) || (rootMayOwn && owner.equals("root"));
+    var exposed = found.permissions().stream().anyMatch(denied::contains);
+    if (found.isDirectory() && owned && !exposed) {
       return;
     }
     var kind =
         found.isSymbolicLink() ? "a symbolic link" : found.isDirectory() ? "a directory" : "a file";
     var fix =
-        !found.isDirectory() || path.equals(dir)
+        path.equals(dir) || (!found.isDirectory() && !home)
             ? "Remove it, and the host makes the directory itself."
-            : owner.equals(account.name())
-                ? "Run 'chmod 700 " + path + "'."
-                : "Remove it, or make it "
-                    + account.name()
-                    + "'s and run 'chmod 700 "
-                    + path
-                    + "'.";
+            : !found.isDirectory() || !owned
+                ? home
+                    ? "Make it a directory of " + account.name() + "'s."
+                    : "Remove it, or make it " + account.name() + "'s with chown."
+                : "Run 'chmod go-w " + path + "'.";
     throw new IOException(
         "This machine's terminal host keeps its socket in "
             + dir
@@ -187,7 +205,10 @@ final class LocalPtyHost implements AutoCloseable {
             + path
             + " must be a directory that "
             + account.name()
-            + " owns and no one else may open, and it is "
+            + (rootMayOwn ? " or root" : "")
+            + " owns and no one else may "
+            + (denied.equals(WRITTEN_BY_OTHERS) ? "write" : "open")
+            + ", and it is "
             + kind
             + " owned by "
             + owner
@@ -209,8 +230,8 @@ final class LocalPtyHost implements AutoCloseable {
   /**
    * Refuses whatever the host keeps in {@code dir} that is, read without following a link, not of
    * its own kind or not {@code account}'s: a host would otherwise write its sessions, take its lock
-   * or bind its socket wherever such an entry leads. A directory that passed {@link
-   * #requirePrivate} admits no one else to plant one, unless it was once open to others.
+   * or bind its socket wherever such an entry leads. A directory that passed {@link #requireSafe}
+   * admits no one else to plant one, unless it was once open to others.
    */
   private static void requireOwnEntries(Account account, Path dir) throws IOException {
     for (var entry : ENTRIES) {

@@ -2686,10 +2686,13 @@ them of the process an agent runs.
   listener. Only what a session runs in differs (`PtyAdmission.folder`): the server takes the
   folder as named, with a login `bash`.
 - **L2. Only this person.** The socket is `~/.sail/local/pty.sock` in the home the account
-  database names, the one source of that home. Before anything is made in them, `~/.sail` and
-  `~/.sail/local` are created owner-only when absent and checked, read without following a link:
-  each must be a directory the person owns that no one else, its group included, may open, or the
-  host refuses to start, naming the path, its owner and mode and the fix. What the host keeps in
+  database names, the one source of that home. Before anything is made there, each directory down
+  to it is checked, read without following a link, by the rule ssh's StrictModes applies to
+  `~/.ssh` and its parents: the home and `~/.sail` must be directories the person owns (the home
+  may be root's) that no one else may write, though others may read and search them; `~/.sail/local`,
+  created owner-only when absent, must be the person's and open to no one else at all. Otherwise
+  the host refuses to start, naming the path, its owner and mode and the fix: `chmod go-w` for a
+  home or `~/.sail` others may write, removal for `~/.sail/local`, a link or a file. What the host keeps in
   `~/.sail/local` (`sessions`, `pty.lock`, `pty.sock`) must then be of its own kind and the
   person's, read without following a link, or the start names it and says to remove it. A `chmod`
   the host cannot make is an error. There is no TCP door. A blank token is the account's person, resolved as a box's own

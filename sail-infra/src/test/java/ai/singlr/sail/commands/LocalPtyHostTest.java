@@ -64,10 +64,12 @@ class LocalPtyHostTest {
     startedSince(began).forEach(ProcessHandle::destroyForcibly);
   }
 
-  /** This account, at home in {@code home}. */
+  /** This account, at home in {@code home}, made as a home is: others may read it, not write. */
   static Account at(Path home) throws IOException {
     var account = Account.current();
-    return new Account(account.name(), Files.createDirectories(home), account.shell());
+    Files.createDirectories(home);
+    Files.setPosixFilePermissions(home, PosixFilePermissions.fromString("rwxr-xr-x"));
+    return new Account(account.name(), home, account.shell());
   }
 
   private Account person() throws IOException {
@@ -541,49 +543,28 @@ class LocalPtyHostTest {
     }
   }
 
-  /** L2 checked: a directory others may open, the host's own or the one above it, is refused. */
+  /** L2, as ssh's StrictModes: others may read and search {@code ~/.sail}, and the host serves. */
   @Test
-  void aDirectoryOthersMayOpenIsRefusedNamingItsModeAndNothingIsMadeInIt() throws Exception {
+  void aDotSailOthersMayReadButNotWriteIsServedFrom() throws Exception {
     var sail = Files.createDirectories(local().getParent());
-    Files.setPosixFilePermissions(sail, PosixFilePermissions.fromString("rwxr-xr-x"));
+    for (var mode : List.of("rwxr-xr-x", "rwxr-x---")) {
+      Files.setPosixFilePermissions(sail, PosixFilePermissions.fromString(mode));
 
-    var above = assertThrows(IOException.class, this::start);
+      var host = start();
 
-    assertEquals(
-        "This machine's terminal host keeps its socket in "
-            + local()
-            + ", so "
-            + sail
-            + " must be a directory that "
-            + person().name()
-            + " owns and no one else may open, and it is a directory owned by "
-            + person().name()
-            + " with mode rwxr-xr-x. Run 'chmod 700 "
-            + sail
-            + "'.",
-        above.getMessage());
-    assertFalse(Files.exists(local(), LinkOption.NOFOLLOW_LINKS), "nothing was made in it");
-
-    Files.setPosixFilePermissions(sail, PosixFilePermissions.fromString("rwx------"));
-    Files.createDirectory(local());
-    Files.setPosixFilePermissions(local(), PosixFilePermissions.fromString("rwxrwxrwx"));
-
-    var own = assertThrows(IOException.class, this::start);
-
-    assertTrue(
-        own.getMessage()
-            .endsWith(" with mode rwxrwxrwx. Remove it, and the host makes the directory itself."),
-        "what others could open may hold what they put there: " + own.getMessage());
-    try (var made = Files.list(local())) {
-      assertEquals(List.of(), made.toList(), "no socket and no lock in a directory others open");
+      try (var client = Client.connect(socket())) {
+        assertEquals(List.of(), client.list(), mode);
+      }
+      assertEquals("rwx------", permissions(local()), mode + ": the host's own directory");
+      stop(host);
     }
   }
 
-  /** L2 checked: the group alone may not open {@code ~/.sail} either, as macOS's staff could. */
+  /** L2: a {@code ~/.sail} its group or others may write is refused, with how to take that away. */
   @Test
-  void aDirectoryItsGroupAloneMayOpenIsRefused() throws Exception {
+  void aDotSailOthersMayWriteIsRefusedSayingToTakeTheirWriteAway() throws Exception {
     var sail = Files.createDirectories(local().getParent());
-    for (var mode : List.of("rwxrwx---", "rwx-w----", "rwx--x---")) {
+    for (var mode : List.of("rwxrwxr-x", "rwxr-xrwx", "rwxrwxrwx")) {
       Files.setPosixFilePermissions(sail, PosixFilePermissions.fromString(mode));
 
       var refused = assertThrows(IOException.class, this::start, mode);
@@ -595,15 +576,75 @@ class LocalPtyHostTest {
               + sail
               + " must be a directory that "
               + person().name()
-              + " owns and no one else may open, and it is a directory owned by "
+              + " owns and no one else may write, and it is a directory owned by "
               + person().name()
               + " with mode "
               + mode
-              + ". Run 'chmod 700 "
+              + ". Run 'chmod go-w "
               + sail
               + "'.",
           refused.getMessage());
       assertFalse(Files.exists(local(), LinkOption.NOFOLLOW_LINKS), mode + ": nothing was made");
+    }
+  }
+
+  /** L2: a home its group may write is refused, as ssh refuses one under its {@code ~/.ssh}. */
+  @Test
+  void aHomeOthersMayWriteIsRefusedSayingToTakeTheirWriteAway() throws Exception {
+    var account = person();
+    var home = account.home();
+    var local = LocalPtyHost.dirOf(account);
+    Files.setPosixFilePermissions(home, PosixFilePermissions.fromString("rwxrwxr-x"));
+    try {
+      var refused = assertThrows(IOException.class, () -> start(account));
+
+      assertEquals(
+          "This machine's terminal host keeps its socket in "
+              + local
+              + ", so "
+              + home
+              + " must be a directory that "
+              + account.name()
+              + " or root owns and no one else may write, and it is a directory owned by "
+              + account.name()
+              + " with mode rwxrwxr-x. Run 'chmod go-w "
+              + home
+              + "'.",
+          refused.getMessage());
+      assertFalse(Files.exists(local.getParent(), LinkOption.NOFOLLOW_LINKS), "nothing made");
+    } finally {
+      Files.setPosixFilePermissions(home, PosixFilePermissions.fromString("rwxr-xr-x"));
+    }
+  }
+
+  /**
+   * L2: the host's own directory stays the person's alone; one others may open at all, even only
+   * read, is refused with "remove it", since it may hold what they put there.
+   */
+  @Test
+  void aHostsDirectoryOthersMayOpenIsRefusedAndNothingIsMadeInIt() throws Exception {
+    privateLocal();
+    for (var mode : List.of("rwxr-x---", "rwxrwxrwx")) {
+      Files.setPosixFilePermissions(local(), PosixFilePermissions.fromString(mode));
+
+      var refused = assertThrows(IOException.class, this::start, mode);
+
+      assertEquals(
+          "This machine's terminal host keeps its socket in "
+              + local()
+              + ", so "
+              + local()
+              + " must be a directory that "
+              + person().name()
+              + " owns and no one else may open, and it is a directory owned by "
+              + person().name()
+              + " with mode "
+              + mode
+              + ". Remove it, and the host makes the directory itself.",
+          refused.getMessage());
+      try (var made = Files.list(local())) {
+        assertEquals(List.of(), made.toList(), mode + ": no socket and no lock in it");
+      }
     }
   }
 
@@ -625,7 +666,7 @@ class LocalPtyHostTest {
             + local().getParent()
             + " must be a directory that "
             + person().name()
-            + " owns and no one else may open, and it is a symbolic link owned by "
+            + " owns and no one else may write, and it is a symbolic link owned by "
             + person().name()
             + " with mode "
             + permissions(local().getParent())
@@ -637,13 +678,12 @@ class LocalPtyHostTest {
   }
 
   /**
-   * L2 checked: a directory the account does not own is refused, here a host for another account's
-   * name over directories this test made.
+   * L2 checked: a directory the account does not own is refused, here the home of a host for
+   * another account's name, which this test's account owns.
    */
   @Test
   void aDirectoryAnotherAccountOwnsIsRefusedNamingItsOwner() throws Exception {
     var me = person();
-    var sail = privateLocal().getParent();
     var other = new Account("sail-nobody", me.home(), me.shell());
 
     var refused = assertThrows(IOException.class, () -> start(other));
@@ -652,14 +692,15 @@ class LocalPtyHostTest {
         "This machine's terminal host keeps its socket in "
             + local()
             + ", so "
-            + sail
-            + " must be a directory that sail-nobody owns and no one else may open, and it is a"
-            + " directory owned by "
+            + me.home()
+            + " must be a directory that sail-nobody or root owns and no one else may write, and"
+            + " it is a directory owned by "
             + me.name()
-            + " with mode rwx------. Remove it, or make it sail-nobody's and run 'chmod 700 "
-            + sail
-            + "'.",
+            + " with mode "
+            + permissions(me.home())
+            + ". Make it a directory of sail-nobody's.",
         refused.getMessage());
+    assertFalse(Files.exists(local().getParent(), LinkOption.NOFOLLOW_LINKS), "nothing made");
   }
 
   /**
