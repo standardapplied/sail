@@ -20,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -107,8 +108,7 @@ public final class PtySession implements AutoCloseable {
 
     @Override
     public void destroyForcibly() {
-      process.descendants().forEach(ProcessHandle::destroyForcibly);
-      process.destroyForcibly();
+      killTree(process.toHandle());
     }
 
     @Override
@@ -130,11 +130,7 @@ public final class PtySession implements AutoCloseable {
 
     @Override
     public void destroyForcibly() {
-      handle.ifPresent(
-          h -> {
-            h.descendants().forEach(ProcessHandle::destroyForcibly);
-            h.destroyForcibly();
-          });
+      handle.ifPresent(PtySession::killTree);
     }
 
     @Override
@@ -153,6 +149,23 @@ public final class PtySession implements AutoCloseable {
         return STATUS_LOST;
       }
     }
+  }
+
+  private static final long KILL_WAIT_SECONDS = 5;
+
+  /**
+   * Kills {@code root} and everything under it, and waits up to {@value #KILL_WAIT_SECONDS} s for
+   * the descendants to be gone: the session's command is the shim's child, not this process's, so
+   * the shim's own reaping says nothing of it.
+   */
+  private static void killTree(ProcessHandle root) {
+    var descendants = root.descendants().toList();
+    descendants.forEach(ProcessHandle::destroyForcibly);
+    root.destroyForcibly();
+    CompletableFuture.allOf(
+            descendants.stream().map(ProcessHandle::onExit).toArray(CompletableFuture[]::new))
+        .completeOnTimeout(null, KILL_WAIT_SECONDS, TimeUnit.SECONDS)
+        .join();
   }
 
   /**
