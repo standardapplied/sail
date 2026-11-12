@@ -863,7 +863,9 @@ clone a project's source repos into its container at provision time, not to move
   so `Main` runs nothing: it prints "sail-api on this box runs as root, so <user>'s sail would
   see none of its specs, projects or FDEs. Run it with sudo: sudo sail <args>" and exits 1.
   Only `--version`, `-V`, `--help` and `-h` are exempt, when picocli reads them as a request for
-  help (not after `--`, where they belong to the command). The `sail` gateway account reads
+  help (not after `--`, where they belong to the command), and what only this machine runs: the
+  account's own terminal host (`_pty-host --local`), its shim (`_pty-child`) and the self-test
+  (`Main.refuses`). The `sail` gateway account reads
   `/var/lib/sail/host.yaml` and is Host; an account with its own `~/.sail/host.yaml` keeps its
   own box. For such an account, `sudo` resolves a project's personal placeholders from that account's
   home (`SailPaths.identityHome`), even beside root's system unit. Every `sail` command a box
@@ -2514,7 +2516,12 @@ A terminal session is its shell: the session shim (`_pty-child`) leads it, and w
 exits the session ends once what is already in the terminal has been read (`Pty.DRAIN_GRACE_MILLIS`
 of quiet); a job the shell left running keeps nothing it says afterwards
 (`PtySessionTest.aJobTheShellLeftKeepsWhatItSaidBeforeTheExitAndNothingAfter`). Until 0.67.0 a
-Linux session lived until every holder of its terminal let go.
+Linux session lived until every holder of its terminal let go. Ending a session (a kill, a stop
+for good) hangs it up first, as a closing terminal does: its shim is sent `SIGHUP`, which it
+passes to the command, so an interactive shell ends at once with its history written; one still
+running after `PtySession.HANGUP_GRACE` (1 s) is sent `SIGTERM`, and one still running 5 s later
+is killed with everything under it. The terminal is read throughout, so what the command says on
+its way out is kept.
 
 **One way in.** Six doors reach Sail: the web API, the container socket, the host CLI, the SSH
 gateway, the terminal host (its unix socket, and TCP by ticket) and sync. Each door's credential code finds whom its credential names
@@ -2673,39 +2680,52 @@ them of the process an agent runs.
 - **L1. One host, two wirings.** `PtySessionHost`, the frames, the ring, the shim and the spawn
   chain are the server's. The local wiring fills the same seams: `LocalPtyAccess` is its
   `PtyIdentity.Resolver` and `PtyAdmission`, `PtyEvents.NONE` its events, a `Handoff` with no
-  descriptor store and the binary's own `_pty-child` its shim, `Network.NONE` its listener. Only
-  what a session runs in differs (`PtyAdmission.folder`): the server takes the folder as named,
-  with a login `bash`.
-- **L2. Only this person.** The socket, `~/.sail/local/pty.sock`, and its directory are
-  owner-only, and there is no TCP door. A blank token is the account's person, resolved as a box's
-  own person is (`RoleRule.Credential.box`, with no roster to consult), and every other token is
-  refused. Whoever can open the socket is that person. Attaching, killing and listing ask
-  `Access` as the server's host does, and opening asks whether that person operates this machine,
-  so the open decision (`openRefusal`) is the server's, unchanged. The dispatch credential the
-  host mints beside its socket at each start still admits its yield-and-list principal.
+  descriptor store and the binary's own `_pty-child` its shim, a `Network` with no door its
+  listener. Only what a session runs in differs (`PtyAdmission.folder`): the server takes the
+  folder as named, with a login `bash`.
+- **L2. Only this person.** The socket is `~/.sail/local/pty.sock` in the home the account
+  database names, the one source of that home. Before anything is made in them, `~/.sail` and
+  `~/.sail/local` are created owner-only when absent and checked, read without following a link:
+  each must be a directory the person owns that no one else may open, or the host refuses to
+  start, naming the path, its owner and mode and the fix. A `chmod` the host cannot make is an
+  error. There is no TCP door. A blank token is the account's person, resolved as a box's own
+  person is (`RoleRule.Credential.box`, with no roster to consult), and every other token is
+  refused. Whoever can open the socket is that person. Attaching, killing and listing ask `Access`
+  as the server's host does, and opening asks whether that person operates this machine, so the
+  open decision (`openRefusal`) is the server's, unchanged. The one other credential is the
+  dispatch token the host mints beside its socket at each start (`pty-dispatch.token`, mode 0600
+  in the owner-only directory, so only the person can read it): its holder may list every session
+  and end one (yield), and may neither open nor kill one.
 - **L3. No store, no Incus, no network.** The local host opens no database, runs no `incus`,
-  binds no port and dials nothing. `LocalWiringSweepTest` holds that its classes name no such
-  type, and a running host leaves its data directory empty and holds no internet socket.
+  binds no port and dials nothing. `LocalWiringSweepTest` follows every call, field, lambda and
+  method reference from the local wiring and `PtyHostCommand`'s local branch through Sail's own
+  classes, stopping at the shared host and pty layer, and holds that nothing it reaches names
+  such a type, but what `RoleRule` names of the roster it is given as none and of a run's
+  credential the local door never presents. A running host leaves its data directory empty and
+  holds no internet socket.
 - **L4. A session is a process in a folder.** An open naming a project or a room is refused,
   saying the local host opens folders. The folder must be an absolute path to an existing
   directory the person may enter, refused before any process starts, and is run in once
   resolved. With no command, a session runs the account's login shell from the account database
-  (`Account`, `getpwuid`, never `$SHELL`) as a login shell, whose own start-up builds `PATH`. Its
-  environment holds `HOME`, `USER`, `LOGNAME` and `SHELL` from that entry, `TERM`, and a UTF-8
-  `LANG` (the host's own, else `en_US.UTF-8`): what a terminal emulator's login gives, since a
-  service starts with almost none. The shell's own start-up may then set its own, as the person's
-  profile does in any terminal.
-- **L5. Sessions outlive their clients, not their host.** A stop (`SIGTERM`) ends every session,
-  reading each terminal to its end, since on macOS a session leader's exit waits for that. An
-  interactive shell ignores `SIGTERM`, so it is killed at the session's 5 s escalation. A new
-  host has a new boot id. With no descriptor store, a restart ends every session; surviving one is
-  a later spec.
+  (`Account`, `getpwuid`, never `$SHELL`) as a login shell, whose own start-up builds `PATH`; a
+  login shell that cannot be run is refused at start. Its environment holds `HOME`, `USER`,
+  `LOGNAME` and `SHELL` from that entry, `TERM`, and a UTF-8 character type: the host's own when
+  the first of `LC_ALL`, `LC_CTYPE` and `LANG` it sets names UTF-8, else `C.UTF-8` where the C
+  library has it (`Locales`), else `en_US.UTF-8`, as `LANG` and as each of the others the host
+  sets. That is what a terminal emulator's login gives, since a service starts with almost none.
+  The shell's own start-up may then set its own, as the person's profile does in any terminal.
+- **L5. Sessions outlive their clients, not their host.** A stop (`SIGTERM`) hangs every
+  session up, reading each terminal to its end, since on macOS a session leader's exit waits for
+  that, and then deletes the sessions' transcripts and sidecars. A new host has a new boot id.
+  With no descriptor store, a restart ends every session; surviving one is a later spec.
 - **L6. The server wiring is untouched.** Without `--local`, every answer is as before.
 
 One host serves one person: it holds `pty.lock` in its directory for as long as it runs, so a
 second exits saying where the first serves, and one that finds the lock free, its holder dead,
-replaces the socket. The lock is taken before the socket is touched and let go only after it is
-gone. A socket path longer than 102 bytes (macOS's 104-byte `sun_path`, less the two the JDK
+replaces the socket. The lock is taken before the socket is touched and let go only after the
+socket and the sessions' files are gone, so a successor started while its predecessor is still
+stopping is refused. Within one process a second claim is refused before the lock file is opened
+again, since closing any channel on it would let the first claim's lock go. A socket path longer than 102 bytes (macOS's 104-byte `sun_path`, less the two the JDK
 keeps) is refused at start, naming the path and the limit. `sail _pty-selftest` starts a local
 host, opens a session in a folder, has a line evaluated, detaches, attaches again and stops
 (`local-selftest: ok`).
