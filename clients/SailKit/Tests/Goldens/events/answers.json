@@ -1,0 +1,10 @@
+{
+  "full": {
+    "retry-after": "1",
+    "status": 503
+  },
+  "open": {
+    "content-type": "text/event-stream; charset=utf-8",
+    "status": 200
+  }
+}

@@ -17,6 +17,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.EngagementMode;
 import ai.singlr.sail.config.Roster;
+import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -119,6 +120,7 @@ class ClientGoldensTest {
   private static final String BARE_SPEC = "harbor-buoys";
   private static final String RUN = "run-1";
   private static final String DATA = "data: ";
+  private static final int STREAMS = 2;
   private static final SyncConfig OWNER = new SyncConfig(null, null, "uday");
 
   @TempDir Path tempDir;
@@ -159,7 +161,6 @@ class ClientGoldensTest {
       box.seed("POST", "/v1/events", uday, published());
       box.seed("PUT", "/v1/specs/" + BARE_SPEC, uday, Map.of("status", "pending"));
       var run = box.run(RUN, SPEC, OWNER.handle());
-      box.run("run-2", BARE_SPEC, "ada");
       box.reviewPassedWithAFindingOpen();
 
       box.record(http, "whoami", "GET", "/v1/whoami", uday, null);
@@ -182,10 +183,13 @@ class ClientGoldensTest {
       box.record(http, "refusal-out-of-scope", "POST", "/v1/specs", sam, unroomed());
       box.record(http, "refusal-project-not-created", "POST", members(), uday, member());
       box.record(http, "refusal-not-found", "GET", "/v1/nowhere", uday, null);
+      box.run("run-2", SPEC, "ada");
       box.record(http, "refusal-run-on-other-node", "GET", "/v1/runs/run-2/log", uday, null);
 
+      var full = box.fullHouse(uday);
       box.end(uday, box.publishEveryOtherWellKnownEvent(run));
       var events = new TreeMap<String, String>();
+      events.put("answers.json", json(Map.of("open", stream.head(), "full", full)));
       events.put("stream.sse", Scrub.stream(stream.join(), box::renamed));
       events.put("room-stream.sse", Scrub.stream(roomStream.join(), box::renamed));
 
@@ -251,8 +255,12 @@ class ClientGoldensTest {
             .map(runs -> runs.name().toLowerCase(Locale.ROOT))
             .toList());
     vocabulary.put("roles", Arrays.stream(Role.values()).map(Role::attribute).toList());
+    vocabulary.put("run_presences", List.of(RunPresence.WORKING, RunPresence.QUIET));
+    vocabulary.put("run_statuses", Arrays.stream(RunStatus.values()).map(RunStatus::wire).toList());
     vocabulary.put(
         "spec_statuses", Arrays.stream(SpecStatus.values()).map(SpecStatus::wire).toList());
+    vocabulary.put(
+        "wake_modes", List.of(RoomWakePolicy.ON, RoomWakePolicy.MENTION_MODE, RoomWakePolicy.OFF));
     GoldenFiles.check(
         GOLDENS.resolve("vocabulary"), new TreeMap<>(Map.of("vocabulary.json", json(vocabulary))));
   }
@@ -499,12 +507,7 @@ class ClientGoldensTest {
           new ApiRouter(operations, auth, new RateLimitGate(), new AgentLogStreamer(auth)));
       server.createContext(
           "/v1/events/stream",
-          new SseHandler(
-              bus,
-              auth,
-              operations.liveMembers()::turnState,
-              SseHandler.DEFAULT_MAX_CONNECTIONS,
-              streamClock));
+          new SseHandler(bus, auth, operations.liveMembers()::turnState, STREAMS, streamClock));
       server.start();
     }
 
@@ -712,6 +715,22 @@ class ClientGoldensTest {
       }
     }
 
+    /**
+     * What a caller is answered when every stream the box allows is open, as the two this test
+     * reads are: the status, and how long the server asks it to wait.
+     */
+    Map<String, Object> fullHouse(String token) throws Exception {
+      assertEquals(STREAMS, streams.size());
+      var request =
+          HttpRequest.newBuilder(URI.create(base() + "/v1/events/stream"))
+              .header("Authorization", "Bearer " + token)
+              .build();
+      try (var client = HttpClient.newHttpClient()) {
+        var response = client.send(request, HttpResponse.BodyHandlers.discarding());
+        return head(response);
+      }
+    }
+
     /** Opens {@code path}'s stream as {@code token}, once it has subscribed. */
     OpenStream stream(String path, String token) throws Exception {
       var request =
@@ -722,7 +741,7 @@ class ClientGoldensTest {
       var client = HttpClient.newHttpClient();
       var response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
       assertEquals(200, response.statusCode());
-      var stream = new OpenStream(client, response.body());
+      var stream = new OpenStream(client, head(response), response.body());
       streams.add(stream);
       stream.awaitLine(": subscribed");
       return stream;
@@ -757,6 +776,16 @@ class ClientGoldensTest {
                       id -> String.format("00000000-0000-7000-8000-%012d", ids.size() + 1)));
     }
 
+    /** The status of {@code response} and the headers a stream's reader acts on, where sent. */
+    private static Map<String, Object> head(HttpResponse<?> response) {
+      var head = new LinkedHashMap<String, Object>();
+      head.put("status", response.statusCode());
+      for (var name : List.of("content-type", "retry-after")) {
+        response.headers().firstValue(name).ifPresent(value -> head.put(name, value));
+      }
+      return head;
+    }
+
     private String base() {
       return "http://127.0.0.1:" + server.getAddress().getPort();
     }
@@ -773,8 +802,10 @@ class ClientGoldensTest {
     private final ByteArrayOutputStream raw = new ByteArrayOutputStream();
     private final LinkedBlockingQueue<String> lines = new LinkedBlockingQueue<>();
     private final CompletableFuture<String> ended;
+    private final Map<String, Object> head;
 
-    OpenStream(HttpClient client, InputStream body) {
+    OpenStream(HttpClient client, Map<String, Object> head, InputStream body) {
+      this.head = head;
       this.ended =
           CompletableFuture.supplyAsync(
               () -> {
@@ -810,6 +841,10 @@ class ClientGoldensTest {
           fail("the stream never wrote '" + wanted + "'");
         }
       }
+    }
+
+    Map<String, Object> head() {
+      return head;
     }
 
     String join() {

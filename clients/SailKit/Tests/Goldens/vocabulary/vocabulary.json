@@ -264,6 +264,17 @@
     "member",
     "viewer"
   ],
+  "run_presences": [
+    "working",
+    "quiet"
+  ],
+  "run_statuses": [
+    "running",
+    "stopping",
+    "stopped",
+    "completed",
+    "failed"
+  ],
   "spec_statuses": [
     "draft",
     "pending",
@@ -273,5 +284,10 @@
     "done",
     "cancelled",
     "archived"
+  ],
+  "wake_modes": [
+    "on",
+    "mention",
+    "off"
   ]
 }

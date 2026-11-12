@@ -6,15 +6,6 @@
   "response": {
     "body": {
       "body": "",
-      "latest_run": {
-        "id": "run-2",
-        "last_activity_at": "2026-11-11T09:00:00.656Z",
-        "node": "ada",
-        "owner": "ada",
-        "presence": "working",
-        "principal": "claude/run-2",
-        "status": "running"
-      },
       "plan": "",
       "schema_version": 1,
       "spec": {
