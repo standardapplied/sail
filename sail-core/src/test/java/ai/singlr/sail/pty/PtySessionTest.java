@@ -427,17 +427,22 @@ class PtySessionTest {
   }
 
   @Test
-  void aSessionWhoseShellIsGoneWhileAJobHoldsItsTerminalEndsAtItsCloseNotAtTheEscalation()
+  void aSessionWhoseShellIsGoneWhileASilentJobHoldsItsTerminalEndsOnItsOwnAtOnce()
       throws Exception {
-    var session = session("trap '' HUP; sleep 60 & echo job:$!:started");
+    var ending = new Ending();
+    var session = session("trap '' HUP; sleep 60 & echo job:$!:started", ending, 64 * 1024);
     var client = new Collector();
     session.attach(client, true, "uday");
     client.awaitOutput(":started");
     var job = Long.parseLong(client.outputText().replaceAll("(?s).*job:(\\d+):started.*", "$1"));
     try {
-      assertTimeoutPreemptively(Duration.ofSeconds(3), session::close);
+      assertTrue(
+          assertTimeoutPreemptively(
+              Duration.ofSeconds(3), ending::await, "within a poll interval of the shell's exit"));
       assertEquals("exited(0)", session.endedReason());
+      assertTrue(ProcessHandle.of(job).map(ProcessHandle::isAlive).orElse(false), "job holds on");
     } finally {
+      session.close();
       ProcessHandle.of(job).ifPresent(ProcessHandle::destroyForcibly);
     }
   }

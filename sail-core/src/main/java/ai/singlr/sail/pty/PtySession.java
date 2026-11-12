@@ -510,7 +510,13 @@ public final class PtySession implements AutoCloseable {
     }
   }
 
+  /**
+   * A child gone before it opened the terminal, or whose silent job still holds it, leaves the
+   * master no end of stream to read, so the child's exit ends the gather as soon as the terminal
+   * has drained, on its own or at a close, never at the escalation.
+   */
   private void startThreads() {
+    child.exited().thenRun(pty::endOnceDrained);
     Thread.ofPlatform().name("pty-gather-" + origin.name()).start(this::gather);
     writerThread = Thread.ofPlatform().name("pty-write-" + origin.name()).start(this::drainInput);
   }
@@ -956,15 +962,11 @@ public final class PtySession implements AutoCloseable {
    * the subscribers are dropped rather than poisoned: their sender threads end on delivering the
    * ending, and a detach's queue-clearing poison would race that delivery and lose it. Those
    * senders are given a moment to deliver it before the caller moves on — a host stopping for good
-   * exits right after, and the ending must be on the wire by then, not in a queue. A child gone
-   * before it opened the terminal, or whose silent job still holds it, leaves the master no end of
-   * stream to read, so once the child goes the gather ends as soon as the terminal has drained, not
-   * at the escalation.
+   * exits right after, and the ending must be on the wire by then, not in a queue.
    */
   @Override
   public void close() {
     child.destroy();
-    child.exited().thenRun(pty::endOnceDrained);
     try {
       if (!gatherDone.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
         child.destroyForcibly();
