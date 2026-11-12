@@ -9,8 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import ai.singlr.sail.common.Ids;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import java.io.IOException;
@@ -58,11 +60,14 @@ class PtySocketPermissionsTest {
 
   /**
    * A host that cannot make its socket's directory owner-only does not start: {@code /tmp}, the
-   * system's, whose mode no account but root may change. The host is not closed, which would delete
-   * the dispatch credential's name in a directory that is not its own.
+   * system's, whose mode no account but root may change, and which root's run would change, so it
+   * runs as no other. The host is not closed, which would delete the dispatch credential's name in
+   * a directory that is not its own. An account's own directory always yields to its chmod, so no
+   * directory of the test's could stand in.
    */
   @Test
   void aHostThatCannotRestrictItsSocketsDirectoryDoesNotStart() {
+    assumeFalse(SailPaths.isRoot(), "root may change /tmp's mode, which this test must not do");
     var socket = Path.of("/tmp", "sail-" + Ids.newId() + ".sock");
     var host =
         new PtySessionHost(

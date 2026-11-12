@@ -2517,11 +2517,13 @@ exits the session ends once what is already in the terminal has been read (`Pty.
 of quiet); a job the shell left running keeps nothing it says afterwards
 (`PtySessionTest.aJobTheShellLeftKeepsWhatItSaidBeforeTheExitAndNothingAfter`). Until 0.67.0 a
 Linux session lived until every holder of its terminal let go. Ending a session (a kill, a stop
-for good) hangs it up first, as a closing terminal does: its shim is sent `SIGHUP`, which it
+for good, a dispatch displacing it, the sweep reaping one never attached) hangs it up first, as a
+closing terminal does: its shim is sent `SIGHUP`, which it
 passes to the command, so an interactive shell ends at once with its history written; one still
 running after `PtySession.HANGUP_GRACE` (1 s) is sent `SIGTERM`, and one still running 5 s later
 is killed with everything under it. The terminal is read throughout, so what the command says on
-its way out is kept.
+its way out is kept, and the jobs an interactive shell started end with it, as it passes the hangup
+on (`PtySessionTest`, `PtySessionHostHandoffTest` for a session adopted across a restart).
 
 **One way in.** Six doors reach Sail: the web API, the container socket, the host CLI, the SSH
 gateway, the terminal host (its unix socket, and TCP by ticket) and sync. Each door's credential code finds whom its credential names
@@ -2686,9 +2688,11 @@ them of the process an agent runs.
 - **L2. Only this person.** The socket is `~/.sail/local/pty.sock` in the home the account
   database names, the one source of that home. Before anything is made in them, `~/.sail` and
   `~/.sail/local` are created owner-only when absent and checked, read without following a link:
-  each must be a directory the person owns that no one else may open, or the host refuses to
-  start, naming the path, its owner and mode and the fix. A `chmod` the host cannot make is an
-  error. There is no TCP door. A blank token is the account's person, resolved as a box's own
+  each must be a directory the person owns that no one else, its group included, may open, or the
+  host refuses to start, naming the path, its owner and mode and the fix. What the host keeps in
+  `~/.sail/local` (`sessions`, `pty.lock`, `pty.sock`) must then be of its own kind and the
+  person's, read without following a link, or the start names it and says to remove it. A `chmod`
+  the host cannot make is an error. There is no TCP door. A blank token is the account's person, resolved as a box's own
   person is (`RoleRule.Credential.box`, with no roster to consult), and every other token is
   refused. Whoever can open the socket is that person. Attaching, killing and listing ask `Access`
   as the server's host does, and opening asks whether that person operates this machine, so the
@@ -2699,8 +2703,9 @@ them of the process an agent runs.
 - **L3. No store, no Incus, no network.** The local host opens no database, runs no `incus`,
   binds no port and dials nothing. `LocalWiringSweepTest` follows every call, field, lambda and
   method reference from the local wiring and `PtyHostCommand`'s local branch through Sail's own
-  classes, stopping at the shared host and pty layer, and holds that nothing it reaches names
-  such a type, but what `RoleRule` names of the roster it is given as none and of a run's
+  classes, and every method a class it makes overrides of a supertype, so a call through a JDK
+  interface is followed too, stopping at the shared host and pty layer; it holds that nothing it
+  reaches names such a type, but what `RoleRule` names of the roster it is given as none and of a run's
   credential the local door never presents. A running host leaves its data directory empty and
   holds no internet socket.
 - **L4. A session is a process in a folder.** An open naming a project or a room is refused,
@@ -2710,15 +2715,19 @@ them of the process an agent runs.
   (`Account`, `getpwuid`, never `$SHELL`) as a login shell, whose own start-up builds `PATH`; a
   login shell that cannot be run is refused at start. Its environment holds `HOME`, `USER`,
   `LOGNAME` and `SHELL` from that entry, `TERM`, and a UTF-8 character type: the host's own when
-  the first of `LC_ALL`, `LC_CTYPE` and `LANG` it sets names UTF-8, else `C.UTF-8` where the C
-  library has it (`Locales`), else `en_US.UTF-8`, as `LANG` and as each of the others the host
+  the first of `LC_ALL`, `LC_CTYPE` and `LANG` it sets names a UTF-8 locale the C library has
+  (`Locales`), else `C.UTF-8` where it has that, else `en_US.UTF-8`, as `LANG` and as each of the others the host
   sets. That is what a terminal emulator's login gives, since a service starts with almost none.
   The shell's own start-up may then set its own, as the person's profile does in any terminal.
 - **L5. Sessions outlive their clients, not their host.** A stop (`SIGTERM`) hangs every
   session up, reading each terminal to its end, since on macOS a session leader's exit waits for
   that, and then deletes the sessions' transcripts and sidecars. A new host has a new boot id.
   With no descriptor store, a restart ends every session; surviving one is a later spec.
-- **L6. The server wiring is untouched.** Without `--local`, every answer is as before.
+- **L6. The server wiring is untouched.** Without `--local`, the host is wired as before, and
+  answers as before but for two changes to what both wirings share: a session ends with a hangup
+  first (on a close, a kill, a dispatch displacing it and the sweep reaping it), so the background
+  jobs of an ended interactive shell end with it; and a host that cannot make its socket's
+  directory owner-only refuses to start.
 
 One host serves one person: it holds `pty.lock` in its directory for as long as it runs, so a
 second exits saying where the first serves, and one that finds the lock free, its holder dead,
@@ -2728,7 +2737,9 @@ stopping is refused. Within one process a second claim is refused before the loc
 again, since closing any channel on it would let the first claim's lock go. A socket path longer than 102 bytes (macOS's 104-byte `sun_path`, less the two the JDK
 keeps) is refused at start, naming the path and the limit. `sail _pty-selftest` starts a local
 host, opens a session in a folder, has a line evaluated, detaches, attaches again and stops
-(`local-selftest: ok`).
+(`local-selftest: ok`), and `ci/check local-host`, beside it in the native smoke test and the
+release's, runs the binary's own `_pty-host --local` in the runner's home: it says it serves, a
+second exits 1 naming it, and `SIGTERM` stops it with exit 143, leaving only its lock.
 
 **Pairing.** Mast reaches a box as an FDE with one string, the connect code, which `sail fde
 pair <handle> --host <ip-or-dns>` mints and `sail fde unpair <handle>` revokes (`FdeCommand`).
@@ -3094,7 +3105,7 @@ the one native build:
   commit that changes only tests or CI takes the image its inputs already built, smoke-tested
   again. CI tests the quick build (`-Ob`, about half the build time);
   `release.yml` builds the optimized one (`-O2`), which only its smoke test (`-V`,
-  `_pty-selftest`) runs. The two compile the same program; what only `-O2` could expose — a race
+  `_pty-selftest`, `ci/check local-host`) runs. The two compile the same program; what only `-O2` could expose — a race
   faster code opens, a miscompile — is the accepted gap.
 - **The incus suites run in balanced shards.** `ci/check shard` places every concrete `*IT`
   class, one with no recorded time included, in exactly one shard, longest first onto the

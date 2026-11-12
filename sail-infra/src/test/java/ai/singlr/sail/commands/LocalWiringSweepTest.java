@@ -29,7 +29,9 @@ import java.lang.constant.MethodTypeDesc;
 import java.net.Socket;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -46,7 +48,11 @@ import org.junit.jupiter.api.Test;
  * what it calls or reads, a class constant or a method's descriptor, but for the edges {@link
  * #ALLOWED} names with why. The sweep stops at the shared terminal host and pty layer ({@link
  * #SHARED}), the server's own (L1): it reaches Incus only for a project session and the network
- * only through a TCP address, and the local wiring refuses the one and gives none of the other.
+ * only through a TCP address, and the local wiring refuses the one and gives none of the other. A
+ * call through a supertype is followed into every reached class made with {@code new} that
+ * overrides it, a JDK interface's included ({@link #overriding}). What it cannot see: a class
+ * loaded or a method found by reflection, a method handle built at run time, a call through an
+ * interface on an object made outside what it follows (the shared host's own), and native code.
  * {@code LocalPtyHostProcessTest} proves the same of a running host.
  */
 class LocalWiringSweepTest {
@@ -130,20 +136,23 @@ class LocalWiringSweepTest {
   @Test
   void theSweepFollowsACallToWhatItNames() throws IOException {
     var planted = new HashMap<String, ClassModel>();
-    for (var type : List.of(Reads.class, Helper.class, Dials.class)) {
+    for (var type : List.of(Reads.class, Helper.class, Dials.class, Hides.class, Hidden.class)) {
       var model = ClassFile.of().parse(bytesOf(type));
       planted.put(model.thisClass().asInternalName(), model);
     }
     var reads = ClassFile.of().parse(bytesOf(Reads.class)).thisClass().asInternalName();
     var helper = ClassFile.of().parse(bytesOf(Helper.class)).thisClass().asInternalName();
     var dials = ClassFile.of().parse(bytesOf(Dials.class)).thisClass().asInternalName();
+    var hides = ClassFile.of().parse(bytesOf(Hides.class)).thisClass().asInternalName();
+    var hidden = ClassFile.of().parse(bytesOf(Hidden.class)).thisClass().asInternalName();
 
-    var sweep = sweep(planted, List.of(reads + "#store", dials + "#dial"));
+    var sweep = sweep(planted, List.of(reads + "#store", dials + "#dial", hides + "#run"));
 
     assertEquals(
         Map.of(
             helper + "#open", Set.of("ai/singlr/sail/store/SpecStore"),
-            dials + "#dial", Set.of("java/net/Socket")),
+            dials + "#dial", Set.of("java/net/Socket"),
+            hidden + "#run", Set.of("ai/singlr/sail/store/SpecStore")),
         sweep.named());
   }
 
@@ -157,6 +166,21 @@ class LocalWiringSweepTest {
   private static final class Helper {
     static Class<?> open() {
       return SpecStore.class;
+    }
+  }
+
+  /** Nor a store reached through a JDK interface, which the call as written does not name. */
+  private static final class Hides {
+    void run() {
+      Runnable task = new Hidden();
+      task.run();
+    }
+  }
+
+  private static final class Hidden implements Runnable {
+    @Override
+    public void run() {
+      var unused = SpecStore.class;
     }
   }
 
@@ -238,7 +262,10 @@ class LocalWiringSweepTest {
           follow(call.owner().asInternalName(), call.name().stringValue(), classes, queue);
         }
         case FieldInstruction field -> note(field.owner().asInternalName(), named);
-        case NewObjectInstruction made -> note(made.className().asInternalName(), named);
+        case NewObjectInstruction made -> {
+          note(made.className().asInternalName(), named);
+          queue.addAll(overriding(made.className().asInternalName(), classes));
+        }
         case TypeCheckInstruction check -> note(check.type().asInternalName(), named);
         case NewReferenceArrayInstruction array ->
             note(array.componentType().asInternalName(), named);
@@ -261,14 +288,51 @@ class LocalWiringSweepTest {
 
   private static void follow(
       String owner, String name, Map<String, ClassModel> classes, ArrayDeque<String> queue) {
-    var followed =
-        owner.startsWith(SAIL)
-            && (!owner.startsWith(SHARED) || LOCAL_ONLY.contains(owner))
-            && UNREACHABLE.stream().noneMatch(owner::startsWith)
-            && classes.containsKey(owner);
-    if (followed) {
+    if (followable(owner, classes)) {
       queue.add(owner + "#" + name);
     }
+  }
+
+  private static boolean followable(String owner, Map<String, ClassModel> classes) {
+    return owner.startsWith(SAIL)
+        && (!owner.startsWith(SHARED) || LOCAL_ONLY.contains(owner))
+        && UNREACHABLE.stream().noneMatch(owner::startsWith)
+        && classes.containsKey(owner);
+  }
+
+  /**
+   * The members of {@code type}, made where the sweep reached, that a caller may reach through one
+   * of its supertypes, a JDK interface above all, which a call as written does not name: every
+   * method it declares that a supertype declares too.
+   */
+  private static List<String> overriding(String type, Map<String, ClassModel> classes) {
+    if (!followable(type, classes)) {
+      return List.of();
+    }
+    Class<?> made;
+    try {
+      made =
+          Class.forName(type.replace('/', '.'), false, LocalWiringSweepTest.class.getClassLoader());
+    } catch (ClassNotFoundException missing) {
+      throw new IllegalStateException(type + " was read but cannot be loaded", missing);
+    }
+    var inherited = new HashSet<String>();
+    var supertypes = new ArrayDeque<Class<?>>(List.of(made));
+    while (!supertypes.isEmpty()) {
+      var next = supertypes.poll();
+      if (next != made) {
+        Arrays.stream(next.getDeclaredMethods()).forEach(m -> inherited.add(m.getName()));
+      }
+      if (next.getSuperclass() != null) {
+        supertypes.add(next.getSuperclass());
+      }
+      supertypes.addAll(List.of(next.getInterfaces()));
+    }
+    return classes.get(type).methods().stream()
+        .map(method -> method.methodName().stringValue())
+        .filter(inherited::contains)
+        .map(name -> type + "#" + name)
+        .toList();
   }
 
   private static void described(MethodTypeDesc type, Set<String> named) {

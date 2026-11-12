@@ -231,7 +231,10 @@ class LocalPtyHostProcessTest {
       boot = client.boot();
     }
 
-    var second = host().ended();
+    var secondHost = host();
+    var second = secondHost.ended();
+
+    assertEquals(1, secondHost.process().exitValue(), "the second exits 1");
 
     assertEquals(
         List.of(

@@ -73,6 +73,7 @@ runs:
         grep -qx 'pty-selftest: ok' <<< "$selftest"
         grep -qx 'tcp-selftest: ok' <<< "$selftest"
         grep -qx 'local-selftest: ok' <<< "$selftest"
+        ci/check local-host ./sail-infra/target/sail
 
     - name: Keep the image for a commit built from the same inputs
       if: steps.image.outputs.cache-hit != 'true'

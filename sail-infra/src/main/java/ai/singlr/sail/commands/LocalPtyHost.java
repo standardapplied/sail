@@ -124,6 +124,7 @@ final class LocalPtyHost implements AutoCloseable {
     }
     requirePrivate(account, dir, dir.getParent());
     requirePrivate(account, dir, dir);
+    requireOwnEntries(account, dir);
     var claim = claim(dir);
     if (claim == null) {
       throw new IOException(
@@ -170,7 +171,7 @@ final class LocalPtyHost implements AutoCloseable {
     var kind =
         found.isSymbolicLink() ? "a symbolic link" : found.isDirectory() ? "a directory" : "a file";
     var fix =
-        !found.isDirectory()
+        !found.isDirectory() || path.equals(dir)
             ? "Remove it, and the host makes the directory itself."
             : owner.equals(account.name())
                 ? "Run 'chmod 700 " + path + "'."
@@ -194,6 +195,60 @@ final class LocalPtyHost implements AutoCloseable {
             + PosixFilePermissions.toString(found.permissions())
             + ". "
             + fix);
+  }
+
+  /** What the host keeps in its directory, by name and the file type each must have. */
+  private record Entry(String name, int type) {}
+
+  private static final int TYPE_MASK = 0170000;
+
+  private static final List<Entry> ENTRIES =
+      List.of(
+          new Entry("sessions", 0040000), new Entry(LOCK, 0100000), new Entry("pty.sock", 0140000));
+
+  /**
+   * Refuses whatever the host keeps in {@code dir} that is, read without following a link, not of
+   * its own kind or not {@code account}'s: a host would otherwise write its sessions, take its lock
+   * or bind its socket wherever such an entry leads. A directory that passed {@link
+   * #requirePrivate} admits no one else to plant one, unless it was once open to others.
+   */
+  private static void requireOwnEntries(Account account, Path dir) throws IOException {
+    for (var entry : ENTRIES) {
+      var path = dir.resolve(entry.name());
+      if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+        continue;
+      }
+      var type = (int) Files.getAttribute(path, "unix:mode", LinkOption.NOFOLLOW_LINKS) & TYPE_MASK;
+      var owner = Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).getName();
+      if (type == entry.type() && owner.equals(account.name())) {
+        continue;
+      }
+      throw new IOException(
+          "This machine's terminal host keeps its socket in "
+              + dir
+              + ", so "
+              + path
+              + " must be "
+              + kind(entry.type())
+              + " of "
+              + account.name()
+              + "'s, and it is "
+              + kind(type)
+              + " owned by "
+              + owner
+              + ". Remove it, and the host makes it again.");
+    }
+  }
+
+  private static String kind(int type) {
+    return switch (type) {
+      case 0040000 -> "a directory";
+      case 0100000 -> "a file";
+      case 0140000 -> "a socket";
+      case 0120000 -> "a symbolic link";
+      case 0010000 -> "a pipe";
+      default -> "a device";
+    };
   }
 
   /** The lock on {@code dir}, held open; null when another host holds it. */

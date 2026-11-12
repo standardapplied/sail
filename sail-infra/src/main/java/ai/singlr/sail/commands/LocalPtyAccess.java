@@ -90,13 +90,15 @@ final class LocalPtyAccess implements PtyIdentity.Resolver, PtyAdmission {
 
   /**
    * What a session's environment adds so that its character type is UTF-8. Nothing when the host's
-   * already is: the first of {@link #CHARACTER_TYPE} it sets names UTF-8. Otherwise {@code C.UTF-8}
-   * where the system has it, else {@code en_US.UTF-8}, as {@code LANG} and as each of the others
-   * the host sets, which would mask it.
+   * already is: the first of {@link #CHARACTER_TYPE} it sets names a UTF-8 locale the system has.
+   * Otherwise {@code C.UTF-8} where the system has it, else {@code en_US.UTF-8}, as {@code LANG}
+   * and as each of the others the host sets, which would mask it.
    */
   static Map<String, String> locale(Map<String, String> host, Predicate<String> installed) {
     var set = CHARACTER_TYPE.stream().filter(name -> Strings.isNotBlank(host.get(name))).toList();
-    if (!set.isEmpty() && utf8(host.get(set.getFirst()))) {
+    if (!set.isEmpty()
+        && utf8(host.get(set.getFirst()))
+        && installed.test(host.get(set.getFirst()))) {
       return Map.of();
     }
     var chosen = installed.test("C.UTF-8") ? "C.UTF-8" : "en_US.UTF-8";

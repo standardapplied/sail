@@ -570,9 +570,193 @@ class LocalPtyHostTest {
 
     var own = assertThrows(IOException.class, this::start);
 
-    assertTrue(own.getMessage().contains("with mode rwxrwxrwx. Run 'chmod 700 "), own.getMessage());
+    assertTrue(
+        own.getMessage()
+            .endsWith(" with mode rwxrwxrwx. Remove it, and the host makes the directory itself."),
+        "what others could open may hold what they put there: " + own.getMessage());
     try (var made = Files.list(local())) {
       assertEquals(List.of(), made.toList(), "no socket and no lock in a directory others open");
+    }
+  }
+
+  /** L2 checked: the group alone may not open {@code ~/.sail} either, as macOS's staff could. */
+  @Test
+  void aDirectoryItsGroupAloneMayOpenIsRefused() throws Exception {
+    var sail = Files.createDirectories(local().getParent());
+    for (var mode : List.of("rwxrwx---", "rwx-w----", "rwx--x---")) {
+      Files.setPosixFilePermissions(sail, PosixFilePermissions.fromString(mode));
+
+      var refused = assertThrows(IOException.class, this::start, mode);
+
+      assertEquals(
+          "This machine's terminal host keeps its socket in "
+              + local()
+              + ", so "
+              + sail
+              + " must be a directory that "
+              + person().name()
+              + " owns and no one else may open, and it is a directory owned by "
+              + person().name()
+              + " with mode "
+              + mode
+              + ". Run 'chmod 700 "
+              + sail
+              + "'.",
+          refused.getMessage());
+      assertFalse(Files.exists(local(), LinkOption.NOFOLLOW_LINKS), mode + ": nothing was made");
+    }
+  }
+
+  /** L2 checked: a link in place of {@code ~/.sail} itself, even to a private directory. */
+  @Test
+  void aLinkInPlaceOfDotSailIsRefusedAndNothingIsMadeWhereItPoints() throws Exception {
+    var real =
+        Files.createDirectory(
+            dir.resolve("real"),
+            PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+    Files.createSymbolicLink(local().getParent(), real);
+
+    var refused = assertThrows(IOException.class, this::start);
+
+    assertEquals(
+        "This machine's terminal host keeps its socket in "
+            + local()
+            + ", so "
+            + local().getParent()
+            + " must be a directory that "
+            + person().name()
+            + " owns and no one else may open, and it is a symbolic link owned by "
+            + person().name()
+            + " with mode "
+            + permissions(local().getParent())
+            + ". Remove it, and the host makes the directory itself.",
+        refused.getMessage());
+    try (var made = Files.list(real)) {
+      assertEquals(List.of(), made.toList(), "nothing was made where the link points");
+    }
+  }
+
+  /**
+   * L2 checked: a directory the account does not own is refused, here a host for another account's
+   * name over directories this test made.
+   */
+  @Test
+  void aDirectoryAnotherAccountOwnsIsRefusedNamingItsOwner() throws Exception {
+    var me = person();
+    var sail = privateLocal().getParent();
+    var other = new Account("sail-nobody", me.home(), me.shell());
+
+    var refused = assertThrows(IOException.class, () -> start(other));
+
+    assertEquals(
+        "This machine's terminal host keeps its socket in "
+            + local()
+            + ", so "
+            + sail
+            + " must be a directory that sail-nobody owns and no one else may open, and it is a"
+            + " directory owned by "
+            + me.name()
+            + " with mode rwx------. Remove it, or make it sail-nobody's and run 'chmod 700 "
+            + sail
+            + "'.",
+        refused.getMessage());
+  }
+
+  /**
+   * L2 checked inside: what the host keeps in its directory must be of its own kind and the
+   * account's, read without following a link, or the start names it and says to remove it.
+   */
+  @Test
+  void anEntryOfTheHostsDirectoryThatIsALinkOrOfAnotherKindIsRefusedNamingIt() throws Exception {
+    var local = privateLocal();
+    var elsewhere = folder("elsewhere");
+    Files.setPosixFilePermissions(elsewhere, PosixFilePermissions.fromString("rwxrwxrwx"));
+    var me = person().name();
+    var cases =
+        List.of(
+            new Planted(
+                "sessions",
+                () -> Files.createSymbolicLink(local.resolve("sessions"), elsewhere),
+                "a directory",
+                "a symbolic link"),
+            new Planted(
+                "pty.lock",
+                () ->
+                    Files.createSymbolicLink(local.resolve("pty.lock"), elsewhere.resolve("lock")),
+                "a file",
+                "a symbolic link"),
+            new Planted(
+                "pty.lock",
+                () -> Files.createDirectory(local.resolve("pty.lock")),
+                "a file",
+                "a directory"),
+            new Planted("pty.sock", () -> mkfifo(local.resolve("pty.sock")), "a socket", "a pipe"),
+            new Planted(
+                "sessions",
+                () -> Files.writeString(local.resolve("sessions"), "not a directory"),
+                "a directory",
+                "a file"));
+    for (var planted : cases) {
+      planted.make().run();
+      var entry = local.resolve(planted.name());
+
+      var refused = assertThrows(IOException.class, this::start, planted.toString());
+
+      assertEquals(
+          "This machine's terminal host keeps its socket in "
+              + local
+              + ", so "
+              + entry
+              + " must be "
+              + planted.must()
+              + " of "
+              + me
+              + "'s, and it is "
+              + planted.is()
+              + " owned by "
+              + me
+              + ". Remove it, and the host makes it again.",
+          refused.getMessage());
+      try (var made = Files.list(elsewhere)) {
+        assertEquals(List.of(), made.toList(), planted + ": nothing was made where it leads");
+      }
+      Files.delete(entry);
+    }
+    start();
+    try (var client = Client.connect(socket())) {
+      assertEquals(List.of(), client.list());
+    }
+  }
+
+  private record Planted(String name, Making make, String must, String is) {}
+
+  @FunctionalInterface
+  private interface Making {
+    void run() throws Exception;
+  }
+
+  private static void mkfifo(Path path) throws Exception {
+    var made = new ProcessBuilder("mkfifo", path.toString()).start();
+    assertTrue(made.waitFor(STEP.toMillis(), TimeUnit.MILLISECONDS), "mkfifo ran");
+    assertEquals(0, made.exitValue());
+  }
+
+  /**
+   * One host per person holds even against a lock another process holds: the start is refused as
+   * for a running host, and goes ahead once the lock is let go.
+   */
+  @Test
+  void aLockAnotherProcessHoldsRefusesTheStartUntilItIsLetGo() throws Exception {
+    var lock = privateLocal().resolve(LocalPtyHost.LOCK);
+    try (var holder = LockProbe.holding(lock)) {
+      var refused = assertThrows(IOException.class, this::start);
+
+      assertTrue(
+          refused.getMessage().startsWith("A terminal host already serves "), refused.getMessage());
+    }
+    start();
+    try (var client = Client.connect(socket())) {
+      assertEquals(List.of(), client.list());
     }
   }
 
