@@ -13,13 +13,17 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
+/**
+ * systemd's descriptor store, on Linux alone: launchd keeps no descriptors, and the datagram
+ * layouts spoken here ({@code sockaddr_un}, {@code msghdr}, {@code cmsghdr}) are glibc's.
+ */
 @EnabledOnOs(OS.LINUX)
 class SdNotifyTest {
 
@@ -43,7 +47,12 @@ class SdNotifyTest {
       var copy = stored.fds().getFirst();
       assertTrue(copy != pty.fd(), "the receiver gets its own descriptor, not the number");
 
-      pty.spawn(List.of("sh", "-c", "echo via-copy"), Map.of("TERM", "dumb"), dir).waitFor();
+      var child =
+          pty.spawn(
+              PtyChildShimTest.shim(dir.resolve("copy.exit"), "sh", "-c", "echo via-copy"),
+              Map.of("TERM", "dumb"),
+              dir);
+      assertTrue(child.waitFor(10, TimeUnit.SECONDS), "the child exits");
       try (var adopted = Pty.adopt(copy)) {
         var buf = new byte[256];
         var seen = new StringBuilder();

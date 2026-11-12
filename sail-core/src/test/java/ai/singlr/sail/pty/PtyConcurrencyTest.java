@@ -10,17 +10,26 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledOnOs;
-import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
 
-@EnabledOnOs(OS.LINUX)
 class PtyConcurrencyTest {
+
+  @TempDir Path dir;
+
+  /**
+   * The terminal's own echo stays on where it keeps a write whole (Linux), so both directions are
+   * as loaded as they can be, and is turned off on Darwin, whose line discipline may place an echo
+   * inside a write it is holding back: the kernel's interleaving, not a corrupted stream.
+   */
+  private static String echoOffWhereItInterleaves() {
+    return Native.PLATFORM == Native.DARWIN ? "stty -echo; " : "";
+  }
 
   /**
    * Types continuously while the child echoes and exits on its own — the read half (a gather
@@ -33,15 +42,17 @@ class PtyConcurrencyTest {
     var lines = 1000;
     try (var pty = Pty.open(80, 24)) {
       pty.spawn(
-          List.of(
+          PtyChildShimTest.shim(
+              dir.resolve("echo.exit"),
               "sh",
               "-c",
-              "i=0; while [ $i -lt "
+              echoOffWhereItInterleaves()
+                  + "i=0; while [ $i -lt "
                   + lines
                   + " ]; do IFS= read -r l; printf 'R:%s\\n' \"$l\";"
                   + " i=$((i+1)); done"),
           Map.of("TERM", "dumb"),
-          java.nio.file.Path.of("/tmp"));
+          dir);
 
       var collected = new ByteArrayOutputStream();
       var readerDone = new CountDownLatch(1);
@@ -87,10 +98,12 @@ class PtyConcurrencyTest {
   @Test
   void closeWhileAReaderIsActiveIsCleanAndEndsTheStream() throws Exception {
     var pty = Pty.open(80, 24);
-    pty.spawn(
-        List.of("sh", "-c", "while true; do echo flood; done"),
-        Map.of("TERM", "dumb"),
-        java.nio.file.Path.of("/tmp"));
+    var child =
+        pty.spawn(
+            PtyChildShimTest.shim(
+                dir.resolve("flood.exit"), "sh", "-c", "while true; do echo flood; done"),
+            Map.of("TERM", "dumb"),
+            dir);
 
     var sawFlood = new CountDownLatch(1);
     var readerDone = new CountDownLatch(1);
@@ -116,6 +129,7 @@ class PtyConcurrencyTest {
     assertTrue(sawFlood.await(10, TimeUnit.SECONDS), "the flood is streaming");
     assertDoesNotThrow(pty::close, "close never throws, even mid-read");
     assertTrue(readerDone.await(10, TimeUnit.SECONDS), "the reader observes end of stream");
+    assertTrue(child.waitFor(10, TimeUnit.SECONDS), "closing the master ends the child");
     assertTrue(
         failure.get() == null,
         "a close during read is end of stream, not an error: " + failure.get());

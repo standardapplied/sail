@@ -19,7 +19,10 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -76,6 +79,8 @@ public final class PtySession implements AutoCloseable {
 
   private static final long PID_REUSE_SLACK_MILLIS = 5_000;
 
+  private static final long KILL_WAIT_SECONDS = 5;
+
   /**
    * The child as this host can reach it: the {@link Process} it spawned, or — after a handoff — an
    * orphan it only knows by pid, whose status is read from the exit file its shim wrote.
@@ -85,7 +90,8 @@ public final class PtySession implements AutoCloseable {
 
     void destroy();
 
-    void destroyForcibly();
+    /** Kills the child's tree as {@link #killTree} does; {@code session} names it in the log. */
+    void destroyForcibly(String session);
 
     /** Completes once the child is gone. */
     CompletableFuture<?> exited();
@@ -106,9 +112,8 @@ public final class PtySession implements AutoCloseable {
     }
 
     @Override
-    public void destroyForcibly() {
-      process.descendants().forEach(ProcessHandle::destroyForcibly);
-      process.destroyForcibly();
+    public void destroyForcibly(String session) {
+      killTree(process.toHandle(), session);
     }
 
     @Override
@@ -129,12 +134,8 @@ public final class PtySession implements AutoCloseable {
     }
 
     @Override
-    public void destroyForcibly() {
-      handle.ifPresent(
-          h -> {
-            h.descendants().forEach(ProcessHandle::destroyForcibly);
-            h.destroyForcibly();
-          });
+    public void destroyForcibly(String session) {
+      handle.ifPresent(shim -> killTree(shim, session));
     }
 
     @Override
@@ -152,6 +153,41 @@ public final class PtySession implements AutoCloseable {
       } catch (IOException | NumberFormatException lost) {
         return STATUS_LOST;
       }
+    }
+  }
+
+  /**
+   * Kills the session's command and everything else under its shim first, then gives the shim up to
+   * {@value #KILL_WAIT_SECONDS} s to exit on its own, which it does only once it has reaped its
+   * command, and kills it if it has not. Killing the shim first would leave the command's zombie to
+   * whoever reaps orphans, and the ending would be published while it is still in the process
+   * table. A shim that outlives the wait is said so, by session and pid.
+   */
+  private static void killTree(ProcessHandle shim, String session) {
+    var descendants = shim.descendants().toList();
+    descendants.forEach(ProcessHandle::destroyForcibly);
+    if (!descendants.isEmpty() && !exitsWithinTheKillWait(shim)) {
+      System.err.println(
+          "pty-host: kill-wait-expired session="
+              + session
+              + " pid="
+              + shim.pid()
+              + " reason=its shim had not exited "
+              + KILL_WAIT_SECONDS
+              + " s after its command was killed, so it is killed too");
+    }
+    shim.destroyForcibly();
+  }
+
+  private static boolean exitsWithinTheKillWait(ProcessHandle shim) {
+    try {
+      shim.onExit().get(KILL_WAIT_SECONDS, TimeUnit.SECONDS);
+      return true;
+    } catch (TimeoutException | ExecutionException late) {
+      return false;
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      return false;
     }
   }
 
@@ -401,7 +437,7 @@ public final class PtySession implements AutoCloseable {
     Process child;
     try {
       child = pty.spawn(argv, env, cwd);
-    } catch (IOException e) {
+    } catch (IOException | RuntimeException e) {
       pty.close();
       journal.close();
       throw e;
@@ -434,7 +470,9 @@ public final class PtySession implements AutoCloseable {
    * the keyboard's last holder is restored (under an id no new subscriber can be given) so the same
    * FDE reclaims it on reconnect exactly as from a ghost attachment; the never-attached grace
    * starts over, since whoever was attached lost the transport with the old host. No start event:
-   * the session is not new.
+   * the session is not new. The orphan's exit ends the gather once the terminal has drained, as
+   * {@link Pty#spawn} has it for a child of this host's own, so a silent job left holding the
+   * terminal never keeps the session open.
    */
   public static PtySession resume(
       SessionMeta meta,
@@ -479,6 +517,7 @@ public final class PtySession implements AutoCloseable {
     session.subscriberIds.set(Math.max(0, meta.writerId()));
     session.everAttached = meta.everAttached();
     session.rebuildBoundary();
+    child.exited().thenRun(pty::endOnceDrained);
     session.startThreads();
     return session;
   }
@@ -567,7 +606,7 @@ public final class PtySession implements AutoCloseable {
       writer.interrupt();
     }
     try {
-      var unused = gatherDone.await(5, java.util.concurrent.TimeUnit.SECONDS);
+      var unused = gatherDone.await(5, TimeUnit.SECONDS);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     }
@@ -643,17 +682,17 @@ public final class PtySession implements AutoCloseable {
 
   /**
    * The reason the session ends, computed with the pty already released so nothing can wedge. On a
-   * pty or journal failure the child may still be alive — close the pty, kill it outright and reap
-   * it before the ending is published, because {@link #close()} skips its escalation once the
-   * gather is done and a child that shrugs off SIGHUP and SIGTERM would otherwise outlive its
-   * session untracked; the reason is the failure. Otherwise the child has exited (or a yield
-   * displaced it): close the pty, then read its exit status, which returns at once because the
-   * child is already gone.
+   * pty or journal failure the child may still be alive — close the pty and kill it outright, its
+   * command first, which its shim reaps before it exits, so the command is gone before the ending
+   * is published, because {@link #close()} skips its escalation once the gather is done and a child
+   * that shrugs off SIGHUP and SIGTERM would otherwise outlive its session untracked; the reason is
+   * the failure. Otherwise the child has exited (or a yield displaced it): close the pty, then read
+   * its exit status, which returns at once because the child is already gone.
    */
   private String endReason(String failure) {
     if (failure != null) {
       pty.close();
-      child.destroyForcibly();
+      child.destroyForcibly(origin.name());
       var unused = child.exitReason();
       return failure;
     }
@@ -956,18 +995,14 @@ public final class PtySession implements AutoCloseable {
    * the subscribers are dropped rather than poisoned: their sender threads end on delivering the
    * ending, and a detach's queue-clearing poison would race that delivery and lose it. Those
    * senders are given a moment to deliver it before the caller moves on — a host stopping for good
-   * exits right after, and the ending must be on the wire by then, not in a queue. A child gone
-   * before it opened the terminal, or whose silent job still holds it, leaves the master no end of
-   * stream to read, so once the child goes the gather ends as soon as the terminal has drained, not
-   * at the escalation.
+   * exits right after, and the ending must be on the wire by then, not in a queue.
    */
   @Override
   public void close() {
     child.destroy();
-    child.exited().thenRun(pty::endOnceDrained);
     try {
-      if (!gatherDone.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
-        child.destroyForcibly();
+      if (!gatherDone.await(5, TimeUnit.SECONDS)) {
+        child.destroyForcibly(origin.name());
         pty.close();
         gatherDone.await();
       }
