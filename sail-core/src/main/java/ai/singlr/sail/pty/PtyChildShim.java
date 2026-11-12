@@ -17,13 +17,14 @@ import java.util.concurrent.CompletableFuture;
 import sun.misc.Signal;
 
 /**
- * The session leader between the pty and the command: runs {@code argv} on the inherited terminal,
- * waits, records the exit status to a file and exits with the same status. Only a parent can
- * collect a child's status, and a host that inherited a session after a restart is not the parent —
- * the file is how the status crosses that gap. The shim is the session leader, so a hangup on the
- * master reaches it and it passes {@code SIGHUP} down as the kernel would have done to the command
- * in its place; {@code SIGTERM} is forwarded the same way; {@code SIGINT} is left to the terminal,
- * which already delivers it to the foreground group.
+ * The session leader between the pty and the command: claims the terminal {@link Pty#spawn} named
+ * ({@link Pty#claimTerminal}), runs {@code argv} on it, waits, records the exit status to a file
+ * and exits with the same status. Only a parent can collect a child's status, and a host that
+ * inherited a session after a restart is not the parent — the file is how the status crosses that
+ * gap. The shim is the session leader, so a hangup on the master reaches it and it passes {@code
+ * SIGHUP} down as the kernel would have done to the command in its place; {@code SIGTERM} is
+ * forwarded the same way; {@code SIGINT} is left to the terminal, which already delivers it to the
+ * foreground group.
  */
 public final class PtyChildShim {
 
@@ -42,6 +43,20 @@ public final class PtyChildShim {
 
   private PtyChildShim() {}
 
+  /**
+   * {@code java -cp <this class path> PtyChildShim <exit file>}, the command {@code argv} follows:
+   * the shim a host run from a class path spawns, as the native image's is its {@code _pty-child}.
+   */
+  public static List<String> onClassPath(Path exitFile) {
+    return List.of(
+        Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+        "--enable-native-access=ALL-UNNAMED",
+        "-cp",
+        System.getProperty("java.class.path"),
+        PtyChildShim.class.getName(),
+        exitFile.toString());
+  }
+
   /** {@code <exit file> <argv...>}: the shim's own entry point, for hosts run from a class path. */
   public static void main(String[] args) throws IOException {
     if (args.length < 2) {
@@ -52,13 +67,23 @@ public final class PtyChildShim {
   }
 
   public static int run(Path exitFile, List<String> argv) throws IOException {
+    var terminal = System.getenv(Pty.TERMINAL);
+    if (terminal == null) {
+      throw new IllegalStateException(
+          "No terminal is named in "
+              + Pty.TERMINAL
+              + ": the shim runs only as the pty host spawns it.");
+    }
+    Pty.claimTerminal(terminal);
     var child = new CompletableFuture<Process>();
     restoreDefault(SIGHUP, SIGINT, SIGTERM);
     Signal.handle(new Signal("HUP"), signal -> child.thenAccept(p -> forward(p, SIGHUP)));
     Signal.handle(new Signal("TERM"), signal -> child.thenAccept(p -> forward(p, SIGTERM)));
     Signal.handle(new Signal("INT"), signal -> {});
     try {
-      child.complete(new ProcessBuilder(argv).inheritIO().start());
+      var command = new ProcessBuilder(argv).inheritIO();
+      command.environment().remove(Pty.TERMINAL);
+      child.complete(command.start());
     } catch (IOException | RuntimeException failed) {
       child.completeExceptionally(failed);
       throw failed;

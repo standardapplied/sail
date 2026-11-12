@@ -93,12 +93,14 @@ public final class PtySessionHost implements AutoCloseable {
   /**
    * How this host outlives itself: the store it pushes masters to, the descriptors the previous
    * host left it (by store name), and the shim every child is spawned under — the {@code
-   * _pty-child} wrapper that records the exit status a successor cannot collect. {@link #NONE} is a
-   * host on its own: no store, no inheritance, children spawned bare.
+   * _pty-child} wrapper that makes the child's session and records the exit status a successor
+   * cannot collect. {@link #NONE} is a host on its own: no store, no inheritance, children spawned
+   * under the shim run from this class path.
    */
   public record Handoff(
       SdNotify store, Map<String, Integer> inheritedFds, Function<Path, List<String>> shim) {
-    public static final Handoff NONE = new Handoff(SdNotify.NONE, Map.of(), exit -> List.of());
+    public static final Handoff NONE =
+        new Handoff(SdNotify.NONE, Map.of(), PtyChildShim::onClassPath);
 
     public Handoff {
       inheritedFds = Map.copyOf(inheritedFds);

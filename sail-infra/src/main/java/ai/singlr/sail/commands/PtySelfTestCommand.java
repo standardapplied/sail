@@ -8,9 +8,11 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.pty.Pty;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.SdNotify;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -20,14 +22,17 @@ import picocli.CommandLine.Command;
  * A native-image self-check for the layers that only fail in the GraalVM binary, never in the JVM
  * unit tests, so the release smoke test catches them rather than a user.
  *
- * <p>The FFM pty layer: opens a real pty, spawns a trivial child, and resizes it. Opening the pty
- * forces {@link Pty}'s static initializer, which builds every libc downcall handle — a missing
- * foreign registration surfaces here. A no-op on non-Linux, where the pty host never runs.
+ * <p>The FFM pty layer: opens a real pty, spawns a child through the session shim this binary
+ * spawns every session under, resizes the pty and reads the size the child's {@code stty} sees.
+ * Opening the pty forces {@link Pty}'s static initializer, which builds every libc downcall handle
+ * — a missing foreign registration surfaces here — and the shim's claim of the terminal runs each
+ * call the child side makes.
  *
  * <p>The descriptor store binding: a datagram receiver stands in for systemd, a pty master is
  * pushed through the production {@link SdNotify} with {@code NOTIFY_SOCKET} pointed at it, the
  * received descriptor is adopted and read through — a real duplicate, not a number — and the
- * removal round-trips. A Panama layout that only breaks in the native image breaks here.
+ * removal round-trips. A Panama layout that only breaks in the native image breaks here. Only a
+ * system with a store runs it.
  *
  * <p>The CLI JSON layer: {@link CliJson} reads record components reflectively, and a record it
  * serializes that is missing from the reflection configuration dies in the native binary with an
@@ -57,18 +62,16 @@ public final class PtySelfTestCommand implements Callable<Integer> {
       System.err.println("json-selftest: FAILED: " + e);
       return 1;
     }
-    if (!System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("linux")) {
-      System.out.println("pty-selftest: skipped (non-Linux)");
-      return 0;
-    }
-    try (var pty = Pty.open(80, 24)) {
-      var child = pty.spawn(List.of("true"), Map.of("TERM", "dumb"), Path.of("/"));
-      pty.resize(100, 40);
-      child.destroyForcibly();
+    try {
+      ptyProbe();
       System.out.println("pty-selftest: ok");
     } catch (Exception e) {
       System.err.println("pty-selftest: FAILED: " + e);
       return 1;
+    }
+    if (!SdNotify.available()) {
+      System.out.println("fdstore-selftest: skipped (no descriptor store on this system)");
+      return 0;
     }
     try {
       fdStoreProbe();
@@ -77,6 +80,53 @@ public final class PtySelfTestCommand implements Callable<Integer> {
     } catch (Exception e) {
       System.err.println("fdstore-selftest: FAILED: " + e);
       return 1;
+    }
+  }
+
+  /**
+   * Spawns {@code sh -c script} on {@code pty} under the shim, its exit file in {@code dir}; once
+   * the child is gone {@code reader} reads to the end of what it left, so a child that never spoke
+   * fails the probe instead of hanging it.
+   */
+  private static Process spawn(Pty pty, Pty reader, Path dir, String script) throws IOException {
+    var argv = new ArrayList<>(PtyHostCommand.shimCommand(dir.resolve("probe.exit")));
+    argv.addAll(List.of("sh", "-c", script));
+    var child = pty.spawn(argv, Map.of("TERM", "dumb"), dir);
+    child.onExit().thenRun(reader::endOnceDrained);
+    return child;
+  }
+
+  /** Reads {@code pty} until {@code marker} has been said, or throws with what was. */
+  private static void readUntil(Pty pty, String marker) throws IOException {
+    var buf = new byte[4096];
+    var seen = new StringBuilder();
+    while (!seen.toString().contains(marker)) {
+      var n = pty.read(buf);
+      if (n < 0) {
+        throw new IllegalStateException("the pty ended before '" + marker + "': " + seen);
+      }
+      seen.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+    }
+  }
+
+  /**
+   * Opens a pty, resizes it once the child is waiting, and reads the new size from the child's own
+   * {@code stty}; the child's exit status comes back through the shim's exit file.
+   */
+  static void ptyProbe() throws Exception {
+    var dir = Files.createTempDirectory("sail-pty");
+    try (var pty = Pty.open(80, 24)) {
+      var child = spawn(pty, pty, dir, "echo waiting; read go; stty size");
+      readUntil(pty, "waiting");
+      pty.resize(100, 40);
+      pty.write("go\n".getBytes(StandardCharsets.UTF_8));
+      readUntil(pty, "40 100");
+      if (child.waitFor() != 0 || !"0".equals(Files.readString(dir.resolve("probe.exit")))) {
+        throw new IllegalStateException("the child did not exit cleanly: " + child.exitValue());
+      }
+    } finally {
+      Files.deleteIfExists(dir.resolve("probe.exit"));
+      Files.deleteIfExists(dir);
     }
   }
 
@@ -95,17 +145,9 @@ public final class PtySelfTestCommand implements Callable<Integer> {
         throw new IllegalStateException("expected one descriptor, got " + stored.fds());
       }
       try (var copy = Pty.adopt(stored.fds().getFirst())) {
-        pty.spawn(List.of("sh", "-c", "echo through-the-store"), Map.of("TERM", "dumb"), dir)
-            .waitFor();
-        var buf = new byte[4096];
-        var seen = new StringBuilder();
-        for (var n = copy.read(buf); n > 0 && !seen.toString().contains("through-the-store"); ) {
-          seen.append(new String(buf, 0, n, StandardCharsets.UTF_8));
-          n = copy.read(buf);
-        }
-        if (!seen.toString().contains("through-the-store")) {
-          throw new IllegalStateException("the stored copy did not carry the output: " + seen);
-        }
+        var child = spawn(pty, copy, dir, "echo through-the-store");
+        readUntil(copy, "through-the-store");
+        child.waitFor();
       }
       store.removeFd("probe");
       var removed = receiver.receive();
@@ -113,6 +155,7 @@ public final class PtySelfTestCommand implements Callable<Integer> {
         throw new IllegalStateException("unexpected removal message: " + removed.text());
       }
     } finally {
+      Files.deleteIfExists(dir.resolve("probe.exit"));
       Files.deleteIfExists(dir.resolve("notify.sock"));
       Files.deleteIfExists(dir);
     }

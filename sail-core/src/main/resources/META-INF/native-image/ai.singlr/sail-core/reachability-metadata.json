@@ -117,6 +117,21 @@
         "returnType": "jint",
         "parameterTypes": [
           "void*",
+          "jint",
+          "jint"
+        ],
+        "options": {
+          "firstVariadicArg": 2
+        }
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": []
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": [
+          "void*",
           "jlong",
           "jint"
         ],

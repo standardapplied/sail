@@ -33,11 +33,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledOnOs;
-import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
-@EnabledOnOs(OS.LINUX)
 class PtySessionHostTest {
 
   @TempDir Path dir;
@@ -725,7 +722,9 @@ class PtySessionHostTest {
   void aTerminalOpensAndAttachesOnlyInAProjectItsPersonHolds() throws Exception {
     var shim =
         new PtySessionHost.Handoff(
-            SdNotify.NONE, Map.of(), exit -> List.of("sh", "-c", "echo up; read a", "--"));
+            SdNotify.NONE,
+            Map.of(),
+            exit -> PtyChildShimTest.shim(exit, "sh", "-c", "echo up; read a", "--"));
     try (var ignored = startHost(PtySessionHost.Limits.DEFAULTS, shim)) {
       unheld.add("beta:mady");
       try (var mady = connect("tok-mady")) {

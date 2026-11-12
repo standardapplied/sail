@@ -18,7 +18,6 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodType;
 import java.lang.invoke.VarHandle;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -27,27 +26,29 @@ import java.util.Map;
  * controlling terminal is the slave side. The JVM cannot {@code fork()}, so the classic {@code
  * forkpty} is replaced by first principles: the master is allocated here via {@code posix_openpt}/
  * {@code grantpt}/{@code unlockpt} (libc through the same Panama discipline as the SQLite layer),
- * and the child is spawned with {@link ProcessBuilder} as {@code setsid sh -c 'exec 0<>$slave 1>&0
- * 2>&0 && exec "$@"'}: {@code setsid} makes it a session leader, and a session leader that opens a
- * terminal it has no controlling terminal for acquires it, which is exactly what {@code forkpty}
- * would have done. The slave is opened by the child alone, never here: this process is itself a
- * session leader under systemd, and a {@link ProcessBuilder} redirect to the slave would make it
- * this process's controlling terminal instead of the child's.
+ * and the child is spawned with {@link ProcessBuilder} as the session shim ({@link PtyChildShim}),
+ * told its terminal in {@link #TERMINAL}; the shim's first act is {@link #claimTerminal}, the half
+ * of {@code forkpty} that runs in the child. The slave is opened by the child alone, never here:
+ * this process is itself a session leader under systemd or launchd, and opening the slave here
+ * would make it this process's controlling terminal instead of the child's.
  *
  * <p>Reads block the calling thread (the session host dedicates a platform gather thread per
  * session — the ghostty drain discipline); a read against a dead child reports end of stream
- * ({@code EIO} on Linux) as {@code -1}, never an exception, so the reaper owns the child's ending.
- * A blocked read polls rather than sleeping in {@code read(2)} forever, so {@link #release()} —
- * which forgets the master without closing it, for a host handing its sessions to its successor —
- * is observed within a poll interval as end of stream. Read and write each allocate their own
- * per-call confined arena, so the two halves — which run on different threads (gather vs. the
- * writer's connection) — share no native buffer and cannot race.
+ * ({@code EIO} on Linux, a zero-length read on macOS) as {@code -1}, never an exception, so the
+ * reaper owns the child's ending. A blocked read polls rather than sleeping in {@code read(2)}
+ * forever, so {@link #release()} — which forgets the master without closing it, for a host handing
+ * its sessions to its successor — is observed within a poll interval as end of stream. Read and
+ * write each allocate their own per-call confined arena, so the two halves — which run on different
+ * threads (gather vs. the writer's connection) — share no native buffer and cannot race.
  *
  * <p>A master may also be {@link #adopt(int) adopted}: a descriptor inherited from a previous host
  * (systemd's file descriptor store hands it back as {@code LISTEN_FDS}) becomes a {@code Pty} over
  * the same kernel terminal, whose child never noticed the host change.
  */
 public final class Pty implements AutoCloseable {
+
+  /** The variable {@link #spawn} names the child's terminal in, for {@link #claimTerminal}. */
+  static final String TERMINAL = "SAIL_PTY_TERMINAL";
 
   private static final int EINTR = 4;
   private static final int EIO = 5;
@@ -81,7 +82,10 @@ public final class Pty implements AutoCloseable {
       MethodHandle read,
       MethodHandle write,
       MethodHandle close,
-      MethodHandle poll) {}
+      MethodHandle poll,
+      MethodHandle setsid,
+      MethodHandle open,
+      MethodHandle dup2) {}
 
   private static final Libc LIBC = loadLibc();
 
@@ -119,7 +123,20 @@ public final class Pty implements AutoCloseable {
                     ValueLayout.JAVA_INT))
             .asType(
                 MethodType.methodType(
-                    int.class, MemorySegment.class, MemorySegment.class, int.class, int.class)));
+                    int.class, MemorySegment.class, MemorySegment.class, int.class, int.class)),
+        Native.downcall("setsid", FunctionDescriptor.of(ValueLayout.JAVA_INT)),
+        Native.downcall(
+            "open",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS,
+                ValueLayout.JAVA_INT,
+                ValueLayout.JAVA_INT),
+            Linker.Option.firstVariadicArg(2)),
+        Native.downcall(
+            "dup2",
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT)));
   }
 
   private static final int MAX_CHUNK = 64 * 1024;
@@ -205,26 +222,60 @@ public final class Pty implements AutoCloseable {
   }
 
   /**
-   * Spawns {@code command} as a session leader with this pty as its controlling terminal. The
-   * caller owns the returned process's ending: waiting, exit codes, and reaping happen there.
+   * Spawns {@code shim}, the session shim's command line ({@link PtyChildShim} and the command it
+   * runs), with this pty named as its terminal: the shim claims it and becomes the session leader
+   * whose controlling terminal it is. What the shim says before it has a terminal goes to this
+   * process's standard error. The caller owns the returned process's ending: waiting, exit codes,
+   * and reaping happen there.
    */
-  public Process spawn(List<String> command, Map<String, String> env, Path cwd) throws IOException {
+  public Process spawn(List<String> shim, Map<String, String> env, Path cwd) throws IOException {
     requireOpen();
-    var full = new ArrayList<String>(command.size() + 5);
-    full.add("setsid");
-    full.add("sh");
-    full.add("-c");
-    full.add("exec 0<>\"$0\" 1>&0 2>&0 && exec \"$@\"");
-    full.add(slavePath);
-    full.addAll(command);
-    var builder = new ProcessBuilder(full);
+    var builder = new ProcessBuilder(shim);
     builder.environment().putAll(env);
+    builder.environment().put(TERMINAL, slavePath);
     builder.directory(cwd.toFile());
     var devNull = new File("/dev/null");
     builder.redirectInput(devNull);
     builder.redirectOutput(devNull);
-    builder.redirectError(devNull);
+    builder.redirectError(ProcessBuilder.Redirect.INHERIT);
     return builder.start();
+  }
+
+  /**
+   * The child's half of {@link #spawn}, the shim's first act: makes this process the leader of a
+   * new session, claims the terminal {@code spawn} named as the session's controlling terminal, and
+   * puts it on standard input, output and error for the command to inherit. The terminal is opened
+   * with {@code O_NOCTTY} and claimed with {@code TIOCSCTTY}, the same two steps on every system,
+   * rather than left to whether an open by a session leader claims it. The claim makes this
+   * process's group the terminal's foreground group, which the command joins.
+   */
+  static void claimTerminal(String terminal) throws IOException {
+    try (var arena = Arena.ofConfined()) {
+      if ((int) LIBC.setsid().invokeExact() < 0) {
+        throw new IOException("setsid failed: the shim already leads a process group.");
+      }
+      var fd =
+          (int)
+              LIBC.open()
+                  .invokeExact(
+                      arena.allocateFrom(terminal), Native.O_RDWR | Native.PLATFORM.oNoctty(), 0);
+      if (fd < 0) {
+        throw new IOException("Could not open the session's terminal " + terminal + ".");
+      }
+      if ((int) LIBC.ioctl().invokeExact(fd, Native.PLATFORM.tiocsctty(), MemorySegment.NULL)
+          != 0) {
+        throw new IOException("TIOCSCTTY failed: " + terminal + " is not this session's to claim.");
+      }
+      for (var stdio = 0; stdio <= 2; stdio++) {
+        if ((int) LIBC.dup2().invokeExact(fd, stdio) < 0) {
+          throw new IOException("Could not put " + terminal + " on descriptor " + stdio + ".");
+        }
+      }
+    } catch (IOException e) {
+      throw e;
+    } catch (Throwable t) {
+      throw new IOException("claiming the terminal " + terminal + " failed", t);
+    }
   }
 
   /**

@@ -119,6 +119,14 @@ public final class SdNotify {
   }
 
   /**
+   * Whether this system has a descriptor store to speak to at all: systemd's, on Linux. launchd
+   * keeps none, and the layouts here are glibc's.
+   */
+  public static boolean available() {
+    return Native.PLATFORM.descriptorStore();
+  }
+
+  /**
    * Pushes {@code fd} into the store under {@code name}; the manager holds its own duplicate. The
    * manager is told not to poll it for hangup ({@code FDPOLL=0}): a child exiting between one
    * host's handoff and its successor's adoption hangs the master up, and the default would drop the

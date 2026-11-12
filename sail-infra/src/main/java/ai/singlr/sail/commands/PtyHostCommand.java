@@ -9,6 +9,7 @@ import ai.singlr.sail.SailVersion;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.pty.PtyAdmission;
+import ai.singlr.sail.pty.PtyChildShim;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
@@ -70,20 +71,14 @@ public final class PtyHostCommand implements Callable<Integer> {
   /**
    * How a session's child is wrapped: the installed binary's {@code _pty-child} in the native
    * image, or the same shim run from this class path when the host is a plain JVM (development, the
-   * integration lanes) — {@code /proc/self/exe} is {@code java} there, not {@code sail}.
+   * integration lanes) — the running executable is {@code java} there, not {@code sail}.
    */
   static List<String> shimCommand(Path exitFile) {
     if (System.getProperty("org.graalvm.nativeimage.imagecode") != null) {
       return List.of(
           SailPaths.binaryPath().toString(), "_pty-child", "--exit", exitFile.toString(), "--");
     }
-    return List.of(
-        Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-        "--enable-native-access=ALL-UNNAMED",
-        "-cp",
-        System.getProperty("java.class.path"),
-        "ai.singlr.sail.pty.PtyChildShim",
-        exitFile.toString());
+    return PtyChildShim.onClassPath(exitFile);
   }
 
   /** Starts a host with no store — the seam the CLI verb tests use. */

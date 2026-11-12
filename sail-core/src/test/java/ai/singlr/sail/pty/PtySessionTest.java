@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -23,11 +24,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledOnOs;
-import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
-@EnabledOnOs(OS.LINUX)
 class PtySessionTest {
 
   @TempDir Path dir;
@@ -114,11 +112,16 @@ class PtySessionTest {
     return new PtySession.Origin(name, "inst-" + name, owner, project, "", List.of("sh"));
   }
 
+  /** {@code sh -c script} under the shim, as the host spawns every session. */
+  private List<String> sh(String script) {
+    return PtyChildShimTest.shim(dir.resolve("t.exit"), "sh", "-c", script);
+  }
+
   private PtySession session(String script) throws IOException {
     return PtySession.start(
         origin("t", "uday", "acme"),
         PtyEvents.NONE,
-        List.of("sh", "-c", script),
+        sh(script),
         Map.of("TERM", "dumb"),
         Path.of("/tmp"),
         dir.resolve("t.ring"),
@@ -181,8 +184,8 @@ class PtySessionTest {
   private PtySession resumed(
       SessionFiles files, Journal journal, String script, boolean withShim, PtyEvents events)
       throws Exception {
-    var command = List.of("sh", "-c", script);
-    var argv = withShim ? PtyChildShimTest.shim(files.exit(), "sh", "-c", script) : command;
+    var exit = withShim ? files.exit() : dir.resolve("unkept.exit");
+    var argv = PtyChildShimTest.shim(exit, "sh", "-c", script);
     var origin = origin("r", "uday", "");
     var pty = Pty.open(80, 24);
     var child = pty.spawn(argv, Map.of("TERM", "dumb"), dir);
@@ -226,7 +229,11 @@ class PtySessionTest {
     var files = SessionFiles.in(dir, "r");
     var journal = RingJournal.open(files.ring(), 64 * 1024);
     var pty = Pty.open(80, 24);
-    var child = pty.spawn(List.of("sh", "-c", "exit 0"), Map.of("TERM", "dumb"), dir);
+    var child =
+        pty.spawn(
+            PtyChildShimTest.shim(dir.resolve("unkept.exit"), "sh", "-c", "exit 0"),
+            Map.of("TERM", "dumb"),
+            dir);
     child.waitFor();
     var stranger = new ProcessBuilder("sleep", "60").start();
     try {
@@ -340,7 +347,7 @@ class PtySessionTest {
         PtySession.start(
             origin("race", "uday", "acme"),
             PtyEvents.NONE,
-            List.of("sh", "-c", "read a"),
+            sh("read a"),
             Map.of("TERM", "dumb"),
             dir,
             files,
@@ -394,6 +401,31 @@ class PtySessionTest {
     assertEquals("exited(0)", session.endedReason());
   }
 
+  /** A session started beside {@code t.ring} that reports its ending to {@code ending}. */
+  private PtySession session(String script, PtyEvents ending, long journalCapacity)
+      throws IOException {
+    return PtySession.start(
+        origin("t", "uday", "acme"),
+        ending,
+        sh(script),
+        Map.of("TERM", "dumb"),
+        Path.of("/tmp"),
+        dir.resolve("t.ring"),
+        journalCapacity,
+        80,
+        24);
+  }
+
+  @Test
+  void aChildsExitEndsItsSessionWithItsStatusWhichTheShimRecords() throws Exception {
+    var ending = new Ending();
+    try (var session = session("exit 7", ending, 64 * 1024)) {
+      assertTrue(ending.await(), "the child's exit ends the session");
+      assertEquals("exited(7)", session.endedReason());
+      assertEquals("7", Files.readString(dir.resolve("t.exit")));
+    }
+  }
+
   @Test
   void aSessionWhoseShellIsGoneWhileAJobHoldsItsTerminalEndsAtItsCloseNotAtTheEscalation()
       throws Exception {
@@ -407,6 +439,21 @@ class PtySessionTest {
       assertEquals("exited(0)", session.endedReason());
     } finally {
       ProcessHandle.of(job).ifPresent(ProcessHandle::destroyForcibly);
+    }
+  }
+
+  @Test
+  void everyByteOfABurstReachesTheRingBeforeTheSessionEnds() throws Exception {
+    var ending = new Ending();
+    var burst = "x".repeat(400_000) + "END";
+    var capacity = 1024 * 1024;
+    try (var session =
+        session("head -c 400000 /dev/zero | tr '\\0' x; printf END", ending, capacity)) {
+      assertTrue(ending.await(), "the child's exit ends the session");
+      assertEquals(burst.length(), session.journaledBytes(), "journaled before the ending");
+    }
+    try (var ring = RingJournal.open(dir.resolve("t.ring"), capacity)) {
+      assertEquals(burst, new String(ring.tail(capacity).bytes(), StandardCharsets.UTF_8));
     }
   }
 
@@ -468,7 +515,7 @@ class PtySessionTest {
         PtySession.start(
             origin("h", "uday", "acme"),
             PtyEvents.NONE,
-            List.of("sh", "-c", "echo ready; read a; echo got:$a"),
+            sh("echo ready; read a; echo got:$a"),
             Map.of("TERM", "dumb"),
             dir,
             files,
@@ -515,9 +562,7 @@ class PtySessionTest {
         PtySession.start(
             origin("stubborn", "uday", "acme"),
             PtyEvents.NONE,
-            List.of(
-                "sh",
-                "-c",
+            sh(
                 "trap '' HUP TERM; read go; echo \"pid=$$;\"; read x; echo boom;"
                     + " while :; do sleep 1; done"),
             Map.of("TERM", "dumb"),
@@ -551,7 +596,7 @@ class PtySessionTest {
         PtySession.start(
             origin("wedge", "uday", "acme"),
             PtyEvents.NONE,
-            List.of("sh", "-c", "read x; echo boom"),
+            sh("read x; echo boom"),
             Map.of("TERM", "dumb"),
             Path.of("/tmp"),
             new FailingJournal(),
@@ -603,7 +648,7 @@ class PtySessionTest {
         PtySession.start(
             origin("yielded", "uday", "acme"),
             recorder,
-            List.of("sh", "-c", "echo up; read a"),
+            sh("echo up; read a"),
             Map.of("TERM", "dumb"),
             Path.of("/tmp"),
             dir.resolve("yielded.ring"),
@@ -670,7 +715,7 @@ class PtySessionTest {
             new PtySession.Origin(
                 "owned", "inst-owned", "mady", "acme", "lounge", List.of("claude")),
             recorder,
-            List.of("sh", "-c", "read a"),
+            sh("read a"),
             Map.of("TERM", "dumb"),
             Path.of("/tmp"),
             dir.resolve("owned.ring"),
@@ -751,10 +796,7 @@ class PtySessionTest {
         PtySession.start(
             origin("big", "uday", "acme"),
             PtyEvents.NONE,
-            List.of(
-                "sh",
-                "-c",
-                "head -c " + payload + " /dev/zero | tr '\\0' x; echo; printf BIG-DONE; read a"),
+            sh("head -c " + payload + " /dev/zero | tr '\\0' x; echo; printf BIG-DONE; read a"),
             Map.of("TERM", "dumb"),
             Path.of("/tmp"),
             dir.resolve("big.ring"),
@@ -861,7 +903,7 @@ class PtySessionTest {
         PtySession.start(
             origin("race", "uday", "acme"),
             events,
-            List.of("sh", "-c", "echo wide-line; read a"),
+            sh("echo wide-line; read a"),
             Map.of("TERM", "dumb"),
             Path.of("/tmp"),
             dir.resolve("race.ring"),
@@ -958,9 +1000,7 @@ class PtySessionTest {
         PtySession.start(
             origin("slow", "uday", "acme"),
             PtyEvents.NONE,
-            List.of(
-                "sh",
-                "-c",
+            sh(
                 "read a; i=0; while [ $i -lt 400 ]; do echo line-$i; i=$((i+1)); done;"
                     + " echo flood-done; read b"),
             Map.of("TERM", "dumb"),
@@ -1035,7 +1075,7 @@ class PtySessionTest {
         PtySession.start(
             origin("brittle", "uday", "acme"),
             brittle,
-            List.of("sh", "-c", "exit 0"),
+            sh("exit 0"),
             Map.of("TERM", "dumb"),
             Path.of("/tmp"),
             dir.resolve("brittle.ring"),
@@ -1071,7 +1111,7 @@ class PtySessionTest {
         PtySession.start(
             origin("hostile", "uday", "acme"),
             hostile,
-            List.of("sh", "-c", "echo up; read a"),
+            sh("echo up; read a"),
             Map.of("TERM", "dumb"),
             Path.of("/tmp"),
             dir.resolve("hostile.ring"),
@@ -1097,9 +1137,7 @@ class PtySessionTest {
         PtySession.start(
             origin("resync-answer", "uday", "acme"),
             PtyEvents.NONE,
-            List.of(
-                "sh",
-                "-c",
+            sh(
                 "read _; i=0; while [ $i -lt 300 ]; do printf '%01000d' $i; i=$((i+1)); done;"
                     + " printf BURST-END; read _"),
             Map.of("TERM", "dumb"),
@@ -1156,10 +1194,7 @@ class PtySessionTest {
         PtySession.start(
             origin("longline", "uday", "acme"),
             PtyEvents.NONE,
-            List.of(
-                "sh",
-                "-c",
-                "read _; head -c 400000 /dev/zero | tr '\\0' x; printf BURST-END; echo; read _"),
+            sh("read _; head -c 400000 /dev/zero | tr '\\0' x; printf BURST-END; echo; read _"),
             Map.of("TERM", "dumb"),
             Path.of("/tmp"),
             dir.resolve("longline.ring"),
@@ -1201,9 +1236,7 @@ class PtySessionTest {
         PtySession.start(
             origin("resync", "uday", "acme"),
             PtyEvents.NONE,
-            List.of(
-                "sh",
-                "-c",
+            sh(
                 "read _; i=0; while [ $i -lt 300 ]; do printf '%01000d' $i; i=$((i+1)); done;"
                     + " printf BURST-END; read _; printf PHASE2; read _"),
             Map.of("TERM", "dumb"),
