@@ -136,8 +136,16 @@ public final class RoleRule {
    * the token names no live session, or this box knows no such person.
    */
   public Optional<Session> session(AuthSessionStore sessions, String token, Actor.Lane lane) {
-    return sessions
-        .validate(token)
+    return session(sessions.validate(token), lane);
+  }
+
+  /**
+   * What the login session {@code validated} stands for on {@code lane}, once its store found it
+   * live: the terminal host finds a ticket's session by its hash, and asks this the same.
+   */
+  public Optional<Session> session(
+      Optional<AuthSessionStore.SessionInfo> validated, Actor.Lane lane) {
+    return validated
         .flatMap(
             session -> Optional.ofNullable(roster).flatMap(known -> known.byId(session.fdeId())))
         .map(fde -> new Session(fde, principal(Credential.person(fde.handle(), lane))));

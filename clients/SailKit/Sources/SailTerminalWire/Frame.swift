@@ -20,6 +20,14 @@ public enum Frame: Equatable, Sendable {
     case kill(session: String)
     /// Ends a session for whatever displaced it; only the host's dispatch authority sends it.
     case yield(session: String, reason: String)
+    /// Asks for a ticket for the holder of `credential` to take `action` on `target`, a project or a
+    /// session, once over the host's TCP listener; the API asks it for a client, which is answered the
+    /// ticket over HTTP.
+    case issueTicket(action: Open<TicketAction>, target: String, credential: String)
+    /// A ticket, presented as the `hello` token of one TCP connection to the host.
+    case ticket(String)
+    /// A ticket request refused: what kind of refusal, and its remedy as words and commands.
+    case ticketRefused(kind: Open<TicketRefusal>, remedy: [RemedyPart])
     case output(lastInputSequence: Int64, bytes: [UInt8])
     /// What follows until ``replayEnd`` is the session's journal replayed; `safe` says whether it
     /// starts on a clean terminal boundary.
@@ -34,6 +42,23 @@ public enum Frame: Equatable, Sendable {
     case sessions(SessionPage)
     case accepted
     case refused(HostRefusal)
+}
+
+/// What a ticket lets its holder do over the host's TCP listener.
+public enum TicketAction: String, CaseIterable, Sendable {
+    /// Open a session in a project, and attach to it.
+    case open
+    /// Attach to a session.
+    case attach
+}
+
+/// What kind of refusal a ticket request met; the API answers each with its own status.
+public enum TicketRefusal: String, CaseIterable, Sendable {
+    case invalid
+    case notFound = "not_found"
+    case forbidden
+    case limited
+    case unavailable
 }
 
 public struct TerminalSize: Equatable, Sendable {

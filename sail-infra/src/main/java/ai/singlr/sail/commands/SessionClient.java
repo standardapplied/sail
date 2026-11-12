@@ -108,6 +108,26 @@ public final class SessionClient implements AutoCloseable {
     expectOk("yield");
   }
 
+  /**
+   * What the host at {@code socket} answers a request for a ticket for the holder of {@code
+   * credential} to take {@code action} on {@code target} over its TCP listener: a {@link
+   * PtyMessage.Ticket} or a {@link PtyMessage.TicketRefused}. The API's door onto the host ({@code
+   * TerminalTickets.Host}): it asks as the box's own process, a blank token, and the credential
+   * rides in the request, which the host resolves itself for that decision alone.
+   */
+  public static PtyMessage ticket(
+      Path socket, String credential, PtyMessage.TicketAction action, String target)
+      throws IOException {
+    try (var client = connect(socket, "")) {
+      PtyWire.write(client.channel, new PtyMessage.IssueTicket(action, target, credential));
+      var reply = PtyWire.read(client.channel);
+      if (!(reply instanceof PtyMessage.Ticket) && !(reply instanceof PtyMessage.TicketRefused)) {
+        throw new IOException("Unexpected host reply to a ticket request: " + reply.getClass());
+      }
+      return reply;
+    }
+  }
+
   /** Sends the attach request and confirms it; frame traffic then belongs to the caller. */
   public SocketChannel attach(String name, boolean write) throws IOException {
     PtyWire.write(channel, new PtyMessage.Attach(name, write));

@@ -163,6 +163,42 @@ class TokenAuthTest {
     assertEquals(client.handle(), box.handle());
   }
 
+  @Test
+  void theCredentialARequestWasAuthenticatedByIsKeptForItAndNoneBeforeIt() throws Exception {
+    var token = tokenStore.create("uday-mac", "admin").token();
+    var auth = new TokenAuth(tokenStore, TestAuth.roles(db));
+    var before = new AtomicReference<String>();
+    var after = new AtomicReference<String>();
+    var http = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    http.createContext(
+        "/",
+        exchange -> {
+          try {
+            ApiAuth.credentialOf(exchange);
+          } catch (IllegalStateException none) {
+            before.set(none.getMessage());
+          }
+          auth.require(exchange);
+          after.set(ApiAuth.credentialOf(exchange));
+          exchange.sendResponseHeaders(204, -1);
+          exchange.close();
+        });
+    http.start();
+    try (var client = HttpClient.newHttpClient()) {
+      var request =
+          HttpRequest.newBuilder(
+                  URI.create("http://127.0.0.1:" + http.getAddress().getPort() + "/"))
+              .header("Authorization", "Bearer " + token)
+              .build();
+      assertEquals(204, client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode());
+    } finally {
+      http.stop(0);
+    }
+
+    assertEquals("No credential was resolved for this request.", before.get());
+    assertEquals(token, after.get());
+  }
+
   /** The principal {@code auth} stamps for a request bearing {@code token}. */
   private static Actor resolved(ApiAuth auth, String token) throws Exception {
     var stamped = new AtomicReference<Actor>();

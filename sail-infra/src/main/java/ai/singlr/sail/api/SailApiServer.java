@@ -5,21 +5,41 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Rebinding;
+import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.store.SpecStore;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.UnaryOperator;
 
 public final class SailApiServer implements AutoCloseable {
 
+  /**
+   * How clients on the box's private network reach it beside loopback: {@code api}, one more
+   * address the same routes, gates and credentials answer at, and {@code terminal}, the ticket door
+   * of the terminal host's TCP listener. {@link #NONE} binds nothing more and offers no ticket.
+   */
+  public record PrivateNetwork(
+      Optional<InetSocketAddress> api, Optional<TerminalTickets> terminal) {
+    public static final PrivateNetwork NONE =
+        new PrivateNetwork(Optional.empty(), Optional.empty());
+  }
+
   private final HttpServer server;
+  private final Optional<Rebinding> privateListener;
+  private final Optional<PeriodicPass> rebinding;
+  private final List<Mount> mounts = new ArrayList<>();
+  private volatile HttpServer privateServer;
+  private final Optional<Path> listening;
   private final ExecutorService executor;
   private final EventBus eventBus;
   private final AuditPersister auditPersister;
@@ -30,6 +50,9 @@ public final class SailApiServer implements AutoCloseable {
   private final SseHandler sseHandler;
   private final LocalApiSocket socketListener;
   private final List<RouteTable> tables = new ArrayList<>();
+
+  /** A context every listener serves: its path, and its handler. */
+  private record Mount(String path, HttpHandler handler) {}
 
   /**
    * Construct with {@code auth}. When {@code eventBus} is non-null, the persister is registered as
@@ -110,13 +133,17 @@ public final class SailApiServer implements AutoCloseable {
         reviewController,
         new RateLimitGate(),
         project -> null,
-        SseHandler.RoomTurns.NONE);
+        SseHandler.RoomTurns.NONE,
+        PrivateNetwork.NONE);
   }
 
   /**
    * The constructor the server runs: {@code rateLimits} gates every context served over TCP (a test
-   * pins a tiny budget), {@code notifications} says what each project wants sent by webhook, and
-   * {@code turns} is what a room's stream is first told.
+   * pins a tiny budget), {@code notifications} says what each project wants sent by webhook, {@code
+   * turns} is what a room's stream is first told, and {@code network} where else the API listens
+   * and how a terminal ticket is issued. Every context is served on loopback and, when {@code
+   * network} names one, on the private address, which is bound once it can be ({@link #tick}):
+   * loopback and the socket never wait on it.
    */
   public SailApiServer(
       String host,
@@ -131,7 +158,8 @@ public final class SailApiServer implements AutoCloseable {
       ReviewPipelineController reviewController,
       RateLimitGate rateLimits,
       ProjectNotificationsResolver notifications,
-      SseHandler.RoomTurns turns)
+      SseHandler.RoomTurns turns,
+      PrivateNetwork network)
       throws IOException {
     this.eventBus = eventBus;
     this.auditPersister = auditSubscriber instanceof AuditPersister ap ? ap : null;
@@ -146,10 +174,25 @@ public final class SailApiServer implements AutoCloseable {
             ? eventBus.subscribe(new SpecLifecycleReactor(specStore))
             : null;
     server = HttpServer.create(new InetSocketAddress(host, port), 32);
+    listening = Optional.ofNullable(socketPath).map(SailApiServer::listeningOf);
+    privateListener =
+        network
+            .api()
+            .map(
+                address ->
+                    new Rebinding(
+                        "The API's private address "
+                            + ListenConfig.hostPort(address)
+                            + " ('"
+                            + ListenConfig.API
+                            + "')",
+                        () -> listenPrivately(address),
+                        said -> System.err.println("  [api-listen] " + said)));
+    rebinding = privateListener.map(listener -> new PeriodicPass("api-listen", this::rebind));
     executor = Executors.newVirtualThreadPerTaskExecutor();
     serve(
         "/",
-        new ApiRouter(operations, auth, rateLimits, new AgentLogStreamer(auth)),
+        new ApiRouter(operations, auth, rateLimits, new AgentLogStreamer(auth), network.terminal()),
         UnaryOperator.identity());
     if (passkeyHandler != null) {
       serve("/v1/auth", passkeyHandler, rateLimits::wrap);
@@ -168,16 +211,58 @@ public final class SailApiServer implements AutoCloseable {
     server.setExecutor(executor);
   }
 
+  /** Binds the private address and serves there every context loopback serves. */
+  private void listenPrivately(InetSocketAddress address) throws IOException {
+    var listener = HttpServer.create(address, 32);
+    for (var each : mounts) {
+      mount(listener, each.path(), each.handler());
+    }
+    listener.setExecutor(executor);
+    listener.start();
+    privateServer = listener;
+    if (listening.isPresent()) {
+      ListenConfig.say(listening.get(), listener.getAddress());
+    }
+  }
+
+  /**
+   * Where the server whose socket is {@code socket} says what its private address is bound to,
+   * while it is: the one account of what the running API listens on, which {@code sail host status}
+   * reads.
+   */
+  public static Path listeningOf(Path socket) {
+    return socket.resolveSibling("api.listening");
+  }
+
+  /**
+   * One pass at {@code nowNanos}: binds the private address when it is not yet bound and its
+   * backoff has passed. A timer drives it each second; tests drive it with synthetic time.
+   */
+  public void tick(long nowNanos) {
+    privateListener.ifPresent(listener -> listener.tick(nowNanos));
+  }
+
+  private void rebind() {
+    tick(System.nanoTime());
+  }
+
   /**
    * Serves {@code table} at {@code path}, through {@code limit}: every context this server serves
    * is a route table, so every path it answers declares its gates.
    */
   private <T extends HttpHandler & RouteTable> void serve(
       String path, T table, UnaryOperator<HttpHandler> limit) {
-    PrivateAttributes.context(server, path, limit.apply(table));
+    var handler = limit.apply(table);
+    mount(server, path, handler);
+    mounts.add(new Mount(path, handler));
     if (!tables.contains(table)) {
       tables.add(table);
     }
+  }
+
+  /** Creates {@code path} on {@code listener}: the one place a context of this server is made. */
+  private static void mount(HttpServer listener, String path, HttpHandler handler) {
+    PrivateAttributes.context(listener, path, handler);
   }
 
   /**
@@ -190,6 +275,8 @@ public final class SailApiServer implements AutoCloseable {
 
   public void start() throws IOException {
     server.start();
+    rebind();
+    rebinding.ifPresent(pass -> pass.start(Duration.ofSeconds(1)));
     if (socketListener != null) {
       socketListener.start();
     }
@@ -197,6 +284,11 @@ public final class SailApiServer implements AutoCloseable {
 
   public int port() {
     return server.getAddress().getPort();
+  }
+
+  /** The private address the API listens on beside loopback, when it does. */
+  public Optional<InetSocketAddress> privateAddress() {
+    return Optional.ofNullable(privateServer).map(HttpServer::getAddress);
   }
 
   /** Returns the event bus, or {@code null} when the server was constructed without one. */
@@ -239,7 +331,12 @@ public final class SailApiServer implements AutoCloseable {
     if (eventBus != null) {
       eventBus.close();
     }
+    rebinding.ifPresent(PeriodicPass::close);
     server.stop(0);
+    if (privateServer != null) {
+      privateServer.stop(0);
+    }
+    listening.ifPresent(ListenConfig::unsay);
     executor.close();
   }
 }

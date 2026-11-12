@@ -52,6 +52,7 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -72,6 +73,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -175,6 +177,13 @@ class ClientGoldensTest {
       box.record(http, "spec", "GET", "/v1/specs/" + SPEC, uday, null);
       box.record(http, "spec-bare", "GET", "/v1/specs/" + BARE_SPEC, uday, null);
       box.record(http, "events-recent", "GET", "/v1/events/recent?limit=3", uday, null);
+      box.record(
+          http,
+          "terminal-ticket",
+          "POST",
+          "/v1/terminal/tickets",
+          uday,
+          Map.of("action", "open", "project", PROJECT));
 
       box.record(http, "refusal-read-only-credential", "POST", messages(), vik, plain("hello"));
       box.record(http, "refusal-room-not-found", "GET", "/v1/rooms/nowhere", uday, null);
@@ -399,6 +408,11 @@ class ClientGoldensTest {
         new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT),
         new PtyMessage.Kill("lounge"),
         new PtyMessage.Yield("lounge", "a dispatch took the repos"),
+        new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, PROJECT, "sail_uday"),
+        new PtyMessage.Ticket("tkt_harbor"),
+        new PtyMessage.TicketRefused(
+            PtyMessage.TicketRefusal.NOT_FOUND,
+            Remedy.of("Project 'harbor' is not in the catalog. Run '", Remedy.sail("sync"), "'.")),
         new PtyMessage.Output(42, "héllo ✅\u001b[0m\r\n".getBytes(StandardCharsets.UTF_8)),
         new PtyMessage.ReplayBegin(true),
         new PtyMessage.ReplayEnd(),
@@ -506,7 +520,15 @@ class ClientGoldensTest {
       PrivateAttributes.context(
           server,
           "/",
-          new ApiRouter(operations, auth, new RateLimitGate(), new AgentLogStreamer(auth)));
+          new ApiRouter(
+              operations,
+              auth,
+              new RateLimitGate(),
+              new AgentLogStreamer(auth),
+              Optional.of(
+                  new TerminalTickets(
+                      (credential, action, target) -> new PtyMessage.Ticket("tkt_" + target),
+                      new InetSocketAddress(InetAddress.ofLiteral("100.64.0.7"), 7072)))));
       server.createContext(
           "/v1/events/stream",
           new SseHandler(bus, auth, operations.liveMembers()::turnState, STREAMS, streamClock));

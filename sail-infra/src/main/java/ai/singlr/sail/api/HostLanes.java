@@ -320,6 +320,16 @@ final class HostLanes {
       return new HostAccess(db, roles).identity(token);
     }
 
+    @Override
+    public PtyIdentity.Person holder(String credentialHash) throws IOException {
+      return new HostAccess(db, roles).holder(credentialHash);
+    }
+
+    @Override
+    public void admitBox(PtyIdentity.Person who) throws IOException {
+      new HostAccess(db, roles).box(who);
+    }
+
     /**
      * Admits {@code identity} into {@code project} when it holds the project on this box ({@link
      * ProjectGate#readable}): the catalog holds it and its person's scope admits it, whatever their

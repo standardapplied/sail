@@ -57,6 +57,7 @@ public final class SessionAwareAuth implements ApiAuth {
     var actor = session.principal().orElseThrow(SessionAwareAuth::invalid);
     exchange.setAttribute("token.name", actor.handle());
     exchange.setAttribute(ApiAuth.ACTOR, actor);
+    exchange.setAttribute(ApiAuth.CREDENTIAL, token);
     if (fde.displayName() != null) {
       exchange.setAttribute("token.displayName", fde.displayName());
     }

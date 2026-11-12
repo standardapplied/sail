@@ -5,17 +5,30 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.SailVersion;
+import ai.singlr.sail.common.Secrets;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.pty.Pty;
+import ai.singlr.sail.pty.PtyAdmission;
+import ai.singlr.sail.pty.PtyEvents;
+import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyMessage;
+import ai.singlr.sail.pty.PtySessionHost;
+import ai.singlr.sail.pty.PtyWire;
 import ai.singlr.sail.pty.SdNotify;
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -38,6 +51,11 @@ import picocli.CommandLine.Command;
  * removal round-trips. A Panama layout that only breaks in the native image breaks here. Only a
  * system with a store runs it.
  *
+ * <p>The terminal's TCP door: a host listening on loopback issues a ticket on its unix socket,
+ * which is presented over TCP, opens a session and has a line echoed back. The ticketed connection
+ * sets keepalive's idle, interval and count, {@code jdk.net} options backed by native code that
+ * only a native image can fail to link.
+ *
  * <p>The CLI JSON layer: {@link CliJson} reads record components reflectively, and a record it
  * serializes that is missing from the reflection configuration dies in the native binary with an
  * unsupported-feature error (the {@code sail session ls --json} field failure). Every record a
@@ -45,7 +63,7 @@ import picocli.CommandLine.Command;
  */
 @Command(
     name = "_pty-selftest",
-    description = "Internal: verify the pty FFM layer and CLI JSON reflection.",
+    description = "Internal: verify the pty FFM layer, the TCP door and CLI JSON reflection.",
     hidden = true)
 public final class PtySelfTestCommand implements Callable<Integer> {
 
@@ -74,6 +92,13 @@ public final class PtySelfTestCommand implements Callable<Integer> {
       System.out.println("pty-selftest: ok");
     } catch (Exception e) {
       System.err.println("pty-selftest: FAILED: " + e);
+      return 1;
+    }
+    try {
+      tcpProbe();
+      System.out.println("tcp-selftest: ok");
+    } catch (Throwable e) {
+      System.err.println("tcp-selftest: FAILED: " + e);
       return 1;
     }
     if (!SdNotify.available()) {
@@ -172,6 +197,109 @@ public final class PtySelfTestCommand implements Callable<Integer> {
     } finally {
       Files.deleteIfExists(dir.resolve("probe.exit"));
       Files.deleteIfExists(dir);
+    }
+  }
+
+  /**
+   * Starts a host whose TCP door listens on loopback, asks it for a ticket on its unix socket as
+   * this box's own process, presents the ticket over TCP, opens a session and reads back a line
+   * typed into it. The session runs {@code cat} under this binary's shim, in place of a project
+   * container this check has none of; its person and admission are this check's own.
+   */
+  static void tcpProbe() throws Exception {
+    var dir = Files.createTempDirectory("sail-tcp");
+    var probe = new PtyIdentity.Person(Actor.system());
+    var credential = "selftest-credential";
+    var admitAll =
+        new PtyAdmission() {
+          @Override
+          public void box(PtyIdentity.Person who) {}
+
+          @Override
+          public void project(String project, PtyIdentity.Person who) {}
+
+          @Override
+          public void room(String room, String project, PtyIdentity.Person who) {}
+        };
+    var socket = dir.resolve("pty.sock");
+    try (var host =
+        new PtySessionHost(
+            socket,
+            dir.resolve("sessions"),
+            64 * 1024,
+            token -> probe,
+            admitAll,
+            PtyEvents.NONE,
+            SailVersion.version(),
+            new PtySessionHost.Handoff(
+                SdNotify.NONE,
+                Map.of(),
+                exit -> {
+                  var argv = new ArrayList<>(PtyHostCommand.shimCommand(exit));
+                  argv.addAll(List.of("sh", "-c", "exec cat", "selftest"));
+                  return argv;
+                }),
+            new PtySessionHost.Network(
+                Optional.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0)),
+                System::nanoTime,
+                hash -> {
+                  if (!Secrets.hash(credential).equals(hash)) {
+                    throw new IOException("not the selftest's credential");
+                  }
+                  return probe;
+                }))) {
+      host.start();
+      if (!(SessionClient.ticket(socket, credential, PtyMessage.TicketAction.OPEN, "selftest")
+          instanceof PtyMessage.Ticket(var ticket))) {
+        throw new IllegalStateException("the host issued no ticket");
+      }
+      try (var tcp = SocketChannel.open(host.tcpAddress().orElseThrow())) {
+        var deadline =
+            CompletableFuture.runAsync(
+                () -> closeQuietly(tcp),
+                CompletableFuture.delayedExecutor(PROBE_STEP.toMillis(), TimeUnit.MILLISECONDS));
+        try {
+          PtyWire.handshake(tcp, tcp);
+          PtyWire.write(tcp, new PtyMessage.Hello(ticket));
+          expect(PtyMessage.Welcome.class, PtyWire.read(tcp));
+          PtyWire.write(
+              tcp,
+              new PtyMessage.Create("selftest", List.of(), dir.toString(), "selftest", "", 80, 24));
+          expect(PtyMessage.Ok.class, PtyWire.read(tcp));
+          PtyWire.write(tcp, new PtyMessage.Attach("selftest", true));
+          expect(PtyMessage.Ok.class, PtyWire.read(tcp));
+          PtyWire.write(
+              tcp, new PtyMessage.Input(1, "over-tcp\n".getBytes(StandardCharsets.UTF_8)));
+          var said = new StringBuilder();
+          while (!said.toString().contains("over-tcp")) {
+            if (PtyWire.read(tcp) instanceof PtyMessage.Output(var seq, var bytes)) {
+              said.append(new String(bytes, StandardCharsets.UTF_8));
+            }
+          }
+        } finally {
+          deadline.cancel(false);
+        }
+      }
+    } finally {
+      try (var left = Files.walk(dir)) {
+        for (var path : left.sorted(Comparator.reverseOrder()).toList()) {
+          Files.deleteIfExists(path);
+        }
+      }
+    }
+  }
+
+  private static void expect(Class<? extends PtyMessage> wanted, PtyMessage got) {
+    if (!wanted.isInstance(got)) {
+      throw new IllegalStateException("expected " + wanted.getSimpleName() + ", got " + got);
+    }
+  }
+
+  private static void closeQuietly(SocketChannel channel) {
+    try {
+      channel.close();
+    } catch (IOException ignored) {
+      var unused = ignored;
     }
   }
 

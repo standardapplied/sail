@@ -1,0 +1,19 @@
+{
+  "request": {
+    "body": {
+      "action": "open",
+      "project": "harbor"
+    },
+    "method": "POST",
+    "path": "/v1/terminal/tickets"
+  },
+  "response": {
+    "body": {
+      "address": "100.64.0.7:7072",
+      "expires_at": "2026-11-11T09:00:30.656Z",
+      "schema_version": 1,
+      "ticket": "tkt_harbor"
+    },
+    "status": 201
+  }
+}

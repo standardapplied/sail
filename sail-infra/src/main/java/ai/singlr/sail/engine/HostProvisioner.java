@@ -95,7 +95,8 @@ public final class HostProvisioner {
               kept.webauthn(),
               kept.sync(),
               kept.limits(),
-              kept.retention());
+              kept.retention(),
+              kept.listen());
       writeHostYaml(hostYaml, hostYamlPath);
       return hostYaml;
     }

@@ -18,6 +18,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class ApiRouterRateLimitTest {
@@ -48,7 +49,11 @@ class ApiRouterRateLimitTest {
   private ApiRouter router() {
     var auth = new FixedTokenTestAuth("token");
     return new ApiRouter(
-        ops, auth, new RateLimitGate(new RateLimiter(1, 0d, () -> 0L)), new AgentLogStreamer(auth));
+        ops,
+        auth,
+        new RateLimitGate(new RateLimiter(1, 0d, () -> 0L)),
+        new AgentLogStreamer(auth),
+        Optional.empty());
   }
 
   private static HttpExchange exchange(String method, String path) {

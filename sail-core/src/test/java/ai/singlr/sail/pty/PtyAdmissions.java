@@ -17,6 +17,9 @@ public final class PtyAdmissions {
   public static final PtyAdmission NONE =
       new PtyAdmission() {
         @Override
+        public void box(PtyIdentity.Person who) {}
+
+        @Override
         public void project(String project, PtyIdentity.Person who) throws IOException {
           throw new IOException("This host keeps no projects, so no session can be opened in one.");
         }

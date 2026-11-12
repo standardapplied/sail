@@ -5,6 +5,9 @@
 
 package ai.singlr.sail.common;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.HexFormat;
 
@@ -29,6 +32,20 @@ public final class Secrets {
   /** A {@code <prefix>_<hex>} secret over {@code bytes} random bytes. */
   public static String mint(String prefix, int bytes) {
     return prefix + "_" + hex(bytes);
+  }
+
+  /**
+   * The SHA-256 of {@code secret} in hex: the one form every store keeps a bearer secret in, and
+   * the terminal host names a ticket's credential by, so the secret itself is kept nowhere.
+   */
+  public static String hash(String secret) {
+    try {
+      return HexFormat.of()
+          .formatHex(
+              MessageDigest.getInstance("SHA-256").digest(secret.getBytes(StandardCharsets.UTF_8)));
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 not available", e);
+    }
   }
 
   /** Hex of {@code bytes} random bytes, unprefixed — for values that carry their own framing. */

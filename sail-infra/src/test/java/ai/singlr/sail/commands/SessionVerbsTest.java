@@ -27,6 +27,9 @@ class SessionVerbsTest {
   private static final PtyAdmission ROOMS =
       new PtyAdmission() {
         @Override
+        public void box(PtyIdentity.Person who) {}
+
+        @Override
         public void project(String project, PtyIdentity.Person who) {}
 
         @Override
