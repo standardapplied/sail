@@ -61,7 +61,9 @@ Usage:
   ci/fleet storage RUN           client, a dir box running acme, adds a ZFS pool in a 20 GiB file: Incus has
                                 it beside devpool, acme and the base profile stay on devpool, a copy of a
                                 container's snapshot on it is a clone (zfs get origin), and the ZFS cache
-                                cap holds across a reboot; observer, left on dir, is unchanged
+                                cap holds across a reboot (boot id changed); client's root disk and root
+                                partition are refused even with --force-wipe, and its ext4 scratch disk
+                                only with it; observer, left on dir, is unchanged
   ci/fleet rebuilt RUN VERSION  main is copied by the README's backup line, takes a spec, and is lost; client
                                 writes while it is gone; a new main installs VERSION and inits empty, which
                                 observer refuses as another org; the copy goes in place, every node re-pins
@@ -123,9 +125,11 @@ internal_ip() {
 }
 
 create_vm() {
+  local scratch=()
+  [[ $2 == client ]] && scratch=(--create-disk "size=10GB,type=pd-balanced,auto-delete=yes,device-name=scratch")
   gc compute instances create "$(vm "$1" "$2")" --zone "$ZONE" --machine-type "$MACHINE" \
     --image-family ubuntu-2404-lts-amd64 --image-project ubuntu-os-cloud \
-    --boot-disk-size 50GB --boot-disk-type pd-balanced \
+    --boot-disk-size 50GB --boot-disk-type pd-balanced "${scratch[@]}" \
     --provisioning-model STANDARD --instance-termination-action DELETE --max-run-duration "$MAX_RUN" \
     --labels "purpose=sail-fleet,run=$1,box=$2" > /dev/null
 }
@@ -959,9 +963,28 @@ capped_on() {
 }
 
 reboots() {
+  local before after
+  before=$(on "$1" "$2" "cat /proc/sys/kernel/random/boot_id")
   on "$1" "$2" "sudo systemctl reboot" || true
   sleep 20
-  answers_ssh "$1" "$2"
+  answers_ssh "$1" "$2" || return 1
+  after=$(on "$1" "$2" "cat /proc/sys/kernel/random/boot_id")
+  echo "boot id $before, then $after"
+  [[ -n $before && -n $after && $before != "$after" ]]
+}
+
+root_disk() {
+  on "$1" "$2" 'echo /dev/$(lsblk -no PKNAME "$(findmnt -n -o SOURCE /)")'
+}
+
+root_partition() {
+  on "$1" "$2" 'findmnt -n -o SOURCE /'
+}
+
+refuses_to_wipe() {
+  local run=$1 box=$2 device=$3
+  refused "$run" "$box" "$device is refused, even with --force-wipe" \
+    "sudo sail host init --storage zfs --pool wiped --disk $device --force-wipe $device --yes"
 }
 
 uncapped_on() {
@@ -971,6 +994,17 @@ uncapped_on() {
 storage() {
   local run=${1:-}
   [[ -n $run ]] || usage
+  local scratch=/dev/disk/by-id/google-scratch disk partition
+  disk=$(root_disk "$run" client)
+  partition=$(root_partition "$run" client)
+  check "$run" "client's root disk $disk is refused for a pool, even named twice" refuses_to_wipe "$run" client "$disk"
+  check "$run" "client's root partition $partition is refused for a pool, even named twice" refuses_to_wipe "$run" client "$partition"
+  check "$run" "client's scratch disk is given an ext4 filesystem" on "$run" client "sudo mkfs.ext4 -qF $scratch"
+  check "$run" "the scratch disk holding ext4 is refused without the force flag, naming it" \
+    refused "$run" client "holds ext4" "sudo sail host init --storage zfs --pool scratch --disk $scratch --yes"
+  check "$run" "named again with --force-wipe, the scratch disk becomes a zfs pool" \
+    allowed "$run" client "sudo sail host init --storage zfs --pool scratch --disk $scratch --force-wipe $scratch --yes && sudo incus storage list --format csv | grep -q '^scratch,zfs,'"
+  check "$run" "the scratch pool goes" on "$run" client "sudo incus storage delete scratch"
   check "$run" "client, a dir box running acme, adds a ZFS pool in a file" \
     allowed "$run" client "sudo sail host init --storage zfs --pool-file-size 20GiB --pool tank --yes"
   check "$run" "client's Incus has tank as zfs beside devpool as dir" pools_on "$run" client "devpool:dir tank:zfs"
