@@ -116,7 +116,7 @@ import Testing
         for chunk in UInt8(1) ... 5 {
             backlog.receive([chunk])
         }
-        #expect(ended.withLock(\.self) == 1)
+        #expect(ended.withLock { $0 } == 1)
         var held: [[UInt8]] = []
         await #expect(throws: SailError.unreachable("the stream's reader fell 3 chunks behind")) {
             for try await chunk in body {

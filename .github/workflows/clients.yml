@@ -1,34 +1,41 @@
 name: Clients
 
 on:
-  push:
-    paths:
-      - "clients/**"
-      - "sail-infra/src/test/java/ai/singlr/sail/api/ClientGoldensTest.java"
-      - ".github/workflows/clients.yml"
   pull_request:
-    paths:
-      - "clients/**"
-      - "sail-infra/src/test/java/ai/singlr/sail/api/ClientGoldensTest.java"
-      - ".github/workflows/clients.yml"
+  push:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 concurrency:
-  group: clients-${{ github.ref }}
+  group: clients-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   sailkit:
-    name: SailKit on Linux
-    runs-on: ubuntu-24.04
+    name: SailKit on ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            runner: ubuntu-24.04
+          - name: macOS
+            runner: macos-15
+            xcode: /Applications/Xcode_26.3.app
     defaults:
       run:
         working-directory: clients/SailKit
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Xcode
+        if: matrix.xcode
+        run: sudo xcode-select --switch ${{ matrix.xcode }}
 
       - name: Swift
         run: swift --version

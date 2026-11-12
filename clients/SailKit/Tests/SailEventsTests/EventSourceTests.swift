@@ -241,7 +241,7 @@ actor ScriptedStreams: Transport {
 
     /// How many chunks readers have taken from the bodies this server answered with.
     nonisolated var pulled: Int {
-        pulls.withLock(\.self)
+        pulls.withLock { $0 }
     }
 
     func send(_ request: HTTPRequest) throws(SailError) -> HTTPResponse {
