@@ -80,10 +80,12 @@ public final class Workspaces {
   /**
    * What makes a fresh clone a workspace of its own, run as root with the project ({@code $1}), the
    * workspace ({@code $2}) and each repository's path and base branch after them, none of them ever
-   * part of the text: a machine-id and SSH host keys of its own (a clone has the template's), the
-   * project's name as its hostname (which the in-container helpers read the project from; Incus
-   * rewrote it to the instance's name on the copy), every repository fetched and switched to the
-   * workspace's branch (the remote's when it has one, else a new one from the base), and the bus.
+   * part of the text: a machine-id and SSH host keys of its own (a clone has the template's, and
+   * sshd is restarted onto the new keys once systemd answers, which it does not yet when {@code
+   * incus start} returns), the project's name as its hostname (which the in-container helpers read
+   * the project from; Incus rewrote it to the instance's name on the copy), every repository
+   * fetched and switched to the workspace's branch (the remote's when it has one, else a new one
+   * from the base), and the bus.
    */
   static final String PREPARE =
       """
@@ -95,6 +97,7 @@ public final class Workspaces {
       if [ -e /var/lib/dbus/machine-id ]; then ln -sf /etc/machine-id /var/lib/dbus/machine-id; fi
       rm -f /etc/ssh/ssh_host_*
       ssh-keygen -A >/dev/null
+      for _ in $(seq 1 300); do systemctl show --property=Version >/dev/null 2>&1 && break; sleep 0.1; done
       systemctl try-restart ssh.service
       printf '%s\\n' "$project" > /etc/hostname
       hostname "$project"

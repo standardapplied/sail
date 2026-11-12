@@ -1010,6 +1010,7 @@ class WorkspacesTest {
         if [ -e /var/lib/dbus/machine-id ]; then ln -sf /etc/machine-id /var/lib/dbus/machine-id; fi
         rm -f /etc/ssh/ssh_host_*
         ssh-keygen -A >/dev/null
+        for _ in $(seq 1 300); do systemctl show --property=Version >/dev/null 2>&1 && break; sleep 0.1; done
         systemctl try-restart ssh.service
         printf '%s\\n' "$project" > /etc/hostname
         hostname "$project"
