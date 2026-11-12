@@ -58,3 +58,9 @@ Hand-written (layouts no machine at hand has), in the call's format:
   path (sdc, the same serial and WWN as sda, its sdc1 the root's ext4), a bcache disk built on
   sdb, and partition types lsblk may print: none, an EFI type in capitals, XBOOTLDR, and on MBR
   disks 0xef, 0xea, 0x83 and the extended 0x5, 0xf and 0x85, and a disk with an empty GPT
+- handwritten-review4-layouts.lsblk.json   review 4's probes (its layout, extended): beside a root
+  partition a Microsoft Reserved, a PReP boot and a never-formatted Linux swap partition, data
+  partitions the listings make members of a RAID, an LVM1 group, bcache, ceph or an exported
+  pool, a disk whose one data partition belongs to such a pool, a RAM disk and an eMMC boot area,
+  and a GPT disk with a ZFS-typed partition (its GUID in capitals) and an MBR disk with 0xbf and
+  0x83 partitions

@@ -476,6 +476,14 @@ class PoolDevicesTest {
   }
 
   @Test
+  void aPoolMemberOnlyLsblkShowsIsRefusedWithNoErase() {
+    assertEquals(
+        "/dev/sdd1 is refused: /dev/sdd1 is a device of a zpool, which is not imported: import it"
+            + " with sudo zpool import, or clear it yourself with sudo zpool labelclear /dev/sdd1.",
+        refusal("gcp2/a-layout-final.lsblk.json", "/dev/sdd1"));
+  }
+
+  @Test
   void aMemberOfAnythingIsRefusedWithNoErase() {
     for (var listing :
         List.of(
@@ -517,6 +525,24 @@ class PoolDevicesTest {
     for (var partition : List.of("/dev/sdc1", "/dev/sdd1", "/dev/sdd2")) {
       assertEquals(partition, devices(names(new Box(PROBES)).shell()).cleared(partition).path());
     }
+  }
+
+  @Test
+  void aDiskIsRefusedWhileAProcessHasOneOfItsPartitionsOpen() {
+    assertEquals(
+        "/dev/sdb is refused: process 5 (qemu-system-x86) has /dev/sdb1 open.",
+        refusal(names(new Box(PROBES)).open(5, "qemu-system-x86", "/dev/sdb1"), "/dev/sdb"));
+  }
+
+  @Test
+  void aWalkOfTheOpenFilesThatFailsRefusesTheDevice() {
+    var shell =
+        gcp(BLANK).shell(new ScriptedShellExecutor().onFail("/proc/[0-9]*", "bash: no /proc"));
+
+    var failed = assertThrows(IOException.class, () -> devices(shell).cleared("/dev/sdb"));
+
+    assertEquals(
+        "Cannot read which processes have devices open: bash: no /proc", failed.getMessage());
   }
 
   @Test
