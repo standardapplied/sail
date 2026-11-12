@@ -2613,7 +2613,7 @@ serves nothing before a `Hello` whose token is a ticket it issued. Until then it
 bytes, closes the connection 5 s after its connect (`PtySessionHost.tick`, each second), holds at
 most 8 such connections for one peer (an IPv6 peer counted by its /64, since a host chooses its
 addresses from one) and all of them in a pool of a quarter of `Limits.connections()`, whose oldest
-is closed for a newcomer, so a peer with many addresses never fills the door and a ticketed client
+(the first to connect: each is taken into the pool on the accept thread) is closed for a newcomer, so a peer with many addresses never fills the door and a ticketed client
 always has room; the door serves `Limits.connections()` in all, apart from the unix socket's, and
 closes anything but a `Hello` unanswered. Refused connections are counted by why and logged once a
 tick, never once each. An accept that fails while the listener stays bound (out of descriptors) is
