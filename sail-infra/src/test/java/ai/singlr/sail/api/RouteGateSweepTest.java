@@ -165,6 +165,7 @@ class RouteGateSweepTest {
               "* /v1/projects/{project}/agent/{sub}/{rest...} serves nothing",
               "GET /v1/projects/{project}/connect reads in scope",
               "GET /v1/projects/{project}/snapshots reads in scope",
+              "GET /v1/projects/{project}/workspaces reads in scope",
               "DELETE /v1/projects/{project}/snapshots/{label} decides RESTORE",
               "POST /v1/projects/{project}/snapshots/{label}/restore decides RESTORE",
               "GET /v1/projects/{project}/files reads in scope",

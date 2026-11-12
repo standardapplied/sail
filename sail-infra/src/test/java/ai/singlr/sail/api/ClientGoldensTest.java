@@ -181,6 +181,7 @@ class ClientGoldensTest {
       box.record(
           http, "specs-measures", "GET", "/v1/specs:measures?project=" + PROJECT, uday, null);
       box.record(http, "events-recent", "GET", "/v1/events/recent?limit=3", uday, null);
+      box.record(http, "workspaces", "GET", "/v1/projects/" + PROJECT + "/workspaces", uday, null);
       box.record(
           http,
           "terminal-ticket",
@@ -502,7 +503,8 @@ class ClientGoldensTest {
       this.operations =
           OperationsFactory.create(
                   db,
-                  new ScriptedShellExecutor(new ShellExec.Result(0, "[]", "")),
+                  new ScriptedShellExecutor(new ShellExec.Result(0, "[]", ""))
+                      .onOk("incus storage list", "[{\"name\": \"tank\", \"driver\": \"zfs\"}]"),
                   bus,
                   null,
                   SyncScheduler.disabled(),

@@ -20,6 +20,15 @@ import org.junit.jupiter.api.Test;
 class GitCredentialsTest {
 
   @Test
+  void aTokenGivenServesEveryHostAndNoneAsksNoOne() {
+    var repos = List.of(new ProjectDefinition.Repo("https://git.example.com/a/b.git", "b", null));
+
+    assertEquals(Map.of("*", "tok"), GitCredentials.known(repos, "tok"));
+    assertEquals(Map.of(), GitCredentials.known(repos, null));
+    assertEquals(Map.of(), GitCredentials.known(null, " "));
+  }
+
+  @Test
   void buildCredentialStoreEmptyWhenNoRepos() {
     var creds = GitCredentials.buildCredentialStore(Map.of("*", "tok123"), null);
     assertEquals("", creds);

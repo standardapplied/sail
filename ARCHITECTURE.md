@@ -1096,8 +1096,8 @@ never with `-f`: Sail never passes `source.wipe`.
   *`HostProvisionerTest.theZfsCacheIsCappedBeforeTheToolsThatLoadZfsAreInstalled`, `ZfsCacheCapTest`.*
 - **Z5. A `dir` box keeps working unchanged.** A re-run of `host init --storage zfs --pool <new>`
   on a box whose profile exists adds the pool beside the old one and touches no container, no
-  profile device and `host.yaml`'s storage; `host status` lists it. Placing a project's
-  containers on it is `sail-project-workspaces`. A pool name Incus already has with another
+  profile device and `host.yaml`'s storage; `host status` lists it. A project's workspaces and
+  its template go on it (**Workspaces**). A pool name Incus already has with another
   driver is refused before anything is installed; a zfs pool Incus already has is kept, and a
   source flag that re-run would ignore is refused by name, while the command that made it, a disk
   or a file of the same size, runs again as a no-op: `--disk` and the pool's source are compared as
@@ -1125,6 +1125,79 @@ every pool with its driver, source and free space (`incus storage list`, `incus 
 /1.0/storage-pools/<pool>/resources`). A paused container (`incus pause`) reads as
 `ContainerState.Frozen`, `frozen` at the API and counted in `host status`; apply and `project
 start` resume it with `incus start`, and stop, restore, rename and resize treat it as live.
+
+**Workspaces** (`Workspaces`, `ProjectWorkspaceCommand`, `ProjectTemplateCommand`). A project
+runs several workspaces on one box, each its own container with its own tree, services and ports,
+cloned in a second from the project's template. The template is the instance `<project>--tmpl`,
+built by the project's own `ProjectProvisioner` run against that name
+(`ProjectProvisioner.Instance`: the name every step addresses, and the pool the launch puts it on),
+with its progress in `template-provision-state.yaml` beside the project's; it is stopped and
+snapshotted as `v<n>`, and records `user.sail.template.current=v<n>` and
+`user.sail.template.inputs=<digest>`, the digest apply already records (`ProjectProvisioner.inputs`:
+the definition and the workstation key). `sail project template build <p>` builds it unless its
+current version was built from the definition as it is; `sail project workspace create <p> <name>`
+builds it first when there is none or it is stale, then runs `incus copy <p>--tmpl/v<n> <p>-<name>`
+with the workspace's keys (`-c user.sail.project=<p> -c user.sail.workspace=<name> -c
+user.sail.template=v<n> -c user.sail.created_ms=<ms>`), starts it and makes it its own in one
+`incus exec` (`Workspaces.PREPARE`, constant text with the project, the workspace and each repo's
+path and base branch as its arguments): a new machine-id and SSH host keys, the project's name as
+its hostname (which the in-container helpers read the project from), each repo fetched and on the
+branch named after the workspace (the remote's when it has one, else a new one from the repo's
+branch or `origin/HEAD`), and the dev user's bus; then the shared files and the machinery, as
+`project start` reconciles them. It says `Created <name> from v<n> in 1.4 s (clone 0.2 s, start 0.9
+s, ready 0.3 s)`. `list`, `shell`, `start`, `stop` and `delete` act on the instance the keys name;
+`GET /v1/projects/{p}/workspaces` lists the same rows, read in scope. The boot sweep
+(`ContainerSetupSweep`) reconciles the running workspaces of every project the box holds. Each
+row with the tests that prove it:
+
+- **W1. The project's container is untouched.** No verb writes to, copies from, snapshots or
+  restarts the instance named after the project, which is the default workspace `main`: listed,
+  and refused by every other verb naming the project verb that does it (`project start`, `stop`,
+  `shell`, `destroy`). *`WorkspacesTest.noVerbWritesToCopiesFromSnapshotsOrRestartsTheProjectsOwnContainer`,
+  `WorkspacesTest.theDefaultWorkspaceIsRefusedByEveryVerbThatWouldTouchItNamingTheProjectVerb`,
+  `ProjectProvisionerTest.aTemplateIsProvisionedIntoItsOwnInstanceOnItsPoolAndTheProjectsContainerIsNeverNamed`,
+  and every existing project test.*
+- **W2. A workspace is a clone of a template snapshot.** Its dataset's ZFS `origin` is the
+  template's `v<n>`; Sail copies only from a snapshot, never an instance (whose snapshots would be
+  sent whole), and refuses a template that is not on a ZFS pool. *`WorkspacesTest.aFirstCreateBuildsTheTemplateAsV1OnTheZfsPoolThenClonesItsSnapshotAndSaysWhatItTook`,
+  `WorkspacesTest.aTemplateThatIsNotOnZfsIsNeverCopied`, `WorkspaceIT`.*
+- **W3. The instance is the record.** A workspace exists exactly when an instance carries
+  `user.sail.project` and `user.sail.workspace`, set as the copy makes it; listing reads only
+  Incus, deleting the instance deletes the workspace, and no row is written. A create that fails
+  after the copy deletes the instance, so none is left half made. *`WorkspacesTest.theListShowsTheDefaultWorkspaceThenEveryCloneWithItsStateTemplateTimeAndAddress`,
+  `WorkspacesTest.aWorkspaceThatCannotBeMadeItsOwnIsDeletedSoNoneIsLeftHalfMade`.*
+- **W4. Names are validated once and never parsed.** A workspace name follows the project-name
+  rule and is not `main`; `<project>-<name>` and `<project>--tmpl` are at most 63 characters, the
+  workspace is no instance Incus has, no project the catalog holds and no name ending `--tmpl`, and
+  a template is no project's name, each refused naming the conflict. The project and workspace are
+  read from the keys, so `a-b` + `c` and `a` + `b-c` never meet. *`WorkspacesTest.aWorkspaceWhoseInstanceNameIsOverSixtyThreeCharactersIsRefused`,
+  `WorkspacesTest.aNameThatCollidesIsRefusedNamingWhatItCollidesWith`,
+  `WorkspacesTest.deleteRemovesTheInstanceItsKeysNameAndNeverSplitsAName`.*
+- **W5. A clone shares no machine identity.** The per-workspace step regenerates the machine-id
+  and the SSH host keys, which every clone otherwise has from the template. *`WorkspacesTest.theScriptThatMakesACloneItsOwnIsPinnedWhole`, `WorkspaceIT`.*
+- **W6. Times are measured and said.** `create` and `start` print, and return in JSON
+  (`timings.clone_ms`, `start_ms`, `ready_ms`, `total_ms`), each phase measured on
+  `System.nanoTime`. *`WorkspacesTest.startResumesAStoppedWorkspaceAndSaysWhatItsResumeTook`,
+  `ProjectWorkspaceCommandTest.aCreateSaysEachPhaseItTookInSeconds`.*
+- **W7. A template version is current only once it is whole.** The record moves to `v<n>` only
+  after the build, the stop and the snapshot; a failed build leaves the previous version current and
+  makes no snapshot, a record that cannot be written removes the snapshot, and the next version
+  follows the highest snapshot, so a stray one is never reused.
+  *`WorkspacesTest.aFailedBuildLeavesThePreviousVersionCurrentAndMakesNoSnapshot`,
+  `WorkspacesTest.aVersionWhoseRecordCannotBeWrittenIsRemovedSoThePreviousStaysCurrent`.*
+- **W8. ZFS or nothing.** Templates and workspaces go on the base profile's pool when it is ZFS,
+  else on the one ZFS pool beside it (several beside a pool that is not ZFS are refused, naming
+  them); a box with none refuses every verb before anything changes, naming `sudo sail host init
+  --storage zfs`. *`WorkspacesTest.everyVerbOnABoxWithNoZfsPoolIsRefusedBeforeAnythingChanges`,
+  `WorkspacesTest.theBaseProfilesPoolIsTakenWhenItIsZfs`, `WorkspaceIT`.*
+- **W9. One decision.** Every verb first reads the project from the catalog as the box's person,
+  `ReadFilter`, which is what `project apply` asks; the read route declares `Gate.READS_IN_SCOPE`
+  and reads through `ProjectGate.readable`. No rule was added. *`RouteGateSweepTest`,
+  `ScopedReadsTest`, `OneDecisionSweepTest`, `AccessDoorsBaselineTest`.*
+
+A template version whose snapshot is deleted by hand while workspaces were cloned from it
+(`incus snapshot delete <p>--tmpl v1`) keeps them running: Incus renames the snapshot under
+`deleted/` until the last clone goes, and frees its space only then.
 
 **The stack** (`ProjectServer`, `StackOperations`): a project's services and its processes,
 each process an app the dev user runs, declared with the port it listens on. `sudo sail project

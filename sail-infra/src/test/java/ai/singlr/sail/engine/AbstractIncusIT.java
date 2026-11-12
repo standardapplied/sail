@@ -93,17 +93,18 @@ public abstract class AbstractIncusIT {
 
   /**
    * Launches {@code container} from the locally published prepared image — the base image plus
-   * every package the incus suite needs, including sail's full provisioning baseline. The alias is
-   * versioned: bump it whenever the package set changes so hosts holding an older bake rebuild
-   * instead of serving a stale image. The image is baked at most once per host: baking is the only
-   * step that touches the network (the public image server, container DNS, the apt archive), each
-   * stage is retried and fails naming itself with diagnostics, and every test launch afterwards is
-   * a local copy. Tests must never reach the internet from inside their own bodies — a bootstrap
-   * that depends on external infrastructure at test time is a defect of the test. A bake that fails
-   * fails every later test of the run at once, naming the stage, instead of being retried by each
-   * of them until the job's own limit cancels the run.
+   * every package the incus suite needs, including sail's full provisioning baseline, with {@code
+   * options} to incus launch. The alias is versioned: bump it whenever the package set changes so
+   * hosts holding an older bake rebuild instead of serving a stale image. The image is baked at
+   * most once per host: baking is the only step that touches the network (the public image server,
+   * container DNS, the apt archive), each stage is retried and fails naming itself with
+   * diagnostics, and every test launch afterwards is a local copy. Tests must never reach the
+   * internet from inside their own bodies — a bootstrap that depends on external infrastructure at
+   * test time is a defect of the test. A bake that fails fails every later test of the run at once,
+   * naming the stage, instead of being retried by each of them until the job's own limit cancels
+   * the run.
    */
-  protected void launchPrepared(String container) throws Exception {
+  protected void launchPrepared(String container, String... options) throws Exception {
     synchronized (PREPARE_LOCK) {
       if (bakeFailure != null) {
         throw new AssertionError("prepared image unavailable: " + bakeFailure.getMessage());
@@ -121,7 +122,9 @@ public abstract class AbstractIncusIT {
       }
     }
     deleteContainerQuietly(container);
-    var launched = shell.exec(List.of("incus", "launch", PREPARED_ALIAS, container));
+    var launch = new ArrayList<>(List.of("incus", "launch", PREPARED_ALIAS, container));
+    launch.addAll(List.of(options));
+    var launched = shell.exec(launch);
     assertTrue(
         launched.ok(),
         "could not launch test container from local image "

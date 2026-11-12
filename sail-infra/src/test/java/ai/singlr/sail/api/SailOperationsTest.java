@@ -28,6 +28,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -819,6 +820,43 @@ class SailOperationsTest {
         "accepted", operations.restoreSnapshot("acme", "snap-1", "uday").orThrow().status());
     var deleter = cataloged(shell, TestProjects.reading(yaml), acme);
     assertEquals("accepted", deleter.deleteSnapshot("acme", "snap-1").orThrow().status());
+  }
+
+  @Test
+  void theWorkspacesOfAProjectAreReadFromIncusAndABoxWithoutZfsIsAConflict() throws Exception {
+    var yaml = tempDir.resolve("sail-workspaces.yaml");
+    Files.writeString(yaml, baseYaml());
+    var zfs =
+        shell()
+            .on("incus storage list", "[{\"name\": \"tank\", \"driver\": \"zfs\", \"config\": {}}]")
+            .on(
+                "incus list --format json",
+                """
+                [{"name": "acme-w", "status": "Stopped",
+                  "config": {"user.sail.project": "acme", "user.sail.workspace": "w",
+                             "user.sail.template": "v1"}}]
+                """);
+    var dir = shell().on("incus storage list", "[{\"name\": \"devpool\", \"driver\": \"dir\"}]");
+    var down = shell().on("incus storage list", new ShellExec.Result(1, "", "incus is down"));
+    var acme = HeldProjects.catalog("acme");
+
+    var listed = cataloged(zfs, TestProjects.reading(yaml), acme).workspaces("acme").orThrow();
+    var noZfs = cataloged(dir, TestProjects.reading(yaml), acme).workspaces("acme");
+    var unread = cataloged(down, TestProjects.reading(yaml), acme).workspaces("acme");
+
+    assertEquals(
+        List.of(
+            new Workspaces.Row("main", "acme", "not_created", null, null, null),
+            new Workspaces.Row("w", "acme-w", "stopped", "v1", null, null)),
+        listed.workspaces());
+    assertError(ErrorCode.CONFLICT, noZfs);
+    assertEquals(
+        "This box has no ZFS pool, and a workspace is a ZFS clone of its project's template.",
+        noZfs.errorMessage());
+    assertError(ErrorCode.CONTAINER_ERROR, unread);
+    assertError(
+        ErrorCode.PROJECT_NOT_IN_CATALOG,
+        cataloged(zfs, TestProjects.reading(yaml), acme).workspaces("beta"));
   }
 
   @Test

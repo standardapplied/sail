@@ -168,6 +168,7 @@ class ScopedReadsTest {
           "/v1/projects/{project}/definition",
           "/v1/projects/{project}/ports",
           "/v1/projects/{project}/snapshots",
+          "/v1/projects/{project}/workspaces",
           "/v1/projects/{project}/files",
           "/v1/projects/{project}/files/{file}");
 
@@ -1555,7 +1556,7 @@ class ScopedReadsTest {
         .collect(Collectors.toCollection(TreeSet::new));
   }
 
-  /** The box's containers, a log every run wrote two lines to, and no snapshot. */
+  /** The box's containers, a log every run wrote two lines to, no snapshot, and a ZFS pool. */
   private final class BoxShell implements ShellExec {
 
     @Override
@@ -1571,6 +1572,9 @@ class ScopedReadsTest {
       }
       if (asked.startsWith("incus snapshot list")) {
         return new Result(0, "[]", "");
+      }
+      if (asked.startsWith("incus storage list")) {
+        return new Result(0, "[{\"name\": \"tank\", \"driver\": \"zfs\"}]", "");
       }
       if (asked.contains(" tail -n ")) {
         return new Result(0, "one\ntwo\n", "");

@@ -122,7 +122,9 @@ class AccessDoorsBaselineTest {
             TestControlPlane.on(
                 OperationsFactory.create(
                     world.db,
-                    new ScriptedShellExecutor().onOk("incus list", "[]"),
+                    new ScriptedShellExecutor()
+                        .onOk("incus list", "[]")
+                        .onOk("incus storage list", "[{\"name\": \"tank\", \"driver\": \"zfs\"}]"),
                     bus,
                     null,
                     SyncScheduler.disabled(),
@@ -676,6 +678,7 @@ class AccessDoorsBaselineTest {
               ops -> ops.stack().serve(project, Duration.ofSeconds(1))));
       doors.add(new Door("stop the stack of " + project, ops -> ops.stack().stop(project)));
       doors.add(new Door("read the ports of " + project, ops -> ops.stack().ports(project)));
+      doors.add(new Door("list the workspaces of " + project, ops -> ops.workspaces(project)));
       for (var box : BOXES) {
         doors.add(
             new Door(

@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -37,6 +38,23 @@ public final class ContainerManager {
 
   /** Summary of a container's name, current state, and resource limits. */
   public record ContainerInfo(String name, ContainerState state, ResourceLimits limits) {}
+
+  /**
+   * An instance as Incus lists it: its name and state, the pool its root disk is on (null when it
+   * names none), its own configuration keys, and when Incus created it.
+   */
+  public record Instance(
+      String name,
+      ContainerState state,
+      String pool,
+      Map<String, String> config,
+      String createdAt) {
+
+    /** The value of configuration key {@code key}, empty when the instance carries none. */
+    public Optional<String> key(String key) {
+      return Optional.ofNullable(config.get(key)).filter(value -> !value.isBlank());
+    }
+  }
 
   /** Queries the current state of a single container by name. */
   public ContainerState queryState(String name)
@@ -83,6 +101,34 @@ public final class ContainerManager {
               return new ContainerInfo(name, state, limits);
             })
         .toList();
+  }
+
+  /** Every instance Incus has, read in one {@code incus list}. */
+  public List<Instance> instances() throws IOException, InterruptedException, TimeoutException {
+    var result = shell.exec(List.of("incus", "list", "--format", "json"));
+    if (!result.ok()) {
+      throw new IOException("incus list failed: " + result.reason());
+    }
+    return YamlUtil.parseList(result.stdout()).stream().map(ContainerManager::instance).toList();
+  }
+
+  private static Instance instance(Map<String, Object> entry) {
+    var config = new LinkedHashMap<String, String>();
+    if (entry.get("config") instanceof Map<?, ?> keys) {
+      keys.forEach((key, value) -> config.put(String.valueOf(key), String.valueOf(value)));
+    }
+    var pool =
+        entry.get("expanded_devices") instanceof Map<?, ?> devices
+                && devices.get("root") instanceof Map<?, ?> root
+                && root.get("pool") instanceof String named
+            ? named
+            : null;
+    return new Instance(
+        Objects.toString(entry.get("name"), "unknown"),
+        parseContainerState(entry),
+        pool,
+        Map.copyOf(config),
+        Objects.toString(entry.get("created_at"), null));
   }
 
   /** Starts a container. Throws on failure. */

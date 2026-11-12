@@ -15,6 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class ContainerManagerTest {
@@ -297,6 +299,44 @@ class ContainerManagerTest {
     assertEquals(
         List.of("acme", "docs"),
         containers.stream().map(ContainerManager.ContainerInfo::name).toList());
+  }
+
+  @Test
+  void instancesCarryTheirPoolKeysAndBirthAsIncusListsThem() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus list --format json",
+                """
+                [{"name": "acme-w", "status": "Frozen", "created_at": "2026-11-12T09:00:00Z",
+                  "config": {"user.sail.project": "acme", "user.sail.workspace": "w", "user.blank": ""},
+                  "expanded_devices": {"root": {"path": "/", "pool": "tank", "type": "disk"}}},
+                 {"name": "bare", "status": "Stopped"}]
+                """);
+
+    var instances = new ContainerManager(shell).instances();
+
+    var workspace = instances.getFirst();
+    assertEquals("acme-w", workspace.name());
+    assertEquals(new ContainerState.Frozen(), workspace.state());
+    assertEquals("tank", workspace.pool());
+    assertEquals("2026-11-12T09:00:00Z", workspace.createdAt());
+    assertEquals(Optional.of("acme"), workspace.key("user.sail.project"));
+    assertEquals(Optional.empty(), workspace.key("user.blank"));
+    assertEquals(Optional.empty(), workspace.key("user.sail.template"));
+    var bare = instances.getLast();
+    assertEquals(
+        new ContainerManager.Instance("bare", new ContainerState.Stopped(), null, Map.of(), null),
+        bare);
+  }
+
+  @Test
+  void instancesFailLoudWhenIncusCannotList() {
+    var shell = new ScriptedShellExecutor().onFail("incus list --format json", "daemon down");
+
+    var failure = assertThrows(IOException.class, () -> new ContainerManager(shell).instances());
+
+    assertEquals("incus list failed: daemon down", failure.getMessage());
   }
 
   @Test

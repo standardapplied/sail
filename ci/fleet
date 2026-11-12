@@ -68,7 +68,9 @@ Usage:
                                 partition are refused, and its ext4 scratch disk until the row itself
                                 erases it with the wipefs the refusal names, then the scratch pool is
                                 made with Sail's last probe of the disk under a second before its
-                                incus storage create (strace); observer, left on dir, is unchanged
+                                incus storage create (strace); a workspace of acme created on tank is a
+                                clone of acme's template snapshot with a machine-id of its own, its
+                                create time in the report; observer, left on dir, is unchanged
   ci/fleet rebuilt RUN VERSION  main is copied by the README's backup line, takes a spec, and is lost; client
                                 writes while it is gone; a new main installs VERSION and inits empty, which
                                 observer refuses as another org; the copy goes in place, every node re-pins
@@ -1092,6 +1094,19 @@ probed_last_on() {
   awk -v g="$gap" 'BEGIN { exit !(g >= 0 && g < 1) }'
 }
 
+workspace_on() {
+  local run=$1 box=$2 created timings origin template workspace
+  created=$(on "$run" "$box" "sudo sail project workspace create acme fleet-w --json") || return 1
+  echo "$created"
+  timings=$(python3 -I -c 'import json,sys; t=json.load(sys.stdin)["timings"]; print("%s ms (clone %s, start %s, ready %s)" % (t["total_ms"], t["clone_ms"], t["start_ms"], t["ready_ms"]))' <<< "$created") || return 1
+  echo "workspace create on $box: $timings" | tee -a "$(log_dir "$run")/report.txt"
+  origin=$(on "$run" "$box" "sudo zfs get -H -o value origin tank/containers/acme-fleet-w")
+  template=$(on "$run" "$box" "sudo incus file pull acme--tmpl/etc/machine-id -")
+  workspace=$(on "$run" "$box" "sudo incus exec acme-fleet-w -- cat /etc/machine-id")
+  echo "origin $origin; machine-id of the template $template, of the workspace $workspace"
+  [[ $origin == tank/containers/acme--tmpl@snapshot-v* && -n $template && -n $workspace && $template != "$workspace" ]]
+}
+
 uncapped_on() {
   on "$1" "$2" "test ! -e /etc/modprobe.d/sail-zfs.conf"
 }
@@ -1128,6 +1143,9 @@ storage() {
   check "$run" "the ZFS cache cap is still in force after the reboot" capped_on "$run" client
   check "$run" "acme runs after the reboot, on devpool" running_on_pool "$run" client acme devpool
   check "$run" "host status names both pools" status_pools "$run" client "devpool:dir tank:zfs"
+  check "$run" "a workspace of acme is a clone of its template's snapshot on tank, with its own machine-id" \
+    workspace_on "$run" client
+  check "$run" "the workspace goes" on "$run" client "sudo sail project workspace delete acme fleet-w"
   check "$run" "client's test containers go" on "$run" client "sudo incus delete --force zc zt"
   check "$run" "observer, a dir box, has devpool alone" pools_on "$run" observer "devpool:dir"
   check "$run" "observer's host status names devpool alone" status_pools "$run" observer "devpool:dir"

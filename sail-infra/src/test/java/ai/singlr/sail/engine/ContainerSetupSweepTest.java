@@ -13,6 +13,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -45,6 +46,35 @@ class ContainerSetupSweepTest {
     assertFalse(
         shell.invocations().stream().anyMatch(c -> c.contains("parked") && c.contains("device")),
         "a stopped container cannot be reconciled and is skipped");
+  }
+
+  @Test
+  void sweepAlsoRefreshesTheRunningWorkspacesOfAHeldProjectAndNoTemplate() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk(
+                "incus list --format json",
+                """
+                [{"name": "acme-fix", "status": "Running",
+                  "config": {"user.sail.project": "acme", "user.sail.workspace": "fix"}},
+                 {"name": "acme-down", "status": "Stopped",
+                  "config": {"user.sail.project": "acme", "user.sail.workspace": "down"}},
+                 {"name": "acme--tmpl", "status": "Running", "config": {"user.sail.template.current": "v1"}},
+                 {"name": "bravo-fix", "status": "Running",
+                  "config": {"user.sail.project": "bravo", "user.sail.workspace": "fix"}},
+                 {"name": "acme-half", "status": "Running", "config": {"user.sail.project": "acme"}}]
+                """);
+
+    var reconciled = ContainerSetupSweep.sweep(shell, Set.of("acme"), locks);
+
+    assertEquals(1, reconciled);
+    var touched =
+        shell.invocations().stream()
+            .filter(c -> c.contains("sail-api-sock"))
+            .map(c -> c.split(" ")[4])
+            .distinct()
+            .toList();
+    assertEquals(List.of("acme-fix"), touched);
   }
 
   @Test

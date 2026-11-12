@@ -36,27 +36,34 @@ public final class ShellCommand implements Runnable {
 
     var state = mgr.queryState(name);
     ContainerStateGuard.requireRunning(state, name);
+    open(name);
+  }
 
-    var cmd =
-        List.of(
-            "incus",
-            "exec",
-            name,
-            "-t",
-            "--user",
-            "1000",
-            "--group",
-            "1000",
-            "--cwd",
-            "/home/dev/workspace",
-            "--env",
-            "HOME=/home/dev",
-            "--",
-            "bash",
-            "-il");
-    var pb = new ProcessBuilder(cmd);
+  /** Opens a login shell as the dev user in {@code instance}, and exits with its status. */
+  static void open(String instance) throws Exception {
+    var pb = new ProcessBuilder(command(instance));
     pb.inheritIO();
     var process = pb.start();
     System.exit(process.waitFor());
+  }
+
+  /** The {@code incus exec} that opens a login shell as the dev user in {@code instance}. */
+  static List<String> command(String instance) {
+    return List.of(
+        "incus",
+        "exec",
+        instance,
+        "-t",
+        "--user",
+        "1000",
+        "--group",
+        "1000",
+        "--cwd",
+        "/home/dev/workspace",
+        "--env",
+        "HOME=/home/dev",
+        "--",
+        "bash",
+        "-il");
   }
 }

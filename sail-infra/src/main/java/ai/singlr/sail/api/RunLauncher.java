@@ -361,7 +361,7 @@ public final class RunLauncher {
     try {
       report =
           ProjectSkillInstaller.installProject(
-              shell, s.project(), Harnesses.of(s.agentType()), projectSkills.get());
+              shell, s.project(), s.project(), Harnesses.of(s.agentType()), projectSkills.get());
     } catch (IllegalStateException changed) {
       throw ApiException.of(ErrorCode.AGENT_LAUNCH_FAILED, changed);
     } catch (Exception e) {

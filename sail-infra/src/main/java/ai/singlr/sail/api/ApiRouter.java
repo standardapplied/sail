@@ -243,6 +243,11 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             reads,
             call -> ApiResponse.from(operations.snapshots(call.project()))),
         route(
+            GET,
+            PROJECT + "/workspaces",
+            reads,
+            call -> ApiResponse.from(operations.workspaces(call.project()))),
+        route(
             DELETE,
             PROJECT + "/snapshots/{label}",
             Gate.decides(Action.RESTORE),

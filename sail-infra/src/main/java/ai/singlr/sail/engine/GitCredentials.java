@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -110,6 +111,24 @@ public final class GitCredentials {
       return System.getenv("BITBUCKET_TOKEN");
     }
     return null;
+  }
+
+  /**
+   * The tokens a run clones {@code repos} with, asking no one: {@code token} for every host when it
+   * is given, else each https host's own from its provider's environment variable.
+   */
+  public static Map<String, String> known(List<ProjectDefinition.Repo> repos, String token) {
+    if (Strings.isNotBlank(token)) {
+      return singleTokenMap(token);
+    }
+    var tokens = new LinkedHashMap<String, String>();
+    for (var host : extractHttpsHosts(repos)) {
+      var found = resolveTokenForHost(host, null);
+      if (Strings.isNotBlank(found)) {
+        tokens.put(host, found);
+      }
+    }
+    return Map.copyOf(tokens);
   }
 
   /** Wraps a single token string into a wildcard token map. Returns empty map if null/blank. */

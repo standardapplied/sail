@@ -374,7 +374,7 @@ let refusalsOfRoutesNotYetCalled: Set<String> = [
 ]
 
 /// The answers of routes this client does not call yet, recorded for the apps that will.
-let answersOfRoutesNotYetCalled: Set<String> = ["spec-measures", "specs-measures"]
+let answersOfRoutesNotYetCalled: Set<String> = ["spec-measures", "specs-measures", "workspaces"]
 
 /// The exchange `SailEvents` makes, proven by its own tests.
 let exchangesOfSailEvents: Set<String> = ["events-recent"]

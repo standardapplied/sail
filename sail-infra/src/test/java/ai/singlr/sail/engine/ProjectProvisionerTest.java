@@ -265,6 +265,56 @@ class ProjectProvisionerTest {
   }
 
   @Test
+  void aTemplateIsProvisionedIntoItsOwnInstanceOnItsPoolAndTheProjectsContainerIsNeverNamed()
+      throws Exception {
+    var script = minimalSuccessShell().onFail("incus info simple--tmpl", "not found");
+    var shell = new PushRecordingShell(script);
+    var provisioner =
+        new ProjectProvisioner(
+            shell, tracker(), ProvisionListener.NOOP, Optional.empty(), OperatorCommand.PLAIN);
+
+    provisioner.provision(
+        new ProjectProvisioner.Instance("simple--tmpl", Optional.of("tank")),
+        minimalConfig(),
+        hostYaml(),
+        null,
+        GIT,
+        null);
+
+    assertTrue(
+        script
+            .arguments()
+            .contains(
+                List.of(
+                    "incus",
+                    "launch",
+                    "ubuntu-24.04",
+                    "simple--tmpl",
+                    "--profile",
+                    "singlr-base",
+                    "--storage",
+                    "tank")),
+        String.join("\n", script.invocations()));
+    assertEquals(
+        List.of(),
+        script.arguments().stream()
+            .map(argv -> argv.indexOf("--") < 0 ? argv : argv.subList(0, argv.indexOf("--")))
+            .filter(
+                target ->
+                    target.stream().anyMatch(w -> w.equals("simple") || w.startsWith("simple/")))
+            .toList());
+    assertTrue(
+        shell.pushed.get("simple--tmpl/etc/sail/project.yaml").startsWith("name: simple\n"),
+        "the template records the project it is, whatever it is named");
+    assertTrue(
+        script
+            .invocations()
+            .contains(
+                "incus config set simple--tmpl user.sail.inputs="
+                    + ProjectProvisioner.inputs(minimalConfig(), Optional.empty())));
+  }
+
+  @Test
   void aDryRunPreviewsEveryStepAndWritesNoState() throws Exception {
     var tracker = dryRunTracker();
     var steps = new ArrayList<String>();

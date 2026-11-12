@@ -244,7 +244,7 @@ public final class RunCommand implements Runnable {
     try (var operations = this.operations.apply(operator)) {
       report =
           ProjectSkillInstaller.installProject(
-              shell, name, harness, new ProjectSkills(operations::projectFiles));
+              shell, name, name, harness, new ProjectSkills(operations::projectFiles));
     }
     for (var skipped : report.skipped()) {
       System.err.println(Banner.warnLine(skipped, Ansi.AUTO));

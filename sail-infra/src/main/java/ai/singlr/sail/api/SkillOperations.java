@@ -238,7 +238,7 @@ public final class SkillOperations {
     var problems = new ArrayList<String>();
     for (var harness : harnesses) {
       try {
-        ProjectSkillInstaller.installProject(shell, project, harness, skills);
+        ProjectSkillInstaller.installProject(shell, project, project, harness, skills);
       } catch (IOException | TimeoutException | RuntimeException blocked) {
         problems.add(notInstalled(harness, blocked));
       } catch (InterruptedException interrupted) {

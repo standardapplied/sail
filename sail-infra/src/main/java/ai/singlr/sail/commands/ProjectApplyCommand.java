@@ -725,21 +725,15 @@ public final class ProjectApplyCommand implements Runnable {
   }
 
   private Map<String, String> resolveGitTokens(ProjectDefinition config, OperatorCommand operator) {
+    var known = GitCredentials.known(config.repos(), gitToken);
     if (Strings.isNotBlank(gitToken)) {
-      return GitCredentials.singleTokenMap(gitToken);
+      return known;
     }
-    var hosts = GitCredentials.extractHttpsHosts(config.repos());
-    if (hosts.isEmpty()) {
-      return Map.of();
-    }
-    var tokens = new LinkedHashMap<String, String>();
-    for (var host : hosts) {
-      var envToken = GitCredentials.resolveTokenForHost(host, null);
-      if (Strings.isNotBlank(envToken)) {
-        tokens.put(host, envToken);
-      }
-    }
-    var missingHosts = hosts.stream().filter(h -> !tokens.containsKey(h)).toList();
+    var tokens = new LinkedHashMap<>(known);
+    var missingHosts =
+        GitCredentials.extractHttpsHosts(config.repos()).stream()
+            .filter(h -> !tokens.containsKey(h))
+            .toList();
     if (missingHosts.isEmpty() || yes || json || dryRun) {
       return Map.copyOf(tokens);
     }

@@ -111,11 +111,12 @@ public final class ProjectSkillInstaller {
 
   /**
    * Installs {@code project}'s skills, as {@code skills} reads them now, and {@code spec-board} for
-   * {@code harness}: every valid folder whole and stamped, every stamped folder the project no
-   * longer holds removed, and every folder that is no skill skipped and reported.
+   * {@code harness} into {@code container}, the project's own or its template: every valid folder
+   * whole and stamped, every stamped folder the project no longer holds removed, and every folder
+   * that is no skill skipped and reported.
    */
   public static Report installProject(
-      ShellExec shell, String project, Harness harness, ProjectSkills skills)
+      ShellExec shell, String project, String container, Harness harness, ProjectSkills skills)
       throws IOException, InterruptedException, TimeoutException {
     var held = new ArrayList<StageSkill>();
     var skipped = new ArrayList<String>();
@@ -129,7 +130,7 @@ public final class ProjectSkillInstaller {
     held.addAll(SailSkills.all());
     installAll(
         shell,
-        project,
+        container,
         skillsDirOf(harness),
         held,
         (skill, file) -> skills.open(project, skill, file));

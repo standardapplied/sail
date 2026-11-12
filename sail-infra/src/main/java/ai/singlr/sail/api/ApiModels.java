@@ -17,6 +17,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.ChangeLog;
@@ -1858,6 +1859,16 @@ record SnapshotView(String name, String createdAt, String source) implements Map
     m.put("name", name);
     m.put("created_at", createdAt);
     m.put("source", source);
+    return m;
+  }
+}
+
+record WorkspaceListResponse(String project, List<Workspaces.Row> workspaces) implements Mappable {
+  @Override
+  public Map<String, Object> toMap() {
+    var m = new LinkedHashMap<String, Object>();
+    m.put("project", project);
+    m.put("workspaces", workspaces);
     return m;
   }
 }

@@ -40,6 +40,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.Workspaces;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
@@ -1277,6 +1278,30 @@ public final class SailOperations implements HostOperations {
   @Override
   public Result<SnapshotListResponse> snapshots(String project) {
     return safe(() -> snapshotOps.list(readable(project)));
+  }
+
+  /**
+   * Read in scope, as the snapshot list is; a box with no ZFS pool, where no workspace can be, is a
+   * conflict naming the command that adds one.
+   */
+  @Override
+  public Result<WorkspaceListResponse> workspaces(String project) {
+    return safe(
+        () -> {
+          var readable = readable(project);
+          try {
+            return new WorkspaceListResponse(
+                readable,
+                new Workspaces(shell, shell, System::nanoTime).list(readable).workspaces());
+          } catch (Remedied.State noZfs) {
+            throw ApiException.of(ErrorCode.CONFLICT, noZfs);
+          } catch (Exception unread) {
+            if (unread instanceof InterruptedException) {
+              Thread.currentThread().interrupt();
+            }
+            throw ApiException.of(ErrorCode.CONTAINER_ERROR, unread);
+          }
+        });
   }
 
   @Override
