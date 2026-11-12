@@ -8,21 +8,18 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ai.singlr.sail.common.Remedied;
-import ai.singlr.sail.common.Remedy;
-import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.pty.PtyMessage;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 /**
- * The ticket door answers the terminal host's refusal in the host's words, as a refusal, and a host
- * it cannot reach as the server's own failure, saying why; the end-to-end scenarios are {@code
- * DirectTerminalTest}'s.
+ * The ticket door keeps the terminal host's words and answers each kind of refusal with its own
+ * status; a host it cannot reach, or one that answers no ticket, is the terminal's outage. The
+ * end-to-end scenarios are {@code DirectTerminalTest}'s.
  */
 class TerminalTicketsTest {
 
@@ -32,34 +29,47 @@ class TerminalTicketsTest {
       Map.of("action", "attach", "session", "lounge");
 
   @Test
-  void theHostsRefusalIsForbiddenInItsWordsAndAnUnreachableHostIsTheServersFailure() {
-    try (var db = Sqlite.openMemory()) {
-      new SchemaManager(db).migrate();
-      var catalog = new ProjectStore(db);
-      var refusing =
+  void eachKindOfRefusalIsItsOwnStatusInTheHostsWords() {
+    var answered = new LinkedHashMap<String, String>();
+    for (var kind : PtyMessage.TicketRefusal.values()) {
+      var door =
           new TerminalTickets(
-              catalog,
-              (credential, action, target) -> {
-                throw Remedied.io("", Remedy.of("Session 'lounge' is not yours to attach."));
-              },
+              (credential, action, target) -> new PtyMessage.TicketRefused(kind, "the host says"),
               TERMINAL);
-      var unreachable =
-          new TerminalTickets(
-              catalog,
-              (credential, action, target) -> {
-                throw new IOException("No session host at /run/pty.sock.");
-              },
-              TERMINAL);
-
-      var refused = assertThrows(ApiException.class, () -> refusing.issue("tok", ATTACH_LOUNGE));
-      var failed = assertThrows(ApiException.class, () -> unreachable.issue("tok", ATTACH_LOUNGE));
-
-      assertEquals(
-          "403 forbidden Session 'lounge' is not yours to attach.",
-          refused.status() + " " + refused.error().code() + " " + refused.error().message());
-      assertEquals(
-          "500 internal No session host at /run/pty.sock.",
-          failed.status() + " " + failed.error().code() + " " + failed.error().message());
+      answered.put(
+          kind.wire(),
+          said(assertThrows(ApiException.class, () -> door.issue("tok", ATTACH_LOUNGE))));
     }
+
+    assertEquals(
+        Map.of(
+            "invalid", "422 invalid_request the host says",
+            "not_found", "404 not_found the host says",
+            "forbidden", "403 forbidden the host says",
+            "limited", "429 rate_limited the host says",
+            "unavailable", "503 terminal_unavailable the host says"),
+        answered);
+  }
+
+  @Test
+  void aHostThatCannotBeAskedOrAnswersNoTicketIsTheTerminalsOutage() {
+    var unreachable =
+        new TerminalTickets(
+            (credential, action, target) -> {
+              throw new IOException("No session host at /run/pty.sock.");
+            },
+            TERMINAL);
+    var astray = new TerminalTickets((credential, action, target) -> new PtyMessage.Ok(), TERMINAL);
+
+    assertEquals(
+        "503 terminal_unavailable No session host at /run/pty.sock.",
+        said(assertThrows(ApiException.class, () -> unreachable.issue("tok", ATTACH_LOUNGE))));
+    assertEquals(
+        "503 terminal_unavailable The terminal host answered no ticket.",
+        said(assertThrows(ApiException.class, () -> astray.issue("tok", ATTACH_LOUNGE))));
+  }
+
+  private static String said(ApiException refused) {
+    return refused.status() + " " + refused.error().code() + " " + refused.error().message();
   }
 }

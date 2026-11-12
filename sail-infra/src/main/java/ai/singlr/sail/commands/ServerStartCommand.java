@@ -270,7 +270,6 @@ public final class ServerStartCommand implements Runnable {
                 terminal.map(
                     address ->
                         new TerminalTickets(
-                            projectStore,
                             (credential, action, target) ->
                                 SessionClient.ticket(
                                     SailPaths.ptySocketPath(), credential, action, target),
@@ -370,17 +369,15 @@ public final class ServerStartCommand implements Runnable {
       System.out.println(
           Ansi.AUTO.string(
               "  @|green ✓|@ Sail server listening on http://" + host + ":" + server.port()));
-      server
-          .privateAddress()
-          .ifPresent(
-              address ->
-                  System.out.println(
-                      Ansi.AUTO.string(
-                          "  @|green ✓|@ Also listening on http://"
-                              + ListenConfig.hostPort(address)
-                              + " ('"
-                              + ListenConfig.API
-                              + "')")));
+      privateApi.ifPresent(
+          address ->
+              System.out.println(
+                  Ansi.AUTO.string(
+                      "    @|faint Also serving http://"
+                          + ListenConfig.hostPort(address)
+                          + " ('"
+                          + ListenConfig.API
+                          + "') once that address is up|@")));
       terminal.ifPresent(
           address ->
               System.out.println(

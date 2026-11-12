@@ -106,19 +106,61 @@ public sealed interface PtyMessage {
   }
 
   /**
-   * Asks for a ticket that lets the credential this connection presented take {@code action} on
-   * {@code target} (a project to open a session in, or a session to attach to) once, over the
-   * host's TCP listener. The host decides it as it decides that open or attach, and answers a
-   * {@link Ticket} or an {@link Err}.
+   * Asks for a ticket that lets the holder of {@code credential}, the API caller's own bearer, take
+   * {@code action} on {@code target} (a project to open a session in, or a session to attach to)
+   * once, over the host's TCP listener. The host resolves the credential itself, for this decision
+   * alone, decides it as it decides that open or attach, and answers a {@link Ticket} or a {@link
+   * TicketRefused}. The connection that asks admits no one by it.
    */
-  record IssueTicket(TicketAction action, String target) implements PtyMessage {}
+  record IssueTicket(TicketAction action, String target, String credential) implements PtyMessage {
+    @Override
+    public String toString() {
+      return "IssueTicket[action=" + action + ", target=" + target + "]";
+    }
+  }
 
   /**
    * A ticket: presented as the {@link Hello} token of one TCP connection within {@link
    * #TICKET_LIFE}, it admits that connection for the action and target it was issued for, and
    * nothing else.
    */
-  record Ticket(String ticket) implements PtyMessage {}
+  record Ticket(String ticket) implements PtyMessage {
+    @Override
+    public String toString() {
+      return "Ticket[]";
+    }
+  }
+
+  /** What kind of refusal a ticket request met, which the API answers with its own status. */
+  enum TicketRefusal {
+    INVALID,
+    NOT_FOUND,
+    FORBIDDEN,
+    LIMITED,
+    UNAVAILABLE;
+
+    /** The kind as the wire names it. */
+    public String wire() {
+      return name().toLowerCase(Locale.ROOT);
+    }
+
+    /** The kind {@code wire} names, refused when it names none. */
+    public static TicketRefusal of(String wire) throws IOException {
+      for (var kind : values()) {
+        if (kind.wire().equals(wire)) {
+          return kind;
+        }
+      }
+      throw new IOException("Corrupt pty frame: a ticket refusal of kind '" + wire + "'.");
+    }
+  }
+
+  /** A ticket request refused: what kind of refusal, and its words, kept as a refusal's are. */
+  record TicketRefused(TicketRefusal kind, Remedy detail) implements PtyMessage {
+    public TicketRefused(TicketRefusal kind, String message) {
+      this(kind, Remedy.of(message));
+    }
+  }
 
   record Output(long lastInputSeq, byte[] bytes) implements PtyMessage {}
 

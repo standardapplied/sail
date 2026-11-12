@@ -20,8 +20,10 @@ import java.util.function.Supplier;
  * session, each read afresh through this box's operations.
  *
  * <p>A gateway-minted session token resolves through the sessions table to its FDE; a blank token
- * is the box's own person (its sync handle). Never a client claim: the token is validated, the
- * box's person read from this box's own configuration, and the role and scope from the FDE roster.
+ * is the box's own person (its sync handle). A ticket's credential, named by its hash, resolves to
+ * the FDE of a login session or an API token. A terminal opens only on a box its caller operates.
+ * Never a client claim: the token is validated, the box's person read from this box's own
+ * configuration, and the role and scope from the FDE roster.
  *
  * <p>A project must be one the caller holds on this box: its catalog holds it and the caller's
  * scope admits it, whatever the caller's role. A room must sit in the session's project, and the
@@ -29,7 +31,7 @@ import java.util.function.Supplier;
  * exactly as a room message is. Only then may the session run in the project's container, or the
  * room id enter the child's environment or the room's event history.
  */
-final class PtyHostAccess implements PtyIdentity.Resolver, PtyAdmission {
+final class PtyHostAccess implements PtyIdentity.Resolver, PtyIdentity.Holders, PtyAdmission {
 
   private final Supplier<HostOperations> operations;
 
@@ -47,6 +49,20 @@ final class PtyHostAccess implements PtyIdentity.Resolver, PtyAdmission {
   public PtyIdentity.Person resolve(String token) throws IOException {
     try (var opened = operations.get()) {
       return opened.pty().identity(token);
+    }
+  }
+
+  @Override
+  public PtyIdentity.Person holder(String credentialHash) throws IOException {
+    try (var opened = operations.get()) {
+      return opened.pty().holder(credentialHash);
+    }
+  }
+
+  @Override
+  public void box(PtyIdentity.Person who) throws IOException {
+    try (var opened = operations.get()) {
+      opened.pty().admitBox(who);
     }
   }
 

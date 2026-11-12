@@ -242,11 +242,12 @@ class RouteGateSweepTest {
     assertEquals(
         Set.of(
             "ai/singlr/sail/api/PrivateAttributes#context",
-            "ai/singlr/sail/api/SailApiServer#serve",
+            "ai/singlr/sail/api/SailApiServer#mount",
             "ai/singlr/sail/commands/LoopbackCallbackServer#<init>"),
         creates,
-        "a context is mounted through SailApiServer.serve, which records its route table; the"
-            + " CLI's local login callback is no server route");
+        "a context is mounted through SailApiServer.mount, which serve calls for a table it records"
+            + " and the private listener for each table recorded; the CLI's local login callback is"
+            + " no server route");
   }
 
   @Test

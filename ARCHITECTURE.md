@@ -2355,8 +2355,11 @@ grant on its own work alone is refused there, since no work is in hand.
 
 - A spec runs only on its assignee's box, and a room's agents only on its owner's box: placement
   (`DispatchPolicy`, `LaunchAdmission`), asked after `Access`.
-- Opening a terminal needs only that its person holds the project on this box, whatever their
-  role, so a viewer opens one too (`HostLanes.Pty.admitProject`, through `ProjectGate.readable`).
+- Opening a terminal needs the project on your own box: its person operates this box (Operate the
+  box on it, the question attaching asks of a session's opener's box: the box's own person, or an
+  admin) and holds the project, whatever their role (`HostLanes.Pty.admitBox`, then
+  `admitProject`, through `ProjectGate.readable`), asked in one place (`PtySessionHost.openRefusal`)
+  at the unix socket and for a ticket alike. A viewer on their own box opens one too.
 - Admins are never scoped.
 
 **Whose a resource is.** `Resources` builds each resource from the row in hand, with the project
@@ -2444,8 +2447,8 @@ bus stats and pointing the box at another main (Operate the box), managing peopl
 ticket and registration without a ticket, `fde` at the host CLI and at the SSH gateway, asked
 before whether the roster lives on this box). Every door reads the row it acts on in its caller's
 scope first, the host CLI's operator included, who sees the projects main's roster gives the box's
-FDE. The terminal opens a session only in a project its person holds on the box, whatever their
-role, as the catalog holds it and their scope admits it.
+FDE. The terminal opens a session only on a box its person operates, in a project they hold on it,
+whatever their role, as the catalog holds it and their scope admits it.
 A terminal session is its shell: the session shim (`_pty-child`) leads it, and when the shell
 exits the session ends once what is already in the terminal has been read (`Pty.DRAIN_GRACE_MILLIS`
 of quiet); a job the shell left running keeps nothing it says afterwards
@@ -2535,35 +2538,55 @@ gateway. A box's workstation key (`~/.sail/workstation_key.pub`) is authorized i
 box's project containers so its owner can SSH from their laptop into a container. Keeping
 these roles distinct is what lets the synced catalog stay identity-free.
 
-**The private network.** A client on a private network the box shares (Tailscale or another)
-reaches it with no SSH, through two host settings, each an IP address and a port
-(`ListenConfig`, the `listen` block of `host.yaml`): `api-listen`, one more address the HTTP API
-serves besides loopback, with the same routes, gates and credentials
-(`SailApiServer.PrivateNetwork`), and `terminal-listen`, where the terminal host takes TCP
-connections beside its unix socket. With neither, nothing more is bound and every answer is as
-before; a wildcard or unparseable address is refused at start naming its setting, and an address
-that cannot be bound fails the start. A terminal connection is admitted by a ticket: the caller
-asks `POST /v1/terminal/tickets` with `{"action": "open", "project": ...}` or `{"action":
-"attach", "session": ...}` and is answered `{ticket, address, expires_at}` (`TerminalTickets`).
-The API reads the project an open names in the caller's scope first, then asks the terminal host
-on its unix socket, presenting the caller's own credential (`PtyMessage.IssueTicket`), and the
-host decides it as it decides that open (`projectRefusal`, a project being required: the network
-opens no shell on the host) or that attach (`attachRefusal`, the one decision an `Attach` frame
-asks too), so there is no second rule; a refusal of the host's is `403` in its words. A ticket
-(`PtyTickets`) is a record that the decision was made, never a credential that widens it: kept
-only as its hash and found by a constant-time compare, spent by its first presentation, refused
-once older than `PtyMessage.TICKET_LIFE` (30 s), bound to the credential, the action and the
-target. On TCP the host serves nothing before a `Hello` whose token is a ticket it issued: until
-then it reads at most `TICKET_FRAME` bytes, closes a connection that presents none within
-`UNTICKETED_DEADLINE` (`reapUnticketed`, on a one-second timer), counts TCP connections against a
-cap apart from the unix socket's, sets `TCP_NODELAY`, and closes anything but a `Hello`
-unanswered. A presented ticket's credential is resolved again against the roster; the connection
-then speaks the unix socket's `SAILPTY3` frames, for its ticket's one action on its one target
-alone (an open ticket creates one session in its project and attaches to it), and is resolved
-again at every sweep and severed as a unix connection is. The blank token, the box's own person,
-is issued no ticket, nor is a token that acts for no FDE; a run credential is no credential of the
-web door, and the socket has no ticket route. Neither listener has TLS: the private network
-encrypts (`DirectTerminalTest`).
+**The private network.** A client on a private network the box shares reaches it with no SSH,
+through two host settings, each an IP address and a port (`ListenConfig`, the `listen` block of
+`host.yaml`, set and closed with `sail host config set api-listen|terminal-listen <address>|none`):
+`api-listen`, one more address the HTTP API serves besides loopback, with the same routes, gates and
+credentials (`SailApiServer.PrivateNetwork`), and `terminal-listen`, where the terminal host takes TCP
+connections beside its unix socket (`PtyTcpDoor`). With neither, nothing more is bound and every
+answer is as before, on the unix socket too. An address must be private: loopback, RFC 1918,
+100.64.0.0/10, or an IPv6 unique-local or link-local address, written in full; a wildcard,
+multicast, broadcast, public or unparseable one is refused at start naming its setting. A private
+address that cannot be bound yet (the private network is not up at boot) takes nothing down: that
+door binds once it can (`Rebinding`, with backoff, said once per change), loopback and the unix
+socket serve meanwhile, and `sail host status` shows each door listening or not.
+
+These doors speak plain HTTP and TCP: use them only on an encrypting overlay (Tailscale,
+WireGuard). On a LAN, a VPC or a bridge, every host on the segment reads the bearer tokens and the
+tickets in the clear. Whoever can reach the address is a peer: every project container on the box
+can, since a packet to the box's own address is delivered locally. Nothing is filtered by address;
+the doors authenticate every request instead. The web door takes no run credential and no box
+credential, and the TCP door nothing but a ticket, so a container gains no identity there it does
+not hold (`DirectTerminalTest`).
+
+A terminal connection is admitted by a ticket. The caller asks `POST /v1/terminal/tickets` with
+`{"action": "open", "project": ...}` or `{"action": "attach", "session": ...}`, and is answered
+`{ticket, address, expires_at}` (`TerminalTickets`). The API asks the terminal host on its unix
+socket as the box's own process, carrying the caller's credential in the request
+(`PtyMessage.IssueTicket`); the host resolves it itself, a login session or an API token bound to an
+FDE (`HostAccess.holder`), for that decision alone, and decides it as it decides that open
+(`openRefusal`, a project being required: the network opens no shell on the host) or that attach
+(`attachRefusal`, the one decision an `Attach` frame asks too), so there is no second rule. Its
+refusal carries a kind (`PtyMessage.TicketRefused`): not found is `404`, refused `403`, a cap `429`,
+an outage or a door not listening `503` (`terminal_unavailable`). A ticket to attach hears every
+refusal as one sentence, "There is no session 'x' on this box that you may attach.", so the network
+cannot tell a session that is not the caller's from one that does not exist; the unix socket keeps
+its words. A ticket (`PtyTickets`) is a record that the decision was made, never a credential that
+widens it: kept only as its hash and found by a constant-time compare, naming its credential only by
+that credential's hash (`Secrets.hash`), spent by its first presentation, refused once older than
+`PtyMessage.TICKET_LIFE` (30 s), bound to the credential, the action and the target; at most
+`Limits.connections()` are held unpresented, and at most 8 for one credential. On TCP the door
+serves nothing before a `Hello` whose token is a ticket it issued. Until then it reads at most 256
+bytes, closes the connection 5 s after its connect (`PtySessionHost.tick`, each second), holds at
+most 8 such connections for one peer address and `Limits.connections()` in all, apart from the unix
+socket's, and closes anything but a `Hello` unanswered. A presented ticket's credential is resolved
+again against the roster. The connection then keeps `TCP_NODELAY` and TCP keepalive (a vanished peer
+found dead within about a minute, its slot, attachment and write token released), speaks the unix
+socket's `SAILPTY3` frames for its ticket's one action on its one target alone (an open ticket
+creates one session in its project and attaches to it), each frame decided again as on the unix
+socket, and is resolved again at every sweep and severed as a unix connection is. No ticket is
+issued for no credential, for the host's own token (the box's person exists only on the unix
+socket) or for a machine token.
 
 **Pairing.** Mast reaches a box as an FDE with one string, the connect code, which `sail fde
 pair <handle> --host <ip-or-dns>` mints and `sail fde unpair <handle>` revokes (`FdeCommand`).
@@ -2865,7 +2888,9 @@ no pairing is removed through the gateway as before, and no key file is touched.
   secure context and the RP id are the browser's view of the proxy's `https://` origin.
   Binding off loopback requires an explicit `sail server start --host 0.0.0.0` and prints a
   plaintext-HTTP warning. The private-network listeners (`api-listen`, `terminal-listen`) are
-  plain too, on named IP addresses only, never a wildcard: the private network encrypts them.
+  plain too, on named private addresses only: use them only on an encrypting overlay, since on a
+  LAN every host on the segment reads bearer tokens and tickets in the clear, and every project
+  container on the box is a peer of theirs, held off by authentication, not by address.
 - **Input hardening.** Repo and git URLs are validated and rejected when they start with `-`,
   so `git clone` cannot read them as options, with `--` guards on git invocations. Paths and
   refs reject `..` traversal. FDE handles are a fail-closed boundary for the `authorized_keys`

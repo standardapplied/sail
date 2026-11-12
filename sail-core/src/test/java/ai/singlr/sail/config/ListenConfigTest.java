@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -60,6 +62,99 @@ class ListenConfigTest {
                 IllegalArgumentException.class,
                 () -> ListenConfig.address(ListenConfig.API, "100.64.0.7:0"))
             .getMessage());
+  }
+
+  @Test
+  void onlyAPrivateAddressIsAcceptedAndNoShortenedOrSignedForm() {
+    var accepted = new ArrayList<String>();
+    var notPrivate = new ArrayList<String>();
+    var unparsed = new ArrayList<String>();
+    for (var value :
+        List.of(
+            "127.0.0.1:7071",
+            "[::1]:7071",
+            "10.1.2.3:7071",
+            "172.16.0.1:7071",
+            "172.31.255.254:7071",
+            "192.168.1.1:7071",
+            "100.64.0.7:7071",
+            "100.127.255.254:7071",
+            "[fd7a:115c:a1e0::7]:7071",
+            "[fe80::1]:7071",
+            "8.8.8.8:7071",
+            "255.255.255.255:7071",
+            "224.0.0.1:7071",
+            "100.128.0.1:7071",
+            "172.32.0.1:7071",
+            "169.254.1.1:7071",
+            "[2001:db8::1]:7071",
+            "[ff02::1]:7071",
+            "1.2.3:7071",
+            "100.64.0.7:+7071",
+            "0:7071",
+            "0.0:7071",
+            "localhost:7071",
+            "100.64.0.256:7071")) {
+      try {
+        ListenConfig.address(ListenConfig.API, value);
+        accepted.add(value);
+      } catch (IllegalArgumentException refused) {
+        (refused.getMessage().contains("not a private address") ? notPrivate : unparsed).add(value);
+      }
+    }
+
+    assertEquals(
+        List.of(
+            "127.0.0.1:7071",
+            "[::1]:7071",
+            "10.1.2.3:7071",
+            "172.16.0.1:7071",
+            "172.31.255.254:7071",
+            "192.168.1.1:7071",
+            "100.64.0.7:7071",
+            "100.127.255.254:7071",
+            "[fd7a:115c:a1e0::7]:7071",
+            "[fe80::1]:7071"),
+        accepted);
+    assertEquals(
+        List.of(
+            "8.8.8.8:7071",
+            "255.255.255.255:7071",
+            "224.0.0.1:7071",
+            "100.128.0.1:7071",
+            "172.32.0.1:7071",
+            "169.254.1.1:7071",
+            "[2001:db8::1]:7071",
+            "[ff02::1]:7071"),
+        notPrivate);
+    assertEquals(
+        List.of(
+            "1.2.3:7071",
+            "100.64.0.7:+7071",
+            "0:7071",
+            "0.0:7071",
+            "localhost:7071",
+            "100.64.0.256:7071"),
+        unparsed);
+    assertEquals(
+        "'api-listen' is '8.8.8.8:7071', which is not a private address, and this door speaks plain"
+            + " HTTP and TCP. Name the box's address on its private network: loopback, 10/8,"
+            + " 172.16/12, 192.168/16, 100.64/10, or an IPv6 unique-local or link-local address.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> ListenConfig.address(ListenConfig.API, "8.8.8.8:7071"))
+            .getMessage());
+  }
+
+  @Test
+  void aDoorSetToNoneIsClosed() {
+    var both = new ListenConfig("100.64.0.7:7071", "100.64.0.7:7072");
+
+    assertEquals(
+        new ListenConfig(null, "100.64.0.7:7072"), both.with(ListenConfig.API, ListenConfig.NONE));
+    assertEquals(
+        new ListenConfig("100.64.0.7:7071", null),
+        both.with(ListenConfig.TERMINAL, ListenConfig.NONE));
   }
 
   @Test

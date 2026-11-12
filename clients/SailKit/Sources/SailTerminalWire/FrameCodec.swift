@@ -96,6 +96,7 @@ private extension Frame {
         case .refused: 31
         case .welcome: 32
         case .ticket: 33
+        case .ticketRefused: 34
         }
     }
 
@@ -115,8 +116,9 @@ private extension Frame {
         case let .listSessions(after, limit): [.string(after), .int32(limit)]
         case let .kill(session): [.string(session)]
         case let .yield(session, reason): [.string(session), .string(reason)]
-        case let .issueTicket(action, target): [.string(action.rawValue), .string(target)]
+        case let .issueTicket(action, target, credential): [.string(action.rawValue), .string(target), .string(credential)]
         case let .ticket(ticket): [.string(ticket)]
+        case let .ticketRefused(kind, remedy): [.string(kind.rawValue), .count(remedy.count)] + remedy.flatMap(\.fields)
         case let .output(lastInputSequence, bytes): [.int64(lastInputSequence), .blob(bytes)]
         case let .replayBegin(safe): [.bool(safe)]
         case let .writerChanged(fde): [.string(fde)]
@@ -196,8 +198,9 @@ private struct Cursor {
         case 7: .listSessions(after: try string(), limit: try int32())
         case 8: .kill(session: try string())
         case 10: .yield(session: try string(), reason: try string())
-        case 11: .issueTicket(action: Open(rawValue: try string()), target: try string())
+        case 11: .issueTicket(action: Open(rawValue: try string()), target: try string(), credential: try string())
         case 33: .ticket(try string())
+        case 34: .ticketRefused(kind: Open(rawValue: try string()), remedy: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.part() })
         case 20: .output(lastInputSequence: try int64(), bytes: try blob())
         case 21: .replayBegin(safe: try bool())
         case 22: .replayEnd

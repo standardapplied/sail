@@ -109,23 +109,22 @@ public final class SessionClient implements AutoCloseable {
   }
 
   /**
-   * A ticket the host at {@code socket} issues to the holder of {@code credential}, to take {@code
-   * action} on {@code target} over its TCP listener: the API's door onto the host ({@code
-   * TerminalTickets.Host}). A refusal is the host's {@code Err}, in its words.
+   * What the host at {@code socket} answers a request for a ticket for the holder of {@code
+   * credential} to take {@code action} on {@code target} over its TCP listener: a {@link
+   * PtyMessage.Ticket} or a {@link PtyMessage.TicketRefused}. The API's door onto the host ({@code
+   * TerminalTickets.Host}): it asks as the box's own process, a blank token, and the credential
+   * rides in the request, which the host resolves itself for that decision alone.
    */
-  public static String ticket(
+  public static PtyMessage ticket(
       Path socket, String credential, PtyMessage.TicketAction action, String target)
       throws IOException {
-    try (var client = connect(socket, credential)) {
-      PtyWire.write(client.channel, new PtyMessage.IssueTicket(action, target));
+    try (var client = connect(socket, "")) {
+      PtyWire.write(client.channel, new PtyMessage.IssueTicket(action, target, credential));
       var reply = PtyWire.read(client.channel);
-      if (reply instanceof PtyMessage.Err(var detail)) {
-        throw Remedied.io("", detail);
-      }
-      if (!(reply instanceof PtyMessage.Ticket(var ticket))) {
+      if (!(reply instanceof PtyMessage.Ticket) && !(reply instanceof PtyMessage.TicketRefused)) {
         throw new IOException("Unexpected host reply to a ticket request: " + reply.getClass());
       }
-      return ticket;
+      return reply;
     }
   }
 

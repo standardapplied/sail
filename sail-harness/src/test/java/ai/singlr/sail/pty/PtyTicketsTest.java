@@ -68,16 +68,40 @@ class PtyTicketsTest {
   }
 
   @Test
-  void noMoreThanTheCapAreKeptUntilOneIsForgotten() throws IOException {
+  void noMoreThanTheCapAreHeldUnpresentedAndASpentOrExpiredOneHoldsNoPlace() throws IOException {
     var tickets = new PtyTickets(2);
-    tickets.issue(OPEN_ACME, 0);
-    tickets.issue(OPEN_ACME, 0);
+    var spent = tickets.issue(OPEN_ACME, 0);
+    tickets.issue(ATTACH_LOUNGE, 0);
 
     assertEquals(
-        "The host holds 2 tickets not yet forgotten; ask again once one has been presented or"
+        "The host holds 2 tickets not yet presented; ask again once some have been presented or"
             + " expired.",
-        assertThrows(IOException.class, () -> tickets.issue(OPEN_ACME, 2 * LIFE)).getMessage());
+        assertThrows(IOException.class, () -> tickets.issue(OPEN_ACME, LIFE)).getMessage());
+    tickets.redeem(spent, LIFE);
+    tickets.issue(OPEN_ACME, LIFE);
     tickets.issue(OPEN_ACME, 2 * LIFE + 1);
+  }
+
+  @Test
+  void oneCredentialHoldsAtMostItsShareAndAnotherIsStillServed() throws IOException {
+    var tickets = new PtyTickets(100);
+    var first = tickets.issue(OPEN_ACME, 0);
+    for (var i = 1; i < PtyTickets.PER_HOLDER; i++) {
+      tickets.issue(OPEN_ACME, 0);
+    }
+
+    assertEquals(
+        "This credential holds 8 tickets not yet presented; present one or let it expire, then"
+            + " ask again.",
+        assertThrows(IOException.class, () -> tickets.issue(OPEN_ACME, 0)).getMessage());
+    tickets.issue(new PtyTickets.Ticket(PtyMessage.TicketAction.OPEN, "acme", "tok-mady"), 0);
+    tickets.redeem(first, 0);
+    tickets.issue(OPEN_ACME, 0);
+  }
+
+  @Test
+  void aTicketNamesItsCredentialNowhereInItsWords() {
+    assertEquals("Ticket[action=OPEN, target=acme]", OPEN_ACME.toString());
   }
 
   @Test
@@ -123,7 +147,7 @@ class PtyTicketsTest {
             new PtyMessage.ListSessions("", 16),
             new PtyMessage.Kill("lounge"),
             new PtyMessage.Yield("lounge", "x"),
-            new PtyMessage.IssueTicket(PtyMessage.TicketAction.ATTACH, "lounge"),
+            new PtyMessage.IssueTicket(PtyMessage.TicketAction.ATTACH, "lounge", "tok-uday"),
             new PtyMessage.Hello("tok-uday"))) {
       assertEquals(refusal, ATTACH_LOUNGE.refusal(other, null));
     }

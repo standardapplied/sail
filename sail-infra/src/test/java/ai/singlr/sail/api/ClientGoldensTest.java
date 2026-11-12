@@ -36,7 +36,6 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
-import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -409,8 +408,11 @@ class ClientGoldensTest {
         new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT),
         new PtyMessage.Kill("lounge"),
         new PtyMessage.Yield("lounge", "a dispatch took the repos"),
-        new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, PROJECT),
+        new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, PROJECT, "sail_uday"),
         new PtyMessage.Ticket("tkt_harbor"),
+        new PtyMessage.TicketRefused(
+            PtyMessage.TicketRefusal.NOT_FOUND,
+            Remedy.of("Project 'harbor' is not in the catalog. Run '", Remedy.sail("sync"), "'.")),
         new PtyMessage.Output(42, "héllo ✅\u001b[0m\r\n".getBytes(StandardCharsets.UTF_8)),
         new PtyMessage.ReplayBegin(true),
         new PtyMessage.ReplayEnd(),
@@ -525,8 +527,7 @@ class ClientGoldensTest {
               new AgentLogStreamer(auth),
               Optional.of(
                   new TerminalTickets(
-                      new ProjectStore(db),
-                      (credential, action, target) -> "tkt_" + target,
+                      (credential, action, target) -> new PtyMessage.Ticket("tkt_" + target),
                       new InetSocketAddress(InetAddress.ofLiteral("100.64.0.7"), 7072)))));
       server.createContext(
           "/v1/events/stream",

@@ -177,13 +177,39 @@ class PtyWireTest {
         ((PtyMessage.SessionEnded) roundTrip(new PtyMessage.SessionEnded("gone"))).reason());
     assertEquals("boom", ((PtyMessage.Err) roundTrip(new PtyMessage.Err("boom"))).message());
     assertEquals(
-        new PtyMessage.IssueTicket(PtyMessage.TicketAction.ATTACH, "lounge"),
-        roundTrip(new PtyMessage.IssueTicket(PtyMessage.TicketAction.ATTACH, "lounge")));
+        new PtyMessage.IssueTicket(PtyMessage.TicketAction.ATTACH, "lounge", "sail_secret"),
+        roundTrip(
+            new PtyMessage.IssueTicket(PtyMessage.TicketAction.ATTACH, "lounge", "sail_secret")));
     assertEquals(new PtyMessage.Ticket("tkt_1"), roundTrip(new PtyMessage.Ticket("tkt_1")));
+    var refusal =
+        new PtyMessage.TicketRefused(
+            PtyMessage.TicketRefusal.LIMITED,
+            Remedy.of("Wait, then run '", Remedy.sail("session ls"), "'."));
+    assertEquals(refusal, roundTrip(refusal));
+    assertEquals(
+        "IssueTicket[action=ATTACH, target=lounge]",
+        new PtyMessage.IssueTicket(PtyMessage.TicketAction.ATTACH, "lounge", "sail_secret")
+            .toString(),
+        "a credential in flight is never in a frame's words");
+    assertEquals("Ticket[]", new PtyMessage.Ticket("tkt_1").toString());
   }
 
   private static ReadableByteChannel channelOf(ByteBuffer bytes) {
     return Channels.newChannel(new ByteArrayInputStream(bytes.array(), 0, bytes.limit()));
+  }
+
+  @Test
+  void aTicketRefusalKindIsOneTheWireNamesOrRefused() {
+    var unknown = ByteBuffer.allocate(64);
+    unknown
+        .putInt(1 + 4 + 4 + 4)
+        .put((byte) 34)
+        .putInt(4)
+        .put("rude".getBytes(StandardCharsets.UTF_8));
+    unknown.putInt(0).flip();
+    assertEquals(
+        "Corrupt pty frame: a ticket refusal of kind 'rude'.",
+        assertThrows(IOException.class, () -> PtyWire.read(channelOf(unknown))).getMessage());
   }
 
   @Test

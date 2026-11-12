@@ -221,6 +221,11 @@ class HostConfigSetCommandTest {
     assertEquals(new ListenConfig("100.64.0.7:7071", "100.64.0.7:7072"), both.listen());
     assertEquals("10.0.0.1", both.serverIp());
     assertEquals(
+        new ListenConfig(null, "100.64.0.7:7072"),
+        HostConfigSetCommand.applyChange(both, "api-listen", "none").listen(),
+        "a door set to none is closed");
+    HostConfigSetCommand.validate("terminal-listen", "none");
+    assertEquals(
         "'terminal-listen' is '0.0.0.0:7072', a wildcard, which would listen on every network the"
             + " box is on. Name the box's address on the private network, e.g. 100.64.0.7:7071.",
         assertThrows(

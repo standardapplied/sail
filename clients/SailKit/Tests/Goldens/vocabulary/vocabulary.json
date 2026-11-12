@@ -93,6 +93,10 @@
       "status": 503
     },
     {
+      "code": "terminal_unavailable",
+      "status": 503
+    },
+    {
       "code": "spec_not_found",
       "status": 404
     },

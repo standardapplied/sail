@@ -574,7 +574,7 @@ sudo sail server token revoke direct-client > /dev/null 2>&1 || true
 sudo sail server token create direct-client member --fde client 2>/dev/null | sed -n 2p | tr -d " "'
 
 readonly DIRECT_TERMINAL='import json, socket, struct, sys, urllib.request
-ip, token = sys.argv[1], sys.argv[2]
+ip, token = sys.argv[1], sys.stdin.readline().strip()
 def text(value):
     raw = value.encode()
     return struct.pack(">i", len(raw)) + raw
@@ -624,13 +624,25 @@ if kind != 31 or b"presented already" not in payload:
     raise SystemExit("the second presentation was not refused as used: frame %d" % kind)
 print("the same ticket, presented again, is refused")'
 
+readonly CLOSE_PRIVATELY='sudo sail host config set api-listen none > /dev/null
+sudo sail host config set terminal-listen none > /dev/null
+sudo systemctl restart sail-api sail-pty-host
+sudo sail server token revoke direct-client > /dev/null 2>&1 || true'
+
 direct_terminal() {
-  local run=$1 ip token
+  local run=$1 ip token status=0
   ip=$(internal_ip "$run" client)
   [[ -n $ip ]] || { echo "client has no address"; return 1; }
   token=$(on "$run" client "cat > /tmp/sail-listen-privately && bash /tmp/sail-listen-privately $ip" <<< "$LISTEN_PRIVATELY")
-  [[ -n $token ]] || { echo "no token for client"; return 1; }
-  on "$run" main "cat > /tmp/sail-direct-terminal.py && python3 /tmp/sail-direct-terminal.py $ip $token" <<< "$DIRECT_TERMINAL"
+  if [[ -z $token ]]; then
+    echo "no token for client"
+    status=1
+  else
+    on "$run" main "cat > /tmp/sail-direct-terminal.py" <<< "$DIRECT_TERMINAL" || status=1
+    [[ $status == 0 ]] && { on "$run" main "python3 /tmp/sail-direct-terminal.py $ip" <<< "$token" || status=1; }
+  fi
+  on "$run" client "cat > /tmp/sail-close-privately && bash /tmp/sail-close-privately" <<< "$CLOSE_PRIVATELY" || status=1
+  return $status
 }
 
 says_in_order() {

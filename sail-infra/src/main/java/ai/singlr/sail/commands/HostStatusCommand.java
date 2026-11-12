@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
@@ -21,10 +22,15 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.ZfsQuery;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -88,8 +94,10 @@ public final class HostStatusCommand implements Runnable {
     var versions = new HostPackages(shell, detail -> {}).versions();
     var containers = Containers.of(shell);
 
+    var doors = doors(hostYaml.listen(), HostStatusCommand::answers);
     if (json) {
-      printJson(hostYaml, incusVersion, versions, hostInfo, poolUsage, fsUsage, containers, out);
+      printJson(
+          hostYaml, incusVersion, versions, hostInfo, poolUsage, fsUsage, containers, doors, out);
       return;
     }
 
@@ -104,6 +112,44 @@ public final class HostStatusCommand implements Runnable {
         containers.summary(),
         out,
         Ansi.AUTO);
+    for (var door : doors) {
+      out.println("  " + door.setting() + "  " + door.address() + "  " + door.state());
+    }
+  }
+
+  /**
+   * A private-network door this box is set to open, and what it is doing now: listening, not
+   * listening (its address not up yet, say), or refused at start, with why.
+   */
+  record Door(String setting, String address, String state) {}
+
+  /** Each door {@code listen} names, its state found by asking {@code answers} of its address. */
+  static List<Door> doors(ListenConfig listen, Predicate<InetSocketAddress> answers) {
+    var doors = new ArrayList<Door>();
+    for (var setting : List.of(ListenConfig.API, ListenConfig.TERMINAL)) {
+      var value = ListenConfig.API.equals(setting) ? listen.api() : listen.terminal();
+      if (value == null) {
+        continue;
+      }
+      String state;
+      try {
+        state = answers.test(ListenConfig.address(setting, value)) ? "listening" : "not listening";
+      } catch (IllegalArgumentException refused) {
+        state = "refused at start: " + refused.getMessage();
+      }
+      doors.add(new Door(setting, value, state));
+    }
+    return List.copyOf(doors);
+  }
+
+  /** Whether something accepts a TCP connection at {@code address} within a second. */
+  private static boolean answers(InetSocketAddress address) {
+    try (var socket = new Socket()) {
+      socket.connect(address, 1000);
+      return true;
+    } catch (IOException silent) {
+      return false;
+    }
   }
 
   /**
@@ -124,6 +170,7 @@ public final class HostStatusCommand implements Runnable {
       ZfsQuery.PoolUsage poolUsage,
       DirQuery.FsUsage fsUsage,
       Containers containers,
+      List<Door> doors,
       PrintStream out) {
     var map = new LinkedHashMap<String, Object>();
     map.put("hostname", hostInfo.hostname());
@@ -160,6 +207,19 @@ public final class HostStatusCommand implements Runnable {
       map.put("containers_running", containers.running());
       map.put("containers_stopped", containers.stopped());
     }
+    map.put(
+        "listen",
+        doors.stream()
+            .map(
+                door ->
+                    Map.of(
+                        "setting",
+                        door.setting(),
+                        "address",
+                        door.address(),
+                        "state",
+                        door.state()))
+            .toList());
     out.println(YamlUtil.dumpJson(map));
   }
 

@@ -26,6 +26,7 @@ import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyChildShim;
@@ -35,20 +36,25 @@ import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.pty.PtyWire;
 import ai.singlr.sail.pty.SdNotify;
+import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -57,6 +63,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
@@ -64,6 +73,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -71,19 +82,24 @@ import org.junit.jupiter.api.io.TempDir;
  * private address answers as on loopback, a ticket asked of it is decided by the terminal host as
  * that host decides the open or attach, and the ticket, presented on the host's TCP listener,
  * admits one connection for that one thing, speaking the unix socket's frames. Each scenario runs
- * through the real router and a real terminal host over loopback TCP, on main's control plane:
- * uday, its admin; ada, a member granted acme alone; vic, a viewer. A session the host opens in a
- * project runs {@code cat} under the real session shim in place of the container's command, which
- * needs an Incus. Time runs on the host's injected clock; every wait is bounded by the class's
- * timeout.
+ * through the real router and a real terminal host over loopback TCP, on a node whose own person is
+ * ada, a member granted acme alone; bob, a member granted acme, and vic, a viewer, are on its
+ * roster but do not operate it. A session the host opens in a project runs {@code cat} under the
+ * real session shim in place of the container's command, which needs an Incus. Time runs on the
+ * host's injected clock; every wait is bounded by the class's timeout.
  */
-@Timeout(value = 60, unit = TimeUnit.SECONDS)
+@Timeout(value = 120, unit = TimeUnit.SECONDS)
 class DirectTerminalTest {
 
-  private static final SyncConfig MAIN = new SyncConfig(SyncConfig.ROLE_MAIN, null, "uday", "main");
+  private static final SyncConfig NODE =
+      new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "ada", "node-box");
   private static final InetSocketAddress ANY_LOOPBACK_PORT =
       new InetSocketAddress(InetAddress.getLoopbackAddress(), 0);
   private static final String OPEN_ACME = "{\"action\":\"open\",\"project\":\"acme\"}";
+  private static final String ATTACH_LOUNGE = "{\"action\":\"attach\",\"session\":\"lounge\"}";
+  private static final String FORGED = "tkt_" + "0".repeat(64);
+  private static final String NOT_ISSUED =
+      "This is not a ticket this host issued; ask the API for a new one.";
 
   @TempDir Path dir;
   private final AtomicLong clock = new AtomicLong(1_000_000_000L);
@@ -93,6 +109,7 @@ class DirectTerminalTest {
   private PtySessionHost host;
   private SailApiServer api;
   private String ada;
+  private String bob;
   private String vic;
 
   @BeforeEach
@@ -100,8 +117,8 @@ class DirectTerminalTest {
     db = Sqlite.open(dir.resolve("sail.db"));
     new SchemaManager(db).migrate();
     roster = new FdeStore(db);
-    roster.add("uday", "Uday", "uday@x.dev", "admin");
     var adaRow = roster.add("ada", "Ada", "ada@x.dev", "member");
+    var bobRow = roster.add("bob", "Bob", "bob@x.dev", "member");
     var vicRow = roster.add("vic", "Vic", "vic@x.dev", "viewer");
     Acting.system(
         () -> {
@@ -109,30 +126,23 @@ class DirectTerminalTest {
           projects.upsert(TestDefinitions.named("acme"));
           projects.upsert(TestDefinitions.named("beta"));
         });
-    roster.restrict("ada");
-    roster.grant("ada", "acme");
-    var tokens = new TokenStore(db);
-    ada = tokens.create("ada-mac", "member", adaRow.id(), null).token();
-    vic = tokens.create("vic-mac", "viewer", vicRow.id(), null).token();
+    for (var handle : List.of("ada", "bob")) {
+      roster.restrict(handle);
+      roster.grant(handle, "acme");
+    }
+    ada = token("ada-mac", "member", adaRow.id());
+    bob = token("bob-mac", "member", bobRow.id());
+    vic = token("vic-mac", "viewer", vicRow.id());
     operations =
         DoorBox.wired(
             OperationsFactory.create(
                 db, DoorBox.acmeRuns(), null, null, SyncScheduler.disabled(), SessionYield.NONE),
             db,
             dir,
-            MAIN);
-    host = terminalHost(new PtySessionHost.Network(Optional.of(ANY_LOOPBACK_PORT), clock::get));
+            NODE);
+    host = terminalHost(network(ANY_LOOPBACK_PORT), socket());
     host.start();
-    api =
-        apiServer(
-            new SailApiServer.PrivateNetwork(
-                Optional.of(ANY_LOOPBACK_PORT),
-                Optional.of(
-                    new TerminalTickets(
-                        new ProjectStore(db),
-                        (credential, action, target) ->
-                            SessionClient.ticket(socket(), credential, action, target),
-                        host.tcpAddress().orElseThrow()))));
+    api = apiServer(Optional.of(ANY_LOOPBACK_PORT), host.tcpAddress().orElseThrow(), socket());
     api.start();
   }
 
@@ -144,34 +154,37 @@ class DirectTerminalTest {
     db.close();
   }
 
-  /** Scenario 1: with neither setting nothing more is bound, and the ticket route is no route. */
+  /**
+   * Scenario 1 and N1: with neither setting nothing more is bound, the ticket route is no route,
+   * and the unix socket answers as on main: an API token is no credential of its hello.
+   */
   @Test
-  void withNeitherSettingOnlyLoopbackAndTheUnixSocketAreBoundAndTheRouteIsAbsent()
-      throws Exception {
-    var hostAlone = terminalHost(PtySessionHost.Network.NONE, dir.resolve("alone.sock"));
+  void withNeitherSettingNothingMoreIsBoundAndEveryAnswerIsMains() throws Exception {
+    var alone = dir.resolve("alone.sock");
+    var hostAlone = terminalHost(PtySessionHost.Network.NONE, alone);
     hostAlone.start();
     try (hostAlone;
-        var apiAlone = apiServer(SailApiServer.PrivateNetwork.NONE)) {
+        var apiAlone = apiServer(Optional.empty(), null, alone)) {
       apiAlone.start();
       var base = "http://127.0.0.1:" + apiAlone.port();
 
       assertEquals(Optional.empty(), hostAlone.tcpAddress());
       assertEquals(Optional.empty(), apiAlone.privateAddress());
-      assertEquals(ListenConfig.none(), ListenConfig.fromMap(null));
       var absent = "404 not_found API endpoint was not found.";
       assertEquals(
           absent, statusAndError(send(base, "POST", "/v1/terminal/tickets", ada, OPEN_ACME)));
       assertEquals(absent, statusAndError(send(base, "GET", "/v1/terminal/tickets", ada, null)));
       assertEquals(
-          "This host listens for no terminal over the network. Name an address with 'sail host"
-              + " config set terminal-listen <address>:<port>' and restart the sail-pty-host"
-              + " service.",
-          assertThrows(
-                  IOException.class,
-                  () ->
-                      SessionClient.ticket(
-                          dir.resolve("alone.sock"), ada, PtyMessage.TicketAction.OPEN, "acme"))
+          "Session token is not valid or has expired.",
+          assertThrows(IOException.class, () -> SessionClient.connect(alone, ada).close())
               .getMessage());
+      assertEquals(
+          new PtyMessage.TicketRefused(
+              PtyMessage.TicketRefusal.UNAVAILABLE,
+              "This host listens for no terminal over the network. Name an address with 'sail"
+                  + " host config set terminal-listen <address>:<port>' and restart the"
+                  + " sail-pty-host service."),
+          plain(SessionClient.ticket(alone, ada, PtyMessage.TicketAction.OPEN, "acme")));
     }
   }
 
@@ -192,13 +205,9 @@ class DirectTerminalTest {
     assertEquals(unauthenticated.body(), send(privately, "GET", "/v1/whoami", null, null).body());
   }
 
-  /**
-   * Scenario 4, and N6: a wildcard or unparseable address is refused naming its setting, before
-   * anything binds; one that cannot be bound fails the start.
-   */
+  /** Scenario 4 and N6: a wildcard is refused naming its setting, before anything binds. */
   @Test
-  void aWildcardOrUnparseableAddressIsRefusedNamingItsSettingAndABindFailureFailsTheStart()
-      throws Exception {
+  void aWildcardAddressIsRefusedNamingItsSetting() {
     assertEquals(
         "'api-listen' is '0.0.0.0:7071', a wildcard, which would listen on every network the box"
             + " is on. Name the box's address on the private network, e.g. 100.64.0.7:7071.",
@@ -213,41 +222,57 @@ class DirectTerminalTest {
                 IllegalArgumentException.class,
                 () -> ListenConfig.fromMap(Map.of("terminal", "[::]:7072")).terminalAddress())
             .getMessage());
-    assertEquals(
-        "'api-listen' is 'tailnet.example:7071', which is not an address and a port. Name the"
-            + " box's address on the private network, e.g. 100.64.0.7:7071 or"
-            + " [fd7a:115c:a1e0::7]:7071.",
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> ListenConfig.address(ListenConfig.API, "tailnet.example:7071"))
-            .getMessage());
+  }
 
-    var taken = api.privateAddress().orElseThrow();
-    var refused =
-        assertThrows(
-            IOException.class,
-            () ->
-                apiServer(new SailApiServer.PrivateNetwork(Optional.of(taken), Optional.empty())));
-    assertTrue(
-        refused
-            .getMessage()
-            .startsWith(
-                "Could not listen on "
-                    + ListenConfig.hostPort(taken)
-                    + ", the API's private address ('api-listen'): "),
-        refused.getMessage());
-    var terminalTaken = host.tcpAddress().orElseThrow();
-    try (var clash =
-        terminalHost(
-            new PtySessionHost.Network(Optional.of(terminalTaken), clock::get),
-            dir.resolve("clash.sock"))) {
-      assertThrows(IOException.class, clash::start);
+  /**
+   * N6: an address that cannot be bound yet takes nothing down. Loopback and the unix socket serve;
+   * the private doors are not listening, and a ticket asked meanwhile is the host's outage; once
+   * the address is free each binds at its next tick.
+   */
+  @Test
+  void anAddressNotUpYetTakesNothingDownAndIsBoundOnceItIs() throws Exception {
+    var heldApi = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+    var heldTerminal = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+    var apiAddress =
+        new InetSocketAddress(InetAddress.getLoopbackAddress(), heldApi.getLocalPort());
+    var terminalAddress =
+        new InetSocketAddress(InetAddress.getLoopbackAddress(), heldTerminal.getLocalPort());
+    var waiting = dir.resolve("waiting.sock");
+    var hostWaiting = terminalHost(network(terminalAddress), waiting);
+    hostWaiting.start();
+    try (hostWaiting;
+        var apiWaiting = apiServer(Optional.of(apiAddress), terminalAddress, waiting)) {
+      apiWaiting.start();
+      var loopback = "http://127.0.0.1:" + apiWaiting.port();
+
+      assertEquals(200, send(loopback, "GET", "/v1/whoami", ada, null).statusCode());
+      assertEquals(Optional.empty(), apiWaiting.privateAddress());
+      assertEquals(Optional.empty(), hostWaiting.tcpAddress());
+      try (var unix = SessionClient.connect(waiting, "")) {
+        unix.list();
+      }
+      assertEquals(
+          "503 terminal_unavailable The terminal's private address ('terminal-listen') is not"
+              + " listening yet; ask again once the private network is up.",
+          statusAndError(send(loopback, "POST", "/v1/terminal/tickets", ada, OPEN_ACME)));
+
+      heldApi.close();
+      heldTerminal.close();
+      apiWaiting.tick(System.nanoTime() + Duration.ofMinutes(2).toNanos());
+      hostWaiting.tick(clock.get() + Duration.ofMinutes(2).toNanos());
+
+      assertEquals(Optional.of(apiAddress), apiWaiting.privateAddress());
+      assertEquals(Optional.of(terminalAddress), hostWaiting.tcpAddress());
+      assertEquals(
+          201, send(loopback, "POST", "/v1/terminal/tickets", ada, OPEN_ACME).statusCode());
     }
   }
 
-  /** Scenario 5: a holder of acme is answered a ticket and where to present it. */
+  /**
+   * Scenario 5: the box's own person, holding acme, is answered a ticket and where to present it.
+   */
   @Test
-  void aHolderOfAProjectIsAnsweredATicketToOpenInItAndTheTerminalAddress() throws Exception {
+  void theBoxsOwnPersonIsAnsweredATicketToOpenInAProjectItHolds() throws Exception {
     var answer = YamlUtil.parseMap(body(post(ada, OPEN_ACME), 201));
 
     assertTrue(answer.get("ticket").toString().matches("tkt_[0-9a-f]{64}"), answer.toString());
@@ -257,15 +282,36 @@ class DirectTerminalTest {
         answer.get("expires_at").toString().substring(0, 16));
   }
 
+  /**
+   * Scenario 5b and N7: a member or a viewer who holds acme but does not operate this box is
+   * refused, as the unix socket refuses them: opening a terminal needs the project on your own box.
+   */
+  @Test
+  void aMemberOrViewerWhoDoesNotOperateThisBoxOpensNothingOnIt() throws Exception {
+    for (var other : List.of(bob, vic)) {
+      var refused = post(other, OPEN_ACME);
+      assertEquals(403, refused.statusCode(), refused.body());
+      assertEquals("forbidden", error(refused).get("code"));
+    }
+    var bobSession = new FdeStore(db).byHandle("bob").orElseThrow();
+    var session = new AuthSessionStore(db).create(bobSession.id(), Duration.ofHours(1));
+    try (var unix = SessionClient.connect(socket(), session.token())) {
+      var unixSays =
+          assertThrows(
+                  IOException.class,
+                  () -> unix.create("bobs", List.of(), "/tmp", "acme", "", 80, 24))
+              .getMessage();
+      assertEquals(unixSays, error(post(bob, OPEN_ACME)).get("message"));
+    }
+    assertEquals(0, host.sessionCount());
+  }
+
   /** Scenario 6: a project the caller does not hold is not found, in the terminal host's words. */
   @Test
   void aProjectTheCallerDoesNotHoldIsNotFoundInTheTerminalHostsWords() throws Exception {
     var answer = post(ada, "{\"action\":\"open\",\"project\":\"beta\"}");
 
-    assertEquals(404, answer.statusCode());
-    var error = (Map<?, ?>) YamlUtil.parseMap(answer.body()).get("error");
-    assertEquals("project_not_in_catalog", error.get("code"));
-    try (var unix = SessionClient.connect(socket(), ada)) {
+    try (var unix = SessionClient.connect(socket(), "")) {
       var hostSays =
           assertThrows(
                   IOException.class, () -> unix.create("b1", List.of(), "/tmp", "beta", "", 80, 24))
@@ -274,24 +320,24 @@ class DirectTerminalTest {
           "Project 'beta' is not in the catalog. Create it with 'sail project create beta', or"
               + " sync it from main with 'sail sync'.",
           hostSays);
-      assertEquals("Project 'beta' is not in the catalog.", error.get("message"));
-      assertTrue(hostSays.startsWith(error.get("message") + " "), hostSays);
+      assertEquals("404 not_found " + hostSays, statusAndError(answer));
     }
   }
 
-  /** Scenario 7: a viewer is refused a ticket to attach another's session, as the host refuses. */
+  /**
+   * Scenario 7: a viewer is refused a ticket to attach another's session, and hears it only as a
+   * session it may not attach: the network does not tell one that exists from one that does not.
+   */
   @Test
-  void aViewerIsRefusedATicketToAttachAnothersSessionAsTheTerminalHostRefuses() throws Exception {
+  void aTicketToAttachAnothersSessionIsRefusedAsNotFoundLikeOneThatDoesNotExist() throws Exception {
     openOnTheSocket("lounge");
 
-    var answer = post(vic, "{\"action\":\"attach\",\"session\":\"lounge\"}");
-
-    assertEquals("403 forbidden Session 'lounge' is not yours to attach.", statusAndError(answer));
-    try (var unix = SessionClient.connect(socket(), vic)) {
-      assertEquals(
-          "Session 'lounge' is not yours to attach.",
-          assertThrows(IOException.class, () -> unix.attach("lounge", true)).getMessage());
-    }
+    assertEquals(
+        "404 not_found There is no session 'lounge' on this box that you may attach.",
+        statusAndError(post(vic, ATTACH_LOUNGE)));
+    assertEquals(
+        "404 not_found There is no session 'ghost' on this box that you may attach.",
+        statusAndError(post(vic, "{\"action\":\"attach\",\"session\":\"ghost\"}")));
   }
 
   /** Scenario 8: the ticket opens a session over TCP, and frames flow both ways. */
@@ -328,6 +374,45 @@ class DirectTerminalTest {
     }
   }
 
+  /** N3: one ticket presented on many connections at once admits exactly one of them. */
+  @Test
+  void oneTicketPresentedOnManyConnectionsAtOnceAdmitsExactlyOne() throws Exception {
+    for (var round = 0; round < 20; round++) {
+      var ticket = ticket(ada, OPEN_ACME);
+      var racers = new ArrayList<SocketChannel>();
+      for (var i = 0; i < 6; i++) {
+        var channel = SocketChannel.open(host.tcpAddress().orElseThrow());
+        PtyWire.handshake(channel, channel);
+        racers.add(channel);
+      }
+      var go = new CountDownLatch(1);
+      try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+        var answers = new ArrayList<Future<PtyMessage>>();
+        for (var channel : racers) {
+          answers.add(
+              pool.submit(
+                  () -> {
+                    go.await();
+                    PtyWire.write(channel, new PtyMessage.Hello(ticket));
+                    return PtyWire.read(channel);
+                  }));
+        }
+        go.countDown();
+        var welcomed = 0;
+        for (var answer : answers) {
+          if (answer.get(30, TimeUnit.SECONDS) instanceof PtyMessage.Welcome) {
+            welcomed++;
+          }
+        }
+        assertEquals(1, welcomed, "round " + round);
+      } finally {
+        for (var channel : racers) {
+          channel.close();
+        }
+      }
+    }
+  }
+
   /** Scenario 10: a ticket older than its life is refused as expired. */
   @Test
   void aTicketOlderThanItsLifeIsRefusedAsExpired() throws Exception {
@@ -349,32 +434,58 @@ class DirectTerminalTest {
   void aTicketToAttachOneSessionNeitherOpensInAProjectNorAttachesAnother() throws Exception {
     openOnTheSocket("lounge");
     openOnTheSocket("study");
-    var attachLounge = "{\"action\":\"attach\",\"session\":\"lounge\"}";
     var refusal =
         new PtyMessage.Err(
             "This connection's ticket is to attach to session 'lounge', and it admits nothing"
                 + " else; ask the API for a ticket for that.");
 
-    try (var opening = present(ticket(ada, attachLounge))) {
+    try (var opening = present(ticket(ada, ATTACH_LOUNGE))) {
       assertInstanceOf(PtyMessage.Welcome.class, PtyWire.read(opening));
       PtyWire.write(opening, new PtyMessage.Create("den", List.of(), "/tmp", "acme", "", 80, 24));
       assertEquals(refusal, PtyWire.read(opening));
       assertClosed(opening);
     }
-    try (var elsewhere = present(ticket(ada, attachLounge))) {
+    try (var elsewhere = present(ticket(ada, ATTACH_LOUNGE))) {
       assertInstanceOf(PtyMessage.Welcome.class, PtyWire.read(elsewhere));
       PtyWire.write(elsewhere, new PtyMessage.Attach("study", true));
       assertEquals(refusal, PtyWire.read(elsewhere));
       assertClosed(elsewhere);
     }
-    try (var opener = present(ticket(ada, OPEN_ACME))) {
-      assertInstanceOf(PtyMessage.Welcome.class, PtyWire.read(opener));
-      PtyWire.write(opener, new PtyMessage.Attach("lounge", true));
-      assertEquals(
-          new PtyMessage.Err(
-              "This connection's ticket is to open a session in project 'acme', and it admits"
-                  + " nothing else; ask the API for a ticket for that."),
-          PtyWire.read(opener));
+    assertEquals(2, host.sessionCount());
+  }
+
+  /**
+   * After an open ticket, no lateral move: each frame outside it closes the connection, and a
+   * second create is refused.
+   */
+  @Test
+  void anOpenTicketAdmitsOneCreateInItsProjectAndNoLateralMove() throws Exception {
+    openOnTheSocket("adas");
+    var lateral =
+        List.<PtyMessage>of(
+            new PtyMessage.Kill("adas"),
+            new PtyMessage.Create("b1", List.of(), "/tmp", "beta", "", 80, 24),
+            new PtyMessage.Create("h1", List.of(), "/tmp", "", "", 80, 24),
+            new PtyMessage.Attach("adas", true),
+            new PtyMessage.ListSessions("", 16),
+            new PtyMessage.Yield("adas", "x"),
+            new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, "acme", ada),
+            new PtyMessage.Hello(""));
+    for (var frame : lateral) {
+      try (var tcp = present(ticket(ada, OPEN_ACME))) {
+        assertInstanceOf(PtyMessage.Welcome.class, PtyWire.read(tcp));
+        PtyWire.write(tcp, frame);
+        assertInstanceOf(PtyMessage.Err.class, PtyWire.read(tcp), frame.toString());
+        assertClosed(tcp);
+      }
+    }
+    try (var tcp = present(ticket(ada, OPEN_ACME))) {
+      assertInstanceOf(PtyMessage.Welcome.class, PtyWire.read(tcp));
+      PtyWire.write(tcp, new PtyMessage.Resize(10, 10));
+      PtyWire.write(tcp, new PtyMessage.Create("c1", List.of(), "/tmp", "acme", "", 80, 24));
+      assertEquals(new PtyMessage.Ok(), PtyWire.read(tcp));
+      PtyWire.write(tcp, new PtyMessage.Create("c2", List.of(), "/tmp", "acme", "", 80, 24));
+      assertInstanceOf(PtyMessage.Err.class, PtyWire.read(tcp), "a second create");
     }
     assertEquals(2, host.sessionCount());
   }
@@ -392,13 +503,24 @@ class DirectTerminalTest {
       garbage.write(ByteBuffer.wrap("GET / HTTP/1.1\r\n\r\n".getBytes(StandardCharsets.US_ASCII)));
       assertClosed(garbage);
     }
-    try (var forged = present("tkt_" + "0".repeat(64))) {
-      assertEquals(
-          new PtyMessage.Err("This is not a ticket this host issued; ask the API for a new one."),
-          PtyWire.read(forged));
+    try (var forged = present(FORGED)) {
+      assertEquals(new PtyMessage.Err(NOT_ISSUED), PtyWire.read(forged));
       assertClosed(forged);
     }
     assertEquals(0, host.sessionCount());
+  }
+
+  /** A ticket split into one-byte writes is still read whole, within the deadline. */
+  @Test
+  void aTicketTrickledOneByteAtATimeIsRead() throws Exception {
+    var ticket = ticket(ada, OPEN_ACME);
+    try (var tcp = SocketChannel.open(host.tcpAddress().orElseThrow())) {
+      PtyWire.handshake(tcp, tcp);
+      for (var b : framed(new PtyMessage.Hello(ticket))) {
+        tcp.write(ByteBuffer.wrap(new byte[] {b}));
+      }
+      assertInstanceOf(PtyMessage.Welcome.class, PtyWire.read(tcp));
+    }
   }
 
   /** Scenario 13: revoking the grant severs the ticketed connection at the sweep, as today's. */
@@ -419,51 +541,137 @@ class DirectTerminalTest {
     assertEquals(404, post(ada, OPEN_ACME).statusCode());
   }
 
-  /**
-   * Scenario 14: an agent's run credential is no credential of the web door, and the socket offers
-   * no ticket route: agents open no terminals this way.
-   */
+  /** N2: the sweep severs a ticketed connection once its person is disabled. */
   @Test
-  void anAgentsRunCredentialIsRefusedATicket() throws Exception {
-    var run = runCredential();
+  void theSweepSeversATicketedConnectionOnceItsPersonIsDisabled() throws Exception {
+    try (var tcp = present(ticket(ada, OPEN_ACME))) {
+      assertInstanceOf(PtyMessage.Welcome.class, PtyWire.read(tcp));
+      db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'ada'");
 
-    assertEquals(
-        "403 invalid_bearer_token Bearer token is invalid.", statusAndError(post(run, OPEN_ACME)));
-    var socket = new SocketDoor(operations).ask("POST", "/v1/terminal/tickets", run, OPEN_ACME);
-    assertEquals(404, socket.status());
+      host.sweep(clock.get());
+
+      assertSevered(tcp);
+    }
   }
 
   /**
-   * Scenario 15: connections that never present a ticket are each closed at the deadline, hold at
-   * most a ticket's frame meanwhile, and crowd out neither the unix socket nor a ticketed client.
+   * N2: a ticket is a record of a decision, never a credential that outlives it: a person disabled
+   * or a token revoked since is refused when it is presented, and a grant revoked since opens and
+   * attaches nothing, each frame asking the one decision again.
+   */
+  @Test
+  void aTicketWhosePersonTokenOrGrantChangedSinceAdmitsNothing() throws Exception {
+    var disabledSince = ticket(ada, OPEN_ACME);
+    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'ada'");
+    try (var tcp = present(disabledSince)) {
+      assertEquals(
+          "FDE 'ada' is disabled or not in this box's roster. Ask an admin to re-enable it, or"
+              + " run 'sail sync' on a node that has not synced its roster.",
+          assertInstanceOf(PtyMessage.Err.class, PtyWire.read(tcp)).message());
+      assertClosed(tcp);
+    }
+    db.execute("UPDATE fdes SET status = 'active' WHERE handle = 'ada'");
+
+    var revokedSince = ticket(ada, OPEN_ACME);
+    new TokenStore(db).revoke("ada-mac");
+    try (var tcp = present(revokedSince)) {
+      assertEquals(
+          "The credential is not valid or has expired.",
+          assertInstanceOf(PtyMessage.Err.class, PtyWire.read(tcp)).message());
+      assertClosed(tcp);
+    }
+  }
+
+  /** N2: a grant revoked after the ticket was issued: the create and the attach are refused. */
+  @Test
+  void aGrantRevokedAfterTheTicketOpensAndAttachesNothing() throws Exception {
+    openOnTheSocket("lounge");
+    var open = ticket(ada, OPEN_ACME);
+    var attach = ticket(ada, ATTACH_LOUNGE);
+    roster.revoke("ada", "acme");
+
+    try (var tcp = present(open)) {
+      assertInstanceOf(PtyMessage.Welcome.class, PtyWire.read(tcp));
+      PtyWire.write(tcp, new PtyMessage.Create("late", List.of(), "/tmp", "acme", "", 80, 24));
+      assertEquals(
+          "Project 'acme' is not in the catalog. Create it with 'sail project create acme', or"
+              + " sync it from main with 'sail sync'.",
+          assertInstanceOf(PtyMessage.Err.class, PtyWire.read(tcp)).message());
+    }
+    try (var tcp = present(attach)) {
+      assertInstanceOf(PtyMessage.Welcome.class, PtyWire.read(tcp));
+      PtyWire.write(tcp, new PtyMessage.Attach("lounge", true));
+      assertInstanceOf(PtyMessage.Err.class, PtyWire.read(tcp));
+    }
+    assertEquals(1, host.sessionCount());
+  }
+
+  /**
+   * Scenario 14 and M4: an agent's run credential, the box credential and no credential are refused
+   * at both doors, from any peer, a project container's included: agents open no terminals this
+   * way.
+   */
+  @Test
+  void aRunCredentialTheBoxCredentialOrNoneIsRefusedAtBothDoors() throws Exception {
+    var run = runCredential();
+    var box = new BoxCredentialStore(db).replace("ada");
+
+    assertEquals(
+        "403 invalid_bearer_token Bearer token is invalid.", statusAndError(post(run, OPEN_ACME)));
+    assertEquals(
+        "403 invalid_bearer_token Bearer token is invalid.", statusAndError(post(box, OPEN_ACME)));
+    assertEquals(
+        "401 missing_bearer_token Missing bearer token.", statusAndError(post(null, OPEN_ACME)));
+    assertEquals(
+        404,
+        new SocketDoor(operations).ask("POST", "/v1/terminal/tickets", run, OPEN_ACME).status());
+    for (var credential : List.of(run, box, "")) {
+      try (var tcp = present(credential)) {
+        assertEquals(new PtyMessage.Err(NOT_ISSUED), PtyWire.read(tcp));
+        assertClosed(tcp);
+      }
+      assertThrows(IOException.class, () -> SessionClient.connect(socket(), run).close());
+    }
+  }
+
+  /**
+   * Scenario 15: connections that never present a ticket are each closed at the deadline, counted
+   * from the connect and not reset by a trickle, hold at most a ticket's frame meanwhile, and crowd
+   * out neither the unix socket nor a ticketed client.
    */
   @Test
   void connectionsThatNeverPresentATicketAreClosedAtTheDeadlineAndTheHostStaysResponsive()
       throws Exception {
     var silent = new ArrayList<SocketChannel>();
     try {
-      for (var i = 0; i < 32; i++) {
+      for (var i = 0; i < 4; i++) {
         var channel = SocketChannel.open(host.tcpAddress().orElseThrow());
         readMagic(channel);
         silent.add(channel);
       }
+      var trickling = SocketChannel.open(host.tcpAddress().orElseThrow());
+      silent.add(trickling);
+      PtyWire.handshake(trickling, trickling);
+      trickling.write(ByteBuffer.wrap(new byte[] {0, 0}));
       try (var oversized = SocketChannel.open(host.tcpAddress().orElseThrow())) {
         PtyWire.handshake(oversized, oversized);
         oversized.write(ByteBuffer.allocate(4).putInt(1 << 20).flip());
         assertClosed(oversized);
       }
-      try (var unix = SessionClient.connect(socket(), ada);
+      try (var unix = SessionClient.connect(socket(), "");
           var ticketed = present(ticket(ada, OPEN_ACME))) {
         unix.list();
         assertInstanceOf(PtyMessage.Welcome.class, PtyWire.read(ticketed));
       }
 
-      host.reapUnticketed(clock.get() + deadline());
+      clock.addAndGet(deadline() / 2);
+      trickling.write(ByteBuffer.wrap(new byte[] {0}));
+      host.tick(clock.get() + deadline() / 2);
 
       for (var channel : silent) {
         assertTrue(channel.isOpen());
       }
-      host.reapUnticketed(clock.get() + deadline() + 1);
+      host.tick(clock.get() + deadline() / 2 + 1);
 
       for (var channel : silent) {
         assertClosed(channel);
@@ -476,40 +684,95 @@ class DirectTerminalTest {
   }
 
   /**
-   * N2: a ticket is a record of a decision, never a credential that outlives it: the host resolves
-   * its person again when it is presented, so a person disabled since is refused.
+   * N8: one peer holding silent connections does not lock another out; on Linux, where every
+   * 127.0.0.0/8 address is the loopback, a second peer address is at hand.
    */
   @Test
-  void aTicketWhosePersonWasDisabledSinceIsRefusedWhenPresented() throws Exception {
-    var ticket = ticket(ada, OPEN_ACME);
-    db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'ada'");
-
-    try (var tcp = present(ticket)) {
-      assertEquals(
-          "FDE 'ada' is disabled or not in this box's roster. Ask an admin to re-enable it, or"
-              + " run 'sail sync' on a node that has not synced its roster.",
-          assertInstanceOf(PtyMessage.Err.class, PtyWire.read(tcp)).message());
-      assertClosed(tcp);
+  @EnabledOnOs(OS.LINUX)
+  void onePeerHoldingSilentConnectionsDoesNotLockAnotherPeerOut() throws Exception {
+    var silent = new ArrayList<SocketChannel>();
+    try {
+      for (var i = 0; i < 20; i++) {
+        var channel = SocketChannel.open();
+        channel.bind(new InetSocketAddress(InetAddress.ofLiteral("127.0.0.2"), 0));
+        channel.connect(host.tcpAddress().orElseThrow());
+        silent.add(channel);
+      }
+      var served = 0;
+      for (var channel : silent) {
+        if (channel.read(ByteBuffer.allocate(8)) > 0) {
+          served++;
+        }
+      }
+      assertEquals(8, served, "one peer holds at most 8 connections that presented no ticket");
+      try (var tcp = present(ticket(ada, OPEN_ACME))) {
+        assertInstanceOf(PtyMessage.Welcome.class, PtyWire.read(tcp));
+      }
+    } finally {
+      for (var channel : silent) {
+        channel.close();
+      }
     }
   }
 
   /**
-   * N4: the box's own person, a blank token, exists only on the unix socket, so it is issued no
-   * ticket; nor is a token that acts for no FDE, whose session would be no one's.
+   * N8: one credential holds at most 8 tickets not yet presented; the ninth is a cap reached, and
+   * another credential, its own person's other token included, is still served.
    */
   @Test
-  void noTicketIsIssuedToTheBlankTokenOrToATokenThatActsForNoOne() throws Exception {
+  void oneCredentialCannotKeepAnotherFromATicket() throws Exception {
+    for (var i = 0; i < 8; i++) {
+      assertEquals(201, post(ada, OPEN_ACME).statusCode(), "ticket " + i);
+    }
     assertEquals(
-        "A ticket carries the credential it is asked with, and this connection presented none.",
-        assertThrows(
-                IOException.class,
-                () -> SessionClient.ticket(socket(), "", PtyMessage.TicketAction.OPEN, "acme"))
-            .getMessage());
+        "429 rate_limited This credential holds 8 tickets not yet presented; present one or let it"
+            + " expire, then ask again.",
+        statusAndError(post(ada, OPEN_ACME)));
+    var adaRow = roster.byHandle("ada").orElseThrow();
+    var other = token("ada-phone", "member", adaRow.id());
+    assertEquals(201, post(other, OPEN_ACME).statusCode());
+  }
+
+  /**
+   * N4: the box's own person exists only on the unix socket, so no ticket is issued for no
+   * credential, for the host's own token, or for a token that acts for no FDE.
+   */
+  @Test
+  void noTicketIsIssuedForNoCredentialTheHostTokenOrAMachineToken() throws Exception {
+    assertEquals(
+        new PtyMessage.TicketRefused(
+            PtyMessage.TicketRefusal.FORBIDDEN,
+            "A ticket is issued for the credential that asks for it, and this request carries none:"
+                + " the box's own person exists only on the unix socket."),
+        plain(SessionClient.ticket(socket(), "", PtyMessage.TicketAction.OPEN, "acme")));
+    var hostToken = new TokenStore(db).create(HostToken.NAME, "admin").token();
     var machine = new TokenStore(db).create("ci", "admin").token();
     assertEquals(
-        "403 forbidden Token 'ci' acts for no FDE, so no terminal session would be anyone's; use"
-            + " a token of your own.",
-        statusAndError(post(machine, OPEN_ACME)));
+        "403 forbidden Token 'host' is bound to no FDE, so it is issued no ticket: the host's own"
+            + " token is the box's person, who exists only on the unix socket, and a machine token"
+            + " acts for no one. Use a token of your own.",
+        statusAndError(post(hostToken, OPEN_ACME)).replace(HostToken.NAME, "host"));
+    assertEquals(403, post(machine, OPEN_ACME).statusCode());
+  }
+
+  /** M5: a ticketed connection that ends releases its attachment and its write token. */
+  @Test
+  void aTicketedConnectionThatEndsReleasesItsAttachmentAndWriteToken() throws Exception {
+    try (var tcp = present(ticket(ada, OPEN_ACME))) {
+      assertInstanceOf(PtyMessage.Welcome.class, PtyWire.read(tcp));
+      PtyWire.write(tcp, new PtyMessage.Create("lounge", List.of(), "/tmp", "acme", "", 80, 24));
+      assertEquals(new PtyMessage.Ok(), PtyWire.read(tcp));
+      PtyWire.write(tcp, new PtyMessage.Attach("lounge", true));
+      assertEquals(new PtyMessage.Ok(), PtyWire.read(tcp));
+    }
+    try (var unix = SessionClient.connect(socket(), "")) {
+      var listed = unix.list().getFirst();
+      while (listed.attached() > 0 || !listed.writerFde().isEmpty()) {
+        listed = unix.list().getFirst();
+      }
+      assertEquals(0, listed.attached());
+      assertEquals("", listed.writerFde());
+    }
   }
 
   /** A request that names no action, or no valid target, is refused before the host is asked. */
@@ -532,14 +795,18 @@ class DirectTerminalTest {
     return dir.resolve("pty.sock");
   }
 
-  private PtySessionHost terminalHost(PtySessionHost.Network network) {
-    return terminalHost(network, socket());
+  private String token(String name, String role, String fdeId) {
+    return new TokenStore(db).create(name, role, fdeId, null).token();
+  }
+
+  private PtySessionHost.Network network(InetSocketAddress address) {
+    return new PtySessionHost.Network(Optional.of(address), clock::get, operations.pty()::holder);
   }
 
   /**
-   * A terminal host on main's control plane, whose sessions in a project run {@code cat} under the
-   * real shim: the container's {@code incus exec} that follows is the ignored arguments of {@code
-   * sh -c}.
+   * A terminal host on the node's control plane, whose sessions in a project run {@code cat} under
+   * the real shim: the container's {@code incus exec} that follows is the ignored arguments of
+   * {@code sh -c}.
    */
   private PtySessionHost terminalHost(PtySessionHost.Network network, Path socket) {
     var pty = operations.pty();
@@ -549,6 +816,11 @@ class DirectTerminalTest {
         64 * 1024,
         pty::identity,
         new PtyAdmission() {
+          @Override
+          public void box(PtyIdentity.Person who) throws IOException {
+            pty.admitBox(who);
+          }
+
           @Override
           public void project(String project, PtyIdentity.Person who) throws IOException {
             pty.admitProject(project, who);
@@ -572,12 +844,18 @@ class DirectTerminalTest {
         network);
   }
 
-  private SailApiServer apiServer(SailApiServer.PrivateNetwork network) throws IOException {
+  /**
+   * The API, on loopback and on {@code privately} when named, asking the host at {@code socket} for
+   * tickets presented at {@code terminal}, when named.
+   */
+  private SailApiServer apiServer(
+      Optional<InetSocketAddress> privately, InetSocketAddress terminal, Path socket)
+      throws IOException {
     return new SailApiServer(
         "127.0.0.1",
         0,
         operations,
-        TestAuth.sessions(db, MAIN),
+        TestAuth.sessions(db, NODE),
         null,
         null,
         null,
@@ -587,12 +865,20 @@ class DirectTerminalTest {
         new RateLimitGate(),
         project -> null,
         SseHandler.RoomTurns.NONE,
-        network);
+        new SailApiServer.PrivateNetwork(
+            privately,
+            Optional.ofNullable(terminal)
+                .map(
+                    address ->
+                        new TerminalTickets(
+                            (credential, action, target) ->
+                                SessionClient.ticket(socket, credential, action, target),
+                            address))));
   }
 
-  /** Opens {@code name} in acme as ada, on the unix socket. */
+  /** Opens {@code name} in acme as the box's own person, on the unix socket. */
   private void openOnTheSocket(String name) throws IOException {
-    try (var unix = SessionClient.connect(socket(), ada)) {
+    try (var unix = SessionClient.connect(socket(), "")) {
       unix.create(name, List.of(), "/tmp", "acme", "", 80, 24);
     }
   }
@@ -621,15 +907,12 @@ class DirectTerminalTest {
   }
 
   private HttpResponse<String> post(String bearer, String json) throws Exception {
-    var request =
-        HttpRequest.newBuilder(
-                URI.create("http://127.0.0.1:" + api.port() + "/v1/terminal/tickets"))
-            .header("Authorization", "Bearer " + bearer)
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(json));
-    try (var client = HttpClient.newHttpClient()) {
-      return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
-    }
+    return send(
+        "http://" + ListenConfig.hostPort(api.privateAddress().orElseThrow()),
+        "POST",
+        "/v1/terminal/tickets",
+        bearer,
+        json);
   }
 
   private static HttpResponse<String> send(
@@ -649,15 +932,26 @@ class DirectTerminalTest {
     }
   }
 
+  private static Map<?, ?> error(HttpResponse<String> response) {
+    return (Map<?, ?>) YamlUtil.parseMap(response.body()).get("error");
+  }
+
   /** The status of {@code response}, and its refusal's code and message. */
   private static String statusAndError(HttpResponse<String> response) {
-    var error = (Map<?, ?>) YamlUtil.parseMap(response.body()).get("error");
+    var error = error(response);
     return response.statusCode() + " " + error.get("code") + " " + error.get("message");
   }
 
   private static String body(HttpResponse<String> response, int status) {
     assertEquals(status, response.statusCode(), response.body());
     return response.body();
+  }
+
+  /** {@code answer}, a refusal's words read as plain words, so it compares by what it says. */
+  private static PtyMessage plain(PtyMessage answer) {
+    return answer instanceof PtyMessage.TicketRefused(var kind, var detail)
+        ? new PtyMessage.TicketRefused(kind, detail.plain())
+        : answer;
   }
 
   private String ticket(String bearer, String json) throws Exception {
@@ -670,6 +964,12 @@ class DirectTerminalTest {
     PtyWire.handshake(channel, channel);
     PtyWire.write(channel, new PtyMessage.Hello(ticket));
     return channel;
+  }
+
+  private static byte[] framed(PtyMessage message) throws IOException {
+    var sink = new ByteArrayOutputStream();
+    PtyWire.write(Channels.newChannel(sink), message);
+    return sink.toByteArray();
   }
 
   private static void readMagic(SocketChannel channel) throws IOException {

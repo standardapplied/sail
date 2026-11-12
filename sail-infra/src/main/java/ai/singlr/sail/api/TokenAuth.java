@@ -54,6 +54,7 @@ public final class TokenAuth implements ApiAuth {
             .orElseThrow(
                 () -> new ApiException(ErrorCode.INVALID_BEARER_TOKEN, "Bearer token is invalid."));
     exchange.setAttribute("token.name", info.name());
+    exchange.setAttribute(ApiAuth.CREDENTIAL, token);
     exchange.setAttribute(
         ApiAuth.ACTOR, roles.principal(credential(info)).orElseThrow(() -> refused(info)));
   }

@@ -10,25 +10,34 @@ import ai.singlr.sail.webauthn.Hashes;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * The tickets a host issued: each a record that the host decided its action on its target for the
- * credential that asked, never a credential of its own. A ticket is kept only as its hash, found by
- * comparing every kept hash in constant time, admits one connection, and must be presented within
- * {@link PtyMessage#TICKET_LIFE}. A used or expired ticket is remembered for as long again, so its
- * presenter hears which it was; after that it is forgotten like one never issued. At most {@code
- * cap} are kept at once, so no caller makes the host hold more.
+ * credential that asked, never a credential of its own, and naming that credential only by its
+ * hash. A ticket is kept only as its own hash, found by comparing every kept hash in constant time,
+ * admits one connection, and must be presented within {@link PtyMessage#TICKET_LIFE}. At most
+ * {@code cap} tickets not yet presented are kept, and at most {@link #PER_HOLDER} for any one
+ * credential, so one caller cannot keep the rest from a ticket. A spent or expired ticket is
+ * remembered apart, for its life again and within its own bound, only so its presenter hears which
+ * it was.
  */
 final class PtyTickets {
 
   private static final long LIFE = PtyMessage.TICKET_LIFE.toNanos();
 
   /**
-   * What a presented ticket admits: {@code action} on {@code target}, as {@code token}'s holder.
+   * What a presented ticket admits: {@code action} on {@code target}, for the credential whose hash
+   * is {@code holder}.
    */
-  record Ticket(PtyMessage.TicketAction action, String target, String token) {
+  record Ticket(PtyMessage.TicketAction action, String target, String holder) {
+
+    @Override
+    public String toString() {
+      return "Ticket[action=" + action + ", target=" + target + "]";
+    }
 
     /**
      * Why {@code message} lies outside this ticket, on a connection that opened {@code opened}
@@ -59,26 +68,42 @@ final class PtyTickets {
     }
   }
 
-  private record Issued(byte[] hash, Ticket ticket, long issuedAt, boolean used) {}
+  private record Issued(byte[] hash, Ticket ticket, long issuedAt) {}
+
+  private record Spent(byte[] hash, long issuedAt, boolean used) {}
+
+  /** How many tickets not yet presented one credential may hold. */
+  static final int PER_HOLDER = 8;
 
   private final int cap;
-  private final List<Issued> issued = new ArrayList<>();
+  private final List<Issued> outstanding = new ArrayList<>();
+  private final ArrayDeque<Spent> spent = new ArrayDeque<>();
 
   PtyTickets(int cap) {
     this.cap = cap;
   }
 
-  /** A new ticket for {@code ticket}, issued at {@code now}; refused when {@code cap} are kept. */
+  /**
+   * A new ticket for {@code ticket}, issued at {@code now}; refused when the host holds {@code cap}
+   * tickets not yet presented, or the ticket's credential holds {@link #PER_HOLDER}.
+   */
   synchronized String issue(Ticket ticket, long now) throws IOException {
-    forget(now);
-    if (issued.size() >= cap) {
+    expire(now);
+    if (outstanding.size() >= cap) {
       throw new IOException(
           "The host holds "
               + cap
-              + " tickets not yet forgotten; ask again once one has been presented or expired.");
+              + " tickets not yet presented; ask again once some have been presented or expired.");
+    }
+    if (outstanding.stream().filter(held -> held.ticket().holder().equals(ticket.holder())).count()
+        >= PER_HOLDER) {
+      throw new IOException(
+          "This credential holds "
+              + PER_HOLDER
+              + " tickets not yet presented; present one or let it expire, then ask again.");
     }
     var value = Secrets.mint("tkt");
-    issued.add(new Issued(hash(value), ticket, now, false));
+    outstanding.add(new Issued(hash(value), ticket, now));
     return value;
   }
 
@@ -87,35 +112,55 @@ final class PtyTickets {
    * unknown, used or expired.
    */
   synchronized Ticket redeem(String presented, long now) throws IOException {
-    forget(now);
+    expire(now);
     var wanted = hash(presented);
-    var index = -1;
-    for (var i = 0; i < issued.size(); i++) {
-      if (MessageDigest.isEqual(issued.get(i).hash(), wanted)) {
-        index = i;
+    Issued found = null;
+    for (var held : outstanding) {
+      if (MessageDigest.isEqual(held.hash(), wanted)) {
+        found = held;
       }
     }
-    if (index < 0) {
+    Spent gone = null;
+    for (var forgotten : spent) {
+      if (MessageDigest.isEqual(forgotten.hash(), wanted)) {
+        gone = forgotten;
+      }
+    }
+    if (found != null) {
+      outstanding.remove(found);
+      remember(new Spent(found.hash(), found.issuedAt(), true));
+      return found.ticket();
+    }
+    if (gone == null) {
       throw new IOException("This is not a ticket this host issued; ask the API for a new one.");
     }
-    var found = issued.get(index);
-    if (found.used()) {
+    if (gone.used()) {
       throw new IOException(
           "This ticket was presented already, and a ticket admits one connection; ask the API for"
               + " a new one.");
     }
-    if (now - found.issuedAt() > LIFE) {
-      throw new IOException(
-          "This ticket expired: a ticket is presented within "
-              + PtyMessage.TICKET_LIFE.toSeconds()
-              + " s of being issued; ask the API for a new one.");
-    }
-    issued.set(index, new Issued(found.hash(), found.ticket(), found.issuedAt(), true));
-    return found.ticket();
+    throw new IOException(
+        "This ticket expired: a ticket is presented within "
+            + PtyMessage.TICKET_LIFE.toSeconds()
+            + " s of being issued; ask the API for a new one.");
   }
 
-  private void forget(long now) {
-    issued.removeIf(entry -> now - entry.issuedAt() > 2 * LIFE);
+  /** Moves every ticket past its life to the spent, and forgets the spent past twice it. */
+  private void expire(long now) {
+    for (var held : List.copyOf(outstanding)) {
+      if (now - held.issuedAt() > LIFE) {
+        outstanding.remove(held);
+        remember(new Spent(held.hash(), held.issuedAt(), false));
+      }
+    }
+    spent.removeIf(forgotten -> now - forgotten.issuedAt() > 2 * LIFE);
+  }
+
+  private void remember(Spent ticket) {
+    spent.addLast(ticket);
+    while (spent.size() > 4 * cap) {
+      spent.removeFirst();
+    }
   }
 
   private static byte[] hash(String value) {

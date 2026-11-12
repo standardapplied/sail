@@ -51,4 +51,18 @@ public sealed interface PtyIdentity {
   interface Resolver {
     Person resolve(String token) throws IOException;
   }
+
+  /**
+   * Resolves the person behind a ticket's credential, named only by its hash ({@code
+   * Secrets.hash}): the caller's own credential at the API, which the host resolves for the ticket
+   * it asks, when the ticket is presented and at every sweep after, and keeps nowhere in the clear.
+   */
+  interface Holders {
+    Holders NONE =
+        hash -> {
+          throw new IOException("This host resolves no ticket credentials.");
+        };
+
+    Person holder(String credentialHash) throws IOException;
+  }
 }

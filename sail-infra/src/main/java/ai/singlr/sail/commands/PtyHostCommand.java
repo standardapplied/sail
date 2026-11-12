@@ -35,7 +35,7 @@ public final class PtyHostCommand implements Callable<Integer> {
 
   static final long JOURNAL_CAPACITY = 4L * 1024 * 1024;
   static final long SWEEP_INTERVAL_MILLIS = 30_000;
-  static final long REAP_INTERVAL_MILLIS = 1_000;
+  static final long TICK_INTERVAL_MILLIS = 1_000;
   static final String STOPPED_REASON = "pty host stopped";
 
   @Override
@@ -43,7 +43,7 @@ public final class PtyHostCommand implements Callable<Integer> {
     var network =
         ListenConfig.load()
             .terminalAddress()
-            .map(PtySessionHost.Network::on)
+            .map(address -> PtySessionHost.Network.on(address, PtyHostAccess.here()))
             .orElse(PtySessionHost.Network.NONE);
     var handoff = PtySessionHost.Handoff.fromEnvironment(PtyHostCommand::shimCommand);
     var host =
@@ -109,8 +109,9 @@ public final class PtyHostCommand implements Callable<Integer> {
   }
 
   /**
-   * Starts the host and its timers, the sweep and the reaping of TCP connections that present no
-   * ticket — the process shell around it is {@link #call()}.
+   * Starts the host and its timers: the sweep, and the TCP door's tick, which binds its address
+   * once it can and closes connections that present no ticket — the process shell around it is
+   * {@link #call()}.
    */
   static PtySessionHost startHost(
       java.nio.file.Path socket,
@@ -134,7 +135,7 @@ public final class PtyHostCommand implements Callable<Integer> {
             network);
     host.start();
     every(SWEEP_INTERVAL_MILLIS, host::sweep);
-    every(REAP_INTERVAL_MILLIS, host::reapUnticketed);
+    every(TICK_INTERVAL_MILLIS, host::tick);
     return host;
   }
 

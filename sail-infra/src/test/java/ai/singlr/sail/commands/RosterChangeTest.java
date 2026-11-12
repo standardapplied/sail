@@ -300,7 +300,7 @@ class RosterChangeTest {
    * The terminal host resolves a connection's principal at its hello and again at each sweep. The
    * sweep severs an open connection once its credential resolves to another principal, or to none,
    * after its person is demoted, rescoped or disabled alike, and the reconnect is admitted as what
-   * it is now.
+   * it is now: nia, who does not operate ada's box, opens no terminal on it.
    */
   @Test
   void aChangeOfAccessSeversAnOpenTerminalAtTheNextSweepAndNotBefore() throws Throwable {
@@ -309,16 +309,14 @@ class RosterChangeTest {
         host -> {
           severedAtTheSweep(host, session, "UPDATE fdes SET role = 'viewer' WHERE handle = 'nia'");
           assertEquals(
-              "Refusing room for session 'again': Your credential is read-only and cannot post in"
-                  + " rooms. Ask an admin for a member or admin credential.",
+              "Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it.",
               refusedAPin(socket(), session));
 
           onMain("UPDATE fdes SET role = 'member' WHERE handle = 'nia'");
           severedAtTheSweep(
               host, session, "UPDATE fdes SET scope = 'granted' WHERE handle = 'nia'");
           assertEquals(
-              "Project 'acme' is not in the catalog. Create it with 'sail project create acme', or"
-                  + " sync it from main with 'sail sync'.",
+              "Box 'ada' belongs to 'ada', not you. Ask ada to operate it, or have an admin do it.",
               refusedAPin(socket(), session));
 
           roster.unrestrict("nia");
@@ -334,11 +332,13 @@ class RosterChangeTest {
 
   /**
    * Until the sweep, an open connection pins rooms and opens sessions as the principal it was
-   * admitted as: the one window A10 leaves the terminal. Opening the session needs a real pty.
+   * admitted as: the one window A10 leaves the terminal. Nia is an admin when she connects, so she
+   * may open a terminal on ada's box. Opening the session needs a real pty.
    */
   @Test
   @EnabledOnOs(OS.LINUX)
   void anOpenTerminalActsAsItWasAdmittedUntilTheSweepAndNotAfter() throws Throwable {
+    onMain("UPDATE fdes SET role = 'admin' WHERE handle = 'nia'");
     var session = niasSession();
     onMainsTerminal(
         host -> {
@@ -420,6 +420,11 @@ class RosterChangeTest {
         64 * 1024,
         pty::identity,
         new PtyAdmission() {
+          @Override
+          public void box(PtyIdentity.Person who) throws IOException {
+            pty.admitBox(who);
+          }
+
           @Override
           public void project(String project, PtyIdentity.Person who) throws IOException {
             pty.admitProject(project, who);

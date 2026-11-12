@@ -11,22 +11,31 @@ import ai.singlr.sail.access.baseline.Baseline;
 import ai.singlr.sail.access.baseline.Cast;
 import ai.singlr.sail.access.baseline.Corpus;
 import ai.singlr.sail.access.baseline.World;
+import ai.singlr.sail.commands.SessionClient;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostAccess;
+import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
+import ai.singlr.sail.pty.PtyAdmission;
+import ai.singlr.sail.pty.PtyChildShim;
+import ai.singlr.sail.pty.PtyEvents;
+import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.pty.PtySessionHost;
+import ai.singlr.sail.pty.SdNotify;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
-import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -36,8 +45,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -104,7 +115,7 @@ class AccessDoorsBaselineTest {
   }
 
   @Test
-  void everyDoorAnswersAsTheBaselineRecords() {
+  void everyDoorAnswersAsTheBaselineRecords() throws IOException {
     try (var world = new World();
         var bus = new EventBus();
         var operations =
@@ -142,6 +153,7 @@ class AccessDoorsBaselineTest {
           List.of(),
           printed.lines().filter(line -> !line.equals(UNCOLLECTED)).toList(),
           "a door prints nothing but what its rehearsal leaves uncollected");
+      tickets(world, corpus);
       Baseline.check("infra-doors", corpus);
     }
   }
@@ -153,29 +165,104 @@ class AccessDoorsBaselineTest {
     specs(world, doors);
     rooms(world, doors);
     projects(doors);
-    tickets(world, doors);
     events(world, doors);
     return doors;
   }
 
   /**
-   * The ticket door's own check, which only the web door's callers reach: the project an open
-   * names, read in the caller's scope before the terminal host is asked. What the host decides
-   * behind it, the open or attach itself, is the host's (DirectTerminalTest), so here it issues
-   * what it is asked.
+   * A ticket asked at the ticket door by each FDE of the roster, by a machine token and by the
+   * host's own token, on main, where ada operates the box: to open a terminal in each project, and
+   * to attach to ada's session and to one that does not exist. The terminal host behind the door is
+   * the real one, over loopback TCP, deciding each as it decides that open or attach; its sessions
+   * in a project run {@code cat}, for want of an Incus. Asked after every other door and outside a
+   * rehearsal: the host answers from its own threads, and each ask mints a credential.
    */
-  private static void tickets(World world, List<Door> doors) {
-    var tickets =
-        new TerminalTickets(
-            new ProjectStore(world.db),
-            (credential, action, target) -> "tkt_" + target,
-            new InetSocketAddress(InetAddress.getLoopbackAddress(), 7072));
-    for (var project : List.of("acme", "beta", "delta", "omega")) {
-      doors.add(
-          new Door(
-              "ask a terminal ticket to open a session in " + project,
-              ops -> tickets.issue("tok", Map.of("action", "open", "project", project)),
-              actor -> actor.lane() == Actor.Lane.API));
+  private void tickets(World world, Corpus corpus) throws IOException {
+    var roles =
+        new RoleRule(
+            () -> new SyncConfig(SyncConfig.ROLE_MAIN, null, Cast.OWNER), new FdeStore(world.db));
+    var pty = new HostLanes.Pty(world.db, roles, new EventStore(world.db));
+    var socket = tempDir.resolve("pty.sock");
+    try (var host =
+        new PtySessionHost(
+            socket,
+            tempDir.resolve("sessions"),
+            64 * 1024,
+            pty::identity,
+            new PtyAdmission() {
+              @Override
+              public void box(PtyIdentity.Person who) throws IOException {
+                pty.admitBox(who);
+              }
+
+              @Override
+              public void project(String project, PtyIdentity.Person who) throws IOException {
+                pty.admitProject(project, who);
+              }
+
+              @Override
+              public void room(String room, String project, PtyIdentity.Person who)
+                  throws IOException {
+                pty.admitRoom(room, project, who);
+              }
+            },
+            PtyEvents.NONE,
+            "0.0.0-test",
+            new PtySessionHost.Handoff(
+                SdNotify.NONE,
+                Map.of(),
+                exit ->
+                    Stream.concat(
+                            PtyChildShim.onClassPath(exit).stream(),
+                            Stream.of("sh", "-c", "exec cat", "container"))
+                        .toList()),
+            new PtySessionHost.Network(
+                Optional.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0)),
+                System::nanoTime,
+                pty::holder))) {
+      host.start();
+      try (var unix = SessionClient.connect(socket, "")) {
+        unix.create("lounge", List.of(), "/tmp", "acme", "", 80, 24);
+      }
+      var door =
+          new TerminalTickets(
+              (credential, action, target) ->
+                  SessionClient.ticket(socket, credential, action, target),
+              host.tcpAddress().orElseThrow());
+      var askers = new LinkedHashMap<String, String>();
+      for (var fde :
+          List.of(Cast.OWNER, Cast.OTHER, Cast.ADMIN, World.VIEWER_FDE, World.SCOPED_FDE)) {
+        askers.put("fde " + fde, session(world, fde));
+      }
+      askers.put("a machine token", new TokenStore(world.db).create("corpus-ci", "admin").token());
+      askers.put(
+          "the host token", new TokenStore(world.db).create(HostToken.NAME, "admin").token());
+      for (var asker : askers.entrySet()) {
+        for (var project : List.of("acme", "beta", "delta", "omega")) {
+          var label = asker.getKey() + " asks a ticket to open a terminal in " + project;
+          corpus.put(
+              label,
+              answer(
+                  new Door(
+                      label,
+                      ops ->
+                          door.issue(
+                              asker.getValue(), Map.of("action", "open", "project", project))),
+                  null));
+        }
+        for (var session : List.of("lounge", "ghost")) {
+          var label = asker.getKey() + " asks a ticket to attach to " + session;
+          corpus.put(
+              label,
+              answer(
+                  new Door(
+                      label,
+                      ops ->
+                          door.issue(
+                              asker.getValue(), Map.of("action", "attach", "session", session))),
+                  null));
+        }
+      }
     }
   }
 

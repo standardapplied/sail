@@ -51,7 +51,6 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   private static final String DELETE = "DELETE";
 
   private static final String PROJECT = "/v1/projects/{project}";
-  private static final String BEARER = "Bearer ";
 
   private static final String SPEC = "spec";
   private static final String ROOM = "room";
@@ -638,8 +637,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
    */
   private ApiResponse terminalTicket(Call call) throws IOException {
     var tickets = terminal.orElseThrow(ApiRouter::notFound);
-    var bearer = call.exchange().getRequestHeaders().getFirst("Authorization");
-    return ApiResponse.created(tickets.issue(bearer.substring(BEARER.length()), call.body()));
+    return ApiResponse.created(tickets.issue(ApiAuth.credentialOf(call.exchange()), call.body()));
   }
 
   private ApiResponse dispatch(Call call) throws IOException {

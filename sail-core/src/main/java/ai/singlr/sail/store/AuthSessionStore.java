@@ -7,11 +7,8 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Secrets;
-import ai.singlr.sail.webauthn.Hashes;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HexFormat;
 import java.util.Optional;
 
 /**
@@ -48,7 +45,14 @@ public final class AuthSessionStore {
 
   /** Resolves a live session, or empty if unknown or expired. Expired rows are pruned on lookup. */
   public Optional<SessionInfo> validate(String token) {
-    var hash = sha256(token);
+    return validateHash(sha256(token));
+  }
+
+  /**
+   * As {@link #validate}, for the session whose token's hash is {@code hash}: the terminal host
+   * keeps only a ticket's credential hash, and resolves it by that.
+   */
+  public Optional<SessionInfo> validateHash(String hash) {
     var result =
         db.queryOne(
             "SELECT fde_id, created_at, expires_at FROM sessions WHERE token_hash = ?",
@@ -81,6 +85,6 @@ public final class AuthSessionStore {
   }
 
   private static String sha256(String input) {
-    return HexFormat.of().formatHex(Hashes.sha256(input.getBytes(StandardCharsets.UTF_8)));
+    return Secrets.hash(input);
   }
 }

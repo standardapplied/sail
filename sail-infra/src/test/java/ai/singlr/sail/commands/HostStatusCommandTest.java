@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -235,5 +236,26 @@ class HostStatusCommandTest {
         OperatorCommand.SUDO,
         new PrintStream(out, true, StandardCharsets.UTF_8));
     return out.toString(StandardCharsets.UTF_8);
+  }
+
+  @Test
+  void eachPrivateDoorTheBoxIsSetToOpenIsShownListeningOrNot() {
+    var listen = new ListenConfig("100.64.0.7:7071", "0.0.0.0:7072");
+    var up = ListenConfig.address(ListenConfig.API, "100.64.0.7:7071");
+
+    assertEquals(
+        List.of(
+            new HostStatusCommand.Door("api-listen", "100.64.0.7:7071", "listening"),
+            new HostStatusCommand.Door(
+                "terminal-listen",
+                "0.0.0.0:7072",
+                "refused at start: 'terminal-listen' is '0.0.0.0:7072', a wildcard, which would"
+                    + " listen on every network the box is on. Name the box's address on the"
+                    + " private network, e.g. 100.64.0.7:7071.")),
+        HostStatusCommand.doors(listen, up::equals));
+    assertEquals(
+        List.of(new HostStatusCommand.Door("api-listen", "100.64.0.7:7071", "not listening")),
+        HostStatusCommand.doors(new ListenConfig("100.64.0.7:7071", null), address -> false));
+    assertEquals(List.of(), HostStatusCommand.doors(ListenConfig.none(), address -> true));
   }
 }

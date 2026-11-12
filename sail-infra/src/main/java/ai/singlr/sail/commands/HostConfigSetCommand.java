@@ -443,7 +443,7 @@ public final class HostConfigSetCommand implements Runnable {
         }
       }
       case "webauthn-session-ttl-hours" -> parseSessionTtlHours(value);
-      case ListenConfig.API, ListenConfig.TERMINAL -> ListenConfig.address(key, value);
+      case ListenConfig.API, ListenConfig.TERMINAL -> ListenConfig.none().with(key, value);
       case "sync-role" -> {
         if (!SyncConfig.ROLE_MAIN.equals(value) && !SyncConfig.ROLE_NODE.equals(value)) {
           throw new IllegalArgumentException(
