@@ -210,18 +210,13 @@ class HostInitCommandTest {
   @Test
   void aDirBoxTakesNoZfsSource() throws Exception {
     assertEquals(new PoolSource.Dir(), source(new ScriptedShellExecutor()));
-    for (var flags :
-        List.of(
-            List.of("--disk", "/dev/sdb"),
-            List.of("--pool-file-size", "50GiB"),
-            List.of("--force-wipe", "/dev/sdb"))) {
+    for (var flags : List.of(List.of("--disk", "/dev/sdb"), List.of("--pool-file-size", "50GiB"))) {
       var refused =
           assertThrows(
               IllegalArgumentException.class,
               () -> source(new ScriptedShellExecutor(), flags.toArray(String[]::new)));
       assertEquals(
-          "--disk, --pool-file-size and --force-wipe choose a ZFS pool's source: pass them with"
-              + " --storage zfs.",
+          "--disk and --pool-file-size choose a ZFS pool's source: pass them with --storage zfs.",
           refused.getMessage());
     }
   }
@@ -247,23 +242,18 @@ class HostInitCommandTest {
   }
 
   @Test
-  void theForceFlagNamesTheDiskAgainSoItNeedsTheDisk() {
-    var refused =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                source(
-                    new ScriptedShellExecutor(),
-                    "--storage",
-                    "zfs",
-                    "--pool-file-size",
-                    "50GiB",
-                    "--force-wipe",
-                    "/dev/sdb"));
-
-    assertEquals(
-        "--force-wipe names the device to erase again: name it with --disk too.",
-        refused.getMessage());
+  void thereIsNoFlagThatErases() {
+    assertThrows(
+        CommandLine.UnmatchedArgumentException.class,
+        () ->
+            source(
+                new ScriptedShellExecutor(),
+                "--storage",
+                "zfs",
+                "--disk",
+                "/dev/sdb",
+                "--force-wipe",
+                "/dev/sdb"));
   }
 
   @Test
@@ -282,15 +272,6 @@ class HostInitCommandTest {
               + " 200GB.",
           refused.getMessage());
     }
-  }
-
-  @Test
-  void aNamedDiskIsClearedWithItsForceFlag() throws Exception {
-    var shell = spare(DeviceFixtures.read(DeviceFixtures.SPARES));
-
-    assertEquals(
-        new PoolSource.Device("/dev/sdb", true, "40G"),
-        source(shell, "--storage", "zfs", "--disk", "/dev/sdb", "--force-wipe", "/dev/sdb"));
   }
 
   @Test
@@ -313,37 +294,28 @@ class HostInitCommandTest {
     var shell = spare(DeviceFixtures.spares(Set.of("/dev/sda", "/dev/sdb")));
 
     assertEquals(
-        new PoolSource.Device("/dev/sdb", false, "40G"),
+        new PoolSource.Device("/dev/sdb", "spare-sdb 8:16 42949672960"),
         source(shell, "--storage", "zfs", "--yes"));
     assertTrue(shell.invocations().contains("wipefs -- /dev/sdb"));
   }
 
   @Test
-  void aReRunKeepsTheZfsPoolIncusHasForcedOrNotAndClearsNoDeviceAgain() throws Exception {
+  void aReRunKeepsTheZfsPoolIncusHasAndClearsNoDeviceAgain() throws Exception {
     var shell =
         new ScriptedShellExecutor()
             .onOk(
                 "incus storage list",
                 "[{\"name\": \"tank\", \"driver\": \"zfs\", \"config\": {\"source\": \"tank\","
                     + " \"volatile.initial_source\": \"/dev/sdb\", \"zfs.pool_name\": \"tank\"}}]")
-            .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n")
-            .onOk("realpath -e -- /dev/disk/by-id/d1", "/dev/sdb\n");
+            .onOk("realpath -e -- /dev/disk/by-id/d1", "/dev/sdb\n")
+            .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n");
 
     assertEquals(
         new PoolSource.Zpool("tank"),
         source(shell, "--storage", "zfs", "--pool", "tank", "--disk", "/dev/sdb"));
     assertEquals(
         new PoolSource.Zpool("tank"),
-        source(
-            shell,
-            "--storage",
-            "zfs",
-            "--pool",
-            "tank",
-            "--disk",
-            "/dev/sdb",
-            "--force-wipe",
-            "/dev/disk/by-id/d1"));
+        source(shell, "--storage", "zfs", "--pool", "tank", "--disk", "/dev/disk/by-id/d1"));
     assertEquals(new PoolSource.Zpool("tank"), source(shell, "--storage", "zfs", "--pool", "tank"));
     assertFalse(
         shell.invocations().stream().anyMatch(c -> c.startsWith("lsblk") || c.startsWith("wipefs")),
@@ -363,17 +335,7 @@ class HostInitCommandTest {
     var refused =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                source(
-                    shell,
-                    "--storage",
-                    "zfs",
-                    "--pool",
-                    "tank",
-                    "--disk",
-                    "/dev/sdc",
-                    "--force-wipe",
-                    "/dev/sdc"));
+            () -> source(shell, "--storage", "zfs", "--pool", "tank", "--disk", "/dev/sdc"));
     var file =
         assertThrows(
             IllegalArgumentException.class,
@@ -381,8 +343,7 @@ class HostInitCommandTest {
 
     assertEquals(
         "Incus already has zfs pool 'tank' on /dev/sdb, which a re-run keeps, so --disk /dev/sdc"
-            + " and --force-wipe /dev/sdc would be ignored. Drop it, or name a new pool with --pool"
-            + " <name>.",
+            + " would be ignored. Drop it, or name a new pool with --pool <name>.",
         refused.getMessage());
     assertEquals(
         "Incus already has zfs pool 'tank' on /dev/sdb, which a re-run keeps, so --pool-file-size"

@@ -20,7 +20,7 @@ import java.util.concurrent.TimeoutException;
  * Incus's storage pools: the one place that builds the command creating one, and that reads them
  * back as Incus has them. Sail hands Incus the whole source and makes nothing inside a pool itself;
  * Incus creates the zpool on a device or a file ({@code zpool create -m none -O compression=on},
- * {@code -f} only with {@code source.wipe}) and owns every dataset in it.
+ * never {@code -f}: Sail never passes {@code source.wipe}) and owns every dataset in it.
  */
 public final class IncusStorage {
 
@@ -76,14 +76,16 @@ public final class IncusStorage {
     var command = new ArrayList<>(List.of("incus", "storage", "create", name, source.driver()));
     switch (source) {
       case PoolSource.Dir dir -> {}
-      case PoolSource.Device device -> {
-        command.add("source=" + device.path());
-        if (device.wipe()) {
-          command.add("source.wipe=true");
-        }
-      }
+      case PoolSource.Device device -> command.add("source=" + device.path());
       case PoolSource.File file -> command.add("size=" + file.sizeMb() + "MiB");
-      case PoolSource.Zpool zpool -> command.add("source=" + zpool.name());
+      case PoolSource.Zpool zpool ->
+          throw new IllegalStateException(
+              "Incus's pool '"
+                  + name
+                  + "' on zpool "
+                  + zpool.name()
+                  + " is gone since this run began, and Sail makes no pool from a zpool it did"
+                  + " not make: run this command again.");
     }
     return List.copyOf(command);
   }

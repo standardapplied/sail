@@ -2,6 +2,7 @@
    "blockdevices": [
       {
          "path": "/dev/nvme0n1",
+         "kname": "nvme0n1",
          "type": "disk",
          "fstype": null,
          "pttype": "gpt",
@@ -9,7 +10,7 @@
          "mountpoints": [
             null
          ],
-         "size": "1.8T",
+         "size": 1979120929997,
          "model": "Samsung SSD",
          "rm": false,
          "wwn": null,
@@ -18,6 +19,7 @@
          "children": [
             {
                "path": "/dev/nvme0n1p1",
+               "kname": "nvme0n1p1",
                "type": "part",
                "fstype": "vfat",
                "pttype": "gpt",
@@ -25,7 +27,7 @@
                "mountpoints": [
                   "/boot/efi"
                ],
-               "size": "512M",
+               "size": 536870912,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -34,6 +36,7 @@
             },
             {
                "path": "/dev/nvme0n1p2",
+               "kname": "nvme0n1p2",
                "type": "part",
                "fstype": "zfs_member",
                "pttype": "gpt",
@@ -41,7 +44,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "2G",
+               "size": 2147483648,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -50,6 +53,7 @@
             },
             {
                "path": "/dev/nvme0n1p3",
+               "kname": "nvme0n1p3",
                "type": "part",
                "fstype": "zfs_member",
                "pttype": "gpt",
@@ -57,7 +61,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "1.8T",
+               "size": 1979120929997,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -68,6 +72,7 @@
       },
       {
          "path": "/dev/nvme1n1",
+         "kname": "nvme1n1",
          "type": "disk",
          "fstype": null,
          "pttype": "gpt",
@@ -75,7 +80,7 @@
          "mountpoints": [
             null
          ],
-         "size": "1.8T",
+         "size": 1979120929997,
          "model": "Samsung SSD",
          "rm": false,
          "wwn": null,
@@ -84,6 +89,7 @@
          "children": [
             {
                "path": "/dev/nvme1n1p1",
+               "kname": "nvme1n1p1",
                "type": "part",
                "fstype": "vfat",
                "pttype": "gpt",
@@ -91,7 +97,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "512M",
+               "size": 536870912,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -100,6 +106,7 @@
             },
             {
                "path": "/dev/nvme1n1p2",
+               "kname": "nvme1n1p2",
                "type": "part",
                "fstype": "zfs_member",
                "pttype": "gpt",
@@ -107,7 +114,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "2G",
+               "size": 2147483648,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -116,6 +123,7 @@
             },
             {
                "path": "/dev/nvme1n1p3",
+               "kname": "nvme1n1p3",
                "type": "part",
                "fstype": "zfs_member",
                "pttype": "gpt",
@@ -123,7 +131,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "1.8T",
+               "size": 1979120929997,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -134,6 +142,7 @@
       },
       {
          "path": "/dev/sdb",
+         "kname": "sdb",
          "type": "disk",
          "fstype": null,
          "pttype": null,
@@ -141,7 +150,7 @@
          "mountpoints": [
             null
          ],
-         "size": "1.8T",
+         "size": 1979120929997,
          "model": "Samsung SSD",
          "rm": false,
          "wwn": null,

@@ -22,7 +22,7 @@ import java.util.Set;
 public final class DeviceFixtures {
 
   /** The lsblk call {@link PoolDevices} makes, as the scripted shell matches it. */
-  public static final String LSBLK = String.join(" ", PoolDevices.LSBLK);
+  public static final String LSBLK = String.join(" ", BlockTree.LSBLK);
 
   /** A real GCP VM's tree (the system on sda, blank sdb and sdc) plus hand-written spare disks. */
   public static final String SPARES = "handwritten-gcp-blank-with-spares.lsblk.json";

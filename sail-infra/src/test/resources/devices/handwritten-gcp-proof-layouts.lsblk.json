@@ -10,7 +10,7 @@
          "mountpoints": [
             null
          ],
-         "size": "1G",
+         "size": 1073741824,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -27,7 +27,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "1023M",
+               "size": 1072693248,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -46,7 +46,7 @@
          "mountpoints": [
             null
          ],
-         "size": "30G",
+         "size": 32212254720,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -63,12 +63,29 @@
                "mountpoints": [
                   "/"
                ],
-               "size": "13G",
+               "size": 13958643712,
                "model": null,
                "rm": false,
                "wwn": null,
                "serial": null,
                "maj:min": "8:1"
+            },
+            {
+               "path": "/dev/sda2",
+               "kname": "sda2",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                  null
+               ],
+               "size": 4294967296,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:2"
             },
             {
                "path": "/dev/sda14",
@@ -80,7 +97,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "4M",
+               "size": 4194304,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -97,7 +114,7 @@
                "mountpoints": [
                   "/boot/efi"
                ],
-               "size": "106M",
+               "size": 111149056,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -114,7 +131,7 @@
                "mountpoints": [
                   "/boot"
                ],
-               "size": "913M",
+               "size": 957349888,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -133,7 +150,7 @@
          "mountpoints": [
             null
          ],
-         "size": "20G",
+         "size": 21474836480,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -150,7 +167,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "2G",
+               "size": 2147483648,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -167,7 +184,7 @@
                      "mountpoints": [
                         "[SWAP]"
                      ],
-                     "size": "1022M",
+                     "size": 1071644672,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -186,7 +203,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "1G",
+               "size": 1073741824,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -203,7 +220,7 @@
                      "mountpoints": [
                         null
                      ],
-                     "size": "1022M",
+                     "size": 1071644672,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -222,7 +239,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "17G",
+               "size": 18253611008,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -239,7 +256,7 @@
                      "mountpoints": [
                         null
                      ],
-                     "size": "16.9G",
+                     "size": 18146236826,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -256,7 +273,7 @@
                            "mountpoints": [
                               null
                            ],
-                           "size": "1G",
+                           "size": 1073741824,
                            "model": null,
                            "rm": false,
                            "wwn": null,
@@ -279,7 +296,7 @@
          "mountpoints": [
             null
          ],
-         "size": "20G",
+         "size": 21474836480,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -296,7 +313,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "2G",
+               "size": 2147483648,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -313,7 +330,7 @@
                      "mountpoints": [
                         "[SWAP]"
                      ],
-                     "size": "1022M",
+                     "size": 1071644672,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -332,7 +349,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "1G",
+               "size": 1073741824,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -349,7 +366,7 @@
                      "mountpoints": [
                         null
                      ],
-                     "size": "1022M",
+                     "size": 1071644672,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -368,7 +385,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "17G",
+               "size": 18253611008,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -385,7 +402,7 @@
                      "mountpoints": [
                         null
                      ],
-                     "size": "16.9G",
+                     "size": 18146236826,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -402,7 +419,7 @@
                            "mountpoints": [
                               null
                            ],
-                           "size": "1G",
+                           "size": 1073741824,
                            "model": null,
                            "rm": false,
                            "wwn": null,
@@ -425,7 +442,7 @@
          "mountpoints": [
             null
          ],
-         "size": "20G",
+         "size": 21474836480,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -442,7 +459,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "20G",
+               "size": 21474836480,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -459,12 +476,29 @@
                "mountpoints": [
                   null
                ],
-               "size": "8M",
+               "size": 8388608,
                "model": null,
                "rm": false,
                "wwn": null,
                "serial": null,
                "maj:min": "8:57"
+            },
+            {
+               "path": "/dev/sdd2",
+               "kname": "sdd2",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                  null
+               ],
+               "size": 1073741824,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:50"
             }
          ]
       },
@@ -478,7 +512,7 @@
          "mountpoints": [
             null
          ],
-         "size": "20G",
+         "size": 21474836480,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -495,7 +529,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "2G",
+               "size": 2147483648,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -512,7 +546,7 @@
                      "mountpoints": [
                         null
                      ],
-                     "size": "2G",
+                     "size": 2147483648,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -531,7 +565,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "2G",
+               "size": 2147483648,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -548,7 +582,7 @@
                      "mountpoints": [
                         null
                      ],
-                     "size": "1G",
+                     "size": 1073741824,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -567,7 +601,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "2G",
+               "size": 2147483648,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -584,7 +618,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "14G",
+               "size": 15032385536,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -603,7 +637,7 @@
          "mountpoints": [
             null
          ],
-         "size": "20G",
+         "size": 21474836480,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -620,7 +654,7 @@
                "mountpoints": [
                   "/srv/neigh1"
                ],
-               "size": "2G",
+               "size": 2147483648,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -637,7 +671,7 @@
                "mountpoints": [
                   "[SWAP]"
                ],
-               "size": "1G",
+               "size": 1073741824,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -654,7 +688,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "2G",
+               "size": 2147483648,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -671,7 +705,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "15G",
+               "size": 16106127360,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -690,7 +724,7 @@
          "mountpoints": [
             null
          ],
-         "size": "1G",
+         "size": 1073741824,
          "model": null,
          "rm": false,
          "wwn": null,

@@ -24,24 +24,29 @@ class IncusStorageTest {
         IncusStorage.createCommand("devpool", new PoolSource.Dir()));
     assertEquals(
         List.of("incus", "storage", "create", "tank", "zfs", "source=/dev/sdb"),
-        IncusStorage.createCommand("tank", new PoolSource.Device("/dev/sdb", false, "id")));
-    assertEquals(
-        List.of("incus", "storage", "create", "tank", "zfs", "source=/dev/sdb", "source.wipe=true"),
-        IncusStorage.createCommand("tank", new PoolSource.Device("/dev/sdb", true, "id")));
+        IncusStorage.createCommand("tank", new PoolSource.Device("/dev/sdb", "id")));
     assertEquals(
         List.of("incus", "storage", "create", "tank", "zfs", "size=51200MiB"),
         IncusStorage.createCommand("tank", new PoolSource.File(51200)));
+  }
+
+  @Test
+  void aZpoolIsNeverMadeIntoAPool() {
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> IncusStorage.createCommand("devpool", new PoolSource.Zpool("tank")));
+
     assertEquals(
-        List.of("incus", "storage", "create", "devpool", "zfs", "source=devpool"),
-        IncusStorage.createCommand("devpool", new PoolSource.Zpool("devpool")));
+        "Incus's pool 'devpool' on zpool tank is gone since this run began, and Sail makes no pool"
+            + " from a zpool it did not make: run this command again.",
+        refused.getMessage());
   }
 
   @Test
   void eachSourceIsSaidAsTheOperatorReadsIt() {
     assertEquals("dir", new PoolSource.Dir().said());
-    assertEquals("zfs on /dev/sdb", new PoolSource.Device("/dev/sdb", false, "id").said());
-    assertEquals(
-        "zfs on /dev/sdb, erased first", new PoolSource.Device("/dev/sdb", true, "id").said());
+    assertEquals("zfs on /dev/sdb", new PoolSource.Device("/dev/sdb", "id").said());
     assertEquals("zfs in a 50.0 GiB file", new PoolSource.File(51200).said());
     assertEquals("zpool devpool as it is", new PoolSource.Zpool("devpool").said());
   }

@@ -38,7 +38,8 @@ import org.junit.jupiter.api.io.TempDir;
 class HostProvisionerTest {
 
   private static final PoolSource DIR = new PoolSource.Dir();
-  private static final PoolSource SDB = new PoolSource.Device("/dev/sdb", false, "40G");
+  private static final PoolSource SDB =
+      new PoolSource.Device("/dev/sdb", "spare-sdb 8:16 42949672960");
   private static final long MEMORY_MB = 65536;
 
   @TempDir Path tempDir;
@@ -144,7 +145,7 @@ class HostProvisionerTest {
 
     var result =
         provisioner.provision(
-            new PoolSource.Device("/dev/nvme1n1", false, "id"),
+            new PoolSource.Device("/dev/nvme1n1", "id"),
             "mypool",
             "br0",
             null,
@@ -1013,7 +1014,7 @@ class HostProvisionerTest {
                 DeviceFixtures.LSBLK,
                 DeviceFixtures.read("gcp/gpt-3-raid-partitions-no-arrays.lsblk-tree.json"));
 
-    var hostYaml = provision(shell, new PoolSource.Device(partition, false, "2G"), null);
+    var hostYaml = provision(shell, new PoolSource.Device(partition, "2147483648"), null);
 
     assertTrue(
         shell
@@ -1053,31 +1054,6 @@ class HostProvisionerTest {
   }
 
   @Test
-  void aDeviceNamedAgainToBeErasedIsWipedByIncusAndOnlyThen() throws Exception {
-    var shell =
-        fresh(
-            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
-                .onOk("wipefs -- /dev/sdb", EXT4),
-            "zfs");
-
-    provision(shell, new PoolSource.Device("/dev/sdb", true, "40G"), null);
-
-    assertTrue(
-        shell
-            .arguments()
-            .contains(
-                List.of(
-                    "incus",
-                    "storage",
-                    "create",
-                    "devpool",
-                    "zfs",
-                    "source=/dev/sdb",
-                    "source.wipe=true")),
-        shell.invocations().toString());
-  }
-
-  @Test
   void aDeviceThatTookASignatureSinceItWasNamedIsRefusedAndUntouched() {
     var shell =
         fresh(
@@ -1088,8 +1064,24 @@ class HostProvisionerTest {
     var refused = assertThrows(IllegalArgumentException.class, () -> provision(shell, SDB, null));
 
     assertEquals(
-        "/dev/sdb holds ext4. Nothing on it is erased unless you name it again: add --force-wipe"
-            + " /dev/sdb to erase it and make the pool there.",
+        "/dev/sdb holds ext4. Sail erases nothing: if nothing on it is wanted, erase it yourself"
+            + " with sudo wipefs --all /dev/sdb, then run this again.",
+        refused.getMessage());
+    assertNoPoolCreated(shell);
+  }
+
+  @Test
+  void aPoolIncusLostSinceTheRunBeganIsNeverMadeFromItsZpool() {
+    var shell = fresh(new ScriptedShellExecutor(new ShellExec.Result(0, "", "")), "zfs");
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> provision(shell, new PoolSource.Zpool("devpool"), null));
+
+    assertEquals(
+        "Incus's pool 'devpool' on zpool devpool is gone since this run began, and Sail makes no"
+            + " pool from a zpool it did not make: run this command again.",
         refused.getMessage());
     assertNoPoolCreated(shell);
   }
@@ -1110,7 +1102,7 @@ class HostProvisionerTest {
     var refused = assertThrows(IllegalArgumentException.class, () -> provision(shell, SDB, null));
 
     assertEquals(
-        "/dev/sdb is refused, even with --force-wipe: it is in the imported zpool sail-raw, and no"
+        "/dev/sdb is refused: it is in the imported zpool sail-raw, and no"
             + " pool's device is taken: export or destroy the pool yourself first.",
         refused.getMessage());
     assertNoPoolCreated(shell);
@@ -1124,10 +1116,12 @@ class HostProvisionerTest {
         assertThrows(
             IllegalStateException.class,
             () ->
-                provision(shell, new PoolSource.Device("/dev/sdb", true, "WWN-A 8:16 40G"), null));
+                provision(
+                    shell, new PoolSource.Device("/dev/sdb", "WWN-A 8:16 42949672960"), null));
 
     assertEquals(
-        "/dev/sdb is not the device first cleared: it was WWN-A 8:16 40G, it is now 40G.",
+        "/dev/sdb is not the device first cleared: it was WWN-A 8:16 42949672960, it is now"
+            + " spare-sdb 8:16 42949672960.",
         refused.getMessage());
     assertNoPoolCreated(shell);
   }
@@ -1145,11 +1139,9 @@ class HostProvisionerTest {
     var refused =
         assertThrows(
             IllegalArgumentException.class,
-            () -> provision(shell, new PoolSource.Device("/dev/sdb", true, "40G"), null));
+            () -> provision(shell, new PoolSource.Device("/dev/sdb", "40G"), null));
 
-    assertEquals(
-        "/dev/sdb is refused, even with --force-wipe: /dev/sdb is mounted at /mnt/scratch.",
-        refused.getMessage());
+    assertEquals("/dev/sdb is refused: /dev/sdb is mounted at /mnt/scratch.", refused.getMessage());
     assertNoPoolCreated(shell);
   }
 

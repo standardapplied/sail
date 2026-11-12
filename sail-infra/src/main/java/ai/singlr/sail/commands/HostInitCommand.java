@@ -75,13 +75,6 @@ public final class HostInitCommand implements Runnable {
               + " ZFS on a box with no spare one. With --storage zfs.")
   private String poolFileSize;
 
-  @Option(
-      names = "--force-wipe",
-      description =
-          "The --disk again, to erase what it holds: a disk or partition with a filesystem, a"
-              + " partition table or an old pool is refused without it.")
-  private String forceWipe;
-
   @Option(names = "--pool", description = "Storage pool name.", defaultValue = "devpool")
   private String pool;
 
@@ -327,9 +320,9 @@ public final class HostInitCommand implements Runnable {
    */
   PoolSource source(ShellExec probe) throws Exception {
     var zfs = HostYaml.BACKEND_ZFS.equals(storage);
-    if (!zfs && (disk != null || poolFileSize != null || forceWipe != null)) {
+    if (!zfs && (disk != null || poolFileSize != null)) {
       throw new IllegalArgumentException(
-          "--disk, --pool-file-size and --force-wipe choose a ZFS pool's source: pass them with"
+          "--disk and --pool-file-size choose a ZFS pool's source: pass them with"
               + " --storage zfs.");
     }
     var held =
@@ -343,10 +336,6 @@ public final class HostInitCommand implements Runnable {
       throw new IllegalArgumentException(
           "Pass --disk or --pool-file-size, not both: a pool is made from one source.");
     }
-    if (forceWipe != null && disk == null) {
-      throw new IllegalArgumentException(
-          "--force-wipe names the device to erase again: name it with --disk too.");
-    }
     var devices = new PoolDevices(probe);
     if (held.isPresent()) {
       return kept(held.get(), devices);
@@ -354,7 +343,7 @@ public final class HostInitCommand implements Runnable {
     if (poolFileSize != null) {
       return file(poolFileSize);
     }
-    return devices.cleared(disk != null ? disk : detectAndSelectDisk(devices), forceWipe);
+    return devices.cleared(disk != null ? disk : detectAndSelectDisk(devices));
   }
 
   /**
@@ -368,9 +357,6 @@ public final class HostInitCommand implements Runnable {
     }
     if (poolFileSize != null) {
       ignored.add("--pool-file-size " + poolFileSize);
-    }
-    if (forceWipe != null && !devices.resolved("--force-wipe", forceWipe).equals(held.source())) {
-      ignored.add("--force-wipe " + forceWipe);
     }
     if (!ignored.isEmpty()) {
       throw new IllegalArgumentException(

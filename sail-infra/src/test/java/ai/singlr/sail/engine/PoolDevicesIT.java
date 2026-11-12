@@ -18,9 +18,9 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * {@link PoolDevices} against the runner's own disks, read-only: lsblk, wipefs without writing and
- * realpath, as root. The runner has one disk and the system runs from it, so every disk and
- * partition must be refused, with the force flag and without, and none offered. Nothing here
- * creates a pool or passes a wipe to anything.
+ * realpath, as root. Every disk and partition the runner has carries something, the system or the
+ * runner's own files, so each must be refused naming what it holds, and none offered. Nothing here
+ * creates a pool or erases anything.
  */
 class PoolDevicesIT extends AbstractIncusIT {
 
@@ -29,7 +29,7 @@ class PoolDevicesIT extends AbstractIncusIT {
     ensureIncusOrSkip();
     var root = new RootShell();
     var devices = new PoolDevices(root);
-    System.out.println("LSBLK " + root.exec(PoolDevices.LSBLK).stdout());
+    System.out.println("LSBLK " + root.exec(BlockTree.LSBLK).stdout());
     var listed = root.exec(List.of("lsblk", "-nrpo", "PATH,TYPE"));
     assertTrue(listed.ok(), listed.reason());
     var paths =
@@ -45,17 +45,11 @@ class PoolDevicesIT extends AbstractIncusIT {
 
     var refusals = new ArrayList<String>();
     for (var path : paths) {
-      for (var force : new String[] {null, path}) {
-        var refused =
-            assertThrows(
-                IllegalArgumentException.class,
-                () -> devices.cleared(path, force),
-                path + " was cleared with force=" + force);
-        assertTrue(
-            refused.getMessage().startsWith(path + " is refused, even with --force-wipe: "),
-            refused.getMessage());
-        refusals.add("REFUSED " + path + " force=" + force + ": " + refused.getMessage());
-      }
+      var refused =
+          assertThrows(
+              IllegalArgumentException.class, () -> devices.cleared(path), path + " was cleared");
+      assertTrue(refused.getMessage().startsWith(path + " "), refused.getMessage());
+      refusals.add("REFUSED " + path + ": " + refused.getMessage());
     }
     refusals.forEach(System.out::println);
 
@@ -92,12 +86,12 @@ class PoolDevicesIT extends AbstractIncusIT {
       var mapper =
           assertThrows(
                   IllegalArgumentException.class,
-                  () -> new PoolDevices(root).cleared("/dev/mapper/sail-it-hold", null))
+                  () -> new PoolDevices(root).cleared("/dev/mapper/sail-it-hold"))
               .getMessage();
       System.out.println("MAPPER [" + mapper + "]");
       assertTrue(
           mapper.startsWith(
-              "/dev/mapper/sail-it-hold is refused, even with --force-wipe: it is a dm device, not"
+              "/dev/mapper/sail-it-hold is refused: it is a dm device, not"
                   + " a disk or a partition"),
           mapper);
       System.out.println(
@@ -154,7 +148,7 @@ class PoolDevicesIT extends AbstractIncusIT {
       assertTrue(names.stdout().lines().toList().contains("sail-it-classes"), names.stdout());
       assertEquals(
           loops.stream().sorted().toList(),
-          PoolDevices.vdevs(listed.stdout().lines().toList()).stream().sorted().toList());
+          ImportedPools.vdevs(listed.stdout().lines().toList()).stream().sorted().toList());
     } finally {
       root.exec(List.of("zpool", "destroy", "sail-it-classes"));
       loops.forEach(

@@ -1,0 +1,390 @@
+{
+   "blockdevices": [
+      {
+         "path": "/dev/sda",
+         "kname": "sda",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 32212254720,
+         "model": null,
+         "rm": false,
+         "wwn": "0x5000c500a1b2c3d4",
+         "serial": "ROOT1",
+         "maj:min": "8:0",
+         "children": [
+            {
+               "path": "/dev/sda1",
+               "kname": "sda1",
+               "type": "part",
+               "fstype": "ext4",
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                  "/"
+               ],
+               "size": 21474836480,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:1"
+            },
+            {
+               "path": "/dev/sda2",
+               "kname": "sda2",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                  null
+               ],
+               "size": 10737418240,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:2"
+            }
+         ]
+      },
+      {
+         "path": "/dev/sdb",
+         "kname": "sdb",
+         "type": "disk",
+         "fstype": "bcache",
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 107374182400,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": "B1",
+         "maj:min": "8:16",
+         "children": [
+            {
+               "path": "/dev/bcache0",
+               "kname": "bcache0",
+               "type": "disk",
+               "fstype": null,
+               "pttype": null,
+               "parttype": null,
+               "mountpoints": [
+                  null
+               ],
+               "size": 107374182400,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "252:0"
+            }
+         ]
+      },
+      {
+         "path": "/dev/sdc",
+         "kname": "sdc",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 32212254720,
+         "model": null,
+         "rm": false,
+         "wwn": "0x5000c500a1b2c3d4",
+         "serial": "ROOT1",
+         "maj:min": "8:32",
+         "children": [
+            {
+               "path": "/dev/sdc1",
+               "kname": "sdc1",
+               "type": "part",
+               "fstype": "ext4",
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                  null
+               ],
+               "size": 21474836480,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:33"
+            },
+            {
+               "path": "/dev/sdc2",
+               "kname": "sdc2",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                  null
+               ],
+               "size": 10737418240,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:34"
+            }
+         ]
+      },
+      {
+         "path": "/dev/sdd",
+         "kname": "sdd",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 32212254720,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": "D1",
+         "maj:min": "8:48",
+         "children": [
+            {
+               "path": "/dev/sdd1",
+               "kname": "sdd1",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": null,
+               "mountpoints": [
+                  null
+               ],
+               "size": 536870912,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:49"
+            },
+            {
+               "path": "/dev/sdd2",
+               "kname": "sdd2",
+               "type": "part",
+               "fstype": "vfat",
+               "pttype": "gpt",
+               "parttype": "C12A7328-F81F-11D2-BA4B-00A0C93EC93B",
+               "mountpoints": [
+                  null
+               ],
+               "size": 536870912,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:50"
+            },
+            {
+               "path": "/dev/sdd3",
+               "kname": "sdd3",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "bc13c2ff-59e6-4262-a352-b275fd6f7172",
+               "mountpoints": [
+                  null
+               ],
+               "size": 536870912,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:51"
+            },
+            {
+               "path": "/dev/sdd4",
+               "kname": "sdd4",
+               "type": "part",
+               "fstype": "ext4",
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                  "/usr"
+               ],
+               "size": 10737418240,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:52"
+            },
+            {
+               "path": "/dev/sdd5",
+               "kname": "sdd5",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                  null
+               ],
+               "size": 19327352832,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:53"
+            }
+         ]
+      },
+      {
+         "path": "/dev/sde",
+         "kname": "sde",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "dos",
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 32212254720,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": "E1",
+         "maj:min": "8:64",
+         "children": [
+            {
+               "path": "/dev/sde1",
+               "kname": "sde1",
+               "type": "part",
+               "fstype": null,
+               "pttype": "dos",
+               "parttype": "0xef",
+               "mountpoints": [
+                  null
+               ],
+               "size": 536870912,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:65"
+            },
+            {
+               "path": "/dev/sde2",
+               "kname": "sde2",
+               "type": "part",
+               "fstype": null,
+               "pttype": "dos",
+               "parttype": "0xea",
+               "mountpoints": [
+                  null
+               ],
+               "size": 536870912,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:66"
+            },
+            {
+               "path": "/dev/sde3",
+               "kname": "sde3",
+               "type": "part",
+               "fstype": null,
+               "pttype": "dos",
+               "parttype": "0x83",
+               "mountpoints": [
+                  null
+               ],
+               "size": 30064771072,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:67"
+            },
+            {
+               "path": "/dev/sde4",
+               "kname": "sde4",
+               "type": "part",
+               "fstype": null,
+               "pttype": "dos",
+               "parttype": "0x5",
+               "mountpoints": [
+                  null
+               ],
+               "size": 1024,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:68"
+            }
+         ]
+      },
+      {
+         "path": "/dev/sdf",
+         "kname": "sdf",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "dos",
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 32212254720,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": "F1",
+         "maj:min": "8:80",
+         "children": [
+            {
+               "path": "/dev/sdf1",
+               "kname": "sdf1",
+               "type": "part",
+               "fstype": null,
+               "pttype": "dos",
+               "parttype": "0xf",
+               "mountpoints": [
+                  null
+               ],
+               "size": 1024,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:81"
+            },
+            {
+               "path": "/dev/sdf2",
+               "kname": "sdf2",
+               "type": "part",
+               "fstype": null,
+               "pttype": "dos",
+               "parttype": "0x85",
+               "mountpoints": [
+                  null
+               ],
+               "size": 1024,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:82"
+            }
+         ]
+      }
+   ]
+}

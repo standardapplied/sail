@@ -2,6 +2,7 @@
    "blockdevices": [
       {
          "path": "/dev/sda",
+         "kname": "sda",
          "type": "disk",
          "fstype": null,
          "pttype": "gpt",
@@ -9,7 +10,7 @@
          "mountpoints": [
             null
          ],
-         "size": "1.8T",
+         "size": 1979120929997,
          "model": "Samsung SSD",
          "rm": false,
          "wwn": null,
@@ -18,6 +19,7 @@
          "children": [
             {
                "path": "/dev/sda1",
+               "kname": "sda1",
                "type": "part",
                "fstype": "vfat",
                "pttype": "gpt",
@@ -25,7 +27,7 @@
                "mountpoints": [
                   "/boot/efi"
                ],
-               "size": "512M",
+               "size": 536870912,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -34,6 +36,7 @@
             },
             {
                "path": "/dev/sda2",
+               "kname": "sda2",
                "type": "part",
                "fstype": "btrfs",
                "pttype": "gpt",
@@ -41,7 +44,7 @@
                "mountpoints": [
                   "/"
                ],
-               "size": "1.8T",
+               "size": 1979120929997,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -52,6 +55,7 @@
       },
       {
          "path": "/dev/sdb",
+         "kname": "sdb",
          "type": "disk",
          "fstype": null,
          "pttype": "gpt",
@@ -59,7 +63,7 @@
          "mountpoints": [
             null
          ],
-         "size": "1.8T",
+         "size": 1979120929997,
          "model": "Samsung SSD",
          "rm": false,
          "wwn": null,
@@ -68,6 +72,7 @@
          "children": [
             {
                "path": "/dev/sdb1",
+               "kname": "sdb1",
                "type": "part",
                "fstype": "vfat",
                "pttype": "gpt",
@@ -75,7 +80,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "512M",
+               "size": 536870912,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -84,6 +89,7 @@
             },
             {
                "path": "/dev/sdb2",
+               "kname": "sdb2",
                "type": "part",
                "fstype": "btrfs",
                "pttype": "gpt",
@@ -91,7 +97,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "1.8T",
+               "size": 1979120929997,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -102,6 +108,7 @@
       },
       {
          "path": "/dev/sdc",
+         "kname": "sdc",
          "type": "disk",
          "fstype": null,
          "pttype": "gpt",
@@ -109,7 +116,7 @@
          "mountpoints": [
             null
          ],
-         "size": "1.8T",
+         "size": 1979120929997,
          "model": "Samsung SSD",
          "rm": false,
          "wwn": null,
@@ -118,6 +125,7 @@
          "children": [
             {
                "path": "/dev/sdc1",
+               "kname": "sdc1",
                "type": "part",
                "fstype": null,
                "pttype": "gpt",
@@ -125,7 +133,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "1M",
+               "size": 1048576,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -134,6 +142,7 @@
             },
             {
                "path": "/dev/sdc2",
+               "kname": "sdc2",
                "type": "part",
                "fstype": null,
                "pttype": "gpt",
@@ -141,7 +150,7 @@
                "mountpoints": [
                   null
                ],
-               "size": "1.8T",
+               "size": 1979120929997,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -152,6 +161,7 @@
       },
       {
          "path": "/dev/sdd",
+         "kname": "sdd",
          "type": "disk",
          "fstype": null,
          "pttype": null,
@@ -159,7 +169,7 @@
          "mountpoints": [
             null
          ],
-         "size": "1.8T",
+         "size": 1979120929997,
          "model": "Samsung SSD",
          "rm": false,
          "wwn": null,

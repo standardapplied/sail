@@ -2,247 +2,391 @@
    "blockdevices": [
       {
          "path": "/dev/loop0",
+         "kname": "loop0",
          "type": "loop",
          "fstype": "squashfs",
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             "/snap/core24/2124"
+            "/snap/core24/2124"
          ],
-         "size": "66.8M",
-         "model": null
-      },{
+         "size": 70044877,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/loop1",
+         "kname": "loop1",
          "type": "loop",
          "fstype": "squashfs",
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             "/snap/google-cloud-cli/519"
+            "/snap/google-cloud-cli/519"
          ],
-         "size": "355.8M",
-         "model": null
-      },{
+         "size": 373083341,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/loop2",
+         "kname": "loop2",
          "type": "loop",
          "fstype": "squashfs",
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             "/snap/snapd/28254"
+            "/snap/snapd/28254"
          ],
-         "size": "44.7M",
-         "model": null
-      },{
+         "size": 46871347,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/sda",
+         "kname": "sda",
          "type": "disk",
          "fstype": null,
          "pttype": "gpt",
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "50G",
+         "size": 53687091200,
          "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null,
          "children": [
             {
                "path": "/dev/sda1",
+               "kname": "sda1",
                "type": "part",
                "fstype": "ext4",
                "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
                "mountpoints": [
-                   "/"
+                  "/"
                ],
-               "size": "49G",
-               "model": null
-            },{
+               "size": 52613349376,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": null
+            },
+            {
                "path": "/dev/sda14",
+               "kname": "sda14",
                "type": "part",
                "fstype": null,
                "pttype": "gpt",
+               "parttype": "21686148-6449-6e6f-744e-656564454649",
                "mountpoints": [
-                   null
+                  null
                ],
-               "size": "4M",
-               "model": null
-            },{
+               "size": 4194304,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": null
+            },
+            {
                "path": "/dev/sda15",
+               "kname": "sda15",
                "type": "part",
                "fstype": "vfat",
                "pttype": "gpt",
+               "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
                "mountpoints": [
-                   "/boot/efi"
+                  "/boot/efi"
                ],
-               "size": "106M",
-               "model": null
-            },{
+               "size": 111149056,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": null
+            },
+            {
                "path": "/dev/sda16",
+               "kname": "sda16",
                "type": "part",
                "fstype": "ext4",
                "pttype": "gpt",
+               "parttype": "bc13c2ff-59e6-4262-a352-b275fd6f7172",
                "mountpoints": [
-                   "/boot"
+                  "/boot"
                ],
-               "size": "913M",
-               "model": null
+               "size": 957349888,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": null
             }
          ]
-      },{
+      },
+      {
          "path": "/dev/sdb",
+         "kname": "sdb",
          "type": "disk",
          "fstype": null,
          "pttype": "gpt",
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "40G",
+         "size": 42949672960,
          "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null,
          "children": [
             {
                "path": "/dev/sdb1",
+               "kname": "sdb1",
                "type": "part",
                "fstype": "linux_raid_member",
                "pttype": "gpt",
+               "parttype": "a19d880f-05fc-4d3b-a006-743f0f84911e",
                "mountpoints": [
-                   null
+                  null
                ],
-               "size": "2G",
+               "size": 2147483648,
                "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": null,
                "children": [
                   {
                      "path": "/dev/md0",
+                     "kname": "md0",
                      "type": "raid1",
                      "fstype": "swap",
                      "pttype": null,
+                     "parttype": null,
                      "mountpoints": [
-                         null
+                        null
                      ],
-                     "size": "2G",
-                     "model": null
+                     "size": 2147483648,
+                     "model": null,
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": null
                   }
                ]
-            },{
+            },
+            {
                "path": "/dev/sdb2",
+               "kname": "sdb2",
                "type": "part",
                "fstype": "linux_raid_member",
                "pttype": "gpt",
+               "parttype": "a19d880f-05fc-4d3b-a006-743f0f84911e",
                "mountpoints": [
-                   null
+                  null
                ],
-               "size": "1G",
+               "size": 1073741824,
                "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": null,
                "children": [
                   {
                      "path": "/dev/md1",
+                     "kname": "md1",
                      "type": "raid1",
                      "fstype": "ext4",
                      "pttype": null,
+                     "parttype": null,
                      "mountpoints": [
-                         null
+                        null
                      ],
-                     "size": "1022M",
-                     "model": null
+                     "size": 1071644672,
+                     "model": null,
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": null
                   }
                ]
-            },{
+            },
+            {
                "path": "/dev/sdb3",
+               "kname": "sdb3",
                "type": "part",
                "fstype": "linux_raid_member",
                "pttype": "gpt",
+               "parttype": "a19d880f-05fc-4d3b-a006-743f0f84911e",
                "mountpoints": [
-                   null
+                  null
                ],
-               "size": "37G",
+               "size": 39728447488,
                "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": null,
                "children": [
                   {
                      "path": "/dev/md2",
+                     "kname": "md2",
                      "type": "raid1",
                      "fstype": null,
                      "pttype": null,
+                     "parttype": null,
                      "mountpoints": [
-                         null
+                        null
                      ],
-                     "size": "37G",
-                     "model": null
+                     "size": 39728447488,
+                     "model": null,
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": null
                   }
                ]
             }
          ]
-      },{
+      },
+      {
          "path": "/dev/sdc",
+         "kname": "sdc",
          "type": "disk",
          "fstype": null,
          "pttype": "gpt",
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "40G",
+         "size": 42949672960,
          "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null,
          "children": [
             {
                "path": "/dev/sdc1",
+               "kname": "sdc1",
                "type": "part",
                "fstype": null,
                "pttype": "gpt",
+               "parttype": "a19d880f-05fc-4d3b-a006-743f0f84911e",
                "mountpoints": [
-                   null
+                  null
                ],
-               "size": "2G",
+               "size": 2147483648,
                "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": null,
                "children": [
                   {
                      "path": "/dev/md0",
+                     "kname": "md0",
                      "type": "raid1",
                      "fstype": "swap",
                      "pttype": null,
+                     "parttype": null,
                      "mountpoints": [
-                         null
+                        null
                      ],
-                     "size": "2G",
-                     "model": null
+                     "size": 2147483648,
+                     "model": null,
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": null
                   }
                ]
-            },{
+            },
+            {
                "path": "/dev/sdc2",
+               "kname": "sdc2",
                "type": "part",
                "fstype": "linux_raid_member",
                "pttype": "gpt",
+               "parttype": "a19d880f-05fc-4d3b-a006-743f0f84911e",
                "mountpoints": [
-                   null
+                  null
                ],
-               "size": "1G",
+               "size": 1073741824,
                "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": null,
                "children": [
                   {
                      "path": "/dev/md1",
+                     "kname": "md1",
                      "type": "raid1",
                      "fstype": "ext4",
                      "pttype": null,
+                     "parttype": null,
                      "mountpoints": [
-                         null
+                        null
                      ],
-                     "size": "1022M",
-                     "model": null
+                     "size": 1071644672,
+                     "model": null,
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": null
                   }
                ]
-            },{
+            },
+            {
                "path": "/dev/sdc3",
+               "kname": "sdc3",
                "type": "part",
                "fstype": "linux_raid_member",
                "pttype": "gpt",
+               "parttype": "a19d880f-05fc-4d3b-a006-743f0f84911e",
                "mountpoints": [
-                   null
+                  null
                ],
-               "size": "37G",
+               "size": 39728447488,
                "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": null,
                "children": [
                   {
                      "path": "/dev/md2",
+                     "kname": "md2",
                      "type": "raid1",
                      "fstype": null,
                      "pttype": null,
+                     "parttype": null,
                      "mountpoints": [
-                         null
+                        null
                      ],
-                     "size": "37G",
-                     "model": null
+                     "size": 39728447488,
+                     "model": null,
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": null
                   }
                ]
             }

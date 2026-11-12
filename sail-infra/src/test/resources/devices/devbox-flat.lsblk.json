@@ -2,164 +2,279 @@
    "blockdevices": [
       {
          "path": "/dev/md0",
+         "kname": "md0",
          "type": "raid1",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "4G",
-         "model": null
-      },{
+         "size": 4294967296,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/md0",
+         "kname": "md0",
          "type": "raid1",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "4G",
-         "model": null
-      },{
+         "size": 4294967296,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/md1",
+         "kname": "md1",
          "type": "raid1",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "1022M",
-         "model": null
-      },{
+         "size": 1071644672,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/md1",
+         "kname": "md1",
          "type": "raid1",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "1022M",
-         "model": null
-      },{
+         "size": 1071644672,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/md2",
+         "kname": "md2",
          "type": "raid1",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             "/var/lib/sail/run", "/dev/.incus-systemd-credentials", "/"
+            "/var/lib/sail/run",
+            "/dev/.incus-systemd-credentials",
+            "/"
          ],
-         "size": "1.7T",
-         "model": null
-      },{
+         "size": 1869169767219,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/md2",
+         "kname": "md2",
          "type": "raid1",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             "/var/lib/sail/run", "/dev/.incus-systemd-credentials", "/"
+            "/var/lib/sail/run",
+            "/dev/.incus-systemd-credentials",
+            "/"
          ],
-         "size": "1.7T",
-         "model": null
-      },{
+         "size": 1869169767219,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/nvme0n1",
+         "kname": "nvme0n1",
          "type": "disk",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "1.7T",
-         "model": "KIOXIA KCD81RUG1T92                     "
-      },{
+         "size": 1869169767219,
+         "model": "KIOXIA KCD81RUG1T92                     ",
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/nvme0n1p1",
+         "kname": "nvme0n1p1",
          "type": "part",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "256M",
-         "model": null
-      },{
+         "size": 268435456,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/nvme0n1p2",
+         "kname": "nvme0n1p2",
          "type": "part",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "4G",
-         "model": null
-      },{
+         "size": 4294967296,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/nvme0n1p3",
+         "kname": "nvme0n1p3",
          "type": "part",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "1G",
-         "model": null
-      },{
+         "size": 1073741824,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/nvme0n1p4",
+         "kname": "nvme0n1p4",
          "type": "part",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "1.7T",
-         "model": null
-      },{
+         "size": 1869169767219,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/nvme1n1",
+         "kname": "nvme1n1",
          "type": "disk",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "1.7T",
-         "model": "KIOXIA KCD81RUG1T92                     "
-      },{
+         "size": 1869169767219,
+         "model": "KIOXIA KCD81RUG1T92                     ",
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/nvme1n1p1",
+         "kname": "nvme1n1p1",
          "type": "part",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "256M",
-         "model": null
-      },{
+         "size": 268435456,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/nvme1n1p2",
+         "kname": "nvme1n1p2",
          "type": "part",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "4G",
-         "model": null
-      },{
+         "size": 4294967296,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/nvme1n1p3",
+         "kname": "nvme1n1p3",
          "type": "part",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "1G",
-         "model": null
-      },{
+         "size": 1073741824,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
          "path": "/dev/nvme1n1p4",
+         "kname": "nvme1n1p4",
          "type": "part",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
-             null
+            null
          ],
-         "size": "1.7T",
-         "model": null
+         "size": 1869169767219,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
       }
    ]
 }

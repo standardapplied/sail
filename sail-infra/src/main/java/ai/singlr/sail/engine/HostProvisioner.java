@@ -270,7 +270,7 @@ public final class HostProvisioner {
       return;
     }
     if (source instanceof PoolSource.Device device && !shell.isDryRun()) {
-      var now = devices.cleared(device.path(), device.wipe() ? device.path() : null);
+      var now = devices.cleared(device.path());
       if (!now.equals(source)) {
         throw new IllegalStateException(
             device.path()
