@@ -19,7 +19,7 @@ public enum SailError: Error, Equatable, Sendable {
 /// `action` is the fix as a person reads it; `remedy` is the same fix as words and commands, sent
 /// when it names a command, so a client can render each command for its own reader. `fieldErrors`
 /// name what the refusal is about, field by field, when the server says.
-public struct Refusal: Equatable, Sendable, Decodable {
+public struct Refusal: Codable, Equatable, Sendable {
     public let code: Open<ErrorCode>
     public let message: String
     public let action: String?
@@ -54,7 +54,7 @@ public struct Refusal: Equatable, Sendable, Decodable {
 
 /// One thing a refusal is about: a field of the request, or a fact the server names (the node a
 /// run executed on, say), and what the server says of it.
-public struct FieldError: Equatable, Sendable, Decodable {
+public struct FieldError: Codable, Equatable, Sendable {
     public let field: String
     public let message: String
 
@@ -65,7 +65,7 @@ public struct FieldError: Equatable, Sendable, Decodable {
 }
 
 /// One part of a remedy: words, or a command to run.
-public enum RemedyPart: Equatable, Sendable, Decodable {
+public enum RemedyPart: Codable, Equatable, Sendable {
     case words(String)
     case command(run: Open<Runner>, verb: String, args: [String])
 
@@ -79,6 +79,18 @@ public enum RemedyPart: Equatable, Sendable, Decodable {
                 verb: try fields.decode(String.self, forKey: .verb),
                 args: try fields.decode([String].self, forKey: .args)
             )
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var fields = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .words(text):
+            try fields.encode(text, forKey: .text)
+        case let .command(run, verb, args):
+            try fields.encode(run, forKey: .run)
+            try fields.encode(verb, forKey: .verb)
+            try fields.encode(args, forKey: .args)
         }
     }
 

@@ -118,6 +118,21 @@ import Testing
         #expect(try roundTrip(projects) == projects)
     }
 
+    @Test func everyRefusalWrittenAsJSONReadsBackAsItself() throws {
+        let refusals = try Goldens.names(in: "http").filter { $0.hasPrefix("refusal-") }
+        #expect(refusals.count == 10)
+        for name in refusals {
+            guard case let .refused(refusal) = SailJSON.refusal(response(try Exchange(name)), route: name) else {
+                Issue.record("\(name) holds no refusal")
+                continue
+            }
+            #expect(try roundTrip(refusal) == refusal, "\(name)")
+        }
+        let remedy = RemedyPart.command(run: .unknown("tugs"), verb: "project apply", args: ["harbor"])
+        #expect(String(decoding: try SailJSON.encode([remedy, .words("Aye")]), as: UTF8.self)
+            == #"[{"args":["harbor"],"run":"tugs","verb":"project apply"},{"text":"Aye"}]"#)
+    }
+
     @Test func aModelIsWrittenWithTheServersKeysAndItsInstantsToTheMillisecond() throws {
         let message = Message(
             id: "m-1", specID: "harbor-design", author: "uday", body: "Aye", replyTo: "m-0", createdAt: at,
