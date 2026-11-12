@@ -117,7 +117,7 @@ public record ZfsCacheCap(long bytes, long floor) {
         .stdout()
         .lines()
         .map(String::strip)
-        .filter(line -> line.startsWith("options zfs "))
+        .filter(line -> line.startsWith("options "))
         .flatMap(line -> Arrays.stream(line.split("\\s+")))
         .filter(word -> word.startsWith("zfs_arc_max="))
         .map(word -> word.substring("zfs_arc_max=".length()))

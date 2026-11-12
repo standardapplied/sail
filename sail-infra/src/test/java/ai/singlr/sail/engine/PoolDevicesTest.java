@@ -643,6 +643,21 @@ class PoolDevicesTest {
   }
 
   @Test
+  void whatLsblkShowsADeviceHoldsCountsWhereItsListingShowsNothing() throws Exception {
+    assertEquals(
+        "/dev/sdc holds ext4. Sail erases nothing: if nothing on it is wanted, erase it yourself"
+            + " with sudo wipefs --all /dev/sdc, then run this again.",
+        refusal("gcp2/d-layout-initial.lsblk.json", "/dev/sdc"));
+    assertEquals(
+        "/dev/sdg holds gpt. Sail erases nothing: if nothing on it is wanted, erase it yourself"
+            + " with sudo wipefs --all /dev/sdg, then run this again.",
+        refusal(TYPES, "/dev/sdg"));
+    assertTrue(
+        devices(new Box(TYPES).shell()).candidates().stream()
+            .noneMatch(candidate -> candidate.device().equals("/dev/sdg")));
+  }
+
+  @Test
   void aDiskTypeDeviceBuiltOnAnotherIsNotAPlainDisk() {
     assertEquals(
         "/dev/bcache0 is refused: it is a disk built on /dev/sdb, not a plain disk.",

@@ -385,6 +385,23 @@
                "maj:min": "8:82"
             }
          ]
+      },
+      {
+         "path": "/dev/sdg",
+         "kname": "sdg",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 32212254720,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": "G1",
+         "maj:min": "8:96"
       }
    ]
 }

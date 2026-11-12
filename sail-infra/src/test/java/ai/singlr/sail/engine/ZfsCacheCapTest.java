@@ -109,6 +109,19 @@ class ZfsCacheCapTest {
   }
 
   @Test
+  void ofTwoCapsTheOperatorSetTheOneModprobeAppliesLastIsNamed() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "modprobe --showconfig",
+                "options zfs zfs_arc_max=1073741824\noptions zfs zfs_arc_max=2147483648\n");
+
+    assertEquals(
+        "ZFS cache cap left as you set it (zfs_arc_max=2147483648)",
+        ZfsCacheCap.forMemory(65536).install(shell));
+  }
+
+  @Test
   void aCapSailCannotRemoveSaysSo() {
     var shell =
         new ScriptedShellExecutor()

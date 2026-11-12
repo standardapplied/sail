@@ -57,4 +57,4 @@ Hand-written (layouts no machine at hand has), in the call's format:
 - handwritten-review3-layouts.lsblk.json   review 3's probes: the root disk seen through a second
   path (sdc, the same serial and WWN as sda, its sdc1 the root's ext4), a bcache disk built on
   sdb, and partition types lsblk may print: none, an EFI type in capitals, XBOOTLDR, and on MBR
-  disks 0xef, 0xea, 0x83 and the extended 0x5, 0xf and 0x85
+  disks 0xef, 0xea, 0x83 and the extended 0x5, 0xf and 0x85, and a disk with an empty GPT
