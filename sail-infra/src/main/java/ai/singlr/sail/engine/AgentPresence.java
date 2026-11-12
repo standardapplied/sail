@@ -45,6 +45,7 @@ public final class AgentPresence {
       case ContainerState.Stopped stopped -> new AgentSession.Presence.Gone();
       case ContainerState.NotCreated absent -> new AgentSession.Presence.Gone();
       case ContainerState.Running running -> inside;
+      case ContainerState.Frozen frozen -> inside;
       case ContainerState.Error unknown -> inside;
     };
   }

@@ -190,6 +190,12 @@ class SailOperationsTest {
             operations(shell().on("incus list ^acme$", EMPTY_JSON)).project("acme"),
             "container_status"));
     assertEquals(
+        "frozen",
+        get(
+            operations(shell().on("incus list ^acme$", STOPPED_JSON.replace("Stopped", "Frozen")))
+                .project("acme"),
+            "container_status"));
+    assertEquals(
         "error",
         get(
             operations(shell().on("incus list ^acme$", new ShellExec.Result(1, "", "boom")))

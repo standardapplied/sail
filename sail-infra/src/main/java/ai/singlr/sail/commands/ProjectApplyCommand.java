@@ -124,11 +124,14 @@ public final class ProjectApplyCommand implements Runnable {
     CONVERGED
   }
 
-  /** The lifecycle decision, pure in the observed state: absent → create, stopped → start. */
+  /**
+   * The lifecycle decision, pure in the observed state: absent → create, stopped or frozen → start,
+   * which resumes a frozen one.
+   */
   static Action plan(ContainerState state) {
     return switch (state) {
       case ContainerState.Running ignored -> Action.CONVERGED;
-      case ContainerState.Stopped ignored -> Action.STARTED;
+      case ContainerState.Stopped _, ContainerState.Frozen _ -> Action.STARTED;
       case ContainerState.NotCreated ignored -> Action.CREATED;
       case ContainerState.Error e ->
           throw new IllegalStateException("Container error: " + e.message());

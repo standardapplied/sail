@@ -335,6 +335,7 @@ public final class Banner {
           case ContainerState.Running r ->
               r.ipv4() != null ? "Running (" + r.ipv4() + ")" : "Running";
           case ContainerState.Stopped ignored -> "Stopped";
+          case ContainerState.Frozen ignored -> "Frozen";
           case ContainerState.NotCreated ignored -> "Not created";
           case ContainerState.Error e -> "Error: " + e.message();
         };
@@ -589,6 +590,8 @@ public final class Banner {
       }
       case ContainerState.Stopped ignored ->
           printLine(out, ansi, "  @|faint \u25a0 " + name + " is stopped|@");
+      case ContainerState.Frozen ignored ->
+          printLine(out, ansi, "  @|faint \u25a0 " + name + " is frozen|@");
       case ContainerState.NotCreated ignored ->
           printLine(out, ansi, "  @|faint \u25a0 " + name + " does not exist|@");
       case ContainerState.Error e ->
@@ -605,6 +608,7 @@ public final class Banner {
           switch (c.state()) {
             case ContainerState.Running ignored -> "Running";
             case ContainerState.Stopped ignored -> "Stopped";
+            case ContainerState.Frozen ignored -> "Frozen";
             case ContainerState.NotCreated ignored -> "Not provisioned";
             case ContainerState.Error ignored -> "Error";
           };

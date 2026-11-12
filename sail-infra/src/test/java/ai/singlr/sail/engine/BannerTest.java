@@ -1327,6 +1327,42 @@ class BannerTest {
   }
 
   @Test
+  void aFrozenContainerReadsAsFrozenInEveryView() {
+    var frozen = new ContainerState.Frozen();
+    var line = new ByteArrayOutputStream();
+    Banner.printContainerStatus("acme", frozen, new PrintStream(line), Ansi.OFF);
+    var table = new ByteArrayOutputStream();
+    Banner.printProjectTable(
+        List.of(new ContainerManager.ContainerInfo("acme", frozen, null)),
+        new PrintStream(table),
+        Ansi.OFF);
+    var config = new ByteArrayOutputStream();
+    Banner.printProjectConfig(
+        new ProjectDefinition(
+            "acme",
+            null,
+            new ProjectDefinition.Resources(2, "4GB", "50GB"),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null),
+        frozen,
+        new PrintStream(config),
+        Ansi.OFF);
+
+    assertEquals("  \u25a0 acme is frozen\n", line.toString(StandardCharsets.UTF_8));
+    assertTrue(table.toString(StandardCharsets.UTF_8).contains(" Frozen "), table.toString());
+    assertTrue(config.toString(StandardCharsets.UTF_8).contains(" Frozen "), config.toString());
+    assertFalse(
+        (table.toString(StandardCharsets.UTF_8) + config.toString(StandardCharsets.UTF_8))
+            .contains("Error"));
+  }
+
+  @Test
   void projectConfigMinimalConfig() {
     var config =
         new ProjectDefinition(

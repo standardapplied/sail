@@ -111,6 +111,15 @@ class ProjectListCommandTest {
   }
 
   @Test
+  void aFrozenContainerListsAsFrozen() {
+    var frozen = new ContainerInfo("acme", new ContainerState.Frozen(), null);
+
+    assertEquals(
+        "[{\"name\": \"acme\", \"status\": \"frozen\"}]",
+        ProjectListCommand.renderJson(List.of(frozen)));
+  }
+
+  @Test
   void jsonForNoProjectsIsAnEmptyArray() {
     assertEquals("[]", ProjectListCommand.renderJson(List.of()));
   }

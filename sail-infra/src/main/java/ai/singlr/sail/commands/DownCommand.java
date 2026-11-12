@@ -56,7 +56,7 @@ public final class DownCommand implements Runnable {
     var state = mgr.queryState(projectName);
 
     switch (state) {
-      case ContainerState.Running ignored -> {
+      case ContainerState.Running _, ContainerState.Frozen _ -> {
         if (!json) {
           Banner.printBranding(System.out, Ansi.AUTO);
           System.out.println();
@@ -87,7 +87,12 @@ public final class DownCommand implements Runnable {
   private void stopAll(ContainerManager mgr) throws Exception {
     var containers = mgr.listAll();
     var running =
-        containers.stream().filter(c -> c.state() instanceof ContainerState.Running).toList();
+        containers.stream()
+            .filter(
+                c ->
+                    c.state() instanceof ContainerState.Running
+                        || c.state() instanceof ContainerState.Frozen)
+            .toList();
 
     if (running.isEmpty()) {
       if (json) {

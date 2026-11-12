@@ -63,6 +63,7 @@ final class ProjectLoader {
         return loaded;
       }
       case ContainerState.Stopped ignored -> throw stopped(project);
+      case ContainerState.Frozen ignored -> throw frozen(project);
       case ContainerState.NotCreated ignored -> throw notCreated(project);
       case ContainerState.Error error ->
           throw new ApiException(ErrorCode.CONTAINER_ERROR, error.message());
@@ -74,6 +75,14 @@ final class ProjectLoader {
         ErrorCode.PROJECT_STOPPED,
         "Project '" + project + "' is stopped.",
         Remedy.of("Start it with ", Remedy.sail("project start", project), "."));
+  }
+
+  /** A frozen container answers no exec; {@code project start} resumes it, as it starts one. */
+  static ApiException frozen(String project) {
+    return new ApiException(
+        ErrorCode.PROJECT_STOPPED,
+        "Project '" + project + "' is frozen.",
+        Remedy.of("Resume it with ", Remedy.sail("project start", project), "."));
   }
 
   private static ApiException notCreated(String project) {
