@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request replaces the run of the push before it; a run on main or by hand
+# is never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # bash by name runs with pipefail, so a maven that fails still fails its step through the tee
 # that keeps its log for the test-evidence action.
 defaults:
