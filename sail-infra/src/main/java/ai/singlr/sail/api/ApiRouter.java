@@ -170,7 +170,7 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(
             GET,
             "/v1/specs/{spec}/measures",
-            reads,
+            Gate.decides(Action.READ_MEASURES),
             call -> ApiResponse.from(operations.specMeasures(call.param(SPEC)))),
         route(POST, "/v1/specs/{spec}/restore", journal, this::restoreGlobalSpec),
         route(POST, "/v1/specs/{spec}/followup", journal, this::createFollowupSpec),

@@ -57,6 +57,9 @@
         "awaiting_merge": {
           "unknown": "not_reached"
         },
+        "box": {
+          "unknown": "no_box_id"
+        },
         "done": {
           "unknown": "not_reached"
         },

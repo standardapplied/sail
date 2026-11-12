@@ -16,10 +16,10 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.OptionalLong;
 import java.util.Set;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
@@ -58,8 +58,24 @@ class SpecMeasuresTest {
 
   private static ChangeLog.Entry entry(
       long seq, SpecStatus status, Instant created, Instant updated, String origin) {
+    return entry(seq, status, created, updated, origin, "acme");
+  }
+
+  private static ChangeLog.Entry heard(
+      long seq, SpecStatus status, Instant created, Instant updated) {
+    return entry(seq, status, created, updated, ChangeLog.Entry.SYNC);
+  }
+
+  private static ChangeLog.Entry entry(
+      long seq,
+      SpecStatus status,
+      Instant created,
+      Instant updated,
+      String origin,
+      String project) {
     var snapshot = new LinkedHashMap<String, Object>();
     snapshot.put("id", LoopRows.SPEC);
+    snapshot.put("project", project);
     snapshot.put("status", status.wire());
     snapshot.put("created_at", created.toEpochMilli());
     snapshot.put("updated_at", updated.toEpochMilli());
@@ -159,7 +175,7 @@ class SpecMeasuresTest {
       MeasureRows.Seen<ReviewStore.ReviewRow> reviews,
       List<Finding> findings,
       MeasureRows.Seen<RunStore.RunRow> runs,
-      MeasureRows.RunErasures erasures) {
+      Map<String, Long> erasures) {
 
     static Given done() {
       return new Given(
@@ -169,7 +185,7 @@ class SpecMeasuresTest {
           MeasureRows.Seen.all(List.of(review("r1", 1, "passed", at(70), null))),
           List.of(),
           MeasureRows.Seen.all(List.of()),
-          MeasureRows.RunErasures.NONE);
+          Map.of());
     }
 
     Given history(List<ChangeLog.Entry> history, Set<Long> gaps) {
@@ -212,7 +228,7 @@ class SpecMeasuresTest {
           erasures);
     }
 
-    Given erased(MeasureRows.RunErasures erasures) {
+    Given erased(Map<String, Long> erasures) {
       return new Given(status, history, gaps, reviews, findings, runs, erasures);
     }
 
@@ -223,7 +239,16 @@ class SpecMeasuresTest {
     SpecMeasures measured() {
       return SpecMeasures.of(
           new MeasureRows(
-              LoopRows.SPEC, status, "box-7", history, gaps, reviews, findings, runs, erasures));
+              LoopRows.SPEC,
+              "acme",
+              status,
+              "box-7",
+              history,
+              gaps,
+              reviews,
+              findings,
+              runs,
+              erasures));
     }
 
     Map<String, Object> wire() {
@@ -295,7 +320,7 @@ class SpecMeasuresTest {
     assertEquals(
         Map.of(
             "box",
-            "box-7",
+            Map.of("sail_id", "box-7"),
             "ready",
             moment(10, "change_log"),
             "verified",
@@ -702,29 +727,105 @@ class SpecMeasuresTest {
     assertEquals(HIDDEN, at(hiddenRuns, "cost", "runs_without_usage"));
   }
 
+  /**
+   * Minor 2 of review 2: a run erased after the spec arrived bounds its run counts only when it was
+   * filed under a project the spec was filed under, or under none; reviews are never erased away.
+   */
   @Test
-  void runsAnErasureByRetentionMayHaveTakenAreALowerBoundAndRunsNoOneCanVouchForAreUnknown() {
+  void runsAnErasureInTheSpecsProjectMayHaveTakenAreALowerBoundAndOthersMarkNothing() {
     var built = Given.done().ran(run("b1", "build"), run("x1", "fix"));
-    var erasedSince = built.erased(new MeasureRows.RunErasures(true, OptionalLong.of(7))).wire();
-    var erasedBefore =
-        built
-            .history(shipped().subList(1, 6), Set.of(1L))
-            .erased(new MeasureRows.RunErasures(true, OptionalLong.of(1)))
-            .wire();
-    var untold = built.erased(MeasureRows.RunErasures.UNTOLD).wire();
-    var nothingHeld =
-        built
-            .history(List.of(), Set.of())
-            .erased(new MeasureRows.RunErasures(true, OptionalLong.of(1)))
-            .wire();
+    var since = built.erased(Map.of("acme", 7L)).wire();
+    var elsewhere = built.erased(Map.of("beta", 7L)).wire();
+    var before =
+        built.history(shipped().subList(1, 6), Set.of(1L)).erased(Map.of("acme", 1L)).wire();
+    var unfiled = new HashMap<String, Long>();
+    unfiled.put(null, 9L);
+    var nowhere = built.erased(unfiled).wire();
+    var moved = new ArrayList<>(shipped());
+    moved.set(0, entry(1, SpecStatus.DRAFT, at(0), at(0), ChangeLog.Entry.LOCAL, "beta"));
+    var once = built.history(moved, Set.of()).erased(Map.of("beta", 7L)).wire();
+    var gapped =
+        built.history(shipped().subList(1, 6), Set.of(1L)).erased(Map.of("beta", 7L)).wire();
+    var nothingHeld = built.history(List.of(), Set.of()).erased(Map.of("acme", 1L)).wire();
 
-    assertEquals(atLeast(1), at(erasedSince, "rework", "build_runs"));
-    assertEquals(atLeast(2), at(erasedSince, "cost", "runs_without_usage"));
-    assertEquals(count(1), at(erasedBefore, "rework", "build_runs"), "erased before it arrived");
-    assertEquals(unknown("retention_unknown"), at(untold, "rework", "fix_runs"));
-    assertEquals(
-        count(1), at(untold, "rework", "review_rounds"), "reviews are never retained away");
+    assertEquals(atLeast(1), at(since, "rework", "build_runs"));
+    assertEquals(atLeast(2), at(since, "cost", "runs_without_usage"));
+    assertEquals(count(1), at(since, "rework", "review_rounds"), "reviews are never erased away");
+    assertEquals(count(1), at(elsewhere, "rework", "build_runs"), "another project's run");
+    assertEquals(count(1), at(before, "rework", "build_runs"), "erased before it arrived");
+    assertEquals(atLeast(1), at(nowhere, "rework", "build_runs"), "a run filed nowhere");
+    assertEquals(atLeast(1), at(once, "rework", "build_runs"), "a project it was filed under");
+    assertEquals(atLeast(1), at(gapped, "rework", "build_runs"), "its projects are not all known");
     assertEquals(atLeast(1), at(nothingHeld, "rework", "build_runs"));
+  }
+
+  /**
+   * Major 1 of review 2, on plain rows: a box's own write that main took comes back heard, at the
+   * same time and in the same status; it is the move it answers, so a node reads its own moves
+   * exact. A heard revision in the same status at another time is another box's write.
+   */
+  @Test
+  void aBoxsOwnWriteComingBackFromMainIsThatMoveNotACollapse() {
+    var echoed =
+        List.of(
+            revision(1, SpecStatus.DRAFT, 0),
+            heard(2, SpecStatus.DRAFT, at(0), at(0)),
+            revision(3, SpecStatus.PENDING, 10),
+            heard(4, SpecStatus.PENDING, at(0), at(10)),
+            revision(5, SpecStatus.AWAITING_MERGE, 70),
+            heard(6, SpecStatus.AWAITING_MERGE, at(0), at(70)),
+            revision(7, SpecStatus.DONE, 130),
+            heard(8, SpecStatus.DONE, at(0), at(130)));
+    var someoneElses = new ArrayList<>(echoed);
+    someoneElses.set(7, heard(8, SpecStatus.DONE, at(0), at(140)));
+
+    var wire = Given.done().history(echoed, Set.of()).wire();
+
+    assertEquals(moment(10, "change_log"), at(wire, "times", "ready"));
+    assertEquals(moment(70, "change_log"), at(wire, "times", "awaiting_merge"));
+    assertEquals(moment(130, "change_log"), at(wire, "times", "done"));
+    assertEquals(
+        COLLAPSED,
+        at(Given.done().history(someoneElses, Set.of()).wire(), "times", "done"),
+        "an edit made on another box after the move");
+  }
+
+  /** Minor 4 of review 2: a birth heard unedited is one move, so what follows it here is exact. */
+  @Test
+  void anUneditedBirthHeardBySyncIsOneMoveSoAReadyMoveAfterItHereIsExact() {
+    var bornElsewhere =
+        List.of(heard(1, SpecStatus.DRAFT, at(0), at(0)), revision(2, SpecStatus.PENDING, 10));
+    var editedElsewhere =
+        List.of(heard(1, SpecStatus.DRAFT, at(0), at(5)), revision(2, SpecStatus.PENDING, 10));
+
+    assertEquals(
+        moment(10, "change_log"),
+        at(Given.done().history(bornElsewhere, Set.of()).wire(), "times", "ready"));
+    assertEquals(
+        INCOMPLETE,
+        at(Given.done().history(editedElsewhere, Set.of()).wire(), "times", "ready"),
+        "a birth edited before it was sent is no birth: the log begins after it");
+  }
+
+  @Test
+  void aBoxWithNoSailIdSaysSoInTheOneShapeEveryUnknownHas() {
+    var given = Given.done();
+    var unnamed =
+        SpecMeasures.of(
+                new MeasureRows(
+                    LoopRows.SPEC,
+                    "acme",
+                    SpecStatus.DONE,
+                    null,
+                    given.history(),
+                    given.gaps(),
+                    given.reviews(),
+                    given.findings(),
+                    given.runs(),
+                    given.erasures()))
+            .toMap();
+
+    assertEquals(unknown("no_box_id"), at(unnamed, "times", "box"));
   }
 
   @Test
@@ -815,11 +916,7 @@ class SpecMeasuresTest {
 
   @Test
   void aNegativeIntervalAndALowerBoundAreLeftOutOfTheSummaryAndCountedApart() {
-    var bounded =
-        Given.done()
-            .ran(run("b1", "build"))
-            .erased(new MeasureRows.RunErasures(true, OptionalLong.of(9)))
-            .measured();
+    var bounded = Given.done().ran(run("b1", "build")).erased(Map.of("acme", 9L)).measured();
     var rows = List.of(measured(0, 10), measured(0, 20), measured(30, 25), bounded);
 
     var wire = SpecMeasuresList.of(rows, SpecMeasuresList.Window.parse(null, null)).toMap();

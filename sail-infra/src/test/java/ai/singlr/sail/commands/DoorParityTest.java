@@ -134,6 +134,37 @@ class DoorParityTest {
     fleet.close();
   }
 
+  /**
+   * Read measures, as the permission table says at every door that offers it: obs, a viewer, reads
+   * e1's at the web door, with its detail and through the host CLI alike, and the box credential in
+   * the container, whose column says no, is answered the detail alone.
+   */
+  @Test
+  void readMeasuresIsTheSpecsReadAtThePeoplesDoorsAndNoneForTheContainersCredential()
+      throws Exception {
+    var route = webBody("obs", "obs", "GET", "/v1/specs/e1/measures", null);
+    var detail = webBody("obs", "obs", "GET", "/v1/specs/e1?measures=true", null);
+    var shown =
+        SailCli.run(
+            "spec",
+            "show",
+            "e1",
+            "--json",
+            "--server",
+            boxes.get("obs").url(),
+            "--token",
+            hostToken,
+            "--no-sync");
+    var container = boxes.get("obs").socket("GET", "/v1/specs/e1?measures=true", "");
+
+    route.remove("schema_version");
+    assertEquals("e1", route.get("spec_id"));
+    assertEquals(route, detail.get("measures"));
+    assertEquals(route, YamlUtil.parseMap(shown.out()).get("measures"));
+    assertEquals(200, container.status());
+    assertEquals(false, container.body().containsKey("measures"));
+  }
+
   @Test
   void row1ObsReadsAcmesSpecs() throws Exception {
     assertEveryDoor(

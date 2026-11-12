@@ -95,31 +95,35 @@ class GlobalSpecOperationsTest {
   }
 
   /**
-   * A node hears of an erasure only for a row it held, so it cannot say whether retention took a
-   * run of a spec, and its run counts are unknown; its review counts are its own.
+   * Reading measures is decided as {@code Action.READ_MEASURES}: an agent's own work alone. Asked
+   * outright, another spec's measures are refused; asked with the detail, the detail comes alone.
    */
   @Test
-  void aBoxThatAuthorsNoErasuresCannotVouchForItsRunCounts() {
+  void anAgentIsRefusedTheMeasuresOfWorkNotItsOwnAndGivenTheDetailAlone() {
     Acting.by(UDAY_ADMIN, () -> ops.create(createReq(Map.of())));
-    var node =
+    var measured =
         new GlobalSpecOperations(
-            specStore, reviewStore, null, new RunStore(db), () -> null, () -> false);
+            specStore, reviewStore, null, new RunStore(db), () -> null, () -> true);
+    var agent =
+        Actor.agentPrincipal("claude/019fee00-0000-7000-8000-000000000001", "uday")
+            .withWork(Actor.Work.of("manatee", "other", "other"));
 
-    var rework = node.measures("auth", "box-7").toMap().get("rework");
+    var refused =
+        assertThrows(
+            ApiException.class, () -> Acting.by(agent, () -> measured.measures("auth", "box-7")));
+    var detail = Acting.by(agent, () -> measured.measured("auth", "box-7"));
+    var own =
+        Acting.by(
+            agent.withWork(Actor.Work.of("manatee", "auth", "auth")),
+            () -> measured.measured("auth", "box-7"));
 
     assertEquals(
-        Map.of(
-            "review_rounds",
-            Map.of("count", 0L),
-            "review_errors",
-            Map.of("count", 0L),
-            "build_runs",
-            Map.of("unknown", "retention_unknown"),
-            "fix_runs",
-            Map.of("unknown", "retention_unknown"),
-            "carried_findings",
-            Map.of("count", 0L)),
-        rework);
+        "'claude/019fee00-0000-7000-8000-000000000001' may read the measures of only its own"
+            + " work, not spec 'auth'.",
+        refused.reason());
+    assertNull(detail.measures());
+    assertEquals("auth", detail.spec().id());
+    assertNotNull(own.measures());
   }
 
   @Test

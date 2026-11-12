@@ -98,10 +98,15 @@ final class MeasuresText {
     return lines;
   }
 
+  /** Whose record the times are: this box's, by its Sail id, or saying it has none. */
+  @SuppressWarnings("unchecked")
   private static String record(Map<String, Object> times) {
-    return times.get("box") == null
-        ? "this box's record"
-        : "this box's record, " + times.get("box");
+    if (!(times.get("box") instanceof Map<?, ?> box)) {
+      return "this box's record";
+    }
+    return box.containsKey("sail_id")
+        ? "this box's record, " + box.get("sail_id")
+        : "this box's record, unknown: " + reason((Map<String, Object>) box);
   }
 
   private static String line(String label, String value) {

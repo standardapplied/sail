@@ -448,6 +448,10 @@ class SpecStoreTest {
     var specs = store.list(new SpecStore.SpecFilter("test-project", null, null, null, null));
 
     assertEquals(3, db.statements() - before, "the list, its dependencies, its repos");
+    var none = db.statements();
+    assertEquals(
+        List.of(), store.list(new SpecStore.SpecFilter("elsewhere", null, null, null, null)));
+    assertEquals(1, db.statements() - none, "an empty list reads nothing more");
     var a = specs.stream().filter(spec -> spec.id().equals("a")).findFirst().orElseThrow();
     assertEquals(List.of("m", "z"), a.dependsOn());
     assertEquals(List.of("api", "web"), a.repos());

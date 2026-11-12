@@ -16,10 +16,10 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -428,16 +428,24 @@ class ChangeLogTest {
   }
 
   @Test
-  void lastErasureIsTheLatestErasureOfATypeFromOneOrigin() {
-    assertEquals(OptionalLong.empty(), log.lastErasure("run", "retention"));
-    log.append("run", "r1", "1-x", "local", false, "{}");
-    log.append("run", "r2", "1-y", "local", false, "{}");
+  void lastErasuresAreTheLatestOfATypeFromTheOriginsAskedByTheProjectEachIsFiledUnder() {
+    log.append("run", "r1", "1-x", "local", false, "{\"project\": \"acme\"}");
+    log.append("run", "r2", "1-y", "local", false, "{\"project\": \"acme\"}");
+    log.append("run", "r3", "1-z", "local", false, "{}");
+    log.append("run", "r4", "1-w", "local", false, "{\"project\": \"beta\"}");
+    assertEquals(Map.of(), log.lastErasures("run", List.of("retention", "sync")));
     log.erase("run", "r1", "erased", "retention");
-    var first = log.head("run", "r1").orElseThrow().seq();
-    log.erase("run", "r2", "erased", "local");
+    log.erase("run", "r2", "erased", "sync");
+    log.erase("run", "r3", "erased", "retention");
+    log.erase("run", "r4", "erased", "local");
 
-    assertEquals(OptionalLong.of(first), log.lastErasure("run", "retention"));
-    assertEquals(OptionalLong.empty(), log.lastErasure("spec", "retention"));
+    var latest = log.lastErasures("run", List.of("retention", "sync"));
+
+    var expected = new HashMap<String, Long>();
+    expected.put("acme", log.head("run", "r2").orElseThrow().seq());
+    expected.put(null, log.head("run", "r3").orElseThrow().seq());
+    assertEquals(expected, latest);
+    assertEquals(Map.of(), log.lastErasures("spec", List.of("retention")));
   }
 
   @Test

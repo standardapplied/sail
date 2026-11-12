@@ -612,6 +612,7 @@ class TestOperations implements Operations {
         SpecMeasures.of(
             new MeasureRows(
                 specId,
+                "test-project",
                 SpecStatus.PENDING,
                 "box",
                 List.of(),
@@ -619,7 +620,7 @@ class TestOperations implements Operations {
                 MeasureRows.Seen.all(List.of()),
                 List.of(),
                 MeasureRows.Seen.all(List.of()),
-                MeasureRows.RunErasures.NONE)));
+                Map.of())));
   }
 
   @Override

@@ -51,7 +51,7 @@ public final class Access {
   private static final Decision NOT_FOUND = new Decision.NotFound();
   private static final Set<Action> SEATED = EnumSet.of(Action.CREATE, Action.CLAIM);
   private static final Set<Action> WRITES_NOTHING =
-      EnumSet.of(Action.READ, Action.READ_DEFINITION, Action.OPERATE_BOX);
+      EnumSet.of(Action.READ, Action.READ_DEFINITION, Action.READ_MEASURES, Action.OPERATE_BOX);
 
   private Access() {}
 
@@ -124,16 +124,6 @@ public final class Access {
   public static boolean ownRun(Actor actor, Resource resource) {
     return resource.kind() == Resource.Kind.RUN
         && PrincipalHandle.namesRun(actor.handle(), resource.id());
-  }
-
-  /**
-   * Whether {@code actor} is the agent of a run working spec {@code specId}: that one spec, not the
-   * whole of its own work ({@link #decide} asks that), for a read a container answers a run alone
-   * about the spec it was launched for.
-   */
-  public static boolean worksOn(Actor actor, String specId) {
-    var work = actor.work();
-    return work != null && work.spec() != null && work.spec().equals(specId);
   }
 
   /**

@@ -320,6 +320,7 @@ class SpecMeasuresCommandTest {
   void aLowerBoundReadsAtLeastAndAnUnknownOrAnErrorSaysWhy() {
     var at = Map.of("at", "2026-11-01T09:00:00.000Z", "source", "change_log");
     var times = new LinkedHashMap<String, Object>();
+    times.put("box", Map.of("unknown", "no_box_id"));
     times.put("ready", at);
     times.put("verified", Map.of("unknown", "hidden_rows"));
     times.put("awaiting_merge", Map.of("unknown", "collapsed_by_sync"));
@@ -345,7 +346,7 @@ class SpecMeasuresCommandTest {
 
     assertEquals(
         List.of(
-            "  @|bold Measures|@ (this box's record):",
+            "  @|bold Measures|@ (this box's record, unknown: no box id):",
             "    Ready: 2026-11-01T09:00:00.000Z (change log)",
             "    Verified: unknown: hidden rows",
             "    Awaiting merge: unknown: collapsed by sync",

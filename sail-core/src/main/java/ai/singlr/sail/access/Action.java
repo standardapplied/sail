@@ -20,6 +20,11 @@ public enum Action {
       "a project's definition",
       "read",
       "a project's definition, which holds its services' secrets"),
+  /**
+   * Reading a spec's measures: its times, rework and cost, read from this box's rows of it. A
+   * person reads them as the spec; in a container, an agent reads those of its own work alone.
+   */
+  READ_MEASURES("Read measures", "a spec's times, rework and cost", "read the measures of"),
   /** Posting a message in a conversation: a room, or a spec's own room. */
   POST("Post", "a message in a conversation", "post in"),
   /**

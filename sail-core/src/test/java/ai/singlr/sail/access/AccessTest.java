@@ -1072,19 +1072,37 @@ class AccessTest {
   }
 
   /**
-   * An agent's own run is the run its principal names: no other run, and nothing else of its id.
-   */
-  /**
-   * A run works the one spec it was launched for; a person, and a room agent of none, work none.
+   * Reading a spec's measures is the own-work rule: a person reads them as the spec, an agent those
+   * of its own work in its work's project alone, a spec moved out of that project included, and the
+   * credential in a container none.
    */
   @Test
-  void anAgentWorksOnTheSpecItsRunWasLaunchedForAndNoOther() {
-    assertTrue(Access.worksOn(Actors.AGENT, "auth"));
-    assertFalse(Access.worksOn(Actors.AGENT, "theirs"));
-    assertFalse(Access.worksOn(Actors.ROOM, "auth"), "a room agent works a room, not a spec");
-    assertFalse(Access.worksOn(Actors.OWNER_IN_CONTAINER, "auth"), "a person runs no work");
+  void anAgentReadsTheMeasuresOfItsOwnWorkAloneAndThePersonInAContainerNone() {
+    var moved = Resources.spec("auth", "beta", "ada", "ada");
+
+    assertEquals(
+        new Decision.Allowed(), Access.decide(Actors.VIEWER, Action.READ_MEASURES, SPEC_ADA));
+    assertEquals(
+        new Decision.Allowed(), Access.decide(Actors.AGENT, Action.READ_MEASURES, SPEC_ADA));
+    assertEquals(
+        Access.decide(Actors.AGENT, Action.POST, moved) instanceof Decision.Refused,
+        Access.decide(Actors.AGENT, Action.READ_MEASURES, moved) instanceof Decision.Refused,
+        "a spec moved out of its work's project is no more its own to read than to post in");
+    assertTrue(
+        Access.decide(Actors.AGENT, Action.READ_MEASURES, moved) instanceof Decision.Refused);
+    assertTrue(
+        Access.decide(
+                Actors.AGENT, Action.READ_MEASURES, Resources.spec("theirs", "acme", "bob", "bob"))
+            instanceof Decision.Refused);
+    assertTrue(
+        Access.decide(Actors.OWNER_IN_CONTAINER, Action.READ_MEASURES, SPEC_ADA)
+            instanceof Decision.Refused);
+    assertFalse(Access.mayWrite(Actors.VIEWER), "reading measures writes nothing");
   }
 
+  /**
+   * An agent's own run is the run its principal names: no other run, and nothing else of its id.
+   */
   @Test
   void anAgentsOwnRunIsTheRunItsPrincipalNamesAndNothingElse() {
     assertTrue(Access.ownRun(Actors.AGENT, RUN_ADA));

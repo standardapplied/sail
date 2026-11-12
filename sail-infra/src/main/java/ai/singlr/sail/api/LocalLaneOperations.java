@@ -84,8 +84,9 @@ public interface LocalLaneOperations {
   Result<GlobalSpecDetailResponse> globalSpec(String specId);
 
   /**
-   * Spec {@code specId}'s detail carrying its measures ({@link SpecMeasures}), as {@code GET
-   * /v1/specs/{id}?measures=true} answers it at either door.
+   * Spec {@code specId}'s detail carrying its measures ({@link SpecMeasures}) when reading them is
+   * the caller's ({@code Action.READ_MEASURES}), as {@code GET /v1/specs/{id}?measures=true}
+   * answers it at either door; otherwise its detail alone.
    */
   Result<GlobalSpecDetailResponse> measuredSpec(String specId);
 

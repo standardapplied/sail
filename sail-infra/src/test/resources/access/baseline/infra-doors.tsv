@@ -12651,14 +12651,14 @@ read measures of ghost as room viewer bob-room beta	denied SPEC_NOT_FOUND 404 Sp
 read measures of s-ada as agent member ada-agent acme	ok SpecMeasures
 read measures of s-ada as agent member ada-agent all	ok SpecMeasures
 read measures of s-ada as agent member ada-agent beta	denied SPEC_NOT_FOUND 404 Spec 's-ada' was not found. | 
-read measures of s-ada as agent member bob-agent acme	ok SpecMeasures
-read measures of s-ada as agent member bob-agent all	ok SpecMeasures
+read measures of s-ada as agent member bob-agent acme	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000b0b01' may read the measures of only its own work, not spec 's-ada'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
+read measures of s-ada as agent member bob-agent all	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000b0b01' may read the measures of only its own work, not spec 's-ada'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
 read measures of s-ada as agent member bob-agent beta	denied SPEC_NOT_FOUND 404 Spec 's-ada' was not found. | 
 read measures of s-ada as agent viewer ada-agent acme	ok SpecMeasures
 read measures of s-ada as agent viewer ada-agent all	ok SpecMeasures
 read measures of s-ada as agent viewer ada-agent beta	denied SPEC_NOT_FOUND 404 Spec 's-ada' was not found. | 
-read measures of s-ada as agent viewer bob-agent acme	ok SpecMeasures
-read measures of s-ada as agent viewer bob-agent all	ok SpecMeasures
+read measures of s-ada as agent viewer bob-agent acme	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000b0b01' may read the measures of only its own work, not spec 's-ada'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
+read measures of s-ada as agent viewer bob-agent all	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000b0b01' may read the measures of only its own work, not spec 's-ada'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
 read measures of s-ada as agent viewer bob-agent beta	denied SPEC_NOT_FOUND 404 Spec 's-ada' was not found. | 
 read measures of s-ada as api admin root all	ok SpecMeasures
 read measures of s-ada as api member ada acme	ok SpecMeasures
@@ -12687,37 +12687,37 @@ read measures of s-ada as cli viewer ada beta	denied SPEC_NOT_FOUND 404 Spec 's-
 read measures of s-ada as cli viewer bob acme	ok SpecMeasures
 read measures of s-ada as cli viewer bob all	ok SpecMeasures
 read measures of s-ada as cli viewer bob beta	denied SPEC_NOT_FOUND 404 Spec 's-ada' was not found. | 
-read measures of s-ada as container admin root all	ok SpecMeasures
-read measures of s-ada as container member ada acme	ok SpecMeasures
-read measures of s-ada as container member ada all	ok SpecMeasures
+read measures of s-ada as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
+read measures of s-ada as container member ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
+read measures of s-ada as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
 read measures of s-ada as container member ada beta	denied SPEC_NOT_FOUND 404 Spec 's-ada' was not found. | 
-read measures of s-ada as container member bob acme	ok SpecMeasures
-read measures of s-ada as container member bob all	ok SpecMeasures
+read measures of s-ada as container member bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
+read measures of s-ada as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
 read measures of s-ada as container member bob beta	denied SPEC_NOT_FOUND 404 Spec 's-ada' was not found. | 
-read measures of s-ada as container viewer ada acme	ok SpecMeasures
-read measures of s-ada as container viewer ada all	ok SpecMeasures
+read measures of s-ada as container viewer ada acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
+read measures of s-ada as container viewer ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
 read measures of s-ada as container viewer ada beta	denied SPEC_NOT_FOUND 404 Spec 's-ada' was not found. | 
-read measures of s-ada as container viewer bob acme	ok SpecMeasures
-read measures of s-ada as container viewer bob all	ok SpecMeasures
+read measures of s-ada as container viewer bob acme	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
+read measures of s-ada as container viewer bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
 read measures of s-ada as container viewer bob beta	denied SPEC_NOT_FOUND 404 Spec 's-ada' was not found. | 
-read measures of s-ada as room viewer ada-room acme	ok SpecMeasures
-read measures of s-ada as room viewer ada-room all	ok SpecMeasures
+read measures of s-ada as room viewer ada-room acme	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/room-019fee00-0000-7000-8000-0000000ada02' may read the measures of only its own work, not spec 's-ada'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
+read measures of s-ada as room viewer ada-room all	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/room-019fee00-0000-7000-8000-0000000ada02' may read the measures of only its own work, not spec 's-ada'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
 read measures of s-ada as room viewer ada-room beta	denied SPEC_NOT_FOUND 404 Spec 's-ada' was not found. | 
-read measures of s-ada as room viewer bob-room acme	ok SpecMeasures
-read measures of s-ada as room viewer bob-room all	ok SpecMeasures
+read measures of s-ada as room viewer bob-room acme	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/room-019fee00-0000-7000-8000-0000000b0b02' may read the measures of only its own work, not spec 's-ada'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
+read measures of s-ada as room viewer bob-room all	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/room-019fee00-0000-7000-8000-0000000b0b02' may read the measures of only its own work, not spec 's-ada'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
 read measures of s-ada as room viewer bob-room beta	denied SPEC_NOT_FOUND 404 Spec 's-ada' was not found. | 
 read measures of s-beta as agent member ada-agent acme	denied SPEC_NOT_FOUND 404 Spec 's-beta' was not found. | 
-read measures of s-beta as agent member ada-agent all	ok SpecMeasures
-read measures of s-beta as agent member ada-agent beta	ok SpecMeasures
+read measures of s-beta as agent member ada-agent all	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000ada01' may read the measures of only its own work, not spec 's-beta'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
+read measures of s-beta as agent member ada-agent beta	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000ada01' may read the measures of only its own work, not spec 's-beta'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
 read measures of s-beta as agent member bob-agent acme	denied SPEC_NOT_FOUND 404 Spec 's-beta' was not found. | 
-read measures of s-beta as agent member bob-agent all	ok SpecMeasures
-read measures of s-beta as agent member bob-agent beta	ok SpecMeasures
+read measures of s-beta as agent member bob-agent all	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000b0b01' may read the measures of only its own work, not spec 's-beta'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
+read measures of s-beta as agent member bob-agent beta	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000b0b01' may read the measures of only its own work, not spec 's-beta'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
 read measures of s-beta as agent viewer ada-agent acme	denied SPEC_NOT_FOUND 404 Spec 's-beta' was not found. | 
-read measures of s-beta as agent viewer ada-agent all	ok SpecMeasures
-read measures of s-beta as agent viewer ada-agent beta	ok SpecMeasures
+read measures of s-beta as agent viewer ada-agent all	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000ada01' may read the measures of only its own work, not spec 's-beta'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
+read measures of s-beta as agent viewer ada-agent beta	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000ada01' may read the measures of only its own work, not spec 's-beta'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
 read measures of s-beta as agent viewer bob-agent acme	denied SPEC_NOT_FOUND 404 Spec 's-beta' was not found. | 
-read measures of s-beta as agent viewer bob-agent all	ok SpecMeasures
-read measures of s-beta as agent viewer bob-agent beta	ok SpecMeasures
+read measures of s-beta as agent viewer bob-agent all	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000b0b01' may read the measures of only its own work, not spec 's-beta'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
+read measures of s-beta as agent viewer bob-agent beta	denied FORBIDDEN_NOT_ASSIGNEE 403 'claude/019fee00-0000-7000-8000-0000000b0b01' may read the measures of only its own work, not spec 's-beta'. | An agent acts only on the work sail launched it for; draft a follow-up spec for anything else.
 read measures of s-beta as api admin root all	ok SpecMeasures
 read measures of s-beta as api member ada acme	denied SPEC_NOT_FOUND 404 Spec 's-beta' was not found. | 
 read measures of s-beta as api member ada all	ok SpecMeasures
@@ -12745,19 +12745,19 @@ read measures of s-beta as cli viewer ada beta	ok SpecMeasures
 read measures of s-beta as cli viewer bob acme	denied SPEC_NOT_FOUND 404 Spec 's-beta' was not found. | 
 read measures of s-beta as cli viewer bob all	ok SpecMeasures
 read measures of s-beta as cli viewer bob beta	ok SpecMeasures
-read measures of s-beta as container admin root all	ok SpecMeasures
+read measures of s-beta as container admin root all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
 read measures of s-beta as container member ada acme	denied SPEC_NOT_FOUND 404 Spec 's-beta' was not found. | 
-read measures of s-beta as container member ada all	ok SpecMeasures
-read measures of s-beta as container member ada beta	ok SpecMeasures
+read measures of s-beta as container member ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
+read measures of s-beta as container member ada beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
 read measures of s-beta as container member bob acme	denied SPEC_NOT_FOUND 404 Spec 's-beta' was not found. | 
-read measures of s-beta as container member bob all	ok SpecMeasures
-read measures of s-beta as container member bob beta	ok SpecMeasures
+read measures of s-beta as container member bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
+read measures of s-beta as container member bob beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
 read measures of s-beta as container viewer ada acme	denied SPEC_NOT_FOUND 404 Spec 's-beta' was not found. | 
-read measures of s-beta as container viewer ada all	ok SpecMeasures
-read measures of s-beta as container viewer ada beta	ok SpecMeasures
+read measures of s-beta as container viewer ada all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
+read measures of s-beta as container viewer ada beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
 read measures of s-beta as container viewer bob acme	denied SPEC_NOT_FOUND 404 Spec 's-beta' was not found. | 
-read measures of s-beta as container viewer bob all	ok SpecMeasures
-read measures of s-beta as container viewer bob beta	ok SpecMeasures
+read measures of s-beta as container viewer bob all	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
+read measures of s-beta as container viewer bob beta	denied AGENT_LANE_FORBIDDEN 403 The credential in a project container cannot read the measures of specs. | Do it from outside the container: with sail on the host, or in Mast.
 read measures of s-beta as room viewer ada-room acme	denied SPEC_NOT_FOUND 404 Spec 's-beta' was not found. | 
 read measures of s-beta as room viewer ada-room all	denied SPEC_NOT_FOUND 404 Spec 's-beta' was not found. | 
 read measures of s-beta as room viewer ada-room beta	denied SPEC_NOT_FOUND 404 Spec 's-beta' was not found. | 

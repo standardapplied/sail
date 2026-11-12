@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.access.Whoami;
@@ -539,15 +538,14 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
   }
 
   /**
-   * A spec's detail, with its measures only for the run whose spec it is: in a container, an agent
-   * reads the measures of its own work and of nothing else, so any other caller, or another spec,
-   * is answered the detail exactly as without asking.
+   * A spec's detail, with its measures when asked and reading them is the caller's ({@link
+   * Action#READ_MEASURES}): in a container, an agent's own work alone; any other caller, or another
+   * spec, is answered the detail exactly as without asking.
    */
   private ApiResponse spec(LocalApiRequest request, Caller caller, Map<String, String> path) {
     var id = path.get("id");
-    var ownWork = Access.worksOn(caller.actor(), id);
     return ApiResponse.from(
-        SpecMeasures.asked(request.query().get("measures")) && ownWork
+        SpecMeasures.asked(request.query().get("measures"))
             ? operations.measuredSpec(id)
             : operations.globalSpec(id));
   }

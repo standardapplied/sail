@@ -34,7 +34,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -1126,14 +1125,14 @@ class RunStoreTest {
   }
 
   @Test
-  void lastErasureIsTheLatestErasureOfARunThisBoxRecordedFromAnOrigin() {
+  void lastErasuresAreTheLatestRunErasureThisBoxRecordedByProject() {
     var run = newRun("backend", "auth");
-    assertEquals(OptionalLong.empty(), store.lastErasure("retention"));
+    assertEquals(Map.of(), store.lastErasures(List.of("retention")));
 
     new Erasure(db).erase(List.of(new Erasure.Target(Erasure.RUN, run)), "retention");
 
-    assertEquals(true, store.lastErasure("retention").isPresent());
-    assertEquals(OptionalLong.empty(), store.lastErasure("local"));
+    assertEquals(Set.of("backend"), store.lastErasures(List.of("retention")).keySet());
+    assertEquals(Map.of(), store.lastErasures(List.of("local")));
   }
 
   @Test

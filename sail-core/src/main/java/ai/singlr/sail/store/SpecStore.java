@@ -1308,6 +1308,9 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    * the order of its key.
    */
   private List<SpecRow> hydrate(List<SpecRow> specs) {
+    if (specs.isEmpty()) {
+      return specs;
+    }
     var ids = YamlUtil.dumpJson(specs.stream().map(SpecRow::id).toList());
     var deps = byFirst("spec_dependencies", "depends_on", ids);
     var repos = byFirst("spec_repos", "repo", ids);

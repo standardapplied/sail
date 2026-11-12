@@ -335,7 +335,8 @@ class SpecMeasuresRouteTest {
     assertEquals(rework(count(3), count(0), count(2), count(1), count(1)), measures.get("rework"));
     assertEquals(
         Map.of("unknown", "not_recorded", "runs_without_usage", count(6)), measures.get("cost"));
-    assertEquals(BOX, ((Map<?, ?>) measures.get("times")).get("box"), "the box's Sail id");
+    assertEquals(
+        Map.of("sail_id", BOX), ((Map<?, ?>) measures.get("times")).get("box"), "its Sail id");
     var measured = get(ada, "/v1/specs/auth?measures=true");
     assertEquals(measures, YamlUtil.parseMap(measured.body()).get("measures"), "one computation");
     assertEquals(
@@ -346,7 +347,8 @@ class SpecMeasuresRouteTest {
     assertEquals(null, read(ada, "/v1/specs/auth").get("measures"), "asked for, never paid for");
     assertEquals(
         "{\"schema_version\": 1, \"error\": {\"code\": \"invalid_request\", \"message\":"
-            + " \"measures must be true or false, not 'yes'.\", \"field_errors\": []}}",
+            + " \"measures must be true or false, not 'yes'.\", \"action\": \"Send measures=true to"
+            + " read the spec with its measures, or leave it out.\", \"field_errors\": []}}",
         get(ada, "/v1/specs/auth?measures=yes").body());
     assertEquals(
         List.of(measures),
@@ -423,10 +425,19 @@ class SpecMeasuresRouteTest {
     move("moved", SpecStatus.DRAFT, SpecStatus.PENDING);
     at(30);
     project("moved", "alpha");
+    Acting.system(() -> new Erasure(db).adopt(Erasure.RUN, "elsewhere", "1-erased", "bravo"));
 
     assertEquals(
         Map.of("unknown", "history_incomplete"),
         ((Map<?, ?>) read(sam, "/v1/specs/moved/measures").get("times")).get("ready"));
+    assertEquals(
+        count(0),
+        ((Map<?, ?>) read(sam, "/v1/specs/moved/measures").get("rework")).get("build_runs"),
+        "an erasure in a project sam does not read says nothing to him");
+    assertEquals(
+        Map.of("count", 0, "at_least", true),
+        ((Map<?, ?>) read(ada, "/v1/specs/moved/measures").get("rework")).get("build_runs"),
+        "a project the spec was filed under, which ada reads");
     assertEquals(
         Map.of("at", "2026-11-01T09:20:00.000Z", "source", "change_log"),
         ((Map<?, ?>) read(ada, "/v1/specs/moved/measures").get("times")).get("ready"));
@@ -506,11 +517,12 @@ class SpecMeasuresRouteTest {
   }
 
   /**
-   * Major 4: a run retention erased after the spec arrived may have been one of its own, so its run
-   * counts are a lower bound; one erased before it arrived could not have been.
+   * A run retention erased after the spec arrived, of its own project, may have been one of its
+   * own, so its run counts are a lower bound; one erased before it arrived could not have been, and
+   * neither could one of another project, nor the runs of a spec pruned there.
    */
   @Test
-  void aRunErasedByRetentionSinceTheSpecArrivedMakesItsRunCountsALowerBound() throws Exception {
+  void aRunOfItsProjectErasedSinceTheSpecArrivedMakesItsRunCountsALowerBound() throws Exception {
     spec("old", "alpha");
     build("o1", "old", "alpha");
     erase("o1");
@@ -518,17 +530,56 @@ class SpecMeasuresRouteTest {
     move("erased", SpecStatus.DRAFT, SpecStatus.PENDING);
     build("e1", "erased", "alpha");
     build("e2", "erased", "alpha");
+    spec("bystander", "bravo");
+    build("by1", "bystander", "bravo");
+    spec("gone", "bravo");
+    build("g1", "gone", "bravo");
+    move("gone", SpecStatus.DRAFT, SpecStatus.ARCHIVED);
     var before = (Map<?, ?>) read(ada, "/v1/specs/erased/measures").get("rework");
+    Acting.system(
+        () ->
+            new Erasure(db)
+                .erase(
+                    new Erasure(db).closure(List.of(new Erasure.Target(Erasure.SPEC, "gone"))),
+                    SpecPruner.RETENTION));
+    var afterAPrune = (Map<?, ?>) read(ada, "/v1/specs/erased/measures").get("rework");
 
     erase("e1");
 
     var after = read(ada, "/v1/specs/erased/measures");
     assertEquals(count(2), before.get("build_runs"), "erased before the spec arrived");
+    assertEquals(count(2), afterAPrune.get("build_runs"), "a pruned spec of another project");
     assertEquals(
         Map.of("count", 1, "at_least", true), ((Map<?, ?>) after.get("rework")).get("build_runs"));
     assertEquals(
         Map.of("count", 1, "at_least", true),
         ((Map<?, ?>) after.get("cost")).get("runs_without_usage"));
+    assertEquals(
+        Map.of("count", 1, "at_least", true),
+        ((Map<?, ?>) read(ada, "/v1/specs/bystander/measures").get("rework")).get("build_runs"),
+        "the pruned spec's own project: its run, erased with it, names no spec");
+  }
+
+  /**
+   * Minor 3 of review 2: a node records main's erasure of a run, held or not, as main's row heard
+   * by sync, filed under the run's project, so it bounds a spec's run counts as main's own does.
+   */
+  @Test
+  void anErasureHeardFromMainBoundsTheRunCountsOfASpecOfItsProjectAsMainsOwnDoes()
+      throws Exception {
+    spec("here", "alpha");
+    build("h1", "here", "alpha");
+    spec("there", "bravo");
+    build("t1", "there", "bravo");
+
+    Acting.system(() -> new Erasure(db).adopt(Erasure.RUN, "never-held", "1-erased", "alpha"));
+
+    assertEquals(
+        Map.of("count", 1, "at_least", true),
+        ((Map<?, ?>) read(ada, "/v1/specs/here/measures").get("rework")).get("build_runs"));
+    assertEquals(
+        count(1),
+        ((Map<?, ?>) read(ada, "/v1/specs/there/measures").get("rework")).get("build_runs"));
   }
 
   private void erase(String run) {

@@ -30,7 +30,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -1316,11 +1315,11 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * The seq of the latest erasure of a run this box recorded from {@code origin}: on a box that
-   * authors erasures, every run it erased.
+   * The seq of the latest erasure of a run this box recorded from one of {@code origins}, by the
+   * project the run was filed under; a null key for runs filed under none.
    */
-  public OptionalLong lastErasure(String origin) {
-    return changeLog.lastErasure(ENTITY, origin);
+  public Map<String, Long> lastErasures(Collection<String> origins) {
+    return changeLog.lastErasures(ENTITY, origins);
   }
 
   public List<RunRow> listForSpec(String specId) {

@@ -15,6 +15,8 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,9 +42,10 @@ import java.util.stream.LongStream;
  * is the author's time of the revision, read from this box's change log alone, and each is exact
  * only for a move written on this box: a revision heard by sync is one per round, so the moves
  * another box made between two rounds are collapsed into it, and what it or a search across it
- * would say is unknown. Verified is when the latest review of the current dispatch attempt
- * completed, if it passed: a pass a re-dispatch superseded verified other work, and one a later
- * review failed verified nothing that shipped.
+ * would say is unknown. A box's own write that main took comes back heard, at the same time and in
+ * the same status as the write it answers; it is that move, not another. Verified is when the
+ * latest review of the current dispatch attempt completed, if it passed: a pass a re-dispatch
+ * superseded verified other work, and one a later review failed verified nothing that shipped.
  */
 record SpecMeasures(
     String specId,
@@ -170,7 +173,9 @@ record SpecMeasures(
       return true;
     }
     throw new ApiException(
-        ErrorCode.INVALID_REQUEST, "measures must be true or false, not '" + value + "'.");
+        ErrorCode.INVALID_REQUEST,
+        "measures must be true or false, not '" + value + "'.",
+        "Send measures=true to read the spec with its measures, or leave it out.");
   }
 
   /** The measures of the spec {@code rows} holds, from those rows alone. */
@@ -190,8 +195,8 @@ record SpecMeasures(
             fromReviews(reviews, reviews.rows().stream().filter(SpecMeasures::verdict).count()),
             fromReviews(
                 reviews, reviews.rows().stream().filter(ReviewStore.ReviewRow::errored).count()),
-            fromRuns(rows, runs.stream().filter(RunStore.RunRow::buildRole).count()),
-            fromRuns(rows, runs.stream().filter(run -> Lane.FIX.matches(run.role())).count()),
+            fromRuns(rows, log, runs.stream().filter(RunStore.RunRow::buildRole).count()),
+            fromRuns(rows, log, runs.stream().filter(run -> Lane.FIX.matches(run.role())).count()),
             fromReviews(
                 reviews,
                 rows.findings().stream().filter(found -> found.carriedFrom() != null).count()));
@@ -204,7 +209,7 @@ record SpecMeasures(
         done.moment(),
         rework,
         codeAct(rows),
-        fromRuns(rows, runs.size()));
+        fromRuns(rows, log, runs.size()));
   }
 
   private static boolean verdict(ReviewStore.ReviewRow review) {
@@ -218,26 +223,31 @@ record SpecMeasures(
   }
 
   /**
-   * {@code count} runs, as this box can vouch for it: unknown when the reader may not see a run, or
-   * on a box that cannot say which runs retention erased; a lower bound when a run was erased here
-   * after the spec arrived, which may have been one of its own.
+   * {@code count} runs, as this box can vouch for it: unknown when the reader may not see a run; a
+   * lower bound when a run filed under one of the projects the spec was ever filed under here was
+   * erased after the spec arrived, which may have been one of its own. Every box records each run
+   * erasure, main as it makes it and a node as it hears it, filed under the run's project and
+   * naming no spec, so a run erased with a pruned spec of the same project bounds it too. When the
+   * log lacks revisions, the projects it was filed under are not all known, and any erasure counts.
    */
-  private static Measure fromRuns(MeasureRows rows, long count) {
+  private static Measure fromRuns(MeasureRows rows, Log log, long count) {
     if (rows.runs().hidden()) {
       return new Measure.Unknown(Measure.HIDDEN_ROWS, 0);
-    }
-    var erasures = rows.erasures();
-    if (!erasures.authored()) {
-      return new Measure.Unknown("retention_unknown", 0);
     }
     var arrived =
         LongStream.concat(
                 rows.history().stream().mapToLong(ChangeLog.Entry::seq),
                 rows.gaps().stream().mapToLong(Long::longValue))
             .min();
-    var erasedSince =
-        erasures.latest().isPresent()
-            && (arrived.isEmpty() || erasures.latest().getAsLong() > arrived.getAsLong());
+    var projects = new HashSet<>(log.projects());
+    projects.add(rows.project());
+    var erasures =
+        rows.gaps().isEmpty()
+            ? rows.runErasures().entrySet().stream()
+                .filter(erased -> erased.getKey() == null || projects.contains(erased.getKey()))
+                .map(Map.Entry::getValue)
+            : rows.runErasures().values().stream();
+    var erasedSince = erasures.anyMatch(seq -> arrived.isEmpty() || seq > arrived.getAsLong());
     return erasedSince ? new Measure.AtLeast(count) : new Measure.Known(count);
   }
 
@@ -314,7 +324,7 @@ record SpecMeasures(
   @Override
   public Map<String, Object> toMap() {
     var times = new LinkedHashMap<String, Object>();
-    times.put("box", box);
+    times.put("box", box == null ? Map.of("unknown", "no_box_id") : Map.of("sail_id", box));
     times.put("ready", ready.toMap());
     times.put("verified", verified.toMap());
     times.put("awaiting_merge", awaitingMerge.toMap());
@@ -348,10 +358,12 @@ record SpecMeasures(
   }
 
   /**
-   * One revision of the spec as the measures read it: its seq, status and author's time, whether it
-   * is the spec's birth, and whether it was heard by sync and so may collapse several moves.
+   * One revision of the spec as the measures read it: its seq, status, project and author's time,
+   * whether it is the spec's birth, and whether it was heard by sync and so may collapse several
+   * moves.
    */
-  private record Revision(long seq, SpecStatus status, Instant at, boolean born, boolean heard) {
+  private record Revision(
+      long seq, SpecStatus status, String project, Instant at, boolean born, boolean heard) {
 
     static Revision of(ChangeLog.Entry entry) {
       var snapshot = YamlUtil.parseMap(entry.snapshot());
@@ -359,9 +371,19 @@ record SpecMeasures(
       return new Revision(
           entry.seq(),
           SpecStatus.fromWire(Snapshots.text(snapshot, "status")),
+          Snapshots.text(snapshot, "project"),
           at,
           Objects.equals(Snapshots.instant(snapshot, "created_at"), at),
           entry.heardFromMain());
+    }
+
+    /**
+     * Whether this revision, heard by sync, is the revision before it coming back: a box's own
+     * write main took and answered with. Every write moves {@code updated_at} past the last, so one
+     * at the same time in the same status is that write, and adds no move.
+     */
+    boolean echoes(Revision before) {
+      return heard && before.status() == status && before.at().equals(at);
     }
 
     /**
@@ -379,13 +401,27 @@ record SpecMeasures(
   /** This box's record of the spec's statuses: the revisions it holds, and what it lacks. */
   private record Log(List<Revision> revisions, Set<Long> gaps) {
 
+    /** The revisions of {@code rows}, each echo of this box's own write left out. */
     static Log of(MeasureRows rows) {
-      return new Log(
-          rows.history().stream()
-              .filter(entry -> entry.kind() == ChangeLog.Kind.REVISION)
-              .map(Revision::of)
-              .toList(),
-          rows.gaps());
+      var revisions = new ArrayList<Revision>();
+      for (var entry : rows.history()) {
+        if (entry.kind() != ChangeLog.Kind.REVISION) {
+          continue;
+        }
+        var revision = Revision.of(entry);
+        if (revisions.isEmpty() || !revision.echoes(revisions.getLast())) {
+          revisions.add(revision);
+        }
+      }
+      return new Log(List.copyOf(revisions), rows.gaps());
+    }
+
+    /** Every project the spec was filed under, as the revisions held say. */
+    Set<String> projects() {
+      return revisions.stream()
+          .map(Revision::project)
+          .filter(Objects::nonNull)
+          .collect(Collectors.toSet());
     }
 
     /**

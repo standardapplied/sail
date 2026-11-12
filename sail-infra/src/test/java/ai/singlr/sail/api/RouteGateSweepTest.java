@@ -126,7 +126,7 @@ class RouteGateSweepTest {
               "PUT /v1/specs/{spec}/content the journal decides",
               "GET /v1/specs/{spec}/reviews reads in scope",
               "GET /v1/specs/{spec}/history reads in scope",
-              "GET /v1/specs/{spec}/measures reads in scope",
+              "GET /v1/specs/{spec}/measures decides READ_MEASURES",
               "POST /v1/specs/{spec}/restore the journal decides",
               "POST /v1/specs/{spec}/followup the journal decides",
               "* /v1/specs/{spec}/{sub} serves nothing",

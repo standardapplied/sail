@@ -291,13 +291,36 @@ class OwnWorkSocketTest {
             "review_errors",
             Map.of("count", 0L),
             "build_runs",
-            Map.of("unknown", "retention_unknown"),
+            Map.of("count", 1L),
             "fix_runs",
-            Map.of("unknown", "retention_unknown"),
+            Map.of("count", 0L),
             "carried_findings",
             Map.of("count", 0L)),
         ((Map<?, ?>) shown.body().get("measures")).get("rework"),
-        "eng's box is a node, which cannot say which runs main's retention erased");
+        "eng's box records main's erasures as main does, and none has taken a run of acme");
+  }
+
+  /**
+   * Review 2, minor 5: reading measures is the own-work rule, so a spec its person moves into
+   * another project mid-run is no more the agent's to read the measures of than to post in.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"claude-code", "codex"})
+  void aSpecMovedOutOfItsWorksProjectMidRunIsServedWithoutMeasuresAsPostingToItIsRefused(
+      String harness) {
+    var build = build("e1", harness);
+    assertEquals("allowed", said(socket("eng", "PUT", "/v1/specs/e1", "project=beta")));
+
+    var asked = run(build, "GET", "/v1/specs/e1?measures=true", "");
+
+    assertEquals("allowed", said(asked));
+    assertEquals(false, asked.body().containsKey("measures"));
+    assertEquals(
+        "403 forbidden_not_assignee '"
+            + principal(build)
+            + "' may post only in its own work, not in 'e1'."
+            + OUTSIDE_WORK,
+        said(run(build, "POST", "/v1/specs/e1/messages", "body=hi")));
   }
 
   /**

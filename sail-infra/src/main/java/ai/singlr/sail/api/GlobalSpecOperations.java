@@ -5,7 +5,12 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
+import ai.singlr.sail.access.Action;
+import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.ReadFilter;
+import ai.singlr.sail.access.Resource;
+import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
@@ -21,6 +26,7 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -125,7 +131,17 @@ final class GlobalSpecOperations {
   GlobalSpecDetailResponse measured(String specId, String box) {
     requireMeasured();
     var row = findOrThrow(specId);
-    return detail(row, measuresOf(List.of(row), box).getFirst());
+    var reads = Access.decide(Actor.current(), Action.READ_MEASURES, resourceOf(row));
+    return detail(
+        row, reads instanceof Decision.Allowed ? measuresOf(List.of(row), box).getFirst() : null);
+  }
+
+  /**
+   * {@code spec} as reading its measures decides it: its project and whose it is, so an agent's own
+   * work ({@link Access#decide}) is the spec its run works, in that spec's project.
+   */
+  private static Resource resourceOf(SpecStore.SpecRow spec) {
+    return Resources.spec(spec.id(), spec.project(), spec.assignee(), spec.createdBy());
   }
 
   private GlobalSpecDetailResponse detail(SpecStore.SpecRow row, SpecMeasures measures) {
@@ -146,7 +162,11 @@ final class GlobalSpecOperations {
    */
   SpecMeasures measures(String specId, String box) {
     requireMeasured();
-    return measuresOf(List.of(findOrThrow(specId)), box).getFirst();
+    var row = findOrThrow(specId);
+    Refusals.require(
+        Access.decide(Actor.current(), Action.READ_MEASURES, resourceOf(row)),
+        () -> Refusals.specNotFound(specId));
+    return measuresOf(List.of(row), box).getFirst();
   }
 
   /**
@@ -163,9 +183,9 @@ final class GlobalSpecOperations {
    * The rows of {@code specs} the reader sees, measured, one read of each kind for all of them:
    * their revisions on this box, every entry compacted away or filed where the reader does not read
    * a gap; their reviews and the findings of those it sees; their runs, as {@code GET
-   * /v1/runs?spec=} lists one spec's; and, on a box that authors erasures, its latest erasure of a
-   * run by retention. A review or run the reader may not see is not counted and is not counted as
-   * none either. Only reads.
+   * /v1/runs?spec=} lists one spec's; and this box's latest run erasure, by retention here or heard
+   * from main, in each project the reader reads. A review or run the reader may not see is not
+   * counted and is not counted as none either. Only reads.
    */
   private List<SpecMeasures> measuresOf(List<SpecStore.SpecRow> specs, String box) {
     var reader = Actor.reader();
@@ -182,10 +202,15 @@ final class GlobalSpecOperations {
     var findings = reviewStore.findingsForReviews(seenReviews);
     var reviews = byKey(everyReview, ReviewStore.ReviewRow::specId);
     var everyRun = byKey(runStore.listForConversations(ids), RunStore.RunRow::conversationId);
-    var erasures =
-        authoritative.getAsBoolean()
-            ? new MeasureRows.RunErasures(true, runStore.lastErasure(SpecPruner.RETENTION))
-            : MeasureRows.RunErasures.UNTOLD;
+    var erasures = new HashMap<String, Long>();
+    runStore
+        .lastErasures(List.of(SpecPruner.RETENTION, ChangeLog.Entry.SYNC))
+        .forEach(
+            (project, seq) -> {
+              if (project == null || ReadFilter.reads(reader, () -> project)) {
+                erasures.put(project, seq);
+              }
+            });
     var sees = ReadFilter.<ChangeLog.Entry>readable(reader, GlobalSpecOperations::projectOf);
     return specs.stream()
         .map(
@@ -203,6 +228,7 @@ final class GlobalSpecOperations {
               return SpecMeasures.of(
                   new MeasureRows(
                       id,
+                      spec.project(),
                       spec.status(),
                       box,
                       held.stream().filter(sees).toList(),

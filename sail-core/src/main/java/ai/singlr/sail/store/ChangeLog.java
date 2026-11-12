@@ -21,7 +21,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
@@ -711,7 +710,7 @@ public final class ChangeLog {
     db.query(
             """
             SELECT entity_id, project FROM change_heads
-            WHERE entity_type = ? AND project IS NOT NULL
+            WHERE entity_type = ? AND project IS NOT NULL AND project <> ''
             AND entity_id IN (SELECT value FROM json_each(?))""",
             row -> Map.entry(row.text(0), row.text(1)),
             entityType,
@@ -721,16 +720,25 @@ public final class ChangeLog {
   }
 
   /**
-   * The seq of the latest erasure of an {@code entityType} this box recorded from {@code origin}.
+   * The seq of the latest erasure of an {@code entityType} this box recorded from one of {@code
+   * origins}, for each project such an erasure is filed under; a null key for those filed under
+   * none.
    */
-  public OptionalLong lastErasure(String entityType, String origin) {
-    return db.queryOne(
-            "SELECT MAX(seq) FROM change_log WHERE entity_type = ? AND kind = ? AND origin = ?",
-            row -> row.isNull(0) ? OptionalLong.empty() : OptionalLong.of(row.integer(0)),
+  public Map<String, Long> lastErasures(String entityType, Collection<String> origins) {
+    var latest = new HashMap<String, Long>();
+    db.query(
+            """
+            SELECT NULLIF(h.project, ''), MAX(l.seq) FROM change_log l
+            JOIN change_heads h ON h.entity_type = l.entity_type AND h.entity_id = l.entity_id
+            WHERE l.entity_type = ? AND l.kind = ?
+            AND l.origin IN (SELECT value FROM json_each(?))
+            GROUP BY NULLIF(h.project, '')""",
+            row -> Map.entry(Optional.ofNullable(row.text(0)), row.integer(1)),
             entityType,
             Kind.ERASURE.wire(),
-            origin)
-        .orElse(OptionalLong.empty());
+            YamlUtil.dumpJson(List.copyOf(origins)))
+        .forEach(erased -> latest.put(erased.getKey().orElse(null), erased.getValue()));
+    return latest;
   }
 
   /**
