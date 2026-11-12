@@ -47,7 +47,7 @@ import Testing
 
     @Test func aStreamThatEndedWithARefusalAnswersNothingMore() async throws {
         let server = ScriptedStreams([.answer(200, [try Goldens.bytes("events/room-stream.sse")], .close)])
-        var events = SailClient(transport: server, token: "tok").events(sleep: Naps(1).sleep).makeAsyncIterator()
+        var events = SailClient(transport: server, token: "tok").events(sleep: Naps().sleep).makeAsyncIterator()
         var read = 0
         await #expect(throws: SailError.self) {
             while try await events.next() != nil {
@@ -85,11 +85,11 @@ import Testing
     @Test func theClientAsksForTheEventsItsFilterNames() async throws {
         let server = ScriptedStreams([])
         let client = SailClient(transport: server, token: "tok")
-        _ = await read(client.events(EventFilter(room: "harbor-design"), sleep: Naps(0).sleep))
+        _ = await read(client.events(EventFilter(room: "harbor-design"), sleep: Naps().sleep))
         _ = await read(client.events(
-            EventFilter(project: "harbor", types: [.specMessagePosted, .agentTextDelta]), sleep: Naps(0).sleep
+            EventFilter(project: "harbor", types: [.specMessagePosted, .agentTextDelta]), sleep: Naps().sleep
         ))
-        _ = await read(client.events(sleep: Naps(0).sleep))
+        _ = await read(client.events(sleep: Naps().sleep))
         let requests = await server.requests
         #expect(requests.map(\.path) == [
             "/v1/events/stream?room=harbor-design",
@@ -107,21 +107,23 @@ func readGolden(_ golden: String) async throws -> ([Event], SailError?) {
 
 /// Every event `events` yields, and the error it ended with, if any.
 func read(_ events: SailEventStream) async -> ([Event], SailError?) {
-    var read: [Event] = []
-    do throws(SailError) {
-        for try await event in events {
-            read.append(event)
+    await Task {
+        var read: [Event] = []
+        do throws(SailError) {
+            for try await event in events {
+                read.append(event)
+            }
+            return (read, nil)
+        } catch {
+            return (read, error)
         }
-        return (read, nil)
-    } catch {
-        return (read, error)
-    }
+    }.value
 }
 
 /// A client's event stream over one connection that delivers `chunks` and closes.
 func stream(_ chunks: [[UInt8]]) -> SailEventStream {
     let client = SailClient(transport: ScriptedStreams([.answer(200, chunks, .close)]), token: "tok")
-    return client.events(sleep: Naps(0).sleep)
+    return client.events(sleep: Naps().sleep)
 }
 
 func dataLines(_ golden: String) throws -> [String] {

@@ -10,7 +10,7 @@ import Testing
         let third = try #require(range(of: "id: 3\n", in: stream))
         let partial = Array(stream[..<(third.upperBound + 20)])
         let server = ScriptedStreams([.answer(200, [partial], .close), .answer(200, [Array("id: 4\ndata: next\n\n".utf8)], .close)])
-        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps(2).sleep)
+        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps().sleep)
         let events = try await read(source)
         #expect(events.map(\.lastEventID) == ["1", "2", "4"])
         #expect(events.last?.data == "next")
@@ -23,7 +23,7 @@ import Testing
         let room = try Goldens.bytes("events/room-stream.sse")
         let opening = try #require(range(of: "id: 2\n", in: room))
         let server = ScriptedStreams([.answer(200, [Array(room[..<opening.lowerBound])], .close), .answer(200, [room], .close)])
-        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps(2).sleep)
+        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps().sleep)
         let events = try await read(source)
         #expect(events.map(\.lastEventID).prefix(4) == ["", "1", "1", "1"])
         #expect(await server.requests.map { $0.headers["Last-Event-ID"] }.prefix(2) == [nil, "1"])
@@ -36,7 +36,7 @@ import Testing
             .answer(503, [], .close),
             .answer(200, [Array("id: 2\ndata: two\n\n".utf8)], .close),
         ])
-        let naps = Naps(4)
+        let naps = Naps()
         let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: naps.sleep)
         #expect(try await read(source).map(\.data) == ["one", "two"])
         #expect(await naps.taken == [.milliseconds(2500), .milliseconds(2500), .milliseconds(2500), .milliseconds(2500)])
@@ -44,7 +44,7 @@ import Testing
     }
 
     @Test func theFirstReconnectWaitsThreeSecondsUnlessTheServerSaysOtherwise() async throws {
-        let naps = Naps(1)
+        let naps = Naps()
         let source = EventSource(
             transport: ScriptedStreams([.answer(200, [], .close)]),
             request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: naps.sleep
@@ -56,7 +56,7 @@ import Testing
     @Test func aRefusedStreamIsTheServersRefusalAndIsNotRetried() async throws {
         let refusal = try Exchange("refusal-invalid-bearer-token")
         let server = ScriptedStreams([.answer(refusal.status, [Array(refusal.body)], .close)])
-        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps(0).sleep)
+        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps().sleep)
         var events = source.makeAsyncIterator()
         await #expect(throws: SailError.refused(Refusal(
             code: .known(.invalidBearerToken), message: "Bearer token is invalid.", action: nil, remedy: []
@@ -67,13 +67,13 @@ import Testing
 
     @Test func aFailedAnswerWithNoRefusalIsUnexpected() async throws {
         let server = ScriptedStreams([.answer(405, [], .close)])
-        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps(0).sleep)
+        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps().sleep)
         await #expect(throws: SailError.unexpected(route: "GET /v1/events/stream", status: 405)) { try await read(source) }
     }
 
     @Test func aCancelledReaderStopsWithoutReconnecting() async throws {
         let server = ScriptedStreams([.answer(200, [Array("data: one\n\n".utf8)], .close)])
-        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps(9).sleep)
+        let source = EventSource(transport: server, request: HTTPRequest(method: "GET", path: "/v1/events/stream"), sleep: Naps().sleep)
         let reader = Task {
             var iterator = source.makeAsyncIterator()
             let first = try await iterator.next()
@@ -87,13 +87,16 @@ import Testing
     }
 }
 
-/// Every event `source` yields until it stops.
-func read(_ source: EventSource) async throws(SailError) -> [ServerSentEvent] {
-    var events: [ServerSentEvent] = []
-    for try await event in source {
-        events.append(event)
-    }
-    return events
+/// Every event `source` yields until it stops, read in a task of its own, which a script that
+/// runs out cancels.
+func read(_ source: EventSource) async throws -> [ServerSentEvent] {
+    try await Task {
+        var events: [ServerSentEvent] = []
+        for try await event in source {
+            events.append(event)
+        }
+        return events
+    }.value
 }
 
 func range(of text: String, in bytes: [UInt8]) -> Range<Int>? {
@@ -101,27 +104,21 @@ func range(of text: String, in bytes: [UInt8]) -> Range<Int>? {
     return bytes.indices.first { bytes[$0...].starts(with: needle) }.map { $0 ..< $0 + needle.count }
 }
 
-/// Reconnect waits that return at once, recorded, until `allowed` are used and the reader is told
-/// to stop as a cancelled task is.
+/// Reconnect waits that return at once, each recorded.
 actor Naps {
-    private let allowed: Int
     private(set) var taken: [Duration] = []
 
-    init(_ allowed: Int) {
-        self.allowed = allowed
-    }
-
     nonisolated var sleep: @Sendable (Duration) async throws -> Void {
-        { try await self.nap($0) }
+        { await self.nap($0) }
     }
 
-    private func nap(_ duration: Duration) throws {
-        guard taken.count < allowed else { throw CancellationError() }
+    private func nap(_ duration: Duration) {
         taken.append(duration)
     }
 }
 
-/// A server that answers each stream it is asked for with the next connection of its script.
+/// A server that answers each stream it is asked for with the next connection of its script, and
+/// once the script is over stops the reader asking, as a reader that went away stops.
 actor ScriptedStreams: Transport {
     enum Ending { case close, drop }
     enum Connection {
@@ -144,7 +141,11 @@ actor ScriptedStreams: Transport {
 
     func open(_ request: HTTPRequest) throws(SailError) -> HTTPStream {
         requests.append(request)
-        guard !script.isEmpty, case let .answer(status, chunks, ending) = script.removeFirst() else {
+        guard !script.isEmpty else {
+            withUnsafeCurrentTask { $0?.cancel() }
+            throw .unreachable("the script is over")
+        }
+        guard case let .answer(status, chunks, ending) = script.removeFirst() else {
             throw .unreachable("no connection")
         }
         return HTTPStream(status: status, body: AsyncThrowingStream { stream in
