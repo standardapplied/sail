@@ -785,6 +785,67 @@ class PoolDevicesTest {
   }
 
   @Test
+  void everyPartitionOfADiskWithAnOverlappingPairIsRefusedAndOneWithNoStart() {
+    var first = partition("/dev/sdx1", 2048L, 1L << 30);
+    var second = partition("/dev/sdx2", 4096L, 1L << 30);
+    var third = partition("/dev/sdx3", 10_000_000L, 1L << 30);
+    var startless = partition("/dev/sdx4", null, 1L << 20);
+    var disk =
+        new BlockDevice(
+            "/dev/sdx",
+            "sdx",
+            "disk",
+            null,
+            "gpt",
+            null,
+            List.of(),
+            20L << 30,
+            null,
+            null,
+            false,
+            null,
+            null,
+            "8:240",
+            List.of(first, second, third, startless));
+
+    assertEquals(
+        List.of("/dev/sdx1 overlaps /dev/sdx2 on /dev/sdx"), DeviceRules.extents(third, disk));
+    assertEquals(
+        List.of("/dev/sdx4 has no start lsblk reads: run sudo udevadm settle, then run this again"),
+        DeviceRules.extents(startless, disk));
+  }
+
+  @Test
+  void aWholeDiskHoldingABootPartitionIsRefusedByItsTypeNeverOfferedAnErase() {
+    var refused = refusal("gcp3/c-layout-final.lsblk.json", "/dev/sdh");
+
+    assertTrue(
+        refused.startsWith(
+            "/dev/sdh is refused: /dev/sdh1 has partition type c12a7328-f81f-11d2-ba4b-00a0c93ec93b"),
+        refused);
+    assertFalse(refused.contains("wipefs"), refused);
+  }
+
+  private static BlockDevice partition(String path, Long start, long size) {
+    return new BlockDevice(
+        path,
+        path.substring(5),
+        "part",
+        null,
+        "gpt",
+        "0fc63daf-8483-4772-8e79-3d69d8477de4",
+        List.of(),
+        size,
+        start,
+        null,
+        false,
+        null,
+        null,
+        null,
+        List.of());
+  }
+
+  @Test
   void aDeviceWithAHardwareIdentityIsHandedToIncusByItsPersistentPath() throws Exception {
     var wwn = "/dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part2";
     assertEquals(
