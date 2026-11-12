@@ -62,7 +62,7 @@ class HostProvisionerTest {
 
     assertEquals("zfs", hostYaml.storageBackend());
     assertEquals("devpool", hostYaml.pool());
-    assertEquals("/dev/sdb", hostYaml.poolDisk());
+    assertEquals("/dev/sdb", hostYaml.poolSource());
     assertEquals("incusbr0", hostYaml.bridge());
     assertEquals("singlr-base", hostYaml.baseProfile());
     assertEquals("ubuntu/24.04", hostYaml.image());
@@ -154,7 +154,7 @@ class HostProvisionerTest {
 
     assertEquals("zfs", result.storageBackend());
     assertEquals("mypool", result.pool());
-    assertEquals("/dev/nvme1n1", result.poolDisk());
+    assertEquals("/dev/nvme1n1", result.poolSource());
     assertEquals("br0", result.bridge());
     assertEquals("singlr-base", result.baseProfile());
     assertEquals("ubuntu/24.04", result.image());
@@ -565,7 +565,7 @@ class HostProvisionerTest {
 
     assertEquals("dir", result.storageBackend());
     assertEquals("devpool", result.pool());
-    assertNull(result.poolDisk());
+    assertNull(result.poolSource());
   }
 
   @Test
@@ -748,7 +748,7 @@ class HostProvisionerTest {
             after.image(),
             after.incusVersion(),
             after.serverIp()));
-    assertEquals("/var/lib/incus/storage-pools/devpool", after.poolDisk());
+    assertEquals("/var/lib/incus/storage-pools/devpool", after.poolSource());
     assertNotEquals(before.initializedAt(), after.initializedAt());
   }
 
@@ -991,7 +991,7 @@ class HostProvisionerTest {
         steps.toString());
     assertEquals(
         List.of("zfs", "devpool", "/dev/sdb"),
-        List.of(hostYaml.storageBackend(), hostYaml.pool(), hostYaml.poolDisk()));
+        List.of(hostYaml.storageBackend(), hostYaml.pool(), hostYaml.poolSource()));
   }
 
   @Test
@@ -1020,7 +1020,7 @@ class HostProvisionerTest {
             .contains(
                 List.of("incus", "storage", "create", "devpool", "zfs", "source=" + partition)),
         shell.invocations().toString());
-    assertEquals(partition, hostYaml.poolDisk());
+    assertEquals(partition, hostYaml.poolSource());
   }
 
   @Test
@@ -1044,7 +1044,7 @@ class HostProvisionerTest {
         List.of(
             "done:5/8:devpool (zfs in a 50.0 GiB file; slower than a disk, meant for trying ZFS)"),
         steps.stream().filter(event -> event.contains("slower than a disk")).toList());
-    assertEquals("/var/lib/incus/disks/devpool.img", hostYaml.poolDisk());
+    assertEquals("/var/lib/incus/disks/devpool.img", hostYaml.poolSource());
     assertFalse(
         shell.invocations().stream()
             .anyMatch(c -> c.startsWith("realpath") || c.startsWith("lsblk")),
@@ -1161,7 +1161,7 @@ class HostProvisionerTest {
         steps.toString());
     assertEquals(
         List.of("dir", "devpool", "/var/lib/incus/storage-pools/devpool"),
-        List.of(hostYaml.storageBackend(), hostYaml.pool(), hostYaml.poolDisk()));
+        List.of(hostYaml.storageBackend(), hostYaml.pool(), hostYaml.poolSource()));
   }
 
   @Test

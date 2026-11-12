@@ -105,7 +105,7 @@ class HostYamlTest {
         """
             storage_backend: zfs
             pool: devpool
-            pool_disk: /dev/sdb
+            pool_source: /dev/sdb
             bridge: incusbr0
             base_profile: singlr-base
             image: ubuntu/24.04
@@ -116,10 +116,10 @@ class HostYamlTest {
     var host = HostYaml.fromMap(YamlUtil.parseMap(yaml));
 
     assertEquals("zfs", host.storageBackend());
-    assertTrue(host.isZfs());
+    assertEquals("zfs", host.storageBackend());
     assertFalse(host.isDir());
     assertEquals("devpool", host.pool());
-    assertEquals("/dev/sdb", host.poolDisk());
+    assertEquals("/dev/sdb", host.poolSource());
     assertEquals("incusbr0", host.bridge());
     assertEquals("singlr-base", host.baseProfile());
     assertEquals("ubuntu/24.04", host.image());
@@ -144,8 +144,7 @@ class HostYamlTest {
 
     assertEquals("dir", host.storageBackend());
     assertTrue(host.isDir());
-    assertFalse(host.isZfs());
-    assertNull(host.poolDisk());
+    assertNull(host.poolSource());
   }
 
   @Test
@@ -153,7 +152,7 @@ class HostYamlTest {
     var yaml =
         """
             pool: devpool
-            pool_disk: /dev/sdb
+            pool_source: /dev/sdb
             bridge: incusbr0
             base_profile: singlr-base
             image: ubuntu/24.04
@@ -164,7 +163,7 @@ class HostYamlTest {
     var host = HostYaml.fromMap(YamlUtil.parseMap(yaml));
 
     assertEquals("zfs", host.storageBackend());
-    assertTrue(host.isZfs());
+    assertEquals("zfs", host.storageBackend());
   }
 
   @Test
@@ -185,7 +184,7 @@ class HostYamlTest {
 
     assertTrue(yaml.contains("storage_backend: zfs") || yaml.contains("storage_backend: \"zfs\""));
     assertTrue(yaml.contains("pool: devpool") || yaml.contains("pool: \"devpool\""));
-    assertTrue(yaml.contains("pool_disk:"));
+    assertTrue(yaml.contains("pool_source:"));
     assertTrue(yaml.contains("base_profile:"));
     assertFalse(yaml.contains("webauthn"));
   }

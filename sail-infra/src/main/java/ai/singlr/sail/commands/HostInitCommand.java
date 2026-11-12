@@ -264,7 +264,7 @@ public final class HostInitCommand implements Runnable {
                 + hostYaml.pool()
                 + " ("
                 + hostYaml.storageBackend()
-                + (hostYaml.poolDisk() == null ? "" : " on " + hostYaml.poolDisk())
+                + (hostYaml.poolSource() == null ? "" : " on " + hostYaml.poolSource())
                 + ")"));
     System.out.println(Ansi.AUTO.string("    @|bold Bridge:|@   " + hostYaml.bridge()));
     System.out.println(Ansi.AUTO.string("    @|bold Image:|@    " + hostYaml.image()));

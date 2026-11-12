@@ -23,7 +23,7 @@ import java.util.function.Function;
 public record HostYaml(
     String storageBackend,
     String pool,
-    String poolDisk,
+    String poolSource,
     String bridge,
     String baseProfile,
     String image,
@@ -45,7 +45,7 @@ public record HostYaml(
   public HostYaml(
       String storageBackend,
       String pool,
-      String poolDisk,
+      String poolSource,
       String bridge,
       String baseProfile,
       String image,
@@ -57,7 +57,7 @@ public record HostYaml(
     this(
         storageBackend,
         pool,
-        poolDisk,
+        poolSource,
         bridge,
         baseProfile,
         image,
@@ -74,7 +74,7 @@ public record HostYaml(
   public HostYaml(
       String storageBackend,
       String pool,
-      String poolDisk,
+      String poolSource,
       String bridge,
       String baseProfile,
       String image,
@@ -85,7 +85,7 @@ public record HostYaml(
     this(
         storageBackend,
         pool,
-        poolDisk,
+        poolSource,
         bridge,
         baseProfile,
         image,
@@ -100,7 +100,7 @@ public record HostYaml(
   public HostYaml(
       String storageBackend,
       String pool,
-      String poolDisk,
+      String poolSource,
       String bridge,
       String baseProfile,
       String image,
@@ -110,7 +110,7 @@ public record HostYaml(
     this(
         storageBackend,
         pool,
-        poolDisk,
+        poolSource,
         bridge,
         baseProfile,
         image,
@@ -159,17 +159,13 @@ public record HostYaml(
     return BACKEND_DIR.equals(storageBackend);
   }
 
-  public boolean isZfs() {
-    return BACKEND_ZFS.equals(storageBackend);
-  }
-
   @SuppressWarnings("unchecked")
   public static HostYaml fromMap(Map<String, Object> map) {
     var backend = Objects.requireNonNullElse((String) map.get("storage_backend"), BACKEND_ZFS);
     return new HostYaml(
         backend,
         (String) map.get("pool"),
-        (String) map.get("pool_disk"),
+        (String) map.get("pool_source"),
         (String) map.get("bridge"),
         (String) map.get("base_profile"),
         (String) map.get("image"),
@@ -187,7 +183,7 @@ public record HostYaml(
     return new HostYaml(
         storageBackend,
         pool,
-        poolDisk,
+        poolSource,
         bridge,
         baseProfile,
         image,
@@ -205,7 +201,7 @@ public record HostYaml(
     return new HostYaml(
         storageBackend,
         pool,
-        poolDisk,
+        poolSource,
         bridge,
         baseProfile,
         image,
@@ -223,7 +219,7 @@ public record HostYaml(
     return new HostYaml(
         storageBackend,
         pool,
-        poolDisk,
+        poolSource,
         bridge,
         baseProfile,
         image,
@@ -240,7 +236,7 @@ public record HostYaml(
     var map = new LinkedHashMap<String, Object>();
     map.put("storage_backend", storageBackend);
     map.put("pool", pool);
-    map.put("pool_disk", poolDisk);
+    map.put("pool_source", poolSource);
     map.put("bridge", bridge);
     map.put("base_profile", baseProfile);
     map.put("image", image);
