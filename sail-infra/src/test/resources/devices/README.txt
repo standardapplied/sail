@@ -17,6 +17,8 @@ Captured, read-only, from real tools (util-linux 2.39.3, Ubuntu 24.04):
   before any filter counts)
 - incus-file-pool.*, raw-file-pool.*   `zpool list -vHP` and `zfs list -H -r -o name` on the
   runner, for a pool Incus made and one `zpool create` made
+- classes.zpool-list.txt   `zpool list -vHP` on the runner (PoolDevicesIT) for a pool with a data,
+  special, log, cache and spare device on loop devices: the class headers are space-padded
 
 Hand-written (layouts no machine at hand has), kept in the captured format:
 - handwritten-gcp-blank-with-spares.lsblk.json   the GCP blank-disks capture plus spare disks sdd

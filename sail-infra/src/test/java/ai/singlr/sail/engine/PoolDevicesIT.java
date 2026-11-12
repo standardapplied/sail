@@ -141,7 +141,9 @@ class PoolDevicesIT extends AbstractIncusIT {
       System.out.println("CLASSES [" + listed.stdout() + "]");
 
       assertTrue(names.stdout().lines().toList().contains("sail-it-classes"), names.stdout());
-      assertEquals(loops, PoolDevices.vdevs(listed.stdout().lines().toList()));
+      assertEquals(
+          loops.stream().sorted().toList(),
+          PoolDevices.vdevs(listed.stdout().lines().toList()).stream().sorted().toList());
     } finally {
       root.exec(List.of("zpool", "destroy", "sail-it-classes"));
       loops.forEach(

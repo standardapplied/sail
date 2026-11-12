@@ -1,0 +1,10 @@
+sail-it-classes	224M	174K	224M	-	-	0%	0%	1.00x	ONLINE	-
+	/dev/loop0	128M	0	112M	-	-	0%	0.00%	-	ONLINE
+special              -      -      -        -         -      -      -      -         -
+	/dev/loop4	128M	174K	112M	-	-	9%	0.15%	-	ONLINE
+logs                 -      -      -        -         -      -      -      -         -
+	/dev/loop1	128M	0	112M	-	-	0%	0.00%	-	ONLINE
+cache                -      -      -        -         -      -      -      -         -
+	/dev/loop2	128M	0	123M	-	-	0%	0.00%	-	ONLINE
+spare                -      -      -        -         -      -      -      -         -
+	/dev/loop3	128M	-	-	-	-	-	-	-	AVAIL

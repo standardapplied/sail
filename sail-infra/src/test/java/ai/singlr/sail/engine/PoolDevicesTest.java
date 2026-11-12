@@ -438,17 +438,29 @@ class PoolDevicesTest {
   }
 
   @Test
+  void everyClassOfACapturedPoolIsAMemberAndNoClassHeaderIs() {
+    var listed = fixture("classes.zpool-list.txt").lines().toList();
+
+    assertEquals(
+        List.of("/dev/loop0", "/dev/loop4", "/dev/loop1", "/dev/loop2", "/dev/loop3"),
+        PoolDevices.vdevs(listed));
+  }
+
+  @Test
   void aCacheDeviceIsAMemberOfItsPool() {
     var listed =
-        "tank\t3.6T\t2.9T\t0.7T\t-\t-\t1%\t80%\t1.00x\tONLINE\t-\n"
-            + "\t/dev/sdb1\t-\t-\t-\t-\t-\t-\t-\t-\tONLINE\n"
-            + "cache\t-\t-\t-\t-\t-\t-\t-\t-\t-\n"
-            + "\t/dev/sdh\t-\t-\t-\t-\t-\t-\t-\t-\tONLINE\n";
+        fixture("classes.zpool-list.txt")
+            .replace("sail-it-classes", "tank")
+            .replace("/dev/loop0", "/dev/sdb1")
+            .replace("/dev/loop2", "/dev/sdh");
 
     assertEquals(
         "/dev/sdh is refused, even with --force-wipe: it is in the imported zpool tank, and no"
             + " pool's device is taken: export or destroy the pool yourself first.",
-        refusal(spares().zpool("tank", listed, "/dev/sdb1\n/dev/sdh"), "/dev/sdh", null));
+        refusal(
+            spares().zpool("tank", listed, "/dev/sdb1\n/dev/loop4\n/dev/loop1\n/dev/sdh\n/dev/loop3"),
+            "/dev/sdh",
+            null));
   }
 
   @Test
