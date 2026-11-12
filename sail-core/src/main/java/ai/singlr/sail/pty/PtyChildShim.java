@@ -6,6 +6,7 @@
 package ai.singlr.sail.pty;
 
 import java.io.IOException;
+import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
@@ -17,14 +18,13 @@ import java.util.concurrent.CompletableFuture;
 import sun.misc.Signal;
 
 /**
- * The session leader between the pty and the command: claims the terminal {@link Pty#spawn} named
- * ({@link Pty#claimTerminal}), runs {@code argv} on it, waits, records the exit status to a file
- * and exits with the same status. Only a parent can collect a child's status, and a host that
- * inherited a session after a restart is not the parent — the file is how the status crosses that
- * gap. The shim is the session leader, so a hangup on the master reaches it and it passes {@code
- * SIGHUP} down as the kernel would have done to the command in its place; {@code SIGTERM} is
- * forwarded the same way; {@code SIGINT} is left to the terminal, which already delivers it to the
- * foreground group.
+ * The session leader between the pty and the command: claims the terminal {@link Pty#spawn} named,
+ * runs {@code argv} on it, waits, records the exit status to a file and exits with the same status.
+ * Only a parent can collect a child's status, and a host that inherited a session after a restart
+ * is not the parent — the file is how the status crosses that gap. The shim is the session leader,
+ * so a hangup on the master reaches it and it passes {@code SIGHUP} down as the kernel would have
+ * done to the command in its place; {@code SIGTERM} is forwarded the same way; {@code SIGINT} is
+ * left to the terminal, which already delivers it to the foreground group.
  */
 public final class PtyChildShim {
 
@@ -40,6 +40,17 @@ public final class PtyChildShim {
       Native.downcall(
           "signal",
           FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.JAVA_INT, ValueLayout.ADDRESS));
+  private static final MethodHandle SETSID =
+      Native.downcall("setsid", FunctionDescriptor.of(ValueLayout.JAVA_INT), Native.CAPTURE_ERRNO);
+  private static final MethodHandle DUP2 =
+      Native.downcall(
+          "dup2",
+          FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT),
+          Native.CAPTURE_ERRNO);
+  private static final MethodHandle CLOSE =
+      Native.downcall("close", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
+  private static final MethodHandle ISATTY =
+      Native.downcall("isatty", FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
 
   private PtyChildShim() {}
 
@@ -66,15 +77,20 @@ public final class PtyChildShim {
     System.exit(run(Path.of(args[0]), List.of(args).subList(1, args.length)));
   }
 
+  /**
+   * Claims the terminal the host named, or, when it named none, runs on the terminal already on
+   * standard input: hosts started before 0.67.0 hand the shim its terminal already claimed.
+   */
   public static int run(Path exitFile, List<String> argv) throws IOException {
     var terminal = System.getenv(Pty.TERMINAL);
-    if (terminal == null) {
+    if (terminal != null) {
+      claim(terminal);
+    } else if (!onATerminal()) {
       throw new IllegalStateException(
           "No terminal is named in "
               + Pty.TERMINAL
               + ": the shim runs only as the pty host spawns it.");
     }
-    Pty.claimTerminal(terminal);
     var child = new CompletableFuture<Process>();
     restoreDefault(SIGHUP, SIGINT, SIGTERM);
     Signal.handle(new Signal("HUP"), signal -> child.thenAccept(p -> forward(p, SIGHUP)));
@@ -91,6 +107,60 @@ public final class PtyChildShim {
     var status = await(child.join());
     Files.writeString(exitFile, Integer.toString(status));
     return status;
+  }
+
+  /**
+   * The child's half of {@link Pty#spawn}: makes this process the leader of a new session, claims
+   * {@code terminal} as the session's controlling terminal, and puts it on standard input, output
+   * and error for the command to inherit. The terminal is opened with {@code O_NOCTTY} and claimed
+   * with {@code TIOCSCTTY}, the same two steps on every system, rather than left to whether an open
+   * by a session leader claims it. The claim makes this process's group the terminal's foreground
+   * group, which the command joins. Putting the terminal on standard output closes the pipe {@code
+   * spawn} waits on.
+   */
+  static void claim(String terminal) throws IOException {
+    try (var arena = Arena.ofConfined()) {
+      var errno = arena.allocate(Native.ERRNO_STATE);
+      if ((int) SETSID.invokeExact(errno) < 0) {
+        throw new IOException(
+            "setsid failed: the shim already leads a process group (errno "
+                + Native.errno(errno)
+                + ").");
+      }
+      var fd = Native.openTerminal(terminal);
+      Native.ioctl(
+          fd,
+          Native.PLATFORM.tiocsctty(),
+          MemorySegment.NULL,
+          "TIOCSCTTY failed: " + terminal + " is not this session's to claim");
+      for (var stdio = 0; stdio <= 2; stdio++) {
+        if ((int) DUP2.invokeExact(errno, fd, stdio) < 0) {
+          throw new IOException(
+              "Could not put "
+                  + terminal
+                  + " on descriptor "
+                  + stdio
+                  + " (errno "
+                  + Native.errno(errno)
+                  + ").");
+        }
+      }
+      if (fd > 2) {
+        var unused = (int) CLOSE.invokeExact(fd);
+      }
+    } catch (IOException e) {
+      throw e;
+    } catch (Throwable t) {
+      throw new IOException("claiming the terminal " + terminal + " failed", t);
+    }
+  }
+
+  private static boolean onATerminal() {
+    try {
+      return (int) ISATTY.invokeExact(0) == 1;
+    } catch (Throwable t) {
+      throw new IllegalStateException("isatty failed", t);
+    }
   }
 
   private static int await(Process child) {

@@ -23,12 +23,19 @@ class PtyConcurrencyTest {
   @TempDir Path dir;
 
   /**
+   * The terminal's own echo stays on where it keeps a write whole (Linux), so both directions are
+   * as loaded as they can be, and is turned off on Darwin, whose line discipline may place an echo
+   * inside a write it is holding back: the kernel's interleaving, not a corrupted stream.
+   */
+  private static String echoOffWhereItInterleaves() {
+    return Native.PLATFORM == Native.DARWIN ? "stty -echo; " : "";
+  }
+
+  /**
    * Types continuously while the child echoes and exits on its own — the read half (a gather
    * thread) and the write half (a keystroke thread) run at once, the normal interactive case. Every
    * line must round-trip intact; a shared native buffer between {@link Pty#read} and {@link
-   * Pty#write} corrupts one stream or the other and drops or garbles lines. The terminal's own echo
-   * is off: Darwin's line discipline may place an echo inside a write it is holding back, which is
-   * the kernel's interleaving, not a corrupted stream.
+   * Pty#write} corrupts one stream or the other and drops or garbles lines.
    */
   @Test
   void concurrentReadAndWriteNeverCorruptEitherStream() throws Exception {
@@ -39,7 +46,8 @@ class PtyConcurrencyTest {
               dir.resolve("echo.exit"),
               "sh",
               "-c",
-              "stty -echo; i=0; while [ $i -lt "
+              echoOffWhereItInterleaves()
+                  + "i=0; while [ $i -lt "
                   + lines
                   + " ]; do IFS= read -r l; printf 'R:%s\\n' \"$l\";"
                   + " i=$((i+1)); done"),

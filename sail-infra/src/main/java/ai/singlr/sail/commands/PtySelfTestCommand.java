@@ -12,10 +12,14 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 import picocli.CommandLine.Command;
 
 /**
@@ -90,27 +94,60 @@ public final class PtySelfTestCommand implements Callable<Integer> {
     return pty.spawn(argv, Map.of("TERM", "dumb"), dir);
   }
 
+  /** How long each step of a probe may take before the probe fails instead of waiting on. */
+  static final Duration PROBE_STEP = Duration.ofSeconds(10);
+
   /** Reads {@code pty} until {@code marker} has been said, or throws with what was. */
   private static void readUntil(Pty pty, String marker) throws IOException {
-    var buf = new byte[4096];
-    var seen = new StringBuilder();
-    while (!seen.toString().contains(marker)) {
-      var n = pty.read(buf);
-      if (n < 0) {
-        throw new IllegalStateException("the pty ended before '" + marker + "': " + seen);
-      }
-      seen.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+    var said = readWhile(pty, seen -> !seen.contains(marker));
+    if (!said.contains(marker)) {
+      throw new IllegalStateException("the pty ended before '" + marker + "': " + said);
     }
   }
 
   /** Reads {@code pty} to its end of stream: the child gone and its terminal drained. */
   private static String readToEnd(Pty pty) throws IOException {
-    var buf = new byte[4096];
-    var said = new StringBuilder();
-    for (var n = pty.read(buf); n >= 0; n = pty.read(buf)) {
-      said.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+    return readWhile(pty, seen -> true);
+  }
+
+  /**
+   * Reads {@code pty} while {@code more} holds of what it said, up to its end of stream. A probe
+   * step that takes longer than {@link #PROBE_STEP} closes the pty and fails, rather than leave a
+   * release smoke waiting on a child that will never speak.
+   */
+  private static String readWhile(Pty pty, Predicate<String> more) throws IOException {
+    var deadline =
+        CompletableFuture.runAsync(
+            pty::close,
+            CompletableFuture.delayedExecutor(PROBE_STEP.toMillis(), TimeUnit.MILLISECONDS));
+    try {
+      var buf = new byte[4096];
+      var said = new StringBuilder();
+      while (more.test(said.toString())) {
+        var n = pty.read(buf);
+        if (n < 0) {
+          break;
+        }
+        said.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+      }
+      if (deadline.isDone()) {
+        throw new IllegalStateException(
+            "the pty said no more within " + PROBE_STEP.toSeconds() + " s: " + said);
+      }
+      return said.toString();
+    } finally {
+      deadline.cancel(false);
     }
-    return said.toString();
+  }
+
+  /** The child's exit status, once it exits within {@link #PROBE_STEP}. */
+  private static int exitOf(Process child) throws InterruptedException {
+    if (!child.waitFor(PROBE_STEP.toMillis(), TimeUnit.MILLISECONDS)) {
+      child.destroyForcibly();
+      throw new IllegalStateException(
+          "the child did not exit within " + PROBE_STEP.toSeconds() + " s");
+    }
+    return child.exitValue();
   }
 
   /**
@@ -129,7 +166,7 @@ public final class PtySelfTestCommand implements Callable<Integer> {
       if (!said.contains("40 100")) {
         throw new IllegalStateException("the child did not see the new size: " + said);
       }
-      if (child.waitFor() != 0 || !"0".equals(Files.readString(dir.resolve("probe.exit")))) {
+      if (exitOf(child) != 0 || !"0".equals(Files.readString(dir.resolve("probe.exit")))) {
         throw new IllegalStateException("the child did not exit cleanly: " + child.exitValue());
       }
     } finally {
@@ -155,7 +192,7 @@ public final class PtySelfTestCommand implements Callable<Integer> {
       try (var copy = Pty.adopt(stored.fds().getFirst())) {
         var child = spawn(pty, dir, "echo through-the-store");
         readUntil(copy, "through-the-store");
-        child.waitFor();
+        exitOf(child);
       }
       store.removeFd("probe");
       var removed = receiver.receive();

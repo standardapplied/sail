@@ -234,7 +234,7 @@ class PtySessionTest {
             PtyChildShimTest.shim(dir.resolve("unkept.exit"), "sh", "-c", "exit 0"),
             Map.of("TERM", "dumb"),
             dir);
-    child.waitFor();
+    assertTrue(child.waitFor(10, TimeUnit.SECONDS), "the first child exits");
     var stranger = new ProcessBuilder("sleep", "60").start();
     try {
       var createdLongBeforeTheStranger = System.currentTimeMillis() - 60_000;
@@ -494,6 +494,41 @@ class PtySessionTest {
       session.close();
       ProcessHandle.of(job).ifPresent(ProcessHandle::destroyForcibly);
     }
+  }
+
+  /**
+   * The session is its shell: once it exits, the session ends after {@link Pty#DRAIN_GRACE_MILLIS}
+   * of quiet, keeping what was in the terminal, while a job the shell left running, which starts
+   * ticking only seconds later, is not kept.
+   */
+  @Test
+  void aJobTheShellLeftKeepsWhatItSaidBeforeTheExitAndNothingAfter() throws Exception {
+    var ending = new Ending();
+    var capacity = 64 * 1024;
+    var session =
+        session(
+            "trap '' HUP; (sleep 2; while :; do echo tick; sleep 0.5; done) &"
+                + " echo job:$!:started; echo before-the-exit; exit 4",
+            ending,
+            capacity);
+    try {
+      assertTrue(ending.await(), "the shell's exit ends the session");
+      assertEquals("exited(4)", session.endedReason());
+    } finally {
+      session.close();
+    }
+    String kept;
+    try (var ring = RingJournal.open(dir.resolve("t.ring"), capacity)) {
+      kept = new String(ring.tail(capacity).bytes(), StandardCharsets.UTF_8);
+    }
+    var job = Long.parseLong(kept.replaceAll("(?s).*job:(\\d+):started.*", "$1"));
+    ProcessHandle.of(job)
+        .ifPresent(
+            handle -> {
+              handle.descendants().forEach(ProcessHandle::destroyForcibly);
+              handle.destroyForcibly();
+            });
+    assertEquals("job:" + job + ":started\r\nbefore-the-exit\r\n", kept);
   }
 
   @Test

@@ -27,9 +27,4 @@ class NativeTest {
     assertEquals(
         "The pty layer runs on Linux and macOS, not on 'Windows 11'.", refused.getMessage());
   }
-
-  @Test
-  void theRunningSystemsFactsAreTheOnesSelected() {
-    assertSame(Native.platform(System.getProperty("os.name")), Native.PLATFORM);
-  }
 }

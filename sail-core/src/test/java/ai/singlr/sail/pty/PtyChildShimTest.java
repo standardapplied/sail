@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -75,12 +76,31 @@ class PtyChildShimTest {
     var started = shim.start();
     var said = new String(started.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
-    assertEquals(1, started.waitFor());
+    assertTrue(started.waitFor(30, TimeUnit.SECONDS));
+    assertEquals(1, started.exitValue(), "no terminal named, and none on its input");
     assertEquals(
         "Exception in thread \"main\" java.lang.IllegalStateException: No terminal is named in"
             + " SAIL_PTY_TERMINAL: the shim runs only as the pty host spawns it.",
         said.lines().findFirst().orElseThrow());
     assertFalse(Files.exists(exit), "no command ran, so no status is recorded");
+  }
+
+  @Test
+  void runByAHostFromBeforeTheShimClaimedTerminalsItRunsOnTheTerminalItIsHanded() throws Exception {
+    var exit = dir.resolve("s.exit");
+    var out = dir.resolve("tty.txt");
+    pty = Pty.open(80, 24);
+    var shim =
+        new ProcessBuilder(shim(exit, "sh", "-c", "tty > " + out + "; exit 5"))
+            .redirectInput(new File(pty.slavePath()));
+    shim.environment().remove(Pty.TERMINAL);
+
+    var started = shim.start();
+
+    assertTrue(started.waitFor(30, TimeUnit.SECONDS));
+    assertEquals(5, started.exitValue());
+    assertEquals("5", Files.readString(exit));
+    assertEquals(pty.slavePath() + "\n", Files.readString(out), "the command ran on that terminal");
   }
 
   @Test

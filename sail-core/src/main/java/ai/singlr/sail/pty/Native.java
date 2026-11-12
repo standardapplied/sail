@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.pty;
 
+import java.io.IOException;
+import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
 import java.lang.foreign.MemoryLayout;
@@ -18,9 +20,10 @@ import java.util.Locale;
 
 /**
  * The one libc lookup the pty layer shares: every downcall is bound here, with or without {@code
- * errno} capture, so {@link Pty} and {@link SdNotify} agree on how a failed call is read. It is
- * also the one place that knows which system it runs on: {@link #PLATFORM} is chosen once, and
- * every other class reads the system's values from it rather than asking.
+ * errno} capture, so {@link Pty}, {@link PtyChildShim} and {@link SdNotify} agree on how a failed
+ * call is read, and so are the two calls both sides of a terminal make, opening it and {@code
+ * ioctl}. It is also the one place that knows which system it runs on: {@link #PLATFORM} is chosen
+ * once, and every other class reads the system's values from it rather than asking.
  */
 final class Native {
 
@@ -74,11 +77,63 @@ final class Native {
     return LINKER.downcallHandle(LOOKUP.find(symbol).orElseThrow(), descriptor, options);
   }
 
-  static MethodHandle downcallCapturingErrno(String symbol, FunctionDescriptor descriptor) {
-    return downcall(symbol, descriptor, CAPTURE_ERRNO);
-  }
-
   static int errno(MemorySegment state) {
     return (int) ERRNO.get(state, 0L);
+  }
+
+  private static final MethodHandle OPEN =
+      downcall(
+          "open",
+          FunctionDescriptor.of(
+              ValueLayout.JAVA_INT,
+              ValueLayout.ADDRESS,
+              ValueLayout.JAVA_INT,
+              ValueLayout.JAVA_INT),
+          Linker.Option.firstVariadicArg(2),
+          CAPTURE_ERRNO);
+
+  private static final MethodHandle IOCTL =
+      downcall(
+          "ioctl",
+          FunctionDescriptor.of(
+              ValueLayout.JAVA_INT,
+              ValueLayout.JAVA_INT,
+              ValueLayout.JAVA_LONG,
+              ValueLayout.ADDRESS),
+          Linker.Option.firstVariadicArg(2),
+          CAPTURE_ERRNO);
+
+  /** Opens {@code terminal} read-write, never as the opener's controlling terminal. */
+  static int openTerminal(String terminal) throws IOException {
+    try (var arena = Arena.ofConfined()) {
+      var errno = arena.allocate(ERRNO_STATE);
+      var fd =
+          (int)
+              OPEN.invokeExact(errno, arena.allocateFrom(terminal), O_RDWR | PLATFORM.oNoctty(), 0);
+      if (fd < 0) {
+        throw new IOException(
+            "Could not open the terminal " + terminal + " (errno " + errno(errno) + ").");
+      }
+      return fd;
+    } catch (IOException e) {
+      throw e;
+    } catch (Throwable t) {
+      throw new IOException("opening the terminal " + terminal + " failed", t);
+    }
+  }
+
+  /** {@code ioctl(fd, request, argument)}, refused as {@code refusal} with the call's errno. */
+  static void ioctl(int fd, long request, MemorySegment argument, String refusal)
+      throws IOException {
+    try (var arena = Arena.ofConfined()) {
+      var errno = arena.allocate(ERRNO_STATE);
+      if ((int) IOCTL.invokeExact(errno, fd, request, argument) != 0) {
+        throw new IOException(refusal + " (errno " + errno(errno) + ").");
+      }
+    } catch (IOException e) {
+      throw e;
+    } catch (Throwable t) {
+      throw new IOException("ioctl failed: " + refusal, t);
+    }
   }
 }

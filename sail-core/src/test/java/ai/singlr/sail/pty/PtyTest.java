@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -36,14 +37,14 @@ class PtyTest {
 
   /**
    * Reads {@code pty} until {@code marker} has been said. A read blocks while the child is silent,
-   * so a deadline ends it: past ten seconds the pty drains to end of stream and the read fails.
+   * so a deadline ends it: past ten seconds the pty is closed and the read fails.
    */
   private static String readUntil(Pty pty, String marker) throws Exception {
     var out = new StringBuilder();
     var buf = new byte[4096];
     var deadline =
         CompletableFuture.runAsync(
-            pty::endOnceDrained, CompletableFuture.delayedExecutor(10, TimeUnit.SECONDS));
+            pty::close, CompletableFuture.delayedExecutor(10, TimeUnit.SECONDS));
     try {
       while (!out.toString().contains(marker)) {
         var n = pty.read(buf);
@@ -67,7 +68,7 @@ class PtyTest {
     var buf = new byte[4096];
     var deadline =
         CompletableFuture.runAsync(
-            pty::endOnceDrained, CompletableFuture.delayedExecutor(10, TimeUnit.SECONDS));
+            pty::close, CompletableFuture.delayedExecutor(10, TimeUnit.SECONDS));
     try {
       for (var n = pty.read(buf); n >= 0; n = pty.read(buf)) {
         out.append(new String(buf, 0, n, StandardCharsets.UTF_8));
@@ -208,6 +209,60 @@ class PtyTest {
   @Test
   void aHostLeadingItsOwnSessionNeverTakesAPtyAsItsControllingTerminal() throws Exception {
     assertEquals("no controlling terminal\n", said(SessionLeadingHost.class), "after ten sessions");
+  }
+
+  /**
+   * A host spawning a stand-in that never claims its terminal, and whose child keeps its standard
+   * output open too: says what {@code spawn} refused, whether within its bound, whether the
+   * stand-in still runs, and how many descriptors the attempt left open.
+   */
+  static final class UnclaimedTerminalHost {
+    public static void main(String[] args) throws Exception {
+      var dir = Path.of(args[0]);
+      var pid = dir.resolve("stand-in.pid");
+      try (var warm = Pty.open(80, 24)) {
+        warm.spawn(List.of("true"), Map.of(), dir).waitFor(10, TimeUnit.SECONDS);
+      }
+      var before = descriptors();
+      try (var pty = Pty.open(80, 24)) {
+        var started = System.nanoTime();
+        try {
+          pty.spawn(
+              List.of("sh", "-c", "sleep 100 & echo $$ $! > " + pid + "; wait"), Map.of(), dir);
+          System.out.println("spawned");
+        } catch (IOException refused) {
+          System.out.println(refused.getMessage().replace(pty.slavePath(), "<tty>"));
+          var bound = Pty.CLAIM_WAIT.plusSeconds(5).toNanos();
+          System.out.println("within the bound: " + (System.nanoTime() - started < bound));
+          System.out.println("open beside the master: " + (descriptors() - before - 1));
+        }
+      }
+      var running =
+          Arrays.stream(Files.readString(pid).strip().split(" "))
+              .map(Long::parseLong)
+              .anyMatch(each -> ProcessHandle.of(each).map(ProcessHandle::isAlive).orElse(false));
+      System.out.println("stand-in or its child running: " + running);
+      System.out.println("descriptors left open: " + (descriptors() - before));
+    }
+
+    private static long descriptors() throws IOException {
+      try (var fds = Files.list(Path.of("/dev/fd"))) {
+        return fds.count();
+      }
+    }
+  }
+
+  @Test
+  void aShimThatNeverClaimsItsTerminalIsStoppedAndRefusedWithNothingLeftOpen() throws Exception {
+    assertEquals(
+        """
+        The session shim did not claim <tty> within 10 s, so it was stopped.
+        within the bound: true
+        open beside the master: 0
+        stand-in or its child running: false
+        descriptors left open: 0
+        """,
+        said(UnclaimedTerminalHost.class));
   }
 
   /** A host whose child speaks before any terminal is its own, as a shim that cannot claim one. */

@@ -128,7 +128,20 @@
       },
       {
         "returnType": "jint",
-        "parameterTypes": []
+        "parameterTypes": [],
+        "options": {
+          "captureCallState": true
+        }
+      },
+      {
+        "returnType": "jint",
+        "parameterTypes": [
+          "jint",
+          "jint"
+        ],
+        "options": {
+          "captureCallState": true
+        }
       },
       {
         "returnType": "jint",

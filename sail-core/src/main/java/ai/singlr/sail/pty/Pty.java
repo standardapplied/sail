@@ -7,10 +7,10 @@ package ai.singlr.sail.pty;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.io.OutputStream;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
-import java.lang.foreign.Linker;
 import java.lang.foreign.MemoryLayout;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.StructLayout;
@@ -19,8 +19,10 @@ import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodType;
 import java.lang.invoke.VarHandle;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * A pseudo-terminal pair owned by this process, with the child spawned as a session leader whose
@@ -28,12 +30,12 @@ import java.util.Map;
  * forkpty} is replaced by first principles: the master is allocated here via {@code posix_openpt}/
  * {@code grantpt}/{@code unlockpt} (libc through the same Panama discipline as the SQLite layer),
  * and the child is spawned with {@link ProcessBuilder} as the session shim ({@link PtyChildShim}),
- * told its terminal in {@link #TERMINAL}; the shim's first act is {@link #claimTerminal}, the half
- * of {@code forkpty} that runs in the child. The slave is opened here too, with {@code O_NOCTTY} so
- * it never becomes this process's controlling terminal (this process is itself a session leader
- * under systemd or launchd), and held until the child holds it: Darwin refuses every terminal
- * {@code ioctl} on a master, its size among them, until the master's slave has been opened (XNU's
- * {@code fix_7070978}), and a slave's last close before the child opened it would end the pty.
+ * told its terminal in {@link #TERMINAL}; the shim's first act is the half of {@code forkpty} that
+ * runs in the child. The slave is opened here too, with {@code O_NOCTTY} so it never becomes this
+ * process's controlling terminal (this process is itself a session leader under systemd or
+ * launchd), and held until the child holds it: Darwin refuses every terminal {@code ioctl} on a
+ * master, its size among them, until the master's slave has been opened (XNU's {@code
+ * fix_7070978}), and a slave's last close before the child opened it would end the pty.
  *
  * <p>Reads block the calling thread (the session host dedicates a platform gather thread per
  * session — the ghostty drain discipline); a read against a dead child reports end of stream
@@ -51,15 +53,29 @@ import java.util.Map;
  */
 public final class Pty implements AutoCloseable {
 
-  /** The variable {@link #spawn} names the child's terminal in, for {@link #claimTerminal}. */
+  /** The variable {@link #spawn} names the child's terminal in, for the shim to claim. */
   static final String TERMINAL = "SAIL_PTY_TERMINAL";
+
+  /**
+   * How long {@link #spawn} waits for the shim to claim its terminal: a native shim takes
+   * milliseconds and one run from a class path well under a second, so a shim this late is not
+   * coming, and is stopped.
+   */
+  static final Duration CLAIM_WAIT = Duration.ofSeconds(10);
+
+  /**
+   * How long a terminal must have been quiet, once its child is gone, for a read to report end of
+   * stream; also how often a blocked read looks again at {@link #release()}. A session is its
+   * shell: what is already in the terminal when the shell exits is read, and a job it left running
+   * keeps nothing it says after this grace.
+   */
+  static final int DRAIN_GRACE_MILLIS = 250;
 
   private static final int NO_SLAVE = -1;
   private static final int EINTR = 4;
   private static final int EIO = 5;
   private static final int EBADF = 9;
   private static final short POLLIN = 1;
-  private static final int READ_POLL_MILLIS = 250;
 
   private static final StructLayout POLLFD =
       MemoryLayout.structLayout(
@@ -83,14 +99,10 @@ public final class Pty implements AutoCloseable {
       MethodHandle grantpt,
       MethodHandle unlockpt,
       MethodHandle ptsname,
-      MethodHandle ioctl,
       MethodHandle read,
       MethodHandle write,
       MethodHandle close,
-      MethodHandle poll,
-      MethodHandle setsid,
-      MethodHandle open,
-      MethodHandle dup2) {}
+      MethodHandle poll) {}
 
   private static final Libc LIBC = loadLibc();
 
@@ -108,42 +120,20 @@ public final class Pty implements AutoCloseable {
         Native.downcall("unlockpt", fdCall),
         Native.downcall(
             "ptsname", FunctionDescriptor.of(ValueLayout.ADDRESS, ValueLayout.JAVA_INT)),
-        Native.downcall(
-            "ioctl",
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.ADDRESS),
-            Linker.Option.firstVariadicArg(2),
-            Native.CAPTURE_ERRNO),
-        Native.downcallCapturingErrno("read", transfer),
-        Native.downcallCapturingErrno("write", transfer),
+        Native.downcall("read", transfer, Native.CAPTURE_ERRNO),
+        Native.downcall("write", transfer, Native.CAPTURE_ERRNO),
         Native.downcall("close", fdCall),
-        Native.downcallCapturingErrno(
+        Native.downcall(
                 "poll",
                 FunctionDescriptor.of(
                     ValueLayout.JAVA_INT,
                     ValueLayout.ADDRESS,
                     Native.PLATFORM.nfdsT(),
-                    ValueLayout.JAVA_INT))
+                    ValueLayout.JAVA_INT),
+                Native.CAPTURE_ERRNO)
             .asType(
                 MethodType.methodType(
-                    int.class, MemorySegment.class, MemorySegment.class, int.class, int.class)),
-        Native.downcall("setsid", FunctionDescriptor.of(ValueLayout.JAVA_INT)),
-        Native.downcall(
-            "open",
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_INT,
-                ValueLayout.ADDRESS,
-                ValueLayout.JAVA_INT,
-                ValueLayout.JAVA_INT),
-            Linker.Option.firstVariadicArg(2),
-            Native.CAPTURE_ERRNO),
-        Native.downcall(
-            "dup2",
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT)));
+                    int.class, MemorySegment.class, MemorySegment.class, int.class, int.class)));
   }
 
   private static final int MAX_CHUNK = 64 * 1024;
@@ -180,7 +170,7 @@ public final class Pty implements AutoCloseable {
       Pty pty;
       try {
         var slave = slaveOf(fd);
-        pty = new Pty(fd, slave, openTerminal(slave));
+        pty = new Pty(fd, slave, Native.openTerminal(slave));
       } catch (IOException e) {
         var unused = (int) LIBC.close().invokeExact(fd);
         throw e;
@@ -222,45 +212,6 @@ public final class Pty implements AutoCloseable {
     return name.reinterpret(256).getString(0);
   }
 
-  /** Opens {@code terminal} read-write, never as the opener's controlling terminal. */
-  private static int openTerminal(String terminal) throws IOException {
-    try (var arena = Arena.ofConfined()) {
-      var errno = arena.allocate(Native.ERRNO_STATE);
-      var fd =
-          (int)
-              LIBC.open()
-                  .invokeExact(
-                      errno,
-                      arena.allocateFrom(terminal),
-                      Native.O_RDWR | Native.PLATFORM.oNoctty(),
-                      0);
-      if (fd < 0) {
-        throw new IOException(
-            "Could not open the terminal " + terminal + " (errno " + Native.errno(errno) + ").");
-      }
-      return fd;
-    } catch (IOException e) {
-      throw e;
-    } catch (Throwable t) {
-      throw new IOException("opening the terminal " + terminal + " failed", t);
-    }
-  }
-
-  /** {@code ioctl(fd, request, argument)}, refused as {@code refusal} with the call's errno. */
-  private static void ioctl(int fd, long request, MemorySegment argument, String refusal)
-      throws IOException {
-    try (var arena = Arena.ofConfined()) {
-      var errno = arena.allocate(Native.ERRNO_STATE);
-      if ((int) LIBC.ioctl().invokeExact(errno, fd, request, argument) != 0) {
-        throw new IOException(refusal + " (errno " + Native.errno(errno) + ").");
-      }
-    } catch (IOException e) {
-      throw e;
-    } catch (Throwable t) {
-      throw new IOException("ioctl failed: " + refusal, t);
-    }
-  }
-
   /** Closes a raw descriptor this process holds but never wrapped; errors are the caller's. */
   public static void closeFd(int fd) throws IOException {
     try {
@@ -280,10 +231,12 @@ public final class Pty implements AutoCloseable {
    * whose controlling terminal it is. What the shim says before it has a terminal goes to this
    * process's standard error. Returns once the shim holds the terminal, or is gone: its standard
    * output, a pipe from here, closes as the claim puts the terminal in its place or as the shim
-   * exits, and only then does this process let go of the slave. Once the child is gone, reads end
-   * as soon as the terminal has drained. The caller owns the returned process's ending: waiting and
-   * exit codes happen there, and it reads the terminal meanwhile, since on macOS a session leader's
-   * exit waits until its terminal's output has been read.
+   * exits, and only then does this process let go of the slave. A shim that has done neither within
+   * {@link #CLAIM_WAIT} is stopped, and refused by the terminal it was given. Whatever fails,
+   * nothing spawn opened outlives it. Once the child is gone, reads end after the drain grace. The
+   * caller owns the returned process's ending: waiting and exit codes happen there, and it reads
+   * the terminal meanwhile, since on macOS a session leader's exit waits until its terminal's
+   * output has been read.
    */
   public Process spawn(List<String> shim, Map<String, String> env, Path cwd) throws IOException {
     requireOpen();
@@ -293,45 +246,60 @@ public final class Pty implements AutoCloseable {
     builder.directory(cwd.toFile());
     builder.redirectInput(new File("/dev/null"));
     builder.redirectError(ProcessBuilder.Redirect.INHERIT);
-    var child = builder.start();
-    try (var claimed = child.getInputStream()) {
-      claimed.transferTo(OutputStream.nullOutputStream());
+    Process child = null;
+    try {
+      child = builder.start();
+      awaitClaim(child);
+      child.onExit().thenRun(this::endOnceDrained);
+      return child;
+    } catch (IOException | RuntimeException failed) {
+      if (child != null) {
+        stop(child);
+      }
+      throw failed;
+    } finally {
+      closeSlave();
     }
-    closeSlave();
-    child.onExit().thenRun(this::endOnceDrained);
-    return child;
   }
 
-  /**
-   * The child's half of {@link #spawn}, the shim's first act: makes this process the leader of a
-   * new session, claims the terminal {@code spawn} named as the session's controlling terminal, and
-   * puts it on standard input, output and error for the command to inherit. The terminal is opened
-   * with {@code O_NOCTTY} and claimed with {@code TIOCSCTTY}, the same two steps on every system,
-   * rather than left to whether an open by a session leader claims it. The claim makes this
-   * process's group the terminal's foreground group, which the command joins. Putting the terminal
-   * on standard output closes the pipe {@code spawn} waits on.
-   */
-  static void claimTerminal(String terminal) throws IOException {
+  /** Waits, up to {@link #CLAIM_WAIT}, for the shim's standard output to close. */
+  private void awaitClaim(Process shim) throws IOException {
+    var said = shim.getInputStream();
+    var drain =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try (said) {
+                    said.transferTo(OutputStream.nullOutputStream());
+                  } catch (IOException gone) {
+                    var unused = gone;
+                  }
+                });
     try {
-      if ((int) LIBC.setsid().invokeExact() < 0) {
-        throw new IOException("setsid failed: the shim already leads a process group.");
+      if (!drain.join(CLAIM_WAIT)) {
+        throw new IOException(
+            "The session shim did not claim "
+                + slavePath
+                + " within "
+                + CLAIM_WAIT.toSeconds()
+                + " s, so it was stopped.");
       }
-      var fd = openTerminal(terminal);
-      ioctl(
-          fd,
-          Native.PLATFORM.tiocsctty(),
-          MemorySegment.NULL,
-          "TIOCSCTTY failed: " + terminal + " is not this session's to claim");
-      for (var stdio = 0; stdio <= 2; stdio++) {
-        if ((int) LIBC.dup2().invokeExact(fd, stdio) < 0) {
-          throw new IOException("Could not put " + terminal + " on descriptor " + stdio + ".");
-        }
-      }
-    } catch (IOException e) {
-      throw e;
-    } catch (Throwable t) {
-      throw new IOException("claiming the terminal " + terminal + " failed", t);
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw new InterruptedIOException("Interrupted waiting for the shim to claim " + slavePath);
     }
+  }
+
+  /** Kills a shim that failed to claim, and everything it started, and closes its pipe. */
+  private static void stop(Process shim) throws IOException {
+    shim.descendants().forEach(ProcessHandle::destroyForcibly);
+    shim.destroyForcibly();
+    try {
+      var unused = shim.waitFor(CLAIM_WAIT.toMillis(), TimeUnit.MILLISECONDS);
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+    }
+    shim.getInputStream().close();
   }
 
   /**
@@ -395,7 +363,7 @@ public final class Pty implements AutoCloseable {
       pollfd.set(ValueLayout.JAVA_SHORT, 4, POLLIN);
       var errno = arena.allocate(Native.ERRNO_STATE);
       try {
-        rc = (int) LIBC.poll().invokeExact(errno, pollfd, 1, READ_POLL_MILLIS);
+        rc = (int) LIBC.poll().invokeExact(errno, pollfd, 1, DRAIN_GRACE_MILLIS);
       } catch (Throwable t) {
         throw new IOException("pty poll failed", t);
       }
@@ -449,7 +417,8 @@ public final class Pty implements AutoCloseable {
       var ws = local.allocate(WINSIZE);
       WS_ROW.set(ws, 0L, (short) rows);
       WS_COL.set(ws, 0L, (short) cols);
-      ioctl(masterFd, Native.PLATFORM.tiocswinsz(), ws, "TIOCSWINSZ failed on the pty master");
+      Native.ioctl(
+          masterFd, Native.PLATFORM.tiocswinsz(), ws, "TIOCSWINSZ failed on the pty master");
     }
   }
 

@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -50,9 +51,13 @@ class PtyChildCommandTest {
               dir);
       var said = new StringBuilder();
       var buf = new byte[4096];
+      var deadline =
+          CompletableFuture.runAsync(
+              pty::close, CompletableFuture.delayedExecutor(60, TimeUnit.SECONDS));
       for (var n = pty.read(buf); n > 0; n = pty.read(buf)) {
         said.append(new String(buf, 0, n, StandardCharsets.UTF_8));
       }
+      assertTrue(deadline.cancel(false), "the shim's terminal ended within the minute: " + said);
 
       assertTrue(shim.waitFor(60, TimeUnit.SECONDS));
       assertEquals(7, shim.exitValue());

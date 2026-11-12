@@ -14,6 +14,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
@@ -46,11 +47,12 @@ class SdNotifyTest {
       var copy = stored.fds().getFirst();
       assertTrue(copy != pty.fd(), "the receiver gets its own descriptor, not the number");
 
-      pty.spawn(
+      var child =
+          pty.spawn(
               PtyChildShimTest.shim(dir.resolve("copy.exit"), "sh", "-c", "echo via-copy"),
               Map.of("TERM", "dumb"),
-              dir)
-          .waitFor();
+              dir);
+      assertTrue(child.waitFor(10, TimeUnit.SECONDS), "the child exits");
       try (var adopted = Pty.adopt(copy)) {
         var buf = new byte[256];
         var seen = new StringBuilder();
