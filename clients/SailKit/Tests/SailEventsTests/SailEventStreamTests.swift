@@ -4,7 +4,7 @@ import SailEvents
 import SailKitTestSupport
 import Testing
 
-@Suite struct SailEventStreamTests {
+@Suite(.timeLimit(.minutes(1))) struct SailEventStreamTests {
     @Test func everyGoldenEventDecodesAsAWellKnownTypeAndTheStreamEndsWithTheServersRefusal() async throws {
         let (updates, ended) = try await readGolden("events/stream.sse")
         #expect(ended == .refused(Refusal(code: .known(.invalidBearerToken), message: "Session token is invalid or expired.")))

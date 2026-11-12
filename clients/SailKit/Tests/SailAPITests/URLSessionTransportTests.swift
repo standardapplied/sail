@@ -84,14 +84,14 @@ import Testing
         #expect(chunks.flatMap(\.self) == Array(ScriptedProtocol.streamed.utf8))
     }
 
-    @Test func aReaderCancelledWhileItWaitsForTheHeadReleasesTheConnection() async {
+    @Test func aReaderCancelledWhileItWaitsForTheHeadReleasesTheConnection() async throws {
         let request = HTTPRequest(method: .get, path: "/silent")
         let opening = Task { [transport] in try await transport.open(request) }
         await Signals.shared.wait(for: "start /silent")
         opening.cancel()
         await Signals.shared.wait(for: "stop /silent")
+        try #require(Signals.shared.count(of: "stop /silent") == 1)
         await #expect(throws: SailError.self) { try await opening.value }
-        #expect(Signals.shared.count(of: "stop /silent") == 1)
     }
 
     @Test func aStreamNobodyReadsReleasesItsConnectionWhenItIsDropped() async throws {

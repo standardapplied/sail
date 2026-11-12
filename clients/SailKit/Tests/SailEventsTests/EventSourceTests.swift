@@ -5,7 +5,7 @@ import SailKitTestSupport
 import Synchronization
 import Testing
 
-@Suite struct EventSourceTests {
+@Suite(.timeLimit(.minutes(1))) struct EventSourceTests {
     @Test func aStreamThatEndsMidEventAsksAgainFromTheLastCompleteEventAndDropsThePart() async throws {
         let stream = try Goldens.bytes("events/stream.sse")
         let third = try #require(range(of: "id: 3\n", in: stream))
