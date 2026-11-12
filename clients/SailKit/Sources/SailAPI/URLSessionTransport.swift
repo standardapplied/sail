@@ -32,7 +32,7 @@ public struct URLSessionTransport: Transport {
     public func open(_ request: HTTPRequest) async throws(SailError) -> HTTPStream {
         let task = connection.session.dataTask(with: try urlRequest(request))
         let (chunks, body) = ChunkBacklog.make(limit: Self.streamBacklog) { task.cancel() }
-        let reader = StreamReader(chunks: chunks)
+        let reader = StreamReader(head: Handoff(), chunks: chunks)
         connection.streams.read(task, with: reader)
         task.resume()
         let head = try await reaching {
@@ -131,7 +131,7 @@ private final class Streams: NSObject, URLSessionDataDelegate, Sendable {
 /// One streamed request as its caller reads it: its head, handed over once, and the chunks of its
 /// body, queued as they arrive.
 private struct StreamReader: Sendable {
-    let head = Handoff<Head>()
+    let head: Handoff<Head>
     let chunks: ChunkBacklog
 
     func finish(_ error: (any Error)?) {

@@ -182,17 +182,23 @@ final class Signals: Sendable {
         waiter?.resume()
     }
 
+    /// Returns once `name` has been raised, or the test waiting for it is cancelled by its time
+    /// limit, which leaves the count it then asserts at zero.
     func wait(for name: String) async {
-        await withCheckedContinuation { waiter in
-            let raised = state.withLock { state in
-                if state.counts[name] == nil {
-                    state.waiting[name] = waiter
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { waiter in
+                let raised = state.withLock { state in
+                    if state.counts[name] == nil {
+                        state.waiting[name] = waiter
+                    }
+                    return state.counts[name] != nil
                 }
-                return state.counts[name] != nil
+                if raised {
+                    waiter.resume()
+                }
             }
-            if raised {
-                waiter.resume()
-            }
+        } onCancel: {
+            state.withLock { $0.waiting.removeValue(forKey: name) }?.resume()
         }
     }
 
