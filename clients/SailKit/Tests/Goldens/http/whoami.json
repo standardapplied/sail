@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/whoami"
+  },
+  "response": {
+    "body": {
+      "capabilities": [
+        "read",
+        "write",
+        "admin"
+      ],
+      "display_name": "Uday",
+      "email": "uday@example.com",
+      "fde": "uday",
+      "name": "uday",
+      "role": "admin",
+      "schema_version": 1
+    },
+    "status": 200
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/specs/nothing"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "spec_not_found",
+        "field_errors": [],
+        "message": "Spec 'nothing' was not found."
+      },
+      "schema_version": 1
+    },
+    "status": 404
+  }
+}

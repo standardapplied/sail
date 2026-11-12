@@ -51,6 +51,21 @@ class BaselineTest {
   }
 
   @Test
+  void aFailureCountsTheCellsThatDifferShowsThemAndSaysHowToRecordTheSnapshot() {
+    var problems = Baseline.differences(BASELINE, answers("a", READ_ONLY, "b", READ_ONLY));
+
+    assertEquals(
+        "access/baseline/x.tsv: 2 cells differ from the snapshot; the first 2, each as its cell,"
+            + " the snapshot's answer and the answer now:\n"
+            + Baseline.difference("a", Corpus.ALLOWED, READ_ONLY)
+            + "\n"
+            + Baseline.difference("c", READ_ONLY, "(absent)")
+            + "\nA change that alters an answer on purpose re-records access/baseline/x.tsv with"
+            + " -Dsail.access.baseline=record; any other difference is a change of behaviour.",
+        Baseline.report("access/baseline/x.tsv", problems));
+  }
+
+  @Test
   void aSnapshotAnswersEachCellOnceOnALineOfItsOwn() {
     assertEquals(
         answers("a", Corpus.ALLOWED, "b", READ_ONLY),

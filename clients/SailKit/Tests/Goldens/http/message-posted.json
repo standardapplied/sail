@@ -1,0 +1,24 @@
+{
+  "request": {
+    "body": {
+      "body": "Which berth takes the ferry — north or south? ⚓",
+      "question": true
+    },
+    "method": "POST",
+    "path": "/v1/rooms/harbor-design/messages"
+  },
+  "response": {
+    "body": {
+      "message": {
+        "author": "uday",
+        "body": "Which berth takes the ferry — north or south? ⚓",
+        "created_at": "2026-11-11T09:00:00.656Z",
+        "id": "00000000-0000-7000-8000-000000000001",
+        "question": true,
+        "spec_id": "harbor-design"
+      },
+      "schema_version": 1
+    },
+    "status": 201
+  }
+}

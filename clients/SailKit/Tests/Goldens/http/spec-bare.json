@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/specs/harbor-buoys"
+  },
+  "response": {
+    "body": {
+      "body": "",
+      "plan": "",
+      "schema_version": 1,
+      "spec": {
+        "created_at": "2026-11-11T09:00:00.656Z",
+        "created_by": "uday",
+        "id": "harbor-buoys",
+        "priority": 0,
+        "project": "harbor",
+        "room_id": "harbor-buoys",
+        "status": "pending",
+        "title": "Buoys mark the channel",
+        "updated_at": "2026-11-11T09:00:00.657Z",
+        "updated_by": "uday"
+      }
+    },
+    "status": 200
+  }
+}

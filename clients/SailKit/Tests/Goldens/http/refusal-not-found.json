@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/nowhere"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "not_found",
+        "field_errors": [],
+        "message": "API endpoint was not found."
+      },
+      "schema_version": 1
+    },
+    "status": 404
+  }
+}

@@ -101,7 +101,9 @@ tests bite, and the deletion count in the body.
   main's commit, the event rule, the read paths and the doors, and each test fails on any cell that
   answers otherwise. A change that alters an answer on purpose re-records it with
   `-Dsail.access.baseline=record` (the command is in `Baseline`'s Javadoc), and the `.tsv` diff in
-  its pull request is the list of what changed, cell by cell.
+  its pull request is the list of what changed, cell by cell. The goldens a native client decodes
+  (`ClientGoldensTest`, `clients/SailKit/Tests/Goldens`) are a snapshot of the same kind
+  (`GoldenFiles`), re-recorded by the same switch.
 - Prefer deleting over adding. The smallest change in the right place; a duplicated seam is
   a finding to fix in the same change.
 

@@ -53,19 +53,28 @@ public final class Baseline {
    * -Dsail.access.baseline=record}, records it as that snapshot.
    */
   public static void check(String name, Corpus corpus) {
-    if (RECORD.equals(System.getProperty(SWITCH))) {
+    if (recording()) {
       record(name, corpus);
       return;
     }
-    var problems = differences(baseline(name), corpus.answers());
+    failOn(DIRECTORY + name + ".tsv", differences(baseline(name), corpus.answers()));
+  }
+
+  /** Whether this run records what it is given as the snapshot rather than checking it. */
+  static boolean recording() {
+    return RECORD.equals(System.getProperty(SWITCH));
+  }
+
+  /** Fails with the report of {@code problems}, each a difference from {@code snapshot}. */
+  static void failOn(String snapshot, List<String> problems) {
     if (!problems.isEmpty()) {
-      fail(report(name, problems));
+      fail(report(snapshot, problems));
     }
   }
 
   /** Every cell {@code now} answers otherwise than {@code baseline}, missing or new included. */
-  static List<String> differences(
-      SortedMap<String, String> baseline, SortedMap<String, String> now) {
+  static <C extends Comparable<C>> List<String> differences(
+      SortedMap<C, String> baseline, SortedMap<C, String> now) {
     var problems = new ArrayList<String>();
     var cells = new TreeSet<>(baseline.keySet());
     cells.addAll(now.keySet());
@@ -80,13 +89,13 @@ public final class Baseline {
   }
 
   /** One differing cell as the failure shows it: the cell, then each answer on its own line. */
-  static String difference(String cell, String baseline, String now) {
+  static String difference(Object cell, String baseline, String now) {
     return cell + "\n  baseline: " + baseline + "\n  now:      " + now;
   }
 
-  private static String report(String name, List<String> problems) {
+  static String report(String snapshot, List<String> problems) {
     var shown = problems.stream().limit(SHOWN).collect(Collectors.joining("\n"));
-    return name
+    return snapshot
         + ": "
         + problems.size()
         + " cells differ from the snapshot; the first "
@@ -94,9 +103,8 @@ public final class Baseline {
         + ", each as its cell, the snapshot's answer and the answer now:\n"
         + shown
         + "\nA change that alters an answer on purpose re-records "
-        + DIRECTORY
-        + name
-        + ".tsv with -D"
+        + snapshot
+        + " with -D"
         + SWITCH
         + "="
         + RECORD

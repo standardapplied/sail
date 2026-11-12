@@ -1,0 +1,20 @@
+{
+  "request": {
+    "body": {
+      "body": ""
+    },
+    "method": "POST",
+    "path": "/v1/rooms/harbor-design/messages"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "bad_request",
+        "field_errors": [],
+        "message": "message body must not be empty"
+      },
+      "schema_version": 1
+    },
+    "status": 400
+  }
+}

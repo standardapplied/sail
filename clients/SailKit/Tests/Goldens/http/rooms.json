@@ -1,0 +1,71 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/rooms?project=harbor"
+  },
+  "response": {
+    "body": {
+      "count": 3,
+      "rooms": [
+        {
+          "created_at": "2026-11-11T09:00:00.656Z",
+          "created_by": "uday",
+          "effective_wake": "on",
+          "id": "harbor-buoys",
+          "members": [],
+          "needs_reply": false,
+          "project": "harbor",
+          "spec_ids": [
+            "harbor-buoys"
+          ],
+          "title": "Buoys mark the channel",
+          "updated_at": "2026-11-11T09:00:00.656Z",
+          "updated_by": "uday"
+        },
+        {
+          "assignee": "uday",
+          "created_at": "2026-11-11T09:00:00.656Z",
+          "created_by": "uday",
+          "effective_wake": "mention",
+          "id": "harbor-design",
+          "last_activity_at": "2026-11-11T09:00:00.656Z",
+          "members": [
+            {
+              "agent": "claude-code",
+              "agent_name": "Claude Code",
+              "engaged_at": "2026-11-11T09:00:00.656Z",
+              "mode": "read_only",
+              "model": "opus"
+            }
+          ],
+          "needs_reply": true,
+          "project": "harbor",
+          "question_message_id": "00000000-0000-7000-8000-000000000003",
+          "spec_ids": [
+            "harbor-docks"
+          ],
+          "title": "Docks",
+          "updated_at": "2026-11-11T09:00:00.656Z",
+          "updated_by": "sail",
+          "wake": "mention"
+        },
+        {
+          "assignee": "uday",
+          "created_at": "2026-11-11T09:00:00.656Z",
+          "created_by": "uday",
+          "effective_wake": "on",
+          "id": "harbor-quay",
+          "members": [],
+          "needs_reply": false,
+          "project": "harbor",
+          "spec_ids": [],
+          "title": "Quay",
+          "updated_at": "2026-11-11T09:00:00.656Z",
+          "updated_by": "uday"
+        }
+      ],
+      "schema_version": 1
+    },
+    "status": 200
+  }
+}

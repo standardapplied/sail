@@ -1,0 +1,30 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/runs/run-2/log"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "run_on_other_node",
+        "field_errors": [
+          {
+            "field": "node",
+            "message": "ada"
+          },
+          {
+            "field": "spec",
+            "message": "harbor-docks"
+          },
+          {
+            "field": "project",
+            "message": "harbor"
+          }
+        ],
+        "message": "Run run-2 executed on ada; its logs live there, not on this box."
+      },
+      "schema_version": 1
+    },
+    "status": 409
+  }
+}

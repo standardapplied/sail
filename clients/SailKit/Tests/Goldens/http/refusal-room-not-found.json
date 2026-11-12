@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/rooms/nowhere"
+  },
+  "response": {
+    "body": {
+      "error": {
+        "code": "room_not_found",
+        "field_errors": [],
+        "message": "Room 'nowhere' was not found."
+      },
+      "schema_version": 1
+    },
+    "status": 404
+  }
+}

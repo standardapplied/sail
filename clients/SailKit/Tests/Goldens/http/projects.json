@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/projects"
+  },
+  "response": {
+    "body": {
+      "projects": [
+        {
+          "container_status": "not_created",
+          "name": "harbor"
+        }
+      ],
+      "schema_version": 1,
+      "total": 1
+    },
+    "status": 200
+  }
+}
