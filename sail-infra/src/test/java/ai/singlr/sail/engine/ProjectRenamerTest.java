@@ -183,6 +183,23 @@ class ProjectRenamerTest {
   }
 
   @Test
+  void aFrozenContainerIsStoppedRenamedAndBroughtBackUp() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus list ^old$", RUNNING.replace("Running", "Frozen"));
+
+    var result = renamer(shell).rename("old", "renamed");
+
+    assertTrue(result.containerRenamed());
+    var cmds = shell.invocations();
+    var stop = firstIndexOf(cmds, c -> c.equals("incus stop old"));
+    var rename = firstIndexOf(cmds, c -> c.equals("incus rename old renamed"));
+    var start = firstIndexOf(cmds, c -> c.equals("incus start renamed"));
+    assertTrue(0 <= stop && stop < rename && rename < start, cmds.toString());
+    assertEquals(-1, firstIndexOf(cmds, c -> c.equals("incus stop renamed")), cmds.toString());
+  }
+
+  @Test
   void leavesAStoppedContainerStoppedAfterFinishing() throws Exception {
     var shell = stoppedShell();
 

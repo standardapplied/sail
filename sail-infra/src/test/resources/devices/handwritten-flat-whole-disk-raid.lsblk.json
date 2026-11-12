@@ -1,0 +1,94 @@
+{
+   "blockdevices": [
+      {
+         "path": "/dev/sda",
+         "kname": "sda",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 53687091200,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
+         "path": "/dev/sdb",
+         "kname": "sdb",
+         "type": "disk",
+         "fstype": "linux_raid_member",
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 42949672960,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
+         "path": "/dev/sdc",
+         "kname": "sdc",
+         "type": "disk",
+         "fstype": "linux_raid_member",
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 42949672960,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
+         "path": "/dev/md0",
+         "kname": "md0",
+         "type": "raid1",
+         "fstype": "ext4",
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            "/srv"
+         ],
+         "size": 42949672960,
+         "start": null,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
+         "path": "/dev/md0",
+         "kname": "md0",
+         "type": "raid1",
+         "fstype": "ext4",
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            "/srv"
+         ],
+         "size": 42949672960,
+         "start": null,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      }
+   ]
+}

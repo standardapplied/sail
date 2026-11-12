@@ -92,6 +92,21 @@ class ProjectLoaderTest {
   }
 
   @Test
+  void aFrozenProjectIsRefusedWithTheCommandThatResumesIt() {
+    var loader =
+        new ProjectLoader(
+            listing("[{\"name\":\"gamma\",\"status\":\"Frozen\"}]"), p -> Optional.of(ACME));
+
+    var refused = assertThrows(ApiException.class, () -> loader.loadRunning("gamma"));
+
+    assertEquals(ErrorCode.PROJECT_STOPPED, refused.failure().errorCode());
+    assertEquals("Project 'gamma' is frozen.", refused.getMessage());
+    assertEquals(
+        Remedy.of("Resume it with ", Remedy.sail("project start", "gamma"), "."), refused.remedy());
+    assertEquals(new ContainerState.Frozen(), loader.loadCreated("gamma").state());
+  }
+
+  @Test
   void aLoaderNeedsAReader() {
     assertThrows(NullPointerException.class, () -> new ProjectLoader(listing("[]"), null));
   }

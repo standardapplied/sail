@@ -1,0 +1,2 @@
+sail-capture	1.88G	754K	1.87G	-	-	6%	0%	1.00x	ONLINE	-
+	/var/lib/incus/disks/sail-capture.img	2G	754K	1.87G	-	-	6%	0.03%	-	ONLINE

@@ -40,6 +40,19 @@ class ProjectResourceReconcilerTest {
   }
 
   @Test
+  void aFrozenContainerIsResizedAsARunningOneIs() throws Exception {
+    var shell = new FakeShell().frozen("acme", "2", "4GB").disk("acme", "50GB");
+
+    var outcome =
+        new ProjectResourceReconciler(new ContainerManager(shell))
+            .reconcile("acme", resources(8, "16GB", "100GB"));
+
+    assertTrue(outcome.present());
+    assertTrue(outcome.limitsApplied());
+    assertTrue(shell.ran("incus config set acme limits.cpu=8 limits.memory=16GB"));
+  }
+
+  @Test
   void isANoOpWhenAlreadyAtTheDesiredSize() throws Exception {
     var shell = new FakeShell().running("acme", "8", "16GB").disk("acme", "100GB");
 
@@ -124,10 +137,20 @@ class ProjectResourceReconcilerTest {
     private String deviceFailure;
 
     FakeShell running(String name, String cpu, String memory) {
+      return listed("Running", name, cpu, memory);
+    }
+
+    FakeShell frozen(String name, String cpu, String memory) {
+      return listed("Frozen", name, cpu, memory);
+    }
+
+    private FakeShell listed(String status, String name, String cpu, String memory) {
       var json =
           "[{\"name\":\""
               + name
-              + "\",\"status\":\"Running\",\"state\":{\"network\":{}},"
+              + "\",\"status\":\""
+              + status
+              + "\",\"state\":{\"network\":{}},"
               + "\"config\":{\"limits.cpu\":\""
               + cpu
               + "\",\"limits.memory\":\""

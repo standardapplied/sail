@@ -14,7 +14,7 @@ package ai.singlr.sail.engine;
 public enum ProjectPhase {
   /** Container launched via {@code incus launch}. */
   CONTAINER_LAUNCHED,
-  /** ZFS refquota set on the container's root dataset. */
+  /** The root disk's size set: a ZFS quota on a zfs pool, advisory on a dir pool. */
   DISK_QUOTA_SET,
   /** CPU and memory limits applied via {@code incus config}. */
   RESOURCE_LIMITS_SET,

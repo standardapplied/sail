@@ -95,6 +95,12 @@ class ProjectApplyCommandTest {
   }
 
   @Test
+  void planStartsAFrozenContainerWhichResumesIt() {
+    assertEquals(
+        ProjectApplyCommand.Action.STARTED, ProjectApplyCommand.plan(new ContainerState.Frozen()));
+  }
+
+  @Test
   void planOnlyConvergesARunningContainer() {
     assertEquals(
         ProjectApplyCommand.Action.CONVERGED,

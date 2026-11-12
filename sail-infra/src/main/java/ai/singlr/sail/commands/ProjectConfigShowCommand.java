@@ -75,6 +75,7 @@ public final class ProjectConfigShowCommand implements Runnable {
         switch (info.state()) {
           case ContainerState.Running ignored -> "running";
           case ContainerState.Stopped ignored -> "stopped";
+          case ContainerState.Frozen ignored -> "frozen";
           case ContainerState.NotCreated ignored -> "not_created";
           case ContainerState.Error ignored -> "error";
         };

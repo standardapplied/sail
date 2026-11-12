@@ -1,0 +1,94 @@
+{
+   "blockdevices": [
+      {
+         "path": "/dev/sda",
+         "kname": "sda",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 161061273600,
+         "start": null,
+         "model": "Virtual Disk",
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
+         "path": "/dev/sda1",
+         "kname": "sda1",
+         "type": "part",
+         "fstype": "ext4",
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+            "/"
+         ],
+         "size": 159987531776,
+         "start": null,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
+         "path": "/dev/sda14",
+         "kname": "sda14",
+         "type": "part",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 4194304,
+         "start": null,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
+         "path": "/dev/sda15",
+         "kname": "sda15",
+         "type": "part",
+         "fstype": "vfat",
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+            "/boot/efi"
+         ],
+         "size": 111149056,
+         "start": null,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      },
+      {
+         "path": "/dev/sda16",
+         "kname": "sda16",
+         "type": "part",
+         "fstype": "ext4",
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+            "/boot"
+         ],
+         "size": 957349888,
+         "start": null,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": null
+      }
+   ]
+}

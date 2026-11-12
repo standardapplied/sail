@@ -64,7 +64,7 @@ public final class UpCommand implements Runnable {
         printTunnelHints(shell);
         printOvercommitHints(mgr, operator);
       }
-      case ContainerState.Stopped ignored -> {
+      case ContainerState.Stopped _, ContainerState.Frozen _ -> {
         if (!json) {
           System.out.println(Ansi.AUTO.string("  @|bold Starting|@ " + name + "..."));
         }

@@ -1,0 +1,4 @@
+handpool	19.5G	8.62M	19.5G	-	-	0%	0%	1.00x	ONLINE	-
+	/dev/sdd1	20.0G	8.62M	19.5G	-	-	0%	0.04%	-	ONLINE
+cache            -      -      -        -         -      -      -      -         -
+	/dev/sdg1	20.0G	0	20.0G	-	-	0%	0.00%	-	ONLINE

@@ -11,18 +11,22 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.DemoSeeder;
-import ai.singlr.sail.engine.DiskDetector;
 import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.HostProvisioner;
+import ai.singlr.sail.engine.IncusStorage;
 import ai.singlr.sail.engine.NetworkDetector;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.PoolDevices;
+import ai.singlr.sail.engine.PoolSource;
 import ai.singlr.sail.engine.PrerequisiteChecker;
 import ai.singlr.sail.engine.ProvisionListener;
+import ai.singlr.sail.engine.ResourceChecker;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -44,20 +48,35 @@ public final class HostInitCommand implements Runnable {
 
   private static final Set<String> VALID_BACKENDS =
       Set.of(HostYaml.BACKEND_DIR, HostYaml.BACKEND_ZFS);
+  private static final long MIN_FILE_MB = 1024;
 
   @Option(names = "--dry-run", description = "Print commands instead of executing them.")
   private boolean dryRun;
 
   @Option(
       names = "--storage",
-      description = "Storage backend: 'dir' (default, host filesystem) or 'zfs' (dedicated disk).",
+      description =
+          "Storage backend: 'dir' (default, host filesystem) or 'zfs' (a disk, a partition or a"
+              + " file).",
       defaultValue = "dir")
   private String storage;
 
   @Option(
       names = "--disk",
-      description = "Disk device for ZFS pool (e.g. /dev/sdb). Only used with --storage zfs.")
+      description =
+          "Whole disk or partition for the ZFS pool (e.g. /dev/sdb, /dev/nvme0n1p5), carrying"
+              + " nothing: Sail erases nothing. With --storage zfs. Do not change disks while host"
+              + " init runs: on disks with no hardware identity (no WWN or NVMe id), a disk replaced"
+              + " under the same name after the last check is judged by zpool create alone, which"
+              + " does not refuse an empty partition table or filesystems inside MBR partitions.")
   private String disk;
+
+  @Option(
+      names = "--pool-file-size",
+      description =
+          "Make the ZFS pool in a file of this size (e.g. 50GiB): slower than a disk, for trying"
+              + " ZFS on a box with no spare one. With --storage zfs.")
+  private String poolFileSize;
 
   @Option(names = "--pool", description = "Storage pool name.", defaultValue = "devpool")
   private String pool;
@@ -170,7 +189,8 @@ public final class HostInitCommand implements Runnable {
       }
     }
 
-    var selectedDisk = isZfs && disk == null ? detectAndSelectDisk(new ShellExecutor(false)) : disk;
+    var reads = new ShellExecutor(false);
+    var source = source(reads);
 
     var resolvedServerIp = serverIp;
     if (resolvedServerIp == null) {
@@ -196,7 +216,7 @@ public final class HostInitCommand implements Runnable {
       System.out.println();
       if (isZfs) {
         System.out.println(Ansi.AUTO.string("  @|bold Pool:|@    " + pool));
-        System.out.println(Ansi.AUTO.string("  @|bold Disk:|@    " + selectedDisk));
+        System.out.println(Ansi.AUTO.string("  @|bold Source:|@  " + source.said()));
         System.out.println(Ansi.AUTO.string("  @|bold Bridge:|@  " + HostYaml.DEFAULT_BRIDGE));
       } else {
         System.out.println(Ansi.AUTO.string("  @|bold Storage:|@ " + pool + " (dir)"));
@@ -205,7 +225,9 @@ public final class HostInitCommand implements Runnable {
         System.out.println(
             Ansi.AUTO.string(
                 "  @|yellow Note:|@ Disk quotas are advisory with 'dir' backend (not enforced)."));
-        System.out.println("        Use --storage zfs --disk /dev/sdX for hard disk limits.");
+        System.out.println(
+            "        Use --storage zfs with --disk <device> or --pool-file-size <size> for"
+                + " enforced ones.");
       }
       System.out.println();
     }
@@ -215,14 +237,14 @@ public final class HostInitCommand implements Runnable {
     }
 
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
-    var provisioner = new HostProvisioner(shell, listener, operator);
+    var provisioner = new HostProvisioner(shell, reads, listener, operator);
     var hostYaml =
         provisioner.provision(
-            storage,
-            selectedDisk,
+            source,
             pool,
             HostYaml.DEFAULT_BRIDGE,
             resolvedServerIp,
+            hostInfo.memoryMb(),
             hostYamlPath,
             SailPaths.controlPlaneDb());
 
@@ -232,14 +254,19 @@ public final class HostInitCommand implements Runnable {
     }
 
     System.out.println();
-    System.out.println(Ansi.AUTO.string("  @|bold,green \u2713 Server ready.|@"));
-    if (isZfs) {
-      System.out.println(
-          Ansi.AUTO.string(
-              "    @|bold Pool:|@     " + hostYaml.pool() + " on " + hostYaml.poolDisk()));
-    } else {
-      System.out.println(Ansi.AUTO.string("    @|bold Storage:|@  " + hostYaml.pool() + " (dir)"));
-    }
+    System.out.println(
+        Ansi.AUTO.string(
+            dryRun
+                ? "  @|bold \u2713 Dry run done: nothing was changed.|@"
+                : "  @|bold,green \u2713 Server ready.|@"));
+    System.out.println(
+        Ansi.AUTO.string(
+            "    @|bold Storage:|@  "
+                + hostYaml.pool()
+                + " ("
+                + hostYaml.storageBackend()
+                + (hostYaml.poolSource() == null ? "" : " on " + hostYaml.poolSource())
+                + ")"));
     System.out.println(Ansi.AUTO.string("    @|bold Bridge:|@   " + hostYaml.bridge()));
     System.out.println(Ansi.AUTO.string("    @|bold Image:|@    " + hostYaml.image()));
     System.out.println(Ansi.AUTO.string("    @|bold Incus:|@    " + hostYaml.incusVersion()));
@@ -247,7 +274,9 @@ public final class HostInitCommand implements Runnable {
       System.out.println(Ansi.AUTO.string("    @|bold Server:|@   " + hostYaml.serverIp()));
     }
 
-    DemoSeeder.seedIfAbsent();
+    if (!dryRun) {
+      DemoSeeder.seedIfAbsent();
+    }
     nextStep(standalone, Files.exists(SailPaths.SYSTEM_UNIT), operator)
         .ifPresent(
             line -> {
@@ -289,14 +318,111 @@ public final class HostInitCommand implements Runnable {
                 + ", installs sail-api and connects this box.");
   }
 
-  private String detectAndSelectDisk(ShellExec shell) throws Exception {
-    var detector = new DiskDetector(shell);
-    var candidates = detector.detect();
+  /**
+   * The pool these flags ask for, read on the machine {@code probe} runs on: dir; the zfs pool
+   * Incus already holds under this name, which a re-run keeps; a file; a named device {@link
+   * PoolDevices#cleared} clears; or for zfs with neither, an unused disk the operator picks.
+   * Refused when the flags disagree, with each other or with the pool Incus has, before anything is
+   * installed.
+   */
+  PoolSource source(ShellExec probe) throws Exception {
+    var zfs = HostYaml.BACKEND_ZFS.equals(storage);
+    if (!zfs && (disk != null || poolFileSize != null)) {
+      throw new IllegalArgumentException(
+          "--disk and --pool-file-size choose a ZFS pool's source: pass them with"
+              + " --storage zfs.");
+    }
+    var held =
+        new IncusStorage(probe)
+            .poolsOrNone().stream().filter(found -> found.name().equals(pool)).findFirst();
+    held.ifPresent(found -> found.requireDriver(storage));
+    if (!zfs) {
+      return new PoolSource.Dir();
+    }
+    if (disk != null && poolFileSize != null) {
+      throw new IllegalArgumentException(
+          "Pass --disk or --pool-file-size, not both: a pool is made from one source.");
+    }
+    var devices = new PoolDevices(probe);
+    if (held.isPresent()) {
+      return kept(held.get(), devices);
+    }
+    if (poolFileSize != null) {
+      return file(poolFileSize);
+    }
+    return devices.cleared(disk != null ? disk : detectAndSelectDisk(devices));
+  }
+
+  /**
+   * The zfs pool Incus holds under this pool's name, which a re-run keeps; a source flag the re-run
+   * would ignore is refused, naming it. {@code --disk} and the pool's source are compared as the
+   * devices they resolve to, since Incus holds the path Sail handed it, a by-id name where the disk
+   * has one; a source that resolves to nothing is a device gone, which no {@code --disk} can be.
+   */
+  private PoolSource kept(IncusStorage.Pool held, PoolDevices devices) throws Exception {
+    var ignored = new ArrayList<String>();
+    if (disk != null && !sameDevice(held, devices.resolved("--disk", disk), devices)) {
+      ignored.add("--disk " + disk);
+    }
+    if (poolFileSize != null && !(file(poolFileSize).sizeMb() + "MiB").equals(held.size())) {
+      ignored.add("--pool-file-size " + poolFileSize);
+    }
+    if (!ignored.isEmpty()) {
+      throw new IllegalArgumentException(
+          "Incus already has zfs pool '"
+              + pool
+              + "' on "
+              + held.source()
+              + ", which a re-run keeps, so "
+              + String.join(" and ", ignored)
+              + " would be ignored. Drop it, or name a new pool with --pool <name>.");
+    }
+    return new PoolSource.Zpool(Objects.requireNonNullElse(held.zpool(), held.name()));
+  }
+
+  private boolean sameDevice(IncusStorage.Pool held, String named, PoolDevices devices)
+      throws Exception {
+    if (!held.source().startsWith("/")) {
+      return false;
+    }
+    var source =
+        devices
+            .device(held.source())
+            .orElseThrow(
+                () ->
+                    new IllegalArgumentException(
+                        "Incus already has zfs pool '"
+                            + pool
+                            + "' on "
+                            + held.source()
+                            + ", which names no device on this box now: the pool's device is gone,"
+                            + " so --disk "
+                            + disk
+                            + " cannot be it. See sudo zpool status "
+                            + Objects.requireNonNullElse(held.zpool(), held.name())
+                            + ", or name a new pool with --pool <name>."));
+    return source.equals(named);
+  }
+
+  /** A file pool of {@code size}, refused unless it reads as at least {@link #MIN_FILE_MB}. */
+  static PoolSource.File file(String size) {
+    var sizeMb = ResourceChecker.parseMemoryMb(size);
+    if (sizeMb < MIN_FILE_MB) {
+      throw new IllegalArgumentException(
+          "--pool-file-size "
+              + size
+              + " is not a size of at least 1GiB. Give one such as 50GiB or 200GB.");
+    }
+    return new PoolSource.File(sizeMb);
+  }
+
+  private String detectAndSelectDisk(PoolDevices devices) throws Exception {
+    var candidates = devices.candidates();
 
     if (candidates.isEmpty()) {
       throw new CliCommand.Refused(
-          "Not provisioned: no candidate disks found. Add a second disk, or name one with --disk"
-              + " /dev/sdX.");
+          "Not provisioned: no unused disk found. Name a disk or a spare partition with --disk"
+              + " <device>, or make the pool in a file with --pool-file-size <size>.");
     }
 
     System.out.println(Ansi.AUTO.string("  @|bold Disks found:|@"));
@@ -306,12 +432,8 @@ public final class HostInitCommand implements Runnable {
       System.out.println(
           Ansi.AUTO.string(
               String.format(
-                  "    @|bold %d.|@ %-14s %8s   %s   @|faint (%s)|@",
-                  i + 1,
-                  c.device(),
-                  c.size(),
-                  Objects.requireNonNullElse(c.model(), ""),
-                  c.reason())));
+                  "    @|bold %d.|@ %-14s %8s   %s",
+                  i + 1, c.device(), c.size(), Objects.requireNonNullElse(c.model(), ""))));
     }
     System.out.println();
 
@@ -332,7 +454,7 @@ public final class HostInitCommand implements Runnable {
   }
 
   /** The disk {@code line} picks of {@code candidates}, numbered from 1; refused otherwise. */
-  static String chosenDisk(String line, List<DiskDetector.Candidate> candidates) {
+  static String chosenDisk(String line, List<PoolDevices.Candidate> candidates) {
     var choice = Strings.isBlank(line) ? 0 : parseChoice(line.strip());
     if (choice < 1 || choice > candidates.size()) {
       throw unchosen("no disk chosen", candidates);
@@ -340,8 +462,8 @@ public final class HostInitCommand implements Runnable {
     return candidates.get(choice - 1).device();
   }
 
-  private static CliCommand.Refused unchosen(String why, List<DiskDetector.Candidate> candidates) {
-    var devices = candidates.stream().map(DiskDetector.Candidate::device).toList();
+  private static CliCommand.Refused unchosen(String why, List<PoolDevices.Candidate> candidates) {
+    var devices = candidates.stream().map(PoolDevices.Candidate::device).toList();
     return new CliCommand.Refused(
         "Not provisioned: "
             + why

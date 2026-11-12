@@ -7,8 +7,10 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
@@ -43,6 +45,33 @@ class ProjectDemoCommandTest {
     var exitCode = cmd.execute();
 
     assertNotEquals(0, exitCode);
+  }
+
+  @Test
+  void aDemoWhoseContainerExistsIsRefusedSayingWhatToDo() {
+    var operator = OperatorCommand.SUDO;
+    var destroy = "\n  Destroy first:  sudo sail project destroy demo";
+
+    assertEquals(
+        "Demo project is already running.\n  Get a shell:    sudo sail project shell demo"
+            + destroy,
+        refusal(new ContainerState.Running("10.0.0.2"), operator));
+    assertEquals(
+        "Demo project exists but is frozen.\n  Resume it:      sudo sail project start demo"
+            + destroy,
+        refusal(new ContainerState.Frozen(), operator));
+    assertEquals(
+        "Demo project exists but is stopped.\n  Start it:       sudo sail project start demo"
+            + destroy,
+        refusal(new ContainerState.Stopped(), operator));
+    ProjectDemoCommand.requireAbsent(new ContainerState.NotCreated(), operator);
+    ProjectDemoCommand.requireAbsent(new ContainerState.Error("unreadable"), operator);
+  }
+
+  private static String refusal(ContainerState state, OperatorCommand operator) {
+    return assertThrows(
+            IllegalStateException.class, () -> ProjectDemoCommand.requireAbsent(state, operator))
+        .getMessage();
   }
 
   @Test

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.HostProvisioner;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.PoolSource;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -47,11 +48,11 @@ class ConsoleProvisionListenerTest {
                       new HostProvisioner(
                               shell, ConsoleProvisionListener.INSTANCE, OperatorCommand.SUDO)
                           .provision(
-                              "dir",
-                              null,
+                              new PoolSource.Dir(),
                               "devpool",
                               "incusbr0",
                               null,
+                              65536,
                               tempDir.resolve("host.yaml"),
                               tempDir.resolve("sail.db"))));
     } finally {

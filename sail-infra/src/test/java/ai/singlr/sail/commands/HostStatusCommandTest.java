@@ -94,6 +94,22 @@ class HostStatusCommandTest {
   }
 
   @Test
+  void aFrozenContainerIsCountedAsFrozen() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus list",
+                """
+                [{"name": "acme", "type": "container", "status": "Frozen", "state": {}},
+                 {"name": "fintech", "type": "container", "status": "Stopped", "state": {}}]
+                """)
+            .onOk("incus version", "Client version: 6.21\nServer version: 6.21\n");
+
+    assertEquals(1, json(shell).get("containers_frozen"));
+    assertTrue(text(shell).contains("2 total (0 running, 1 frozen, 1 stopped)"));
+  }
+
+  @Test
   void aDaemonThatDoesNotAnswerStillReportsAndNeverClaimsZeroContainers() throws Exception {
     var shell =
         new ScriptedShellExecutor()
@@ -219,6 +235,87 @@ class HostStatusCommandTest {
     for (var shell : List.of(current, unknown)) {
       assertEquals(List.of("  │  Incus:       6.18"), rows(shell, "Incus:", "Upgrade:"));
     }
+  }
+
+  @Test
+  void everyPoolIsNamedWithItsDriverItsSourceAndItsFreeSpace() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("incus list", "[]")
+            .onOk(
+                "incus storage list",
+                """
+                [{"name": "devpool", "driver": "dir",
+                  "config": {"source": "/var/lib/incus/storage-pools/devpool"}},
+                 {"name": "tank", "driver": "zfs",
+                  "config": {"source": "tank", "volatile.initial_source": "/dev/nvme0n1p5"}}]
+                """)
+            .onOk(
+                "incus query /1.0/storage-pools/devpool/resources",
+                "{\"space\": {\"used\": 128849018880, \"total\": 959925207040}}")
+            .onFail("incus query /1.0/storage-pools/tank/resources", "not found");
+
+    assertEquals(
+        List.of(
+            "  │  Pool:        devpool (dir, /var/lib/incus/storage-pools/devpool): 774.0 GiB free"
+                + " of 894.0 GiB",
+            "  │  Pool:        tank (zfs, /dev/nvme0n1p5): free space unknown",
+            "  │  Note:        Disk limits on a dir pool are advisory"),
+        rows(shell, "Pool:", "Note:"));
+    assertEquals(
+        List.of(
+            Map.of(
+                "name",
+                "devpool",
+                "driver",
+                "dir",
+                "source",
+                "/var/lib/incus/storage-pools/devpool",
+                "used_bytes",
+                128849018880L,
+                "total_bytes",
+                959925207040L),
+            Map.of("name", "tank", "driver", "zfs", "source", "/dev/nvme0n1p5")),
+        json(shell).get("pools"));
+  }
+
+  @Test
+  void aZfsBoxHasNoAdvisoryNote() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("incus list", "[]")
+            .onOk(
+                "incus storage list",
+                "[{\"name\": \"tank\", \"driver\": \"zfs\", \"config\":"
+                    + " {\"source\": \"/var/lib/incus/disks/tank.img\"}}]")
+            .onOk(
+                "incus query /1.0/storage-pools/tank/resources",
+                "{\"space\": {\"used\": 0, \"total\": 53687091200}}");
+
+    assertEquals(
+        List.of(
+            "  │  Pool:        tank (zfs, /var/lib/incus/disks/tank.img): 50.0 GiB free of 50.0"
+                + " GiB"),
+        rows(shell, "Pool:", "Note:"));
+  }
+
+  @Test
+  void storageIncusCannotListIsSaidAndNeverReadAsNoPools() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("incus list", "[]")
+            .onFail("incus storage list", "cannot connect to the incus daemon");
+
+    var status = json(shell);
+    assertEquals(
+        "incus storage list failed: cannot connect to the incus daemon",
+        status.get("storage_error"));
+    assertFalse(status.containsKey("pools"));
+    assertEquals(
+        List.of(
+            "  │  Pool:        unavailable (incus storage list failed: cannot connect to the"
+                + " incus daemon)"),
+        rows(shell, "Pool:", "Note:"));
   }
 
   /** The banner's rows labelled any of {@code labels}, the padding before their border dropped. */

@@ -9,7 +9,6 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
-import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -73,7 +72,7 @@ public final class RestoreCommand implements Runnable {
       System.out.println();
     }
 
-    if (state instanceof ContainerState.Running) {
+    if (state.live()) {
       if (!json) {
         System.out.println(Ansi.AUTO.string("  @|bold Stopping|@ " + name + "..."));
       }

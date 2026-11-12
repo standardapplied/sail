@@ -213,14 +213,31 @@ class ContainerManagerTest {
   }
 
   @Test
-  void queryStateReturnsErrorForUnexpectedStatus() throws Exception {
+  void aPausedContainerReadsAsFrozenNotAsAnError() throws Exception {
     var shell = new ScriptedShellExecutor().onOk("incus list ^acme-health$", FROZEN_JSON);
-    var mgr = new ContainerManager(shell);
 
-    var state = mgr.queryState("acme-health");
+    assertEquals(
+        new ContainerState.Frozen(), new ContainerManager(shell).queryState("acme-health"));
+  }
 
-    assertInstanceOf(ContainerState.Error.class, state);
-    assertTrue(((ContainerState.Error) state).message().contains("Frozen"));
+  @Test
+  void aContainerIsLiveWhenItsProcessesExist() {
+    assertTrue(new ContainerState.Running(null).live());
+    assertTrue(new ContainerState.Frozen().live());
+    assertFalse(new ContainerState.Stopped().live());
+    assertFalse(new ContainerState.NotCreated().live());
+    assertFalse(new ContainerState.Error("boom").live());
+  }
+
+  @Test
+  void queryStateReturnsErrorForUnexpectedStatus() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("incus list ^acme-health$", FROZEN_JSON.replace("Frozen", "Freezing"));
+
+    assertEquals(
+        new ContainerState.Error("Unexpected container status: Freezing"),
+        new ContainerManager(shell).queryState("acme-health"));
   }
 
   @Test
