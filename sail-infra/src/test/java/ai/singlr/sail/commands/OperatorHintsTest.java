@@ -271,6 +271,7 @@ class OperatorHintsTest {
   @Test
   void everyRenderedCommandIsOneSailHas() throws Exception {
     var rendered = Pattern.compile("\\.(?:sail|root|client)\\(\\s*(?=\")");
+    var sail = new CommandLine(new Sail()).setUnmatchedArgumentsAllowed(true);
     var unknown = new ArrayList<String>();
     for (var root :
         List.of(
@@ -285,7 +286,7 @@ class OperatorHintsTest {
           while (matcher.find()) {
             var call = source.substring(matcher.end(), closingParen(source, matcher.end()));
             for (var args : rendered(file, call)) {
-              if (!parses(args)) {
+              if (!parses(sail, args)) {
                 unknown.add(file.getFileName() + ": " + args);
               }
             }
@@ -397,7 +398,7 @@ class OperatorHintsTest {
     return rendered.toString();
   }
 
-  private static boolean parses(String args) {
+  private static boolean parses(CommandLine sail, String args) {
     var words =
         Arrays.stream(
                 args.replaceAll("\"?<[^>]*>\"?|'[^']*'", "x")
@@ -406,7 +407,6 @@ class OperatorHintsTest {
                     .split("\\s+"))
             .filter(word -> !word.isEmpty() && !word.endsWith("..."))
             .toArray(String[]::new);
-    var sail = new CommandLine(new Sail()).setUnmatchedArgumentsAllowed(true);
     try {
       for (var parsed = sail.parseArgs(words); parsed != null; parsed = parsed.subcommand()) {
         if (!parsed.unmatched().isEmpty()) {

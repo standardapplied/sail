@@ -2,6 +2,10 @@ name: Native binaries
 description: >
   Fetches the released binary .github/released-tag pins and builds the native image under test,
   each smoke-tested: the two inputs of every test that upgrades a fleet's release to this build.
+  The image is kept in the cache under everything it is built from (the main sources and
+  resources, the poms, this action, the optimization level and the GraalVM build), so a commit
+  that changes none of them, one that changes only tests or CI, takes the image built from the
+  same inputs instead of building it again.
 
 inputs:
   optimization:
@@ -43,12 +47,32 @@ runs:
         chmod +x sail-linux-amd64
         ./sail-linux-amd64 -V
 
-    - name: Build native image
+    - name: Name the GraalVM build
+      id: graalvm
       shell: bash
-      run: mvn -B package -Pnative -DskipTests -Dsail.native.optimization=${{ inputs.optimization }}
+      run: echo "build=$(java -version 2>&1 | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the image built from the same inputs
+      id: image
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: sail-infra/target/sail
+        key: native-image-${{ runner.os }}-${{ runner.arch }}${{ inputs.optimization }}-${{ steps.graalvm.outputs.build }}-${{ hashFiles('**/pom.xml', 'sail-*/src/main/**', '.github/actions/native-binaries/action.yml') }}
+
+    - name: Build native image
+      if: steps.image.outputs.cache-hit != 'true'
+      shell: bash
+      run: mvn -B package -Pnative -DskipTests -Djacoco.skip=true -Dspotless.check.skip=true -Dsail.native.optimization=${{ inputs.optimization }}
 
     - name: Smoke test
       shell: bash
       run: |
         ./sail-infra/target/sail -V
         ./sail-infra/target/sail _pty-selftest
+
+    - name: Keep the image for a commit built from the same inputs
+      if: steps.image.outputs.cache-hit != 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: sail-infra/target/sail
+        key: ${{ steps.image.outputs.cache-primary-key }}
