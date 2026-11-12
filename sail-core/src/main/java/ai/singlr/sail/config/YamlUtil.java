@@ -26,6 +26,13 @@ import org.snakeyaml.engine.v2.common.FlowStyle;
  */
 public final class YamlUtil {
 
+  /**
+   * The most characters a protocol line is read in at once. The engine's reader copies its window
+   * of a scalar on every refill, so a line read through the default 1 KiB buffer costs the square
+   * of its longest scalar: 2.5 to 10 s for a 4 MiB body, against 30 to 80 ms read through this.
+   */
+  private static final int LINE_BUFFER = 1024 * 1024;
+
   private YamlUtil() {}
 
   /** Parse a YAML or JSON string into a Map. Returns empty map for null/blank input. */
@@ -71,7 +78,11 @@ public final class YamlUtil {
     }
     try {
       var settings =
-          LoadSettings.builder().setCodePointLimit(maxChars).setAllowDuplicateKeys(false).build();
+          LoadSettings.builder()
+              .setCodePointLimit(maxChars)
+              .setAllowDuplicateKeys(false)
+              .setBufferSize(Math.min(text.length() + 1, LINE_BUFFER))
+              .build();
       var value = new Load(settings).loadFromString(text);
       if (!(value instanceof Map<?, ?> map)) {
         throw new IllegalArgumentException("Expected a JSON object");

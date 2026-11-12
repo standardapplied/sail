@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Remedy;
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
@@ -87,19 +88,21 @@ public final class SpecCliHelper {
         spec board                         show the kanban summary
         spec list [--status S] [--assignee me] [--search Q]
         spec show <id>
-        spec create --id <id> --title <title> [--body-file F] [--status pending] [--assignee H]
+        spec create --id <id> --title <title> [--body-file F] [--assignee H]
                     [--depends-on a,b] [--repos a,b] [--agent A] [--model M]
                     [--reasoning-effort none|low|medium|high|xhigh] [--priority N] [--plan-file F]
                     [--room R]  (default: $SAIL_ROOM_ID when this terminal is pinned to a room)
-        spec update <id> [--status S] [--title T] [--assignee H] [--wake on|mention|off]
+                    A spec created here is a draft.
+        spec update <id> [--title T] [--assignee H] [--wake on|mention|off]
                     [--force] [...]  (alias: edit)
+                    A status moves outside the container: on the board in Mast, or on the host
+                    with __SET_STATUS__.
                     --assignee takes an FDE handle; leave it blank for anyone to claim, and
                     claim an unassigned spec for your FDE. The agent type goes in --agent.
         spec content <id> --body-file F [--plan-file F]   revise the body
         spec comment <id> --body <text>|- [--reply-to <message-id>] [--question]
                     (--question flags a blocking question so the board pages the engineer)
         spec comments <id> [--before <message-id>] [--limit N]
-        spec archive <id>
         spec whoami                        show this run's principal identity
       USAGE
         exit "${1:-0}"
@@ -180,7 +183,11 @@ public final class SpecCliHelper {
 
   /** Returns the script content that {@link #install(String)} writes. Pure function. */
   public static String scriptContent() {
-    return SCRIPT.replace("__PREAMBLE__\n", SocketPreamble.of("spec"));
+    return SCRIPT
+        .replace("__PREAMBLE__\n", SocketPreamble.of("spec"))
+        .replace(
+            "__SET_STATUS__",
+            Remedy.of(Remedy.sail("spec update", "<id>", "--status", "<status>")).plain());
   }
 
   /** Returns the PATH line that {@link #install(String)} appends to {@link #PROFILE_PATH}. */

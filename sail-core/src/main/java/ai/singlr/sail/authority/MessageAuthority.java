@@ -15,11 +15,13 @@ import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.PrincipalHandle;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Sqlite;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -38,12 +40,14 @@ public final class MessageAuthority implements WriteAuthority {
 
   private final RoomStore rooms;
   private final RunStore runs;
+  private final ChangeLog journal;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
   public MessageAuthority(Sqlite db) {
     this.rooms = new RoomStore(db);
     this.runs = new RunStore(db);
+    this.journal = new ChangeLog(db);
     this.attribution = new Attribution(db);
   }
 
@@ -76,7 +80,10 @@ public final class MessageAuthority implements WriteAuthority {
    * conversation this box does not hold is not here, which is said first, as for every row this box
    * does not hold; then {@link Access} decides the post; and last the fact that a post is
    * someone's, so a credential acting for no FDE posts nothing. Both facts are of what no one here
-   * can own, which is an admin's to write ({@link Access#unowned}), as on main.
+   * can own, which is an admin's to write ({@link Access#unowned}), as on main. The conversation is
+   * filed under its project, and made by whoever made the spec whose own room it is; that spec
+   * since moved to another project left its room behind, and a post there is decided where the spec
+   * is as well ({@link #whereItsSpecIs}).
    */
   private Optional<Refusal> posting(Actor actor, String roomId) {
     var unheld =
@@ -86,7 +93,28 @@ public final class MessageAuthority implements WriteAuthority {
     if (unheld.isPresent()) {
       return unheld;
     }
-    return posted(actor, Resources.conversation(roomId, null, rooms.owners(roomId)));
+    var filed = journal.conversationProject(roomId);
+    var owners = rooms.owners(roomId);
+    return posted(actor, attribution.made(Resources.conversation(roomId, filed, owners)))
+        .or(() -> whereItsSpecIs(actor, roomId, filed, owners));
+  }
+
+  /**
+   * Why {@code actor} may not post in {@code roomId}, the own room of a spec now in another project
+   * than {@code filed}, where its room stayed: the post is a post where the spec is too, as a move
+   * of the spec is a change where it lands ({@link SpecAuthority}), so whoever posts in one project
+   * only, an agent in its work's, posts in no spec moved out of it.
+   */
+  private Optional<Refusal> whereItsSpecIs(
+      Actor actor, String roomId, String filed, List<String> owners) {
+    return journal
+        .liveProject("spec", roomId)
+        .filter(project -> !project.equals(filed))
+        .flatMap(
+            project ->
+                WriteAuthority.refused(
+                    actor,
+                    Taking.of(Resources.conversation(roomId, project, owners), Action.POST)));
   }
 
   /**

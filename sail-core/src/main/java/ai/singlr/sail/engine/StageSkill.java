@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import java.util.Arrays;
@@ -55,6 +56,19 @@ public record StageSkill(String name, String body, List<File> files) {
   /** The folder a project's skill named {@code name} lives in among its files, slash-ended. */
   public static String projectFolder(String name) {
     return PROJECT_ROOT + name + "/";
+  }
+
+  /**
+   * The host command a person shares {@code folder}, a folder in {@code project}'s container, by:
+   * nothing in a container may share a skill.
+   */
+  public static Remedy.Command shareFromContainer(String folder, String project) {
+    return Remedy.sail("project skills add", "--container", folder, "-p", project);
+  }
+
+  /** The host command a person stops sharing {@code project}'s skill {@code skill} by. */
+  public static Remedy.Command unshare(String skill, String project) {
+    return Remedy.sail("project skills rm", skill, "-p", project);
   }
 
   /** The most characters a skill's {@code description} may hold. */

@@ -11,6 +11,7 @@ import ai.singlr.sail.access.Decision;
 import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resource;
 import ai.singlr.sail.access.Resources;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RoomStore;
@@ -46,9 +47,10 @@ import java.util.stream.Stream;
  * pushed them: an event marked as retold starts no review and finishes no run here. So a member is
  * never taken at their word for what this box observed, and a run another box executed is never a
  * key to the spec it names: its pusher wrote that row, and only the spec's own owner speaks for the
- * spec. A run's own principal publishes only the narration of its own run, a fact of its lane until
- * its actor carries its work (sail-agents-act-on-their-own-work). Every refusal names its fix: who
- * may publish the event, to ask.
+ * spec. An agent is decided like anyone, by its lane's column: it narrates its own run, which is
+ * the narration's resource, and posts in its own work, but an announcement it makes is never taken
+ * at its word, since it retells nothing. Every refusal names its fix: who may publish the event, to
+ * ask.
  */
 public final class EventAuthority {
 
@@ -184,25 +186,24 @@ public final class EventAuthority {
               + " writes they describe.",
           "Make the change through its own route; the server publishes the event.");
     }
-    if (actor.agentLane()) {
-      return principal(actor, type, action, subject);
-    }
-    return switch (Access.decide(actor, action, resource(action, subject))) {
+    var resource = resource(action, subject);
+    return switch (Access.decide(actor, action, resource)) {
       case Decision.Allowed allowed ->
-          believed(actor, action, subject, retold)
+          believed(actor, action, subject, resource, retold)
               ? Optional.empty()
-              : refused(Refusal.Kind.NOT_OWNER, actor, type, action, subject);
+              : refused(Refusal.Kind.NOT_OWNER, null, actor, type, action, subject);
       case Decision.Refused refused ->
-          refused(refused.refusal().kind(), actor, type, action, subject);
+          refused(refused.refusal().kind(), refused.refusal().fix(), actor, type, action, subject);
       case Decision.NotFound notFound -> unseen(type, subject);
     };
   }
 
   /**
    * What {@code action} is taken on when an event is about {@code subject}. The box, for an event
-   * that speaks for it. Otherwise the work it names, answering to who drives it here: a run this
-   * box executed is also this box's; and a run's narration is a person's only on the box that
-   * executed it.
+   * that speaks for it. A run's narration, the run it names, answering only to the FDE of the box
+   * that executed it ({@link Resources#launched}): a person's only on that box, and its own
+   * principal's. Otherwise the work it names, answering to who drives it here: a run this box
+   * executed is also this box's.
    */
   private Resource resource(Action action, Subject subject) {
     var executed =
@@ -211,7 +212,14 @@ public final class EventAuthority {
             : List.<String>of();
     return switch (action) {
       case OPERATE_BOX -> Resources.box(boxFde.get());
-      case NARRATE -> work(subject, executed);
+      case NARRATE ->
+          subject.runId() == null
+              ? work(subject, executed)
+              : Resources.launched(
+                  subject.runId(),
+                  subject.project(),
+                  null,
+                  executed.stream().findFirst().orElse(null));
       default ->
           work(subject, Stream.concat(subject.owners().stream(), executed.stream()).toList());
     };
@@ -230,19 +238,23 @@ public final class EventAuthority {
   /**
    * Whether a sender {@link Access} allows is taken at its word: what an event the machinery acts
    * on reports, only whoever speaks for this box reports first-hand, and anyone else only retells,
-   * never what this box executed itself; an announcement is retold by a voice, about a
-   * conversation; a person's narration, an admin's included, only of a run this box executed, since
-   * what another box's run did reaches this one by sync. An event about the box is decided by the
-   * action alone.
+   * never what this box executed itself; an announcement is retold by a person's voice, about a
+   * conversation, and never by an agent, which retells nothing (its socket strips the source); a
+   * person's narration, an admin's included, only of a run this box executed, since what another
+   * box's run did reaches this one by sync, and a run's own principal of itself, since only the box
+   * executing a run holds its credential, as {@link Access#ownRun} decides it of {@code resource},
+   * what the narration is taken on. An event about the box is decided by the action alone.
    */
-  private boolean believed(Actor actor, Action action, Subject subject, boolean retold) {
+  private boolean believed(
+      Actor actor, Action action, Subject subject, Resource resource, boolean retold) {
     var firstHand = speaksForBox(actor);
     return switch (action) {
       case OPERATE_BOX -> true;
-      case NARRATE -> subject.executedHere();
+      case NARRATE -> subject.executedHere() || Access.ownRun(actor, resource);
       case POST ->
           firstHand
               || (retold
+                  && !actor.agentLane()
                   && Strings.isNotBlank(actor.actingFde())
                   && subject.conversation() != null);
       default -> firstHand || (retold && !subject.executedHere());
@@ -252,13 +264,33 @@ public final class EventAuthority {
   /**
    * The refusal, of the {@code kind} it was decided as, worded as an event's: only this rule knows
    * the event's type and what it would make this box do, as only a door knows its answer for an
-   * absent id. A read-only sender may publish nothing. Otherwise the event speaks for this box,
-   * which only its FDE or an admin does; or it reports what this box observed of work the sender
-   * owns, that this box executed, or that a run narrates, which only they report first-hand; or it
-   * makes this box act on work the sender may not drive.
+   * absent id. {@code fix} is the decision's own, null for a sender it allowed but did not believe,
+   * which an agent never is of its own run. An agent narrating anything but its own run hears that
+   * it narrates only that, and every type but narration and an announcement is not for agents. A
+   * read-only sender may publish nothing. Otherwise the event speaks for this box, which only its
+   * FDE or an admin does; or it reports what this box observed of work the sender owns, that this
+   * box executed, or that a run narrates, which only they report first-hand; or it makes this box
+   * act on work the sender may not drive.
    */
   private static Optional<Refusal> refused(
-      Refusal.Kind kind, Actor actor, String type, Action action, Subject subject) {
+      Refusal.Kind kind, Remedy fix, Actor actor, String type, Action action, Subject subject) {
+    if (actor.agentLane() && action != Action.POST) {
+      return action == Action.NARRATE
+          ? Refusal.of(
+              Refusal.Kind.NOT_OWNER,
+              "Event type '"
+                  + type
+                  + "' narrates "
+                  + described(subject)
+                  + ", and '"
+                  + actor.handle()
+                  + "' may narrate only its own run.",
+              fix)
+          : Refusal.of(
+              Refusal.Kind.NOT_PUBLISHABLE,
+              "Event type '" + type + "' is not available to agent principals.",
+              "Ask the FDE the agent works for, or an admin, to publish it.");
+    }
     if (kind == Refusal.Kind.READ_ONLY) {
       return Optional.of(Refusal.readOnly("publish events"));
     }
@@ -326,35 +358,6 @@ public final class EventAuthority {
                 ? "' names " + named(subject) + ", which this box does not hold."
                 : "' names no work this box holds."),
         "Publish events only about work in the projects you are granted.");
-  }
-
-  private Optional<Refusal> principal(Actor actor, String type, Action action, Subject subject) {
-    if (action != Action.NARRATE) {
-      return Refusal.of(
-          Refusal.Kind.NOT_PUBLISHABLE,
-          "Event type '" + type + "' is not available to agent principals.",
-          "Ask the FDE the agent works for, or an admin, to publish it.");
-    }
-    var work =
-        Optional.ofNullable(subject.runId())
-            .flatMap(runs::findById)
-            .map(run -> run.resource(Actor.system(), specs::findById))
-            .orElseGet(() -> work(subject, List.of()));
-    return switch (Access.decide(actor, Action.NARRATE, work)) {
-      case Decision.Allowed allowed -> Optional.empty();
-      case Decision.NotFound notFound -> unseen(type, subject);
-      case Decision.Refused refused ->
-          Refusal.of(
-              Refusal.Kind.NOT_OWNER,
-              "Event type '"
-                  + type
-                  + "' narrates "
-                  + described(subject)
-                  + ", and '"
-                  + actor.handle()
-                  + "' may narrate only its own run.",
-              refused.refusal().fix());
-    };
   }
 
   private static String described(Subject subject) {

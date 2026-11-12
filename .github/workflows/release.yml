@@ -71,7 +71,7 @@ jobs:
           kind: release
 
       - name: Build native image
-        run: mvn package -Pnative -DskipTests
+        run: mvn package -Pnative -DskipTests -Djacoco.skip=true -Dspotless.check.skip=true
 
       - name: Smoke test
         run: |

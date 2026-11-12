@@ -28,25 +28,38 @@ class PolicyTest {
     var ownWork =
         assertThrows(
             IllegalArgumentException.class,
-            () -> new Policy.Row(Action.POST, Cell.NO, Cell.OWN_WORK, Cell.YES, Cell.YES, Cell.NO));
+            () ->
+                new Policy.Row(
+                    Action.POST, Cell.NO, Cell.OWN_WORK, Cell.YES, Cell.YES, Cell.NO, Cell.YES));
     var owner =
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                new Policy.Row(Action.CHANGE, Cell.NO, Cell.OWNER, Cell.YES, Cell.NO, Cell.OWNER));
+                new Policy.Row(
+                    Action.CHANGE, Cell.NO, Cell.OWNER, Cell.YES, Cell.NO, Cell.NO, Cell.OWNER));
+
+    var itsOwn =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new Policy.Row(
+                    Action.NARRATE, Cell.NO, Cell.ITS_OWN, Cell.YES, Cell.YES, Cell.NO, Cell.NO));
 
     assertEquals(
         "The row of POST gives a role own work, which only an agent has.", ownWork.getMessage());
     assertEquals(
+        "The row of NARRATE gives a role own work, which only an agent has.", itsOwn.getMessage());
+    assertEquals(
         "The row of CHANGE gives a lane ownership, which only a role decides.", owner.getMessage());
     assertThrows(
         NullPointerException.class,
-        () -> new Policy.Row(Action.POST, Cell.NO, Cell.YES, Cell.YES, Cell.YES, null));
+        () -> new Policy.Row(Action.POST, Cell.NO, Cell.YES, Cell.YES, Cell.YES, Cell.NO, null));
   }
 
   @Test
   void theTableHoldsOneRowPerActionInOrder() {
-    var row = new Policy.Row(Action.READ, Cell.YES, Cell.YES, Cell.YES, Cell.YES, Cell.YES);
+    var row =
+        new Policy.Row(Action.READ, Cell.YES, Cell.YES, Cell.YES, Cell.YES, Cell.YES, Cell.YES);
 
     var thrown = assertThrows(IllegalArgumentException.class, () -> Policy.indexed(List.of(row)));
 
@@ -58,7 +71,7 @@ class PolicyTest {
   }
 
   @Test
-  void onlyAnAgentsColumnHearsAConversationThroughTheVoicesThatSteerIt() {
+  void onlyAnAgentHearsAConversationThroughTheVoicesThatSteerIt() {
     var heard =
         Arrays.stream(Actor.Lane.values())
             .collect(
@@ -74,6 +87,7 @@ class PolicyTest {
             Actor.Lane.API, false,
             Actor.Lane.AGENT, true,
             Actor.Lane.ROOM, true,
+            Actor.Lane.CONTAINER, false,
             Actor.Lane.SYNC, false,
             Actor.Lane.MAIN, false,
             Actor.Lane.SYSTEM, false),
@@ -81,7 +95,7 @@ class PolicyTest {
   }
 
   @Test
-  void aPersonReadsTheColumnOfTheirRoleAndAnAgentTheColumnOfItsLaneToo() {
+  void aPersonReadsTheColumnOfTheirRoleAndAnAgentOrAContainerTheColumnOfItsLaneToo() {
     assertEquals(
         Map.of(Role.VIEWER, Column.VIEWER, Role.MEMBER, Column.MEMBER, Role.ADMIN, Column.ADMIN),
         Arrays.stream(Role.values()).collect(Collectors.toMap(Function.identity(), Column::role)));
@@ -93,7 +107,8 @@ class PolicyTest {
             Actor.Lane.MAIN, Optional.empty(),
             Actor.Lane.SYSTEM, Optional.empty(),
             Actor.Lane.AGENT, Optional.of(Column.WORK_AGENT),
-            Actor.Lane.ROOM, Optional.of(Column.ROOM_AGENT)),
+            Actor.Lane.ROOM, Optional.of(Column.ROOM_AGENT),
+            Actor.Lane.CONTAINER, Optional.of(Column.CONTAINER)),
         Arrays.stream(Actor.Lane.values())
             .collect(Collectors.toMap(Function.identity(), Column::lane)));
   }

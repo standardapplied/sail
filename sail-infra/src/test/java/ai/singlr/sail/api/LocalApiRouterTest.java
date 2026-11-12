@@ -28,7 +28,6 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.SyncBox;
-import ai.singlr.sail.sync.SyncEngine;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -68,58 +67,13 @@ class LocalApiRouterTest {
         method, path, Map.of(), auth(), body.getBytes(StandardCharsets.UTF_8));
   }
 
-  /** Operations whose box reports its sync health and holds no parked conflict. */
-  private static class SyncingOperations extends TestOperations {
-    @Override
-    public SyncStatus syncStatus() {
-      return new SyncStatus(
-          "node",
-          "main",
-          new SyncEngine.Report(1, 2, 3, 4),
-          "in_sync",
-          null,
-          null,
-          0,
-          null,
-          null,
-          null);
-    }
-
-    @Override
-    public List<SyncConflicts.Conflict> conflicts() {
-      return List.of();
-    }
-  }
-
   @Test
-  void theBoxsPersonReadsItsSyncHealthAndNoRunDoes() {
-    var local = new SocketDoor(new SyncingOperations());
-    var health = new LocalApiRequest("GET", "/v1/sync", Map.of(), boxAuth(), new byte[0]);
-
-    assertEquals("main", local.ask(health).body().get("main"));
-    assertEquals(
-        "403 {schema_version=1, error={code=agent_lane_forbidden, message=Agent principals cannot"
-            + " operate boxes., action=Only an operator lane (CLI or API token) may do this., field_errors=[]}}",
-        answer(local.ask(get("/v1/sync", Map.of()))));
-    assertEquals(
-        "403 {schema_version=1, error={code=agent_lane_forbidden, message=Agent principals cannot"
-            + " operate boxes., action=Only an operator lane (CLI or API token) may do this., field_errors=[]}}",
-        answer(
-            local.ask(new LocalApiRequest("GET", "/v1/sync", Map.of(), roomAuth(), new byte[0]))));
-    assertEquals(
-        "403 {schema_version=1, error={code=forbidden_not_assignee, message=Box 'ada' belongs to"
-            + " 'ada', not you., action=Ask ada to operate it, or have an admin do it.,"
-            + " field_errors=[]}}",
-        answer(
-            new SocketDoor(
-                    new SyncingOperations() {
-                      @Override
-                      public String boxFde() {
-                        return "ada";
-                      }
-                    })
-                .ask(health)),
-        "the box gate decides on the box the router serves, not on the caller's own");
+  void noSocketCallerReadsSyncHealth() {
+    for (var auth : List.of(boxAuth(), auth(), roomAuth())) {
+      assertEquals(
+          "404 {error=No route for /v1/sync}",
+          answer(router.ask(new LocalApiRequest("GET", "/v1/sync", Map.of(), auth, new byte[0]))));
+    }
   }
 
   private static String answer(ApiResponse response) {
@@ -131,7 +85,6 @@ class LocalApiRouterTest {
     var answers = new LinkedHashMap<String, String>();
     for (var asked :
         List.of(
-            "POST /v1/sync",
             "POST /v1/conflicts",
             "GET /v1/conflicts/auth/resolve",
             "POST /v1/whoami",
@@ -153,7 +106,6 @@ class LocalApiRouterTest {
 
     assertEquals(
         List.of(
-            "405 {error=Only GET is available.}",
             "405 {error=Only GET is available.}",
             "405 {error=Conflict resolution accepts POST}",
             "405 {error=whoami accepts GET}",
@@ -229,8 +181,9 @@ class LocalApiRouterTest {
             + " characters.",
         refusal(router.ask(form("PUT", "/v1/projects/Bad_Name/zz", ""))));
     assertEquals(
-        "404 project_not_in_catalog Project 'nope' is not in the catalog.",
-        refusal(router.ask(get("/v1/projects/nope/zz", Map.of()))));
+        "404 {error=No route for /v1/projects/nope/zz}",
+        answer(router.ask(get("/v1/projects/nope/zz", Map.of()))),
+        "a run reads every project its person does, as the person's own credential");
     assertEquals(
         "404 {error=No route for /v1/projects/acme/zz}",
         answer(router.ask(form("DELETE", "/v1/projects/acme/zz", ""))));
@@ -243,9 +196,16 @@ class LocalApiRouterTest {
 
   @Test
   void agentsReadConflictsButCannotTriggerSync() {
-    var local = new SocketDoor(new SyncingOperations());
+    var local =
+        new SocketDoor(
+            new TestOperations() {
+              @Override
+              public List<SyncConflicts.Conflict> conflicts() {
+                return List.of();
+              }
+            });
     assertEquals(List.of(), local.ask(get("/v1/conflicts", Map.of())).body().get("conflicts"));
-    assertEquals(405, local.ask(form("POST", "/v1/sync", "")).status());
+    assertEquals(404, local.ask(form("POST", "/v1/sync", "")).status());
     assertEquals(405, local.ask(form("POST", "/v1/conflicts", "")).status());
     assertEquals(400, local.ask(form("POST", "/v1/conflicts/spec/resolve", "")).status());
     assertEquals(404, local.ask(form("POST", "/v1/conflicts/resolve", "strategy=mine")).status());
@@ -428,7 +388,7 @@ class LocalApiRouterTest {
 
   private static LocalApiRequest merge(String template) {
     assertTrue(template.contains("\ntitle: local\n"), template);
-    var headers = new HashMap<>(auth());
+    var headers = new HashMap<>(boxAuth());
     headers.put("content-type", "application/json");
     var body =
         YamlUtil.dumpJson(
@@ -757,29 +717,6 @@ class LocalApiRouterTest {
   }
 
   @Test
-  void aSpeclessRoomSessionPostsOnlyToItsOwnRoom() {
-    var own =
-        router.ask(
-            new LocalApiRequest(
-                "POST",
-                "/v1/specs/lounge/messages",
-                Map.of(),
-                roomAuth(),
-                "body=hi".getBytes(StandardCharsets.UTF_8)));
-    assertEquals(201, own.status(), "a room-keyed run owns its own conversation");
-
-    var foreign =
-        router.ask(
-            new LocalApiRequest(
-                "POST",
-                "/v1/specs/auth/messages",
-                Map.of(),
-                roomAuth(),
-                "body=hi".getBytes(StandardCharsets.UTF_8)));
-    assertEquals(403, foreign.status(), "another room is never this session's to post into");
-  }
-
-  @Test
   void aRunReadingItsOwnRoomAcknowledgesExactlyTheMessagesShown() {
     var response = router.ask(get("/v1/specs/auth/messages", Map.of()));
 
@@ -1012,7 +949,7 @@ class LocalApiRouterTest {
     assertEquals(200, response.status());
     assertEquals(TestOperations.BOX_HANDLE, response.body().get("handle"));
     assertEquals("member", response.body().get("role"));
-    assertEquals("cli", response.body().get("lane"));
+    assertEquals("container", response.body().get("lane"));
     assertEquals("box", response.body().get("credential"));
     assertFalse(response.body().containsKey("run_id"));
   }
@@ -1023,7 +960,7 @@ class LocalApiRouterTest {
         new TestOperations() {
           @Override
           public Optional<Actor> boxActorForCredential(String credential) {
-            return Optional.of(new Actor("impostor", Role.ADMIN, Actor.Lane.CLI));
+            return Optional.of(new Actor("impostor", Role.ADMIN, Actor.Lane.CONTAINER));
           }
         };
     var response = new SocketDoor(greedy).ask(get("/v1/whoami", Map.of()));

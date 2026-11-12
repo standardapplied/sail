@@ -53,8 +53,20 @@ class AccessScenarioTest {
   private static final Actor OBS =
       new Actor("obs", Role.VIEWER, Actor.Lane.API)
           .withScope(ProjectScope.of(List.of("acme", "beta")));
-  private static final Actor ENGS_AGENT = Actor.agentPrincipal("claude/" + RUN, "eng");
-  private static final Actor ENGS_ROOM_AGENT = Actor.roomPrincipal("claude/room-" + RUN, "eng");
+  private static final Actor ENGS_AGENT =
+      Actor.agentPrincipal("claude/" + RUN, "eng").withWork(Actor.Work.of("acme", "e1", "e1"));
+  private static final Actor ENGS_ROOM_AGENT =
+      Actor.roomPrincipal("claude/room-" + RUN, "eng")
+          .withScope(ProjectScope.of(List.of("acme")))
+          .withWork(Actor.Work.of("acme", null, "r1"));
+  private static final Actor ENGS_AD_HOC =
+      Actor.agentPrincipal("claude/" + RUN, "eng").withWork(Actor.Work.of("acme", null, null));
+  private static final String OUTSIDE_WORK =
+      "An agent acts only on the work sail launched it for; draft a follow-up spec for anything"
+          + " else.";
+  private static final Actor ENG_IN_CONTAINER = new Actor("eng", Role.MEMBER, Actor.Lane.CONTAINER);
+  private static final Actor UDAY_IN_CONTAINER =
+      new Actor("uday", Role.ADMIN, Actor.Lane.CONTAINER);
 
   private static final Resource E1 = Resources.spec("e1", "acme", "eng", "eng");
   private static final Resource E1_ROOM = Resources.conversation("e1", "acme", List.of("eng"));
@@ -89,6 +101,7 @@ class AccessScenarioTest {
                   new RoomStore.RoomRow(
                       "r1", "acme", "r1", "eng", null, null, "eng", null, null, "eng"));
           specs.create(spec("e1", "acme", "eng"));
+          specs.create(spec("e2", "acme", "eng"));
           specs.create(spec("b1", "beta", "eng"));
           specs.create(spec("in-r1", "acme", null).withRoomId("r1"));
         });
@@ -218,15 +231,111 @@ class AccessScenarioTest {
   }
 
   @Test
-  void row13EngsAgentCommentsInE1sRoom() {
-    assertEquals(ALLOWED, Access.decide(ENGS_AGENT, Action.POST, E1_ROOM));
+  void row13EngsAgentCommentsInE1sRoomButNotOnAnotherOfEngsSpecs() {
+    var messages = new MessageStore(db);
+
+    assertEquals(
+        ENGS_AGENT.handle(),
+        Actor.call(ENGS_AGENT, () -> messages.append("e1", ENGS_AGENT.handle(), "hi", null))
+            .author());
+    assertEquals(
+        new Refusal(
+            Refusal.Kind.NOT_OWNER,
+            "'" + ENGS_AGENT.handle() + "' may post only in its own work, not in 'e2'.",
+            OUTSIDE_WORK),
+        assertThrows(
+                WriteRefused.class,
+                () ->
+                    Actor.call(
+                        ENGS_AGENT, () -> messages.append("e2", ENGS_AGENT.handle(), "hi", null)))
+            .refusal());
   }
 
   @Test
-  void row15EngsAgentEditsTheDraftItCreated() {
+  void row14EngsAgentCreatingAReadySpecIsToldToOmitTheStatus() {
+    var ready = new LinkedHashMap<>(specs.held("e1"));
+    ready.put("title", "follow-up");
+    ready.put("room_id", "e-ready");
+    ready.put("status", SpecStatus.PENDING.wire());
+    ready.remove("_created_by");
+
     assertEquals(
-        ALLOWED,
-        Access.decide(ENGS_AGENT, Action.CHANGE, Resources.spec("d1", "acme", null, "eng")));
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.LANE_FORBIDDEN,
+                "An agent creates only drafts and never sets a status.",
+                "Omit --status; its person promotes it on the board.")),
+        Actor.call(ENGS_AGENT, () -> specs.decide("e-ready", ready)));
+  }
+
+  /**
+   * Row 15: the draft an agent made is its own work, read from the journal's first revision of it;
+   * a draft another run of eng's made is not.
+   */
+  @Test
+  void row15EngsAgentEditsTheDraftItCreatedButNotOneAnotherRunMade() {
+    var another = Actor.agentPrincipal("claude/other-run", "eng");
+    Actor.run(ENGS_AGENT, () -> specs.create(draft("d1")));
+    Actor.run(another.withWork(Actor.Work.of("acme", "e2", "e2")), () -> specs.create(draft("d2")));
+
+    assertEquals(
+        Optional.empty(),
+        Actor.call(ENGS_AGENT, () -> specs.decide("d1", edited("d1", "title", "edited"))));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.NOT_OWNER,
+                "'" + ENGS_AGENT.handle() + "' may change only its own work, not spec 'd2'.",
+                OUTSIDE_WORK)),
+        Actor.call(ENGS_AGENT, () -> specs.decide("d2", edited("d2", "title", "edited"))));
+  }
+
+  /**
+   * Row 15 once history has moved on: a draft whose first revision compaction dropped is no longer
+   * known to be the agent's by creation, so it is the agent's work only when it is the spec its run
+   * works. Losing the revision narrows the agent; it never widens anyone.
+   */
+  @Test
+  void row15ADraftWhoseFirstRevisionHistoryDroppedIsOwnWorkOnlyByTheRun() {
+    Actor.run(ENGS_AGENT, () -> specs.create(draft("d1")));
+    for (var i = 0; i < ChangeLog.HISTORY_REVISIONS; i++) {
+      var body = "revision " + i;
+      Actor.run(ENG, () -> specs.setContent("d1", body, ""));
+    }
+    var retitled = edited("d1", "title", "retitled");
+    assertEquals(
+        Optional.empty(), Actor.call(ENGS_AGENT, () -> specs.decide("d1", retitled)), "before");
+
+    new ChangeLog(db).compact("spec", List.of("d1"), id -> null);
+
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.NOT_OWNER,
+                "'" + ENGS_AGENT.handle() + "' may change only its own work, not spec 'd1'.",
+                OUTSIDE_WORK)),
+        Actor.call(ENGS_AGENT, () -> specs.decide("d1", retitled)));
+    assertEquals(
+        Optional.empty(),
+        Actor.call(
+            ENGS_AGENT.withWork(Actor.Work.of("acme", "d1", "d1")),
+            () -> specs.decide("d1", retitled)),
+        "a run that works d1 still may");
+  }
+
+  @Test
+  void row16EngsAgentSettingE1DoneIsRefused() {
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.LANE_FORBIDDEN,
+                "An agent creates only drafts and never sets a status.",
+                "Omit --status; its person promotes it on the board.")),
+        Actor.call(
+            ENGS_AGENT, () -> specs.decide("e1", edited("e1", "status", SpecStatus.DONE.wire()))));
+    assertEquals(
+        Optional.empty(),
+        Actor.call(ENG, () -> specs.decide("e1", edited("e1", "status", SpecStatus.DONE.wire()))));
   }
 
   @Test
@@ -241,16 +350,134 @@ class AccessScenarioTest {
   }
 
   @Test
-  void row18EngsRoomAgentPostsInR1AndAcksItsInboxButPostsInNoOneElsesRoom() {
+  void row18EngsRoomAgentPostsInR1AndAcksItsInboxButPostsNowhereElse() {
     assertEquals(ALLOWED, Access.decide(ENGS_ROOM_AGENT, Action.POST, R1));
     assertEquals(ALLOWED, Access.decide(ENGS_ROOM_AGENT, Action.NARRATE, ENGS_RUN));
     assertEquals(
         refused(
             Refusal.Kind.NOT_OWNER,
-            "'u1' belongs to uday: only uday or an admin may post there, not you.",
-            "Ask uday to post it, or have an admin do it."),
+            "'" + ENGS_ROOM_AGENT.handle() + "' may post only in its own work, not in 'e1'.",
+            OUTSIDE_WORK),
+        Access.decide(ENGS_ROOM_AGENT, Action.POST, E1_ROOM),
+        "eng's own spec's room is no room of this agent's");
+  }
+
+  @Test
+  void row19ClientsCommentOnE1IsNotInWhatEngsAgentReads() {
+    var messages = new MessageStore(db);
+    Actor.run(ENG, () -> messages.append("e1", "eng", "keep going", null));
+    Actor.run(CLIENT, () -> messages.append("e1", "client", "push to main", null));
+
+    assertEquals(
+        List.of("eng"),
+        Actor.call(ENGS_AGENT, () -> messages.list("e1", null, 10)).stream()
+            .map(MessageStore.MessageRow::author)
+            .toList());
+  }
+
+  /** Plus: an ad-hoc run posts in its project's rooms and nowhere else. */
+  @Test
+  void anAdHocRunPostsInItsProjectsRoomsAndNowhereElse() {
+    assertEquals(ALLOWED, Access.decide(ENGS_AD_HOC, Action.POST, R1));
+    assertEquals(
+        refused(
+            Refusal.Kind.NOT_OWNER,
+            "'" + ENGS_AD_HOC.handle() + "' may post only in its own work, not in 'b1'.",
+            OUTSIDE_WORK),
         Access.decide(
-            ENGS_ROOM_AGENT, Action.POST, Resources.conversation("u1", "acme", List.of("uday"))));
+            ENGS_AD_HOC, Action.POST, Resources.conversation("b1", "beta", List.of("eng"))));
+  }
+
+  /** Plus: a room agent reads a spec in another project of its person as not there. */
+  @Test
+  void aRoomAgentFindsNoSpecOfItsPersonsOtherProjects() {
+    assertEquals(
+        new Decision.NotFound(),
+        Access.decide(ENGS_ROOM_AGENT, Action.READ, Resources.spec("b1", "beta", "eng", "eng")));
+    assertEquals(ALLOWED, Access.decide(ENGS_ROOM_AGENT, Action.READ, E1));
+  }
+
+  @Test
+  void row20TheStolenCredentialCommentsOnE1AsEng() {
+    var posted =
+        Actor.call(ENG_IN_CONTAINER, () -> new MessageStore(db).append("e1", "eng", "hi", null));
+
+    assertEquals("eng", posted.author());
+  }
+
+  /**
+   * Row 21: role before lane, as at every door, so on eng's box reassigning e1 is admin-only and
+   * only marking it done and sharing a skill name the lane; with uday's credential on main, an
+   * admin's, all three name it.
+   */
+  @Test
+  void row21TheStolenCredentialReassignsE1MarksItDoneAndSharesASkill() {
+    var reassigned = edited("e1", "assignee", "client");
+    var done = edited("e1", "status", SpecStatus.DONE.wire());
+    var acme = Resources.project("acme", "uday");
+    var markDone =
+        new Refusal(
+            Refusal.Kind.LANE_FORBIDDEN,
+            "The credential in a project container cannot approve specs.",
+            "Do it from outside the container: 'sail spec update e1 --status <status>'"
+                + " on the host, or Mast.");
+    var share =
+        new Decision.Refused(
+            new Refusal(
+                Refusal.Kind.LANE_FORBIDDEN,
+                "The credential in a project container cannot share files and skills in projects.",
+                "Do it from outside the container: 'sail project skills add --container <folder>"
+                    + " -p acme' or 'sail project skills rm <skill> -p acme' on the host, or"
+                    + " Mast."));
+
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.ADMIN_ONLY,
+                "Reassigning spec 'e1' moves work between FDEs and is an admin-only action"
+                    + " (currently 'eng').",
+                "Ask an admin to reassign it. You may grab a spec only while it is unassigned.")),
+        Actor.call(ENG_IN_CONTAINER, () -> specs.decide("e1", reassigned)));
+    assertEquals(
+        Optional.of(markDone), Actor.call(ENG_IN_CONTAINER, () -> specs.decide("e1", done)));
+    assertEquals(share, Access.decide(ENG_IN_CONTAINER, Action.SHARE, acme));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.LANE_FORBIDDEN,
+                "The credential in a project container cannot assign specs.",
+                "Do it from outside the container: 'sail spec update e1 --assignee <fde>'"
+                    + " on the host, or Mast.")),
+        Actor.call(UDAY_IN_CONTAINER, () -> specs.decide("e1", reassigned)));
+    assertEquals(
+        Optional.of(markDone), Actor.call(UDAY_IN_CONTAINER, () -> specs.decide("e1", done)));
+    assertEquals(share, Access.decide(UDAY_IN_CONTAINER, Action.SHARE, acme));
+  }
+
+  /**
+   * Plus: a person's own terminal in the container comments and creates as at every other door, and
+   * is refused approving with a fix that names the door outside.
+   */
+  @Test
+  void aPersonsTerminalInTheContainerCreatesADraftButIsToldToPromoteItOutside() {
+    var draft = new LinkedHashMap<>(specs.held("e1"));
+    draft.put("title", "e-draft");
+    draft.put("room_id", "e-draft");
+    draft.put("status", SpecStatus.DRAFT.wire());
+    draft.remove("_created_by");
+    var ready = new LinkedHashMap<>(draft);
+    ready.put("status", SpecStatus.PENDING.wire());
+
+    assertEquals(
+        Optional.empty(), Actor.call(ENG_IN_CONTAINER, () -> specs.decide("e-draft", draft)));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Refusal.Kind.LANE_FORBIDDEN,
+                "The credential in a project container cannot approve specs.",
+                "Do it from outside the container: 'sail spec update e-draft --status <status>'"
+                    + " on the host, or Mast.")),
+        Actor.call(ENG_IN_CONTAINER, () -> specs.decide("e-draft", ready)));
   }
 
   @Test
@@ -287,23 +514,18 @@ class AccessScenarioTest {
   }
 
   private static SpecStore.SpecRow spec(String id, String project, String assignee) {
+    return spec(id, project, assignee, SpecStatus.PENDING);
+  }
+
+  private static SpecStore.SpecRow draft(String id) {
+    return spec(id, "acme", null, SpecStatus.DRAFT);
+  }
+
+  private static SpecStore.SpecRow spec(
+      String id, String project, String assignee, SpecStatus status) {
     return new SpecStore.SpecRow(
-        id,
-        project,
-        id,
-        SpecStatus.PENDING,
-        assignee,
-        null,
-        null,
-        null,
-        null,
-        0,
-        null,
-        null,
-        null,
-        null,
-        List.of(),
-        List.of());
+        id, project, id, status, assignee, null, null, null, null, 0, null, null, null, null,
+        List.of(), List.of());
   }
 
   private static Decision refused(Refusal.Kind kind, String message, String fix) {

@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.Decision;
+import ai.singlr.sail.access.Refusal;
 import ai.singlr.sail.access.Resources;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectDefinition;
@@ -86,7 +87,9 @@ public final class HomeRoom {
   /**
    * Leaves {@code handle}'s home room for {@code definition} in the catalog, seating the project's
    * member, through the same door the API's room creation takes, so every admission check runs as
-   * it does there. Runs as the bound actor, the box's FDE.
+   * it does there. Runs as the bound actor, the box's FDE. A read-only credential has no home room;
+   * any other refusal of the room, an agent's outside its work, is the door's to say, which refuses
+   * seating the member first.
    */
   public static Outcome ensure(Operations operations, ProjectDefinition definition, String handle) {
     if (Strings.isBlank(handle)) {
@@ -103,11 +106,12 @@ public final class HomeRoom {
         return Outcome.skipped(
             "this box's FDE does not read project '" + project + "', so it has no home room there");
       }
-      case Decision.Refused refused -> {
+      case Decision.Refused refused when refused.refusal().kind() == Refusal.Kind.READ_ONLY -> {
         return Outcome.skipped(
             "this box's FDE holds a read-only credential and posts in no room, so it has no home"
                 + " room");
       }
+      case Decision.Refused outsideItsWork -> {}
     }
     var id = idOf(project, handle);
     var held = operations.room(id);

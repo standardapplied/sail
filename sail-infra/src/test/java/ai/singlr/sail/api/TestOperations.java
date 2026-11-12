@@ -82,7 +82,7 @@ class TestOperations implements Operations {
     if (!BOX_CREDENTIAL.equals(credential)) {
       return Operations.super.boxActorForCredential(credential);
     }
-    return Optional.of(new Actor(BOX_HANDLE, Role.MEMBER, Actor.Lane.CLI));
+    return Optional.of(new Actor(BOX_HANDLE, Role.MEMBER, Actor.Lane.CONTAINER));
   }
 
   /** Every run here acts for an active member FDE, so its lane decides its role. */

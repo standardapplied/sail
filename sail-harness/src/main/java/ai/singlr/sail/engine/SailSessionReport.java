@@ -21,9 +21,10 @@ import java.util.concurrent.TimeoutException;
  * reports with its run credential and the server records the conversation on the run row — so the
  * fix lane (run id, no {@code SAIL_SPEC_ID}) reports too. An interactive session pinned to a room
  * ({@code SAIL_ROOM_ID}, exported by a room-bound terminal session) has no run row: it reports with
- * the box's ambient credential and the server emits {@code agent_conversation_started} in the room,
- * naming the CLI the hook config passes as the script's one argument. A session with neither — a
- * reviewer, an engineer's bare shell — is inert by construction. Last write wins server-side: a
+ * the box's ambient credential, found as every helper finds its credential ({@link
+ * SocketPreamble#credentialLookup}), and the server emits {@code agent_conversation_started} in the
+ * room, naming the CLI the hook config passes as the script's one argument. A session with neither
+ * — a reviewer, an engineer's bare shell — is inert by construction. Last write wins server-side: a
  * resume, clear, or compact restart simply re-reports the new conversation, so the row always names
  * the invocation a human would want to attach to. Both CLIs feed the same script — Claude Code and
  * Codex SessionStart payloads carry {@code session_id} and {@code transcript_path} under the same
@@ -70,13 +71,7 @@ public final class SailSessionReport {
       RUN_ID="${SAIL_RUN_ID:-}"
       ROOM_ID="${SAIL_ROOM_ID:-}"
       [ -n "$RUN_ID" ] || [ -n "$ROOM_ID" ] || exit 0
-      SOCKET="__SAIL_API_SOCKET__"
-      [ -S "$SOCKET" ] || exit 0
-      CREDENTIAL="${SAIL_RUN_CREDENTIAL:-}"
-      if [ -z "$CREDENTIAL" ] && [ -z "$RUN_ID" ]; then
-        BOX_CREDENTIAL_FILE="$(dirname "$SOCKET")/box.credential"
-        [ -r "$BOX_CREDENTIAL_FILE" ] && CREDENTIAL="$(tr -d '[:space:]' < "$BOX_CREDENTIAL_FILE")"
-      fi
+      __LOOKUP__[ -S "$SOCKET" ] || exit 0
       [ -n "$CREDENTIAL" ] || exit 0
       command -v curl >/dev/null 2>&1 || exit 0
       command -v python3 >/dev/null 2>&1 || exit 0
@@ -119,7 +114,7 @@ public final class SailSessionReport {
 
   /** Returns the script content that {@link #install(String)} writes. Pure function. */
   public static String scriptContent() {
-    return SCRIPT.replace("__SAIL_API_SOCKET__", SailPaths.apiSocketContainerPath().toString());
+    return SCRIPT.replace("__LOOKUP__", SocketPreamble.credentialLookup());
   }
 
   /**

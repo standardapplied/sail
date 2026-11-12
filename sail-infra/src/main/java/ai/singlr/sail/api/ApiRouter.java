@@ -246,6 +246,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(DELETE, PROJECT + "/files/{path...}", journal, this::removeFile),
         route(Route.ANY, PROJECT + "/files", unserved, this::unservedFile),
         route(Route.ANY, PROJECT + "/files/{path...}", unserved, this::unservedFile),
+        route(POST, PROJECT + "/skills", box, this::shareSkill),
+        route(DELETE, PROJECT + "/skills/{name}", Gate.decides(Action.SHARE), this::unshareSkill),
         route(POST, PROJECT + "/serve", Gate.decides(Action.SERVE), this::serve),
         route(
             DELETE,
@@ -551,6 +553,31 @@ public final class ApiRouter implements HttpHandler, RouteTable {
             call.param("section"),
             body.get("value"),
             call.exchange().getRequestHeaders().getFirst("If-Match")));
+  }
+
+  /**
+   * Shares the folder {@code folder}, a path inside the project's container, as skill {@code name}
+   * (the folder's own name when absent): the door a person outside the container shares one by. It
+   * reads a container on this box, so it is operating the box (its own person or an admin, the
+   * route's gate) as well as sharing in the project, which the operation decides; both before the
+   * folder is read. Removing a skill reads no container, and is Share alone.
+   */
+  private ApiResponse shareSkill(Call call) throws Exception {
+    var body = call.body();
+    return ApiResponse.ok(
+        operations
+            .skills()
+            .shareFromContainer(
+                call.project(),
+                Objects.toString(body.get("folder"), ""),
+                Objects.toString(body.get("name"), null)));
+  }
+
+  /** Stops sharing the project's skill {@code name}. */
+  private ApiResponse unshareSkill(Call call) throws IOException {
+    var name = call.param("name");
+    return ApiResponse.ok(
+        Map.of("name", name, "files", operations.skills().remove(call.project(), name)));
   }
 
   /**

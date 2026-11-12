@@ -18,9 +18,12 @@ import java.util.Set;
  * Everyone a door binds today, each named by a stable label: every role on every lane that can
  * carry it, each scope a grant can give, and each relation to the work the corpus asks about.
  * {@code ada} owns most of that work, {@code bob} is another member, {@code root} the admin; their
- * agents act for them through the runs the corpus's box holds. A run's agent is never bound above
- * member nor a room's agent above viewer ({@code RoleRule} caps them), and an admin is never scoped
- * ({@code FdeStore}), so neither appears.
+ * agents act for them through the runs the corpus's box holds, each on its run's work: ada's agent
+ * builds {@code s-ada} and bob's {@code s-bob}, in their own rooms, and their room agents sit in
+ * {@code lobby} and {@code den}, reading acme alone of what their person reads, as the role rule
+ * narrows a read-only run to its own project. A run's agent is never bound above member nor a
+ * room's agent above viewer ({@code RoleRule} caps them), and an admin is never scoped ({@code
+ * FdeStore}), so neither appears.
  */
 public final class Cast {
 
@@ -53,12 +56,14 @@ public final class Cast {
   private Cast() {}
 
   /**
-   * The whole cast: people on the host CLI, an HTTP token and a sync session, a machine token, run
-   * and room agents, and Sail itself as main and as this box.
+   * The whole cast: people on the host CLI, an HTTP token, a sync session and the box credential in
+   * a project container, a machine token, run and room agents, and Sail itself as main and as this
+   * box.
    */
   public static List<Member> everyone() {
     var cast = new ArrayList<Member>();
-    for (var lane : List.of(Actor.Lane.CLI, Actor.Lane.API, Actor.Lane.SYNC)) {
+    for (var lane :
+        List.of(Actor.Lane.CLI, Actor.Lane.API, Actor.Lane.SYNC, Actor.Lane.CONTAINER)) {
       cast.addAll(people(lane, SCOPES));
     }
     cast.add(member("api member machine all", new Actor(null, Role.MEMBER, Actor.Lane.API)));
@@ -79,7 +84,7 @@ public final class Cast {
    */
   public static List<Member> unscoped(Set<Actor.Lane> lanes) {
     var cast = new ArrayList<Member>();
-    for (var lane : List.of(Actor.Lane.CLI, Actor.Lane.API)) {
+    for (var lane : List.of(Actor.Lane.CLI, Actor.Lane.API, Actor.Lane.CONTAINER)) {
       if (lanes.contains(lane)) {
         cast.addAll(people(lane, List.of("all")));
       }
@@ -122,27 +127,37 @@ public final class Cast {
     var cast = new ArrayList<Member>();
     for (var role : List.of(Role.VIEWER, Role.MEMBER)) {
       for (var scope : scopes) {
-        cast.add(agent(role, "ada-agent", ADA_AGENT, OWNER, scope));
-        cast.add(agent(role, "bob-agent", BOB_AGENT, OTHER, scope));
+        cast.add(agent(role, "ada-agent", ADA_AGENT, OWNER, scope, "s-ada"));
+        cast.add(agent(role, "bob-agent", BOB_AGENT, OTHER, scope, "s-bob"));
       }
     }
     for (var scope : scopes) {
       cast.add(
           member(
               label(Actor.Lane.ROOM, Role.VIEWER, "ada-room", scope),
-              scoped(Actor.roomPrincipal(ADA_ROOM_AGENT, OWNER), scope)));
+              roomAgent(ADA_ROOM_AGENT, OWNER, scope, "lobby")));
       cast.add(
           member(
               label(Actor.Lane.ROOM, Role.VIEWER, "bob-room", scope),
-              scoped(Actor.roomPrincipal(BOB_ROOM_AGENT, OTHER), scope)));
+              roomAgent(BOB_ROOM_AGENT, OTHER, scope, "den")));
     }
     return cast;
   }
 
-  private static Member agent(Role role, String who, String handle, String owner, String scope) {
+  private static Member agent(
+      Role role, String who, String handle, String owner, String scope, String spec) {
     return member(
         label(Actor.Lane.AGENT, role, who, scope),
-        scoped(new Actor(handle, role, Actor.Lane.AGENT, owner), scope));
+        scoped(new Actor(handle, role, Actor.Lane.AGENT, owner), scope)
+            .withWork(Actor.Work.of("acme", spec, spec)));
+  }
+
+  /** A room agent of {@code owner} in {@code room} of acme, its person seeing {@code scope}. */
+  private static Actor roomAgent(String handle, String owner, String scope, String room) {
+    var seen = scoped(Actor.roomPrincipal(handle, owner), scope).scope();
+    return Actor.roomPrincipal(handle, owner)
+        .withScope(ProjectScope.of(seen.admits("acme") ? List.of("acme") : List.of()))
+        .withWork(Actor.Work.of("acme", null, room));
   }
 
   private static Actor scoped(Actor actor, String scope) {

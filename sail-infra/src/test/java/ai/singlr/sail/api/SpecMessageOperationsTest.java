@@ -182,7 +182,8 @@ class SpecMessageOperationsTest {
             .asFailure();
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, refused.errorCode());
 
-    var agent = Actor.agentPrincipal("codex/run-1", "ada");
+    var agent =
+        Actor.agentPrincipal("codex/run-1", "ada").withWork(Actor.Work.of("acme", "room", "room"));
     var posted =
         Actor.call(
                 agent,
@@ -284,7 +285,8 @@ class SpecMessageOperationsTest {
               }
             },
             delivered));
-    var agent = Actor.agentPrincipal("claude/run-1", "ada");
+    var agent =
+        Actor.agentPrincipal("claude/run-1", "ada").withWork(Actor.Work.of("acme", "room", "room"));
     var posted =
         Actor.call(
                 agent,

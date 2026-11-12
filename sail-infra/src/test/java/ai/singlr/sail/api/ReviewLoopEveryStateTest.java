@@ -28,6 +28,8 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -387,6 +389,7 @@ class ReviewLoopEveryStateTest {
    */
   @ParameterizedTest(name = "review {0}, spec {1}")
   @MethodSource("reviewAndSpecStates")
+  @Execution(ExecutionMode.CONCURRENT)
   void theWalkEndsWhereTheRealStoresDoAcrossTheSpace(ReviewShape shape, SpecStatus specStatus) {
     loop = ReviewLoop.of(tempDir, AN_AGENT_THEN_A_PERSON);
     loop.spec(STATE, "api");

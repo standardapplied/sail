@@ -455,6 +455,14 @@ class RunAuthorityTest {
                 Kind.NOT_OWNER,
                 "Run " + RUN + " belongs to spec 'auth', owned by 'ada' and 'carol', not you.",
                 "Only ada or carol or an admin may access this run.")),
+        rule.decide(OTHER_API, RUN, RUNNING, session));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "'claude/" + OTHER_RUN + "' may change only its own work, not run '" + RUN + "'.",
+                "An agent acts only on the work sail launched it for; draft a follow-up spec for"
+                    + " anything else.")),
         rule.decide(OTHERS_AGENT, RUN, RUNNING, session));
   }
 

@@ -19,6 +19,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.TestDefinitions;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.FileMaterializer;
@@ -32,10 +33,13 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.SyncBox;
@@ -60,10 +64,12 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -1348,6 +1354,124 @@ class ApiRouterTest {
       assertEquals(200, get(server, "/v1/projects/acme/ports", "token").statusCode());
       assertEquals(403, post(server, "/v1/projects/acme/serve", "token", "").statusCode());
       assertEquals(403, delete(server, "/v1/projects/acme/serve", "token").statusCode());
+    }
+  }
+
+  /**
+   * The box's own person shares a folder that lives in its container, as Mast does: that reads a
+   * container on this box, so anyone else, a member of the project or a viewer, is refused as not
+   * operating the box, whole and before the container is asked. A member removes a skill, which
+   * reads no container; a viewer may not. A folder that is no skill is refused in the standard's
+   * words.
+   */
+  @Test
+  void aPersonSharesAFolderOfTheContainerAndAViewerIsRefusedBeforeItIsAsked(@TempDir Path dir)
+      throws Exception {
+    var skillsPath = "/v1/projects/acme/skills";
+    var javaMd = "---\nname: java\ndescription: Java standards.\n---\nApply them.\n";
+    try (var db = Sqlite.open(dir.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+      var files = new FileStore(db);
+      var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+      var acme = TestDefinitions.yaml("name: acme\nagent:\n  type: claude-code\n");
+      var catalog = new ProjectStore(db);
+      Acting.system(() -> catalog.upsert(acme));
+      var skills =
+          new SkillOperations(
+              new ProjectSkills(
+                  project ->
+                      new SharedProjectFiles(
+                          files, dir.resolve("projects"), project, FileLimits.defaults())),
+              shell,
+              new ProjectLoader(shell, project -> Optional.of(acme)),
+              catalog);
+      var operations =
+          new TestOperations() {
+            @Override
+            public SkillOperations skills() {
+              return skills;
+            }
+          };
+      Consumer<String> holds =
+          skillMd ->
+              shell
+                  .onOk("incus list", "[{\"name\": \"acme\", \"status\": \"Running\"}]")
+                  .onOk("-printf", "f " + skillMd.length() + " 644 SKILL.md\0")
+                  .onOk(
+                      "base64",
+                      Base64.getEncoder().encodeToString(skillMd.getBytes(StandardCharsets.UTF_8)));
+      ApiAuth viewer =
+          exchange ->
+              exchange.setAttribute(ApiAuth.ACTOR, new Actor("vic", Role.VIEWER, Actor.Lane.API));
+      ApiAuth member =
+          exchange ->
+              exchange.setAttribute(ApiAuth.ACTOR, new Actor("uday", Role.MEMBER, Actor.Lane.API));
+      ApiAuth client =
+          exchange ->
+              exchange.setAttribute(
+                  ApiAuth.ACTOR, new Actor("client", Role.MEMBER, Actor.Lane.API));
+      try (var asViewer = serverWith(operations, true, viewer);
+          var asMember = serverWith(operations, true, member);
+          var asClient = serverWith(operations, true, client)) {
+        var folder = "{\"folder\": \"/home/dev/drafts/standards\", \"name\": \"java\"}";
+        for (var refused :
+            List.of(
+                post(asViewer, skillsPath, null, folder),
+                post(asClient, skillsPath, null, folder))) {
+          assertEquals(403, refused.statusCode(), refused.body());
+          assertEquals(
+              Map.of(
+                  "code",
+                  "forbidden_not_assignee",
+                  "message",
+                  "Box 'uday' belongs to 'uday', not you.",
+                  "action",
+                  "Ask uday to operate it, or have an admin do it.",
+                  "field_errors",
+                  List.of()),
+              errorOf(refused));
+        }
+        var removedByAViewer = delete(asViewer, skillsPath + "/java", null);
+        assertEquals(403, removedByAViewer.statusCode(), removedByAViewer.body());
+        assertEquals(
+            Map.of(
+                "code",
+                "read_only_credential",
+                "message",
+                "Your credential is read-only and cannot share files and skills in projects.",
+                "action",
+                "Ask an admin for a member or admin credential.",
+                "field_errors",
+                List.of()),
+            errorOf(removedByAViewer));
+        assertEquals(List.of(), shell.invocations(), "a refusal asks nothing of the container");
+
+        holds.accept("---\nname: java\n---\nApply them.\n");
+
+        var noSkill = post(asMember, skillsPath, null, folder);
+        assertEquals(422, noSkill.statusCode(), noSkill.body());
+        assertEquals(
+            "Skill 'java' has no description in its front matter: the Agent Skills standard"
+                + " requires one.",
+            errorOf(noSkill).get("message"));
+        assertEquals(List.of(), files.list("acme"));
+
+        holds.accept(javaMd);
+        var shared = post(asMember, skillsPath, null, folder);
+        assertEquals(200, shared.statusCode(), shared.body());
+        assertEquals("java", YamlUtil.parseMap(shared.body()).get("name"));
+        assertEquals(
+            List.of(".sail/skills/java/SKILL.md"),
+            files.list("acme").stream().map(FileStore.FileRow::path).toList());
+
+        var removed = delete(asClient, skillsPath + "/java", null);
+        assertEquals(200, removed.statusCode(), removed.body());
+        assertEquals(1, YamlUtil.parseMap(removed.body()).get("files"));
+        assertEquals(List.of(), files.list("acme"));
+        var again = delete(asMember, skillsPath + "/java", null);
+        assertEquals(404, again.statusCode(), again.body());
+        assertEquals("No skill 'java' is shared on acme.", errorOf(again).get("message"));
+      }
     }
   }
 

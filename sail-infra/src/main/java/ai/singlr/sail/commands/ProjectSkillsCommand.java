@@ -10,6 +10,7 @@ import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SkillOperations;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.NameValidator;
@@ -31,9 +32,11 @@ import picocli.CommandLine.Parameters;
  * Manages a project's skills on this box: the folders under {@code .sail/skills/} among its files,
  * which sail installs whole into every harness's skills folder, where the agent invokes one when it
  * judges it relevant. {@code ls} shows every skill an agent of the project can see; {@code add}
- * shares a local folder as one; {@code rm} stops sharing one; {@code show} prints a skill's {@code
- * SKILL.md}. Each is the one {@link SkillOperations} verb the container's {@code skill} also runs,
- * so a skill shared from either door is the same write, and it syncs.
+ * shares a folder as one, on this box or, with {@code --container}, in the project's container;
+ * {@code rm} stops sharing one; {@code show} prints a skill's {@code SKILL.md}. Each is the one
+ * {@link SkillOperations} verb the web API also runs, so a skill shared from either door is the
+ * same write, and it syncs. Nothing in a container shares a skill: whatever runs there can read its
+ * credential, so a person shares one from outside.
  */
 @Command(
     name = "skills",
@@ -70,12 +73,14 @@ public final class ProjectSkillsCommand implements Runnable {
                         row.name(),
                         row.kind().name().toLowerCase(Locale.ROOT),
                         String.join(", ", row.agents()),
-                        row.share().isEmpty()
-                            ? row.status()
-                            : row.status()
-                                + ": share it with '"
-                                + row.share()
-                                + "' in the container"))
+                        row.share()
+                            .map(
+                                command ->
+                                    row.status()
+                                        + ": share it with '"
+                                        + operator.render(Remedy.of(command))
+                                        + "'")
+                            .orElse(row.status())))
             .toList();
     var header = List.of("SKILL", "FROM", "AGENTS", "STATUS");
     var widths = new int[3];
@@ -138,7 +143,7 @@ public final class ProjectSkillsCommand implements Runnable {
   @Command(
       name = "add",
       description =
-          "Share a local folder as a skill: every file under it becomes .sail/skills/<name>/<path>.",
+          "Share a folder as a skill: every file under it becomes .sail/skills/<name>/<path>.",
       mixinStandardHelpOptions = true)
   static final class Add implements Callable<Integer> {
 
@@ -147,11 +152,18 @@ public final class ProjectSkillsCommand implements Runnable {
         description = "Project (default: the current project, set by project switch).")
     private String project;
 
-    @Parameters(index = "0", description = "Local folder holding a SKILL.md and any other files.")
+    @Parameters(index = "0", description = "Folder holding a SKILL.md and any other files.")
     private Path folder;
 
     @Option(names = "--name", description = "The skill's name (default: the folder's name).")
     private String name;
+
+    @Option(
+        names = "--container",
+        description =
+            "The folder is an absolute path inside the project's container, read there as its dev"
+                + " user.")
+    private boolean container;
 
     private final Function<OperatorCommand, HostOperations> operations;
 
@@ -172,7 +184,10 @@ public final class ProjectSkillsCommand implements Runnable {
         var shared =
             Actor.call(
                 operations.identity().operator(),
-                () -> operations.skills().shareFromHost(project, folder, name));
+                () ->
+                    container
+                        ? operations.skills().shareFromContainer(project, folder.toString(), name)
+                        : operations.skills().shareFromHost(project, folder, name));
         System.out.println(
             Ansi.AUTO.string(
                 "  @|green ✓|@ Shared skill @|bold "

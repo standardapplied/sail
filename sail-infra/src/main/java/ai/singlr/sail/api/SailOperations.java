@@ -114,9 +114,12 @@ public final class SailOperations implements HostOperations {
     return roles().boxFde().orElse(null);
   }
 
-  /** The role rule over this box's roster and its sync configuration ({@link #box}). */
+  /**
+   * The role rule over this box's roster, its sync configuration ({@link #box}) and its specs,
+   * where a run's work lives.
+   */
   private RoleRule roles() {
-    return new RoleRule(this::box, fdeStore);
+    return new RoleRule(this::box, fdeStore, specStore);
   }
 
   /**
@@ -496,10 +499,11 @@ public final class SailOperations implements HostOperations {
 
   /**
    * The box's own person the box credential stands for, resolved when asked: the FDE this box is
-   * now, with the role and scope {@link RoleRule} gives them on the CLI lane, as the host CLI's
-   * root. The credential proves only that it was minted for that FDE, so one minted for an FDE the
-   * box no longer is refuses, and so does a disabled FDE or one the roster does not know. Empty
-   * when the box store is not wired (a lane that never authenticates is a lane that fails closed).
+   * now, with the role and scope {@link RoleRule} gives them on the in-container lane, whose column
+   * narrows a credential anything in the container can read. The credential proves only that it was
+   * minted for that FDE, so one minted for an FDE the box no longer is refuses, and so does a
+   * disabled FDE or one the roster does not know. Empty when the box store is not wired (a lane
+   * that never authenticates is a lane that fails closed).
    */
   @Override
   public Optional<Actor> boxActorForCredential(String credential) {
@@ -510,7 +514,7 @@ public final class SailOperations implements HostOperations {
     return boxCredentialStore
         .resolve(credential)
         .filter(minted -> roles.boxFde().filter(minted::equals).isPresent())
-        .flatMap(minted -> roles.principal(RoleRule.Credential.box()));
+        .flatMap(minted -> roles.principal(RoleRule.Credential.container()));
   }
 
   SailOperations(
@@ -767,7 +771,7 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public SkillOperations skills() {
-    return new SkillOperations(projectSkills, shell, projects);
+    return new SkillOperations(projectSkills, shell, projects, projectCatalog());
   }
 
   @Override
@@ -1337,7 +1341,8 @@ public final class SailOperations implements HostOperations {
   /**
    * A run acting for no FDE acts for this box's, so a run credential never outranks the FDE whose
    * box launched it; and it sees the projects that FDE does, so a run a scoped FDE started on main
-   * reads no more than its owner may, and an ownerless run no more than the box's person.
+   * reads no more than its owner may, and an ownerless run no more than the box's person. It works
+   * what it was launched for, as the role rule derives it from the run and this box's specs.
    */
   @Override
   public Optional<Actor> runActor(RunStore.RunRow run) {

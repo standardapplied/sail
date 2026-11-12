@@ -8,8 +8,14 @@ and contracts: `ARCHITECTURE.md`. Build, gates, migrations, releases: `CONTRIBUT
 
 ## Build and test
 
-- `mvn clean verify` is the gate CI runs: every unit test, JaCoCo coverage gates, spotless.
-  `mvn spotless:apply` formats. Build offline with `-o` when the repository is warm.
+- `ci/check quick` is the loop for a change: it formats, then runs every unit test of every
+  module, compiling incrementally and without JaCoCo, in about two minutes on an 8-core box. It
+  does not run the coverage gates, the `*IT` suites, the macOS suite or the native build, and it
+  does not `clean`: a deleted or renamed class leaves its compiled `.class` in `target`, so after
+  one, run the gate.
+- `mvn clean verify` is the gate CI runs: every unit test, JaCoCo coverage gates, spotless (two
+  to two and a half minutes). `mvn spotless:apply` formats. Build offline with `-o` when the
+  repository is warm.
 - Before pushing: `mvn -o -Pintegration -Dsail.it.requireIncus=false clean verify`. It adds
   the multi-node integration tests (`*IT`); the incus-backed ones skip here and run in CI.
 - One module and class: `mvn -o -pl sail-infra -am -Dtest=StageSkillsTest test`

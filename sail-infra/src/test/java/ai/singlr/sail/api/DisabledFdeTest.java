@@ -154,7 +154,7 @@ class DisabledFdeTest {
   @Test
   void aRunActsWithTheRoleItsFdeHoldsNowCappedByItsLane() throws Exception {
     new FdeStore(db).add("raj", null, null, "admin");
-    var credential = reserveRun("raj", "beta", "auth");
+    var credential = reserveRun("raj", "acme", "auth");
     Acting.as(
         "raj",
         () ->
