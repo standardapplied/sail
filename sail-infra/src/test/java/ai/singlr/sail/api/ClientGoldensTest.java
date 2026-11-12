@@ -5,9 +5,11 @@
 
 package ai.singlr.sail.api;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
+import ai.singlr.sail.access.baseline.GoldenFiles;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Engagement;
@@ -47,7 +49,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.channels.Channels;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
@@ -62,7 +63,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
@@ -85,11 +85,12 @@ import org.junit.jupiter.api.io.TempDir;
  * ran, with a sample of every well-known event type; every pty frame type as {@link PtyWire} writes
  * it; and the vocabularies the client's enums mirror. Each file must equal what the server writes
  * now, so a change to a shape a client decodes fails here and arrives in its pull request as a
- * changed golden. A change that alters one on purpose re-records them:
+ * changed golden. They are a snapshot as the permission baseline is ({@link GoldenFiles}), so a
+ * change that alters one on purpose re-records them as it does:
  *
  * <pre>
  * mvn -o -pl sail-infra -am test -Dtest=ClientGoldensTest \
- *     -Dsurefire.failIfNoSpecifiedTests=false -Dsail.client.goldens=record
+ *     -Dsurefire.failIfNoSpecifiedTests=false -Dsail.access.baseline=record
  * </pre>
  *
  * <p>Ids are random and times run on the clock, so the clock is pinned and every UUID is renamed by
@@ -97,9 +98,6 @@ import org.junit.jupiter.api.io.TempDir;
  * the wire. Nothing else is rewritten.
  */
 class ClientGoldensTest {
-
-  static final String SWITCH = "sail.client.goldens";
-  static final String RECORD = "record";
 
   private static final Path GOLDENS = Path.of("..", "clients", "SailKit", "Tests", "Goldens");
   private static final Instant AT = Instant.parse("2026-11-11T09:00:00Z");
@@ -169,12 +167,14 @@ class ClientGoldensTest {
       events.put("stream.sse", Scrub.stream(stream.join(), box::renamed));
       events.put("room-stream.sse", Scrub.stream(roomStream.join(), box::renamed));
 
-      Goldens.check("http", http);
-      Goldens.check("events", events);
-      assertEquals(
-          wellKnownTypes(),
-          typesIn(events.get("stream.sse"), events.get("room-stream.sse")),
-          "the streams carry every well-known event type");
+      assertAll(
+          () -> GoldenFiles.check(GOLDENS.resolve("http"), http),
+          () -> GoldenFiles.check(GOLDENS.resolve("events"), events),
+          () ->
+              assertEquals(
+                  wellKnownTypes(),
+                  typesIn(events.get("stream.sse"), events.get("room-stream.sse")),
+                  "the streams carry every well-known event type"));
     }
   }
 
@@ -192,13 +192,12 @@ class ClientGoldensTest {
             .map(Class::getSimpleName)
             .collect(Collectors.toSet());
     assertEquals(permitted, sampled, "a sample of every pty frame type");
-    Goldens.check(
-        "frames",
+    GoldenFiles.check(
+        GOLDENS.resolve("frames"),
         new TreeMap<>(
             Map.of(
                 "frames.json",
-                Goldens.json(
-                    Map.of("magic", HexFormat.of().formatHex(magic()), "frames", frames)))));
+                json(Map.of("magic", HexFormat.of().formatHex(magic()), "frames", frames)))));
   }
 
   @Test
@@ -220,7 +219,13 @@ class ClientGoldensTest {
     vocabulary.put("roles", Arrays.stream(Role.values()).map(Role::attribute).toList());
     vocabulary.put(
         "spec_statuses", Arrays.stream(SpecStatus.values()).map(SpecStatus::wire).toList());
-    Goldens.check("vocabulary", new TreeMap<>(Map.of("vocabulary.json", Goldens.json(vocabulary))));
+    GoldenFiles.check(
+        GOLDENS.resolve("vocabulary"), new TreeMap<>(Map.of("vocabulary.json", json(vocabulary))));
+  }
+
+  /** {@code value} as a golden holds it: its keys sorted, one to a line. */
+  private static String json(Object value) {
+    return YamlUtil.dumpJsonPretty(Scrub.canonical(value, UnaryOperator.identity())) + "\n";
   }
 
   private static String messages() {
@@ -531,7 +536,7 @@ class ClientGoldensTest {
               request,
               "response",
               Map.of("status", response.statusCode(), "body", parsed));
-      goldens.put(name + ".json", Goldens.json(Scrub.canonical(exchange, this::renamed)));
+      goldens.put(name + ".json", json(Scrub.canonical(exchange, this::renamed)));
       return parsed;
     }
 
@@ -700,96 +705,6 @@ class ClientGoldensTest {
       var data = new LinkedHashMap<>(YamlUtil.parseMap(line.substring(DATA.length())));
       data.computeIfPresent("host", (key, host) -> HostInfo.hostname().equals(host) ? "box" : host);
       return YamlUtil.dumpJsonValue(canonical(data, rename));
-    }
-  }
-
-  /** The goldens one directory holds, checked against what is written now or recorded as it. */
-  private static final class Goldens {
-
-    private Goldens() {}
-
-    static String json(Object value) {
-      return YamlUtil.dumpJsonPretty(Scrub.canonical(value, UnaryOperator.identity())) + "\n";
-    }
-
-    static void check(String directory, SortedMap<String, String> now) {
-      var dir = GOLDENS.resolve(directory);
-      if (RECORD.equals(System.getProperty(SWITCH))) {
-        record(dir, now);
-        return;
-      }
-      var recorded = read(dir);
-      var names = new TreeSet<>(recorded.keySet());
-      names.addAll(now.keySet());
-      var problems = new ArrayList<String>();
-      for (var name : names) {
-        var golden = recorded.get(name);
-        var written = now.get(name);
-        if (golden == null) {
-          problems.add(name + ": written now, but no golden is committed");
-        } else if (written == null) {
-          problems.add(name + ": committed, but nothing writes it now");
-        } else if (!golden.equals(written)) {
-          problems.add(name + ": " + firstDifference(golden, written));
-        }
-      }
-      if (!problems.isEmpty()) {
-        fail(
-            dir
-                + " differs from what the server writes now:\n"
-                + String.join("\n", problems)
-                + "\nA change to a shape a client decodes re-records them with -D"
-                + SWITCH
-                + "="
-                + RECORD
-                + "; any other difference is a change of the wire.");
-      }
-    }
-
-    private static String firstDifference(String golden, String written) {
-      var was = golden.lines().toList();
-      var is = written.lines().toList();
-      var line = 0;
-      while (line < was.size() && line < is.size() && was.get(line).equals(is.get(line))) {
-        line++;
-      }
-      return "line "
-          + (line + 1)
-          + "\n  golden: "
-          + (line < was.size() ? was.get(line) : "(end)")
-          + "\n  now:    "
-          + (line < is.size() ? is.get(line) : "(end)");
-    }
-
-    private static SortedMap<String, String> read(Path dir) {
-      var files = new TreeMap<String, String>();
-      if (!Files.isDirectory(dir)) {
-        return files;
-      }
-      try (var listing = Files.list(dir)) {
-        for (var file : listing.toList()) {
-          files.put(file.getFileName().toString(), Files.readString(file, StandardCharsets.UTF_8));
-        }
-      } catch (IOException e) {
-        throw new UncheckedIOException(e);
-      }
-      return files;
-    }
-
-    private static void record(Path dir, SortedMap<String, String> now) {
-      try {
-        Files.createDirectories(dir);
-        for (var stale : read(dir).keySet()) {
-          if (!now.containsKey(stale)) {
-            Files.delete(dir.resolve(stale));
-          }
-        }
-        for (var file : now.entrySet()) {
-          Files.writeString(dir.resolve(file.getKey()), file.getValue(), StandardCharsets.UTF_8);
-        }
-      } catch (IOException e) {
-        throw new UncheckedIOException(e);
-      }
     }
   }
 }

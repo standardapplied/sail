@@ -2,7 +2,7 @@
 
 ## 0.66.0
 
-- **A Swift core for the native clients, proven against the server's own answers.** `clients/SailKit` is a Swift package (Swift 6, Foundation only) that the macOS and iOS apps will build on: `SailAPI` reads `whoami`, projects, rooms, messages and specs and posts a message, keeping a refusal's code, message and fix; `SailEvents` follows `/v1/events/stream` across reconnects; `SailTerminalWire` reads and writes the `SAILPTY3` frames. `ClientGoldensTest` writes what the server answers for each of them under `clients/SailKit/Tests/Goldens` and fails when the server would answer otherwise (`-Dsail.client.goldens=record` rewrites them), and the new `Clients` workflow builds and tests the package on Linux. No server answer changes.
+- **A Swift core for the native clients, proven against the server's own answers.** `clients/SailKit` is a Swift package (Swift 6, Foundation only) that the macOS and iOS apps will build on: `SailAPI` reads `whoami`, projects, rooms, messages and specs and posts a message, keeping a refusal's code, message and fix; `SailEvents` follows `/v1/events/stream` across reconnects; `SailTerminalWire` reads and writes the `SAILPTY3` frames. `ClientGoldensTest` writes what the server answers for each of them under `clients/SailKit/Tests/Goldens` and fails when the server would answer otherwise, naming every file that differs (they are a snapshot as the permission baseline is, so `-Dsail.access.baseline=record` rewrites them), and the new `Clients` workflow builds and tests the package on Linux. No server answer changes.
 
 ## 0.65.0
 
