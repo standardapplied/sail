@@ -86,11 +86,40 @@ class ZfsCacheCapTest {
             List.of(
                 "grep",
                 "-rsH",
+                "--include=*.conf",
                 "--exclude=sail-zfs.conf",
                 "-E",
                 "^[[:space:]]*options[[:space:]]+zfs[[:space:]].*zfs_arc_max=",
                 "/etc/modprobe.d")),
         shell.arguments());
+  }
+
+  @Test
+  void onlyFilesModprobeReadsCount() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onFail("grep -rsH", "")
+            .onOk("cat /sys/module/zfs/parameters/zfs_arc_max", "0\n")
+            .onOk("bash -c")
+            .onOk("findmnt", "ext4\n");
+
+    ZfsCacheCap.forMemory(65536).install(shell);
+
+    assertTrue(
+        shell.arguments().getFirst().contains("--include=*.conf"), shell.invocations().toString());
+  }
+
+  @Test
+  void aCapSetOnTheLoadedModuleIsKeptAndNamed() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onFail("grep -rsH", "")
+            .onOk("cat /sys/module/zfs/parameters/zfs_arc_max", "4294967296\n");
+
+    assertEquals(
+        "ZFS cache cap left as set on the loaded module (zfs_arc_max=4294967296)",
+        ZfsCacheCap.forMemory(65536).install(shell));
+    assertTrue(shell.invocations().stream().noneMatch(c -> c.startsWith("bash -c")));
   }
 
   @Test

@@ -36,9 +36,11 @@ public sealed interface PoolSource {
 
   /**
    * The block device at {@code path}, as {@link PoolDevices#cleared} resolved it, for a ZFS pool;
-   * {@code wipe} when the operator named it again to have what it holds erased.
+   * {@code wipe} when the operator named it again to have what it holds erased; {@code identity}
+   * what lsblk said of it that does not move between disks, so the device checked again before the
+   * pool is made is the one first cleared.
    */
-  record Device(String path, boolean wipe) implements PoolSource {
+  record Device(String path, boolean wipe, String identity) implements PoolSource {
     @Override
     public String driver() {
       return HostYaml.BACKEND_ZFS;
@@ -51,9 +53,8 @@ public sealed interface PoolSource {
   }
 
   /**
-   * The zpool {@code name}, handed to Incus as it is: one Incus already holds under this pool's
-   * name, or an empty imported pool a device belongs to (an older Sail made one with {@code zpool
-   * create}). Incus requires it empty; nothing on it is erased.
+   * The zpool {@code name} Incus already holds under this pool's name, which a re-run of {@code
+   * host init} keeps as it is.
    */
   record Zpool(String name) implements PoolSource {
     @Override

@@ -78,7 +78,7 @@ class PoolDevicesTest {
             "--json",
             "--tree",
             "--output",
-            "PATH,TYPE,FSTYPE,PTTYPE,MOUNTPOINTS,SIZE,MODEL,RM"),
+            "PATH,TYPE,FSTYPE,PTTYPE,PARTTYPE,MOUNTPOINTS,SIZE,MODEL,RM,WWN,SERIAL,MAJ:MIN"),
         PoolDevices.LSBLK);
     assertEquals(
         List.of("wipefs", "--all", "--no-act", "--types", "sail_exclusive_probe", "--", "/dev/sdb"),
@@ -236,7 +236,8 @@ class PoolDevicesTest {
       var shell = gcp(layout).shell();
 
       assertEquals(
-          new PoolSource.Device("/dev/sdb", false), devices(shell).cleared("/dev/sdb", null));
+          new PoolSource.Device("/dev/sdb", false, "40G"),
+          devices(shell).cleared("/dev/sdb", null));
       assertEquals(
           List.of(
               "realpath -e -- /dev/sdb",
@@ -255,14 +256,14 @@ class PoolDevicesTest {
             + " --force-wipe /dev/sdb to erase it and make the pool there.",
         refusal(gcp(PARTITIONED), "/dev/sdb", null));
     assertEquals(
-        new PoolSource.Device("/dev/sdb", true),
+        new PoolSource.Device("/dev/sdb", true, "40G"),
         devices(gcp(PARTITIONED).shell()).cleared("/dev/sdb", "/dev/sdb"));
   }
 
   @Test
   void aSparePartitionIsCleared() throws Exception {
     assertEquals(
-        new PoolSource.Device("/dev/sdb1", false),
+        new PoolSource.Device("/dev/sdb1", false, "2G"),
         devices(gcp(PARTITIONED).shell()).cleared("/dev/sdb1", null));
   }
 
@@ -273,7 +274,7 @@ class PoolDevicesTest {
             + " /dev/sdd to erase it and make the pool there.",
         refusal(spares().holds("/dev/sdd", EXT4), "/dev/sdd", null));
     assertEquals(
-        new PoolSource.Device("/dev/sdd", true),
+        new PoolSource.Device("/dev/sdd", true, "100G"),
         devices(spares().holds("/dev/sdd", EXT4).shell()).cleared("/dev/sdd", "/dev/sdd"));
   }
 
@@ -359,49 +360,51 @@ class PoolDevicesTest {
   }
 
   @Test
-  void anEmptyImportedPoolsDeviceIsNeverWipedButHandedToIncusAsItIs() throws Exception {
-    assertEquals(
-        new PoolSource.Zpool("sail-raw"),
-        devices(imported(fixture("raw-file-pool.zfs-list.txt")).shell()).cleared("/dev/sdi", null));
-    assertEquals(
-        "/dev/sdi is refused, even with --force-wipe: it is in the imported zpool sail-raw, which"
-            + " is never wiped: drop --force-wipe to hand the empty pool to Incus, or destroy the"
-            + " pool yourself.",
-        refusal(imported(fixture("raw-file-pool.zfs-list.txt")), "/dev/sdi", "/dev/sdi"));
+  void aDeviceInAnImportedPoolIsRefusedForcedOrNotWhateverThePoolHolds() {
+    var refused =
+        "/dev/sdi is refused, even with --force-wipe: it is in the imported zpool sail-raw, and no"
+            + " pool's device is taken: export or destroy the pool yourself first.";
+    for (var device : List.of("/dev/sdi", "/dev/sdi1")) {
+      for (var force : new String[] {null, device}) {
+        assertEquals(
+            refused.replace("/dev/sdi is", device + " is"), refusal(imported(), device, force));
+      }
+    }
   }
 
   @Test
-  void aDeviceInTwoImportedPoolsIsRefused() {
-    var pools =
-        fixture("raw-file-pool.zpool-list.txt").replace("/tmp/sail-raw.img", "/dev/sdi1")
-            + fixture("raw-file-pool.zpool-list.txt")
-                .replace("sail-raw", "other")
-                .replace("/tmp/other.img", "/dev/sdi9");
+  void aPoolWithFilesInItsTopDatasetIsRefusedAndNeverHandedOver() {
+    var shell = imported().shell();
 
-    assertEquals(
-        "/dev/sdi is refused, even with --force-wipe: it holds devices of the imported pools"
-            + " sail-raw, other.",
-        refusal(spares().zpool(pools, "/dev/sdi1\n/dev/sdi9"), "/dev/sdi", null));
+    assertThrows(IllegalArgumentException.class, () -> devices(shell).cleared("/dev/sdi", null));
+    assertTrue(
+        shell.invocations().stream().noneMatch(c -> c.startsWith("zfs ")),
+        "what a pool holds is not read: any pool's device is refused");
   }
 
   @Test
-  void anImportedPoolThatHoldsDatasetsIsRefusedNamingThem() {
-    var box = imported(fixture("incus-file-pool.zfs-list.txt").replace("sail-capture", "sail-raw"));
+  void aDeviceInTwoImportedPoolsNamesBoth() {
+    var raw = fixture("raw-file-pool.zpool-list.txt");
+    var box =
+        spares()
+            .zpool("sail-raw", raw.replace("/tmp/sail-raw.img", "/dev/sdi1"), "/dev/sdi1")
+            .zpool(
+                "other",
+                raw.replace("sail-raw", "other").replace("/tmp/other.img", "/dev/sdi9"),
+                "/dev/sdi9");
 
     assertEquals(
-        "/dev/sdi is refused, even with --force-wipe: it is in the imported zpool sail-raw, which"
-            + " holds sail-raw/buckets, sail-raw/containers, sail-raw/custom, sail-raw/deleted,"
-            + " sail-raw/deleted/buckets, sail-raw/deleted/containers, sail-raw/deleted/custom,"
-            + " sail-raw/deleted/images, sail-raw/deleted/virtual-machines, sail-raw/images,"
-            + " sail-raw/virtual-machines: only an empty pool is handed to Incus, and none is"
-            + " wiped.",
+        "/dev/sdi is refused, even with --force-wipe: it is in the imported zpool sail-raw, and no"
+            + " pool's device is taken: export or destroy the pool yourself first; it is in the"
+            + " imported zpool other, and no pool's device is taken: export or destroy the pool"
+            + " yourself first.",
         refusal(box, "/dev/sdi", null));
   }
 
   @Test
-  void aPoolIncusHoldsIsRefused() {
+  void aPoolIncusHoldsIsNamedAsIncuss() {
     var box =
-        imported(fixture("raw-file-pool.zfs-list.txt"))
+        imported()
             .incus(
                 "[{\"name\": \"tank\", \"driver\": \"zfs\", \"config\": {\"source\": \"sail-raw\","
                     + " \"zfs.pool_name\": \"sail-raw\"}}]");
@@ -418,15 +421,29 @@ class PoolDevicesTest {
         spares()
             .holds("/dev/sdj", DeviceFixtures.listings(PARTITIONED).get("/dev/sdb"))
             .holds("/dev/sdj1", RAID_MEMBER.replace("linux_raid_member", "zfs_member"))
-            .zpool(fixture("raw-file-pool.zpool-list.txt"), "/tmp/sail-raw.img");
+            .zpool("sail-raw", fixture("raw-file-pool.zpool-list.txt"), "/tmp/sail-raw.img");
 
     assertEquals(
         "/dev/sdj holds gpt, PMBR, zfs_member on /dev/sdj1. Nothing on it is erased unless you"
             + " name it again: add --force-wipe /dev/sdj to erase it and make the pool there.",
         refusal(box, "/dev/sdj", null));
     assertEquals(
-        new PoolSource.Device("/dev/sdj", true),
+        new PoolSource.Device("/dev/sdj", true, "100G"),
         devices(box.shell()).cleared("/dev/sdj", "/dev/sdj"));
+  }
+
+  @Test
+  void aCacheDeviceIsAMemberOfItsPool() {
+    var listed =
+        "tank\t3.6T\t2.9T\t0.7T\t-\t-\t1%\t80%\t1.00x\tONLINE\t-\n"
+            + "\t/dev/sdb1\t-\t-\t-\t-\t-\t-\t-\t-\tONLINE\n"
+            + "cache\t-\t-\t-\t-\t-\t-\t-\t-\t-\n"
+            + "\t/dev/sdh\t-\t-\t-\t-\t-\t-\t-\t-\tONLINE\n";
+
+    assertEquals(
+        "/dev/sdh is refused, even with --force-wipe: it is in the imported zpool tank, and no"
+            + " pool's device is taken: export or destroy the pool yourself first.",
+        refusal(spares().zpool("tank", listed, "/dev/sdb1\n/dev/sdh"), "/dev/sdh", null));
   }
 
   @Test
@@ -444,6 +461,72 @@ class PoolDevicesTest {
   }
 
   @Test
+  void aBoxWhoseRootLsblkCannotPlaceRefusesEveryDiskAndPartition() {
+    var layout = "handwritten-root-on-zfs-mirror.lsblk.json";
+    var refusal =
+        "Sail cannot tell which disks carry the running system: lsblk shows no device mounted at /"
+            + " (root on ZFS, or on a filesystem lsblk cannot place), so no disk or partition is"
+            + " taken, forced or not. Make the pool in a file instead, with --pool-file-size"
+            + " <size>.";
+    for (var device : names(new Box(layout)).paths()) {
+      for (var force : new String[] {null, device}) {
+        assertEquals(refusal, refusal(layout, device, force), device);
+      }
+    }
+    assertEquals(
+        refusal,
+        assertThrows(
+                IllegalArgumentException.class, () -> devices(new Box(layout).shell()).candidates())
+            .getMessage());
+  }
+
+  @Test
+  void bootPartitionsAreRefusedMountedOrNotOnAnyDisk() {
+    var layout = "handwritten-btrfs-raid1-root.lsblk.json";
+
+    assertEquals(
+        "/dev/sdb1 is refused, even with --force-wipe: /dev/sdb1 is an EFI system partition.",
+        refusal(layout, "/dev/sdb1", "/dev/sdb1"));
+    assertEquals(
+        "/dev/sdc1 is refused, even with --force-wipe: /dev/sdc1 is a BIOS boot partition.",
+        refusal(layout, "/dev/sdc1", null));
+    assertEquals(
+        "/dev/sdc is refused, even with --force-wipe: /dev/sdc1 is a BIOS boot partition.",
+        refusal(layout, "/dev/sdc", "/dev/sdc"));
+  }
+
+  @Test
+  void aSecondBtrfsRootDeviceIsRefusedOnTheExclusiveOpenItsFilesystemHolds() {
+    var layout = "handwritten-btrfs-raid1-root.lsblk.json";
+
+    assertEquals(
+        "/dev/sdb2 is refused, even with --force-wipe: /dev/sdb2 is held open by something lsblk"
+            + " does not show.",
+        refusal(names(new Box(layout)).busy("/dev/sdb2"), "/dev/sdb2", "/dev/sdb2"));
+  }
+
+  @Test
+  void aBoxWithItsRootInPlainSightStillOffersAndClearsItsBlankSpare() throws Exception {
+    var layout = "handwritten-btrfs-raid1-root.lsblk.json";
+
+    assertEquals(
+        List.of("/dev/sdd"),
+        devices(new Box(layout).shell()).candidates().stream()
+            .map(PoolDevices.Candidate::device)
+            .toList());
+    assertEquals(
+        "/dev/sdd",
+        devices(names(new Box(layout)).shell()).cleared("/dev/sdd", null).said().substring(7));
+  }
+
+  @Test
+  void aDeviceMapperDeviceWithNoParentIsNotAFlatList() throws Exception {
+    var shell = names(new Box("handwritten-gcp-blank-with-dm-zero.lsblk.json")).shell();
+
+    assertEquals("zfs on /dev/sdb", devices(shell).cleared("/dev/sdb", null).said());
+  }
+
+  @Test
   void aForceFlagNamingAnotherDeviceIsRefused() {
     assertEquals(
         "--force-wipe names /dev/sdc, not the pool's device /dev/sdb. Name the same device to"
@@ -456,7 +539,8 @@ class PoolDevicesTest {
     var byId = "/dev/disk/by-id/google-spare";
     var shell = gcp(PARTITIONED).name(byId, "/dev/sdb").shell();
 
-    assertEquals(new PoolSource.Device("/dev/sdb", true), devices(shell).cleared(byId, "/dev/sdb"));
+    assertEquals(
+        new PoolSource.Device("/dev/sdb", true, "40G"), devices(shell).cleared(byId, "/dev/sdb"));
   }
 
   @Test
@@ -552,15 +636,15 @@ class PoolDevicesTest {
     return box;
   }
 
-  /** The spares, /dev/sdi's first partition in the imported zpool sail-raw, holding {@code zfs}. */
-  private static Box imported(String datasets) {
+  /** The spares, /dev/sdi's first partition a vdev of the imported zpool sail-raw. */
+  private static Box imported() {
     return spares()
         .holds("/dev/sdi", DeviceFixtures.listings(PARTITIONED).get("/dev/sdb"))
         .holds("/dev/sdi1", RAID_MEMBER.replace("linux_raid_member", "zfs_member"))
         .zpool(
+            "sail-raw",
             fixture("raw-file-pool.zpool-list.txt").replace("/tmp/sail-raw.img", "/dev/sdi1"),
-            "/dev/sdi1")
-        .datasets("sail-raw", datasets);
+            "/dev/sdi1");
   }
 
   private static String refusal(String layout, String named, String force) {
@@ -588,9 +672,7 @@ class PoolDevicesTest {
     private final Map<String, String> names = new LinkedHashMap<>();
     private final Map<String, String> listings = new LinkedHashMap<>();
     private final Map<String, String> busy = new LinkedHashMap<>();
-    private final Map<String, String> datasets = new LinkedHashMap<>();
-    private String zpools;
-    private String vdevs;
+    private final Map<String, List<String>> pools = new LinkedHashMap<>();
     private String incus;
 
     Box(String layout) {
@@ -629,14 +711,9 @@ class PoolDevicesTest {
       return this;
     }
 
-    Box zpool(String listed, String resolvedVdevs) {
-      zpools = listed;
-      vdevs = resolvedVdevs;
-      return this;
-    }
-
-    Box datasets(String pool, String listed) {
-      datasets.put(pool, listed);
+    /** An imported pool {@code pool}: its {@code zpool list -vHP} and where its vdevs resolve. */
+    Box zpool(String pool, String listed, String resolvedVdevs) {
+      pools.put(pool, List.of(listed, resolvedVdevs));
       return this;
     }
 
@@ -664,10 +741,16 @@ class PoolDevicesTest {
           shell.onOk(open);
         }
       }
-      if (zpools != null) {
-        shell.onOk("which zpool").onOk("zpool list -vHP", zpools).onOk("realpath -m", vdevs + "\n");
+      if (!pools.isEmpty()) {
+        shell.onOk("which zpool").onOk("zpool list -H -o name", String.join("\n", pools.keySet()));
+        for (var pool : longestFirst(pools.keySet())) {
+          var listed = pools.get(pool).getFirst();
+          shell.onOk("zpool list -vHP " + pool, listed);
+          shell.onOk(
+              "realpath -m -- " + String.join(" ", PoolDevices.vdevs(listed.lines().toList())),
+              pools.get(pool).getLast() + "\n");
+        }
       }
-      datasets.forEach((pool, listed) -> shell.onOk("zfs list -H -r -o name " + pool, listed));
       if (incus != null) {
         shell.onOk("incus storage list", incus);
       }

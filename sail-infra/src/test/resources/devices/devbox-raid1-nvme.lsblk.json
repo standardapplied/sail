@@ -5,47 +5,63 @@
          "type": "disk",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
              null
          ],
          "size": "1.7T",
          "model": "KIOXIA KCD81RUG1T92                     ",
          "rm": false,
+         "wwn": null,
+         "serial": "94A0A1YGTLXJ        ",
+         "maj:min": "259:0",
          "children": [
             {
                "path": "/dev/nvme0n1p1",
                "type": "part",
                "fstype": null,
                "pttype": null,
+               "parttype": null,
                "mountpoints": [
                    null
                ],
                "size": "256M",
                "model": null,
-               "rm": false
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "259:1"
             },{
                "path": "/dev/nvme0n1p2",
                "type": "part",
                "fstype": null,
                "pttype": null,
+               "parttype": null,
                "mountpoints": [
                    null
                ],
                "size": "4G",
                "model": null,
                "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "259:2",
                "children": [
                   {
                      "path": "/dev/md0",
                      "type": "raid1",
                      "fstype": null,
                      "pttype": null,
+                     "parttype": null,
                      "mountpoints": [
                          null
                      ],
                      "size": "4G",
                      "model": null,
-                     "rm": false
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": "9:0"
                   }
                ]
             },{
@@ -53,24 +69,32 @@
                "type": "part",
                "fstype": null,
                "pttype": null,
+               "parttype": null,
                "mountpoints": [
                    null
                ],
                "size": "1G",
                "model": null,
                "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "259:3",
                "children": [
                   {
                      "path": "/dev/md1",
                      "type": "raid1",
                      "fstype": null,
                      "pttype": null,
+                     "parttype": null,
                      "mountpoints": [
                          null
                      ],
                      "size": "1022M",
                      "model": null,
-                     "rm": false
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": "9:1"
                   }
                ]
             },{
@@ -78,24 +102,32 @@
                "type": "part",
                "fstype": null,
                "pttype": null,
+               "parttype": null,
                "mountpoints": [
                    null
                ],
                "size": "1.7T",
                "model": null,
                "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "259:4",
                "children": [
                   {
                      "path": "/dev/md2",
                      "type": "raid1",
                      "fstype": null,
                      "pttype": null,
+                     "parttype": null,
                      "mountpoints": [
                          "/var/lib/sail/run", "/dev/.incus-systemd-credentials", "/"
                      ],
                      "size": "1.7T",
                      "model": null,
-                     "rm": false
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": "9:2"
                   }
                ]
             }
@@ -105,47 +137,63 @@
          "type": "disk",
          "fstype": null,
          "pttype": null,
+         "parttype": null,
          "mountpoints": [
              null
          ],
          "size": "1.7T",
          "model": "KIOXIA KCD81RUG1T92                     ",
          "rm": false,
+         "wwn": null,
+         "serial": "94A0A1Z6TLXJ        ",
+         "maj:min": "259:5",
          "children": [
             {
                "path": "/dev/nvme1n1p1",
                "type": "part",
                "fstype": null,
                "pttype": null,
+               "parttype": null,
                "mountpoints": [
                    null
                ],
                "size": "256M",
                "model": null,
-               "rm": false
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "259:6"
             },{
                "path": "/dev/nvme1n1p2",
                "type": "part",
                "fstype": null,
                "pttype": null,
+               "parttype": null,
                "mountpoints": [
                    null
                ],
                "size": "4G",
                "model": null,
                "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "259:7",
                "children": [
                   {
                      "path": "/dev/md0",
                      "type": "raid1",
                      "fstype": null,
                      "pttype": null,
+                     "parttype": null,
                      "mountpoints": [
                          null
                      ],
                      "size": "4G",
                      "model": null,
-                     "rm": false
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": "9:0"
                   }
                ]
             },{
@@ -153,24 +201,32 @@
                "type": "part",
                "fstype": null,
                "pttype": null,
+               "parttype": null,
                "mountpoints": [
                    null
                ],
                "size": "1G",
                "model": null,
                "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "259:8",
                "children": [
                   {
                      "path": "/dev/md1",
                      "type": "raid1",
                      "fstype": null,
                      "pttype": null,
+                     "parttype": null,
                      "mountpoints": [
                          null
                      ],
                      "size": "1022M",
                      "model": null,
-                     "rm": false
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": "9:1"
                   }
                ]
             },{
@@ -178,24 +234,32 @@
                "type": "part",
                "fstype": null,
                "pttype": null,
+               "parttype": null,
                "mountpoints": [
                    null
                ],
                "size": "1.7T",
                "model": null,
                "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "259:9",
                "children": [
                   {
                      "path": "/dev/md2",
                      "type": "raid1",
                      "fstype": null,
                      "pttype": null,
+                     "parttype": null,
                      "mountpoints": [
                          "/var/lib/sail/run", "/dev/.incus-systemd-credentials", "/"
                      ],
                      "size": "1.7T",
                      "model": null,
-                     "rm": false
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": "9:2"
                   }
                ]
             }

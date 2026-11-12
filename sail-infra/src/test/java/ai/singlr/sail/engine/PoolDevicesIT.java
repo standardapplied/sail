@@ -63,6 +63,112 @@ class PoolDevicesIT extends AbstractIncusIT {
   }
 
   /**
+   * The probe's exclusive open on a loop device that something holds: a mounted filesystem, then a
+   * device-mapper device built on it. Each fails the open with EBUSY, as {@link PoolDevices} reads
+   * it.
+   */
+  @Test
+  void theExclusiveOpenFindsARealHolderBusy(@TempDir Path dir) throws Exception {
+    ensureIncusOrSkip();
+    var root = new RootShell();
+    var loop = attach(root, dir.resolve("held.img"), "mkfs.ext4 -qF \"$1\"");
+    var mount = dir.resolve("mnt");
+    try {
+      assertTrue(root.exec(List.of("mkdir", "-p", mount.toString())).ok());
+      assertTrue(root.exec(List.of("mount", loop, mount.toString())).ok());
+      var mounted = root.exec(PoolDevices.exclusiveOpen(loop));
+      assertTrue(root.exec(List.of("umount", mount.toString())).ok());
+      var sectors = root.exec(List.of("blockdev", "--getsz", loop)).stdout().strip();
+      assertTrue(
+          root.exec(
+                  List.of(
+                      "dmsetup",
+                      "create",
+                      "sail-it-hold",
+                      "--table",
+                      "0 " + sectors + " linear " + loop + " 0"))
+              .ok());
+      var mapped = root.exec(PoolDevices.exclusiveOpen(loop));
+      root.exec(List.of("dmsetup", "remove", "sail-it-hold"));
+      System.out.println(
+          "MOUNTED " + loop + " exit " + mounted.exitCode() + " [" + mounted.stderr() + "]");
+      System.out.println(
+          "MAPPED " + loop + " exit " + mapped.exitCode() + " [" + mapped.stderr() + "]");
+
+      for (var held : List.of(mounted, mapped)) {
+        assertEquals(1, held.exitCode());
+        assertEquals(
+            "wipefs: error: " + loop + ": probing initialization failed: Device or resource busy",
+            held.stderr().strip());
+      }
+    } finally {
+      root.exec(List.of("losetup", "-d", loop));
+    }
+  }
+
+  /**
+   * A pool with a device in every class zpool lists apart (log, cache, spare, special): each is a
+   * member as {@link PoolDevices#vdevs} reads {@code zpool list -vHP}.
+   */
+  @Test
+  void everyClassOfAPoolsDevicesIsAMember(@TempDir Path dir) throws Exception {
+    ensureIncusOrSkip();
+    var root = new RootShell();
+    var loops = new ArrayList<String>();
+    for (var name : List.of("data", "log", "cache", "spare", "special")) {
+      loops.add(attach(root, dir.resolve(name + ".img"), "true"));
+    }
+    try {
+      var made =
+          root.exec(
+              List.of(
+                  "zpool",
+                  "create",
+                  "sail-it-classes",
+                  loops.get(0),
+                  "log",
+                  loops.get(1),
+                  "cache",
+                  loops.get(2),
+                  "spare",
+                  loops.get(3),
+                  "special",
+                  loops.get(4)));
+      assertTrue(made.ok(), made.reason());
+      var names = root.exec(List.of("zpool", "list", "-H", "-o", "name"));
+      var listed = root.exec(List.of("zpool", "list", "-vHP", "sail-it-classes"));
+      System.out.println("NAMES [" + names.stdout() + "]");
+      System.out.println("CLASSES [" + listed.stdout() + "]");
+
+      assertTrue(names.stdout().lines().toList().contains("sail-it-classes"), names.stdout());
+      assertEquals(loops, PoolDevices.vdevs(listed.stdout().lines().toList()));
+    } finally {
+      root.exec(List.of("zpool", "destroy", "sail-it-classes"));
+      loops.forEach(
+          loop -> {
+            try {
+              root.exec(List.of("losetup", "-d", loop));
+            } catch (Exception ignored) {
+            }
+          });
+    }
+  }
+
+  /** A loop device over a new 128 MiB file at {@code file}, made ready by {@code prepare}. */
+  private static String attach(RootShell root, Path file, String prepare) throws Exception {
+    var attached =
+        root.exec(
+            List.of(
+                "bash",
+                "-c",
+                "truncate -s 128M \"$1\" && " + prepare + " && losetup -f --show \"$1\"",
+                "bash",
+                file.toString()));
+    assertTrue(attached.ok(), attached.reason());
+    return attached.stdout().strip();
+  }
+
+  /**
    * The probe's exclusive open on a loop device holding a partition table, nothing else holding it:
    * it succeeds and prints nothing, where the unfiltered {@code --no-act --all} lists the table as
    * erased and asks the kernel to re-read it. The loop device's file is the only thing written, and

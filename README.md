@@ -47,8 +47,10 @@ Incus creates and owns the pool. A disk or partition that holds anything, a file
 partition table or an exported pool, is refused naming what is on it, and erased only when you
 name it again with `--force-wipe <device>`. One in use is refused even then: mounted, swap, a
 partition of the disk the system runs from, a RAID, LVM or LUKS member (the refusal names the
-command that frees it), or one something else holds open. A device of an imported zpool is never
-erased: an empty pool is handed to Incus as it is, one with datasets is refused. A file is slower
+command that frees it), an EFI system or BIOS boot partition, or one something else holds open.
+A device of an imported zpool is refused: export or destroy the pool yourself first. On a box
+whose root lsblk cannot place, root on ZFS for one, every disk is refused and a file pool is the
+way to try ZFS. A file is slower
 than a disk and meant for trials. `host init` caps the ZFS cache at a tenth of memory, at most
 16 GiB (`/etc/modprobe.d/sail-zfs.conf`), and says so; a cap you set yourself is kept. On ZFS a
 container's disk limit is enforced: Incus sets the root disk's size as the dataset's ZFS `quota`,

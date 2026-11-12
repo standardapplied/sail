@@ -214,13 +214,15 @@ class HostInitCommandTest {
     var shell = spare(DeviceFixtures.read(DeviceFixtures.SPARES));
 
     assertEquals(
-        new PoolSource.Device("/dev/sdb", true),
+        new PoolSource.Device("/dev/sdb", true, "40G"),
         source(shell, "--storage", "zfs", "--disk", "/dev/sdb", "--force-wipe", "/dev/sdb"));
   }
 
   @Test
   void aZfsBoxWithNoDiskNamedAndNoneUnusedIsToldOfPartitionsAndFiles() {
-    var shell = new ScriptedShellExecutor().onOk("lsblk", "{\"blockdevices\": []}");
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(DeviceFixtures.LSBLK, DeviceFixtures.spares(Set.of("/dev/sda")));
 
     var refused = assertThrows(CliCommand.Refused.class, () -> source(shell, "--storage", "zfs"));
 
@@ -236,7 +238,8 @@ class HostInitCommandTest {
     var shell = spare(DeviceFixtures.spares(Set.of("/dev/sda", "/dev/sdb")));
 
     assertEquals(
-        new PoolSource.Device("/dev/sdb", false), source(shell, "--storage", "zfs", "--yes"));
+        new PoolSource.Device("/dev/sdb", false, "40G"),
+        source(shell, "--storage", "zfs", "--yes"));
     assertTrue(shell.invocations().contains("wipefs -- /dev/sdb"));
   }
 
@@ -297,29 +300,6 @@ class HostInitCommandTest {
         "Incus already has zfs pool 'tank' on /dev/sdb, which a re-run keeps, so --pool-file-size"
             + " 9GiB would be ignored. Drop it, or name a new pool with --pool <name>.",
         file.getMessage());
-  }
-
-  @Test
-  void anEmptyImportedPoolOnTheNamedDiskIsHandedToIncusAsItIs() throws Exception {
-    answering("", false);
-    var shell =
-        spare(DeviceFixtures.read(DeviceFixtures.SPARES))
-            .onOk("realpath -e -- /dev/sdi", "/dev/sdi\n")
-            .onOk("which zpool")
-            .onOk(
-                "zpool list -vHP",
-                DeviceFixtures.read("raw-file-pool.zpool-list.txt")
-                    .replace("/tmp/sail-raw.img", "/dev/sdi1"))
-            .onOk("realpath -m", "/dev/sdi1\n")
-            .onOk("zfs list", DeviceFixtures.read("raw-file-pool.zfs-list.txt"));
-
-    assertEquals(
-        new PoolSource.Zpool("sail-raw"),
-        source(shell, "--storage", "zfs", "--disk", "/dev/sdi", "--yes"));
-    assertEquals(
-        "  Found:   the empty imported zpool sail-raw on that device, which Incus does not have:"
-            + " it is handed to Incus as it is (source=sail-raw), and nothing on it is erased.\n",
-        out.toString(StandardCharsets.UTF_8));
   }
 
   @Test

@@ -13,9 +13,9 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 /**
@@ -26,12 +26,17 @@ import java.util.stream.Stream;
  * holder lsblk cannot see (a mount in another namespace, a pool, an array).
  *
  * <p>Refused always, by name: anything but a disk or a partition; a removable, empty, zram or nbd
- * device; a device mounted, swap, or with something built on it; a partition of the disk the
- * running system is on; a RAID member, an LVM physical volume, a LUKS volume; a device another
- * holder has open. A device in an imported pool is never wiped: the empty pool is handed to Incus
- * as it is, one with datasets or one Incus holds is refused. Anything else a device holds, a
- * filesystem, a partition table, an exported pool, is erased only when the operator names the same
- * device again. Names are resolved first, so a symlink is judged as the device it points at.
+ * device; a device mounted, swap, or with something built on it; an EFI system or BIOS boot
+ * partition, and a disk holding one; a partition of the disk the running system is on; a RAID
+ * member, an LVM physical volume, a LUKS volume; a device another holder has open; a device in an
+ * imported pool. Where no device lsblk lists is mounted at {@code /}, which disks carry the system
+ * cannot be told, and every device is refused. Anything else a device holds, a filesystem, a
+ * partition table, an exported pool, is erased only when the operator names the same device again.
+ * Names are resolved first, so a symlink is judged as the device it points at, and what a device is
+ * cleared as carries what lsblk says of it that does not move between disks.
+ *
+ * <p>The exclusive open sees only holders that open a device exclusively: a process that opens it
+ * plainly (a virtual machine's raw disk, {@code dd}) is not seen.
  */
 public final class PoolDevices {
 
@@ -41,13 +46,17 @@ public final class PoolDevices {
           "--json",
           "--tree",
           "--output",
-          "PATH,TYPE,FSTYPE,PTTYPE,MOUNTPOINTS,SIZE,MODEL,RM");
+          "PATH,TYPE,FSTYPE,PTTYPE,PARTTYPE,MOUNTPOINTS,SIZE,MODEL,RM,WWN,SERIAL,MAJ:MIN");
 
   /** A wipefs type filter no signature matches: with it the probe can erase nothing. */
   static final String NOTHING = "sail_exclusive_probe";
 
   private static final Set<String> KINDS = Set.of("disk", "part");
-  private static final Set<String> WHOLE = Set.of("disk", "loop", "rom");
+  private static final Map<String, String> BOOT =
+      Map.of(
+          "c12a7328-f81f-11d2-ba4b-00a0c93ec93b", "an EFI system partition",
+          "0xef", "an EFI system partition",
+          "21686148-6449-6e6f-744e-656564454649", "a BIOS boot partition");
   private static final String PARTITION = "part";
   private static final String SWAP = "[SWAP]";
   private static final String BUSY = "Device or resource busy";
@@ -95,12 +104,11 @@ public final class PoolDevices {
   }
 
   /**
-   * What the device {@code named} names may become: the device itself, to be erased only when
-   * {@code forceWipe} (the operator's second naming of it, or null) names it too, or the empty
-   * imported pool it belongs to, handed to Incus as it is. Refused, with nothing written,
-   * otherwise.
+   * The device {@code named} names, as Incus may be handed it: to be erased only when {@code
+   * forceWipe} (the operator's second naming of it, or null) names it too. Refused, with nothing
+   * written, otherwise.
    */
-  public PoolSource cleared(String named, String forceWipe)
+  public PoolSource.Device cleared(String named, String forceWipe)
       throws IOException, InterruptedException, TimeoutException {
     var path = resolved("--disk", named);
     var label = label(named, path);
@@ -122,10 +130,7 @@ public final class PoolDevices {
       signatures.put(member.path(), signatures(member.path()));
     }
     refuseAny(label, memberships(signatures));
-    var pools = pooled(signatures.keySet());
-    if (!pools.isEmpty()) {
-      return handed(label, pools, forced);
-    }
+    refuseAny(label, pooled(signatures.keySet()));
     var busy = new ArrayList<String>();
     for (var member : members) {
       if (busy(member.path())) {
@@ -143,7 +148,7 @@ public final class PoolDevices {
               + path
               + " to erase it and make the pool there.");
     }
-    return new PoolSource.Device(path, forced);
+    return new PoolSource.Device(path, forced, place.identity());
   }
 
   /**
@@ -165,6 +170,10 @@ public final class PoolDevices {
     if (name.startsWith("zram") || name.startsWith("nbd")) {
       uses.add("it is a " + name.replaceAll("[0-9]+$", "") + " device");
     }
+    device
+        .subtree()
+        .filter(node -> node.parttype() != null && BOOT.containsKey(node.parttype()))
+        .forEach(node -> uses.add(node.path() + " is " + BOOT.get(node.parttype())));
     if (device != disk) {
       disk.subtree()
           .filter(node -> device.subtree().noneMatch(own -> own == node))
@@ -256,8 +265,10 @@ public final class PoolDevices {
   }
 
   /**
-   * Every device as lsblk lists it, whole devices at the top. A partition, an array or a volume at
-   * the top means lsblk printed a flat list, which cannot say what is built on what: refused.
+   * Every device as lsblk lists it, whole devices at the top. A partition at the top, or a device
+   * listed there twice, means lsblk printed a flat list, which cannot say what is built on what. A
+   * tree with nothing mounted at {@code /} cannot say which disks carry the system. Both are
+   * refused.
    */
   private List<BlockDevice> tree() throws IOException, InterruptedException, TimeoutException {
     var listed = shell.exec(LSBLK);
@@ -269,10 +280,21 @@ public final class PoolDevices {
               + " MOUNTPOINTS); nothing was wiped.");
     }
     var devices = BlockDevice.listed(YamlUtil.parseMap(listed.stdout()).get("blockdevices"));
-    if (devices.stream().anyMatch(device -> !WHOLE.contains(device.type()))) {
+    var paths = devices.stream().map(BlockDevice::path).toList();
+    if (devices.stream().anyMatch(device -> PARTITION.equals(device.type()))
+        || Set.copyOf(paths).size() != paths.size()) {
       throw new IOException(
           "lsblk printed a flat list, not a device tree, so what is built on a device cannot be"
               + " read; nothing was wiped.");
+    }
+    if (devices.stream()
+        .flatMap(BlockDevice::subtree)
+        .noneMatch(node -> node.mountpoints().contains("/"))) {
+      throw new IllegalArgumentException(
+          "Sail cannot tell which disks carry the running system: lsblk shows no device mounted at"
+              + " / (root on ZFS, or on a filesystem lsblk cannot place), so no disk or partition is"
+              + " taken, forced or not. Make the pool in a file instead, with --pool-file-size"
+              + " <size>.");
     }
     return devices;
   }
@@ -288,7 +310,22 @@ public final class PoolDevices {
     throw new IllegalArgumentException(label + " is not a block device lsblk lists.");
   }
 
-  private record Place(BlockDevice device, BlockDevice disk) {}
+  private record Place(BlockDevice device, BlockDevice disk) {
+
+    /**
+     * What lsblk says of the device that does not move between disks: its or its disk's WWN or
+     * serial where there is one, with its major:minor and size.
+     */
+    String identity() {
+      var stable =
+          Stream.of(device.wwn(), device.serial(), disk.wwn(), disk.serial())
+              .filter(Objects::nonNull)
+              .findFirst();
+      return Stream.concat(stable.stream(), Stream.of(device.majmin(), device.size()))
+          .filter(Objects::nonNull)
+          .collect(Collectors.joining(" "));
+    }
+  }
 
   /**
    * The signature types {@code wipefs} lists on {@code path}: given no {@code --all} and no {@code
@@ -333,90 +370,56 @@ public final class PoolDevices {
     throw new IOException("Cannot tell whether " + path + " is in use: " + opened.reason());
   }
 
-  /** The imported pool each of {@code paths} belongs to; none where ZFS is not installed. */
-  private Map<String, String> pooled(Set<String> paths)
+  /**
+   * Why each of {@code paths} that is a device of an imported pool may not be taken; none where ZFS
+   * is not installed. A pool's devices are read pool by pool, every vdev line of {@code zpool list
+   * -vHP <pool>} a member whatever class (log, cache, spare, special, dedup) it is listed under.
+   */
+  private List<String> pooled(Set<String> paths)
       throws IOException, InterruptedException, TimeoutException {
     if (!shell.exec(List.of("which", "zpool")).ok()) {
-      return Map.of();
+      return List.of();
     }
-    var listed = shell.exec(List.of("zpool", "list", "-vHP"));
+    var uses = new ArrayList<String>();
+    for (var pool : listed(List.of("zpool", "list", "-H", "-o", "name"))) {
+      var members = vdevs(listed(List.of("zpool", "list", "-vHP", pool)));
+      if (members.isEmpty()) {
+        continue;
+      }
+      var command = new ArrayList<>(List.of("realpath", "-m", "--"));
+      command.addAll(members);
+      if (shell.exec(command).stdout().lines().anyMatch(paths::contains)) {
+        uses.add(inPool(pool));
+      }
+    }
+    return uses;
+  }
+
+  /** The vdev paths of a pool's {@code zpool list -vHP} lines: each line that names a path. */
+  static List<String> vdevs(List<String> lines) {
+    return lines.stream()
+        .map(line -> line.strip().split("\t")[0])
+        .filter(name -> name.startsWith("/"))
+        .toList();
+  }
+
+  private String inPool(String pool) throws InterruptedException {
+    var held =
+        storage.poolsOrNone().stream().filter(found -> pool.equals(found.zpool())).findFirst();
+    return held.isPresent()
+        ? "it is in zpool " + pool + ", Incus's pool '" + held.get().name() + "'"
+        : "it is in the imported zpool "
+            + pool
+            + ", and no pool's device is taken: export or destroy the pool yourself first";
+  }
+
+  private List<String> listed(List<String> command)
+      throws IOException, InterruptedException, TimeoutException {
+    var listed = shell.exec(command);
     if (!listed.ok()) {
       throw new IOException("Cannot list the imported pools: " + listed.reason());
     }
-    var vdevs = new LinkedHashMap<String, String>();
-    String pool = null;
-    for (var line : listed.stdout().lines().toList()) {
-      var name = line.strip().split("\t")[0];
-      if (!line.startsWith("\t")) {
-        pool = name;
-      } else if (name.startsWith("/")) {
-        vdevs.put(name, pool);
-      }
-    }
-    if (vdevs.isEmpty()) {
-      return Map.of();
-    }
-    var command = new ArrayList<>(List.of("realpath", "-m", "--"));
-    command.addAll(vdevs.keySet());
-    var resolved = shell.exec(command).stdout().lines().toList();
-    var pools = new LinkedHashMap<String, String>();
-    var named = List.copyOf(vdevs.values());
-    for (var i = 0; i < resolved.size() && i < named.size(); i++) {
-      if (paths.contains(resolved.get(i))) {
-        pools.put(resolved.get(i), named.get(i));
-      }
-    }
-    return pools;
-  }
-
-  /**
-   * The imported pool {@code pools} names, handed to Incus as it is when it is empty and nobody
-   * holds it; refused otherwise, since a pool's device is never wiped.
-   */
-  private PoolSource handed(String label, Map<String, String> pools, boolean forced)
-      throws IOException, InterruptedException, TimeoutException {
-    var names = new LinkedHashSet<>(pools.values());
-    var where = String.join(", ", names);
-    if (names.size() > 1) {
-      refuseAny(label, List.of("it holds devices of the imported pools " + where));
-    }
-    var name = names.getFirst();
-    var held = storage.poolsOrNone().stream().filter(pool -> name.equals(pool.zpool())).findFirst();
-    if (held.isPresent()) {
-      refuseAny(
-          label, List.of("it is in zpool " + name + ", Incus's pool '" + held.get().name() + "'"));
-    }
-    if (forced) {
-      refuseAny(
-          label,
-          List.of(
-              "it is in the imported zpool "
-                  + name
-                  + ", which is never wiped: drop --force-wipe to hand the empty pool to Incus, or"
-                  + " destroy the pool yourself"));
-    }
-    var datasets = datasets(name);
-    if (!datasets.isEmpty()) {
-      refuseAny(
-          label,
-          List.of(
-              "it is in the imported zpool "
-                  + name
-                  + ", which holds "
-                  + String.join(", ", datasets)
-                  + ": only an empty pool is handed to Incus, and none is wiped"));
-    }
-    return new PoolSource.Zpool(name);
-  }
-
-  /** What zpool {@code name} holds beside its own root dataset. */
-  private List<String> datasets(String name)
-      throws IOException, InterruptedException, TimeoutException {
-    var listed = shell.exec(List.of("zfs", "list", "-H", "-r", "-o", "name", name));
-    if (!listed.ok()) {
-      throw new IOException("Cannot list what zpool " + name + " holds: " + listed.reason());
-    }
-    return listed.stdout().lines().map(String::strip).filter(line -> !line.equals(name)).toList();
+    return listed.stdout().lines().filter(line -> !line.isBlank()).toList();
   }
 
   private static String label(String named, String path) {
@@ -429,10 +432,14 @@ public final class PoolDevices {
       String type,
       String fstype,
       String pttype,
+      String parttype,
       List<String> mountpoints,
       String size,
       String model,
       boolean removable,
+      String wwn,
+      String serial,
+      String majmin,
       List<BlockDevice> children) {
 
     static List<BlockDevice> listed(Object nodes) {
@@ -448,13 +455,19 @@ public final class PoolDevices {
           (String) node.get("type"),
           (String) node.get("fstype"),
           (String) node.get("pttype"),
+          (String) node.get("parttype"),
           mounts.stream().filter(Objects::nonNull).map(String::valueOf).toList(),
           Objects.toString(node.get("size"), "0B"),
-          Optional.ofNullable(node.get("model"))
-              .map(model -> model.toString().strip())
-              .orElse(null),
+          stripped(node.get("model")),
           Boolean.TRUE.equals(node.get("rm")),
+          stripped(node.get("wwn")),
+          stripped(node.get("serial")),
+          (String) node.get("maj:min"),
           listed(node.get("children")));
+    }
+
+    private static String stripped(Object value) {
+      return value == null || value.toString().isBlank() ? null : value.toString().strip();
     }
 
     /** Whether lsblk reports it holds no bytes, as an nbd device with nothing attached does. */

@@ -318,9 +318,9 @@ public final class HostInitCommand implements Runnable {
   /**
    * The pool these flags ask for, read on the machine {@code probe} runs on: dir; the zfs pool
    * Incus already holds under this name, which a re-run keeps; a file; a named device {@link
-   * PoolDevices#cleared} clears, or the empty imported pool it belongs to; or for zfs with neither,
-   * an unused disk the operator picks. Refused when the flags disagree, with each other or with the
-   * pool Incus has, before anything is installed.
+   * PoolDevices#cleared} clears; or for zfs with neither, an unused disk the operator picks.
+   * Refused when the flags disagree, with each other or with the pool Incus has, before anything is
+   * installed.
    */
   PoolSource source(ShellExec probe) throws Exception {
     var zfs = HostYaml.BACKEND_ZFS.equals(storage);
@@ -351,11 +351,7 @@ public final class HostInitCommand implements Runnable {
     if (poolFileSize != null) {
       return file(poolFileSize);
     }
-    var source = devices.cleared(disk != null ? disk : detectAndSelectDisk(devices), forceWipe);
-    if (source instanceof PoolSource.Zpool zpool) {
-      handOver(zpool);
-    }
-    return source;
+    return devices.cleared(disk != null ? disk : detectAndSelectDisk(devices), forceWipe);
   }
 
   /**
@@ -384,23 +380,6 @@ public final class HostInitCommand implements Runnable {
               + " would be ignored. Drop it, or name a new pool with --pool <name>.");
     }
     return new PoolSource.Zpool(Objects.requireNonNullElse(held.zpool(), held.name()));
-  }
-
-  /** Says the empty imported pool goes to Incus as it is, and asks unless told yes. */
-  private void handOver(PoolSource.Zpool zpool) {
-    if (!json) {
-      System.out.println(
-          Ansi.AUTO.string(
-              "  @|bold Found:|@   the empty imported zpool "
-                  + zpool.name()
-                  + " on that device, which Incus does not have: it is handed to Incus as it"
-                  + " is (source="
-                  + zpool.name()
-                  + "), and nothing on it is erased."));
-    }
-    if (!yes && !dryRun && !json) {
-      ask("Hand zpool " + zpool.name() + " to Incus?");
-    }
   }
 
   /** A file pool of {@code size}, refused unless it reads as at least {@link #MIN_FILE_MB}. */

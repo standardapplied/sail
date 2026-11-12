@@ -68,7 +68,9 @@ public record ZfsCacheCap(long bytes, long floor) {
 
   /**
    * Writes the cap on the machine {@code shell} runs on, unless the operator set one, and says what
-   * holds.
+   * holds. The operator's cap is one in a file modprobe reads ({@code *.conf}) beside Sail's, or
+   * one the loaded module holds that Sail did not write (set on the kernel command line, or by
+   * hand).
    */
   public String install(ShellExec shell)
       throws IOException, InterruptedException, TimeoutException {
@@ -77,6 +79,7 @@ public record ZfsCacheCap(long bytes, long floor) {
             List.of(
                 "grep",
                 "-rsH",
+                "--include=*.conf",
                 "--exclude=sail-zfs.conf",
                 "-E",
                 "^[[:space:]]*options[[:space:]]+zfs[[:space:]].*zfs_arc_max=",
@@ -85,6 +88,13 @@ public record ZfsCacheCap(long bytes, long floor) {
       return "ZFS cache cap left as you set it ("
           + set.stdout().strip().lines().findFirst().orElseThrow()
           + ")";
+    }
+    var live = shell.exec(List.of("cat", LOADED + "max"));
+    var held = live.ok() ? live.stdout().strip() : "0";
+    var ours = shell.exec(List.of("grep", "-ho", "zfs_arc_max=[0-9]*", PATH));
+    var written = ours.ok() ? ours.stdout().strip().replace("zfs_arc_max=", "") : "";
+    if (!held.equals("0") && !held.equals(written) && !held.equals(String.valueOf(bytes))) {
+      return "ZFS cache cap left as set on the loaded module (zfs_arc_max=" + held + ")";
     }
     dropIn().install(shell);
     var root = shell.exec(List.of("findmnt", "-n", "-o", "FSTYPE", "/"));

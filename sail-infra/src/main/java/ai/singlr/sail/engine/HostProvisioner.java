@@ -30,7 +30,8 @@ import java.util.concurrent.TimeoutException;
  *
  * <p>The storage {@code host.yaml} states is the pool the base profile puts containers on, as Incus
  * has it. A box whose profile already exists keeps it: a ZFS pool added to a dir box sits beside
- * the dir pool, its containers untouched, and new containers are placed on it by naming it.
+ * the dir pool, its containers and the profile untouched; placing projects on it waits for
+ * workspaces.
  *
  * <p>Every step is idempotent — safe to run again on an already-provisioned host. A re-run
  * refreshes only the fields it provisions and keeps the rest of {@code host.yaml}: sync identity,
@@ -261,7 +262,12 @@ public final class HostProvisioner {
       var now = devices.cleared(device.path(), device.wipe() ? device.path() : null);
       if (!now.equals(source)) {
         throw new IllegalStateException(
-            device.path() + " changed since it was named: it now reads as " + now.said() + ".");
+            device.path()
+                + " is not the device first cleared: it was "
+                + device.identity()
+                + ", it is now "
+                + now.identity()
+                + ".");
       }
     }
     var restarted = make(pool, source);

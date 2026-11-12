@@ -38,7 +38,7 @@ import org.junit.jupiter.api.io.TempDir;
 class HostProvisionerTest {
 
   private static final PoolSource DIR = new PoolSource.Dir();
-  private static final PoolSource SDB = new PoolSource.Device("/dev/sdb", false);
+  private static final PoolSource SDB = new PoolSource.Device("/dev/sdb", false, "40G");
   private static final long MEMORY_MB = 65536;
 
   @TempDir Path tempDir;
@@ -144,7 +144,7 @@ class HostProvisionerTest {
 
     var result =
         provisioner.provision(
-            new PoolSource.Device("/dev/nvme1n1", false),
+            new PoolSource.Device("/dev/nvme1n1", false, "id"),
             "mypool",
             "br0",
             null,
@@ -1013,7 +1013,7 @@ class HostProvisionerTest {
                 DeviceFixtures.LSBLK,
                 DeviceFixtures.read("gcp/gpt-3-raid-partitions-no-arrays.lsblk-tree.json"));
 
-    var hostYaml = provision(shell, new PoolSource.Device(partition, false), null);
+    var hostYaml = provision(shell, new PoolSource.Device(partition, false, "2G"), null);
 
     assertTrue(
         shell
@@ -1060,7 +1060,7 @@ class HostProvisionerTest {
                 .onOk("wipefs -- /dev/sdb", EXT4),
             "zfs");
 
-    provision(shell, new PoolSource.Device("/dev/sdb", true), null);
+    provision(shell, new PoolSource.Device("/dev/sdb", true, "40G"), null);
 
     assertTrue(
         shell
@@ -1099,18 +1099,35 @@ class HostProvisionerTest {
     var shell =
         fresh(
             new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+                .onOk("zpool list -H -o name", "sail-raw\n")
                 .onOk(
-                    "zpool list",
+                    "zpool list -vHP sail-raw",
                     DeviceFixtures.read("raw-file-pool.zpool-list.txt")
                         .replace("/tmp/sail-raw.img", "/dev/sdb"))
-                .onOk("realpath -m", "/dev/sdb\n")
-                .onOk("zfs list", DeviceFixtures.read("raw-file-pool.zfs-list.txt")),
+                .onOk("realpath -m", "/dev/sdb\n"),
             "zfs");
 
-    var refused = assertThrows(IllegalStateException.class, () -> provision(shell, SDB, null));
+    var refused = assertThrows(IllegalArgumentException.class, () -> provision(shell, SDB, null));
 
     assertEquals(
-        "/dev/sdb changed since it was named: it now reads as zpool sail-raw as it is.",
+        "/dev/sdb is refused, even with --force-wipe: it is in the imported zpool sail-raw, and no"
+            + " pool's device is taken: export or destroy the pool yourself first.",
+        refused.getMessage());
+    assertNoPoolCreated(shell);
+  }
+
+  @Test
+  void aNameThatNowNamesAnotherDiskIsRefusedAndUntouched() {
+    var shell = fresh(new ScriptedShellExecutor(new ShellExec.Result(0, "", "")), "zfs");
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                provision(shell, new PoolSource.Device("/dev/sdb", true, "WWN-A 8:16 40G"), null));
+
+    assertEquals(
+        "/dev/sdb is not the device first cleared: it was WWN-A 8:16 40G, it is now 40G.",
         refused.getMessage());
     assertNoPoolCreated(shell);
   }
@@ -1128,7 +1145,7 @@ class HostProvisionerTest {
     var refused =
         assertThrows(
             IllegalArgumentException.class,
-            () -> provision(shell, new PoolSource.Device("/dev/sdb", true), null));
+            () -> provision(shell, new PoolSource.Device("/dev/sdb", true, "40G"), null));
 
     assertEquals(
         "/dev/sdb is refused, even with --force-wipe: /dev/sdb is mounted at /mnt/scratch.",

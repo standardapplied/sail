@@ -992,8 +992,7 @@ every pool: `host init` has it create the pool with one `incus storage create`, 
 `--storage dir` (the host filesystem, `incus storage create <pool> dir`), and for `--storage zfs`
 a whole disk or a partition (`--disk <device>`, `source=<device>`), a sparse file Incus makes
 under `/var/lib/incus/disks/` (`--pool-file-size <size>`, `size=<n>MiB`), slower than a disk and
-said once to be meant for trials, or an existing empty zpool (`source=<zpool>`, which Incus
-requires empty). Incus runs `zpool create -m none -O compression=on` itself, with `-f` only for
+said once to be meant for trials. Incus runs `zpool create -m none -O compression=on` itself, with `-f` only for
 `source.wipe=true`.
 
 - **Z1. What `host init` reports as done is what Incus has.** The base profile's root disk is
@@ -1002,23 +1001,26 @@ requires empty). Incus runs `zpool create -m none -O compression=on` itself, wit
   (`pool_source`) as Incus has them. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`,
   `HostProvisionerTest.aProfileThatNamesAPoolIncusLacksIsRefused`, `HostProvisionerIT`.*
 - **Z2. Sail never formats what it was not told to.** `PoolDevices.cleared` resolves the named
-  device and reads the whole device tree (`lsblk --json --tree`; a flat list fails closed). It
-  refuses, even with `--force-wipe`: anything but a disk or a partition; a removable, empty, zram
-  or nbd device; one mounted or swap, or with something built on it (an array, a volume, an open
-  LUKS volume); a partition of the disk the running system is on (any partition there, or
-  anything built on one, mounted at `/` or `/boot…` or used as swap); a RAID member, an LVM
+  device and reads the whole device tree (`lsblk --json --tree`; a flat list fails closed, and a
+  tree with nothing mounted at `/`, as with root on ZFS, refuses every disk and partition, since
+  which disks carry the system cannot be told; the file pool is the way on). It refuses, even with
+  `--force-wipe`: anything but a disk or a partition; a removable, empty, zram or nbd device; one
+  mounted or swap, or with something built on it (an array, a volume, an open LUKS volume); an EFI
+  system or BIOS boot partition, by its partition type, and a disk holding one; a partition of the
+  disk the running system is on (any partition there, or anything built on one, mounted at `/` or
+  `/boot…` or used as swap); a RAID member, an LVM
   physical volume or a LUKS volume, read from lsblk and from `wipefs`'s listing of the device and
   each partition, with the command that clears it named; a device another holder has open, found
   by the exclusive open `wipefs --all --no-act --types sail_exclusive_probe` makes (`--no-act`
   skips the writes, and the type filter matches no signature, so it neither reports anything
   erased nor re-reads a partition table, as an unfiltered `--no-act --all` does); and a device of
-  an imported pool (`zpool list
-  -vHP`). That pool is never wiped: an empty one nobody holds is handed to Incus as it is
-  (`source=<zpool>`, as an older Sail's raw `zpool create` left it), one with datasets or one an
-  Incus pool is is refused. Anything else a device or its partitions hold (a filesystem, a
+  an imported pool, whatever class it is listed under (`zpool list -vHP <pool>`), named with the
+  pool and with Incus's pool when Incus holds it. The open sees only exclusive holders: a process
+  that opens a device plainly, a virtual machine's raw disk or `dd`, is not seen. Anything else a device or its partitions hold (a filesystem, a
   partition table, an exported pool) is refused unless `--force-wipe` names the same device;
   that is the one case Incus is passed `source.wipe=true`. It runs when the flags are read and
-  again just before the pool is made. Offered disks (none named) are only whole unused ones.
+  again just before the pool is made, which refuses unless the device is the one first cleared
+  (its or its disk's WWN or serial, its major:minor and size). Offered disks (none named) are only whole unused ones.
   *`PoolDevicesTest` (on lsblk, wipefs and zpool output captured from this devbox, a GitHub
   runner and a GCP VM taken through blank, partitioned and RAID layouts, plus one hand-written
   layout of spare disks), `PoolDevicesIT` (the runner's own disks, read-only, and the probe on a
