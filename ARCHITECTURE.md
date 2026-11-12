@@ -1007,19 +1007,22 @@ requires empty). Incus runs `zpool create -m none -O compression=on` itself, wit
   or nbd device; one mounted or swap, or with something built on it (an array, a volume, an open
   LUKS volume); a partition of the disk the running system is on (any partition there, or
   anything built on one, mounted at `/` or `/boot…` or used as swap); a RAID member, an LVM
-  physical volume or a LUKS volume, read from lsblk and from `wipefs --no-act` on the device and
+  physical volume or a LUKS volume, read from lsblk and from `wipefs`'s listing of the device and
   each partition, with the command that clears it named; a device another holder has open, found
-  by the exclusive open `wipefs --all --no-act --types sail_exclusive_probe` makes (it writes
-  nothing and the type matches no signature); and a device of an imported pool (`zpool list
+  by the exclusive open `wipefs --all --no-act --types sail_exclusive_probe` makes (`--no-act`
+  skips the writes, and the type filter matches no signature, so it neither reports anything
+  erased nor re-reads a partition table, as an unfiltered `--no-act --all` does); and a device of
+  an imported pool (`zpool list
   -vHP`). That pool is never wiped: an empty one nobody holds is handed to Incus as it is
   (`source=<zpool>`, as an older Sail's raw `zpool create` left it), one with datasets or one an
   Incus pool is is refused. Anything else a device or its partitions hold (a filesystem, a
   partition table, an exported pool) is refused unless `--force-wipe` names the same device;
   that is the one case Incus is passed `source.wipe=true`. It runs when the flags are read and
   again just before the pool is made. Offered disks (none named) are only whole unused ones.
-  *`PoolDevicesTest` (on lsblk, wipefs and zpool output captured from this devbox and a GitHub
-  runner, plus one hand-written layout of spare disks), `PoolDevicesIT` (the runner's own disks,
-  read-only), `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
+  *`PoolDevicesTest` (on lsblk, wipefs and zpool output captured from this devbox, a GitHub
+  runner and a GCP VM taken through blank, partitioned and RAID layouts, plus one hand-written
+  layout of spare disks), `PoolDevicesIT` (the runner's own disks, read-only, and the probe on a
+  loop device), `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
 - **Z3. One pool, one owner.** Sail only reads ZFS (`zpool list`, `zfs list`); every pool,
   dataset, snapshot and copy is made or removed by Incus. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`.*
 - **Z4. The ZFS cache cap is set before ZFS can take memory.** Step 3 writes
