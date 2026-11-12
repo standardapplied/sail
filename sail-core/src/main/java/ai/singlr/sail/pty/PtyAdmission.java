@@ -37,8 +37,9 @@ public interface PtyAdmission {
   void room(String room, String project, PtyIdentity.Person who) throws IOException;
 
   /**
-   * The folder a session {@code who} opens names, as it runs there, or throws with the reason
-   * before any process starts. The server takes it as named ({@link Folder#asNamed}).
+   * How a session {@code who} opens in the folder {@code named} runs there, or throws with the
+   * reason before any process starts. The server takes the folder as named ({@link
+   * Folder#asNamed}).
    */
   default Folder folder(Path named, PtyIdentity.Person who) throws IOException {
     return Folder.asNamed(named);
