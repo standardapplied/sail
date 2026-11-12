@@ -375,6 +375,17 @@ class SpecMeasuresTest {
     assertEquals(missing(1), at(skipped, "intervals", "awaiting_merge"));
     var bornDone = Given.done().history(List.of(revision(1, SpecStatus.DONE, 0)), Set.of()).wire();
     assertEquals(moment(0, "change_log"), at(bornDone, "times", "done"));
+    assertEquals(
+        moment(0, "change_log"),
+        at(
+            Given.done()
+                .history(
+                    List.of(revision(1, SpecStatus.DONE, 0), revision(2, SpecStatus.DONE, 5)),
+                    Set.of(3L))
+                .wire(),
+            "times",
+            "done"),
+        "a stretch begun at the birth is known whatever lies past it out of sight");
     assertEquals(NOT_REACHED, at(bornDone, "times", "ready"));
     assertEquals(
         NOT_REACHED,
@@ -383,6 +394,16 @@ class SpecMeasuresTest {
             "times",
             "verified"),
         "a pass a re-dispatch superseded verified an earlier attempt");
+    assertEquals(
+        moment(100, "review"),
+        at(
+            Given.done()
+                .reviewed(
+                    review("r1", 1, "passed", at(70), null), review("r2", 2, "passed", at(100), null))
+                .wire(),
+            "times",
+            "verified"),
+        "the latest pass of the attempt is what verified it");
   }
 
   /** Scenario 5. */

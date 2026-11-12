@@ -25,6 +25,7 @@ import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -77,6 +78,20 @@ class GlobalSpecOperationsTest {
         new HashMap<String, Object>(Map.of("id", "auth", "project", "manatee", "title", "Auth"));
     base.putAll(overrides);
     return SpecCreateRequest.fromMap(base);
+  }
+
+  @Test
+  void measuresNeedTheRunsAndTheReviewsAndSayWhichStoreIsMissing() {
+    Acting.by(UDAY_ADMIN, () -> ops.create(createReq(Map.of())));
+    var withoutRuns = new GlobalSpecOperations(specStore, reviewStore);
+    var withoutReviews = new GlobalSpecOperations(specStore, null, null, new RunStore(db));
+
+    assertEquals(
+        "Run store not available.",
+        assertThrows(ApiException.class, () -> withoutRuns.measures("auth")).reason());
+    assertEquals(
+        "Review store not available.",
+        assertThrows(ApiException.class, () -> withoutReviews.measured("auth")).reason());
   }
 
   @Test

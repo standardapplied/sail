@@ -290,8 +290,7 @@ record SpecMeasures(
     Moment firstInto(SpecStatus status) {
       for (var index = 0; index < revisions.size(); index++) {
         if (revisions.get(index).status() == status) {
-          var seq = revisions.get(index).seq();
-          return born() && gaps.stream().noneMatch(gap -> gap < seq) ? at(index) : INCOMPLETE;
+          return wholeBefore(index) ? at(index) : INCOMPLETE;
         }
       }
       return born() && gaps.isEmpty() ? NOT_REACHED : INCOMPLETE;
@@ -332,12 +331,18 @@ record SpecMeasures(
      * first, whether the log begins with the spec's birth.
      */
     private boolean adjacent(int index) {
-      var seq = revisions.get(index).seq();
       if (index == 0) {
-        return born() && gaps.stream().noneMatch(gap -> gap < seq);
+        return wholeBefore(0);
       }
       var previous = revisions.get(index - 1).seq();
+      var seq = revisions.get(index).seq();
       return gaps.stream().noneMatch(gap -> gap > previous && gap < seq);
+    }
+
+    /** Whether the log holds everything before revision {@code index}, from the spec's birth. */
+    private boolean wholeBefore(int index) {
+      var seq = revisions.get(index).seq();
+      return born() && gaps.stream().noneMatch(gap -> gap < seq);
     }
 
     /** Whether the first revision held is the spec's birth: made when the spec was. */

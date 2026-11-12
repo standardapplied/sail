@@ -266,6 +266,24 @@ class SpecMeasuresCommandTest {
   }
 
   @Test
+  void aListingOfNoSpecsSaysSoAndADurationReadsInItsLargestUnits() {
+    assertEquals(
+        """
+          Measures of 0 specs (this box's record):
+          Median and p90, nearest rank, over the specs listed:
+            No recorded human code act: 0 of 0 done (an upper bound); 0 not done
+        """,
+        run("list", "--project", "alpha", "--status", "cancelled", "--measures"));
+    assertEquals(
+        List.of("42s", "5m", "2h 0m", "3d 4h 5m"),
+        List.of(
+            MeasuresText.duration(42),
+            MeasuresText.duration(300),
+            MeasuresText.duration(7200),
+            MeasuresText.duration(3 * 86400 + 4 * 3600 + 300)));
+  }
+
+  @Test
   @SuppressWarnings("unchecked")
   void theJsonOfBothVerbsIsTheOneRecordTheServerComputed() {
     var shown = YamlUtil.parseMap(run("show", "auth", "--json"));
