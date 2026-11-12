@@ -62,8 +62,9 @@ Usage:
                                 it beside devpool, acme and the base profile stay on devpool, a copy of a
                                 container's snapshot on it is a clone (zfs get origin), and the ZFS cache
                                 cap holds across a reboot (boot id changed); client's root disk and root
-                                partition are refused even with --force-wipe, and its ext4 scratch disk
-                                only with it; observer, left on dir, is unchanged
+                                partition are refused, and its ext4 scratch disk until the row itself
+                                erases it with the wipefs the refusal names; observer, left on dir, is
+                                unchanged
   ci/fleet rebuilt RUN VERSION  main is copied by the README's backup line, takes a spec, and is lost; client
                                 writes while it is gone; a new main installs VERSION and inits empty, which
                                 observer refuses as another org; the copy goes in place, every node re-pins
@@ -981,10 +982,10 @@ root_partition() {
   on "$1" "$2" 'findmnt -n -o SOURCE /'
 }
 
-refuses_to_wipe() {
+refuses_a_pool_on() {
   local run=$1 box=$2 device=$3
-  refused "$run" "$box" "$device is refused, even with --force-wipe" \
-    "sudo sail host init --storage zfs --pool wiped --disk $device --force-wipe $device --yes"
+  refused "$run" "$box" "$device is refused" \
+    "sudo sail host init --storage zfs --pool refused --disk $device --yes"
 }
 
 uncapped_on() {
@@ -997,15 +998,18 @@ storage() {
   local scratch=/dev/disk/by-id/google-scratch disk partition
   disk=$(root_disk "$run" client)
   partition=$(root_partition "$run" client)
-  check "$run" "client's root disk $disk is refused for a pool, even named twice" refuses_to_wipe "$run" client "$disk"
-  check "$run" "client's root partition $partition is refused for a pool, even named twice" refuses_to_wipe "$run" client "$partition"
+  check "$run" "client's root disk $disk is refused for a pool" refuses_a_pool_on "$run" client "$disk"
+  check "$run" "client's root partition $partition is refused for a pool" refuses_a_pool_on "$run" client "$partition"
   check "$run" "client's scratch disk is given an ext4 filesystem" on "$run" client "sudo mkfs.ext4 -qF $scratch"
-  check "$run" "the scratch disk holding ext4 is refused without the force flag, naming it" \
-    refused "$run" client "holds ext4" "sudo sail host init --storage zfs --pool scratch --disk $scratch --yes"
-  check "$run" "named again with --force-wipe, the scratch disk becomes a zfs pool" \
-    allowed "$run" client "sudo sail host init --storage zfs --pool scratch --disk $scratch --force-wipe $scratch --yes && sudo incus storage list --format csv | grep -q '^scratch,zfs,'"
-  check "$run" "the command that made the forced scratch pool runs again and keeps it" \
-    naming "already exists)" allowed "$run" client "sudo sail host init --storage zfs --pool scratch --disk $scratch --force-wipe $scratch --yes"
+  check "$run" "the scratch disk holding ext4 is refused, naming ext4 and the wipefs that erases it" \
+    refused "$run" client "holds ext4. Sail erases nothing: if nothing on it is wanted, erase it yourself with sudo wipefs --all /dev/" \
+    "sudo sail host init --storage zfs --pool scratch --disk $scratch --yes"
+  check "$run" "the row erases the scratch disk itself, with the wipefs the refusal named" \
+    on "$run" client "sudo wipefs --all $scratch"
+  check "$run" "the blank scratch disk becomes a zfs pool" \
+    allowed "$run" client "sudo sail host init --storage zfs --pool scratch --disk $scratch --yes && sudo incus storage list --format csv | grep -q '^scratch,zfs,'"
+  check "$run" "the command that made the scratch pool runs again and keeps it" \
+    naming "already exists)" allowed "$run" client "sudo sail host init --storage zfs --pool scratch --disk $scratch --yes"
   check "$run" "the scratch pool goes" on "$run" client "sudo incus storage delete scratch"
   check "$run" "a dry run of adding tank shows the base profile staying on devpool" \
     naming "singlr-base (already exists): containers on devpool (dir)" allowed "$run" client "sudo sail host init --storage zfs --pool-file-size 20GiB --pool tank --dry-run --yes"
