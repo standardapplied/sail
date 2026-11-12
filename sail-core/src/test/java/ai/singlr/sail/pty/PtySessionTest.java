@@ -12,6 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.lang.foreign.FunctionDescriptor;
+import java.lang.foreign.Linker;
+import java.lang.foreign.ValueLayout;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,6 +27,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 class PtySessionTest {
@@ -133,6 +138,7 @@ class PtySessionTest {
   /** A journal whose disk fills the moment {@code trigger} is appended (empty: at once). */
   private static final class FailingJournal implements Journal {
     private final String trigger;
+    private volatile boolean closed;
 
     FailingJournal() {
       this("");
@@ -168,7 +174,9 @@ class PtySessionTest {
     }
 
     @Override
-    public void close() {}
+    public void close() {
+      closed = true;
+    }
   }
 
   private PtySession resumed(String script, boolean withShim) throws Exception {
@@ -498,37 +506,44 @@ class PtySessionTest {
 
   /**
    * The session is its shell: once it exits, the session ends after {@link Pty#DRAIN_GRACE_MILLIS}
-   * of quiet, keeping what was in the terminal, while a job the shell left running, which starts
-   * ticking only seconds later, is not kept.
+   * of quiet, keeping what was in the terminal, while a job the shell left running is not waited
+   * for. The job speaks only once the test has seen the ending (it waits for a file the test makes
+   * then), and gives up on its own after a minute, so nothing outlives a failed assertion.
    */
   @Test
   void aJobTheShellLeftKeepsWhatItSaidBeforeTheExitAndNothingAfter() throws Exception {
+    var go = dir.resolve("go");
+    var jobPid = dir.resolve("job.pid");
     var ending = new Ending();
     var capacity = 64 * 1024;
     var session =
         session(
-            "trap '' HUP; (sleep 2; while :; do echo tick; sleep 0.5; done) &"
-                + " echo job:$!:started; echo before-the-exit; exit 4",
+            "trap '' HUP; (i=0; while [ ! -e "
+                + go
+                + " ] && [ $i -lt 600 ]; do sleep 0.1; i=$((i+1)); done; echo tick) &"
+                + " echo $! > "
+                + jobPid
+                + "; echo before-the-exit; exit 4",
             ending,
             capacity);
     try {
       assertTrue(ending.await(), "the shell's exit ends the session");
       assertEquals("exited(4)", session.endedReason());
+      var job = ProcessHandle.of(Long.parseLong(Files.readString(jobPid).strip()));
+      assertTrue(job.map(ProcessHandle::isAlive).orElse(false), "the job outlived its session");
+      Files.createFile(go);
+      job.get().onExit().get(30, TimeUnit.SECONDS);
     } finally {
       session.close();
+      if (Files.exists(jobPid)) {
+        ProcessHandle.of(Long.parseLong(Files.readString(jobPid).strip()))
+            .ifPresent(ProcessHandle::destroyForcibly);
+      }
     }
-    String kept;
     try (var ring = RingJournal.open(dir.resolve("t.ring"), capacity)) {
-      kept = new String(ring.tail(capacity).bytes(), StandardCharsets.UTF_8);
+      assertEquals(
+          "before-the-exit\r\n", new String(ring.tail(capacity).bytes(), StandardCharsets.UTF_8));
     }
-    var job = Long.parseLong(kept.replaceAll("(?s).*job:(\\d+):started.*", "$1"));
-    ProcessHandle.of(job)
-        .ifPresent(
-            handle -> {
-              handle.descendants().forEach(ProcessHandle::destroyForcibly);
-              handle.destroyForcibly();
-            });
-    assertEquals("job:" + job + ":started\r\nbefore-the-exit\r\n", kept);
   }
 
   @Test
@@ -643,6 +658,101 @@ class PtySessionTest {
       }
       assertTrue(seen.toString().contains("got:bye"), "the child converses with the adoptee");
     }
+  }
+
+  /**
+   * A host that adopts every orphan and reaps none ({@code PR_SET_CHILD_SUBREAPER}, and nothing
+   * waits on what it adopts), ending ten sessions in turn by a journal failure, each with a command
+   * that shrugs off SIGHUP and SIGTERM: says how many of those commands were still in the process
+   * table, alive or a zombie, when their ending was published. Only the shim can reap its command
+   * here, so the count is zero only when the command dies before the shim does.
+   */
+  static final class NeverReapingHost {
+    private static final int PR_SET_CHILD_SUBREAPER = 36;
+
+    public static void main(String[] args) throws Throwable {
+      var prctl =
+          Native.downcall(
+              "prctl",
+              FunctionDescriptor.of(
+                  ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG),
+              Linker.Option.firstVariadicArg(1));
+      if ((int) prctl.invokeExact(PR_SET_CHILD_SUBREAPER, 1L) != 0) {
+        throw new IllegalStateException("prctl(PR_SET_CHILD_SUBREAPER) failed");
+      }
+      var dir = Path.of(args[0]);
+      var present = 0;
+      for (var i = 0; i < 10; i++) {
+        var session =
+            PtySession.start(
+                origin("stubborn-" + i, "uday", "acme"),
+                PtyEvents.NONE,
+                PtyChildShimTest.shim(
+                    dir.resolve(i + ".exit"),
+                    "sh",
+                    "-c",
+                    "trap '' HUP TERM; read go; echo \"pid=$$;\"; read x; echo boom;"
+                        + " while :; do sleep 1; done"),
+                Map.of("TERM", "dumb"),
+                dir,
+                new FailingJournal("boom"),
+                SessionFiles.in(dir, "t" + i),
+                80,
+                24,
+                4096);
+        try {
+          var client = new Collector();
+          var id = session.attach(client, true, "uday");
+          session.input(id, 1, "\n".getBytes(StandardCharsets.UTF_8));
+          client.awaitOutput(";");
+          var pid = Long.parseLong(client.outputText().replaceAll("(?s).*pid=(\\d+);.*", "$1"));
+          session.input(id, 2, "\n".getBytes(StandardCharsets.UTF_8));
+          if (!client.ended.await(30, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("the failure did not end session " + i);
+          }
+          if (ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false)) {
+            present++;
+          }
+        } finally {
+          session.close();
+        }
+      }
+      System.out.println("commands in the process table at their ending: " + present);
+    }
+  }
+
+  /** {@code PR_SET_CHILD_SUBREAPER} is Linux's; no one else makes a host adopt its orphans. */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aKilledCommandIsGoneBeforeItsEndingEvenWhereNoOneReapsOrphans() throws Exception {
+    assertEquals(
+        "commands in the process table at their ending: 0\n",
+        PtyTest.said(NeverReapingHost.class, dir),
+        "ten forced endings in a host that reaps no orphan");
+  }
+
+  @Test
+  void aSpawnThatThrowsReleasesTheSessionsJournalAndTerminal() throws Exception {
+    var journal = new FailingJournal();
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                PtySession.start(
+                    origin("bad-env", "uday", "acme"),
+                    PtyEvents.NONE,
+                    sh("exit 0"),
+                    Map.of("NOT=A=NAME", "x"),
+                    Path.of("/tmp"),
+                    journal,
+                    SessionFiles.in(dir, "t"),
+                    80,
+                    24,
+                    4096));
+
+    assertTrue(refused.getMessage().contains("NOT=A=NAME"), refused.getMessage());
+    assertTrue(journal.closed, "the journal is closed with the terminal it was opened beside");
   }
 
   @Test

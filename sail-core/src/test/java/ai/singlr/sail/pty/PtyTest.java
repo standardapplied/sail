@@ -186,6 +186,11 @@ class PtyTest {
 
   /** What {@code host}'s {@code main}, run in a JVM of its own on this class path, says. */
   private String said(Class<?> host) throws Exception {
+    return said(host, dir);
+  }
+
+  /** What {@code host}'s {@code main}, run in a JVM of its own with {@code dir}, says. */
+  static String said(Class<?> host, Path dir) throws Exception {
     var process =
         new ProcessBuilder(
                 Path.of(System.getProperty("java.home"), "bin", "java").toString(),
