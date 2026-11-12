@@ -11,6 +11,7 @@ usage() {
   cat >&2 <<'EOF'
 Usage:
   ci/check                      format, then run the tests of classes changed against origin/main
+  ci/check quick                format, then every module's unit tests, incrementally and without coverage
   ci/check full                 every module's tests and gates, as CI's unit jobs run them together
   ci/check unit MODULE [--no-coverage]
                                 one module's import check, tests and gates, its upstream installed first
@@ -71,6 +72,12 @@ unit() {
   else
     mvn -B verify -pl "$module" -Djacoco.skip=true
   fi
+}
+
+quick() {
+  forbid_wildcard_imports $MODULES
+  mvn -B -q spotless:apply
+  mvn -B verify -Djacoco.skip=true
 }
 
 full() {
@@ -242,6 +249,7 @@ changed() {
 
 case ${1:-} in
   "") changed ;;
+  quick) quick ;;
   full) full ;;
   unit) shift; unit "$@" ;;
   shard) shift; shard "$@" ;;
