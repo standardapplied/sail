@@ -120,9 +120,6 @@ public interface Operations extends LocalLaneOperations {
   /** Stops a run, but only when it is executing on this box (same provenance guard as the log). */
   Result<StopRunResponse> stopRun(String runId, String localHandle);
 
-  /** Returns up to {@code limit} most-recent events (oldest first). */
-  Result<RecentEventsResponse> recentEvents(int limit);
-
   /**
    * The spec's durable event history from this box's audit store, oldest first: RECORD-class events
    * only, at most {@code limit} rows, and — when {@code since} is non-null — only rows with an

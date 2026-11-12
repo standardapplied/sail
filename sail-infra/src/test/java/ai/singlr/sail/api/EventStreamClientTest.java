@@ -52,7 +52,6 @@ class EventStreamClientTest {
   @Test
   void deliversPublishedEventsIntoQueue(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
-      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 32);
       try (var server =
           new SailApiServer(
               "127.0.0.1",
@@ -60,7 +59,7 @@ class EventStreamClientTest {
               new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
-              persister,
+              null,
               tmp.resolve("api.sock"))) {
         server.start();
         var queue = new LinkedBlockingQueue<Event>();
@@ -91,7 +90,6 @@ class EventStreamClientTest {
   @Test
   void closeStopsTheReader(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
-      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 8);
       try (var server =
           new SailApiServer(
               "127.0.0.1",
@@ -99,7 +97,7 @@ class EventStreamClientTest {
               new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
-              persister,
+              null,
               tmp.resolve("api.sock"))) {
         server.start();
         var queue = new LinkedBlockingQueue<Event>();
@@ -156,7 +154,6 @@ class EventStreamClientTest {
   @Test
   void subscribeThrowsOnNon200Response(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
-      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 8);
       try (var server =
           new SailApiServer(
               "127.0.0.1",
@@ -164,7 +161,7 @@ class EventStreamClientTest {
               new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
-              persister,
+              null,
               tmp.resolve("api.sock"))) {
         server.start();
         var queue = new LinkedBlockingQueue<Event>();
@@ -268,7 +265,6 @@ class EventStreamClientTest {
   @Test
   void filtersByProject(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
-      var persister = new AuditPersister(tmp.resolve("events.jsonl"), 16);
       try (var server =
           new SailApiServer(
               "127.0.0.1",
@@ -276,7 +272,7 @@ class EventStreamClientTest {
               new SailOperations(),
               new FixedTokenTestAuth("tok"),
               bus,
-              persister,
+              null,
               tmp.resolve("api.sock"))) {
         server.start();
         var queue = new LinkedBlockingQueue<Event>();

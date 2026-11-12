@@ -63,8 +63,7 @@ class ProjectServeCommandTest {
   }
 
   private HostOperations operations() {
-    return OperationsFactory.create(
-        db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE);
+    return OperationsFactory.create(db, shell, null, SyncScheduler.disabled(), SessionYield.NONE);
   }
 
   private record Ran(int exit, String out) {}

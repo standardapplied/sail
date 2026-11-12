@@ -23,6 +23,7 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
+import ai.singlr.sail.store.FeedFloors;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
@@ -323,7 +324,13 @@ class SpecPruneTest {
 
     assertTrue(report.entries().contains(new Erasure.Target(Erasure.RUN, late)));
     assertEquals(0, count("SELECT count(*) FROM runs WHERE spec_id = 'old'"));
-    assertEquals(0, count("SELECT count(*) FROM change_log WHERE kind <> 'erasure'"));
+    assertEquals(
+        0,
+        count(
+            "SELECT count(*) FROM change_log WHERE kind <> 'erasure' AND entity_type <> '"
+                + FeedFloors.TYPE
+                + "'"),
+        "nothing of what was pruned stays; a floor its readers answer to may");
   }
 
   @Test

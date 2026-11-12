@@ -26,6 +26,7 @@ import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
+import ai.singlr.sail.store.FeedFloors;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
@@ -491,7 +492,10 @@ class ScopedSyncTest {
 
     assertEquals(
         0,
-        count(nia.db, "SELECT count(*) FROM change_heads WHERE project IS NOT 'beta'"),
+        count(
+            nia.db,
+            "SELECT count(*) FROM change_heads WHERE project IS NOT 'beta' AND entity_type <> ?",
+            FeedFloors.TYPE),
         "nothing of alpha stays, what this box never held live included");
     assertEquals(0, count(nia.db, "SELECT count(*) FROM change_log WHERE entity_id LIKE 'alpha%'"));
     SyncBox.assertScopedToMain(main, nia, ProjectScope.of(List.of(B)));
@@ -849,7 +853,9 @@ class ScopedSyncTest {
     var dropped = SyncBox.roundSettling(main, nia);
 
     assertInstanceOf(Settlement.How.Dropped.class, dropped.settled().getFirst().how());
-    assertEquals(0, count(nia.db, "SELECT count(*) FROM change_log"));
+    assertEquals(
+        0,
+        count(nia.db, "SELECT count(*) FROM change_log WHERE entity_type <> ?", FeedFloors.TYPE));
     assertTrue(new RunStore(main.db).findById(run).isEmpty(), "nothing of it was offered");
   }
 

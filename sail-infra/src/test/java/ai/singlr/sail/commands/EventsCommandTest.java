@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -31,7 +32,7 @@ import picocli.CommandLine;
 
 class EventsCommandTest {
 
-  private static final Remedy.Command FOLLOW_AGAIN = Remedy.sail("events", "--follow");
+  private static final Remedy.Command FOLLOW_AGAIN = Remedy.sail("events");
 
   @Test
   void registeredAsRootSubcommand() {
@@ -54,8 +55,7 @@ class EventsCommandTest {
 
     assertEquals(0, exit);
     var help = sw.toString();
-    assertTrue(help.contains("--follow"));
-    assertTrue(help.contains("--lines"));
+    assertFalse(help.contains("--follow"), "a stream is all it does");
     assertTrue(help.contains("--project"));
     assertTrue(help.contains("--type"));
     assertTrue(help.contains("--json"));
@@ -80,6 +80,10 @@ class EventsCommandTest {
     var frames =
         List.of(
             ": subscribed",
+            "",
+            "event: change",
+            "id: 7",
+            "data: {\"seq\": 7, \"type\": \"room\", \"id\": \"lobby\", \"gone\": true}",
             "",
             "event: error",
             "data: {\"code\": \"conflict\", \"message\": \"This box does not know its FDE's"
@@ -121,12 +125,11 @@ class EventsCommandTest {
     assertEquals(
         List.of(
             "The sail API closed the stream (it restarted or stopped). Follow again: sudo sail"
-                + " events --follow"),
+                + " events"),
         CliCommand.lines(closed, OperatorCommand.SUDO));
     assertEquals(
         List.of(
-            "The sail API closed the stream (it restarted or stopped). Follow again: sail events"
-                + " --follow"),
+            "The sail API closed the stream (it restarted or stopped). Follow again: sail events"),
         CliCommand.lines(closed, OperatorCommand.PLAIN));
   }
 
@@ -158,8 +161,7 @@ class EventsCommandTest {
 
     assertEquals(
         List.of(
-            "The sail API closed the stream (it restarted or stopped). Follow again: sail events"
-                + " --follow"),
+            "The sail API closed the stream (it restarted or stopped). Follow again: sail events"),
         CliCommand.lines(closed, OperatorCommand.PLAIN));
   }
 
@@ -173,13 +175,13 @@ class EventsCommandTest {
     try (var server = dropped ? StreamServer.dropping(frames) : StreamServer.ending(frames)) {
       var port = Integer.toString(server.port());
 
-      var followed = SailCli.run("events", "--follow", "--port", port);
+      var followed = SailCli.run("events", "--port", port);
 
       assertEquals(1, followed.exit());
       assertEquals("", followed.out());
       assertEquals(
           "  ✗ The sail API closed the stream (it restarted or stopped). Follow again: "
-              + OperatorCommand.here().sail("events --follow --port " + port)
+              + OperatorCommand.here().sail("events --port " + port)
               + "\n",
           followed.err());
     } finally {

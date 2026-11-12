@@ -1,4 +1,9 @@
 {
+  "change_types": [
+    "spec",
+    "room",
+    "message"
+  ],
   "error_codes": [
     {
       "code": "bad_request",
@@ -67,6 +72,10 @@
     {
       "code": "precondition_failed",
       "status": 412
+    },
+    {
+      "code": "resync_required",
+      "status": 409
     },
     {
       "code": "project_not_in_catalog",

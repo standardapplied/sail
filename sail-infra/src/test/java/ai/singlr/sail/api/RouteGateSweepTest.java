@@ -112,7 +112,8 @@ class RouteGateSweepTest {
               "POST /v1/conflicts/{id...} decides CHANGE",
               "GET /v1/events reads in scope",
               "POST /v1/events the journal decides",
-              "GET /v1/events/recent reads in scope",
+              "GET /v1/changes reads in scope",
+              "POST /v1/changes:wake wakes the change feed",
               "GET /v1/events/stats operates the box",
               "POST /v1/specs:prune decides PRUNE",
               "GET /v1/specs:measures reads in scope",
@@ -411,6 +412,8 @@ class RouteGateSweepTest {
             "* /v1/conflicts/{id...} serves nothing",
             "GET /v1/whoami reads in scope",
             "* /v1/whoami serves nothing",
+            "GET /v1/changes reads in scope",
+            "* /v1/changes serves nothing",
             "POST /v1/events the journal decides",
             "* /v1/events serves nothing",
             "GET /v1/run/messages acts on its own run",
@@ -520,6 +523,7 @@ class RouteGateSweepTest {
           case Gate.OperatesBox box -> "operates the box";
           case Gate.ManagesPeople people -> "manages people";
           case Gate.Unserved unserved -> "serves nothing";
+          case Gate.Wakes wakes -> "wakes the change feed";
           case Gate.RunsOwn own -> "acts on its own run";
           case Gate.Decides(var action) -> "decides " + action.name();
           case Gate.Unauthenticated(var reason) -> "unauthenticated: " + reason;

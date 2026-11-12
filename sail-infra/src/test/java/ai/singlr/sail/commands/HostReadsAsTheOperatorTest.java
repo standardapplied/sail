@@ -106,7 +106,6 @@ class HostReadsAsTheOperatorTest {
                         Sqlite.open(database),
                         incus,
                         null,
-                        null,
                         SyncScheduler.disabled(),
                         SessionYield.NONE),
                 incus),

@@ -138,7 +138,7 @@ class DirectTerminalTest {
     operations =
         DoorBox.wired(
             OperationsFactory.create(
-                db, DoorBox.acmeRuns(), null, null, SyncScheduler.disabled(), SessionYield.NONE),
+                db, DoorBox.acmeRuns(), null, SyncScheduler.disabled(), SessionYield.NONE),
             db,
             dir,
             NODE);

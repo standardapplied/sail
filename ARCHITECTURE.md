@@ -1177,11 +1177,10 @@ credential minted at dispatch (`SAIL_RUN_CREDENTIAL`), which resolves to the run
 principal; a missing or revoked credential is refused with 401. Every box runs it, and it
 is what lets an engineer dispatch agents locally.
 
-Event history has two read shapes. `GET /v1/events/recent?limit=` is the unscoped window,
-and `GET /v1/events?spec=<id>[&since=<eventId>][&limit=]` serves one spec's durable history
-from the `EventStore`: RECORD-class events only (telemetry is pruned by retention and never
-served from history), oldest first, with `since` an exclusive monotonic event-id cursor for
-gap-fill after an SSE reconnect. The record is **node-local** — there is no event replica,
+What changed is read from the change feed (below). A spec's own event history is
+`GET /v1/events?spec=<id>[&since=<eventId>][&limit=]`, served from the `EventStore`:
+RECORD-class events only (telemetry is pruned by retention and never served from history),
+oldest first, with `since` an exclusive event-id cursor. The record is **node-local** — there is no event replica,
 so events recorded on another FDE's box never land in this box's audit store (same
 provenance posture as agent logs). The route serves the local record completely; the
 fleet-consistent room content is and remains the durable synced stores — messages, reviews,
@@ -2468,6 +2467,91 @@ straight to the database and announces each, and the door decides it on the conv
 message is in, never on a run named beside it, and rebuilds the event whole from the stored row, as the messages route emits it
 for a local post, refusing a message this box does not hold. A refusal is a 403 through
 `Refusals`, naming the event type and what the sender may not drive.
+
+### The change feed
+
+A client keeps a copy of the rows it shows and stays current without reading them all again:
+it reads a list, which answers a `Seq` header, then asks `GET /v1/changes?since=<position>` (or
+holds `GET /v1/events/stream` open with `Last-Event-ID: <position>`) for every row that changed
+after. A position is one opaque string, `<catalog>.<seq>.<fingerprint>` (`FeedPositions`): the
+database's catalog id, a `change_log.seq`, and the first 6 bytes of a SHA-256 of the type, id
+and rev of the entry at that seq, as the log holds it or compaction kept it (`0` where none ever
+stood). The `Seq` header, `since`, `next`, the SSE `id:`, `Last-Event-ID` and `after` all carry
+one; a change's own `seq` in its envelope stays an integer. A revision's rev is
+`<counter>-<content hash>`: a reader who held a row's content can test a guess at a later
+revision of it, never enumerate one.
+
+One seam, `ChangeFeed`, serves both. A page reads the heads after the position from
+`ChangeLog.changesAfter`, each type's range (and, for a scoped reader, each of its projects'
+ranges of it) in seq order through an index and cut at the limit, then each fed type's rows in
+one read, in one read snapshot. It serves a reader a row it may read now, or `gone` or `erased`,
+without content, for a head filed where it may read now; nothing else, and a change to one row
+never re-sends another. A fed row is shaped by its type's list record less the fields that list
+derives from other rows (`RoomsListResponse.DERIVED`, `GlobalSpecsListResponse.DERIVED`), which
+a client derives from the rows it holds (SailKit's `HeldRows`):
+
+| Field | Derived from |
+|---|---|
+| room `spec_ids` | the spec rows whose `room_id` is the room |
+| room `last_activity_at` | the newest message held of the room |
+| room `needs_reply`, `question_message_id` | the room's latest question an agent asked, of the messages held, that no person spoke after |
+| spec `wake`, `engagement` | its room row's `wake` and first member |
+| spec `needs_reply`, `question_message_id` | its room's open question |
+| spec `last_activity_at` | the later of its `updated_at` and the newest message held of the conversation named as the spec is |
+
+A spec whose room its reader may not read is listed with none of the room's fields, as the client,
+holding no such room, derives none. Deriving without the box's roster has known limits, where a
+client's copy disagrees with the list: the server counts a question answered only by a voice that
+steers its room, and a client any person's message, so a reply from someone who does not steer
+the room clears the client's `needs_reply` while the list shows it; a client that rebuilt from the
+lists holds only the newest page of a room's messages, so a question older than that page, with no
+person's message since, is open on the list and not on the client; and a reader that hears only a
+room's steering voices is listed with the time of the room's newest message of any voice, which it
+is never sent.
+
+A client follows the feed only from the position of the reads it holds, and applies changes in
+the order told. A stream reads one page per turn of its loop, as the caller is now: it asks the
+door that opened it before a page is read and again before it is written, so a caller refused
+since is ended with none of it. It reads on from its own cursor without checking that cursor's
+entry again. It reads when this process commits an append to the change log (`ChangeLog.watch`)
+or when another process announces one through `POST /v1/changes:wake`, a burst of either waking
+it once; never on a timer and on no other event. The wake carries nothing, is delivered to no
+client, and any caller who authenticates may send it (gate `WAKES`). A command other than the
+server binds a `CommitAnnouncer` to every database it opens (`Sqlite.ANNOUNCING`, bound by
+`Main`; the server binds none), which sends the wake after each commit that appended. Bus events
+carry no `id:`, so they never move a cursor.
+
+A change of what a reader may read raises a **floor** (`FeedFloors`): an entry of the change
+log's own type `feed`, filed under no project, that no sync pages and every other reader of the
+log passes over by naming its types (`FeedFloorTest` sweeps the sources for it). Raising one
+moves it to a new entry with a fresh random rev, so a position standing on it says nothing of
+whose floor rose, and keeps the entry it replaces as a compacted one, so a position standing on
+that still checks. The box's floor rises when history is rewritten with no newer entry
+(`ChangeLog.purge`, `forget`, on a node); an FDE's when what it reads changes
+(`FdeStore.restrict`, `unrestrict`, `grant`, `revoke`, its removal, an erased project's grants
+taken back); a project's when a spec, room or run moves into or out of it (both projects), when
+main refiles a head on a node (`fileUnder`), and when a message filed apart from its
+conversation is deleted or erased: every message said in a room before the room moved stays filed
+under the project it left, as does a later reply in one of its threads, so retention or a prune of
+a moved room's old history resyncs every scoped reader of the project it left, though none of
+them can read any of it, rather than tell them the end of a message that was never theirs. A reader of every project answers to no
+project floor. A position that does not parse, names another database, lies past the newest
+seq, stands where no entry now stands as it was handed out (a copy restored from an older backup
+and grown again; an entry erased since), or below its reader's floor is `409 resync_required` on
+the feed and one `event: resync` with an `id:` on the stream, each naming the newest position;
+a stream told so after it started is then ended. An older binary run against the database raises
+no floor while it runs.
+
+| | Invariant | Proven by |
+|---|---|---|
+| F1 | A position is opaque and names the database, the `change_log.seq` and the entry standing there: durable across restarts, strictly increasing, assigned where the revision is written, with no second counter. One from another database, from a copy restored from an older backup, standing on an entry no longer there, or a bare number is `resync`, never served. | `ChangeFeedTest` (a restart; a reinstall; a restore, before and after the entry at the seq is erased; the same row at the same seq with another revision; an old client's bare id), `FeedFloorTest` |
+| F2 | For any reader and position, replay then live delivery is every readable change after it, each once a page, in order, including a change committed during the replay; a page's `next` passes what it read and told nothing of; a stream's cursor survives the erasure of its entry. | `ChangeFeedTest` (a change committed between two replay pages; a row changed three times; 5,000 changes paged; a skipped tail; an erased cursor) |
+| F3 | A change is told only to a reader of its row, by its own read route's rule; a scoped reader's feed and stream are the same changes with and without another project's activity, positions aside; no position names a floor that rose. One erasure is seen by readers who could read nothing of it: the deletion or erasure of a message filed apart from its conversation, which is every pre-move message of a moved room, resyncs the scoped readers of the project it is filed under. | `ChangeFeedTest` (a scoped viewer; a reply in a moved room's old thread; a run's credential; the floor fingerprints), `ScopedReadsTest`, `OneDecisionSweepTest` |
+| F4 | A change of what a reader may read raises a floor for the readers it can affect, who are answered `resync` and whose open streams end; a caller refused before a page is written is sent none of it. | `ChangeFeedTest` (a revoked member; a disabled one; a disable, a deleted session and a revoke landing between the door and the page), `FeedFloorTest` |
+| F5 | An erased row is told as `erased` with its id and type, never its content, to a reader of where it is filed; a reader that hears only a room's steering voices is never told the erasure of a message, so it keeps one it was told. | `ChangeFeedTest` (a pruned spec; erased messages and a steering-only reader), `FeedFloorTest` |
+| F6 | A page holds at most 500 heads (100 by default), reads each range through an index in seq order, and costs the same statements however many it holds; each page is its own read, so a replay never holds a write, and a stream reads one page a turn. | `ChangeFeedTest` (statements; twenty streams over 60,000 hidden messages; a 200,000-change replay), `FeedFloorTest` (query plans at 200,000 heads) |
+| F7 | `/v1/changes` and the stream's row events are one read through `ChangeFeed`; a fed row carries what its own journal entry holds, shaped by its list record less the fields derived from other rows, and a change to one row never re-sends another; a client deriving those fields from what it holds agrees with the lists. | `ChangeFeedTest` (scenario 7 on the derived view; a room's wake change), `ClientGoldensTest` (`changes.json`, `board-*.json`), SailKit `ChangeFeedTests` |
+| F8 | A client that names no position is served as before, but for the `Seq` header and the ids row changes carry; bus events, turn deltas, pty facts and a room's turn state carry no id, and no client is sent a wake. An idle stream reads nothing, and only commits and wakes make a stream read. | `ChangeFeedTest` (no position; deltas on a resumed stream; an idle stream; a member's wake; wakes in a burst and door events), `SseHandlerTest`, `ClientGoldensTest` (`stream.sse`) |
 
 ## Access
 

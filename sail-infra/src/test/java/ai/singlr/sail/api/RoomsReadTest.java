@@ -106,7 +106,6 @@ class RoomsReadTest {
             new ShellExecutor(false),
             TestProjects.reading(yaml),
             null,
-            null,
             new SpecStore(db),
             new ReviewStore(db),
             new RunStore(db),

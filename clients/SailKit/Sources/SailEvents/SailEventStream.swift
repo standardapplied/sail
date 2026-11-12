@@ -18,11 +18,18 @@ public struct EventFilter: Equatable, Sendable {
 /// What the server's live events tell a reader.
 public enum StreamUpdate: Equatable, Sendable {
     case event(Event)
-    /// The stream is connected and carries what the server publishes from now on. What it
-    /// published while no connection was open is not replayed, so a reader that shows state
-    /// fetches it again now (``SailAPI/Endpoint`` for the lists, `recentEvents` for the feed);
-    /// `after` is the id of the last event this stream delivered before, nil when there was none.
-    case connected(after: Int64?)
+    /// A row changed: the change feed's change, at the position a reconnect resumes after. Each
+    /// is sent once, in order, from where the stream resumed.
+    case change(Change)
+    /// The server cannot resume from where this stream asked, or what the caller may read changed:
+    /// what the reader holds may be stale, so it reads the rows afresh and follows the feed from the
+    /// position those reads answer. A stream told so as it connects goes on with the changes after
+    /// `after`; one told so later is ended by the server, and reconnects.
+    case resync(after: String)
+    /// The stream is connected. A stream that resumed (`after` is the position of the last change
+    /// it delivered, nil when there was none) is sent every change since, then live ones; the bus's
+    /// events published while no connection was open are not sent again.
+    case connected(after: String?)
     /// The server could not be reached, or is at its connection limit, and is being asked again.
     case connectFailed(SailError)
     /// The server sent an event this client cannot read; the stream goes on.
@@ -64,7 +71,7 @@ public struct SailEventStream: AsyncSequence, Sendable {
             do throws(SailError) {
                 switch try await updates.next() {
                 case nil: return nil
-                case let .connected(lastEventID): return .connected(after: Int64(lastEventID))
+                case let .connected(lastEventID): return .connected(after: lastEventID.isEmpty ? nil : lastEventID)
                 case let .connectFailed(error): return .connectFailed(error)
                 case let .event(sent): return try read(sent)
                 }
@@ -74,20 +81,32 @@ public struct SailEventStream: AsyncSequence, Sendable {
             }
         }
 
-        /// The event `sent` holds, or the refusal the server ended the stream with.
+        /// The event `sent` holds: a bus event, a row change, a resync, or the refusal the server
+        /// ended the stream with.
         private func read(_ sent: ServerSentEvent) throws(SailError) -> StreamUpdate {
             let data = Data(sent.data.utf8)
             do throws(SailError) {
-                guard sent.type != "error" else {
-                    throw SailError.refused(try SailJSON.decode(Refusal.self, from: data, route: route))
+                switch sent.type {
+                case "error": throw SailError.refused(try SailJSON.decode(Refusal.self, from: data, route: route))
+                case "change": return .change(try SailJSON.decode(Change.self, from: data, route: route))
+                case "resync": return .resync(after: try SailJSON.decode(Resync.self, from: data, route: route).position)
+                case "message": return .event(try SailJSON.decode(Event.self, from: data, route: route))
+                default:
+                    return .unreadable(Undecodable(
+                        route: route, field: "(event)", reason: "an event named '\(sent.type)' is not one this client reads"
+                    ))
                 }
-                return .event(try SailJSON.decode(Event.self, from: data, route: route))
             } catch {
                 guard case let .undecodable(unreadable) = error else { throw error }
                 return .unreadable(unreadable)
             }
         }
     }
+}
+
+/// Where a stream told to resync reads afresh from.
+private struct Resync: Decodable {
+    let position: String
 }
 
 extension SailClient {

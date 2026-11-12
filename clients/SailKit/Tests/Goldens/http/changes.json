@@ -1,0 +1,140 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/changes?since=golden.0.0"
+  },
+  "response": {
+    "body": {
+      "changes": [
+        {
+          "id": "00000000-0000-7000-8000-000000000001",
+          "row": {
+            "author": "uday",
+            "body": "Which berth takes the ferry — north or south? ⚓",
+            "created_at": "2026-11-11T09:00:00.656Z",
+            "id": "00000000-0000-7000-8000-000000000001",
+            "question": true,
+            "spec_id": "harbor-design"
+          },
+          "seq": 4,
+          "type": "message"
+        },
+        {
+          "id": "00000000-0000-7000-8000-000000000002",
+          "row": {
+            "author": "uday",
+            "body": "South: it has the deeper draft. 🚢",
+            "created_at": "2026-11-11T09:00:00.656Z",
+            "id": "00000000-0000-7000-8000-000000000002",
+            "reply_to": "00000000-0000-7000-8000-000000000001",
+            "spec_id": "harbor-design"
+          },
+          "seq": 5,
+          "type": "message"
+        },
+        {
+          "id": "harbor-docks",
+          "row": {
+            "agent": "claude-code",
+            "assignee": "uday",
+            "branch": "agent/harbor-docks",
+            "created_at": "2026-11-11T09:00:00.656Z",
+            "created_by": "uday",
+            "depends_on": [
+              "harbor-berths"
+            ],
+            "id": "harbor-docks",
+            "model": "opus",
+            "priority": 2,
+            "project": "harbor",
+            "reasoning_effort": "high",
+            "repos": [
+              "harbor-api"
+            ],
+            "room_id": "harbor-design",
+            "status": "pending",
+            "title": "Docks take the ferry",
+            "updated_at": "2026-11-11T09:00:00.656Z",
+            "updated_by": "uday"
+          },
+          "seq": 6,
+          "type": "spec"
+        },
+        {
+          "id": "harbor-design",
+          "row": {
+            "assignee": "uday",
+            "created_at": "2026-11-11T09:00:00.656Z",
+            "created_by": "uday",
+            "effective_wake": "mention",
+            "id": "harbor-design",
+            "members": [
+              {
+                "agent": "claude-code",
+                "agent_name": "Claude Code",
+                "engaged_at": "2026-11-11T09:00:00.656Z",
+                "mode": "read_only",
+                "model": "opus"
+              }
+            ],
+            "project": "harbor",
+            "title": "Docks",
+            "updated_at": "2026-11-11T09:00:00.656Z",
+            "updated_by": "sail",
+            "wake": "mention"
+          },
+          "seq": 9,
+          "type": "room"
+        },
+        {
+          "id": "00000000-0000-7000-8000-000000000004",
+          "row": {
+            "author": "claude/run-1",
+            "body": "The harness exited before it answered.",
+            "created_at": "2026-11-11T09:00:00.656Z",
+            "error": true,
+            "id": "00000000-0000-7000-8000-000000000004",
+            "spec_id": "harbor-design"
+          },
+          "seq": 11,
+          "type": "message"
+        },
+        {
+          "id": "00000000-0000-7000-8000-000000000003",
+          "row": {
+            "author": "claude/run-1",
+            "body": "Shall I take the south berth?",
+            "created_at": "2026-11-11T09:00:00.656Z",
+            "id": "00000000-0000-7000-8000-000000000003",
+            "question": true,
+            "spec_id": "harbor-design"
+          },
+          "seq": 12,
+          "type": "message"
+        },
+        {
+          "gone": true,
+          "id": "harbor-quay",
+          "seq": 19,
+          "type": "room"
+        },
+        {
+          "erased": true,
+          "id": "harbor-buoys",
+          "seq": 21,
+          "type": "spec"
+        },
+        {
+          "erased": true,
+          "id": "harbor-buoys",
+          "seq": 22,
+          "type": "room"
+        }
+      ],
+      "more": false,
+      "next": "golden.22.000000000022",
+      "schema_version": 1
+    },
+    "status": 200
+  }
+}

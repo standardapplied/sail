@@ -102,7 +102,7 @@ class SpecMeasuresRouteTest {
     var operations =
         TestControlPlane.on(
             OperationsFactory.create(
-                db, NO_CONTAINERS, bus, null, SyncScheduler.disabled(), SessionYield.NONE),
+                db, NO_CONTAINERS, bus, SyncScheduler.disabled(), SessionYield.NONE),
             db,
             tempDir,
             new SyncConfig(null, null, null, BOX));

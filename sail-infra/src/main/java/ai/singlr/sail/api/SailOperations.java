@@ -46,8 +46,12 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.BoxCredentialStore;
+import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.FeedFloors;
+import ai.singlr.sail.store.FeedPositions;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
@@ -65,7 +69,9 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -311,6 +317,77 @@ public final class SailOperations implements HostOperations {
     return resolved;
   }
 
+  /**
+   * The change feed over this box's change log, its rows each read as its own list route reads it;
+   * a message is steered, so a reader who hears only steering is told nothing of one deleted or
+   * erased. A box built without its control plane keeps no change log, and feeds nothing ({@link
+   * ChangeFeed#NONE}).
+   */
+  @Override
+  public ChangeFeed changes() {
+    if (controlPlane == null) {
+      return ChangeFeed.NONE;
+    }
+    return new JournalFeed(
+        new ChangeLog(controlPlane),
+        new FeedPositions(controlPlane),
+        new FeedFloors(controlPlane),
+        Map.of(
+            Erasure.SPEC,
+            new JournalFeed.Fed(this::readableSpecs, false),
+            Erasure.ROOM,
+            new JournalFeed.Fed(this::readableRooms, false),
+            Erasure.MESSAGE,
+            new JournalFeed.Fed(this::readableMessages, true)),
+        this::freshenForRead);
+  }
+
+  /**
+   * The specs among {@code ids} the reader may see, as the feed shapes each ({@link
+   * GlobalSpecsListResponse#fed}).
+   */
+  private Map<String, Mappable> readableSpecs(List<String> ids) {
+    var rows = new LinkedHashMap<String, Mappable>();
+    globalSpecOps
+        .readableViews(ids)
+        .forEach((id, view) -> rows.put(id, () -> GlobalSpecsListResponse.fed(view)));
+    return rows;
+  }
+
+  /**
+   * The rooms among {@code ids} the reader may see, as the feed shapes each ({@link
+   * RoomsListResponse#fed}).
+   */
+  private Map<String, Mappable> readableRooms(List<String> ids) {
+    var rows = new LinkedHashMap<String, Mappable>();
+    for (var view :
+        viewsOf(
+            ReadFilter.readable(
+                Actor.reader(), requireRoomStore().findByIds(ids), RoomStore.RoomRow::project))) {
+      rows.put(view.id(), () -> RoomsListResponse.fed(view));
+    }
+    return rows;
+  }
+
+  /**
+   * The messages among {@code ids} the reader may see, as a read of their conversation shapes them:
+   * the store's read of each, in a conversation the reader may see ({@link #requireRoomOrSpec}).
+   */
+  private Map<String, SpecMessageView> readableMessages(List<String> ids) {
+    var messages = requireMessageStore().findReadable(ids);
+    var conversations =
+        conversations(messages.stream().map(MessageStore.MessageRow::roomId).toList());
+    var views = new LinkedHashMap<String, SpecMessageView>();
+    for (var message : messages) {
+      ReadFilter.readable(
+              Actor.reader(),
+              Optional.ofNullable(conversations.get(message.roomId())),
+              RoomStore.RoomRow::project)
+          .ifPresent(room -> views.put(message.id(), SpecMessageView.from(message)));
+    }
+    return views;
+  }
+
   @Override
   public ProjectFiles projectFiles(String project) {
     return new SharedProjectFiles(
@@ -320,7 +397,6 @@ public final class SailOperations implements HostOperations {
   private final ShellExec shell;
   private final WatcherSpawner watcherSpawner;
   private final EventBus eventBus;
-  private final AuditPersister auditPersister;
   private final SpecStore specStore;
   private final ReviewStore reviewStore;
   private final RunStore runStore;
@@ -353,16 +429,12 @@ public final class SailOperations implements HostOperations {
 
   SailOperations(
       ShellExec shell, ProjectReader definitions, WatcherSpawner.ProcessSpawner watcherFallback) {
-    this(shell, definitions, watcherFallback, null, null);
+    this(shell, definitions, watcherFallback, null);
   }
 
   /** Construct with explicit event-bus wiring; used by {@link SailApiServer}. */
-  public SailOperations(
-      ShellExec shell,
-      ProjectReader definitions,
-      EventBus eventBus,
-      AuditPersister auditPersister) {
-    this(shell, definitions, WatcherSpawner::spawnProcess, eventBus, auditPersister, null, null);
+  public SailOperations(ShellExec shell, ProjectReader definitions, EventBus eventBus) {
+    this(shell, definitions, WatcherSpawner::spawnProcess, eventBus, null, null);
   }
 
   /** Construct with database-backed stores; used by the control plane server. */
@@ -370,27 +442,15 @@ public final class SailOperations implements HostOperations {
       ShellExec shell,
       ProjectReader definitions,
       EventBus eventBus,
-      EventSubscriber auditSubscriber,
       SpecStore specStore,
       ReviewStore reviewStore) {
-    this(
-        shell,
-        definitions,
-        WatcherSpawner::spawnProcess,
-        eventBus,
-        auditSubscriber instanceof AuditPersister ap ? ap : null,
-        specStore,
-        reviewStore);
+    this(shell, definitions, WatcherSpawner::spawnProcess, eventBus, specStore, reviewStore);
   }
 
   /** Construct with database-backed spec store (no review store). */
   public SailOperations(
-      ShellExec shell,
-      ProjectReader definitions,
-      EventBus eventBus,
-      EventSubscriber auditSubscriber,
-      SpecStore specStore) {
-    this(shell, definitions, eventBus, auditSubscriber, specStore, null);
+      ShellExec shell, ProjectReader definitions, EventBus eventBus, SpecStore specStore) {
+    this(shell, definitions, eventBus, specStore, null);
   }
 
   /** Construct with the project catalog included but no sync or run aggregate. */
@@ -398,7 +458,6 @@ public final class SailOperations implements HostOperations {
       ShellExec shell,
       ProjectReader definitions,
       EventBus eventBus,
-      EventSubscriber auditSubscriber,
       SpecStore specStore,
       ReviewStore reviewStore,
       ProjectStore projectStore) {
@@ -406,7 +465,6 @@ public final class SailOperations implements HostOperations {
         shell,
         definitions,
         eventBus,
-        auditSubscriber,
         specStore,
         reviewStore,
         null,
@@ -430,7 +488,6 @@ public final class SailOperations implements HostOperations {
       ShellExec shell,
       ProjectReader definitions,
       EventBus eventBus,
-      EventSubscriber auditSubscriber,
       SpecStore specStore,
       ReviewStore reviewStore,
       RunStore runStore,
@@ -443,7 +500,6 @@ public final class SailOperations implements HostOperations {
         definitions,
         WatcherSpawner::spawnProcess,
         eventBus,
-        auditSubscriber instanceof AuditPersister ap ? ap : null,
         specStore,
         reviewStore,
         runStore,
@@ -521,9 +577,8 @@ public final class SailOperations implements HostOperations {
       ShellExec shell,
       ProjectReader definitions,
       WatcherSpawner.ProcessSpawner watcherFallback,
-      EventBus eventBus,
-      AuditPersister auditPersister) {
-    this(shell, definitions, watcherFallback, eventBus, auditPersister, null, null);
+      EventBus eventBus) {
+    this(shell, definitions, watcherFallback, eventBus, null, null);
   }
 
   SailOperations(
@@ -531,18 +586,9 @@ public final class SailOperations implements HostOperations {
       ProjectReader definitions,
       WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
-      AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore) {
-    this(
-        shell,
-        definitions,
-        watcherFallback,
-        eventBus,
-        auditPersister,
-        specStore,
-        reviewStore,
-        null);
+    this(shell, definitions, watcherFallback, eventBus, specStore, reviewStore, null);
   }
 
   SailOperations(
@@ -550,7 +596,6 @@ public final class SailOperations implements HostOperations {
       ProjectReader definitions,
       WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
-      AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore,
       RunStore runStore) {
@@ -559,7 +604,6 @@ public final class SailOperations implements HostOperations {
         definitions,
         watcherFallback,
         eventBus,
-        auditPersister,
         specStore,
         reviewStore,
         runStore,
@@ -575,7 +619,6 @@ public final class SailOperations implements HostOperations {
       ProjectReader definitions,
       WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
-      AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore,
       RunStore runStore,
@@ -586,7 +629,6 @@ public final class SailOperations implements HostOperations {
         definitions,
         watcherFallback,
         eventBus,
-        auditPersister,
         specStore,
         reviewStore,
         runStore,
@@ -602,7 +644,6 @@ public final class SailOperations implements HostOperations {
       ProjectReader definitions,
       WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
-      AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore,
       RunStore runStore,
@@ -614,7 +655,6 @@ public final class SailOperations implements HostOperations {
         definitions,
         watcherFallback,
         eventBus,
-        auditPersister,
         specStore,
         reviewStore,
         runStore,
@@ -630,7 +670,6 @@ public final class SailOperations implements HostOperations {
       ProjectReader definitions,
       WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
-      AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore,
       RunStore runStore,
@@ -644,7 +683,6 @@ public final class SailOperations implements HostOperations {
         definitions,
         watcherFallback,
         eventBus,
-        auditPersister,
         specStore,
         reviewStore,
         runStore,
@@ -669,7 +707,6 @@ public final class SailOperations implements HostOperations {
       ProjectReader definitions,
       WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
-      AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore,
       RunStore runStore,
@@ -682,7 +719,6 @@ public final class SailOperations implements HostOperations {
     this.shell = shell;
     this.watcherSpawner = hooks.watcher();
     this.eventBus = eventBus;
-    this.auditPersister = auditPersister;
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.runStore = runStore;
@@ -970,27 +1006,49 @@ public final class SailOperations implements HostOperations {
    * spec-less room answers from its own row.
    */
   private Optional<RoomStore.RoomRow> roomOrSpec(String roomId) {
-    var spec = specStore == null ? null : specStore.findById(roomId).orElse(null);
-    if (spec != null) {
-      var room =
-          roomStore == null ? null : roomStore.findById(spec.roomIdOrIdentity()).orElse(null);
-      if (room != null) {
-        return Optional.of(room);
-      }
-      return Optional.of(
-          new RoomStore.RoomRow(
-              spec.roomIdOrIdentity(),
-              spec.project(),
-              spec.title(),
-              spec.assignee(),
-              null,
-              null,
-              spec.createdBy(),
-              spec.createdAt(),
-              spec.updatedAt(),
-              spec.updatedBy()));
+    return Optional.ofNullable(conversations(List.of(roomId)).get(roomId));
+  }
+
+  /**
+   * The conversation behind each of {@code ids} that has one, as {@link #roomOrSpec} resolves it,
+   * keyed by the id asked: the specs and the rooms are each read once, however many ids.
+   */
+  private Map<String, RoomStore.RoomRow> conversations(List<String> ids) {
+    var specs = new HashMap<String, SpecStore.SpecRow>();
+    if (specStore != null) {
+      specStore.findByIds(ids).forEach(spec -> specs.put(spec.id(), spec));
     }
-    return roomStore == null ? Optional.empty() : roomStore.findById(roomId);
+    var rooms = new HashMap<String, RoomStore.RoomRow>();
+    if (roomStore != null) {
+      var wanted = new LinkedHashSet<>(ids);
+      specs.values().forEach(spec -> wanted.add(spec.roomIdOrIdentity()));
+      roomStore.findByIds(wanted).forEach(room -> rooms.put(room.id(), room));
+    }
+    var found = new LinkedHashMap<String, RoomStore.RoomRow>();
+    for (var id : ids) {
+      var spec = specs.get(id);
+      var room =
+          spec == null ? rooms.get(id) : rooms.getOrDefault(spec.roomIdOrIdentity(), roomOf(spec));
+      if (room != null) {
+        found.put(id, room);
+      }
+    }
+    return found;
+  }
+
+  /** The room a spec converses in before that room's row has arrived: the spec's, as it stands. */
+  private static RoomStore.RoomRow roomOf(SpecStore.SpecRow spec) {
+    return new RoomStore.RoomRow(
+        spec.roomIdOrIdentity(),
+        spec.project(),
+        spec.title(),
+        spec.assignee(),
+        null,
+        null,
+        spec.createdBy(),
+        spec.createdAt(),
+        spec.updatedAt(),
+        spec.updatedBy());
   }
 
   @Override
@@ -1079,7 +1137,7 @@ public final class SailOperations implements HostOperations {
                   Actor.reader(),
                   project == null || project.isBlank() ? store.listAll() : store.list(project),
                   RoomStore.RoomRow::project);
-          var views = rows.stream().map(this::viewOf).toList();
+          var views = viewsOf(rows);
           if (messageStore == null) {
             return new RoomsListResponse(views, Map.of(), Map.of());
           }
@@ -1095,12 +1153,31 @@ public final class SailOperations implements HostOperations {
    * row's project, and one whose row has not arrived is its spec's.
    */
   private <T> Map<String, T> ofReadableRooms(Map<String, T> byRoom) {
+    var rooms = List.copyOf(byRoom.keySet());
     var readable = new LinkedHashMap<String, T>();
-    for (var room :
-        ReadFilter.readable(Actor.reader(), List.copyOf(byRoom.keySet()), this::projectOfRoom)) {
+    for (var room : ReadFilter.readable(Actor.reader(), rooms, projectsOfRooms(rooms))) {
       readable.put(room, byRoom.get(room));
     }
     return readable;
+  }
+
+  /**
+   * The project of each of {@code rooms}, as {@link #roomOrSpec} resolves it: every one resolved in
+   * one read, the first time one is asked, so a reader no project hides a room from asks none.
+   */
+  private Function<String, String> projectsOfRooms(List<String> rooms) {
+    return new Function<>() {
+      private Map<String, RoomStore.RoomRow> resolved;
+
+      @Override
+      public String apply(String room) {
+        if (resolved == null) {
+          resolved = conversations(rooms);
+        }
+        var conversation = resolved.get(room);
+        return conversation == null ? null : conversation.project();
+      }
+    };
   }
 
   /** {@code byRoom}'s instants as the edge prints them. */
@@ -1108,10 +1185,6 @@ public final class SailOperations implements HostOperations {
     var formatted = new LinkedHashMap<String, String>();
     byRoom.forEach((room, at) -> formatted.put(room, DateTimeUtils.format(at)));
     return formatted;
-  }
-
-  private String projectOfRoom(String roomId) {
-    return roomOrSpec(roomId).map(RoomStore.RoomRow::project).orElse(null);
   }
 
   @Override
@@ -1172,8 +1245,28 @@ public final class SailOperations implements HostOperations {
 
   /** The room as its reader sees it, naming the specs attached to it that the reader may see. */
   private RoomView viewOf(RoomStore.RoomRow row) {
-    var specs = ReadFilter.readable(Actor.reader(), specsIn(row.id()), SpecStore.SpecRow::project);
-    return RoomView.from(row, specs.stream().map(SpecStore.SpecRow::id).toList());
+    return viewsOf(List.of(row)).getFirst();
+  }
+
+  /** {@code rows} as {@link #viewOf} shapes each, the specs attached to them read once. */
+  private List<RoomView> viewsOf(List<RoomStore.RoomRow> rows) {
+    var attached =
+        specStore == null || rows.isEmpty()
+            ? Map.<String, List<SpecStore.SpecRow>>of()
+            : specStore.listByRooms(rows.stream().map(RoomStore.RoomRow::id).toList());
+    return rows.stream()
+        .map(
+            row ->
+                RoomView.from(
+                    row,
+                    ReadFilter.readable(
+                            Actor.reader(),
+                            attached.getOrDefault(row.id(), List.of()),
+                            SpecStore.SpecRow::project)
+                        .stream()
+                        .map(SpecStore.SpecRow::id)
+                        .toList()))
+        .toList();
   }
 
   /** What to do about {@code attached}, naming only the specs the reader may see. */
@@ -1725,24 +1818,6 @@ public final class SailOperations implements HostOperations {
       triggerSyncAfterWrite();
     }
     return result;
-  }
-
-  @Override
-  public Result<RecentEventsResponse> recentEvents(int limit) {
-    if (limit <= 0 || limit > 5000) {
-      return Result.failure(
-          ErrorCode.INVALID_REQUEST, "limit must be between 1 and 5000, got " + limit);
-    }
-    if (auditPersister == null) {
-      return Result.success(new RecentEventsResponse(limit, 0, List.of()));
-    }
-    return safe(
-        () -> {
-          var events =
-              auditPersister.recent(limit, ReadFilter.readable(Actor.reader(), Event::project));
-          var maps = events.stream().map(Event::toMap).toList();
-          return new RecentEventsResponse(limit, maps.size(), maps);
-        });
   }
 
   @Override

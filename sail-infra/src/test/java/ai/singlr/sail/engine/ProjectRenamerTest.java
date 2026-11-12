@@ -109,7 +109,7 @@ class ProjectRenamerTest {
     new FdeStore(db).add("ada", null, null, "member");
     var shell = runningShell();
     try (var operations =
-        OperationsFactory.create(db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+        OperationsFactory.create(db, shell, null, SyncScheduler.disabled(), SessionYield.NONE)
             .useControlPlane(
                 db,
                 tempDir,
