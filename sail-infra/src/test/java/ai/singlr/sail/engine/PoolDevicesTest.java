@@ -365,6 +365,13 @@ class PoolDevicesTest {
                     LUKS_DISK,
                     PARTITIONED_DISK,
                     LOOP,
+                    dev(
+                        "/dev/sdi",
+                        "disk",
+                        null,
+                        "gpt",
+                        List.of(),
+                        dev("/dev/sdi1", "part", null, null, List.of())),
                     dev("/dev/nvme1n1", "disk", null, null, List.of(), "3.5T", "KIOXIA  ")));
 
     assertEquals(

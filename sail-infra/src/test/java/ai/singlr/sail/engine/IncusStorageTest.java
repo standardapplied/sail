@@ -34,6 +34,14 @@ class IncusStorageTest {
   }
 
   @Test
+  void eachSourceIsSaidAsTheOperatorReadsIt() {
+    assertEquals("dir", new PoolSource.Dir().said());
+    assertEquals("zfs on /dev/sdb", new PoolSource.Device("/dev/sdb", false).said());
+    assertEquals("zfs on /dev/sdb, erased first", new PoolSource.Device("/dev/sdb", true).said());
+    assertEquals("zfs in a 50.0 GiB file", new PoolSource.File(51200).said());
+  }
+
+  @Test
   void createRunsTheCommandAndAnswersAsIncusDid() throws Exception {
     var shell = new ScriptedShellExecutor().onFail("incus storage create", "Error: pool exists");
 

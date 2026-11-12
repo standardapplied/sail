@@ -217,7 +217,7 @@ public final class HostInitCommand implements Runnable {
       System.out.println();
       if (isZfs) {
         System.out.println(Ansi.AUTO.string("  @|bold Pool:|@    " + pool));
-        System.out.println(Ansi.AUTO.string("  @|bold Source:|@  " + planned(source)));
+        System.out.println(Ansi.AUTO.string("  @|bold Source:|@  " + source.said()));
         System.out.println(Ansi.AUTO.string("  @|bold Bridge:|@  " + HostYaml.DEFAULT_BRIDGE));
       } else {
         System.out.println(Ansi.AUTO.string("  @|bold Storage:|@ " + pool + " (dir)"));
@@ -351,14 +351,6 @@ public final class HostInitCommand implements Runnable {
               + " is not a size of at least 1GiB. Give one such as 50GiB or 200GB.");
     }
     return new PoolSource.File(sizeMb);
-  }
-
-  private static String planned(PoolSource source) {
-    return switch (source) {
-      case PoolSource.Dir dir -> "the host filesystem";
-      case PoolSource.Device device -> device.path() + (device.wipe() ? ", erased first" : "");
-      case PoolSource.File file -> "a " + Strings.gibibytes(file.sizeMb() << 20) + " file";
-    };
   }
 
   private String detectAndSelectDisk(PoolDevices devices) throws Exception {

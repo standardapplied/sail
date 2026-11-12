@@ -45,7 +45,7 @@ public final class PoolDevices {
 
   /**
    * Every whole disk that holds nothing and that nothing uses, for an operator who named none.
-   * Partitions are never offered: one is taken only when named.
+   * lsblk lists a partition only under its disk, so none is offered: one is taken only when named.
    */
   public List<Candidate> candidates() throws IOException, InterruptedException, TimeoutException {
     var listed = shell.exec(lsblk(List.of()));
@@ -53,7 +53,6 @@ public final class PoolDevices {
       throw new IOException("lsblk failed: " + listed.reason());
     }
     return devices(listed.stdout()).stream()
-        .filter(device -> "disk".equals(device.type()))
         .filter(device -> uses(device).isEmpty() && holds(device, device.signature()).isEmpty())
         .map(device -> new Candidate(device.path(), device.size(), device.model()))
         .toList();

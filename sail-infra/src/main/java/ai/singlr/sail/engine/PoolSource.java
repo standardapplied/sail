@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 
 /**
@@ -17,11 +18,19 @@ public sealed interface PoolSource {
   /** The Incus storage driver this source is made with. */
   String driver();
 
+  /** This source as the operator reads it. */
+  String said();
+
   /** A directory on the host's filesystem; disk limits on it are advisory. */
   record Dir() implements PoolSource {
     @Override
     public String driver() {
       return HostYaml.BACKEND_DIR;
+    }
+
+    @Override
+    public String said() {
+      return "dir";
     }
   }
 
@@ -34,6 +43,11 @@ public sealed interface PoolSource {
     public String driver() {
       return HostYaml.BACKEND_ZFS;
     }
+
+    @Override
+    public String said() {
+      return "zfs on " + path + (wipe ? ", erased first" : "");
+    }
   }
 
   /**
@@ -44,6 +58,11 @@ public sealed interface PoolSource {
     @Override
     public String driver() {
       return HostYaml.BACKEND_ZFS;
+    }
+
+    @Override
+    public String said() {
+      return "zfs in a " + Strings.gibibytes(sizeMb << 20) + " file";
     }
   }
 }

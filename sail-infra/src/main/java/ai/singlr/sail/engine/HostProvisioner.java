@@ -8,7 +8,6 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
@@ -272,7 +271,9 @@ public final class HostProvisioner {
       devices.cleared(device.path(), device.wipe() ? device.path() : null);
     }
     var restarted = make(pool, source);
-    stepDone(5, pool + " (" + described(source) + ")" + restarted);
+    var trial =
+        source instanceof PoolSource.File ? "; slower than a disk, meant for trying ZFS" : "";
+    stepDone(5, pool + " (" + source.said() + trial + ")" + restarted);
   }
 
   /**
@@ -283,16 +284,23 @@ public final class HostProvisioner {
   private String make(String pool, PoolSource source)
       throws IOException, InterruptedException, TimeoutException {
     var made = storage.create(pool, source);
-    if (made.ok()) {
-      return "";
+    var unseen = !made.ok() && IncusStorage.zfsUnseen(made);
+    if (unseen) {
+      restartToSeeZfs(made);
+      made = storage.create(pool, source);
     }
-    if (!IncusStorage.zfsUnseen(made)) {
+    if (!made.ok()) {
       throw new IOException("Failed to create storage pool " + pool + ": " + made.reason());
     }
+    return unseen ? "; restarted Incus, which ran no container, to see ZFS" : "";
+  }
+
+  private void restartToSeeZfs(ShellExec.Result unseen)
+      throws IOException, InterruptedException, TimeoutException {
     if (!new ContainerManager(shell).listAll().isEmpty()) {
       throw Remedied.io(
           "Incus started before the ZFS tools were installed and does not see them ("
-              + made.reason()
+              + unseen.reason()
               + ").",
           Remedy.of(
               "Restart it when no terminal or agent run is open: ",
@@ -303,22 +311,6 @@ public final class HostProvisioner {
     if (!restart.ok()) {
       throw new IOException("Failed to restart Incus to see ZFS: " + restart.reason());
     }
-    var again = storage.create(pool, source);
-    if (!again.ok()) {
-      throw new IOException("Failed to create storage pool " + pool + ": " + again.reason());
-    }
-    return "; restarted Incus, which ran no container, to see ZFS";
-  }
-
-  private static String described(PoolSource source) {
-    return switch (source) {
-      case PoolSource.Dir dir -> "dir";
-      case PoolSource.Device device -> "zfs on " + device.path();
-      case PoolSource.File file ->
-          "zfs in a "
-              + Strings.gibibytes(file.sizeMb() << 20)
-              + " file; slower than a disk, meant for trying ZFS";
-    };
   }
 
   /**

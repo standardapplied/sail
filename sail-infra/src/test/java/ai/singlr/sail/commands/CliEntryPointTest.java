@@ -211,7 +211,7 @@ class CliEntryPointTest {
     assertEquals(0, exitCode);
     var output = capturedOut.toString(StandardCharsets.UTF_8);
     assertTrue(output.contains("mypool"), "Should show custom pool name");
-    assertTrue(output.contains("a 20.0 GiB file"), output);
+    assertTrue(output.contains("zfs in a 20.0 GiB file"), output);
   }
 
   @Test
