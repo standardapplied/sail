@@ -2693,7 +2693,8 @@ them of the process an agent runs.
   (`Account`, `getpwuid`, never `$SHELL`) as a login shell, whose own start-up builds `PATH`. Its
   environment holds `HOME`, `USER`, `LOGNAME` and `SHELL` from that entry, `TERM`, and a UTF-8
   `LANG` (the host's own, else `en_US.UTF-8`): what a terminal emulator's login gives, since a
-  service starts with almost none.
+  service starts with almost none. The shell's own start-up may then set its own, as the person's
+  profile does in any terminal.
 - **L5. Sessions outlive their clients, not their host.** A stop (`SIGTERM`) ends every session,
   reading each terminal to its end, since on macOS a session leader's exit waits for that. An
   interactive shell ignores `SIGTERM`, so it is killed at the session's 5 s escalation. A new
