@@ -9,10 +9,13 @@ import java.io.File;
 import java.io.IOException;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
+import java.lang.foreign.Linker;
+import java.lang.foreign.MemoryLayout;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.StructLayout;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodType;
 import java.lang.invoke.VarHandle;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -46,9 +49,6 @@ import java.util.Map;
  */
 public final class Pty implements AutoCloseable {
 
-  private static final int O_RDWR = 2;
-  private static final int O_NOCTTY = 0x100;
-  private static final long TIOCSWINSZ = 0x5414;
   private static final int EINTR = 4;
   private static final int EIO = 5;
   private static final int EBADF = 9;
@@ -56,21 +56,21 @@ public final class Pty implements AutoCloseable {
   private static final int READ_POLL_MILLIS = 250;
 
   private static final StructLayout POLLFD =
-      java.lang.foreign.MemoryLayout.structLayout(
+      MemoryLayout.structLayout(
           ValueLayout.JAVA_INT.withName("fd"),
           ValueLayout.JAVA_SHORT.withName("events"),
           ValueLayout.JAVA_SHORT.withName("revents"));
 
   private static final StructLayout WINSIZE =
-      java.lang.foreign.MemoryLayout.structLayout(
+      MemoryLayout.structLayout(
           ValueLayout.JAVA_SHORT.withName("ws_row"),
           ValueLayout.JAVA_SHORT.withName("ws_col"),
           ValueLayout.JAVA_SHORT.withName("ws_xpixel"),
           ValueLayout.JAVA_SHORT.withName("ws_ypixel"));
   private static final VarHandle WS_ROW =
-      WINSIZE.varHandle(java.lang.foreign.MemoryLayout.PathElement.groupElement("ws_row"));
+      WINSIZE.varHandle(MemoryLayout.PathElement.groupElement("ws_row"));
   private static final VarHandle WS_COL =
-      WINSIZE.varHandle(java.lang.foreign.MemoryLayout.PathElement.groupElement("ws_col"));
+      WINSIZE.varHandle(MemoryLayout.PathElement.groupElement("ws_col"));
 
   private record Libc(
       MethodHandle posixOpenpt,
@@ -105,17 +105,21 @@ public final class Pty implements AutoCloseable {
                 ValueLayout.JAVA_INT,
                 ValueLayout.JAVA_INT,
                 ValueLayout.JAVA_LONG,
-                ValueLayout.ADDRESS)),
+                ValueLayout.ADDRESS),
+            Linker.Option.firstVariadicArg(2)),
         Native.downcallCapturingErrno("read", transfer),
         Native.downcallCapturingErrno("write", transfer),
         Native.downcall("close", fdCall),
         Native.downcallCapturingErrno(
-            "poll",
-            FunctionDescriptor.of(
-                ValueLayout.JAVA_INT,
-                ValueLayout.ADDRESS,
-                ValueLayout.JAVA_LONG,
-                ValueLayout.JAVA_INT)));
+                "poll",
+                FunctionDescriptor.of(
+                    ValueLayout.JAVA_INT,
+                    ValueLayout.ADDRESS,
+                    Native.PLATFORM.nfdsT(),
+                    ValueLayout.JAVA_INT))
+            .asType(
+                MethodType.methodType(
+                    int.class, MemorySegment.class, MemorySegment.class, int.class, int.class)));
   }
 
   private static final int MAX_CHUNK = 64 * 1024;
@@ -139,7 +143,7 @@ public final class Pty implements AutoCloseable {
   /** Allocates a master/slave pair and stamps the initial window size on it. */
   public static Pty open(int cols, int rows) throws IOException {
     try {
-      var fd = (int) LIBC.posixOpenpt().invokeExact(O_RDWR | O_NOCTTY);
+      var fd = (int) LIBC.posixOpenpt().invokeExact(Native.O_RDWR | Native.PLATFORM.oNoctty());
       if (fd < 0) {
         throw new IOException("posix_openpt failed; no pseudo-terminals available.");
       }
@@ -283,7 +287,7 @@ public final class Pty implements AutoCloseable {
       pollfd.set(ValueLayout.JAVA_SHORT, 4, POLLIN);
       var errno = arena.allocate(Native.ERRNO_STATE);
       try {
-        rc = (int) LIBC.poll().invokeExact(errno, pollfd, 1L, READ_POLL_MILLIS);
+        rc = (int) LIBC.poll().invokeExact(errno, pollfd, 1, READ_POLL_MILLIS);
       } catch (Throwable t) {
         throw new IOException("pty poll failed", t);
       }
@@ -337,7 +341,7 @@ public final class Pty implements AutoCloseable {
       var ws = local.allocate(WINSIZE);
       WS_ROW.set(ws, 0L, (short) rows);
       WS_COL.set(ws, 0L, (short) cols);
-      var rc = (int) LIBC.ioctl().invokeExact(masterFd, TIOCSWINSZ, ws);
+      var rc = (int) LIBC.ioctl().invokeExact(masterFd, Native.PLATFORM.tiocswinsz(), ws);
       if (rc != 0) {
         throw new IOException("TIOCSWINSZ failed on the pty master.");
       }
