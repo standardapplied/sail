@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.access.Access;
 import ai.singlr.sail.access.Action;
 import ai.singlr.sail.access.ReadFilter;
 import ai.singlr.sail.access.Whoami;
@@ -544,7 +545,7 @@ final class LocalApiRouter implements LocalApiHandler, RouteTable {
    */
   private ApiResponse spec(LocalApiRequest request, Caller caller, Map<String, String> path) {
     var id = path.get("id");
-    var ownWork = caller instanceof Caller.Run(var run, _) && id.equals(run.specId());
+    var ownWork = Access.worksOn(caller.actor(), id);
     return ApiResponse.from(
         SpecMeasures.asked(request.query().get("measures")) && ownWork
             ? operations.measuredSpec(id)

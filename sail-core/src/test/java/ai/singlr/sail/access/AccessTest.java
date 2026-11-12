@@ -1074,6 +1074,17 @@ class AccessTest {
   /**
    * An agent's own run is the run its principal names: no other run, and nothing else of its id.
    */
+  /**
+   * A run works the one spec it was launched for; a person, and a room agent of none, work none.
+   */
+  @Test
+  void anAgentWorksOnTheSpecItsRunWasLaunchedForAndNoOther() {
+    assertTrue(Access.worksOn(Actors.AGENT, "auth"));
+    assertFalse(Access.worksOn(Actors.AGENT, "theirs"));
+    assertFalse(Access.worksOn(Actors.ROOM, "auth"), "a room agent works a room, not a spec");
+    assertFalse(Access.worksOn(Actors.OWNER_IN_CONTAINER, "auth"), "a person runs no work");
+  }
+
   @Test
   void anAgentsOwnRunIsTheRunItsPrincipalNamesAndNothingElse() {
     assertTrue(Access.ownRun(Actors.AGENT, RUN_ADA));

@@ -127,6 +127,16 @@ public final class Access {
   }
 
   /**
+   * Whether {@code actor} is the agent of a run working spec {@code specId}: that one spec, not the
+   * whole of its own work ({@link #decide} asks that), for a read a container answers a run alone
+   * about the spec it was launched for.
+   */
+  public static boolean worksOn(Actor actor, String specId) {
+    var work = actor.work();
+    return work != null && work.spec() != null && work.spec().equals(specId);
+  }
+
+  /**
    * The projects whose resources {@code actor} may read: the audience step of {@link #decide} as a
    * scope, every project for Sail itself. Rows in hand are read through {@link ReadFilter}, and a
    * read that filters many rows inside one query filters by this scope, so the Read rule is the
