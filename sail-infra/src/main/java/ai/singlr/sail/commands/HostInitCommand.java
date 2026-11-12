@@ -274,7 +274,9 @@ public final class HostInitCommand implements Runnable {
       System.out.println(Ansi.AUTO.string("    @|bold Server:|@   " + hostYaml.serverIp()));
     }
 
-    DemoSeeder.seedIfAbsent();
+    if (!dryRun) {
+      DemoSeeder.seedIfAbsent();
+    }
     nextStep(standalone, Files.exists(SailPaths.SYSTEM_UNIT), operator)
         .ifPresent(
             line -> {

@@ -22,14 +22,89 @@ import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
 class HostInitCommandTest {
+
+  /** Runs {@code sail} with {@code args} through its command line, as an isolated box does. */
+  public static void main(String[] args) {
+    System.exit(new CommandLine(new Sail()).execute(args));
+  }
+
+  /**
+   * A dry run through the command line, on a dir box whose Incus (a stand-in on the PATH) holds
+   * devpool and puts the base profile's containers on it: adding a zfs pool in a file shows the
+   * profile staying on devpool, as a real run leaves it, and the box's store is never opened.
+   */
+  @Test
+  @EnabledOnOs(OS.LINUX)
+  void aDryRunShowsTheProfileWhereIncusHasItAndTouchesNoStore(@TempDir Path home) throws Exception {
+    var data = Files.createDirectories(home.resolve("data"));
+    var bin = Files.createDirectories(home.resolve("bin"));
+    var incus = bin.resolve("incus");
+    Files.writeString(
+        incus,
+        """
+        #!/bin/sh
+        case "$*" in
+          "storage list --format json")
+            printf '%s\\n' '[{"name":"devpool","driver":"dir","config":{"source":"/var/lib/incus/storage-pools/devpool"}}]' ;;
+          "profile show singlr-base") echo "name: singlr-base" ;;
+          "profile device list singlr-base") printf 'root\\neth0\\n' ;;
+          "profile device get singlr-base root pool") echo devpool ;;
+          *) exit 1 ;;
+        esac
+        """);
+    Files.setPosixFilePermissions(incus, PosixFilePermissions.fromString("rwxr-xr-x"));
+    var output = home.resolve("output.txt");
+    var builder =
+        new ProcessBuilder(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-Duser.home=" + home,
+                "--enable-native-access=ALL-UNNAMED",
+                "-cp",
+                System.getProperty("java.class.path"),
+                HostInitCommandTest.class.getName(),
+                "host",
+                "init",
+                "--dry-run",
+                "--storage",
+                "zfs",
+                "--pool-file-size",
+                "20GiB",
+                "--pool",
+                "tank",
+                "--yes")
+            .redirectErrorStream(true)
+            .redirectOutput(output.toFile());
+    builder.environment().put("SAIL_DATA_DIR", data.toString());
+    builder.environment().put("PATH", bin + ":" + System.getenv("PATH"));
+    var process = builder.start();
+    try {
+      assertTrue(process.waitFor(60, TimeUnit.SECONDS), "the dry run timed out");
+      var said = Files.readString(output);
+      assertEquals(0, process.exitValue(), said);
+      assertTrue(said.contains("singlr-base (already exists): containers on devpool (dir)"), said);
+      assertFalse(said.contains("demo project"), said);
+      try (var held = Files.list(data)) {
+        assertEquals(List.of(), held.toList());
+      }
+    } finally {
+      process.destroyForcibly();
+    }
+  }
 
   private static final List<Candidate> DISKS =
       List.of(new Candidate("/dev/sdb", "100G", null), new Candidate("/dev/sdc", "200G", null));
