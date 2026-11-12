@@ -1,10 +1,10 @@
 import Foundation
 
-/// A message in a room. `specId` names the room it was posted in: the server still calls a room a
+/// A message in a room. `specID` names the room it was posted in: the server still calls a room a
 /// spec there.
 public struct Message: Decodable, Equatable, Sendable {
     public let id: String
-    public let specId: String
+    public let specID: String
     public let author: String
     public let body: String
     public let replyTo: String?
@@ -17,7 +17,7 @@ public struct Message: Decodable, Equatable, Sendable {
     public init(from decoder: any Decoder) throws {
         let fields = try decoder.container(keyedBy: CodingKeys.self)
         id = try fields.decode(String.self, forKey: .id)
-        specId = try fields.decode(String.self, forKey: .specId)
+        specID = try fields.decode(String.self, forKey: .specID)
         author = try fields.decode(String.self, forKey: .author)
         body = try fields.decode(String.self, forKey: .body)
         replyTo = try fields.decodeIfPresent(String.self, forKey: .replyTo)
@@ -28,7 +28,7 @@ public struct Message: Decodable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, author, body, question, error
-        case specId = "spec_id"
+        case specID = "spec_id"
         case replyTo = "reply_to"
         case createdAt = "created_at"
     }
@@ -36,13 +36,13 @@ public struct Message: Decodable, Equatable, Sendable {
 
 /// One page of a room's messages, oldest first.
 public struct MessageList: Decodable, Equatable, Sendable {
-    public let specId: String
+    public let specID: String
     public let messages: [Message]
     public let total: Int
 
     private enum CodingKeys: String, CodingKey {
         case messages, total
-        case specId = "spec_id"
+        case specID = "spec_id"
     }
 }
 

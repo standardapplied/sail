@@ -30,13 +30,13 @@ import Testing
     func aLengthOutsideOneToTheLimitIsRefusedOnceItsFourBytesArrive(length: Int32) throws {
         var reader = FrameReader()
         #expect(try reader.read(bigEndian(length).prefix(3)).isEmpty)
-        #expect(throws: TerminalWireError.oversized(Int(length))) {
+        #expect(throws: TerminalWireError.lengthOutOfRange(Int(length))) {
             try reader.read(bigEndian(length).suffix(1))
         }
     }
 
     @Test func aFrameAtTheLimitIsRead() throws {
-        let largest = Frame.input(seq: 1, bytes: Array(repeating: 7, count: FrameCodec.maxPayload - 13))
+        let largest = Frame.input(sequence: 1, bytes: Array(repeating: 7, count: FrameCodec.maxPayload - 13))
         var reader = FrameReader()
         #expect(try reader.read(FrameCodec.encode(largest)) == [largest])
     }

@@ -32,7 +32,7 @@ private final class Writer {
 
     func framed() throws(TerminalWireError) -> [UInt8] {
         let length = bytes.count - 4
-        guard length <= FrameCodec.maxPayload else { throw .oversized(length) }
+        guard length <= FrameCodec.maxPayload else { throw .lengthOutOfRange(length) }
         bytes.replaceSubrange(0 ..< 4, with: withUnsafeBytes(of: Int32(length).bigEndian, Array.init))
         return bytes
     }
@@ -42,17 +42,17 @@ private final class Writer {
         case let .hello(token): type(9).string(token)
         case let .welcome(hostBootID): type(32).string(hostBootID)
         case let .create(create):
-            type(1).string(create.session).strings(create.command).string(create.cwd)
+            type(1).string(create.session).strings(create.command).string(create.workingDirectory)
                 .string(create.project).string(create.room).size(create.size)
         case let .attach(session, write): type(2).string(session).bool(write)
-        case let .input(seq, bytes): type(3).int64(seq).blob(bytes)
+        case let .input(sequence, bytes): type(3).int64(sequence).blob(bytes)
         case let .resize(size): type(4).size(size)
         case .takeWrite: type(5)
         case .detach: type(6)
         case let .listSessions(after, limit): type(7).string(after).int32(limit)
         case let .kill(session): type(8).string(session)
         case let .yield(session, reason): type(10).string(session).string(reason)
-        case let .output(lastInputSeq, bytes): type(20).int64(lastInputSeq).blob(bytes)
+        case let .output(lastInputSequence, bytes): type(20).int64(lastInputSequence).blob(bytes)
         case let .replayBegin(safe): type(21).bool(safe)
         case .replayEnd: type(22)
         case let .writerChanged(fde): type(23).string(fde)
@@ -67,8 +67,8 @@ private final class Writer {
                 session(info)
             }
             string(page.next)
-        case .ok: type(30)
-        case let .err(refusal):
+        case .accepted: type(30)
+        case let .refused(refusal):
             type(31).string(refusal.message)
             if let remedy = refusal.remedy {
                 count(remedy)
@@ -94,7 +94,7 @@ private final class Writer {
 
     @discardableResult
     private func size(_ size: TerminalSize) -> Writer {
-        int32(size.cols).int32(size.rows)
+        int32(size.columns).int32(size.rows)
     }
 
     @discardableResult
@@ -169,14 +169,14 @@ private struct Cursor {
         case 32: .welcome(hostBootID: try string())
         case 1: .create(try create())
         case 2: .attach(session: try string(), write: try bool())
-        case 3: .input(seq: try int64(), bytes: try blob())
+        case 3: .input(sequence: try int64(), bytes: try blob())
         case 4: .resize(try size())
         case 5: .takeWrite
         case 6: .detach
         case 7: .listSessions(after: try string(), limit: try int32())
         case 8: .kill(session: try string())
         case 10: .yield(session: try string(), reason: try string())
-        case 20: .output(lastInputSeq: try int64(), bytes: try blob())
+        case 20: .output(lastInputSequence: try int64(), bytes: try blob())
         case 21: .replayBegin(safe: try bool())
         case 22: .replayEnd
         case 23: .writerChanged(fde: try string())
@@ -186,15 +186,15 @@ private struct Cursor {
         case 27: .sessionEnded(reason: try string())
         case 28: .sessionInfo(try session())
         case 29: .sessions(SessionPage(sessions: try list { (cursor: inout Cursor) throws(TerminalWireError) in try cursor.session() }, next: try string()))
-        case 30: .ok
-        case 31: .err(try refusal())
+        case 30: .accepted
+        case 31: .refused(try refusal())
         case let other: throw .unknownType(other)
         }
     }
 
     private mutating func create() throws(TerminalWireError) -> SessionCreate {
         SessionCreate(
-            session: try string(), command: try strings(), cwd: try string(), project: try string(),
+            session: try string(), command: try strings(), workingDirectory: try string(), project: try string(),
             room: try string(), size: try size()
         )
     }
@@ -221,7 +221,7 @@ private struct Cursor {
     }
 
     private mutating func size() throws(TerminalWireError) -> TerminalSize {
-        TerminalSize(cols: try int32(), rows: try int32())
+        TerminalSize(columns: try int32(), rows: try int32())
     }
 
     private mutating func strings() throws(TerminalWireError) -> [String] {

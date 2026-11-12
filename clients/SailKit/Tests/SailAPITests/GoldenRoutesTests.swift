@@ -99,14 +99,14 @@ func answer<Response>(
         #expect(room.effectiveWake == "mention")
         #expect(room.members.count == 1)
         expectSeated(room.members.first)
-        #expect(room.specIds == ["harbor-docks"])
+        #expect(room.specIDs == ["harbor-docks"])
         #expect(room.createdBy == "uday")
         #expect(room.createdAt.milliseconds == Goldens.pinnedMilliseconds)
         #expect(room.updatedAt.milliseconds == Goldens.pinnedMilliseconds)
         #expect(room.updatedBy == "sail")
         #expect(room.lastActivityAt?.milliseconds == Goldens.pinnedMilliseconds)
         #expect(room.needsReply)
-        #expect(room.questionMessageId == "00000000-0000-7000-8000-000000000003")
+        #expect(room.questionMessageID == "00000000-0000-7000-8000-000000000003")
     }
 
     @Test func aRoomWithNothingOptionalReadsAsNothingSeatedFiledOrAsked() throws {
@@ -116,19 +116,19 @@ func answer<Response>(
         #expect(room.wake == nil)
         #expect(room.effectiveWake == "on")
         #expect(room.members.isEmpty)
-        #expect(room.specIds.isEmpty)
+        #expect(room.specIDs.isEmpty)
         #expect(room.lastActivityAt == nil)
         #expect(!room.needsReply)
-        #expect(room.questionMessageId == nil)
+        #expect(room.questionMessageID == nil)
     }
 
     @Test func messagesReadEveryFieldWithAReplyAndAQuestion() throws {
         let list = try Endpoint.messages(room: "harbor-design").decode(response(try Exchange("messages")))
-        #expect(list.specId == "harbor-design")
+        #expect(list.specID == "harbor-design")
         #expect(list.total == 4)
         let (asked, answered, failed, agent) = (list.messages[0], list.messages[1], list.messages[2], list.messages[3])
         #expect(asked.id == "00000000-0000-7000-8000-000000000001")
-        #expect(asked.specId == "harbor-design")
+        #expect(asked.specID == "harbor-design")
         #expect(asked.author == "uday")
         #expect(asked.body == question.body)
         #expect(asked.replyTo == nil)
@@ -178,11 +178,11 @@ func answer<Response>(
         #expect(spec.createdAt.milliseconds == Goldens.pinnedMilliseconds)
         #expect(spec.updatedAt.milliseconds == Goldens.pinnedMilliseconds)
         #expect(spec.updatedBy == "uday")
-        #expect(spec.roomId == "harbor-design")
+        #expect(spec.roomID == "harbor-design")
         #expect(spec.lastActivityAt == nil)
         #expect(listed.lastActivityAt?.milliseconds == Goldens.pinnedMilliseconds)
         #expect(spec.needsReply)
-        #expect(spec.questionMessageId == "00000000-0000-7000-8000-000000000003")
+        #expect(spec.questionMessageID == "00000000-0000-7000-8000-000000000003")
     }
 
     @Test func aSpecWithNothingOptionalReadsAsUnassignedUnfiledAndUnasked() throws {
@@ -201,11 +201,11 @@ func answer<Response>(
         #expect(spec.repos.isEmpty)
         #expect(spec.wake == nil)
         #expect(spec.engagement == nil)
-        #expect(spec.roomId == "harbor-buoys")
+        #expect(spec.roomID == "harbor-buoys")
         #expect(spec.updatedAt.milliseconds == Goldens.pinnedMilliseconds + 1)
         #expect(spec.lastActivityAt == nil)
         #expect(!spec.needsReply)
-        #expect(spec.questionMessageId == nil)
+        #expect(spec.questionMessageID == nil)
     }
 
     @Test func aFieldTheClientDoesNotKnowIsIgnored() throws {

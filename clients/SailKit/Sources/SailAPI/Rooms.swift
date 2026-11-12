@@ -2,7 +2,7 @@ import Foundation
 
 /// A room: a conversation in a project, its members, and the specs filed in it. `wake` is the mode
 /// the room was set to, if any, and `effectiveWake` the one it runs under. `needsReply` says an
-/// agent's question waits for an answer, `questionMessageId` which.
+/// agent's question waits for an answer, `questionMessageID` which.
 public struct Room: Decodable, Equatable, Sendable {
     public let id: String
     public let project: String
@@ -11,26 +11,26 @@ public struct Room: Decodable, Equatable, Sendable {
     public let wake: String?
     public let effectiveWake: String
     public let members: [RoomMember]
-    public let specIds: [String]
+    public let specIDs: [String]
     public let createdBy: String?
     public let createdAt: Date
     public let updatedAt: Date
     public let updatedBy: String?
     public let lastActivityAt: Date?
     public let needsReply: Bool
-    public let questionMessageId: String?
+    public let questionMessageID: String?
 
     private enum CodingKeys: String, CodingKey {
         case id, project, title, assignee, wake, members
         case effectiveWake = "effective_wake"
-        case specIds = "spec_ids"
+        case specIDs = "spec_ids"
         case createdBy = "created_by"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case updatedBy = "updated_by"
         case lastActivityAt = "last_activity_at"
         case needsReply = "needs_reply"
-        case questionMessageId = "question_message_id"
+        case questionMessageID = "question_message_id"
     }
 }
 

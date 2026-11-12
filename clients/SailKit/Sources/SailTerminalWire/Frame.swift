@@ -8,8 +8,8 @@ public enum Frame: Equatable, Sendable {
     case welcome(hostBootID: String)
     case create(SessionCreate)
     case attach(session: String, write: Bool)
-    /// Input toward the pty; `seq` is echoed back on output as the last input the host applied.
-    case input(seq: Int64, bytes: [UInt8])
+    /// Input toward the pty; `sequence` is echoed back on output as the last input the host applied.
+    case input(sequence: Int64, bytes: [UInt8])
     case resize(TerminalSize)
     case takeWrite
     case detach
@@ -18,7 +18,7 @@ public enum Frame: Equatable, Sendable {
     case kill(session: String)
     /// Ends a session for whatever displaced it; only the host's dispatch authority sends it.
     case yield(session: String, reason: String)
-    case output(lastInputSeq: Int64, bytes: [UInt8])
+    case output(lastInputSequence: Int64, bytes: [UInt8])
     /// What follows until ``replayEnd`` is the session's journal replayed; `safe` says whether it
     /// starts on a clean terminal boundary.
     case replayBegin(safe: Bool)
@@ -30,16 +30,16 @@ public enum Frame: Equatable, Sendable {
     case sessionEnded(reason: String)
     case sessionInfo(SessionInfo)
     case sessions(SessionPage)
-    case ok
-    case err(HostRefusal)
+    case accepted
+    case refused(HostRefusal)
 }
 
 public struct TerminalSize: Equatable, Sendable {
-    public var cols: Int32
+    public var columns: Int32
     public var rows: Int32
 
-    public init(cols: Int32, rows: Int32) {
-        self.cols = cols
+    public init(columns: Int32, rows: Int32) {
+        self.columns = columns
         self.rows = rows
     }
 }
@@ -48,15 +48,15 @@ public struct TerminalSize: Equatable, Sendable {
 public struct SessionCreate: Equatable, Sendable {
     public var session: String
     public var command: [String]
-    public var cwd: String
+    public var workingDirectory: String
     public var project: String
     public var room: String
     public var size: TerminalSize
 
-    public init(session: String, command: [String], cwd: String, project: String, room: String, size: TerminalSize) {
+    public init(session: String, command: [String], workingDirectory: String, project: String, room: String, size: TerminalSize) {
         self.session = session
         self.command = command
-        self.cwd = cwd
+        self.workingDirectory = workingDirectory
         self.project = project
         self.room = room
         self.size = size
@@ -120,8 +120,9 @@ public struct HostRefusal: Equatable, Sendable {
 }
 
 public enum TerminalWireError: Error, Equatable, Sendable {
-    /// A frame's length is outside 1 through ``FrameCodec/maxPayload``: refused, never allocated.
-    case oversized(Int)
+    /// A frame's length, the one given, is outside 1 through ``FrameCodec/maxPayload``: refused,
+    /// never allocated.
+    case lengthOutOfRange(Int)
     /// A frame ends before the fields it claims.
     case truncated
     case unknownType(UInt8)

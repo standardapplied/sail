@@ -1,7 +1,7 @@
 import Foundation
 
 /// A spec as the server shows it. `engagement` is the agent standing in its room, and `wake` the
-/// room's wake mode. `lastActivityAt` comes with a listing; `needsReply` and `questionMessageId`
+/// room's wake mode. `lastActivityAt` comes with a listing; `needsReply` and `questionMessageID`
 /// say an agent's question in its room waits for an answer.
 public struct Spec: Decodable, Equatable, Sendable {
     public let id: String
@@ -22,10 +22,10 @@ public struct Spec: Decodable, Equatable, Sendable {
     public let createdAt: Date
     public let updatedAt: Date
     public let updatedBy: String?
-    public let roomId: String?
+    public let roomID: String?
     public let lastActivityAt: Date?
     public let needsReply: Bool
-    public let questionMessageId: String?
+    public let questionMessageID: String?
 
     public init(from decoder: any Decoder) throws {
         let fields = try decoder.container(keyedBy: CodingKeys.self)
@@ -47,10 +47,10 @@ public struct Spec: Decodable, Equatable, Sendable {
         createdAt = try fields.decode(Date.self, forKey: .createdAt)
         updatedAt = try fields.decode(Date.self, forKey: .updatedAt)
         updatedBy = try fields.decodeIfPresent(String.self, forKey: .updatedBy)
-        roomId = try fields.decodeIfPresent(String.self, forKey: .roomId)
+        roomID = try fields.decodeIfPresent(String.self, forKey: .roomID)
         lastActivityAt = try fields.decodeIfPresent(Date.self, forKey: .lastActivityAt)
         needsReply = try fields.decodeIfPresent(Bool.self, forKey: .needsReply) ?? false
-        questionMessageId = try fields.decodeIfPresent(String.self, forKey: .questionMessageId)
+        questionMessageID = try fields.decodeIfPresent(String.self, forKey: .questionMessageID)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -61,10 +61,10 @@ public struct Spec: Decodable, Equatable, Sendable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case updatedBy = "updated_by"
-        case roomId = "room_id"
+        case roomID = "room_id"
         case lastActivityAt = "last_activity_at"
         case needsReply = "needs_reply"
-        case questionMessageId = "question_message_id"
+        case questionMessageID = "question_message_id"
     }
 }
 

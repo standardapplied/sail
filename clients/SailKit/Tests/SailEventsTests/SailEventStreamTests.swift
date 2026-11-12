@@ -21,9 +21,9 @@ import Testing
     @Test func anEventReadsEveryFieldTheServerSends() async throws {
         let (events, _) = try await readGolden("events/stream.sse")
         let posted = try #require(events.first)
-        #expect(posted.v == 1)
+        #expect(posted.version == 1)
         #expect(posted.id == 1)
-        #expect(posted.ts.milliseconds == Goldens.pinnedMilliseconds)
+        #expect(posted.timestamp.milliseconds == Goldens.pinnedMilliseconds)
         #expect(posted.project == "harbor")
         #expect(posted.spec == "harbor-design")
         #expect(posted.type == .known(.specMessagePosted))

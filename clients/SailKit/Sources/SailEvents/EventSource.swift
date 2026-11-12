@@ -11,7 +11,7 @@ public struct EventSource: AsyncSequence, Sendable {
     public typealias Failure = SailError
 
     /// The reconnection time until a stream sets its own.
-    public static let reconnection = Duration.seconds(3)
+    public static let defaultReconnectionTime = Duration.seconds(3)
 
     private let transport: any Transport
     private let request: HTTPRequest
@@ -38,7 +38,7 @@ public struct EventSource: AsyncSequence, Sendable {
         private var body: AsyncThrowingStream<[UInt8], any Error>.AsyncIterator?
         private var hasConnected = false
         private var ended = false
-        private var reconnection = EventSource.reconnection
+        private var reconnectionTime = EventSource.defaultReconnectionTime
 
         init(source: EventSource) {
             self.source = source
@@ -61,7 +61,7 @@ public struct EventSource: AsyncSequence, Sendable {
                 do {
                     if let chunk = try await connection.next() {
                         pending += parser.feed(chunk)
-                        reconnection = parser.retry ?? reconnection
+                        reconnectionTime = parser.retry ?? reconnectionTime
                         body = connection
                     } else {
                         body = nil
@@ -79,7 +79,7 @@ public struct EventSource: AsyncSequence, Sendable {
             defer { hasConnected = true }
             guard hasConnected else { return true }
             do {
-                try await source.sleep(reconnection)
+                try await source.sleep(reconnectionTime)
                 return true
             } catch {
                 return false

@@ -16,18 +16,18 @@ import Testing
     @Test func theGoldenFramesCarryTheirFieldsInOrder() throws {
         let frames = try Dictionary(uniqueKeysWithValues: Goldens.frames().map { ($0.name, try decoded($0.wire)) })
         #expect(frames["Create"] == .create(SessionCreate(
-            session: "lounge", command: ["bash", "-l"], cwd: "/home/dev", project: "harbor",
-            room: "harbor-design", size: TerminalSize(cols: 132, rows: 43)
+            session: "lounge", command: ["bash", "-l"], workingDirectory: "/home/dev", project: "harbor",
+            room: "harbor-design", size: TerminalSize(columns: 132, rows: 43)
         )))
         #expect(frames["Attach"] == .attach(session: "lounge", write: true))
-        #expect(frames["Input"] == .input(seq: 42, bytes: Array("ls -la\r".utf8)))
-        #expect(frames["Output"] == .output(lastInputSeq: 42, bytes: Array("héllo ✅\u{1b}[0m\r\n".utf8)))
-        #expect(frames["Resize"] == .resize(TerminalSize(cols: 100, rows: 30)))
+        #expect(frames["Input"] == .input(sequence: 42, bytes: Array("ls -la\r".utf8)))
+        #expect(frames["Output"] == .output(lastInputSequence: 42, bytes: Array("héllo ✅\u{1b}[0m\r\n".utf8)))
+        #expect(frames["Resize"] == .resize(TerminalSize(columns: 100, rows: 30)))
         #expect(frames["ReplayBegin"] == .replayBegin(safe: true))
         #expect(frames["ListSessions"] == .listSessions(after: "", limit: 16))
         #expect(frames["Sessions"] == .sessions(SessionPage(sessions: [lounge, shell], next: "shell")))
         #expect(frames["SessionInfo"] == .sessionInfo(lounge))
-        #expect(frames["Err"] == .err(HostRefusal(
+        #expect(frames["Err"] == .refused(HostRefusal(
             message: "You do not hold the write token. Run sail session take lounge to take it.",
             remedy: [
                 .words("You do not hold the write token. Run "),
@@ -42,7 +42,7 @@ import Testing
         let message = 4 + Int(try decodedLength(err, at: 5))
         let bare = lengthPrefixed(Array(err[4 ..< 5 + message]))
         let frame = try decoded(bare)
-        #expect(frame == .err(HostRefusal(
+        #expect(frame == .refused(HostRefusal(
             message: "You do not hold the write token. Run sail session take lounge to take it.",
             remedy: nil
         )))
@@ -108,10 +108,10 @@ import Testing
 
     @Test func aFrameLargerThanTheHostAcceptsIsRefusedBeforeItIsSent() throws {
         let largest = FrameCodec.maxPayload - 13
-        #expect(try FrameCodec.encode(.input(seq: 1, bytes: Array(repeating: 0, count: largest))).count
+        #expect(try FrameCodec.encode(.input(sequence: 1, bytes: Array(repeating: 0, count: largest))).count
             == 4 + FrameCodec.maxPayload)
-        #expect(throws: TerminalWireError.oversized(FrameCodec.maxPayload + 1)) {
-            try FrameCodec.encode(.input(seq: 1, bytes: Array(repeating: 0, count: largest + 1)))
+        #expect(throws: TerminalWireError.lengthOutOfRange(FrameCodec.maxPayload + 1)) {
+            try FrameCodec.encode(.input(sequence: 1, bytes: Array(repeating: 0, count: largest + 1)))
         }
     }
 
@@ -185,7 +185,7 @@ func messageName(of frame: Frame) -> String {
     case .sessionEnded: "SessionEnded"
     case .sessionInfo: "SessionInfo"
     case .sessions: "Sessions"
-    case .ok: "Ok"
-    case .err: "Err"
+    case .accepted: "Ok"
+    case .refused: "Err"
     }
 }

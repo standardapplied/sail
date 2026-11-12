@@ -19,7 +19,7 @@ public struct FrameReader: Sendable {
         var start = 0
         while buffer.count - start >= 4 {
             let length = Int(integer(bigEndian: buffer[start ..< start + 4]) as Int32)
-            guard (1 ... FrameCodec.maxPayload).contains(length) else { throw .oversized(length) }
+            guard (1 ... FrameCodec.maxPayload).contains(length) else { throw .lengthOutOfRange(length) }
             guard buffer.count - start - 4 >= length else { break }
             frames.append(try FrameCodec.decode(payload: buffer[start + 4 ..< start + 4 + length]))
             start += 4 + length

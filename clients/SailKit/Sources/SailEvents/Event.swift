@@ -1,14 +1,14 @@
 import Foundation
 import SailAPI
 
-/// One event the server published: what happened (`type`), in which project and, when it concerns
-/// one, which spec or room (`spec`). `id` is the stream's sequence; an event the stream tells a
+/// One event the server published: what happened (`type`) and when (`timestamp`), in which project
+/// and, when it concerns one, which spec or room (`spec`). `version` is the event format's. `id` is the stream's sequence; an event the stream tells a
 /// reader first and never stores, a room's turn state, has none. `agent` is a label its sender
 /// chose; `publisher` is who published it through a door, absent for the server's own events.
 public struct Event: Decodable, Equatable, Sendable {
-    public let v: Int
+    public let version: Int
     public let id: Int64?
-    public let ts: Date
+    public let timestamp: Date
     public let project: String
     public let spec: String?
     public let type: Open<EventType>
@@ -19,9 +19,9 @@ public struct Event: Decodable, Equatable, Sendable {
 
     public init(from decoder: any Decoder) throws {
         let fields = try decoder.container(keyedBy: CodingKeys.self)
-        v = try fields.decode(Int.self, forKey: .v)
+        version = try fields.decode(Int.self, forKey: .version)
         id = try fields.decodeIfPresent(Int64.self, forKey: .id)
-        ts = try fields.decode(Date.self, forKey: .ts)
+        timestamp = try fields.decode(Date.self, forKey: .timestamp)
         project = try fields.decode(String.self, forKey: .project)
         spec = try fields.decodeIfPresent(String.self, forKey: .spec)
         type = try fields.decode(Open<EventType>.self, forKey: .type)
@@ -32,7 +32,9 @@ public struct Event: Decodable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case v, id, ts, project, spec, type, agent, host, data, publisher
+        case id, project, spec, type, agent, host, data, publisher
+        case version = "v"
+        case timestamp = "ts"
     }
 }
 
