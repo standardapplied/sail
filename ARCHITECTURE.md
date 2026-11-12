@@ -2212,8 +2212,8 @@ hundred.
   in any attempt: an upper bound. Cost and human minutes are `unknown`: no row records them yet.
 - **Where it is read.** `GET /v1/specs/{spec}/measures` serves the record. `GET
   /v1/specs/{spec}?measures=true` carries it as `measures`, with no ETag; `sail spec show` and its
-  `--json` ask for it, and in a container only a run reading its own spec is served it, any other
-  caller the detail as without asking; no other read of a spec pays for it. `GET
+  `--json` ask for it, and in a container only a run reading its own spec (`Access.worksOn`) is
+  served it, any other caller the detail as without asking; no other read of a spec pays for it. `GET
   /v1/specs:measures`, behind `sail spec list --status done --measures [--done-since]
   [--done-until]`, lists it per spec with the nearest-rank median and p90 of every number over
   the values known exactly, counting what each left out.
