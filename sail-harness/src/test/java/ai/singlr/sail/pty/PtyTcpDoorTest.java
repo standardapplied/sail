@@ -7,6 +7,7 @@ package ai.singlr.sail.pty;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -85,6 +86,62 @@ class PtyTcpDoorTest {
 
     assertEquals(-1, first.read(ByteBuffer.allocate(1)), "the oldest is let go");
     assertTrue(second.isOpen() && third.isOpen());
+  }
+
+  @Test
+  void aConnectionWithNoTicketIsLetGoOnlyForOneThatConnectedAfterIt() throws IOException {
+    try (var narrow =
+        new PtyTcpDoor(
+            LOOPBACK,
+            4,
+            now::get,
+            new PtyTickets(8),
+            PtyIdentity.Holders.NONE,
+            dir.resolve("narrow.listening"),
+            (channel, admission) -> {})) {
+      narrow.tick(now.get());
+      var address = narrow.address().orElseThrow();
+      for (var round = 0; round < 500; round++) {
+        SocketChannel.open(address).close();
+        try (var live = handshaken(address)) {
+          PtyWire.write(live, new PtyMessage.Hello("tkt_" + "0".repeat(64)));
+
+          assertInstanceOf(
+              PtyMessage.Err.class,
+              PtyWire.read(live),
+              "round " + round + ": the one before it left first and is the one let go");
+        }
+      }
+    }
+  }
+
+  @Test
+  void aConnectionTurnedAwayAtTheCapGivesBackTheSlotItTook() throws IOException {
+    try (var single =
+        new PtyTcpDoor(
+            LOOPBACK,
+            1,
+            now::get,
+            new PtyTickets(8),
+            PtyIdentity.Holders.NONE,
+            dir.resolve("single.listening"),
+            (channel, admission) -> {})) {
+      single.tick(now.get());
+      var address = single.address().orElseThrow();
+      var held = handshaken(address);
+      for (var i = 0; i < 20; i++) {
+        try (var over = SocketChannel.open(address)) {
+          assertEquals(-1, over.read(ByteBuffer.allocate(8)), "past the cap: closed unread");
+        }
+      }
+
+      held.close();
+
+      assertTimeoutPreemptively(
+          Duration.ofSeconds(10),
+          () -> handshaken(address).close(),
+          "the slot is free again once the one that held it is gone");
+    }
   }
 
   @Test
@@ -200,6 +257,23 @@ class PtyTcpDoorTest {
     assertFalse(late.listening());
     assertEquals(Optional.empty(), late.address());
     assertEquals(Optional.empty(), ListenConfig.said(dir.resolve("late.listening")));
+  }
+
+  /**
+   * A connection the door shook hands on, tried again while it is turned away at its cap: a slot is
+   * released once the thread of the connection that held it has seen it end, which a client that
+   * just closed one cannot wait for.
+   */
+  static SocketChannel handshaken(InetSocketAddress address) throws IOException {
+    while (true) {
+      var channel = SocketChannel.open(address);
+      try {
+        PtyWire.handshake(channel, channel);
+        return channel;
+      } catch (IOException turnedAway) {
+        channel.close();
+      }
+    }
   }
 
   /** A connection the door is serving: it wrote the magic, so it counted it. */
