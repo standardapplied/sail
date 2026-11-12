@@ -59,8 +59,44 @@ import Testing
         #expect(parser.retry == nil)
         #expect(parser.feed(Array("retry: 2500\n\n".utf8)).isEmpty)
         #expect(parser.retry == .milliseconds(2500))
-        #expect(parser.feed(Array("retry: 25x\n\nretry\n\n".utf8)).isEmpty)
+        for notDigits in ["25x", "-5", "+5", "", " 7", "99999999999999999999"] {
+            #expect(parser.feed(Array("retry: \(notDigits)\n\n".utf8)).isEmpty)
+            #expect(parser.retry == .milliseconds(2500), "retry: \(notDigits)")
+        }
+        #expect(parser.feed(Array("retry\n\n".utf8)).isEmpty)
         #expect(parser.retry == .milliseconds(2500))
+    }
+
+    @Test func aLineAsLongAsTheLimitIsReadAndOneByteLongerStopsTheParser() {
+        let longest = [UInt8](repeating: UInt8(ascii: "x"), count: EventStreamParser.limit - 5)
+        var parser = EventStreamParser()
+        let events = parser.feed(Array("data:".utf8) + longest + Array("\n\n".utf8))
+        #expect(events.map(\.data.utf8.count) == [EventStreamParser.limit - 5])
+        #expect(!parser.hasOverflowed)
+
+        let kept = parser.feed(Array("id: 7\ndata: kept\n\ndata:".utf8) + longest + [UInt8(ascii: "x")])
+        #expect(kept == [ServerSentEvent(type: "message", data: "kept", lastEventID: "7")])
+        #expect(parser.hasOverflowed)
+        #expect(parser.feed(Array("\n\nid: 8\ndata: after\n\n".utf8)).isEmpty)
+        #expect(parser.lastEventID == "7")
+    }
+
+    @Test func anEventsDataAsLongAsTheLimitIsReadAndOneByteLongerStopsTheParser() {
+        let line = Array("data:".utf8) + [UInt8](repeating: UInt8(ascii: "x"), count: 65535) + [UInt8(ascii: "\n")]
+        let lines = EventStreamParser.limit / 65536
+        var parser = EventStreamParser()
+        for _ in 1 ... lines {
+            #expect(parser.feed(line).isEmpty)
+        }
+        #expect(parser.feed(Array("\n".utf8)).map(\.data.utf8.count) == [EventStreamParser.limit - 1])
+        #expect(!parser.hasOverflowed)
+
+        for _ in 1 ... lines {
+            #expect(parser.feed(line).isEmpty)
+        }
+        #expect(!parser.hasOverflowed)
+        #expect(parser.feed(Array("data:\n\n".utf8)).isEmpty)
+        #expect(parser.hasOverflowed)
     }
 
     @Test func fieldsAreReadAsTheEventSourceStandardSays() {

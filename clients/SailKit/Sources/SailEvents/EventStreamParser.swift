@@ -17,12 +17,23 @@ public struct ServerSentEvent: Equatable, Sendable {
 /// WHATWG event-stream rules. Lines are split on bytes, so a chunk boundary inside a character or
 /// between `\r` and `\n` changes nothing; an event is dispatched only at its blank line, so one
 /// the connection ends inside is never seen. The id buffer starts at the id a previous connection
-/// last dispatched, so an event a server sends without an id does not erase where to resume.
+/// last dispatched, so an event a server sends without an id does not erase the last id seen.
+///
+/// It holds at most ``limit`` bytes of a line and of an event's data. A stream that outgrows
+/// either is not an event stream this client can follow: the parser stops, keeping the events it
+/// had already dispatched, and says so in ``hasOverflowed``.
 public struct EventStreamParser: Sendable {
+    /// The most bytes one line, or one event's data, may hold: the server's events are single
+    /// lines of a few hundred bytes.
+    public static let limit = 1 << 20
+
     /// The id of the last event dispatched: what a reconnect sends as `Last-Event-ID`.
     public private(set) var lastEventID: String
     /// The reconnection time the stream last set with a `retry` field.
     public private(set) var retry: Duration?
+    /// Whether a line or an event's data outgrew ``limit``. Nothing is read after it, and the
+    /// connection should be dropped as broken.
+    public private(set) var hasOverflowed = false
 
     private var line: [UInt8] = []
     private var afterCarriageReturn = false
@@ -40,6 +51,7 @@ public struct EventStreamParser: Sendable {
     public mutating func feed(_ bytes: some Sequence<UInt8>) -> [ServerSentEvent] {
         var events: [ServerSentEvent] = []
         for byte in bytes {
+            guard !hasOverflowed else { break }
             if afterCarriageReturn {
                 afterCarriageReturn = false
                 if byte == .lineFeed { continue }
@@ -50,11 +62,19 @@ public struct EventStreamParser: Sendable {
                 endLine(into: &events)
             case .lineFeed:
                 endLine(into: &events)
-            default:
+            case _ where line.count < Self.limit:
                 line.append(byte)
+            default:
+                overflow()
             }
         }
         return events
+    }
+
+    private mutating func overflow() {
+        hasOverflowed = true
+        line = []
+        data = ""
     }
 
     private mutating func endLine(into events: inout [ServerSentEvent]) {
@@ -82,9 +102,10 @@ public struct EventStreamParser: Sendable {
     private mutating func field(_ name: String, value: String) {
         switch name {
         case "event": type = value
-        case "data": data += value + "\n"
+        case "data" where data.utf8.count + value.utf8.count < Self.limit: data += value + "\n"
+        case "data": overflow()
         case "id" where !value.unicodeScalars.contains("\u{0}"): idBuffer = value
-        case "retry" where !value.isEmpty && value.utf8.allSatisfy({ (UInt8(ascii: "0") ... UInt8(ascii: "9")).contains($0) }):
+        case "retry" where !value.isEmpty && value.utf8.allSatisfy(\.isDigit):
             if let milliseconds = Int(value) {
                 retry = .milliseconds(milliseconds)
             }
@@ -114,4 +135,8 @@ private extension UInt8 {
     static let carriageReturn = UInt8(ascii: "\r")
     static let colon = UInt8(ascii: ":")
     static let space = UInt8(ascii: " ")
+
+    var isDigit: Bool {
+        (UInt8(ascii: "0") ... UInt8(ascii: "9")).contains(self)
+    }
 }
