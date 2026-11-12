@@ -990,38 +990,55 @@ host and path as one repository whatever the scheme, user, port or `.git`).
 every pool: `host init` has it create the pool with one `incus storage create`, built only by
 `IncusStorage.createCommand`, and Sail makes no dataset of its own inside one. The sources are
 `--storage dir` (the host filesystem, `incus storage create <pool> dir`), and for `--storage zfs`
-a whole disk or a partition (`--disk <device>`, `source=<device>`), or a sparse file Incus makes
+a whole disk or a partition (`--disk <device>`, `source=<device>`), a sparse file Incus makes
 under `/var/lib/incus/disks/` (`--pool-file-size <size>`, `size=<n>MiB`), slower than a disk and
-said once to be meant for trials. Incus runs `zpool create -m none -O compression=on` itself,
-with `-f` only for `source.wipe=true`. An existing zpool or dataset (`source=<zpool>` or
-`source=<zpool>/<dataset>`, which Incus requires empty) is an Incus form Sail does not offer.
+said once to be meant for trials, or an existing empty zpool (`source=<zpool>`, which Incus
+requires empty). Incus runs `zpool create -m none -O compression=on` itself, with `-f` only for
+`source.wipe=true`.
 
 - **Z1. What `host init` reports as done is what Incus has.** The base profile's root disk is
   converged (added when missing, an existing one kept) and the pool it names must be one Incus
-  lists, else init fails; `host.yaml` states that pool, its driver and its source as Incus has
-  them. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`,
-  `HostProvisionerTest.aProfileThatNamesAPoolIncusLacksIsRefused`, `ZfsPoolIT`.*
+  lists, else init fails; `host.yaml` states that pool, its driver and its source
+  (`pool_source`) as Incus has them. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`,
+  `HostProvisionerTest.aProfileThatNamesAPoolIncusLacksIsRefused`, `HostProvisionerIT`.*
 - **Z2. Sail never formats what it was not told to.** `PoolDevices.cleared` resolves the named
-  device and refuses, even with `--force-wipe`, anything in use: mounted (the running system's
-  disk among them) or swap, a RAID member, an LVM physical volume, a device something is built
-  on, anything but a disk or a partition. A device that holds any signature `wipefs` sees, or a
-  partition with a filesystem, is refused unless `--force-wipe` names the same device; that is
-  the one case Incus is passed `source.wipe=true`. It runs when the flags are read and again
-  just before the pool is made. Offered disks (none named) are only whole unused ones.
-  *`PoolDevicesTest`, `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
-- **Z3. One pool, one owner.** Nothing in Sail runs `zpool` or `zfs`; snapshots, copies and
-  deletes go through Incus. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`.*
+  device and reads the whole device tree (`lsblk --json --tree`; a flat list fails closed). It
+  refuses, even with `--force-wipe`: anything but a disk or a partition; a removable, empty, zram
+  or nbd device; one mounted or swap, or with something built on it (an array, a volume, an open
+  LUKS volume); a partition of the disk the running system is on (any partition there, or
+  anything built on one, mounted at `/` or `/boot…` or used as swap); a RAID member, an LVM
+  physical volume or a LUKS volume, read from lsblk and from `wipefs --no-act` on the device and
+  each partition, with the command that clears it named; a device another holder has open, found
+  by the exclusive open `wipefs --all --no-act --types sail_exclusive_probe` makes (it writes
+  nothing and the type matches no signature); and a device of an imported pool (`zpool list
+  -vHP`). That pool is never wiped: an empty one nobody holds is handed to Incus as it is
+  (`source=<zpool>`, as an older Sail's raw `zpool create` left it), one with datasets or one an
+  Incus pool is is refused. Anything else a device or its partitions hold (a filesystem, a
+  partition table, an exported pool) is refused unless `--force-wipe` names the same device;
+  that is the one case Incus is passed `source.wipe=true`. It runs when the flags are read and
+  again just before the pool is made. Offered disks (none named) are only whole unused ones.
+  *`PoolDevicesTest` (on lsblk, wipefs and zpool output captured from this devbox and a GitHub
+  runner, plus one hand-written layout of spare disks), `PoolDevicesIT` (the runner's own disks,
+  read-only), `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
+- **Z3. One pool, one owner.** Sail only reads ZFS (`zpool list`, `zfs list`); every pool,
+  dataset, snapshot and copy is made or removed by Incus. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`.*
 - **Z4. The ZFS cache cap is set before ZFS can take memory.** Step 3 writes
-  `/etc/modprobe.d/sail-zfs.conf` (`options zfs zfs_arc_max=`, a tenth of memory, at least the
-  64 MiB ZFS honours) before installing zfsutils-linux, and to the loaded module when ZFS is
-  already in, so it holds from the next load and across reboots.
+  `/etc/modprobe.d/sail-zfs.conf` (`options zfs zfs_arc_max=`, a tenth of memory, at most
+  16 GiB and at least the 64 MiB ZFS honours, with `zfs_arc_min` lowered to half the cap where
+  the ceiling falls under ZFS's default floor of a thirty-second of memory) before installing
+  zfsutils-linux, and to the loaded module when ZFS is already in, so it holds from the next load
+  and across reboots. Where `/` is on ZFS the module loads from the initramfs, which carries a
+  copy of `/etc/modprobe.d`, so init runs `update-initramfs -u`. A cap the operator set in any
+  other file under `/etc/modprobe.d` is kept, nothing written, and the step names it.
   *`HostProvisionerTest.theZfsCacheIsCappedBeforeTheToolsThatLoadZfsAreInstalled`, `ZfsCacheCapTest`.*
 - **Z5. A `dir` box keeps working unchanged.** A re-run of `host init --storage zfs --pool <new>`
-  on a box whose profile exists adds the pool beside the old one and touches no container and no
-  profile device; new containers are placed on it by naming it (`--storage <pool>`). A pool
-  name Incus already has with another driver is refused, and a zfs pool Incus already has is
-  kept, its device not cleared again.
-  *`HostProvisionerTest.aDirBoxWithContainersAddsAZfsPoolBesideItsOwnAndTouchesNoContainer`.*
+  on a box whose profile exists adds the pool beside the old one and touches no container, no
+  profile device and `host.yaml`'s storage; `host status` lists it. Placing a project's
+  containers on it is `sail-project-workspaces`. A pool name Incus already has with another
+  driver is refused before anything is installed; a zfs pool Incus already has is kept, and a
+  source flag that re-run would ignore is refused by name.
+  *`HostProvisionerTest.aDirBoxWithContainersAddsAZfsPoolBesideItsOwnAndTouchesNoContainer`,
+  `HostProvisionerIT`.*
 
 Incus finds the ZFS tools when a pool is created, not only when it starts (its driver looks
 them up on each load until one succeeds; only `incus info`'s list of supported drivers is read
@@ -1030,12 +1047,12 @@ missing, init restarts it only on a box with no container, saying so, and otherw
 `systemctl restart incus` and stops. On a `zfs` pool a container's disk limit is the root disk's
 `size`, which Incus sets as the dataset's `quota` (`zfs.use_refquota` would make it `refquota`;
 Sail leaves the Incus default), so a write past it fails inside the container with "Disk quota
-exceeded" and the snapshots of that container count against it. `incus copy <c>/<snap> <new>` is
-a `zfs clone` whose `origin` is the snapshot. `sail host status` lists every pool with its
-driver, source and free space (`incus storage list`, `incus query
+exceeded" and the snapshots of that container count against it. A copy of an instance's
+snapshot on the pool is a `zfs clone` whose `origin` is the snapshot. `sail host status` lists
+every pool with its driver, source and free space (`incus storage list`, `incus query
 /1.0/storage-pools/<pool>/resources`). A paused container (`incus pause`) reads as
-`ContainerState.Frozen`, `frozen` at the API; apply and `project start` resume it with `incus
-start`.
+`ContainerState.Frozen`, `frozen` at the API and counted in `host status`; apply and `project
+start` resume it with `incus start`, and stop, restore, rename and resize treat it as live.
 
 **The stack** (`ProjectServer`, `StackOperations`): a project's services and its processes,
 each process an app the dev user runs, declared with the port it listens on. `sudo sail project

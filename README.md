@@ -44,15 +44,19 @@ sudo sail host init --storage zfs --pool-file-size 200GiB    # a file, to try ZF
 ```
 
 Incus creates and owns the pool. A disk or partition that holds anything, a filesystem, a
-partition table or an old pool, is refused naming what is on it, and erased only when you name
-it again with `--force-wipe <device>`; one in use (mounted, swap, a RAID member, an LVM volume)
-is refused even then. A file is slower than a disk and meant for trials. `host init` caps the
-ZFS cache at a tenth of memory (`/etc/modprobe.d/sail-zfs.conf`) and says so. On ZFS a
-container's disk limit is enforced: Incus sets the root disk's size as the dataset's ZFS
-`quota`, which its snapshots count against, and a snapshot copy is a clone that costs nothing at
-first. On a box already on `dir`, the same command with `--pool <name>` adds the ZFS pool beside
-it: existing containers and the base profile stay where they are. `sudo sail host status` lists
-every pool with its driver, source and free space.
+partition table or an exported pool, is refused naming what is on it, and erased only when you
+name it again with `--force-wipe <device>`. One in use is refused even then: mounted, swap, a
+partition of the disk the system runs from, a RAID, LVM or LUKS member (the refusal names the
+command that frees it), or one something else holds open. A device of an imported zpool is never
+erased: an empty pool is handed to Incus as it is, one with datasets is refused. A file is slower
+than a disk and meant for trials. `host init` caps the ZFS cache at a tenth of memory, at most
+16 GiB (`/etc/modprobe.d/sail-zfs.conf`), and says so; a cap you set yourself is kept. On ZFS a
+container's disk limit is enforced: Incus sets the root disk's size as the dataset's ZFS `quota`,
+which its snapshots count against, and a snapshot copy is a clone that costs nothing at first.
+On a box already on `dir`, the same command with `--pool <name>` adds the ZFS pool beside it:
+existing containers and the base profile stay where they are, and `sudo sail host status` lists
+every pool with its driver, source and free space. Placing a project's containers on the new
+pool comes with workspaces.
 
 ## The model: one main, many nodes
 
