@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.HostProvisioner;
+import ai.singlr.sail.engine.IncusStorage;
 import ai.singlr.sail.engine.NetworkDetector;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PoolDevices;
@@ -24,11 +25,13 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.ssh.SshPublicKey;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.TimeoutException;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -191,7 +194,7 @@ public final class HostInitCommand implements Runnable {
       }
     }
 
-    var source = source(new PoolDevices(new ShellExecutor(false)));
+    var source = source(new ShellExecutor(false));
 
     var resolvedServerIp = serverIp;
     if (resolvedServerIp == null) {
@@ -314,10 +317,12 @@ public final class HostInitCommand implements Runnable {
   }
 
   /**
-   * The pool these flags ask for: dir, a named device {@link PoolDevices#cleared} clears, a file,
+   * The pool these flags ask for, read on the machine {@code probe} runs on: dir, the zfs pool
+   * Incus already has under this name (a re-run keeps it whatever source is named, so a device it
+   * took is not refused for holding it), a file, a named device {@link PoolDevices#cleared} clears,
    * or for zfs with neither, an unused disk the operator picks. Refused when the flags disagree.
    */
-  PoolSource source(PoolDevices devices) throws Exception {
+  PoolSource source(ShellExec probe) throws Exception {
     var named = disk != null || poolFileSize != null || forceWipe != null;
     if (!HostYaml.BACKEND_ZFS.equals(storage)) {
       if (named) {
@@ -335,10 +340,27 @@ public final class HostInitCommand implements Runnable {
       throw new IllegalArgumentException(
           "--force-wipe names the device to erase again: name it with --disk too.");
     }
+    var held = held(new IncusStorage(probe));
+    if (held.isPresent()) {
+      return new PoolSource.Device(held.get().source(), false);
+    }
     if (poolFileSize != null) {
       return file(poolFileSize);
     }
+    var devices = new PoolDevices(probe);
     return devices.cleared(disk != null ? disk : detectAndSelectDisk(devices), forceWipe);
+  }
+
+  /**
+   * The zfs pool Incus has under this pool's name; none where Incus does not answer, as on a box it
+   * is not installed on yet.
+   */
+  private Optional<IncusStorage.Pool> held(IncusStorage storage) throws InterruptedException {
+    try {
+      return storage.find(pool).filter(found -> HostYaml.BACKEND_ZFS.equals(found.driver()));
+    } catch (IOException | TimeoutException e) {
+      return Optional.empty();
+    }
   }
 
   /** A file pool of {@code size}, refused unless it reads as at least {@link #MIN_FILE_MB}. */

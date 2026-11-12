@@ -6,12 +6,12 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
-import ai.singlr.sail.engine.PoolDevices;
 import ai.singlr.sail.engine.PoolDevices.Candidate;
 import ai.singlr.sail.engine.PoolSource;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -249,10 +249,61 @@ class HostInitCommandTest {
     assertTrue(shell.invocations().contains("wipefs --no-act --json -- /dev/sdb"));
   }
 
+  @Test
+  void aReRunKeepsTheZfsPoolIncusHasAndClearsNoDeviceAgain() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus storage list",
+                "[{\"name\": \"tank\", \"driver\": \"zfs\", \"config\": {\"source\": \"tank\","
+                    + " \"volatile.initial_source\": \"/dev/sdb\"}}]");
+
+    assertEquals(
+        new PoolSource.Device("/dev/sdb", false),
+        source(shell, "--storage", "zfs", "--pool", "tank", "--disk", "/dev/sdb"));
+    assertEquals(
+        new PoolSource.Device("/dev/sdb", false),
+        source(shell, "--storage", "zfs", "--pool", "tank"));
+    assertFalse(
+        shell.invocations().stream()
+            .anyMatch(
+                c -> c.startsWith("realpath") || c.startsWith("lsblk") || c.startsWith("wipefs")),
+        shell.invocations().toString());
+  }
+
+  @Test
+  void aPoolOfAnotherDriverUnderTheNameIsNoReasonToSkipClearingTheDevice() {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus storage list",
+                "[{\"name\": \"devpool\", \"driver\": \"dir\", \"config\": {\"source\": \"/d\"}}]")
+            .onFail("realpath", "realpath: /dev/sdz: No such file");
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> source(shell, "--storage", "zfs", "--disk", "/dev/sdz"));
+
+    assertEquals(
+        "--disk /dev/sdz names no device on this box: realpath: /dev/sdz: No such file.",
+        refused.getMessage());
+  }
+
+  @Test
+  void anIncusNotInstalledYetHasNoPool() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onThrow("incus storage list", new IOException("Cannot run program \"incus\""));
+
+    assertEquals(
+        new PoolSource.File(51200), source(shell, "--storage", "zfs", "--pool-file-size", "50GiB"));
+  }
+
   private static PoolSource source(ScriptedShellExecutor shell, String... args) throws Exception {
     var command = new HostInitCommand();
     new CommandLine(command).parseArgs(args);
-    return command.source(new PoolDevices(shell));
+    return command.source(shell);
   }
 
   @Test

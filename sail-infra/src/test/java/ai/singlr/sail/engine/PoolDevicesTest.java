@@ -213,6 +213,37 @@ class PoolDevicesTest {
   }
 
   @Test
+  void aRaidMemberOfNoRunningArrayAndAnIdleLvmVolumeAreRefusedEvenWithTheForceFlag()
+      throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("realpath -e -- /dev/sdj", "/dev/sdj\n")
+            .onOk("realpath -e -- /dev/sdk", "/dev/sdk\n")
+            .onOk(
+                LSBLK + " -- /dev/sdj",
+                lsblk(dev("/dev/sdj", "disk", "linux_raid_member", null, List.of())))
+            .onOk(
+                LSBLK + " -- /dev/sdk",
+                lsblk(dev("/dev/sdk", "disk", "LVM2_member", null, List.of())));
+
+    var member =
+        assertThrows(
+            IllegalArgumentException.class, () -> devices(shell).cleared("/dev/sdj", "/dev/sdj"));
+    var volume =
+        assertThrows(
+            IllegalArgumentException.class, () -> devices(shell).cleared("/dev/sdk", "/dev/sdk"));
+
+    assertEquals(
+        "/dev/sdj is in use, so no pool is made on it, even with --force-wipe: /dev/sdj is a RAID"
+            + " member.",
+        member.getMessage());
+    assertEquals(
+        "/dev/sdk is in use, so no pool is made on it, even with --force-wipe: /dev/sdk is an LVM"
+            + " physical volume.",
+        volume.getMessage());
+  }
+
+  @Test
   void anLvmPhysicalVolumeIsRefusedEvenWithTheForceFlag() {
     var shell = box(Map.of("/dev/sde", "/dev/sde"), Map.of());
 

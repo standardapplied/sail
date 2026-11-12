@@ -1019,7 +1019,8 @@ with `-f` only for `source.wipe=true`. An existing zpool or dataset (`source=<zp
 - **Z5. A `dir` box keeps working unchanged.** A re-run of `host init --storage zfs --pool <new>`
   on a box whose profile exists adds the pool beside the old one and touches no container and no
   profile device; new containers are placed on it by naming it (`--storage <pool>`). A pool
-  name Incus already has with another driver is refused.
+  name Incus already has with another driver is refused, and a zfs pool Incus already has is
+  kept, its device not cleared again.
   *`HostProvisionerTest.aDirBoxWithContainersAddsAZfsPoolBesideItsOwnAndTouchesNoContainer`.*
 
 Incus finds the ZFS tools when a pool is created, not only when it starts (its driver looks
