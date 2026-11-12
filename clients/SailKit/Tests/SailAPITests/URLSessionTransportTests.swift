@@ -73,15 +73,18 @@ import Testing
         }
     }
 
+    /// What arrived is all of the body on Linux; Apple's loader drops what it had not yet handed
+    /// over when the connection fails, so there it may be none of it.
     @Test func aStreamThatBreaksAfterItsHeadYieldsWhatArrivedAndThenFails() async throws {
         let stream = try await transport.open(HTTPRequest(method: .get, path: "/break"))
-        var chunks: [[UInt8]] = []
+        #expect(stream.status == 201)
+        var arrived: [UInt8] = []
         await #expect(throws: (any Error).self) {
             for try await chunk in stream.body {
-                chunks.append(chunk)
+                arrived += chunk
             }
         }
-        #expect(chunks.flatMap(\.self) == Array(ScriptedProtocol.streamed.utf8))
+        #expect(Array(ScriptedProtocol.streamed.utf8).starts(with: arrived))
     }
 
     @Test func aReaderCancelledWhileItWaitsForTheHeadReleasesTheConnection() async throws {
