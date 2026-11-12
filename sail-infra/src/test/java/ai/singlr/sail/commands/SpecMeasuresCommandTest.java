@@ -35,6 +35,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -309,6 +310,54 @@ class SpecMeasuresCommandTest {
             MeasuresText.duration(3599),
             MeasuresText.duration(7200),
             MeasuresText.duration(3 * 86400 + 4 * 3600 + 300)));
+  }
+
+  /**
+   * What a box with no Sail id, a lower bound, a count the reader may not see and an interval no
+   * clock agrees with read as, from an answer in the shape the server serves.
+   */
+  @Test
+  void aLowerBoundReadsAtLeastAndAnUnknownOrAnErrorSaysWhy() {
+    var at = Map.of("at", "2026-11-01T09:00:00.000Z", "source", "change_log");
+    var times = new LinkedHashMap<String, Object>();
+    times.put("ready", at);
+    times.put("verified", Map.of("unknown", "hidden_rows"));
+    times.put("awaiting_merge", Map.of("unknown", "collapsed_by_sync"));
+    times.put("done", at);
+    var intervals = new LinkedHashMap<String, Object>();
+    intervals.put("ready_to_done", Map.of("error", "done at x is before ready at y."));
+    var rework = new LinkedHashMap<String, Object>();
+    rework.put("review_rounds", Map.of("unknown", "hidden_rows"));
+    rework.put("review_errors", Map.of("unknown", "hidden_rows"));
+    rework.put("build_runs", Map.of("count", 3, "at_least", true));
+    rework.put("fix_runs", Map.of("count", 1, "at_least", true));
+    rework.put("carried_findings", Map.of("unknown", "hidden_rows"));
+    var answer = new LinkedHashMap<String, Object>();
+    answer.put("times", times);
+    answer.put("intervals", intervals);
+    answer.put("rework", rework);
+    answer.put("no_recorded_human_code_act", Map.of("unknown", "hidden_rows"));
+    answer.put(
+        "cost",
+        Map.of(
+            "unknown", "not_recorded", "runs_without_usage", Map.of("count", 4, "at_least", true)));
+    answer.put("human_minutes", Map.of("unknown", "not_recorded"));
+
+    assertEquals(
+        List.of(
+            "  @|bold Measures|@ (this box's record):",
+            "    Ready: 2026-11-01T09:00:00.000Z (change log)",
+            "    Verified: unknown: hidden rows",
+            "    Awaiting merge: unknown: collapsed by sync",
+            "    Done: 2026-11-01T09:00:00.000Z (change log)",
+            "    Ready → done: error: done at x is before ready at y.",
+            "    Rework: review rounds unknown (hidden rows), review errors unknown (hidden rows),"
+                + " at least 3 build runs, at least 1 fix run, carried findings unknown (hidden"
+                + " rows)",
+            "    No recorded human code act: unknown: hidden rows",
+            "    Cost: unknown: not recorded (at least 4 runs without usage)",
+            "    Human minutes: unknown: not recorded"),
+        MeasuresText.section(answer));
   }
 
   @Test
