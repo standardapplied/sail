@@ -107,6 +107,13 @@ public final class PoolDevices {
     return resolved.stdout().strip();
   }
 
+  /** The device {@code path} resolves to on this box, or none when it names nothing. */
+  public Optional<String> device(String path)
+      throws IOException, InterruptedException, TimeoutException {
+    var resolved = shell.exec(List.of("realpath", "-e", "--", path));
+    return resolved.ok() ? Optional.of(resolved.stdout().strip()) : Optional.empty();
+  }
+
   /**
    * The device {@code named} names, as Incus may be handed it: one that carries nothing. Refused,
    * with nothing written, otherwise.

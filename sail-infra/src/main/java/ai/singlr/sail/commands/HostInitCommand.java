@@ -355,11 +355,13 @@ public final class HostInitCommand implements Runnable {
 
   /**
    * The zfs pool Incus holds under this pool's name, which a re-run keeps; a source flag the re-run
-   * would ignore is refused, naming it.
+   * would ignore is refused, naming it. {@code --disk} and the pool's source are compared as the
+   * devices they resolve to, since Incus holds the path Sail handed it, a by-id name where the disk
+   * has one; a source that resolves to nothing is a device gone, which no {@code --disk} can be.
    */
   private PoolSource kept(IncusStorage.Pool held, PoolDevices devices) throws Exception {
     var ignored = new ArrayList<String>();
-    if (disk != null && !devices.resolved("--disk", disk).equals(held.source())) {
+    if (disk != null && !sameDevice(held, devices.resolved("--disk", disk), devices)) {
       ignored.add("--disk " + disk);
     }
     if (poolFileSize != null && !(file(poolFileSize).sizeMb() + "MiB").equals(held.size())) {
@@ -376,6 +378,30 @@ public final class HostInitCommand implements Runnable {
               + " would be ignored. Drop it, or name a new pool with --pool <name>.");
     }
     return new PoolSource.Zpool(Objects.requireNonNullElse(held.zpool(), held.name()));
+  }
+
+  private boolean sameDevice(IncusStorage.Pool held, String named, PoolDevices devices)
+      throws Exception {
+    if (!held.source().startsWith("/")) {
+      return false;
+    }
+    var source =
+        devices
+            .device(held.source())
+            .orElseThrow(
+                () ->
+                    new IllegalArgumentException(
+                        "Incus already has zfs pool '"
+                            + pool
+                            + "' on "
+                            + held.source()
+                            + ", which names no device on this box now: the pool's device is gone,"
+                            + " so --disk "
+                            + disk
+                            + " cannot be it. See sudo zpool status "
+                            + Objects.requireNonNullElse(held.zpool(), held.name())
+                            + ", or name a new pool with --pool <name>."));
+    return source.equals(named);
   }
 
   /** A file pool of {@code size}, refused unless it reads as at least {@link #MIN_FILE_MB}. */

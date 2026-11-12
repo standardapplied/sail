@@ -1100,7 +1100,10 @@ never with `-f`: Sail never passes `source.wipe`.
   containers on it is `sail-project-workspaces`. A pool name Incus already has with another
   driver is refused before anything is installed; a zfs pool Incus already has is kept, and a
   source flag that re-run would ignore is refused by name, while the command that made it, a disk
-  or a file of the same size, runs again as a no-op. A zfs pool Incus no longer has when the pool is made is never made from its
+  or a file of the same size, runs again as a no-op: `--disk` and the pool's source are compared as
+  the devices `realpath -e` resolves them to, so any name of the pool's device (its kernel path, the
+  by-id path Incus holds, another link of the disk) is the same device, and a source that resolves
+  to nothing is refused as the pool's device gone. A zfs pool Incus no longer has when the pool is made is never made from its
   zpool. A dry run reads the profile, pools and packages the box has, so it shows the base
   profile staying where it is and says whether Incus and ZFS would be installed, which bridge, pool
   and profile it would create, whether the image would be cached and the bridge rules added, and

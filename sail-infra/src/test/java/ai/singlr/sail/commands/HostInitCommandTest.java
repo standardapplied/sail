@@ -354,6 +354,116 @@ class HostInitCommandTest {
         shell.invocations().toString());
   }
 
+  /**
+   * The fifth GCP proof's local NVMe SSD: Incus holds pool znv under the by-id path Sail handed it,
+   * and udev names the disk by three more links ({@code nvme-identity.txt}, {@code incus storage
+   * show znv}).
+   */
+  private static final String NVME_ID =
+      "/dev/disk/by-id/nvme-nvme.1ae0-6e766d655f63617264-6e766d655f63617264-00000001";
+
+  private static final String NVME_ALIAS = "/dev/disk/by-id/google-local-nvme-ssd-0";
+
+  private static ScriptedShellExecutor heldUnder(String source) {
+    return new ScriptedShellExecutor()
+        .onOk(
+            "incus storage list",
+            "[{\"name\": \"znv\", \"driver\": \"zfs\", \"config\": {\"source\": \"znv\","
+                + " \"volatile.initial_source\": \""
+                + source
+                + "\", \"zfs.pool_name\": \"znv\"}}]");
+  }
+
+  @Test
+  void aReRunOfAPoolHeldUnderItsByIdPathKeepsItByAnyNameOfThatDisk() throws Exception {
+    var shell =
+        heldUnder(NVME_ID)
+            .onOk("realpath -e -- " + NVME_ID, "/dev/nvme0n1\n")
+            .onOk("realpath -e -- " + NVME_ALIAS, "/dev/nvme0n1\n")
+            .onOk("realpath -e -- /dev/nvme0n1", "/dev/nvme0n1\n")
+            .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n");
+
+    for (var named : List.of("/dev/nvme0n1", NVME_ID, NVME_ALIAS)) {
+      assertEquals(
+          new PoolSource.Zpool("znv"),
+          source(shell, "--storage", "zfs", "--pool", "znv", "--disk", named),
+          named);
+    }
+    assertEquals(
+        "Incus already has zfs pool 'znv' on "
+            + NVME_ID
+            + ", which a re-run keeps, so --disk /dev/sdb would be ignored. Drop it, or name a new"
+            + " pool with --pool <name>.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> source(shell, "--storage", "zfs", "--pool", "znv", "--disk", "/dev/sdb"))
+            .getMessage());
+    assertFalse(
+        shell.invocations().stream().anyMatch(c -> c.startsWith("lsblk") || c.startsWith("wipefs")),
+        shell.invocations().toString());
+  }
+
+  @Test
+  void aReRunOfAPoolHeldUnderAPartitionsByIdPathKeepsItByAnyNameOfThatPartition() throws Exception {
+    var shell =
+        heldUnder(NVME_ID + "-part1")
+            .onOk("realpath -e -- " + NVME_ID + "-part1", "/dev/nvme0n1p1\n")
+            .onOk("realpath -e -- " + NVME_ALIAS + "-part1", "/dev/nvme0n1p1\n")
+            .onOk("realpath -e -- /dev/nvme0n1p1", "/dev/nvme0n1p1\n")
+            .onOk("realpath -e -- /dev/nvme0n1", "/dev/nvme0n1\n");
+
+    for (var named : List.of("/dev/nvme0n1p1", NVME_ID + "-part1", NVME_ALIAS + "-part1")) {
+      assertEquals(
+          new PoolSource.Zpool("znv"),
+          source(shell, "--storage", "zfs", "--pool", "znv", "--disk", named),
+          named);
+    }
+    assertEquals(
+        "Incus already has zfs pool 'znv' on "
+            + NVME_ID
+            + "-part1, which a re-run keeps, so --disk /dev/nvme0n1 would be ignored. Drop it, or"
+            + " name a new pool with --pool <name>.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> source(shell, "--storage", "zfs", "--pool", "znv", "--disk", "/dev/nvme0n1"))
+            .getMessage());
+  }
+
+  @Test
+  void aReRunNamingADiskWhenThePoolsDeviceIsGoneIsRefusedSayingSo() throws Exception {
+    var shell =
+        heldUnder(NVME_ID)
+            .onFail(
+                "realpath -e -- " + NVME_ID, "realpath: " + NVME_ID + ": No such file or directory")
+            .onOk("realpath -e -- /dev/nvme0n1", "/dev/nvme0n1\n");
+
+    assertEquals(
+        "Incus already has zfs pool 'znv' on "
+            + NVME_ID
+            + ", which names no device on this box now: the pool's device is gone, so --disk"
+            + " /dev/nvme0n1 cannot be it. See sudo zpool status znv, or name a new pool with"
+            + " --pool <name>.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> source(shell, "--storage", "zfs", "--pool", "znv", "--disk", "/dev/nvme0n1"))
+            .getMessage());
+    assertEquals(new PoolSource.Zpool("znv"), source(shell, "--storage", "zfs", "--pool", "znv"));
+  }
+
+  @Test
+  void aPoolMadeFromAZpoolsNameIsNeverTheDiskNamed() {
+    var shell = heldUnder("znv").onOk("realpath -e -- /dev/nvme0n1", "/dev/nvme0n1\n");
+
+    assertEquals(
+        "Incus already has zfs pool 'znv' on znv, which a re-run keeps, so --disk /dev/nvme0n1"
+            + " would be ignored. Drop it, or name a new pool with --pool <name>.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> source(shell, "--storage", "zfs", "--pool", "znv", "--disk", "/dev/nvme0n1"))
+            .getMessage());
+    assertFalse(shell.invocations().contains("realpath -e -- znv"), shell.invocations().toString());
+  }
+
   @Test
   void aReRunOfTheCommandThatMadeAFilePoolKeepsItAndADifferentSizeIsRefused() throws Exception {
     var shell =
@@ -387,7 +497,8 @@ class HostInitCommandTest {
                 "incus storage list",
                 "[{\"name\": \"tank\", \"driver\": \"zfs\", \"config\": {\"source\": \"tank\","
                     + " \"volatile.initial_source\": \"/dev/sdb\", \"zfs.pool_name\": \"tank\"}}]")
-            .onOk("realpath -e -- /dev/sdc", "/dev/sdc\n");
+            .onOk("realpath -e -- /dev/sdc", "/dev/sdc\n")
+            .onOk("realpath -e -- /dev/sdb", "/dev/sdb\n");
 
     var refused =
         assertThrows(
