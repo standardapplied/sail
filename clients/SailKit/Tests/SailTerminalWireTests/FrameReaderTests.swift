@@ -35,6 +35,35 @@ import Testing
         }
     }
 
+    @Test func framesReadBeforeABadOneAreAnsweredAndTheErrorComesOnTheNextRead() throws {
+        let ended = try golden("SessionEnded")
+        let broken = ended + bigEndian(Int32.max)
+        let refusal = TerminalWireError.lengthOutOfRange(Int(Int32.max))
+        for offset in 0 ... broken.count {
+            var reader = FrameReader()
+            var frames: [Frame] = []
+            var failures: [TerminalWireError] = []
+            for chunk in cut(broken, at: offset) + [[]] {
+                do {
+                    frames += try reader.read(chunk)
+                } catch {
+                    failures.append(error)
+                }
+            }
+            #expect(frames == [try decoded(ended)], "cut at \(offset)")
+            #expect(failures.first == refusal, "cut at \(offset)")
+            #expect(throws: refusal) { try reader.read(ended) }
+            #expect(reader.buffered == 0)
+        }
+    }
+
+    @Test func aFrameThatDoesNotDecodeAfterGoodOnesIsRaisedOnTheNextReadToo() throws {
+        let ended = try golden("SessionEnded")
+        var reader = FrameReader()
+        #expect(try reader.read(ended + lengthPrefixed([99])) == [try decoded(ended)])
+        #expect(throws: TerminalWireError.unknownType(99)) { try reader.read([]) }
+    }
+
     @Test func aFrameAtTheLimitIsRead() throws {
         let largest = Frame.input(sequence: 1, bytes: Array(repeating: 7, count: FrameCodec.maxPayload - 13))
         var reader = FrameReader()
