@@ -312,7 +312,8 @@ public final class HostProvisioner {
       made = storage.create(pool, source);
     }
     if (!made.ok()) {
-      throw new IOException("Failed to create storage pool " + pool + ": " + made.reason());
+      throw new IOException(
+          "Failed to create storage pool " + pool + ": " + IncusStorage.refused(made));
     }
     return unseen ? "; restarted Incus, which ran no container, to see ZFS" : "";
   }
@@ -447,9 +448,13 @@ public final class HostProvisioner {
     step(7, "Caching Ubuntu 24.04 image...");
 
     var check =
-        shell.exec(List.of("bash", "-c", "incus image list --format=json | grep -q ubuntu-24.04"));
+        read(List.of("bash", "-c", "incus image list --format=json | grep -q ubuntu-24.04"));
     if (check.ok()) {
       stepDone(7, "already cached");
+      return;
+    }
+    if (shell.isDryRun()) {
+      stepDone(7, "would cache Ubuntu 24.04");
       return;
     }
 
@@ -477,13 +482,17 @@ public final class HostProvisioner {
 
     ShellExec.Result status;
     try {
-      status = shell.exec(List.of("ufw", "status"));
+      status = (shell.isDryRun() ? reads : shell).exec(List.of("ufw", "status"));
     } catch (IOException e) {
       stepSkipped(8, "UFW not installed");
       return;
     }
     if (!status.ok() || !status.stdout().contains("Status: active")) {
       stepSkipped(8, "UFW not active");
+      return;
+    }
+    if (shell.isDryRun()) {
+      stepDone(8, "would add bridge rules");
       return;
     }
 

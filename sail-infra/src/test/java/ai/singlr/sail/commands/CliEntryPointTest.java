@@ -161,7 +161,8 @@ class CliEntryPointTest {
     assertTrue(output.contains("███████"), "Should show branding");
     assertTrue(output.contains("Host Detection"), "Should show host detection banner");
     assertTrue(output.contains("[dry-run]"), "Should show dry-run commands");
-    assertTrue(output.contains("Server ready"), "Should show server ready");
+    assertTrue(output.contains("Dry run done: nothing was changed."), output);
+    assertFalse(output.contains("Server ready"), output);
   }
 
   @Test
@@ -174,7 +175,7 @@ class CliEntryPointTest {
     assertEquals(0, exitCode);
     var output = capturedOut.toString(StandardCharsets.UTF_8);
     assertTrue(output.contains("Host Detection"), "Should show host detection");
-    assertTrue(output.contains("Server ready"), "Should complete with dir backend");
+    assertTrue(output.contains("Dry run done: nothing was changed."), output);
     assertTrue(output.contains("(dir)"), "Should show dir backend in output");
   }
 

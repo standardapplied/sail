@@ -15,7 +15,7 @@ import java.io.InputStreamReader;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -206,9 +206,9 @@ class PoolDevicesIT extends AbstractIncusIT {
   }
 
   /**
-   * A loop device a process holds open read-write, without the exclusive open the probe sees, is
-   * refused by the walk of {@code /proc/<pid>/fd}, naming the process; once it lets go, nothing
-   * holds it.
+   * A loop device a process holds open read-write through a device node of its own, without the
+   * exclusive open the probe sees, is refused by the walk of {@code /proc/<pid>/fd}, matched by
+   * device number and naming the process; once it lets go, nothing holds it.
    */
   @Test
   void aDeviceAProcessHoldsOpenPlainlyIsRefusedUntilItLetsGo(@TempDir Path dir) throws Exception {
@@ -216,20 +216,24 @@ class PoolDevicesIT extends AbstractIncusIT {
     var root = new RootShell();
     var loop = attach(root, dir.resolve("open.img"), "true");
     var devices = new PoolDevices(root);
+    var number = root.exec(List.of("lsblk", "-dno", "MAJ:MIN", loop)).stdout().strip();
+    var node = dir.resolve("its-own-node").toString();
     try {
+      var parts = number.split(":");
+      assertTrue(root.exec(List.of("mknod", node, "b", parts[0], parts[1])).ok());
       var holder =
           new ProcessBuilder(
-                  "sudo", "-n", "bash", "-c", "exec 3<>\"$1\"; echo held; read -r _", "bash", loop)
+                  "sudo", "-n", "bash", "-c", "exec 3<>\"$1\"; echo held; read -r _", "bash", node)
               .redirectErrorStream(true)
               .start();
       List<String> held;
       try (var said = new BufferedReader(new InputStreamReader(holder.getInputStream()))) {
         assertEquals("held", said.readLine());
-        held = devices.openBy(loop, Set.of(loop));
+        held = devices.openBy(loop, Map.of(number, loop));
         holder.getOutputStream().close();
         assertTrue(holder.waitFor(60, TimeUnit.SECONDS), "the holder did not let go");
       }
-      var released = devices.openBy(loop, Set.of(loop));
+      var released = devices.openBy(loop, Map.of(number, loop));
       System.out.println("HELD " + held + " RELEASED " + released);
 
       assertEquals(1, held.size(), held.toString());
@@ -238,6 +242,7 @@ class PoolDevicesIT extends AbstractIncusIT {
           held.toString());
       assertEquals(List.of(), released);
     } finally {
+      root.exec(List.of("rm", "-f", node));
       root.exec(List.of("losetup", "-d", loop));
     }
   }

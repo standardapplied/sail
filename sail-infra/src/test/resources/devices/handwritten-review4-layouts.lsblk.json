@@ -11,6 +11,7 @@
             null
          ],
          "size": 107374182400,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -27,7 +28,8 @@
                "mountpoints": [
                   "/"
                ],
-               "size": 96636764160,
+               "size": 94345625600,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -45,6 +47,7 @@
                   null
                ],
                "size": 134217728,
+               "start": 184268800,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -62,6 +65,7 @@
                   null
                ],
                "size": 8388608,
+               "start": 184530944,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -79,6 +83,7 @@
                   null
                ],
                "size": 4294967296,
+               "start": 184547328,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -96,6 +101,7 @@
                   null
                ],
                "size": 4294967296,
+               "start": 192935936,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -113,6 +119,7 @@
                   null
                ],
                "size": 4294967296,
+               "start": 201324544,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -132,6 +139,7 @@
             null
          ],
          "size": 21474836480,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -149,6 +157,7 @@
                   null
                ],
                "size": 21474836480,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -168,6 +177,7 @@
             null
          ],
          "size": 67108864,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -185,6 +195,7 @@
             null
          ],
          "size": 4194304,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -202,6 +213,7 @@
             null
          ],
          "size": 21474836480,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -219,6 +231,7 @@
                   null
                ],
                "size": 21474836480,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -238,6 +251,7 @@
             null
          ],
          "size": 21474836480,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -254,7 +268,8 @@
                "mountpoints": [
                   null
                ],
-               "size": 21474836480,
+               "size": 21473786880,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -272,6 +287,7 @@
                   null
                ],
                "size": 1024,
+               "start": 41940990,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -279,6 +295,62 @@
                "maj:min": "8:50"
             }
          ]
+      },
+      {
+         "path": "/dev/sde",
+         "kname": "sde",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "dos",
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 1073741824,
+         "start": null,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": "E1",
+         "maj:min": "8:64",
+         "children": [
+            {
+               "path": "/dev/sde1",
+               "kname": "sde1",
+               "type": "part",
+               "fstype": null,
+               "pttype": "dos",
+               "parttype": "0x83",
+               "mountpoints": [
+                  null
+               ],
+               "size": 2147483648,
+               "start": 0,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:65"
+            }
+         ]
+      },
+      {
+         "path": "/dev/nvme1n1",
+         "kname": "nvme1n1",
+         "type": "disk",
+         "fstype": null,
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+            null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": null,
+         "rm": false,
+         "wwn": "eui.0025388b91b0f1a2",
+         "serial": "N1",
+         "maj:min": "259:5"
       }
    ]
 }

@@ -1013,7 +1013,10 @@ never with `-f`: Sail never passes `source.wipe`.
   tree (`lsblk --json --tree --bytes`; a flat list fails closed), then takes the device only when
   all of this holds, each refused by name otherwise: it is a plain disk (at the top of the tree, of
   type disk; not an array, a loop device, a mapping, a ZFS volume, a zram or nbd device, or a disk
-  built on another, as bcache is) or a partition of one, not removable and not empty; every
+  built on another, as bcache is) or a partition of one, not removable and not empty; a
+  partition's extent (its START and size from the same lsblk call) lies inside its disk and
+  overlaps no other partition, and a disk with an overlapping pair refuses every partition of it,
+  since writing one destroys the other; every
   partition's type, on the device or for a disk on any of its partitions, is Linux filesystem data
   (GPT `0fc63daf-…`, MBR `0x83`) or ZFS (`6a898cc3-…`, `0xbf`), compared without case, and any
   other type or none refuses it, since a boot, firmware, reserved or extended partition may carry
@@ -1025,31 +1028,46 @@ never with `-f`: Sail never passes `source.wipe`.
   type filter matches no signature, so wipefs neither reports anything erased nor re-reads a
   partition table, as an unfiltered `--no-act --all` does; udev may re-read one when the device is
   closed, which writes nothing); no process has it, or for a disk any of its partitions, open at
-  all, read from every `/proc/<pid>/fd` (a process whose open files cannot be read refuses it too);
+  all, read from every `/proc/<pid>/fd` and matched by device number, so a holder is seen through
+  any node or path it opened the device by, in any mount namespace (a process whose open files
+  cannot be read refuses it too, and an exclusive holder the walk cannot find is said to be one
+  Sail cannot name);
   and neither it nor another partition of its disk is a device of an imported pool,
   whatever class it is listed under (`zpool list -vHP <pool>`), named with the pool and with
   Incus's pool when Incus holds it. Where it sits does not matter: a blank partition on the
   system's disk is taken, and everything the system uses there carries a signature, a mount or a
   boot type. A device whose only obstacle is a filesystem, swap or a bare partition table names
   the `sudo wipefs --all <device>` the operator may run; one in use names the use, and a member
-  of anything the command that frees it (a zpool not imported: `zpool import` or `zpool
-  labelclear`), never wipefs. A refused device that holds a filesystem unmounted names it. What
+  of anything the command that frees it (a zpool `zpool import` lists: import it or `zpool
+  labelclear` it; the labels of a pool it does not list, destroyed or missing its other devices:
+  `zpool labelclear`, never import), never wipefs; a pool's whole disk is named by its pool. A refused device that holds a filesystem unmounted names it. What
   neither the open nor the walk sees is a consumer that does not keep the device open while Sail
   looks, a stopped virtual machine's raw disk or a closed dm-crypt volume with no header. A disk
   with no partition table and no signature is blank to Sail, even where a filesystem survives
   further in after its table was erased. The check runs when the flags are read and again just
   before the pool is made, which refuses unless the device is the one first cleared (its or its
   disk's WWN or serial, its major:minor and its size in bytes), and once more before the create
-  that follows Incus restarting to see ZFS. Offered disks (none named) are only whole blank ones.
+  that follows Incus restarting to see ZFS; each re-check is the last command before its create.
+  A device whose disk has a hardware identity (a WWN, or an NVMe EUI) is handed to Incus by the
+  path udev names from it (`/dev/disk/by-id/wwn-…` or `nvme-eui.…`, with `-partN`), so no other disk
+  can stand under the name the pool is made on; a disk with none, as on GCP, is handed by its
+  kernel path. There, a disk physically replaced under the same name between Sail's last check and
+  the pool's creation is judged by `zpool create` alone, which refuses a filesystem, swap, a pool
+  member or a device in use, but not an empty partition table or filesystems inside MBR
+  partitions: do not change disks while `host init` runs. Zpool's offer to force a create it
+  refused is never passed on: the refusal says what zpool found and that Sail erases nothing.
+  Offered disks (none named) are only whole blank ones.
   A pool on one partition or one disk has no redundancy: losing that device loses every container
   on the pool, however the system's own disks are mirrored.
   *`PoolDevicesTest` (on lsblk, wipefs and zpool output captured from this devbox, a GitHub
-  runner and two GCP proofs taken through blank, partitioned, RAID, pool, swap, btrfs, swapped-disk
-  and pivoted root-on-ZFS and btrfs layouts, plus hand-written layouts marked as such),
+  runner and three GCP proofs taken through blank, partitioned, RAID, pool, swap, btrfs,
+  swapped-disk, overlapping-partition and pivoted root-on-ZFS and btrfs layouts, plus hand-written
+  layouts marked as such),
   `PoolDevicesIT` (the runner's own disks, read-only; the probe on a loop device mounted and
   mapped; a `/dev/mapper` path refused as a dm device; a pool with every vdev class; Incus making
   the pool Sail asks for on a blank loop device, and zpool refusing one that took ext4 after the
-  checks, its ext4 kept; a loop device a process holds open plainly refused until it lets go), `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
+  checks, its ext4 kept; a loop device a process holds open plainly, through a device node of its
+  own, refused until it lets go), `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
 - **Z3. One pool, one owner.** Sail only reads ZFS (`zpool list`); every pool,
   dataset, snapshot and copy is made or removed by Incus. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`.*
 - **Z4. The ZFS cache cap is set before ZFS can take memory.** Step 3 writes
@@ -1058,10 +1076,12 @@ never with `-f`: Sail never passes `source.wipe`.
   the ceiling falls under ZFS's default floor of a thirty-second of memory) before installing
   zfsutils-linux, and to the loaded module when ZFS is already in, so it holds from the next load
   and across reboots. Where `/` is on ZFS the module loads from the initramfs, which carries a
-  copy of `/etc/modprobe.d`, so init runs `update-initramfs -u`. A cap the operator set, one
-  `modprobe --showconfig` lists from any file modprobe reads that Sail did not write, a value in
-  Sail's own file other than the one Sail writes for this box (the operator's edit), or one the
-  loaded module holds that Sail did not write, is kept, nothing written, and the step names it;
+  copy of `/etc/modprobe.d`, so init runs `update-initramfs -u`. It decides from what the next
+  boot applies, the merged configuration `modprobe --showconfig` lists from every file modprobe
+  reads and the kernel command line: a cap the operator set there that Sail did not write, or a
+  value in Sail's own file other than the one Sail writes for this box (the operator's edit), is
+  kept, nothing written, and the step names it; a value only the loaded module holds is gone at
+  the next boot, so Sail writes its own;
   the cap Sail wrote before is removed, so the operator's is the one modprobe applies whichever
   file sorts last.
   *`HostProvisionerTest.theZfsCacheIsCappedBeforeTheToolsThatLoadZfsAreInstalled`, `ZfsCacheCapTest`.*
@@ -1073,7 +1093,9 @@ never with `-f`: Sail never passes `source.wipe`.
   source flag that re-run would ignore is refused by name, while the command that made it, a disk
   or a file of the same size, runs again as a no-op. A zfs pool Incus no longer has when the pool is made is never made from its
   zpool. A dry run reads the profile, pools and packages the box has, so it shows the base
-  profile staying where it is and says whether Incus and ZFS would be installed.
+  profile staying where it is and says whether Incus and ZFS would be installed, whether the image
+  would be cached and the bridge rules added, and ends "Dry run done: nothing was changed" rather
+  than "Server ready".
   *`HostProvisionerTest.aDirBoxWithContainersAddsAZfsPoolBesideItsOwnAndTouchesNoContainer`,
   `HostProvisionerIT`.*
 

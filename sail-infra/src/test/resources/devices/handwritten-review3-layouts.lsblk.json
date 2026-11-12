@@ -11,6 +11,7 @@
             null
          ],
          "size": 32212254720,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": "0x5000c500a1b2c3d4",
@@ -28,6 +29,7 @@
                   "/"
                ],
                "size": 21474836480,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -45,6 +47,7 @@
                   null
                ],
                "size": 10737418240,
+               "start": 41943040,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -64,6 +67,7 @@
             null
          ],
          "size": 107374182400,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -81,6 +85,7 @@
                   null
                ],
                "size": 107374182400,
+               "start": null,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -100,6 +105,7 @@
             null
          ],
          "size": 32212254720,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": "0x5000c500a1b2c3d4",
@@ -117,6 +123,7 @@
                   null
                ],
                "size": 21474836480,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -134,6 +141,7 @@
                   null
                ],
                "size": 10737418240,
+               "start": 41943040,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -153,6 +161,7 @@
             null
          ],
          "size": 32212254720,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -170,6 +179,7 @@
                   null
                ],
                "size": 536870912,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -187,6 +197,7 @@
                   null
                ],
                "size": 536870912,
+               "start": 1048576,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -204,6 +215,7 @@
                   null
                ],
                "size": 536870912,
+               "start": 2097152,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -221,6 +233,7 @@
                   "/usr"
                ],
                "size": 10737418240,
+               "start": 3145728,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -238,6 +251,7 @@
                   null
                ],
                "size": 19327352832,
+               "start": 24117248,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -257,6 +271,7 @@
             null
          ],
          "size": 32212254720,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -274,6 +289,7 @@
                   null
                ],
                "size": 536870912,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -291,6 +307,7 @@
                   null
                ],
                "size": 536870912,
+               "start": 1048576,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -308,6 +325,7 @@
                   null
                ],
                "size": 30064771072,
+               "start": 2097152,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -325,6 +343,7 @@
                   null
                ],
                "size": 1024,
+               "start": 60817408,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -344,6 +363,7 @@
             null
          ],
          "size": 32212254720,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -361,6 +381,7 @@
                   null
                ],
                "size": 1024,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -378,6 +399,7 @@
                   null
                ],
                "size": 1024,
+               "start": 2,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -397,6 +419,7 @@
             null
          ],
          "size": 32212254720,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,

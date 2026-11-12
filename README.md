@@ -46,7 +46,8 @@ sudo sail host init --storage zfs --pool-file-size 200GiB    # a file, to try ZF
 Incus creates and owns the pool. Sail erases nothing: it takes a disk or a partition only when it
 carries nothing at all, no partition table, no filesystem, no swap, no RAID, LVM, LUKS, bcache,
 ceph or ZFS signature, and nothing holds it open, exclusively or not. A partition is taken only
-with the Linux filesystem data or ZFS partition type. Anything else is refused naming what it
+with the Linux filesystem data or ZFS partition type, lying inside its disk and overlapping no
+other partition. Anything else is refused naming what it
 holds. Where only a filesystem, swap or a bare partition table is in the way, the refusal names
 the command that erases it (`sudo wipefs --all <device>`), for you to run if nothing on it is
 wanted, and then run `host init` again; a member of a pool, an array, a volume group or a cache
@@ -58,7 +59,11 @@ reserved or extended partition, by its type; anything but a plain disk or a part
 array, a loop device, a ZFS volume, an LVM or LUKS mapping, a partition of any of them); and a
 device of an imported zpool, or a partition beside one on the same disk (export or destroy the
 pool yourself first). A disk with no partition table and no signature is blank to Sail, even if a
-filesystem survives further in after its table was erased. A pool on one partition or one disk
+filesystem survives further in after its table was erased. A disk with a hardware identity (a WWN
+or an NVMe EUI) is handed to Incus by its `/dev/disk/by-id` name; on disks with none, as on most
+cloud VMs, do not change disks while `host init` runs: one replaced under the same name after
+Sail's last check is judged by `zpool create` alone, which does not refuse an empty partition
+table or filesystems inside MBR partitions. A pool on one partition or one disk
 has no redundancy: if that device dies, every container on the pool is lost, however the system's
 own disks are mirrored. A file is slower
 than a disk and meant for trials. `host init` caps the ZFS cache at a tenth of memory, at most

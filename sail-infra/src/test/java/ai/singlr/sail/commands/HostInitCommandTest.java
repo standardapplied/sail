@@ -57,6 +57,8 @@ class HostInitCommandTest {
 
     assertTrue(said.contains("singlr-base (already exists): containers on devpool (dir)"), said);
     assertFalse(said.contains("demo project"), said);
+    assertTrue(said.contains("Dry run done: nothing was changed."), said);
+    assertFalse(said.contains("Server ready"), said);
     try (var held = Files.list(home.resolve("data"))) {
       assertEquals(List.of(), held.toList());
     }

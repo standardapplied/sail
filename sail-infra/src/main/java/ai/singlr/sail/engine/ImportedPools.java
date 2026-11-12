@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
+import java.util.stream.Collectors;
 
 /**
  * The zpools this box has imported, read pool by pool: every vdev line of {@code zpool list -vHP
@@ -51,6 +52,23 @@ final class ImportedPools {
       }
     }
     return uses;
+  }
+
+  /**
+   * The pools {@code zpool import} lists as there to import, from what it reads on this box's
+   * devices; it imports nothing. None where ZFS is not installed or it lists none.
+   */
+  Set<String> importable() throws IOException, InterruptedException, TimeoutException {
+    if (!shell.exec(List.of("which", "zpool")).ok()) {
+      return Set.of();
+    }
+    var listed = shell.exec(List.of("zpool", "import"));
+    return (listed.stdout() + "\n" + listed.stderr())
+        .lines()
+        .map(String::strip)
+        .filter(line -> line.startsWith("pool: "))
+        .map(line -> line.substring("pool: ".length()).strip())
+        .collect(Collectors.toSet());
   }
 
   /** The vdev paths of a pool's {@code zpool list -vHP} lines: each line that names a path. */

@@ -11,6 +11,7 @@
             "/snap/core24/2124"
          ],
          "size": 70044877,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -28,6 +29,7 @@
             "/snap/google-cloud-cli/519"
          ],
          "size": 373083341,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -45,6 +47,7 @@
             "/snap/snapd/28254"
          ],
          "size": 46871347,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -62,6 +65,7 @@
             null
          ],
          "size": 32212254720,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -79,6 +83,7 @@
                   "/"
                ],
                "size": 31138512896,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -96,6 +101,7 @@
                   null
                ],
                "size": 4194304,
+               "start": 60817408,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -113,6 +119,7 @@
                   "/boot/efi"
                ],
                "size": 111149056,
+               "start": 60825600,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -130,6 +137,7 @@
                   "/boot"
                ],
                "size": 957349888,
+               "start": 61042688,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -149,6 +157,7 @@
             null
          ],
          "size": 21474836480,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -166,6 +175,7 @@
                   null
                ],
                "size": 21474836480,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -183,6 +193,7 @@
                   null
                ],
                "size": 8388608,
+               "start": 41943040,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -202,6 +213,7 @@
             null
          ],
          "size": 21474836480,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -219,6 +231,7 @@
                   null
                ],
                "size": 21474836480,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -236,6 +249,7 @@
                   null
                ],
                "size": 8388608,
+               "start": 41943040,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -255,6 +269,7 @@
             null
          ],
          "size": 21474836480,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -272,6 +287,7 @@
                   "/srv/neigh1"
                ],
                "size": 4294967296,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -289,6 +305,7 @@
                   null
                ],
                "size": 2147483648,
+               "start": 8388608,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -306,6 +323,7 @@
                   null
                ],
                "size": 4294967296,
+               "start": 12582912,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -323,6 +341,7 @@
                   null
                ],
                "size": 10737418240,
+               "start": 20971520,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -342,6 +361,7 @@
             null
          ],
          "size": 21474836480,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -359,6 +379,7 @@
                   "/mnt/btr"
                ],
                "size": 6442450944,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -376,6 +397,7 @@
                   null
                ],
                "size": 6442450944,
+               "start": 12582912,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -393,6 +415,7 @@
                   null
                ],
                "size": 8589934592,
+               "start": 25165824,
                "model": null,
                "rm": false,
                "wwn": null,

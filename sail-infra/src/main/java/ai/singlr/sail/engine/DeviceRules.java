@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -30,6 +31,7 @@ final class DeviceRules {
           "6a898cc3-1dd2-11b2-99a6-080020736631",
           "0xbf");
   private static final String SWAP = "[SWAP]";
+  private static final long SECTOR = 512;
   private static final String ZFS = "zfs_member";
   private static final Set<String> HELD = Set.of("bcache", "ceph_bluestore", "crypto_LUKS");
   private static final Map<String, String> MEMBERS =
@@ -65,6 +67,9 @@ final class DeviceRules {
               + parent.get().type()
               + "), not of a disk");
     }
+    if (parent.isPresent() && parent.get() == disk) {
+      uses.addAll(extents(device, disk));
+    }
     if (disk.removable()) {
       uses.add(disk.path() + " is removable");
     }
@@ -80,18 +85,71 @@ final class DeviceRules {
         .subtree()
         .forEach(
             node -> {
-              if (node.partition()) {
+              if (node == device && node.partition()) {
                 typed(node).ifPresent(uses::add);
               }
               node.mountpoints().forEach(mount -> uses.add(mounted(node, mount)));
               if (member(node.fstype()) && !ZFS.equals(node.fstype())) {
-                uses.add(membership(node.path(), node.fstype(), null));
+                uses.add(membership(node.path(), node.fstype(), null, Set.of()));
               }
               if (node != device && !node.partition()) {
                 uses.add(node.path() + " (" + node.type() + ") is built on it");
               }
             });
     return List.copyOf(uses);
+  }
+
+  /**
+   * Why where a partition lies on {@code disk} keeps a pool off {@code device}: no start lsblk
+   * reads, an extent past the end of the disk, or one that overlaps another partition of it, which
+   * any partition of a disk with an overlapping pair shares, since writing either destroys the
+   * other.
+   */
+  static List<String> extents(BlockDevice device, BlockDevice disk) {
+    if (device.start() == null) {
+      return List.of(
+          device.path()
+              + " has no start lsblk reads: run sudo udevadm settle, then run this again");
+    }
+    var reasons = new ArrayList<String>();
+    if (device.start() * SECTOR + device.size() > disk.size()) {
+      reasons.add(device.path() + " reaches past the end of " + disk.path());
+    }
+    var partitions = disk.children().stream().filter(BlockDevice::partition).toList();
+    for (var one : partitions) {
+      for (var other : partitions) {
+        var reported = one == device || (other != device && one.path().compareTo(other.path()) < 0);
+        if (one != other && reported && overlap(one, other)) {
+          reasons.add(one.path() + " overlaps " + other.path() + " on " + disk.path());
+        }
+      }
+    }
+    return reasons;
+  }
+
+  private static boolean overlap(BlockDevice one, BlockDevice other) {
+    if (one.start() == null || other.start() == null) {
+      return false;
+    }
+    var from = one.start() * SECTOR;
+    var to = other.start() * SECTOR;
+    return from < to + other.size() && to < from + one.size();
+  }
+
+  /**
+   * Why a partition of the disk {@code device} keeps a pool off the whole disk by its type: none
+   * lsblk reads, or one that is neither Linux filesystem data nor ZFS. Judged after what the disk
+   * holds, so a pool's disk is named by its pool.
+   */
+  static List<String> partitionTypes(BlockDevice device) {
+    if (device.partition()) {
+      return List.of();
+    }
+    return device
+        .subtree()
+        .filter(node -> node != device && node.partition())
+        .flatMap(node -> typed(node).stream())
+        .toList();
   }
 
   /**
@@ -112,17 +170,23 @@ final class DeviceRules {
   /**
    * Each member of something, a pool, an array, a volume group, a cache or a cluster, that the
    * probes or lsblk found on {@code device} or its partitions; {@code pools} names the zpool a
-   * {@code zfs_member} listing gives. Such a device is never offered an erase.
+   * {@code zfs_member} listing gives, and {@code importable} the pools {@code zpool import} lists,
+   * so a pool's stale labels are never offered an import. Such a device is never offered an erase.
    */
   static List<String> memberships(
-      BlockDevice device, Map<String, List<String>> signatures, Map<String, String> pools) {
+      BlockDevice device,
+      Map<String, List<String>> signatures,
+      Map<String, String> pools,
+      Set<String> importable) {
     var uses = new LinkedHashSet<String>();
     for (var member : device.members()) {
       Stream.concat(
               signatures.getOrDefault(member.path(), List.of()).stream(),
               Stream.ofNullable(member.fstype()))
           .filter(DeviceRules::member)
-          .forEach(type -> uses.add(membership(member.path(), type, pools.get(member.path()))));
+          .forEach(
+              type ->
+                  uses.add(membership(member.path(), type, pools.get(member.path()), importable)));
     }
     return List.copyOf(uses);
   }
@@ -132,9 +196,17 @@ final class DeviceRules {
     return type != null && (type.endsWith("_member") || HELD.contains(type));
   }
 
-  private static String membership(String path, String type, String pool) {
+  private static String membership(String path, String type, String pool, Set<String> importable) {
     if (MEMBERS.containsKey(type)) {
       return path + " " + MEMBERS.get(type).formatted(path);
+    }
+    if (ZFS.equals(type) && pool != null && !importable.contains(pool)) {
+      return path
+          + " carries the labels of zpool "
+          + pool
+          + ", which cannot be imported (destroyed, or its other devices are gone): clear them"
+          + " yourself with sudo zpool labelclear "
+          + path;
     }
     if (ZFS.equals(type)) {
       return path

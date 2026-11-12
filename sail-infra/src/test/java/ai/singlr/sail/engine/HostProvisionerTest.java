@@ -366,6 +366,27 @@ class HostProvisionerTest {
   }
 
   @Test
+  void aDeviceZpoolRefusesIsReportedWithoutZpoolsAdviceToForceIt() {
+    var shell =
+        fresh(
+            new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+                .onFail(
+                    "incus storage create",
+                    "Error: Failed to run: zpool create -m none -O compression=on devpool /dev/sdb:"
+                        + " exit status 1 (invalid vdev specification\nuse '-f' to override the"
+                        + " following errors:\n/dev/sdb contains a filesystem of type 'ext4')"),
+            "zfs");
+
+    var refused = assertThrows(IOException.class, () -> provision(shell, SDB, null));
+
+    assertEquals(
+        "Failed to create storage pool devpool: zpool refused the device: /dev/sdb contains a"
+            + " filesystem of type 'ext4'. Sail erases nothing, so nothing was written: see what"
+            + " the device holds, then run this again.",
+        refused.getMessage());
+  }
+
+  @Test
   void incusInitFailureThrowsIOException() {
     var shell =
         box(
@@ -991,6 +1012,11 @@ class HostProvisionerTest {
     assertTrue(
         steps.contains("done:5/8:devpool (zfs on /dev/sdb, one device: no redundancy)"),
         steps.toString());
+    var create = shell.invocations().indexOf("incus storage create devpool zfs source=/dev/sdb");
+    assertTrue(
+        shell.invocations().get(create - 1).startsWith("bash -c for d in /proc"),
+        "the re-check's last probe is the last command before the create: "
+            + shell.invocations().subList(create - 4, create + 1));
     assertTrue(
         steps.contains("done:6/8:singlr-base (already exists): containers on devpool (zfs)"),
         steps.toString());
@@ -1252,6 +1278,7 @@ class HostProvisionerTest {
                 tempDir.resolve("sail.db"));
 
     assertTrue(steps.contains("done:2/8:would be installed"), steps.toString());
+    assertTrue(steps.contains("done:7/8:would cache Ubuntu 24.04"), steps.toString());
     assertTrue(
         steps.contains("done:3/8:would be installed; ZFS cache capped at 6.4 GiB"),
         steps.toString());

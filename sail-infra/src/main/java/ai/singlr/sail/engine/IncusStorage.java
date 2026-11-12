@@ -97,6 +97,24 @@ public final class IncusStorage {
     return shell.exec(createCommand(name, source), null, CREATE_TIMEOUT);
   }
 
+  /**
+   * Why a create failed, as Incus said, except that zpool's offer to force it is never passed on:
+   * where zpool refused the device, what it found there, and that Sail erases nothing.
+   */
+  static String refused(ShellExec.Result failed) {
+    var reason = failed.reason();
+    var forced = "use '-f' to override the following errors:";
+    var at = reason.indexOf(forced);
+    if (at < 0) {
+      return reason;
+    }
+    var found = reason.substring(at + forced.length()).strip().replaceAll("\\)$", "").strip();
+    return "zpool refused the device: "
+        + found
+        + ". Sail erases nothing, so nothing was written: see what the device holds, then run this"
+        + " again.";
+  }
+
   /** Whether {@code failed}, a create's answer, says incusd does not see the ZFS tools. */
   static boolean zfsUnseen(ShellExec.Result failed) {
     return failed.stderr().contains("Required tool '");

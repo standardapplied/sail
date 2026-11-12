@@ -25,7 +25,7 @@ final class BlockTree {
           "--tree",
           "--bytes",
           "--output",
-          "PATH,KNAME,TYPE,FSTYPE,PTTYPE,PARTTYPE,MOUNTPOINTS,SIZE,MODEL,RM,WWN,SERIAL,MAJ:MIN");
+          "PATH,KNAME,TYPE,FSTYPE,PTTYPE,PARTTYPE,MOUNTPOINTS,SIZE,START,MODEL,RM,WWN,SERIAL,MAJ:MIN");
 
   private BlockTree() {}
 

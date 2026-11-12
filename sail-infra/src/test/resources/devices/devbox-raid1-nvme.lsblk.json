@@ -11,6 +11,7 @@
              null
          ],
          "size": 1920383410176,
+         "start": null,
          "model": "KIOXIA KCD81RUG1T92                     ",
          "rm": false,
          "wwn": null,
@@ -28,6 +29,7 @@
                    null
                ],
                "size": 268435456,
+               "start": 4096,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -44,6 +46,7 @@
                    null
                ],
                "size": 4294967296,
+               "start": 528384,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -61,6 +64,7 @@
                          null
                      ],
                      "size": 4289724416,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -79,6 +83,7 @@
                    null
                ],
                "size": 1073741824,
+               "start": 8916992,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -96,6 +101,7 @@
                          null
                      ],
                      "size": 1071644672,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -114,6 +120,7 @@
                    null
                ],
                "size": 1914744151552,
+               "start": 11014144,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -131,6 +138,7 @@
                          "/var/lib/sail/run", "/dev/.incus-systemd-credentials", "/"
                      ],
                      "size": 1914608877568,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -151,6 +159,7 @@
              null
          ],
          "size": 1920383410176,
+         "start": null,
          "model": "KIOXIA KCD81RUG1T92                     ",
          "rm": false,
          "wwn": null,
@@ -168,6 +177,7 @@
                    null
                ],
                "size": 268435456,
+               "start": 4096,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -184,6 +194,7 @@
                    null
                ],
                "size": 4294967296,
+               "start": 528384,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -201,6 +212,7 @@
                          null
                      ],
                      "size": 4289724416,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -219,6 +231,7 @@
                    null
                ],
                "size": 1073741824,
+               "start": 8916992,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -236,6 +249,7 @@
                          null
                      ],
                      "size": 1071644672,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -254,6 +268,7 @@
                    null
                ],
                "size": 1914744151552,
+               "start": 11014144,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -271,6 +286,7 @@
                          "/var/lib/sail/run", "/dev/.incus-systemd-credentials", "/"
                      ],
                      "size": 1914608877568,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,

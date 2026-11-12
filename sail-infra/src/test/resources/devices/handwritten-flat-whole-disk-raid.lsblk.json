@@ -11,6 +11,7 @@
             null
          ],
          "size": 53687091200,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -28,6 +29,7 @@
             null
          ],
          "size": 42949672960,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -45,6 +47,7 @@
             null
          ],
          "size": 42949672960,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -62,6 +65,7 @@
             "/srv"
          ],
          "size": 42949672960,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -79,6 +83,7 @@
             "/srv"
          ],
          "size": 42949672960,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,

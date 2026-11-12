@@ -64,8 +64,11 @@ public final class HostInitCommand implements Runnable {
   @Option(
       names = "--disk",
       description =
-          "Whole disk or partition for the ZFS pool (e.g. /dev/sdb, /dev/nvme0n1p5). With --storage"
-              + " zfs.")
+          "Whole disk or partition for the ZFS pool (e.g. /dev/sdb, /dev/nvme0n1p5), carrying"
+              + " nothing: Sail erases nothing. With --storage zfs. Do not change disks while host"
+              + " init runs: on disks with no hardware identity (no WWN or NVMe EUI), a disk replaced"
+              + " under the same name after the last check is judged by zpool create alone, which"
+              + " does not refuse an empty partition table or filesystems inside MBR partitions.")
   private String disk;
 
   @Option(
@@ -251,7 +254,11 @@ public final class HostInitCommand implements Runnable {
     }
 
     System.out.println();
-    System.out.println(Ansi.AUTO.string("  @|bold,green \u2713 Server ready.|@"));
+    System.out.println(
+        Ansi.AUTO.string(
+            dryRun
+                ? "  @|bold \u2713 Dry run done: nothing was changed.|@"
+                : "  @|bold,green \u2713 Server ready.|@"));
     System.out.println(
         Ansi.AUTO.string(
             "    @|bold Storage:|@  "

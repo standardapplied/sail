@@ -11,6 +11,7 @@
             null
          ],
          "size": 161061273600,
+         "start": null,
          "model": "Virtual Disk",
          "rm": false,
          "wwn": null,
@@ -28,6 +29,7 @@
             "/"
          ],
          "size": 159987531776,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -45,6 +47,7 @@
             null
          ],
          "size": 4194304,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -62,6 +65,7 @@
             "/boot/efi"
          ],
          "size": 111149056,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -79,6 +83,7 @@
             "/boot"
          ],
          "size": 957349888,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,

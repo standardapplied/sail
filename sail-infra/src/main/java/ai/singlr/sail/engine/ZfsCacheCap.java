@@ -70,10 +70,11 @@ public record ZfsCacheCap(long bytes, long floor) {
 
   /**
    * Writes the cap on the machine {@code shell} runs on, unless the operator set one, and says what
-   * holds. The operator's cap is one modprobe applies ({@code modprobe --showconfig}, every file it
-   * reads) that Sail did not write, a value in Sail's own file other than the one Sail writes for
-   * this box (the operator's edit), or one the loaded module holds that Sail did not write (set on
-   * the kernel command line, or by hand).
+   * holds. Decided from what the next boot applies, the merged configuration {@code modprobe
+   * --showconfig} lists from every file modprobe reads and the kernel command line: the operator's
+   * cap is one there that Sail did not write, or a value in Sail's own file other than the one Sail
+   * writes for this box (the operator's edit). A value only the loaded module holds is gone at the
+   * next boot, so it is no reason to write nothing.
    */
   public String install(ShellExec shell)
       throws IOException, InterruptedException, TimeoutException {
@@ -90,11 +91,6 @@ public record ZfsCacheCap(long bytes, long floor) {
           + theirs.getLast()
           + ")"
           + (written.isEmpty() || edited ? "" : removed(shell));
-    }
-    var live = shell.exec(List.of("cat", LOADED + "max"));
-    var held = live.ok() ? live.stdout().strip() : "0";
-    if (!held.equals("0") && !held.equals(written) && !held.equals(String.valueOf(bytes))) {
-      return "ZFS cache cap left as set on the loaded module (zfs_arc_max=" + held + ")";
     }
     dropIn().install(shell);
     var root = shell.exec(List.of("findmnt", "-n", "-o", "FSTYPE", "/"));

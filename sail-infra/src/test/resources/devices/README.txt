@@ -1,14 +1,25 @@
 Device fixtures for PoolDevicesTest and the tests that drive PoolDevices.
 
 The call PoolDevices makes is `lsblk --json --tree --bytes --output
-PATH,KNAME,TYPE,FSTYPE,PTTYPE,PARTTYPE,MOUNTPOINTS,SIZE,MODEL,RM,WWN,SERIAL,MAJ:MIN`. Every
+PATH,KNAME,TYPE,FSTYPE,PTTYPE,PARTTYPE,MOUNTPOINTS,SIZE,START,MODEL,RM,WWN,SERIAL,MAJ:MIN`. Every
 lsblk fixture has each of those keys on every device, sizes in bytes, as that call prints them.
+START (a partition's first sector) is the column added last: only the devbox capture and
+gcp3/g-layout-overlapping-mbr carry real starts (the latter from the proof's own `lsblk -o START`
+of that layout, 2048 and 6293504). Elsewhere a partition's start is laid out from its disk's
+first sector (gcp3: from 1 MiB) end to end in listed order, so starts are consistent but not the
+real ones; the hand-written layouts' partitions were sized to fit their disks.
 
 Captured, read-only, from real tools (util-linux 2.39.3, Ubuntu 24.04):
+- gcp3/<layout>.lsblk.json   the third GCP proof (of c11ae7ac), the call above without START,
+  verbatim (sizes in bytes): a-* and f-* blank, ext4 and swap disks, pools made; c-* RAID arrays
+  active, stopped and partitioned, imported and exported pools, zvols, a loop partition, LUKS and
+  LVM; d-* every partition type on GPT and MBR, holders, LUKS with a detached header; g-* an MBR
+  table whose second partition lies inside the first (mounted); s-* disks swapped under one name.
 - devbox-raid1-nvme.lsblk.json   this devbox (two NVMe drives in RAID1, md2 at /), the call above,
   verbatim. It runs in a container, so udev gives lsblk no filesystem or partition types.
 - gcp2/<layout>.lsblk.json   the second GCP proof (of f54c5c60), the call above without --bytes:
-  its sizes are lsblk's rounded units turned into bytes, all else verbatim. a-*: a system disk
+  its sizes are lsblk's rounded units turned into bytes, all else verbatim, so a disk's partitions
+  may add up to more than the disk; tests that weigh extents use gcp3. a-*: a system disk
   with a blank sda2 beside BIOS boot sda14, EFI sda15 and XBOOTLDR /boot sda16, two disks of
   RAID1 arrays (md0 swap, md1 and md2 ext4) active, unmounted, stopped and partitioned (md2p1), a
   partitioned loop device, a zvol whole and partitioned, imported pools with a cache device, an
@@ -62,5 +73,5 @@ Hand-written (layouts no machine at hand has), in the call's format:
   partition a Microsoft Reserved, a PReP boot and a never-formatted Linux swap partition, data
   partitions the listings make members of a RAID, an LVM1 group, bcache, ceph or an exported
   pool, a disk whose one data partition belongs to such a pool, a RAM disk and an eMMC boot area,
-  and a GPT disk with a ZFS-typed partition (its GUID in capitals) and an MBR disk with 0xbf and
-  0x83 partitions
+  and a GPT disk with a ZFS-typed partition (its GUID in capitals), an MBR disk with 0xbf and
+  0x83 partitions, an MBR partition reaching past its 1 GiB disk, and an NVMe disk with an EUI

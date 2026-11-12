@@ -11,11 +11,10 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Objects;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * The one place that decides whether a block device may become a ZFS pool. Sail erases nothing, so
@@ -46,19 +45,20 @@ public final class PoolDevices {
   static final String NOTHING = "sail_exclusive_probe";
 
   /**
-   * Lists, for each process, the block devices it has open: {@code pid<TAB>device} per open device,
-   * and {@code unreadable<TAB>pid} for a process whose open files Sail may not read. An entry or a
-   * process gone while it is listed, as a busy process's descriptors come and go, is skipped. A
-   * constant script: it takes no input.
+   * Lists, for each process, the block devices it has open by device number, so a holder is seen
+   * through any path or node it opened the device by, in any mount namespace: {@code
+   * pid<TAB>major:minor} in hex per open device, and {@code unreadable<TAB>pid} for a process whose
+   * open files Sail may not read. A descriptor or a process gone while it is listed, as a busy
+   * process's descriptors come and go, is skipped. A constant script: it takes no input.
    */
   static final String OPEN_FILES =
       """
       for d in /proc/[0-9]*; do
         p=${d#/proc/}
-        l=$(ls -l "$d/fd" 2>&1)
+        l=$(stat -L -c '%F %t:%T' "$d"/fd/* 2>&1)
         case $l in *'Permission denied'*) [ -e "$d" ] && printf 'unreadable\\t%s\\n' "$p"; continue ;; esac
         printf '%s\\n' "$l" | while IFS= read -r line; do
-          case $line in *' -> /dev/'*) printf '%s\\t%s\\n' "$p" "${line##* -> }" ;; esac
+          case $line in 'block special file '*) printf '%s\\t%s\\n' "$p" "${line##* }" ;; esac
         done
       done
       """;
@@ -119,7 +119,10 @@ public final class PoolDevices {
           .forEach(row -> labels.put(member.path(), row[4]));
     }
     refuseAny(label, pools.refusals(signatures.keySet(), place.beside()));
-    refuseAny(label, DeviceRules.memberships(place.device(), signatures, labels));
+    refuseAny(
+        label,
+        DeviceRules.memberships(
+            place.device(), signatures, labels, labels.isEmpty() ? Set.of() : pools.importable()));
     var busy = new ArrayList<String>();
     for (var member : members) {
       if (busy(member.path())) {
@@ -127,18 +130,21 @@ public final class PoolDevices {
         busy.add(
             member.path()
                 + (held.isEmpty() ? "" : " holds " + String.join(", ", held) + " and")
-                + " is held open by something lsblk does not show");
+                + " is held exclusively by something Sail cannot name: a mount in another"
+                + " namespace, an array, a pool, or a process that opened it exclusively");
       }
     }
-    refuseAny(label, busy);
     refuseAny(
         label,
         openBy(
             place.device().path(),
             members.stream()
-                .flatMap(member -> Stream.of(member.path(), member.kernelPath()))
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet())));
+                .filter(member -> member.majmin() != null)
+                .collect(
+                    Collectors.toMap(
+                        BlockDevice::majmin, BlockDevice::path, (one, other) -> one))));
+    refuseAny(label, busy);
+    refuseAny(label, DeviceRules.partitionTypes(place.device()));
     var holds = DeviceRules.holds(place.device(), signatures);
     if (!holds.isEmpty()) {
       throw new IllegalArgumentException(
@@ -150,7 +156,32 @@ public final class PoolDevices {
               + path
               + ", then run this again.");
     }
-    return new PoolSource.Device(path, place.identity());
+    return new PoolSource.Device(persistent(place, path), place.identity());
+  }
+
+  /**
+   * The path Incus is handed for the device at {@code path}: the one udev names from its disk's
+   * hardware identity, a WWN or an NVMe EUI, with its partition's suffix, so no other disk can
+   * stand under it when the pool is made; the kernel path where the disk has none, or where that
+   * name does not resolve to the device.
+   */
+  private String persistent(BlockTree.Place place, String path)
+      throws IOException, InterruptedException, TimeoutException {
+    var wwn = place.disk().wwn();
+    var number =
+        place.device().kname() == null
+            ? ""
+            : place.device().kname().replaceAll(".*?([0-9]+)$", "$1");
+    if (wwn == null || (place.device() != place.disk() && !number.matches("[0-9]+"))) {
+      return path;
+    }
+    var named =
+        "/dev/disk/by-id/"
+            + (wwn.startsWith("eui.") || wwn.startsWith("nguid.") ? "nvme-" : "wwn-")
+            + wwn
+            + (place.device() == place.disk() ? "" : "-part" + number);
+    var resolved = shell.exec(List.of("realpath", "-e", "--", named));
+    return resolved.ok() && resolved.stdout().strip().equals(path) ? named : path;
   }
 
   /**
@@ -195,11 +226,12 @@ public final class PoolDevices {
   }
 
   /**
-   * Why {@code device} may be in use by a process that opened one of {@code paths} without holding
-   * it exclusively, as a virtual machine's raw disk or {@code dd} does, read from {@code
-   * /proc/<pid>/fd}; a process whose open files cannot be read refuses it too.
+   * Why {@code device} may be in use by a process that has one of the devices {@code numbers} maps
+   * by major:minor to its path open, exclusively or not, as a virtual machine's raw disk or {@code
+   * dd} does, read from {@code /proc/<pid>/fd}; a process whose open files cannot be read refuses
+   * it too.
    */
-  List<String> openBy(String device, Set<String> paths)
+  List<String> openBy(String device, Map<String, String> numbers)
       throws IOException, InterruptedException, TimeoutException {
     var walked = shell.exec(List.of("bash", "-c", OPEN_FILES));
     if (!walked.ok()) {
@@ -208,18 +240,22 @@ public final class PoolDevices {
     var uses = new LinkedHashSet<String>();
     for (var line : walked.stdout().lines().toList()) {
       var fields = line.split("\t", 2);
-      if (fields.length < 2 || !fields[fields[0].equals("unreadable") ? 1 : 0].matches("[0-9]+")) {
+      if (fields.length < 2) {
         continue;
       }
-      if (fields[0].equals("unreadable")) {
+      if (fields[0].equals("unreadable") && fields[1].matches("[0-9]+")) {
         uses.add(
             "Sail cannot read the files process "
                 + fields[1]
                 + " has open, so whether it holds "
                 + device
                 + " cannot be told: run this as root");
-      } else if (paths.contains(fields[1])) {
-        uses.add("process " + fields[0] + command(fields[0]) + " has " + fields[1] + " open");
+      } else if (fields[0].matches("[0-9]+") && fields[1].matches("[0-9a-f]+:[0-9a-f]+")) {
+        var number = fields[1].split(":");
+        var held = numbers.get(Long.parseLong(number[0], 16) + ":" + Long.parseLong(number[1], 16));
+        if (held != null) {
+          uses.add("process " + fields[0] + command(fields[0]) + " has " + held + " open");
+        }
       }
     }
     return List.copyOf(uses);

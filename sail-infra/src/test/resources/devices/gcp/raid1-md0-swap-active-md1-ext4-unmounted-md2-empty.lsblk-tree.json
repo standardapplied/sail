@@ -11,6 +11,7 @@
             "/snap/core24/2124"
          ],
          "size": 70044877,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -28,6 +29,7 @@
             "/snap/google-cloud-cli/519"
          ],
          "size": 373083341,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -45,6 +47,7 @@
             "/snap/snapd/28254"
          ],
          "size": 46871347,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -62,6 +65,7 @@
             null
          ],
          "size": 53687091200,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -79,6 +83,7 @@
                   "/"
                ],
                "size": 52613349376,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -96,6 +101,7 @@
                   null
                ],
                "size": 4194304,
+               "start": 102760448,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -113,6 +119,7 @@
                   "/boot/efi"
                ],
                "size": 111149056,
+               "start": 102768640,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -130,6 +137,7 @@
                   "/boot"
                ],
                "size": 957349888,
+               "start": 102985728,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -149,6 +157,7 @@
             null
          ],
          "size": 42949672960,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -166,6 +175,7 @@
                   null
                ],
                "size": 2147483648,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -183,6 +193,7 @@
                         "[SWAP]"
                      ],
                      "size": 2147483648,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -202,6 +213,7 @@
                   null
                ],
                "size": 1073741824,
+               "start": 4194304,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -219,6 +231,7 @@
                         null
                      ],
                      "size": 1071644672,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -238,6 +251,7 @@
                   null
                ],
                "size": 39728447488,
+               "start": 6291456,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -255,6 +269,7 @@
                         null
                      ],
                      "size": 39728447488,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -276,6 +291,7 @@
             null
          ],
          "size": 42949672960,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -293,6 +309,7 @@
                   null
                ],
                "size": 2147483648,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -310,6 +327,7 @@
                         "[SWAP]"
                      ],
                      "size": 2147483648,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -329,6 +347,7 @@
                   null
                ],
                "size": 1073741824,
+               "start": 4194304,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -346,6 +365,7 @@
                         null
                      ],
                      "size": 1071644672,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -365,6 +385,7 @@
                   null
                ],
                "size": 39728447488,
+               "start": 6291456,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -382,6 +403,7 @@
                         null
                      ],
                      "size": 39728447488,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,

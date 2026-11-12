@@ -109,7 +109,6 @@ class PoolDevicesTest {
     var disk = refusal(DEVBOX, "/dev/nvme0n1");
     for (var reason :
         List.of(
-            "/dev/nvme0n1p1" + untyped,
             "/dev/md0 (raid1) is built on it",
             "/dev/md2 is mounted at /;",
             "/dev/md2 (raid1) is built on it")) {
@@ -140,14 +139,7 @@ class PoolDevicesTest {
         refusal(gcp(BLANK), "/dev/sda14"));
     assertEquals(
         "/dev/sda (/dev/disk/by-id/google-persistent-disk-0) is refused: /dev/sda1 is mounted at /;"
-            + " /dev/sda14 has partition type 21686148-6449-6e6f-744e-656564454649"
-            + ACCEPTED
-            + "; /dev/sda15 has partition type c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
-            + ACCEPTED
-            + "; /dev/sda15 is mounted at /boot/efi; /dev/sda16 has partition type"
-            + " bc13c2ff-59e6-4262-a352-b275fd6f7172"
-            + ACCEPTED
-            + "; /dev/sda16 is mounted at /boot.",
+            + " /dev/sda15 is mounted at /boot/efi; /dev/sda16 is mounted at /boot.",
         refusal(
             gcp(BLANK).name("/dev/disk/by-id/google-persistent-disk-0", "/dev/sda"),
             "/dev/disk/by-id/google-persistent-disk-0"));
@@ -173,8 +165,7 @@ class PoolDevicesTest {
                 + " /dev/sdb1 yourself",
             "/dev/md0 is in use as swap",
             "/dev/md1 is mounted at /mnt/sailtrial-boot",
-            "/dev/md2 (raid1) is built on it",
-            "/dev/sdb3 has partition type a19d880f-05fc-4d3b-a006-743f0f84911e" + ACCEPTED)) {
+            "/dev/md2 (raid1) is built on it")) {
       assertTrue(disk.contains(reason), disk);
     }
     assertFalse(disk.contains("wipefs"), disk);
@@ -377,10 +368,14 @@ class PoolDevicesTest {
   }
 
   @Test
-  void aDeviceAnotherHolderHasOpenIsRefused() {
+  void aDeviceHeldExclusivelyByAHolderTheWalkCannotFindSaysSo() {
     assertEquals(
-        "/dev/sdk is refused: /dev/sdk is held open by something lsblk" + " does not show.",
+        "/dev/sdk is refused: /dev/sdk is held exclusively by something Sail cannot name: a mount"
+            + " in another namespace, an array, a pool, or a process that opened it exclusively.",
         refusal(spares().busy("/dev/sdk"), "/dev/sdk"));
+    assertEquals(
+        "/dev/sdk is refused: process 31 (qemu-system-x86) has /dev/sdk open.",
+        refusal(spares().busy("/dev/sdk").open(31, "qemu-system-x86", "/dev/sdk"), "/dev/sdk"));
   }
 
   @Test
@@ -456,7 +451,8 @@ class PoolDevicesTest {
     var refused =
         refusal(
             names(new Box(PROBES))
-                .holds("/dev/sda5", LISTED + "sda5 0x3f000 zfs_member 1234567890 oldtank\n"),
+                .holds("/dev/sda5", LISTED + "sda5 0x3f000 zfs_member 1234567890 oldtank\n")
+                .importable("oldtank"),
             "/dev/sda5");
 
     assertEquals(
@@ -471,7 +467,8 @@ class PoolDevicesTest {
             + " labelclear /dev/sdb1.",
         refusal(
             names(new Box(PROBES))
-                .holds("/dev/sdb1", LISTED + "sdb1 0x3f000 zfs_member 1234567890 exported\n"),
+                .holds("/dev/sdb1", LISTED + "sdb1 0x3f000 zfs_member 1234567890 exported\n")
+                .importable("exported"),
             "/dev/sdb"));
   }
 
@@ -612,14 +609,15 @@ class PoolDevicesTest {
         "/dev/sdb9 is refused: /dev/sdb9 has partition type 6a945a3b-1dd2-11b2-99a6-080020736631"
             + ACCEPTED
             + ".",
-        refusal("gcp2/b-layout-after-devpool.lsblk.json", "/dev/sdb9"));
+        refusal("gcp3/f-layout-after-devpool.lsblk.json", "/dev/sdb9"));
   }
 
   @Test
   void theSecondDeviceOfABtrfsRootIsRefusedNamingTheBtrfsItHolds() {
     assertEquals(
-        "/dev/sdd2 is refused: /dev/sdd2 holds btrfs and is held open by something lsblk does not"
-            + " show.",
+        "/dev/sdd2 is refused: /dev/sdd2 holds btrfs and is held exclusively by something Sail"
+            + " cannot name: a mount in another namespace, an array, a pool, or a process that"
+            + " opened it exclusively.",
         refusal(names(new Box(BTRFS_ROOT)).busy("/dev/sdd2"), "/dev/sdd2"));
   }
 
@@ -772,6 +770,82 @@ class PoolDevicesTest {
   }
 
   @Test
+  void aPartitionOverlappingAnotherOrPastItsDiskIsRefusedNamingWhy() {
+    var overlap = "gcp3/g-layout-overlapping-mbr.lsblk.json";
+
+    assertEquals(
+        "/dev/sdb2 is refused: /dev/sdb2 overlaps /dev/sdb1 on /dev/sdb.",
+        refusal(overlap, "/dev/sdb2"));
+    assertTrue(
+        refusal(overlap, "/dev/sdb1").contains("/dev/sdb1 overlaps /dev/sdb2 on /dev/sdb"),
+        refusal(overlap, "/dev/sdb1"));
+    assertEquals(
+        "/dev/sde1 is refused: /dev/sde1 reaches past the end of /dev/sde.",
+        refusal(PROBES, "/dev/sde1"));
+  }
+
+  @Test
+  void aDeviceWithAHardwareIdentityIsHandedToIncusByItsPersistentPath() throws Exception {
+    var wwn = "/dev/disk/by-id/wwn-0x5000c500a1b2c3d4-part2";
+    assertEquals(
+        new PoolSource.Device(wwn, "0x5000c500a1b2c3d4 8:2 10737418240"),
+        devices(names(new Box(TYPES)).name(wwn, "/dev/sda2").shell()).cleared("/dev/sda2"));
+    var eui = "/dev/disk/by-id/nvme-eui.0025388b91b0f1a2";
+    assertEquals(
+        eui,
+        devices(names(new Box(PROBES)).name(eui, "/dev/nvme1n1").shell())
+            .cleared("/dev/nvme1n1")
+            .path());
+    assertEquals(
+        "/dev/sda2",
+        devices(names(new Box(TYPES)).shell()).cleared("/dev/sda2").path(),
+        "a persistent path that names no device is not handed over");
+  }
+
+  @Test
+  void theWholeDiskOfAPoolNamesThePoolNotItsReservedPartition() {
+    var devpool =
+        fixture("raw-file-pool.zpool-list.txt")
+            .replace("sail-raw", "devpool")
+            .replace("/tmp/devpool.img", "/dev/sdb1");
+    assertEquals(
+        "/dev/sdb is refused: it is in zpool devpool, Incus's pool 'devpool'.",
+        refusal(
+            names(new Box("gcp3/f-layout-after-devpool.lsblk.json"))
+                .zpool("devpool", devpool, "/dev/sdb1")
+                .incus(
+                    "[{\"name\": \"devpool\", \"driver\": \"zfs\", \"config\":"
+                        + " {\"source\": \"devpool\", \"zfs.pool_name\": \"devpool\"}}]"),
+            "/dev/sdb"));
+    assertEquals(
+        "/dev/sdd is refused: /dev/sdd1 is a device of zpool handpool, which is not imported:"
+            + " import it with sudo zpool import handpool, or clear it yourself with sudo zpool"
+            + " labelclear /dev/sdd1.",
+        refusal(
+            names(new Box("gcp3/c-layout-exported-pool.lsblk.json"))
+                .holds("/dev/sdd1", LISTED + "sdd1 0x3f000 zfs_member 1234567890 handpool\n")
+                .importable("handpool"),
+            "/dev/sdd"));
+  }
+
+  @Test
+  void theLabelsOfAPoolThatCannotBeImportedAreClearedNeverImported() {
+    var refused =
+        refusal(
+            names(new Box(PROBES))
+                .holds("/dev/sda5", LISTED + "sda5 0x3f000 zfs_member 1234567890 oldtank\n")
+                .importable("othertank"),
+            "/dev/sda5");
+
+    assertEquals(
+        "/dev/sda5 is refused: /dev/sda5 carries the labels of zpool oldtank, which cannot be"
+            + " imported (destroyed, or its other devices are gone): clear them yourself with sudo"
+            + " zpool labelclear /dev/sda5.",
+        refused);
+    assertFalse(refused.contains("zpool import"), refused);
+  }
+
+  @Test
   void aDiskTypeDeviceBuiltOnAnotherIsNotAPlainDisk() {
     assertEquals(
         "/dev/bcache0 is refused: it is a disk built on /dev/sdb, not a plain disk.",
@@ -857,6 +931,7 @@ class PoolDevicesTest {
     private final Map<String, String> busy = new LinkedHashMap<>();
     private final Map<String, List<String>> pools = new LinkedHashMap<>();
     private final StringBuilder opened = new StringBuilder();
+    private final StringBuilder importable = new StringBuilder();
     private final Map<Integer, String> comms = new LinkedHashMap<>();
     private String incus;
 
@@ -897,8 +972,30 @@ class PoolDevicesTest {
 
     /** Process {@code pid}, named {@code comm}, holding {@code path} open as /proc shows it. */
     Box open(int pid, String comm, String path) {
-      opened.append(pid).append('\t').append(path).append('\n');
+      var number =
+          BlockDevice.listed(YamlUtil.parseMap(fixture(layout)).get("blockdevices")).stream()
+              .flatMap(BlockDevice::subtree)
+              .filter(device -> device.path().equals(path))
+              .findFirst()
+              .orElseThrow()
+              .majmin()
+              .split(":");
+      opened
+          .append(pid)
+          .append('\t')
+          .append(Integer.toHexString(Integer.parseInt(number[0])))
+          .append(':')
+          .append(Integer.toHexString(Integer.parseInt(number[1])))
+          .append('\n');
       comms.put(pid, comm);
+      return this;
+    }
+
+    /** The pools {@code zpool import} lists as there to import. */
+    Box importable(String... pools) {
+      for (var pool : pools) {
+        importable.append("   pool: ").append(pool).append('\n');
+      }
       return this;
     }
 
@@ -952,6 +1049,12 @@ class PoolDevicesTest {
         shell.onOk("incus storage list", incus);
       }
       comms.forEach((pid, comm) -> shell.onOk("cat /proc/" + pid + "/comm", comm + "\n"));
+      if (!importable.isEmpty()) {
+        shell.onOk("which zpool").onOk("zpool import", importable.toString());
+        if (pools.isEmpty()) {
+          shell.onOk("zpool list -H -o name", "");
+        }
+      }
       shell.onOk("/proc/[0-9]*", opened.toString());
       return shell;
     }

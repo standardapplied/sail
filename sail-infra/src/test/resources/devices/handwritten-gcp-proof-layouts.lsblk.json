@@ -11,6 +11,7 @@
             null
          ],
          "size": 1073741824,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
@@ -28,6 +29,7 @@
                   null
                ],
                "size": 1072693248,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -47,6 +49,7 @@
             null
          ],
          "size": 32212254720,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -64,6 +67,7 @@
                   "/"
                ],
                "size": 13958643712,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -81,6 +85,7 @@
                   null
                ],
                "size": 4294967296,
+               "start": 27262976,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -98,6 +103,7 @@
                   null
                ],
                "size": 4194304,
+               "start": 35651584,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -115,6 +121,7 @@
                   "/boot/efi"
                ],
                "size": 111149056,
+               "start": 35659776,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -132,6 +139,7 @@
                   "/boot"
                ],
                "size": 957349888,
+               "start": 35876864,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -151,6 +159,7 @@
             null
          ],
          "size": 21474836480,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -168,6 +177,7 @@
                   null
                ],
                "size": 2147483648,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -185,6 +195,7 @@
                         "[SWAP]"
                      ],
                      "size": 1071644672,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -204,6 +215,7 @@
                   null
                ],
                "size": 1073741824,
+               "start": 4194304,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -221,6 +233,7 @@
                         null
                      ],
                      "size": 1071644672,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -240,6 +253,7 @@
                   null
                ],
                "size": 18253611008,
+               "start": 6291456,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -257,6 +271,7 @@
                         null
                      ],
                      "size": 18146236826,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -274,6 +289,7 @@
                               null
                            ],
                            "size": 1073741824,
+                           "start": 0,
                            "model": null,
                            "rm": false,
                            "wwn": null,
@@ -297,6 +313,7 @@
             null
          ],
          "size": 21474836480,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -314,6 +331,7 @@
                   null
                ],
                "size": 2147483648,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -331,6 +349,7 @@
                         "[SWAP]"
                      ],
                      "size": 1071644672,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -350,6 +369,7 @@
                   null
                ],
                "size": 1073741824,
+               "start": 4194304,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -367,6 +387,7 @@
                         null
                      ],
                      "size": 1071644672,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -386,6 +407,7 @@
                   null
                ],
                "size": 18253611008,
+               "start": 6291456,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -403,6 +425,7 @@
                         null
                      ],
                      "size": 18146236826,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -420,6 +443,7 @@
                               null
                            ],
                            "size": 1073741824,
+                           "start": 0,
                            "model": null,
                            "rm": false,
                            "wwn": null,
@@ -443,6 +467,7 @@
             null
          ],
          "size": 21474836480,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -459,7 +484,8 @@
                "mountpoints": [
                   null
                ],
-               "size": 21474836480,
+               "size": 20391657472,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -477,6 +503,7 @@
                   null
                ],
                "size": 8388608,
+               "start": 39827456,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -494,6 +521,7 @@
                   null
                ],
                "size": 1073741824,
+               "start": 39843840,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -513,6 +541,7 @@
             null
          ],
          "size": 21474836480,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -530,6 +559,7 @@
                   null
                ],
                "size": 2147483648,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -547,6 +577,7 @@
                         null
                      ],
                      "size": 2147483648,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -566,6 +597,7 @@
                   null
                ],
                "size": 2147483648,
+               "start": 4194304,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -583,6 +615,7 @@
                         null
                      ],
                      "size": 1073741824,
+                     "start": null,
                      "model": null,
                      "rm": false,
                      "wwn": null,
@@ -602,6 +635,7 @@
                   null
                ],
                "size": 2147483648,
+               "start": 8388608,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -619,6 +653,7 @@
                   null
                ],
                "size": 15032385536,
+               "start": 12582912,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -638,6 +673,7 @@
             null
          ],
          "size": 21474836480,
+         "start": null,
          "model": "PersistentDisk",
          "rm": false,
          "wwn": null,
@@ -655,6 +691,7 @@
                   "/srv/neigh1"
                ],
                "size": 2147483648,
+               "start": 0,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -672,6 +709,7 @@
                   "[SWAP]"
                ],
                "size": 1073741824,
+               "start": 4194304,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -689,6 +727,7 @@
                   null
                ],
                "size": 2147483648,
+               "start": 6291456,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -706,6 +745,7 @@
                   null
                ],
                "size": 16106127360,
+               "start": 10485760,
                "model": null,
                "rm": false,
                "wwn": null,
@@ -725,6 +765,7 @@
             null
          ],
          "size": 1073741824,
+         "start": null,
          "model": null,
          "rm": false,
          "wwn": null,
