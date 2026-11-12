@@ -1594,15 +1594,16 @@ class PtySessionHostTest {
             Optional.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0)),
             now::get,
             holders);
-    try (var host = startHost(new PtySessionHost.Limits(32, 16, 4, 256))) {
+    try (var host = startHost(new PtySessionHost.Limits(32, 16, 4, 256));
+        var asker = connect("")) {
       var address = host.tcpAddress().orElseThrow();
       for (var i = 0; i < 301; i++) {
-        endAtStage(host, address, i % 7);
+        endAtStage(host, asker, address, i % 7);
       }
       var held = new ArrayList<SocketChannel>();
       try {
         for (var i = 0; i < 4; i++) {
-          held.add(admitted(host));
+          held.add(admitted(host, asker));
         }
         try (var fifth = SocketChannel.open(address)) {
           assertEquals(-1, fifth.read(ByteBuffer.allocate(8)), "exactly the cap, never lifted");
@@ -1614,10 +1615,13 @@ class PtySessionHostTest {
       }
       var unix = new ArrayList<SocketChannel>();
       try {
-        for (var i = 0; i < 4; i++) {
+        for (var i = 0; i < 3; i++) {
           unix.add(connect());
         }
-        assertThrows(IOException.class, () -> connect().close(), "the unix cap is exactly 4");
+        assertThrows(
+            IOException.class,
+            () -> connect().close(),
+            "the unix cap is exactly 4, the asker's one");
       } finally {
         for (var channel : unix) {
           channel.close();
@@ -1630,10 +1634,11 @@ class PtySessionHostTest {
    * One TCP connection ended at {@code stage}: closed before the magic, after it, mid-length, on an
    * oversized length, on a forged ticket, after a welcome, or reset after a frame once welcomed.
    */
-  private void endAtStage(PtySessionHost host, InetSocketAddress address, int stage)
+  private void endAtStage(
+      PtySessionHost host, SocketChannel asker, InetSocketAddress address, int stage)
       throws IOException {
     if (stage >= 5) {
-      try (var tcp = admitted(host)) {
+      try (var tcp = admitted(host, asker)) {
         if (stage == 6) {
           PtyWire.write(tcp, new PtyMessage.Resize(10, 10));
           tcp.setOption(StandardSocketOptions.SO_LINGER, 0);
@@ -1680,10 +1685,10 @@ class PtySessionHostTest {
           assertInstanceOf(PtyMessage.Err.class, PtyWire.read(tcp));
         }
       }
-      try (var first = admitted(host);
-          var second = admitted(host);
+      try (var unixFirst = connect("");
+          var first = admitted(host, unixFirst);
+          var second = admitted(host, unixFirst);
           var third = SocketChannel.open(host.tcpAddress().orElseThrow());
-          var unixFirst = connect();
           var unixSecond = connect()) {
         assertEquals(-1, third.read(ByteBuffer.allocate(8)), "past the TCP cap: closed unread");
         assertInstanceOf(PtyMessage.Sessions.class, listing(unixSecond));
@@ -1723,11 +1728,15 @@ class PtySessionHostTest {
   }
 
   /**
-   * A TCP connection welcomed on a fresh ticket, tried again while slots that ended connections
-   * held are still being released.
+   * A TCP connection welcomed on a fresh ticket that {@code asker}, a unix connection that
+   * presented no token, asked for; tried again while slots that ended connections held are still
+   * being released. Asking on one held connection keeps the unix socket's count fixed, since a
+   * closed one releases its slot only once the host has seen it close.
    */
-  private SocketChannel admitted(PtySessionHost host) throws IOException {
-    var ticket = (PtyMessage.Ticket) askTicket("tok-uday", PtyMessage.TicketAction.OPEN, "beta");
+  private SocketChannel admitted(PtySessionHost host, SocketChannel asker) throws IOException {
+    PtyWire.write(
+        asker, new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, "beta", "tok-uday"));
+    var ticket = (PtyMessage.Ticket) PtyWire.read(asker);
     while (true) {
       var channel = SocketChannel.open(host.tcpAddress().orElseThrow());
       try {
