@@ -2940,7 +2940,10 @@ Deliberate limits of the current design, each with its consequence:
    them out everywhere, since every door refuses a disabled FDE and a node disables an FDE
    main no longer lists, but the row lingers on nodes as disabled. Delete propagation is a
    roster protocol change.
-4. **One platform per OS.** Linux amd64 hosts; macOS arm64 as a thin client only.
+4. **One platform per OS.** Linux amd64 hosts; macOS arm64 as a thin client. The terminal host's
+   pty layer runs on macOS through the same spawn chain (the `macos-latest` unit lanes and the
+   darwin release's `_pty-selftest` prove it), but no local host is wired or packaged there, and
+   with no descriptor store its sessions would not survive a restart.
 5. **Sail never talks to the forge.** A passed review parks in `awaiting_merge`; a person
    merges the pull request and marks the spec done. A merge or release stage behind a forge
    adapter is the next step of the loop (`sail-check-stage` on the board).
