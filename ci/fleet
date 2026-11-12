@@ -1004,7 +1004,11 @@ storage() {
     refused "$run" client "holds ext4" "sudo sail host init --storage zfs --pool scratch --disk $scratch --yes"
   check "$run" "named again with --force-wipe, the scratch disk becomes a zfs pool" \
     allowed "$run" client "sudo sail host init --storage zfs --pool scratch --disk $scratch --force-wipe $scratch --yes && sudo incus storage list --format csv | grep -q '^scratch,zfs,'"
+  check "$run" "the command that made the forced scratch pool runs again and keeps it" \
+    naming "already exists)" allowed "$run" client "sudo sail host init --storage zfs --pool scratch --disk $scratch --force-wipe $scratch --yes"
   check "$run" "the scratch pool goes" on "$run" client "sudo incus storage delete scratch"
+  check "$run" "a dry run of adding tank shows the base profile staying on devpool" \
+    naming "singlr-base (already exists): containers on devpool (dir)" allowed "$run" client "sudo sail host init --storage zfs --pool-file-size 20GiB --pool tank --dry-run --yes"
   check "$run" "client, a dir box running acme, adds a ZFS pool in a file" \
     allowed "$run" client "sudo sail host init --storage zfs --pool-file-size 20GiB --pool tank --yes"
   check "$run" "client's Incus has tank as zfs beside devpool as dir" pools_on "$run" client "devpool:dir tank:zfs"

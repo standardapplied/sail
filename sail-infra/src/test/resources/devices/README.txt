@@ -36,7 +36,7 @@ Hand-written (layouts no machine at hand has), kept in the captured format:
   an array built on two whole disks: no partition at the top, the array listed once per member
 - handwritten-gcp-proof-layouts.lsblk.json   the devices of the GCP proof of 13a8e078 (its `lsblk -f`
   and case notes under the proof's cases), in the call's format: a loop device with a partition,
-  the system disk with its BIOS boot and EFI partitions, two disks of RAID1 arrays (md1 holding
-  ext4, md2 partitioned into md2p1), a pool disk with ZFS's reserved partition sdd9 and its zvol
+  the system disk with its BIOS boot and EFI partitions, two disks of RAID1 arrays (md0 swap in
+  use, md1 holding ext4, md2 partitioned into md2p1), a pool disk with ZFS's reserved partition sdd9 and its zvol
   zd0, a disk with an open LUKS volume, an active LVM volume, an ext4 partition and a spare, and a
   disk whose second partition is swap in use beside a blank and an ext4 partition

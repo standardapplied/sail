@@ -155,7 +155,26 @@
                "rm": false,
                "wwn": null,
                "serial": null,
-               "maj:min": "8:17"
+               "maj:min": "8:17",
+               "children": [
+                  {
+                     "path": "/dev/md0",
+                     "kname": "md0",
+                     "type": "raid1",
+                     "fstype": "swap",
+                     "pttype": null,
+                     "parttype": null,
+                     "mountpoints": [
+                        "[SWAP]"
+                     ],
+                     "size": "1022M",
+                     "model": null,
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": "9:0"
+                  }
+               ]
             },
             {
                "path": "/dev/sdb2",
@@ -282,7 +301,26 @@
                "rm": false,
                "wwn": null,
                "serial": null,
-               "maj:min": "8:33"
+               "maj:min": "8:33",
+               "children": [
+                  {
+                     "path": "/dev/md0",
+                     "kname": "md0",
+                     "type": "raid1",
+                     "fstype": "swap",
+                     "pttype": null,
+                     "parttype": null,
+                     "mountpoints": [
+                        "[SWAP]"
+                     ],
+                     "size": "1022M",
+                     "model": null,
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": "9:0"
+                  }
+               ]
             },
             {
                "path": "/dev/sdc2",

@@ -337,6 +337,13 @@ class PoolDevicesTest {
   }
 
   @Test
+  void aNameNoDeviceHasIsNotMatchedToADeviceListedWithoutItsKernelName() {
+    assertEquals(
+        "/dev/null is not a block device lsblk lists.",
+        refusal(gcp(BLANK).name("/dev/null", "/dev/null"), "/dev/null", null));
+  }
+
+  @Test
   void anArrayIsRefusedAsAnArrayNamingWhatItHolds() {
     assertEquals(
         "/dev/md1 is refused, even with --force-wipe: it is an md array (raid1), not a disk or a"

@@ -26,11 +26,13 @@ import java.util.stream.Stream;
  * for an imported pool they belong to, and an exclusive open that writes nothing for any other
  * holder lsblk cannot see (a mount in another namespace, a pool, an array).
  *
- * <p>Refused always, by name: anything but a disk or a partition; a removable, empty, zram or nbd
- * device; a device mounted, swap, or with something built on it; an EFI system or BIOS boot
- * partition, and a disk holding one; a partition of the disk the running system is on; a RAID
- * member, an LVM physical volume, a LUKS volume; a device another holder has open; a device in an
- * imported pool. Where no device lsblk lists is mounted at {@code /}, which disks carry the system
+ * <p>Refused always, by name: anything but a disk or a partition of a disk (an array, a mapping, a
+ * loop device, or a partition of one); a removable, empty, zram or nbd device, or a ZFS volume; a
+ * device mounted, swap, or with something built on it; an EFI system or BIOS boot partition, and a
+ * disk holding one; a partition of the disk the running system is on; a RAID member, an LVM
+ * physical volume, a LUKS volume; a device another holder has open; a device in an imported pool,
+ * or a partition beside one on the same disk. A refusal names the filesystem a refused device holds
+ * unmounted. Where no device lsblk lists is mounted at {@code /}, which disks carry the system
  * cannot be told, and every device is refused. Anything else a device holds, a filesystem, a
  * partition table, an exported pool, is erased only when the operator names the same device again.
  * Names are resolved first, so a symlink is judged as the device it points at, and what a device is
@@ -350,12 +352,15 @@ public final class PoolDevices {
     return devices;
   }
 
-  /** Where {@code path} is in the tree: its node and the whole disk it is on. */
+  /**
+   * Where {@code path} is in the tree, by its path or its kernel name: its node and the whole disk
+   * it is on.
+   */
   private static Place locate(List<BlockDevice> tree, String path, String label) {
     for (var disk : tree) {
       var found =
           disk.subtree()
-              .filter(node -> node.path().equals(path) || path.equals("/dev/" + node.kname()))
+              .filter(node -> node.path().equals(path) || path.equals(node.kernelPath()))
               .findFirst();
       if (found.isPresent()) {
         return new Place(found.get(), disk);
@@ -438,9 +443,10 @@ public final class PoolDevices {
   }
 
   /**
-   * Why each of {@code paths} that is a device of an imported pool may not be taken; none where ZFS
-   * is not installed. A pool's devices are read pool by pool, every vdev line of {@code zpool list
-   * -vHP <pool>} a member whatever class (log, cache, spare, special, dedup) it is listed under.
+   * Why each of {@code paths} that is a device of an imported pool, or that is {@code beside} one
+   * on the same disk, may not be taken; none where ZFS is not installed. A pool's devices are read
+   * pool by pool, every vdev line of {@code zpool list -vHP <pool>} a member whatever class (log,
+   * cache, spare, special, dedup) it is listed under.
    */
   private List<String> pooled(Set<String> paths, Set<String> beside)
       throws IOException, InterruptedException, TimeoutException {
@@ -541,6 +547,13 @@ public final class PoolDevices {
 
     private static String stripped(Object value) {
       return value == null || value.toString().isBlank() ? null : value.toString().strip();
+    }
+
+    /**
+     * Its path by kernel name, as {@code realpath} resolves a {@code /dev/mapper} name; or none.
+     */
+    String kernelPath() {
+      return kname == null ? null : "/dev/" + kname;
     }
 
     /** Whether lsblk reports it holds no bytes, as an nbd device with nothing attached does. */
