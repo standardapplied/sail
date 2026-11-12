@@ -15,7 +15,7 @@ let package = Package(
     targets: [
         .target(name: "SailAPI", swiftSettings: strict),
         .target(name: "SailEvents", dependencies: ["SailAPI"], swiftSettings: strict),
-        .target(name: "SailTerminalWire", swiftSettings: strict),
+        .target(name: "SailTerminalWire", dependencies: ["SailAPI"], swiftSettings: strict),
         .target(
             name: "SailKitTestSupport",
             dependencies: ["SailAPI"],

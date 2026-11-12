@@ -1,3 +1,4 @@
+import SailAPI
 import SailKitTestSupport
 import SailTerminalWire
 import Testing
@@ -31,7 +32,7 @@ import Testing
             message: "You do not hold the write token. Run sail session take lounge to take it.",
             remedy: [
                 .words("You do not hold the write token. Run "),
-                .command(runs: "SAIL", verb: "session", args: ["take", "lounge"]),
+                .command(run: .known(.sail), verb: "session", args: ["take", "lounge"]),
                 .words(" to take it."),
             ]
         )))
@@ -47,6 +48,32 @@ import Testing
             remedy: nil
         )))
         #expect(try FrameCodec.encode(frame) == bare)
+    }
+
+    @Test func aRunnerTheClientDoesNotKnowIsKeptAsTheHostSpelledItAndEncodesAsItCame() throws {
+        let err = try golden("Err")
+        let runner = try #require(range(of: "SAIL", in: err))
+        var grown = err
+        grown.replaceSubrange(runner, with: Array("TUGS".utf8))
+        let frame = try decoded(grown)
+        #expect(frame == .refused(HostRefusal(
+            message: "You do not hold the write token. Run sail session take lounge to take it.",
+            remedy: [
+                .words("You do not hold the write token. Run "),
+                .command(run: .unknown("TUGS"), verb: "session", args: ["take", "lounge"]),
+                .words(" to take it."),
+            ]
+        )))
+        #expect(try FrameCodec.encode(frame) == grown)
+    }
+
+    @Test func onlyTheByteOneReadsAsTrueAsTheHostReadsIt() throws {
+        var replay = try golden("ReplayBegin")
+        #expect(try decoded(replay) == .replayBegin(safe: true))
+        replay[5] = 2
+        #expect(try decoded(replay) == .replayBegin(safe: false))
+        replay[5] = 0
+        #expect(try decoded(replay) == .replayBegin(safe: false))
     }
 
     @Test func everyFrameCutShortIsTruncatedNeverAFrame() throws {
@@ -122,6 +149,7 @@ import Testing
         #expect(throws: TerminalWireError.skew(.hostOlder)) { try Handshake.check(peer: Array("SAILPTY1".utf8)) }
         #expect(throws: TerminalWireError.skew(.clientOlder)) { try Handshake.check(peer: Array("SAILPTY4".utf8)) }
         #expect(throws: TerminalWireError.skew(.clientOlder)) { try Handshake.check(peer: Array("SAIL".utf8)) }
+        #expect(throws: TerminalWireError.skew(.clientOlder)) { try Handshake.check(peer: Goldens.magic() + [0x33]) }
     }
 }
 
@@ -132,6 +160,11 @@ let lounge = SessionInfo(
 let shell = SessionInfo(
     name: "shell", instanceID: "inst-2", live: false, attached: 0, writerFDE: "", room: "", command: ["bash"]
 )
+
+func range(of text: String, in bytes: [UInt8]) -> Range<Int>? {
+    let needle = Array(text.utf8)
+    return bytes.indices.first { bytes[$0...].starts(with: needle) }.map { $0 ..< $0 + needle.count }
+}
 
 func golden(_ name: String) throws -> [UInt8] {
     guard let wire = try Goldens.frames().first(where: { $0.name == name })?.wire else {

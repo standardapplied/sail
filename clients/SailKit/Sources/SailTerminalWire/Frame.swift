@@ -1,3 +1,5 @@
+import SailAPI
+
 /// One message of the `SAILPTY3` terminal protocol, in either direction: the host's `PtyMessage`.
 /// The client sends the requests and receives the notifications; both are modelled so every frame
 /// round-trips through ``FrameCodec``.
@@ -100,22 +102,16 @@ public struct SessionPage: Equatable, Sendable {
     }
 }
 
-/// The host's refusal: its message, and the remedy behind it as words and commands. `remedy` is
-/// nil when the host sent the message alone, as a host from before remedies does.
+/// The host's refusal: its message, and the remedy behind it as words and commands, the same parts
+/// an API refusal carries. `remedy` is nil when the host sent the message alone, as a host from
+/// before remedies does.
 public struct HostRefusal: Equatable, Sendable {
     public var message: String
-    public var remedy: [Part]?
+    public var remedy: [RemedyPart]?
 
-    public init(message: String, remedy: [Part]?) {
+    public init(message: String, remedy: [RemedyPart]?) {
         self.message = message
         self.remedy = remedy
-    }
-
-    /// Words, or a command `runs` names the runner of (`SAIL`, `CLIENT`, `PROGRAM` as the host
-    /// writes it), kept verbatim so a client renders it for its own reader.
-    public enum Part: Equatable, Sendable {
-        case words(String)
-        case command(runs: String, verb: String, args: [String])
     }
 }
 
