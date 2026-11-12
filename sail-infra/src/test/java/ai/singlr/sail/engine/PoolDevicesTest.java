@@ -35,6 +35,7 @@ class PoolDevicesTest {
   private static final String OWNER = "raid1-md0-swap-active-md1-ext4-mounted-md2-empty";
   private static final String STOPPED = "raid-members-arrays-stopped";
   private static final String SPARES = DeviceFixtures.SPARES;
+  private static final String PROOF = "handwritten-gcp-proof-layouts.lsblk.json";
   private static final List<String> RAID_LAYOUTS =
       List.of(
           OWNER,
@@ -78,7 +79,7 @@ class PoolDevicesTest {
             "--json",
             "--tree",
             "--output",
-            "PATH,TYPE,FSTYPE,PTTYPE,PARTTYPE,MOUNTPOINTS,SIZE,MODEL,RM,WWN,SERIAL,MAJ:MIN"),
+            "PATH,KNAME,TYPE,FSTYPE,PTTYPE,PARTTYPE,MOUNTPOINTS,SIZE,MODEL,RM,WWN,SERIAL,MAJ:MIN"),
         PoolDevices.LSBLK);
     assertEquals(
         List.of("wipefs", "--all", "--no-act", "--types", "sail_exclusive_probe", "--", "/dev/sdb"),
@@ -122,9 +123,8 @@ class PoolDevicesTest {
             + " is mounted at /, the running system; /dev/md2 (raid1) is built on it.",
         refusal(DEVBOX, "/dev/nvme0n1p4", null));
     assertEquals(
-        "/dev/md0 is refused, even with --force-wipe: it is a raid1 device, not a disk or a"
-            + " partition; it is a partition of /dev/nvme0n1, which carries the running system"
-            + " (/dev/md2 is mounted at /, the running system).",
+        "/dev/md0 is refused, even with --force-wipe: it is an md array (raid1), not a disk or a"
+            + " partition.",
         refusal(DEVBOX, "/dev/md0", "/dev/md0"));
   }
 
@@ -180,8 +180,8 @@ class PoolDevicesTest {
             + " yourself; /dev/md2 (raid1) is built on it.",
         refusal(gcp(OWNER), "/dev/sdb", "/dev/sdb"));
     assertEquals(
-        "/dev/sdb3 is refused, even with --force-wipe: it is a partition of /dev/sdb, which"
-            + " carries the running system (/dev/md0 is in use as swap); /dev/sdb3 is a RAID"
+        "/dev/sdb3 is refused, even with --force-wipe: it is a partition of /dev/sdb, where"
+            + " /dev/md0 is in use as swap; /dev/sdb3 is a RAID"
             + " member: stop its array and clear it with mdadm --zero-superblock /dev/sdb3"
             + " yourself; /dev/md2 (raid1) is built on it.",
         refusal(gcp(OWNER), "/dev/sdb3", "/dev/sdb3"));
@@ -284,10 +284,86 @@ class PoolDevicesTest {
   }
 
   @Test
+  void whatSitsOnARefusedDeviceIsRefusedForcedOrNotAndNoZfsVolumeIsOffered() throws Exception {
+    var reasons =
+        Map.of(
+            "/dev/md2p1", "it is a partition of /dev/md2 (raid1), not of a disk",
+            "/dev/loop3p1", "it is a partition of /dev/loop3 (loop), not of a disk",
+            "/dev/zd0", "it is a ZFS volume");
+    reasons.forEach(
+        (device, reason) -> {
+          for (var force : new String[] {null, device}) {
+            assertEquals(
+                device + " is refused, even with --force-wipe: " + reason + ".",
+                refusal(PROOF, device, force));
+          }
+        });
+
+    assertEquals(List.of(), devices(names(new Box(PROOF)).shell()).candidates());
+  }
+
+  @Test
+  void aPartitionBesideADeviceOfAnImportedPoolIsRefusedForcedOrNot() {
+    var listed =
+        fixture("raw-file-pool.zpool-list.txt")
+            .replace("/tmp/sail-raw.img", "/dev/sdd1")
+            .replace("sail-raw", "handpool");
+    for (var force : new String[] {null, "/dev/sdd9"}) {
+      assertEquals(
+          "/dev/sdd9 is refused, even with --force-wipe: /dev/sdd1, on the same disk, is in the"
+              + " imported zpool handpool, and no pool's device is taken: export or destroy the"
+              + " pool yourself first.",
+          refusal(
+              names(new Box(PROOF)).zpool("handpool", listed, "/dev/sdd1"), "/dev/sdd9", force));
+    }
+  }
+
+  @Test
+  void aMapperPathIsRefusedAsTheDeviceItNames() {
+    assertEquals(
+        "/dev/mapper/proofluks is refused, even with --force-wipe: it is an open LUKS volume, not a"
+            + " disk or a partition.",
+        refusal(
+            names(new Box(PROOF)).name("/dev/mapper/proofluks", "/dev/dm-0"),
+            "/dev/mapper/proofluks",
+            null));
+    assertEquals(
+        "/dev/mapper/proofvg-prooflv (/dev/proofvg/prooflv) is refused, even with --force-wipe: it"
+            + " is an LVM logical volume, not a disk or a partition; it holds ext4.",
+        refusal(
+            names(new Box(PROOF)).name("/dev/proofvg/prooflv", "/dev/dm-1"),
+            "/dev/proofvg/prooflv",
+            "/dev/proofvg/prooflv"));
+  }
+
+  @Test
+  void anArrayIsRefusedAsAnArrayNamingWhatItHolds() {
+    assertEquals(
+        "/dev/md1 is refused, even with --force-wipe: it is an md array (raid1), not a disk or a"
+            + " partition; it holds ext4.",
+        refusal(PROOF, "/dev/md1", "/dev/md1"));
+  }
+
+  @Test
+  void aPartitionBesideSwapInUseNamesTheSwapAndWhatThePartitionHolds() {
+    assertEquals(
+        "/dev/sdg4 is refused, even with --force-wipe: it is a partition of /dev/sdg, where"
+            + " /dev/sdg2 is in use as swap; it holds ext4.",
+        refusal(PROOF, "/dev/sdg4", "/dev/sdg4"));
+  }
+
+  @Test
+  void aSparePartitionBesideLuksAndLvmIsCleared() throws Exception {
+    assertEquals(
+        new PoolSource.Device("/dev/sde4", false, "sail-fleet-zfsproof-a-d4 8:68 14G"),
+        devices(names(new Box(PROOF)).shell()).cleared("/dev/sde4", null));
+  }
+
+  @Test
   void aPartitionBesideSwapInUseIsRefusedEvenWithTheForceFlag() {
     assertEquals(
-        "/dev/sdl2 is refused, even with --force-wipe: it is a partition of /dev/sdl, which"
-            + " carries the running system (/dev/sdl1 is in use as swap).",
+        "/dev/sdl2 is refused, even with --force-wipe: it is a partition of /dev/sdl, where"
+            + " /dev/sdl1 is in use as swap.",
         refusal(spares(), "/dev/sdl2", "/dev/sdl2"));
   }
 
@@ -300,7 +376,7 @@ class PoolDevicesTest {
         "/dev/zram0 is refused, even with --force-wipe: it is a zram device.",
         refusal(spares(), "/dev/zram0", "/dev/zram0"));
     assertEquals(
-        "/dev/nbd0 is refused, even with --force-wipe: it has no size; it is a nbd device.",
+        "/dev/nbd0 is refused, even with --force-wipe: it has no size; it is an nbd device.",
         refusal(spares(), "/dev/nbd0", "/dev/nbd0"));
     assertEquals(
         "/dev/sdf is refused, even with --force-wipe: /dev/sdf is an LVM physical volume: move its"
@@ -447,6 +523,13 @@ class PoolDevicesTest {
   }
 
   @Test
+  void theCacheDeviceOfThePoolOnTheProofsVmIsAMember() {
+    assertEquals(
+        List.of("/dev/sdd1", "/dev/sdg1"),
+        PoolDevices.vdevs(fixture("gcp/handpool-with-cache.zpool-list.txt").lines().toList()));
+  }
+
+  @Test
   void aCacheDeviceIsAMemberOfItsPool() {
     var listed =
         fixture("classes.zpool-list.txt")
@@ -503,7 +586,8 @@ class PoolDevicesTest {
     var layout = "handwritten-btrfs-raid1-root.lsblk.json";
 
     assertEquals(
-        "/dev/sdb1 is refused, even with --force-wipe: /dev/sdb1 is an EFI system partition.",
+        "/dev/sdb1 is refused, even with --force-wipe: /dev/sdb1 is an EFI system partition; it"
+            + " holds vfat.",
         refusal(layout, "/dev/sdb1", "/dev/sdb1"));
     assertEquals(
         "/dev/sdc1 is refused, even with --force-wipe: /dev/sdc1 is a BIOS boot partition.",

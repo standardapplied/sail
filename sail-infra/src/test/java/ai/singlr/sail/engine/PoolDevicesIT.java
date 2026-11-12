@@ -65,7 +65,7 @@ class PoolDevicesIT extends AbstractIncusIT {
   /**
    * The probe's exclusive open on a loop device that something holds: a mounted filesystem, then a
    * device-mapper device built on it. Each fails the open with EBUSY, as {@link PoolDevices} reads
-   * it.
+   * it. The mapping, named by its {@code /dev/mapper} path, is refused as what it is.
    */
   @Test
   void theExclusiveOpenFindsARealHolderBusy(@TempDir Path dir) throws Exception {
@@ -89,7 +89,17 @@ class PoolDevicesIT extends AbstractIncusIT {
                       "0 " + sectors + " linear " + loop + " 0"))
               .ok());
       var mapped = root.exec(PoolDevices.exclusiveOpen(loop));
-      root.exec(List.of("dmsetup", "remove", "sail-it-hold"));
+      var mapper =
+          assertThrows(
+                  IllegalArgumentException.class,
+                  () -> new PoolDevices(root).cleared("/dev/mapper/sail-it-hold", null))
+              .getMessage();
+      System.out.println("MAPPER [" + mapper + "]");
+      assertTrue(
+          mapper.startsWith(
+              "/dev/mapper/sail-it-hold is refused, even with --force-wipe: it is a dm device, not"
+                  + " a disk or a partition"),
+          mapper);
       System.out.println(
           "MOUNTED " + loop + " exit " + mounted.exitCode() + " [" + mounted.stderr() + "]");
       System.out.println(
@@ -102,6 +112,7 @@ class PoolDevicesIT extends AbstractIncusIT {
             held.stderr().strip());
       }
     } finally {
+      root.exec(List.of("dmsetup", "remove", "sail-it-hold"));
       root.exec(List.of("losetup", "-d", loop));
     }
   }

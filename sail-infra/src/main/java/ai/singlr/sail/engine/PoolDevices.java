@@ -13,6 +13,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
@@ -46,12 +47,19 @@ public final class PoolDevices {
           "--json",
           "--tree",
           "--output",
-          "PATH,TYPE,FSTYPE,PTTYPE,PARTTYPE,MOUNTPOINTS,SIZE,MODEL,RM,WWN,SERIAL,MAJ:MIN");
+          "PATH,KNAME,TYPE,FSTYPE,PTTYPE,PARTTYPE,MOUNTPOINTS,SIZE,MODEL,RM,WWN,SERIAL,MAJ:MIN");
 
   /** A wipefs type filter no signature matches: with it the probe can erase nothing. */
   static final String NOTHING = "sail_exclusive_probe";
 
-  private static final Set<String> KINDS = Set.of("disk", "part");
+  private static final String DISK = "disk";
+  private static final Set<String> KINDS = Set.of(DISK, "part");
+  private static final Set<String> ARRAYS =
+      Set.of("raid0", "raid1", "raid4", "raid5", "raid6", "raid10", "linear", "md");
+  private static final Map<String, String> KIND =
+      Map.of("lvm", "an LVM logical volume", "crypt", "an open LUKS volume");
+  private static final Map<String, String> NAMED =
+      Map.of("zram", "a zram device", "nbd", "an nbd device", "zd", "a ZFS volume");
   private static final Map<String, String> BOOT =
       Map.of(
           "c12a7328-f81f-11d2-ba4b-00a0c93ec93b", "an EFI system partition",
@@ -111,9 +119,9 @@ public final class PoolDevices {
   public PoolSource.Device cleared(String named, String forceWipe)
       throws IOException, InterruptedException, TimeoutException {
     var path = resolved("--disk", named);
-    var label = label(named, path);
-    var place = locate(tree(), path, label);
-    refuseAny(label, uses(place.device(), place.disk()));
+    var place = locate(tree(), path, label(named, path));
+    var label = label(named, place.device().path());
+    refuseAny(label, refusals(place.device(), place.disk()));
     var forced = forceWipe != null;
     var wiped = forced ? resolved("--force-wipe", forceWipe) : path;
     if (!wiped.equals(path)) {
@@ -130,7 +138,7 @@ public final class PoolDevices {
       signatures.put(member.path(), signatures(member.path()));
     }
     refuseAny(label, memberships(signatures));
-    refuseAny(label, pooled(signatures.keySet()));
+    refuseAny(label, pooled(signatures.keySet(), place.beside()));
     var busy = new ArrayList<String>();
     for (var member : members) {
       if (busy(member.path())) {
@@ -158,7 +166,16 @@ public final class PoolDevices {
   static List<String> uses(BlockDevice device, BlockDevice disk) {
     var uses = new LinkedHashSet<String>();
     if (!KINDS.contains(device.type())) {
-      uses.add("it is a " + device.type() + " device, not a disk or a partition");
+      uses.add("it is " + kind(device) + ", not a disk or a partition");
+    }
+    var parent = parent(disk, device);
+    if (parent.isPresent() && !(parent.get() == disk && DISK.equals(disk.type()))) {
+      uses.add(
+          "it is a partition of "
+              + parent.get().path()
+              + " ("
+              + parent.get().type()
+              + "), not of a disk");
     }
     if (disk.removable()) {
       uses.add(disk.path() + " is removable");
@@ -167,30 +184,24 @@ public final class PoolDevices {
       uses.add("it has no size");
     }
     var name = disk.path().substring(disk.path().lastIndexOf('/') + 1);
-    if (name.startsWith("zram") || name.startsWith("nbd")) {
-      uses.add("it is a " + name.replaceAll("[0-9]+$", "") + " device");
+    var named = NAMED.get(name.replaceAll("[0-9]+$", ""));
+    if (named != null) {
+      uses.add("it is " + named);
     }
     device
         .subtree()
         .filter(node -> node.parttype() != null && BOOT.containsKey(node.parttype()))
         .forEach(node -> uses.add(node.path() + " is " + BOOT.get(node.parttype())));
-    if (device != disk) {
+    if (parent.isPresent() && parent.get() == disk) {
       disk.subtree()
           .filter(node -> device.subtree().noneMatch(own -> own == node))
           .flatMap(
               node ->
                   node.mountpoints().stream()
                       .filter(PoolDevices::system)
-                      .map(mount -> mounted(node, mount)))
+                      .map(mount -> beside(node, mount)))
           .findFirst()
-          .ifPresent(
-              system ->
-                  uses.add(
-                      "it is a partition of "
-                          + disk.path()
-                          + ", which carries the running system ("
-                          + system
-                          + ")"));
+          .ifPresent(system -> uses.add("it is a partition of " + disk.path() + system));
     }
     device
         .subtree()
@@ -205,6 +216,46 @@ public final class PoolDevices {
               }
             });
     return List.copyOf(uses);
+  }
+
+  /**
+   * The {@link #uses} that refuse {@code device}, with the filesystem it holds unmounted, which a
+   * refusal names so the operator knows what the refused device keeps.
+   */
+  static List<String> refusals(BlockDevice device, BlockDevice disk) {
+    var uses = uses(device, disk);
+    if (uses.isEmpty()
+        || device.fstype() == null
+        || MEMBERS.containsKey(device.fstype())
+        || !device.mountpoints().isEmpty()) {
+      return uses;
+    }
+    return Stream.concat(uses.stream(), Stream.of("it holds " + device.fstype())).toList();
+  }
+
+  /** What a device that is neither a disk nor a partition is, as a refusal names it. */
+  private static String kind(BlockDevice device) {
+    if (ARRAYS.contains(device.type())) {
+      return "an md array (" + device.type() + ")";
+    }
+    return KIND.getOrDefault(device.type(), "a " + device.type() + " device");
+  }
+
+  /** The device {@code device} is a partition of, when it is a partition. */
+  private static Optional<BlockDevice> parent(BlockDevice disk, BlockDevice device) {
+    if (!PARTITION.equals(device.type())) {
+      return Optional.empty();
+    }
+    return disk.subtree()
+        .filter(node -> node.children().stream().anyMatch(child -> child == device))
+        .findFirst();
+  }
+
+  /** Why a system mount on another part of its disk keeps a partition off it. */
+  private static String beside(BlockDevice node, String mount) {
+    return SWAP.equals(mount)
+        ? ", where " + node.path() + " is in use as swap"
+        : ", which carries the running system (" + mounted(node, mount) + ")";
   }
 
   /** Each RAID, LVM or LUKS signature the probes found, which keeps any pool off its device. */
@@ -302,7 +353,10 @@ public final class PoolDevices {
   /** Where {@code path} is in the tree: its node and the whole disk it is on. */
   private static Place locate(List<BlockDevice> tree, String path, String label) {
     for (var disk : tree) {
-      var found = disk.subtree().filter(node -> node.path().equals(path)).findFirst();
+      var found =
+          disk.subtree()
+              .filter(node -> node.path().equals(path) || path.equals("/dev/" + node.kname()))
+              .findFirst();
       if (found.isPresent()) {
         return new Place(found.get(), disk);
       }
@@ -311,6 +365,19 @@ public final class PoolDevices {
   }
 
   private record Place(BlockDevice device, BlockDevice disk) {
+
+    /**
+     * The other devices whose pool keeps this one off: for a partition of a disk, the disk and its
+     * other partitions, which a pool's device on the same disk may be.
+     */
+    Set<String> beside() {
+      return parent(disk, device).filter(parent -> parent == disk).isEmpty()
+          ? Set.of()
+          : members(disk).stream()
+              .map(BlockDevice::path)
+              .filter(path -> !path.equals(device.path()))
+              .collect(Collectors.toSet());
+    }
 
     /**
      * What lsblk says of the device that does not move between disks: its or its disk's WWN or
@@ -375,7 +442,7 @@ public final class PoolDevices {
    * is not installed. A pool's devices are read pool by pool, every vdev line of {@code zpool list
    * -vHP <pool>} a member whatever class (log, cache, spare, special, dedup) it is listed under.
    */
-  private List<String> pooled(Set<String> paths)
+  private List<String> pooled(Set<String> paths, Set<String> beside)
       throws IOException, InterruptedException, TimeoutException {
     if (!shell.exec(List.of("which", "zpool")).ok()) {
       return List.of();
@@ -388,8 +455,12 @@ public final class PoolDevices {
       }
       var command = new ArrayList<>(List.of("realpath", "-m", "--"));
       command.addAll(members);
-      if (shell.exec(command).stdout().lines().anyMatch(paths::contains)) {
-        uses.add(inPool(pool));
+      var resolved = shell.exec(command).stdout().lines().toList();
+      var near = resolved.stream().filter(beside::contains).findFirst();
+      if (resolved.stream().anyMatch(paths::contains)) {
+        uses.add("it " + inPool(pool));
+      } else if (near.isPresent()) {
+        uses.add(near.get() + ", on the same disk, " + inPool(pool));
       }
     }
     return uses;
@@ -407,8 +478,8 @@ public final class PoolDevices {
     var held =
         storage.poolsOrNone().stream().filter(found -> pool.equals(found.zpool())).findFirst();
     return held.isPresent()
-        ? "it is in zpool " + pool + ", Incus's pool '" + held.get().name() + "'"
-        : "it is in the imported zpool "
+        ? "is in zpool " + pool + ", Incus's pool '" + held.get().name() + "'"
+        : "is in the imported zpool "
             + pool
             + ", and no pool's device is taken: export or destroy the pool yourself first";
   }
@@ -429,6 +500,7 @@ public final class PoolDevices {
   /** A block device as {@code lsblk --json --tree} lists it, with what is on it and built on it. */
   record BlockDevice(
       String path,
+      String kname,
       String type,
       String fstype,
       String pttype,
@@ -452,6 +524,7 @@ public final class PoolDevices {
       var mounts = node.get("mountpoints") instanceof List<?> listed ? listed : List.of();
       return new BlockDevice(
           (String) node.get("path"),
+          (String) node.get("kname"),
           (String) node.get("type"),
           (String) node.get("fstype"),
           (String) node.get("pttype"),

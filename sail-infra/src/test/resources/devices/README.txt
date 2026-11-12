@@ -3,18 +3,20 @@ Device fixtures for PoolDevicesTest and the tests that drive PoolDevices.
 Captured, read-only, from real tools (util-linux 2.39.3, Ubuntu 24.04):
 - devbox-raid1-nvme.lsblk.json   this devbox (two NVMe drives in RAID1, md2 at /), the call
   PoolDevices makes: `lsblk --json --tree --output
-  PATH,TYPE,FSTYPE,PTTYPE,PARTTYPE,MOUNTPOINTS,SIZE,MODEL,RM,WWN,SERIAL,MAJ:MIN`
+  PATH,KNAME,TYPE,FSTYPE,PTTYPE,PARTTYPE,MOUNTPOINTS,SIZE,MODEL,RM,WWN,SERIAL,MAJ:MIN`
 - devbox-flat.lsblk.json, github-runner-flat.lsblk.json   the flat list the first version's call
   printed (`lsblk --json --output PATH,TYPE,FSTYPE,PTTYPE,MOUNTPOINTS,SIZE,MODEL`), on this devbox
   and on a GitHub ubuntu-24.04 runner
 - gcp/<layout>.*   a GCP Ubuntu 24.04 VM, its system on sda and two spare disks sdb and sdc taken
   through blank, partitioned, RAID1 (md0 swap, md1 ext4, md2 empty) mounted, unmounted, swap off,
   arrays stopped, arrays recreated over stale signatures, blank again, and reassembled degraded by
-  udev: `lsblk-tree.json` (the call above without PARTTYPE, RM, WWN, SERIAL and MAJ:MIN, so its
+  udev: `lsblk-tree.json` (the call above without KNAME, PARTTYPE, RM, WWN, SERIAL and MAJ:MIN, so its
   devices carry no partition type, are not removable and are known by their size alone), `lsblk-flat.json`,
   `wipefs-list.txt` (`wipefs <device>`, the listing PoolDevices reads) and `wipefs-noact-all.txt`
   (`wipefs --no-act --all <device>`, whose busy answer is the probe's: the exclusive open fails
   before any filter counts)
+- gcp/handpool-with-cache.zpool-list.txt   `zpool list -vHP handpool` on the GCP proof's VM: a pool
+  on sdd1 with sdg1 as its cache device
 - incus-file-pool.*, raw-file-pool.*   `zpool list -vHP` and `zfs list -H -r -o name` on the
   runner, for a pool Incus made and one `zpool create` made
 - classes.zpool-list.txt   `zpool list -vHP` on the runner (PoolDevicesIT) for a pool with a data,
@@ -32,3 +34,9 @@ Hand-written (layouts no machine at hand has), kept in the captured format:
   device-mapper device with no parent at the top of the tree
 - handwritten-flat-whole-disk-raid.lsblk.json   the flat list the first version's call prints for
   an array built on two whole disks: no partition at the top, the array listed once per member
+- handwritten-gcp-proof-layouts.lsblk.json   the devices of the GCP proof of 13a8e078 (its `lsblk -f`
+  and case notes under the proof's cases), in the call's format: a loop device with a partition,
+  the system disk with its BIOS boot and EFI partitions, two disks of RAID1 arrays (md1 holding
+  ext4, md2 partitioned into md2p1), a pool disk with ZFS's reserved partition sdd9 and its zvol
+  zd0, a disk with an open LUKS volume, an active LVM volume, an ext4 partition and a spare, and a
+  disk whose second partition is swap in use beside a blank and an ext4 partition
