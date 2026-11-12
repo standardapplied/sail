@@ -537,7 +537,7 @@ class PoolDevicesTest {
   @Test
   void aWalkOfTheOpenFilesThatFailsRefusesTheDevice() {
     var shell =
-        gcp(BLANK).shell(new ScriptedShellExecutor().onFail("/proc/[0-9]*", "bash: no /proc"));
+        gcp(BLANK).shell(new ScriptedShellExecutor().onFail("for d in /proc", "bash: no /proc"));
 
     var failed = assertThrows(IOException.class, () -> devices(shell).cleared("/dev/sdb"));
 
