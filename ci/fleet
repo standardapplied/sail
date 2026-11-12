@@ -66,8 +66,9 @@ Usage:
                                 container's snapshot on it is a clone (zfs get origin), and the ZFS cache
                                 cap holds across a reboot (boot id changed); client's root disk and root
                                 partition are refused, and its ext4 scratch disk until the row itself
-                                erases it with the wipefs the refusal names; observer, left on dir, is
-                                unchanged
+                                erases it with the wipefs the refusal names, then the scratch pool is
+                                made with Sail's last probe of the disk under a second before its
+                                incus storage create (strace); observer, left on dir, is unchanged
   ci/fleet rebuilt RUN VERSION  main is copied by the README's backup line, takes a spec, and is lost; client
                                 writes while it is gone; a new main installs VERSION and inits empty, which
                                 observer refuses as another org; the copy goes in place, every node re-pins
@@ -1077,6 +1078,20 @@ refuses_a_pool_on() {
     "sudo sail host init --storage zfs --pool refused --disk $device --yes"
 }
 
+probed_last_on() {
+  local run=$1 box=$2 device=$3 pool=$4 trace probe create gap
+  on "$run" "$box" "sudo apt-get install -y -q strace > /dev/null && sudo strace -f -tt -e trace=execve -o /tmp/sail-gap.trace sail host init --storage zfs --pool $pool --disk $device --yes" || return 1
+  on "$run" "$box" "sudo incus storage list --format csv" | grep -q "^$pool,zfs," || { echo "Incus has no zfs pool $pool"; return 1; }
+  trace=$(on "$run" "$box" "sudo cat /tmp/sail-gap.trace" | grep -E 'execve\("[^"]*/(wipefs|incus)", \["(wipefs", "--all|incus", "storage", "create)')
+  echo "$trace"
+  probe=$(grep -F '"wipefs", "--all"' <<< "$trace" | tail -1 | awk '{print $2}')
+  create=$(grep -F '"incus", "storage", "create"' <<< "$trace" | tail -1 | awk '{print $2}')
+  [[ -n $probe && -n $create ]] || { echo "the trace has no probe or no create"; return 1; }
+  gap=$(awk -v p="$probe" -v c="$create" 'BEGIN { split(p, a, ":"); split(c, b, ":"); printf "%.3f", (b[1] * 3600 + b[2] * 60 + b[3]) - (a[1] * 3600 + a[2] * 60 + a[3]) }')
+  echo "last probe of $device at $probe, incus storage create at $create: $gap s"
+  awk -v g="$gap" 'BEGIN { exit !(g >= 0 && g < 1) }'
+}
+
 uncapped_on() {
   on "$1" "$2" "test ! -e /etc/modprobe.d/sail-zfs.conf"
 }
@@ -1095,8 +1110,8 @@ storage() {
     "sudo sail host init --storage zfs --pool scratch --disk $scratch --yes"
   check "$run" "the row erases the scratch disk itself, with the wipefs the refusal named" \
     on "$run" client "sudo wipefs --all $scratch"
-  check "$run" "the blank scratch disk becomes a zfs pool" \
-    allowed "$run" client "sudo sail host init --storage zfs --pool scratch --disk $scratch --yes && sudo incus storage list --format csv | grep -q '^scratch,zfs,'"
+  check "$run" "the blank scratch disk becomes a zfs pool, Sail's last probe of it under a second before the create" \
+    probed_last_on "$run" client "$scratch" scratch
   check "$run" "the command that made the scratch pool runs again and keeps it" \
     naming "already exists)" allowed "$run" client "sudo sail host init --storage zfs --pool scratch --disk $scratch --yes"
   check "$run" "the scratch pool goes" on "$run" client "sudo incus storage delete scratch"

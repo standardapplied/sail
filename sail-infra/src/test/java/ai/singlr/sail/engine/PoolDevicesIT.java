@@ -247,6 +247,65 @@ class PoolDevicesIT extends AbstractIncusIT {
     }
   }
 
+  /**
+   * A partition of a loop device whose whole device a process holds open read-write through a node
+   * of its own: the walk, looking for the device numbers {@link PoolDevices#numbers} gives the
+   * partition, names the process holding the whole device; once it lets go, nothing holds the
+   * partition. A loop device's partition is refused for its kind, so the walk is driven directly.
+   */
+  @Test
+  void aPartitionWhoseWholeDiskAProcessHoldsIsRefusedUntilItLetsGo(@TempDir Path dir)
+      throws Exception {
+    ensureIncusOrSkip();
+    var root = new RootShell();
+    var attached =
+        root.exec(
+            List.of(
+                "bash",
+                "-c",
+                "truncate -s 128M \"$1\" && printf 'label: gpt\\n,32M\\n,32M\\n' | sfdisk -q \"$1\""
+                    + " && losetup -fP --show \"$1\"",
+                "bash",
+                dir.resolve("disk.img").toString()));
+    assertTrue(attached.ok(), attached.reason());
+    var loop = attached.stdout().strip();
+    var partition = loop + "p2";
+    var devices = new PoolDevices(root);
+    var node = dir.resolve("its-own-disk-node").toString();
+    try {
+      root.exec(PoolDevices.SETTLE);
+      var numbers =
+          PoolDevices.numbers(BlockTree.locate(BlockTree.read(root), partition, partition));
+      var number = root.exec(List.of("lsblk", "-dno", "MAJ:MIN", loop)).stdout().strip();
+      var parts = number.split(":");
+      assertTrue(root.exec(List.of("mknod", node, "b", parts[0], parts[1])).ok());
+      var holder =
+          new ProcessBuilder(
+                  "sudo", "-n", "bash", "-c", "exec 3<>\"$1\"; echo held; read -r _", "bash", node)
+              .redirectErrorStream(true)
+              .start();
+      List<String> held;
+      try (var said = new BufferedReader(new InputStreamReader(holder.getInputStream()))) {
+        assertEquals("held", said.readLine());
+        held = devices.openBy(partition, numbers);
+        holder.getOutputStream().close();
+        assertTrue(holder.waitFor(60, TimeUnit.SECONDS), "the holder did not let go");
+      }
+      var released = devices.openBy(partition, numbers);
+      System.out.println("DISK HELD " + numbers + " " + held + " RELEASED " + released);
+
+      assertEquals(loop, numbers.get(number), numbers.toString());
+      assertEquals(1, held.size(), held.toString());
+      assertTrue(
+          held.getFirst().matches("process [0-9]+ \\(bash\\) has " + loop + " open"),
+          held.toString());
+      assertEquals(List.of(), released);
+    } finally {
+      root.exec(List.of("rm", "-f", node));
+      root.exec(List.of("losetup", "-d", loop));
+    }
+  }
+
   private static String attach(RootShell root, Path file, String prepare) throws Exception {
     var attached =
         root.exec(

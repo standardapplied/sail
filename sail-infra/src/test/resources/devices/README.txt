@@ -3,13 +3,22 @@ Device fixtures for PoolDevicesTest and the tests that drive PoolDevices.
 The call PoolDevices makes is `lsblk --json --tree --bytes --output
 PATH,KNAME,TYPE,FSTYPE,PTTYPE,PARTTYPE,MOUNTPOINTS,SIZE,START,MODEL,RM,WWN,SERIAL,MAJ:MIN`. Every
 lsblk fixture has each of those keys on every device, sizes in bytes, as that call prints them.
-START (a partition's first sector) is the column added last: only the devbox capture and
-gcp3/g-layout-overlapping-mbr carry real starts (the latter from the proof's own `lsblk -o START`
-of that layout, 2048 and 6293504). Elsewhere a partition's start is laid out from its disk's
+START (a partition's first sector) is the column added last: the devbox capture, every gcp4
+capture and gcp3/g-layout-overlapping-mbr carry real starts (the latter from the proof's own
+`lsblk -o START` of that layout, 2048 and 6293504). Elsewhere a partition's start is laid out from its disk's
 first sector (gcp3: from 1 MiB) end to end in listed order, so starts are consistent but not the
 real ones; the hand-written layouts' partitions were sized to fit their disks.
 
 Captured, read-only, from real tools (util-linux 2.39.3, Ubuntu 24.04):
+- gcp4/<case or layout>.lsblk.json   the fourth GCP proof (of 21e9a482), the call above verbatim,
+  START included. The proof took 105 captures, of which 24 differ: each file kept is named by the
+  first case or layout that printed it, the byte-identical captures of later cases left out, and
+  four are renamed for what they hold: a-overlap-and-past-end (a-001 and a-101..a-115: MBR and GPT
+  tables with an overlapping pair, a third partition beside one, an MBR partition the kernel cut at
+  its disk's end, a loop partition past its device's end, an ext4 disk of three adjacent
+  partitions), a-holders (a-201..a-206: a GPT disk of ten blank partitions), c-nvme-pd (c-01, c-02:
+  an NVMe persistent disk, its id of the nvme.<vendor>-<serial>-<model>-<namespace> form) and
+  b-local-nvme-ssd (b-120: a local NVMe SSD, its id of that form).
 - gcp3/<layout>.lsblk.json   the third GCP proof (of c11ae7ac), the call above without START,
   verbatim (sizes in bytes): a-* and f-* blank, ext4 and swap disks, pools made; c-* RAID arrays
   active, stopped and partitioned, imported and exported pools, zvols, a loop partition, LUKS and

@@ -104,7 +104,7 @@ class HostProvisionerTest {
             "already installed",
             "already installed; ZFS cache capped at 6.4 GiB",
             "bridge: incusbr0",
-            "devpool (zfs on /dev/sdb, one device: no redundancy)",
+            "would create devpool (zfs on /dev/sdb, one device: no redundancy)",
             "singlr-base (already exists): containers on devpool (zfs)",
             "already cached"),
         doneDetails);
@@ -1013,10 +1013,16 @@ class HostProvisionerTest {
         steps.contains("done:5/8:devpool (zfs on /dev/sdb, one device: no redundancy)"),
         steps.toString());
     var create = shell.invocations().indexOf("incus storage create devpool zfs source=/dev/sdb");
+    var recheck = shell.invocations().subList(0, create);
+    assertEquals(
+        String.join(" ", PoolDevices.exclusiveOpen("/dev/sdb")),
+        recheck.getLast(),
+        "a probe of the device, not the walk of /proc, is the last command before the create: "
+            + recheck);
     assertTrue(
-        shell.invocations().get(create - 1).startsWith("bash -c for d in /proc"),
-        "the re-check's last probe is the last command before the create: "
-            + shell.invocations().subList(create - 4, create + 1));
+        recheck.lastIndexOf("bash -c " + PoolDevices.OPEN_FILES)
+            < recheck.lastIndexOf("wipefs -- /dev/sdb"),
+        "the re-check walks /proc before it probes the device: " + recheck);
     assertTrue(
         steps.contains("done:6/8:singlr-base (already exists): containers on devpool (zfs)"),
         steps.toString());
@@ -1282,8 +1288,14 @@ class HostProvisionerTest {
     assertTrue(
         steps.contains("done:3/8:would be installed; ZFS cache capped at 6.4 GiB"),
         steps.toString());
+    assertTrue(steps.contains("done:4/8:would create bridge incusbr0"), steps.toString());
     assertTrue(
-        steps.contains("done:6/8:singlr-base: containers on devpool (zfs)"), steps.toString());
+        steps.contains(
+            "done:5/8:would create devpool (zfs on /dev/sdb, one device: no redundancy)"),
+        steps.toString());
+    assertTrue(
+        steps.contains("done:6/8:would create singlr-base: containers on devpool (zfs)"),
+        steps.toString());
     assertEquals(
         List.of("zfs", "devpool", "/dev/sdb"),
         List.of(hostYaml.storageBackend(), hostYaml.pool(), hostYaml.poolSource()));

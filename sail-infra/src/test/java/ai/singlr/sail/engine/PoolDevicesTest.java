@@ -18,6 +18,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -42,6 +43,8 @@ class PoolDevicesTest {
   private static final String ZFS_ROOT = "gcp2/e-root-on-zfs-mirror-pivot.lsblk.json";
   private static final String TYPES = "handwritten-review3-layouts.lsblk.json";
   private static final String PROBES = "handwritten-review4-layouts.lsblk.json";
+  private static final String HOLDERS = "gcp4/a-holders.lsblk.json";
+  private static final String OVERLAPS = "gcp4/a-overlap-and-past-end.lsblk.json";
   private static final String LISTED = "DEVICE OFFSET TYPE UUID LABEL\n";
   private static final String ACCEPTED =
       ", not Linux filesystem data (0fc63daf-8483-4772-8e79-3d69d8477de4, 0x83) or ZFS"
@@ -229,12 +232,100 @@ class PoolDevicesTest {
           List.of(
               "realpath -e -- /dev/sdb",
               LSBLK,
+              "bash -c " + PoolDevices.OPEN_FILES,
               "wipefs -- /dev/sdb",
               "which zpool",
-              String.join(" ", PoolDevices.exclusiveOpen("/dev/sdb")),
-              "bash -c " + PoolDevices.OPEN_FILES),
+              String.join(" ", PoolDevices.exclusiveOpen("/dev/sdb"))),
           shell.invocations());
     }
+  }
+
+  @Test
+  void aProcessHoldingTheWholeDiskRefusesThePartitionNamed() throws Exception {
+    for (var partition : List.of("/dev/sdg6", "/dev/sdg9")) {
+      assertEquals(
+          partition + " is refused: process 23334 (python3) has /dev/sdg open.",
+          refusal(names(new Box(HOLDERS)).open(23334, "python3", "/dev/sdg"), partition));
+    }
+    assertEquals("/dev/sdg6", devices(names(new Box(HOLDERS)).shell()).cleared("/dev/sdg6").path());
+  }
+
+  @Test
+  void theWalkNamesAHolderBeforeAnyProbeAndADisksPartitionsAreProbedBeforeIt() throws Exception {
+    var vanished =
+        "wipefs: error: /dev/sdg1: probing initialization failed: No such file or directory";
+    assertEquals(
+        "/dev/sdg is refused: process 23334 (python3) has /dev/sdg open.",
+        refusal(
+            names(new Box(HOLDERS)).open(23334, "python3", "/dev/sdg").busy("/dev/sdg1", vanished),
+            "/dev/sdg"));
+
+    var shell = names(new Box(HOLDERS)).shell();
+    assertThrows(IllegalArgumentException.class, () -> devices(shell).cleared("/dev/sdg"));
+    var probes =
+        shell.invocations().stream()
+            .filter(c -> c.startsWith("wipefs --all") || c.startsWith("udevadm"))
+            .toList();
+    var partitions =
+        IntStream.rangeClosed(1, 10)
+            .mapToObj(n -> String.join(" ", PoolDevices.exclusiveOpen("/dev/sdg" + n)))
+            .toList();
+    var expected = new ArrayList<>(partitions);
+    expected.add(String.join(" ", PoolDevices.exclusiveOpen("/dev/sdg")));
+    expected.add("udevadm settle --timeout=10");
+    assertEquals(expected, probes);
+    assertTrue(
+        shell.invocations().indexOf("bash -c " + PoolDevices.OPEN_FILES)
+            < shell.invocations().indexOf("wipefs -- /dev/sdg"),
+        shell.invocations().toString());
+  }
+
+  @Test
+  void aWholeDiskThatVanishesWhileProbedCannotBeJudged() {
+    var failed =
+        assertThrows(
+            IOException.class,
+            () ->
+                devices(
+                        gcp(BLANK)
+                            .busy(
+                                "/dev/sdb",
+                                "wipefs: error: /dev/sdb: probing initialization failed: No such"
+                                    + " file or directory")
+                            .shell())
+                    .cleared("/dev/sdb"));
+
+    assertEquals(
+        "Cannot tell whether /dev/sdb is in use: wipefs: error: /dev/sdb: probing initialization"
+            + " failed: No such file or directory",
+        failed.getMessage());
+  }
+
+  @Test
+  void aPartitionThatVanishesWhileProbedOrAnUnsettledTableSaysTheTableIsChanging() {
+    assertEquals(
+        "/dev/sdg is refused: /dev/sdg1 vanished while Sail probed it, so the partition table of"
+            + " /dev/sdg is changing: run this again.",
+        refusal(
+            names(new Box(HOLDERS))
+                .busy(
+                    "/dev/sdg1",
+                    "wipefs: error: /dev/sdg1: probing initialization failed: No such file or"
+                        + " directory"),
+            "/dev/sdg"));
+    assertEquals(
+        "/dev/sdg is refused: udev did not settle within 10 s after Sail probed /dev/sdg, so its"
+            + " partition table is changing: run this again.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    devices(
+                            names(new Box(HOLDERS))
+                                .shell(
+                                    new ScriptedShellExecutor()
+                                        .onFail("udevadm settle", "timeout")))
+                        .cleared("/dev/sdg"))
+            .getMessage());
   }
 
   @Test
@@ -826,6 +917,52 @@ class PoolDevicesTest {
     assertFalse(refused.contains("wipefs"), refused);
   }
 
+  @Test
+  void aWholeDiskWithAnOverlappingPairNamesTheOverlap() {
+    assertEquals(
+        "/dev/sdb is refused: /dev/sdb1 overlaps /dev/sdb2 on /dev/sdb; /dev/sdb1 is mounted at"
+            + " /mnt/ovl.",
+        refusal(OVERLAPS, "/dev/sdb"));
+    assertEquals(
+        "/dev/sdc is refused: /dev/sdc1 overlaps /dev/sdc2 on /dev/sdc.",
+        refusal(OVERLAPS, "/dev/sdc"));
+    assertEquals(
+        "/dev/sdd is refused: /dev/sdd1 overlaps /dev/sdd2 on /dev/sdd.",
+        refusal(OVERLAPS, "/dev/sdd"));
+    assertEquals(
+        "/dev/loop3 is refused: it is a loop device, not a disk or a partition; /dev/loop3p1"
+            + " reaches past the end of /dev/loop3.",
+        refusal(OVERLAPS, "/dev/loop3"));
+  }
+
+  @Test
+  void aPartitionTheKernelCutAtItsDisksEndIsRefusedAsReachingPastIt() {
+    var cut =
+        "/dev/sde1 reaches past the end of /dev/sde: the kernel cut it at the disk's end, so udev"
+            + " reads no type for it.";
+    assertEquals("/dev/sde1 is refused: " + cut, refusal(OVERLAPS, "/dev/sde1"));
+    assertEquals("/dev/sde is refused: " + cut, refusal(OVERLAPS, "/dev/sde"));
+  }
+
+  @Test
+  void anNvmeDiskWithAVendorIdIsHandedToIncusByItsNvmeName() throws Exception {
+    var id = "nvme.1ae0-6e766d655f636172642d7064-6e766d655f636172642d7064-00000002";
+    var named = "/dev/disk/by-id/nvme-" + id;
+    var shell = names(new Box("gcp4/c-nvme-pd.lsblk.json")).name(named, "/dev/nvme0n2").shell();
+
+    assertEquals(
+        new PoolSource.Device(named, id + " 259:5 21474836480"),
+        devices(shell).cleared("/dev/nvme0n2"));
+    assertEquals(
+        "realpath -e -- " + named, shell.invocations().getLast(), shell.invocations().toString());
+    assertEquals(
+        "/dev/nvme0n1",
+        devices(names(new Box("gcp4/b-local-nvme-ssd.lsblk.json")).shell())
+            .cleared("/dev/nvme0n1")
+            .path(),
+        "a by-id name that does not resolve to the device is not handed over");
+  }
+
   private static BlockDevice partition(String path, Long start, long size) {
     return new BlockDevice(
         path,
@@ -1117,6 +1254,7 @@ class PoolDevicesTest {
         }
       }
       shell.onOk("/proc/[0-9]*", opened.toString());
+      shell.onOk(String.join(" ", PoolDevices.SETTLE));
       return shell;
     }
 

@@ -67,7 +67,7 @@ final class DeviceRules {
               + parent.get().type()
               + "), not of a disk");
     }
-    if (parent.isPresent() && parent.get() == disk) {
+    if (parent.map(found -> found == disk).orElse(device == disk)) {
       uses.addAll(extents(device, disk));
     }
     if (disk.removable()) {
@@ -85,8 +85,8 @@ final class DeviceRules {
         .subtree()
         .forEach(
             node -> {
-              if (node == device && node.partition()) {
-                typed(node).ifPresent(uses::add);
+              if (node == device && parent.isPresent()) {
+                typed(node, parent.get()).ifPresent(uses::add);
               }
               node.mountpoints().forEach(mount -> uses.add(mounted(node, mount)));
               if (member(node.fstype()) && !ZFS.equals(node.fstype())) {
@@ -100,22 +100,24 @@ final class DeviceRules {
   }
 
   /**
-   * Why where a partition lies on {@code disk} keeps a pool off {@code device}: no start lsblk
-   * reads, an extent past the end of the disk, or one that overlaps another partition of it, which
-   * any partition of a disk with an overlapping pair shares, since writing either destroys the
-   * other.
+   * Why where a partition lies on {@code disk} keeps a pool off {@code device}, the disk or a
+   * partition of it: no start lsblk reads, an extent past the end of the disk, or one that overlaps
+   * another partition of it, which the disk and any partition of a disk with an overlapping pair
+   * share, since writing either destroys the other.
    */
   static List<String> extents(BlockDevice device, BlockDevice disk) {
-    if (device.start() == null) {
+    if (device != disk && device.start() == null) {
       return List.of(
           device.path()
               + " has no start lsblk reads: run sudo udevadm settle, then run this again");
     }
     var reasons = new ArrayList<String>();
-    if (device.start() * SECTOR + device.size() > disk.size()) {
-      reasons.add(device.path() + " reaches past the end of " + disk.path());
-    }
     var partitions = disk.children().stream().filter(BlockDevice::partition).toList();
+    for (var one : partitions) {
+      if ((one == device || device == disk) && pastTheEnd(one, disk)) {
+        reasons.add(one.path() + " reaches past the end of " + disk.path());
+      }
+    }
     for (var one : partitions) {
       for (var other : partitions) {
         var reported = one == device || (other != device && one.path().compareTo(other.path()) < 0);
@@ -125,6 +127,19 @@ final class DeviceRules {
       }
     }
     return reasons;
+  }
+
+  private static boolean pastTheEnd(BlockDevice partition, BlockDevice disk) {
+    return partition.start() != null && partition.start() * SECTOR + partition.size() > disk.size();
+  }
+
+  /**
+   * Whether {@code partition} ends at the last byte of {@code disk}, as the kernel cuts one whose
+   * table entry reaches past it; no GPT partition ends there, under the table's backup copy.
+   */
+  private static boolean atTheEnd(BlockDevice partition, BlockDevice disk) {
+    return partition.start() != null
+        && partition.start() * SECTOR + partition.size() == disk.size();
   }
 
   private static boolean overlap(BlockDevice one, BlockDevice other) {
@@ -148,7 +163,7 @@ final class DeviceRules {
     return device
         .subtree()
         .filter(node -> node != device && node.partition())
-        .flatMap(node -> typed(node).stream())
+        .flatMap(node -> typed(node, device).stream())
         .toList();
   }
 
@@ -225,11 +240,19 @@ final class DeviceRules {
   }
 
   /**
-   * Why a partition's type keeps a pool off it: none lsblk reads, or one that is neither Linux
-   * filesystem data nor ZFS. A boot, firmware, reserved or extended partition may carry no
-   * signature at all, so only those two are taken.
+   * Why a partition's type keeps a pool off it, a partition of {@code parent}: none lsblk reads, or
+   * one that is neither Linux filesystem data nor ZFS. A boot, firmware, reserved or extended
+   * partition may carry no signature at all, so only those two are taken. With no type, one that
+   * ends at its disk's last byte is one the kernel cut there, whose entry udev cannot read.
    */
-  private static Optional<String> typed(BlockDevice node) {
+  private static Optional<String> typed(BlockDevice node, BlockDevice parent) {
+    if (node.parttype() == null && atTheEnd(node, parent)) {
+      return Optional.of(
+          node.path()
+              + " reaches past the end of "
+              + parent.path()
+              + ": the kernel cut it at the disk's end, so udev reads no type for it");
+    }
     if (node.parttype() == null) {
       return Optional.of(
           node.path()

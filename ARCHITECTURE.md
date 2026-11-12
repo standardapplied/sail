@@ -1016,7 +1016,9 @@ never with `-f`: Sail never passes `source.wipe`.
   built on another, as bcache is) or a partition of one, not removable and not empty; a
   partition's extent (its START and size from the same lsblk call) lies inside its disk and
   overlaps no other partition, and a disk with an overlapping pair refuses every partition of it,
-  since writing one destroys the other; every
+  since writing one destroys the other, and the disk itself names the pair; a partition with no
+  type udev can read that ends at its disk's last byte is one the kernel cut there, and is refused
+  as reaching past the disk's end; every
   partition's type, on the device or for a disk on any of its partitions, is Linux filesystem data
   (GPT `0fc63daf-…`, MBR `0x83`) or ZFS (`6a898cc3-…`, `0xbf`), compared without case, and any
   other type or none refuses it, since a boot, firmware, reserved or extended partition may carry
@@ -1027,7 +1029,10 @@ never with `-f`: Sail never passes `source.wipe`.
   --types sail_exclusive_probe` makes finds no other holder (`--no-act` skips the writes, and the
   type filter matches no signature, so wipefs neither reports anything erased nor re-reads a
   partition table, as an unfiltered `--no-act --all` does; udev may re-read one when the device is
-  closed, which writes nothing); no process has it, or for a disk any of its partitions, open at
+  closed, which writes nothing, so a disk's partitions are probed before the disk, Sail waits for
+  udev to settle after a disk's probe, at most 10 s, and a partition gone while it is probed or a
+  table that does not settle is refused as a partition table that is changing); no process has it,
+  any of its partitions, or for a partition its disk, open at
   all, read from every `/proc/<pid>/fd` and matched by device number, so a holder is seen through
   any node or path it opened the device by, in any mount namespace (a process whose open files
   cannot be read refuses it too, and an exclusive holder the walk cannot find is said to be one
@@ -1048,8 +1053,12 @@ never with `-f`: Sail never passes `source.wipe`.
   before the pool is made, which refuses unless the device is the one first cleared (its or its
   disk's WWN or serial, its major:minor and its size in bytes), and once more before the create
   that follows Incus restarting to see ZFS; each re-check is the last command before its create.
-  A device whose disk has a hardware identity (a WWN, or an NVMe EUI) is handed to Incus by the
-  path udev names from it (`/dev/disk/by-id/wwn-…` or `nvme-eui.…`, with `-partN`), so no other disk
+  The walk of `/proc` takes seconds on a busy box, so it runs after lsblk is read and before the
+  device is probed: the device's own probes, then its by-id name, are the last look at it before
+  Incus is handed it.
+  A device whose disk has a hardware identity (a WWN, or an NVMe EUI, NGUID or vendor id) is handed
+  to Incus by the path udev names from it (`/dev/disk/by-id/wwn-…`, `nvme-eui.…` or `nvme-nvme.…`,
+  with `-partN`), only when that path resolves to the device checked, so no other disk
   can stand under the name the pool is made on; a disk with none, as on GCP, is handed by its
   kernel path. There, a disk physically replaced under the same name between Sail's last check and
   the pool's creation is judged by `zpool create` alone, which refuses a filesystem, swap, a pool
@@ -1060,14 +1069,14 @@ never with `-f`: Sail never passes `source.wipe`.
   A pool on one partition or one disk has no redundancy: losing that device loses every container
   on the pool, however the system's own disks are mirrored.
   *`PoolDevicesTest` (on lsblk, wipefs and zpool output captured from this devbox, a GitHub
-  runner and three GCP proofs taken through blank, partitioned, RAID, pool, swap, btrfs,
+  runner and four GCP proofs taken through blank, partitioned, RAID, pool, swap, btrfs,
   swapped-disk, overlapping-partition and pivoted root-on-ZFS and btrfs layouts, plus hand-written
   layouts marked as such),
   `PoolDevicesIT` (the runner's own disks, read-only; the probe on a loop device mounted and
   mapped; a `/dev/mapper` path refused as a dm device; a pool with every vdev class; Incus making
   the pool Sail asks for on a blank loop device, and zpool refusing one that took ext4 after the
   checks, its ext4 kept; a loop device a process holds open plainly, through a device node of its
-  own, refused until it lets go), `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
+  own, refused until it lets go, and a partition of one whose whole device a process holds), `HostProvisionerTest.aDeviceMountedSinceItWasNamedIsRefusedAndUntouched`.*
 - **Z3. One pool, one owner.** Sail only reads ZFS (`zpool list`); every pool,
   dataset, snapshot and copy is made or removed by Incus. *`HostProvisionerTest.aZfsPoolOnAWholeDiskIsIncussOwnAndTheProfilePutsContainersOnIt`.*
 - **Z4. The ZFS cache cap is set before ZFS can take memory.** Step 3 writes
@@ -1093,8 +1102,9 @@ never with `-f`: Sail never passes `source.wipe`.
   source flag that re-run would ignore is refused by name, while the command that made it, a disk
   or a file of the same size, runs again as a no-op. A zfs pool Incus no longer has when the pool is made is never made from its
   zpool. A dry run reads the profile, pools and packages the box has, so it shows the base
-  profile staying where it is and says whether Incus and ZFS would be installed, whether the image
-  would be cached and the bridge rules added, and ends "Dry run done: nothing was changed" rather
+  profile staying where it is and says whether Incus and ZFS would be installed, which bridge, pool
+  and profile it would create, whether the image would be cached and the bridge rules added, and
+  ends "Dry run done: nothing was changed" rather
   than "Server ready".
   *`HostProvisionerTest.aDirBoxWithContainersAddsAZfsPoolBesideItsOwnAndTouchesNoContainer`,
   `HostProvisionerIT`.*

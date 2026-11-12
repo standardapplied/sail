@@ -12,9 +12,12 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * The one place that decides whether a block device may become a ZFS pool. Sail erases nothing, so
@@ -34,10 +37,11 @@ import java.util.stream.Collectors;
  * at, and what a device is cleared as carries what lsblk says of it that does not move between
  * disks. A disk with no partition table and no signature is blank.
  *
- * <p>A holder is found two ways: the exclusive open fails while anything holds the device
- * exclusively, and every process's {@code /proc/<pid>/fd} names the devices it has open, plainly
- * too (a virtual machine's raw disk, {@code dd}). A consumer that does not keep the device open
- * while Sail looks is not seen.
+ * <p>A holder is found two ways: every process's {@code /proc/<pid>/fd} names the devices it has
+ * open, plainly too (a virtual machine's raw disk, {@code dd}), and the exclusive open fails while
+ * anything holds the device exclusively. The walk of {@code /proc} takes seconds, so it runs before
+ * the device is probed, and the probes are the last look at the device before Incus is handed it. A
+ * consumer that does not keep the device open while Sail looks is not seen.
  */
 public final class PoolDevices {
 
@@ -64,6 +68,11 @@ public final class PoolDevices {
       """;
 
   private static final String BUSY = "Device or resource busy";
+  private static final Pattern NVME = Pattern.compile("(eui|nguid|nvme)\\.");
+  private static final String GONE = "No such file or directory";
+
+  /** Waits, at most 10 seconds, for udev to finish what a probe's close set off. */
+  static final List<String> SETTLE = List.of("udevadm", "settle", "--timeout=10");
 
   private final ShellExec shell;
   private final ImportedPools pools;
@@ -108,6 +117,7 @@ public final class PoolDevices {
     var place = BlockTree.locate(BlockTree.read(shell), path, label(named, path));
     var label = label(named, place.device().path());
     refuseAny(label, DeviceRules.refusals(place.device(), place.disk()));
+    refuseAny(label, openBy(place.device().path(), numbers(place)));
     var members = place.device().members();
     var signatures = new LinkedHashMap<String, List<String>>();
     var labels = new LinkedHashMap<String, String>();
@@ -123,27 +133,7 @@ public final class PoolDevices {
         label,
         DeviceRules.memberships(
             place.device(), signatures, labels, labels.isEmpty() ? Set.of() : pools.importable()));
-    var busy = new ArrayList<String>();
-    for (var member : members) {
-      if (busy(member.path())) {
-        var held = DeviceRules.holds(member, signatures);
-        busy.add(
-            member.path()
-                + (held.isEmpty() ? "" : " holds " + String.join(", ", held) + " and")
-                + " is held exclusively by something Sail cannot name: a mount in another"
-                + " namespace, an array, a pool, or a process that opened it exclusively");
-      }
-    }
-    refuseAny(
-        label,
-        openBy(
-            place.device().path(),
-            members.stream()
-                .filter(member -> member.majmin() != null)
-                .collect(
-                    Collectors.toMap(
-                        BlockDevice::majmin, BlockDevice::path, (one, other) -> one))));
-    refuseAny(label, busy);
+    refuseAny(label, held(place.device(), signatures));
     refuseAny(label, DeviceRules.partitionTypes(place.device()));
     var holds = DeviceRules.holds(place.device(), signatures);
     if (!holds.isEmpty()) {
@@ -160,10 +150,46 @@ public final class PoolDevices {
   }
 
   /**
+   * The devices a process holding any of them open could write over the one at {@code place}, by
+   * major:minor: the device, each of its partitions, and the device it is a partition of, whose
+   * every byte a holder of the whole disk reaches.
+   */
+  static Map<String, String> numbers(BlockTree.Place place) {
+    return Stream.concat(
+            place.device().members().stream(),
+            BlockTree.parent(place.disk(), place.device()).stream())
+        .filter(device -> device.majmin() != null)
+        .collect(
+            Collectors.toMap(
+                BlockDevice::majmin, BlockDevice::path, (one, other) -> one, LinkedHashMap::new));
+  }
+
+  /**
+   * Why something lsblk and the walk cannot see holds {@code device} or a partition of it, from
+   * each one's {@link #exclusiveOpen}: partitions first, then the disk, whose probe makes udev
+   * re-read its partition table when it closes, so udev is let settle after it.
+   */
+  private List<String> held(BlockDevice device, Map<String, List<String>> signatures)
+      throws IOException, InterruptedException, TimeoutException {
+    var members = device.members();
+    var held = new ArrayList<String>();
+    for (var member : Stream.concat(members.stream().skip(1), Stream.of(device)).toList()) {
+      exclusive(member, device, signatures).ifPresent(held::add);
+    }
+    if (members.size() > 1 && !shell.exec(SETTLE).ok()) {
+      held.add(
+          "udev did not settle within 10 s after Sail probed "
+              + device.path()
+              + ", so its partition table is changing: run this again");
+    }
+    return held;
+  }
+
+  /**
    * The path Incus is handed for the device at {@code path}: the one udev names from its disk's
-   * hardware identity, a WWN or an NVMe EUI, with its partition's suffix, so no other disk can
-   * stand under it when the pool is made; the kernel path where the disk has none, or where that
-   * name does not resolve to the device.
+   * hardware identity, a WWN or an NVMe EUI, NGUID or vendor id, with its partition's suffix, so no
+   * other disk can stand under it when the pool is made; the kernel path where the disk has none,
+   * or where that name does not resolve to the device.
    */
   private String persistent(BlockTree.Place place, String path)
       throws IOException, InterruptedException, TimeoutException {
@@ -177,7 +203,7 @@ public final class PoolDevices {
     }
     var named =
         "/dev/disk/by-id/"
-            + (wwn.startsWith("eui.") || wwn.startsWith("nguid.") ? "nvme-" : "wwn-")
+            + (NVME.matcher(wwn).lookingAt() ? "nvme-" : "wwn-")
             + wwn
             + (place.device() == place.disk() ? "" : "-part" + number);
     var resolved = shell.exec(List.of("realpath", "-e", "--", named));
@@ -185,11 +211,11 @@ public final class PoolDevices {
   }
 
   /**
-   * The open {@link #busy} makes: {@code wipefs --all} opens the device for exclusive use, which
-   * fails with EBUSY while anything holds it. {@code --no-act} skips every write, and the type
-   * filter matches no signature, so nothing is erased and no partition table is re-read by wipefs,
-   * as an unfiltered {@code --no-act --all} does; udev may re-read one when the device is closed,
-   * which writes nothing.
+   * The open {@link #exclusive} makes: {@code wipefs --all} opens the device for exclusive use,
+   * which fails with EBUSY while anything holds it. {@code --no-act} skips every write, and the
+   * type filter matches no signature, so nothing is erased and no partition table is re-read by
+   * wipefs, as an unfiltered {@code --no-act --all} does; udev may re-read one when the device is
+   * closed, which writes nothing.
    */
   static List<String> exclusiveOpen(String path) {
     return List.of("wipefs", "--all", "--no-act", "--types", NOTHING, "--", path);
@@ -266,15 +292,34 @@ public final class PoolDevices {
     return named.ok() ? " (" + named.stdout().strip() + ")" : "";
   }
 
-  /** Whether another holder has {@code path} open, so its {@link #exclusiveOpen} fails. */
-  private boolean busy(String path) throws IOException, InterruptedException, TimeoutException {
-    var opened = shell.exec(exclusiveOpen(path));
+  /**
+   * Why {@code member} of {@code device} is held, from its {@link #exclusiveOpen}: it fails while
+   * anything holds it exclusively, and finds no node for a partition the kernel dropped while udev
+   * re-read the table.
+   */
+  private Optional<String> exclusive(
+      BlockDevice member, BlockDevice device, Map<String, List<String>> signatures)
+      throws IOException, InterruptedException, TimeoutException {
+    var opened = shell.exec(exclusiveOpen(member.path()));
     if (opened.ok()) {
-      return false;
+      return Optional.empty();
     }
     if (opened.stderr().contains(BUSY)) {
-      return true;
+      var holds = DeviceRules.holds(member, signatures);
+      return Optional.of(
+          member.path()
+              + (holds.isEmpty() ? "" : " holds " + String.join(", ", holds) + " and")
+              + " is held exclusively by something Sail cannot name: a mount in another"
+              + " namespace, an array, a pool, or a process that opened it exclusively");
     }
-    throw new IOException("Cannot tell whether " + path + " is in use: " + opened.reason());
+    if (member != device && opened.stderr().contains(GONE)) {
+      return Optional.of(
+          member.path()
+              + " vanished while Sail probed it, so the partition table of "
+              + device.path()
+              + " is changing: run this again");
+    }
+    throw new IOException(
+        "Cannot tell whether " + member.path() + " is in use: " + opened.reason());
   }
 }

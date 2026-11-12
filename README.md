@@ -54,13 +54,13 @@ wanted, and then run `host init` again; a member of a pool, an array, a volume g
 is refused naming the tool that frees it instead (an exported pool: `zpool import`, or `zpool
 labelclear` yourself). A blank partition on the disk the system runs from is taken, as on a server
 whose two disks both carry the system. Refused whatever it holds: a disk with partitions; a mounted
-or swap device, or one with something built on it, or one a process has open; a boot, firmware,
+or swap device, or one with something built on it, or one a process has open (for a partition, its whole disk too); a boot, firmware,
 reserved or extended partition, by its type; anything but a plain disk or a partition of one (an
 array, a loop device, a ZFS volume, an LVM or LUKS mapping, a partition of any of them); and a
 device of an imported zpool, or a partition beside one on the same disk (export or destroy the
 pool yourself first). A disk with no partition table and no signature is blank to Sail, even if a
 filesystem survives further in after its table was erased. A disk with a hardware identity (a WWN
-or an NVMe EUI) is handed to Incus by its `/dev/disk/by-id` name; on disks with none, as on most
+or an NVMe id) is handed to Incus by its `/dev/disk/by-id` name; on disks with none, as on most
 cloud VMs, do not change disks while `host init` runs: one replaced under the same name after
 Sail's last check is judged by `zpool create` alone, which does not refuse an empty partition
 table or filesystems inside MBR partitions. A pool on one partition or one disk

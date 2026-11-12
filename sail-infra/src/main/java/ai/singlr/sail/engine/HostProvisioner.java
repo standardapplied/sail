@@ -247,7 +247,11 @@ public final class HostProvisioner {
     }
 
     var version = incusVersion(shell);
-    stepDone(4, "bridge: " + bridge);
+    var made =
+        shell.isDryRun() && !read(List.of("incus", "network", "show", bridge)).ok()
+            ? "would create bridge "
+            : "bridge: ";
+    stepDone(4, made + bridge);
     return version;
   }
 
@@ -291,7 +295,7 @@ public final class HostProvisioner {
     var restarted = make(pool, source);
     var trial =
         source instanceof PoolSource.File ? "; slower than a disk, meant for trying ZFS" : "";
-    stepDone(5, pool + " (" + source.said() + trial + ")" + restarted);
+    stepDone(5, wouldCreate() + pool + " (" + source.said() + trial + ")" + restarted);
   }
 
   /**
@@ -405,7 +409,8 @@ public final class HostProvisioner {
                         + " lists (incus storage list), then run this command again."));
     stepDone(
         6,
-        profile
+        (existed ? "" : wouldCreate())
+            + profile
             + (existed ? " (already exists)" : "")
             + ": containers on "
             + root.name()
@@ -413,6 +418,11 @@ public final class HostProvisioner {
             + root.driver()
             + ")");
     return root;
+  }
+
+  /** How a dry run's step says what a real run would make: before the name of what is made. */
+  private String wouldCreate() {
+    return shell.isDryRun() ? "would create " : "";
   }
 
   /**

@@ -1,0 +1,670 @@
+{
+   "blockdevices": [
+      {
+         "path": "/dev/loop0",
+         "kname": "loop0",
+         "type": "loop",
+         "fstype": "squashfs",
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+             "/snap/core24/2124"
+         ],
+         "size": 70033408,
+         "start": null,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": "7:0"
+      },{
+         "path": "/dev/loop1",
+         "kname": "loop1",
+         "type": "loop",
+         "fstype": "squashfs",
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+             "/snap/google-cloud-cli/519"
+         ],
+         "size": 373112832,
+         "start": null,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": "7:1"
+      },{
+         "path": "/dev/loop2",
+         "kname": "loop2",
+         "type": "loop",
+         "fstype": "squashfs",
+         "pttype": null,
+         "parttype": null,
+         "mountpoints": [
+             "/snap/snapd/28254"
+         ],
+         "size": 46882816,
+         "start": null,
+         "model": null,
+         "rm": false,
+         "wwn": null,
+         "serial": null,
+         "maj:min": "7:2"
+      },{
+         "path": "/dev/sda",
+         "kname": "sda",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": 32212254720,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "persistent-disk-0",
+         "maj:min": "8:0",
+         "children": [
+            {
+               "path": "/dev/sda1",
+               "kname": "sda1",
+               "type": "part",
+               "fstype": "ext4",
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                   "/"
+               ],
+               "size": 10737418240,
+               "start": 2099200,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:1"
+            },{
+               "path": "/dev/sda2",
+               "kname": "sda2",
+               "type": "part",
+               "fstype": "zfs_member",
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                   null
+               ],
+               "size": 4294967296,
+               "start": 23070720,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:2"
+            },{
+               "path": "/dev/sda14",
+               "kname": "sda14",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "21686148-6449-6e6f-744e-656564454649",
+               "mountpoints": [
+                   null
+               ],
+               "size": 4194304,
+               "start": 2048,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:14"
+            },{
+               "path": "/dev/sda15",
+               "kname": "sda15",
+               "type": "part",
+               "fstype": "vfat",
+               "pttype": "gpt",
+               "parttype": "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+               "mountpoints": [
+                   "/boot/efi"
+               ],
+               "size": 111149056,
+               "start": 10240,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:15"
+            },{
+               "path": "/dev/sda16",
+               "kname": "sda16",
+               "type": "part",
+               "fstype": "ext4",
+               "pttype": "gpt",
+               "parttype": "bc13c2ff-59e6-4262-a352-b275fd6f7172",
+               "mountpoints": [
+                   "/boot"
+               ],
+               "size": 957350400,
+               "start": 227328,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "259:1"
+            }
+         ]
+      },{
+         "path": "/dev/sdb",
+         "kname": "sdb",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "sail-fleet-zfsproof4-b-d1",
+         "maj:min": "8:16",
+         "children": [
+            {
+               "path": "/dev/sdb1",
+               "kname": "sdb1",
+               "type": "part",
+               "fstype": "linux_raid_member",
+               "pttype": "gpt",
+               "parttype": "a19d880f-05fc-4d3b-a006-743f0f84911e",
+               "mountpoints": [
+                   null
+               ],
+               "size": 8589934592,
+               "start": 2048,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:17",
+               "children": [
+                  {
+                     "path": "/dev/md0",
+                     "kname": "md0",
+                     "type": "raid1",
+                     "fstype": "ext4",
+                     "pttype": null,
+                     "parttype": null,
+                     "mountpoints": [
+                         "/mnt/md0"
+                     ],
+                     "size": 8580497408,
+                     "start": null,
+                     "model": null,
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": "9:0"
+                  }
+               ]
+            },{
+               "path": "/dev/sdb2",
+               "kname": "sdb2",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                   null
+               ],
+               "size": 12882804736,
+               "start": 16779264,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:18"
+            }
+         ]
+      },{
+         "path": "/dev/sdc",
+         "kname": "sdc",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "sail-fleet-zfsproof4-b-d2",
+         "maj:min": "8:32",
+         "children": [
+            {
+               "path": "/dev/sdc1",
+               "kname": "sdc1",
+               "type": "part",
+               "fstype": "linux_raid_member",
+               "pttype": "gpt",
+               "parttype": "a19d880f-05fc-4d3b-a006-743f0f84911e",
+               "mountpoints": [
+                   null
+               ],
+               "size": 8589934592,
+               "start": 2048,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:33",
+               "children": [
+                  {
+                     "path": "/dev/md0",
+                     "kname": "md0",
+                     "type": "raid1",
+                     "fstype": "ext4",
+                     "pttype": null,
+                     "parttype": null,
+                     "mountpoints": [
+                         "/mnt/md0"
+                     ],
+                     "size": 8580497408,
+                     "start": null,
+                     "model": null,
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": "9:0"
+                  }
+               ]
+            },{
+               "path": "/dev/sdc2",
+               "kname": "sdc2",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                   null
+               ],
+               "size": 12882804736,
+               "start": 16779264,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:34"
+            }
+         ]
+      },{
+         "path": "/dev/sdd",
+         "kname": "sdd",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "sail-fleet-zfsproof4-b-d3",
+         "maj:min": "8:48",
+         "children": [
+            {
+               "path": "/dev/sdd1",
+               "kname": "sdd1",
+               "type": "part",
+               "fstype": "crypto_LUKS",
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                   null
+               ],
+               "size": 3221225472,
+               "start": 2048,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:49",
+               "children": [
+                  {
+                     "path": "/dev/mapper/proofluks",
+                     "kname": "dm-0",
+                     "type": "crypt",
+                     "fstype": null,
+                     "pttype": null,
+                     "parttype": null,
+                     "mountpoints": [
+                         null
+                     ],
+                     "size": 3204448256,
+                     "start": null,
+                     "model": null,
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": "252:0"
+                  }
+               ]
+            },{
+               "path": "/dev/sdd2",
+               "kname": "sdd2",
+               "type": "part",
+               "fstype": "LVM2_member",
+               "pttype": "gpt",
+               "parttype": "e6d6d379-f507-44c2-a23c-238f2a3df928",
+               "mountpoints": [
+                   null
+               ],
+               "size": 3221225472,
+               "start": 6293504,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:50",
+               "children": [
+                  {
+                     "path": "/dev/mapper/proofvg-prooflv",
+                     "kname": "dm-1",
+                     "type": "lvm",
+                     "fstype": null,
+                     "pttype": null,
+                     "parttype": null,
+                     "mountpoints": [
+                         null
+                     ],
+                     "size": 1073741824,
+                     "start": null,
+                     "model": null,
+                     "rm": false,
+                     "wwn": null,
+                     "serial": null,
+                     "maj:min": "252:1"
+                  }
+               ]
+            },{
+               "path": "/dev/sdd3",
+               "kname": "sdd3",
+               "type": "part",
+               "fstype": "ext4",
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                   "/srv/d3"
+               ],
+               "size": 3221225472,
+               "start": 12584960,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:51"
+            },{
+               "path": "/dev/sdd4",
+               "kname": "sdd4",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7",
+               "mountpoints": [
+                   null
+               ],
+               "size": 2147483648,
+               "start": 18876416,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:52"
+            },{
+               "path": "/dev/sdd5",
+               "kname": "sdd5",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "0fc63daf-8483-4772-8e79-3d69d8477de4",
+               "mountpoints": [
+                   null
+               ],
+               "size": 2147483648,
+               "start": 23070720,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:53"
+            }
+         ]
+      },{
+         "path": "/dev/sde",
+         "kname": "sde",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "sail-fleet-zfsproof4-b-d4",
+         "maj:min": "8:64",
+         "children": [
+            {
+               "path": "/dev/sde1",
+               "kname": "sde1",
+               "type": "part",
+               "fstype": "zfs_member",
+               "pttype": "gpt",
+               "parttype": "6a898cc3-1dd2-11b2-99a6-080020736631",
+               "mountpoints": [
+                   null
+               ],
+               "size": 21464350720,
+               "start": 2048,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:65"
+            },{
+               "path": "/dev/sde9",
+               "kname": "sde9",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "6a945a3b-1dd2-11b2-99a6-080020736631",
+               "mountpoints": [
+                   null
+               ],
+               "size": 8388608,
+               "start": 41924608,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:73"
+            }
+         ]
+      },{
+         "path": "/dev/sdf",
+         "kname": "sdf",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "sail-fleet-zfsproof4-b-d5",
+         "maj:min": "8:80",
+         "children": [
+            {
+               "path": "/dev/sdf1",
+               "kname": "sdf1",
+               "type": "part",
+               "fstype": "zfs_member",
+               "pttype": "gpt",
+               "parttype": "6a898cc3-1dd2-11b2-99a6-080020736631",
+               "mountpoints": [
+                   null
+               ],
+               "size": 21464350720,
+               "start": 2048,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:81"
+            },{
+               "path": "/dev/sdf9",
+               "kname": "sdf9",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "6a945a3b-1dd2-11b2-99a6-080020736631",
+               "mountpoints": [
+                   null
+               ],
+               "size": 8388608,
+               "start": 41924608,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:89"
+            }
+         ]
+      },{
+         "path": "/dev/sdg",
+         "kname": "sdg",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": 21474836480,
+         "start": null,
+         "model": "PersistentDisk",
+         "rm": false,
+         "wwn": null,
+         "serial": "sail-fleet-zfsproof4-b-d6",
+         "maj:min": "8:96",
+         "children": [
+            {
+               "path": "/dev/sdg1",
+               "kname": "sdg1",
+               "type": "part",
+               "fstype": "zfs_member",
+               "pttype": "gpt",
+               "parttype": "6a898cc3-1dd2-11b2-99a6-080020736631",
+               "mountpoints": [
+                   null
+               ],
+               "size": 21464350720,
+               "start": 2048,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:97"
+            },{
+               "path": "/dev/sdg9",
+               "kname": "sdg9",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "6a945a3b-1dd2-11b2-99a6-080020736631",
+               "mountpoints": [
+                   null
+               ],
+               "size": 8388608,
+               "start": 41924608,
+               "model": null,
+               "rm": false,
+               "wwn": null,
+               "serial": null,
+               "maj:min": "8:105"
+            }
+         ]
+      },{
+         "path": "/dev/nvme0n1",
+         "kname": "nvme0n1",
+         "type": "disk",
+         "fstype": null,
+         "pttype": "gpt",
+         "parttype": null,
+         "mountpoints": [
+             null
+         ],
+         "size": 402653184000,
+         "start": null,
+         "model": "nvme_card",
+         "rm": false,
+         "wwn": "nvme.1ae0-6e766d655f63617264-6e766d655f63617264-00000001",
+         "serial": "local-nvme-ssd-0",
+         "maj:min": "259:0",
+         "children": [
+            {
+               "path": "/dev/nvme0n1p1",
+               "kname": "nvme0n1p1",
+               "type": "part",
+               "fstype": "zfs_member",
+               "pttype": "gpt",
+               "parttype": "6a898cc3-1dd2-11b2-99a6-080020736631",
+               "mountpoints": [
+                   null
+               ],
+               "size": 402569297920,
+               "start": 16384,
+               "model": null,
+               "rm": false,
+               "wwn": "nvme.1ae0-6e766d655f63617264-6e766d655f63617264-00000001",
+               "serial": null,
+               "maj:min": "259:2"
+            },{
+               "path": "/dev/nvme0n1p9",
+               "kname": "nvme0n1p9",
+               "type": "part",
+               "fstype": null,
+               "pttype": "gpt",
+               "parttype": "6a945a3b-1dd2-11b2-99a6-080020736631",
+               "mountpoints": [
+                   null
+               ],
+               "size": 67108864,
+               "start": 786284544,
+               "model": null,
+               "rm": false,
+               "wwn": "nvme.1ae0-6e766d655f63617264-6e766d655f63617264-00000001",
+               "serial": null,
+               "maj:min": "259:3"
+            }
+         ]
+      }
+   ]
+}
