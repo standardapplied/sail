@@ -101,6 +101,14 @@ import Testing
         #expect(server.pulled == 3)
     }
 
+    @Test func aRefusalWhoseConnectionBreaksAfterItArrivedIsStillTheServersRefusal() async throws {
+        let refusal = try Exchange("refusal-invalid-bearer-token")
+        let server = try ScriptedStreams([.answer(refusal.status, [Array(refusal.body)], .drop)])
+        await #expect(throws: SailError.refused(Refusal(code: .known(.invalidBearerToken), message: "Bearer token is invalid."))) {
+            try await read(follow(server))
+        }
+    }
+
     @Test func aFailedAnswerWithNoRefusalIsUnexpected() async throws {
         let server = try ScriptedStreams([.answer(405, [])])
         await #expect(throws: SailError.unexpected(route: "GET /v1/events/stream", status: 405)) {
@@ -145,6 +153,30 @@ import Testing
             .event(ServerSentEvent(type: "message", data: "three", lastEventID: "3")),
         ])
         #expect(server.pulled == 2)
+    }
+
+    @Test func aReaderCancelledWhileItWaitsToReconnectStopsWithoutAskingAgain() async throws {
+        let server = try ScriptedStreams([.stream([], .close), .stream([], .close)])
+        let source = EventSource(transport: server, request: HTTPRequest(method: .get, path: "/v1/events/stream")) { _ in
+            throw CancellationError()
+        }
+        #expect(try await read(source) == [.connected(lastEventID: "")])
+        #expect(await server.requests.count == 1)
+    }
+
+    @Test func aSourceFollowedWithoutASeamReadsItsStreamAndStopsWhenItsReaderIsCancelled() async throws {
+        let server = try ScriptedStreams([.stream([Array("data: one\n\n".utf8)], .close)])
+        let source = EventSource(transport: server, request: HTTPRequest(method: .get, path: "/v1/events/stream"))
+        let reader = Task {
+            var updates = source.makeAsyncIterator()
+            let read = [try await updates.next(), try await updates.next()]
+            withUnsafeCurrentTask { $0?.cancel() }
+            return (read, try await updates.next())
+        }
+        let (read, after) = try await reader.value
+        #expect(read == [.connected(lastEventID: ""), .event(ServerSentEvent(type: "message", data: "one", lastEventID: ""))])
+        #expect(after == nil)
+        #expect(await server.requests.count == 1)
     }
 
     @Test func aCancelledReaderStopsWithoutReconnecting() async throws {
@@ -221,7 +253,7 @@ actor ScriptedStreams: Transport {
         /// The server with every stream it allows taken.
         case full
         /// Any other answer.
-        case answer(Int, headers: [String: String] = [:], [[UInt8]])
+        case answer(Int, headers: [String: String] = [:], [[UInt8]], Ending = .close)
         case unreachable
     }
 
@@ -259,8 +291,8 @@ actor ScriptedStreams: Transport {
             return HTTPStream(status: open.status, headers: open.headers, body: body(chunks, ending))
         case .full:
             return HTTPStream(status: full.status, headers: full.headers, body: body([], .close))
-        case let .answer(status, headers, chunks):
-            return HTTPStream(status: status, headers: headers, body: body(chunks, .close))
+        case let .answer(status, headers, chunks, ending):
+            return HTTPStream(status: status, headers: headers, body: body(chunks, ending))
         case .unreachable:
             throw .unreachable("no connection")
         }

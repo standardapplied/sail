@@ -110,6 +110,18 @@ import Testing
         #expect(Signals.shared.count(of: "stop /hang/part-read") == 1)
     }
 
+    @Test func aHeadThatArrivesBeforeItsCallerWaitsIsHandedOverAndALaterOneIgnored() async throws {
+        let head = Handoff<Int>()
+        head.answer(.success(200))
+        head.answer(.success(500))
+        head.answer(.failure(URLError(.cancelled)))
+        #expect(try await head.value() == 200)
+        #expect(try await head.value() == 200)
+        let failed = Handoff<Int>()
+        failed.answer(.failure(URLError(.cancelled)))
+        await #expect(throws: URLError.self) { try await failed.value() }
+    }
+
     @Test func aReaderThatFallsBehindReadsWhatWasHeldAndThenLosesTheStream() async throws {
         let ended = Mutex(0)
         let (backlog, body) = ChunkBacklog.make(limit: 3) { ended.withLock { $0 += 1 } }

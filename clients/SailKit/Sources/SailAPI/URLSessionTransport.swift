@@ -36,7 +36,7 @@ public struct URLSessionTransport: Transport {
         connection.streams.read(task, with: reader)
         task.resume()
         let head = try await reaching {
-            try await withTaskCancellationHandler { try await reader.head() } onCancel: { task.cancel() }
+            try await withTaskCancellationHandler { try await reader.head.value() } onCancel: { task.cancel() }
         }
         return HTTPStream(status: head.status, headers: head.headers, body: body)
     }
@@ -115,7 +115,7 @@ private final class Streams: NSObject, URLSessionDataDelegate, Sendable {
         _ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
         completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void
     ) {
-        reader(of: dataTask)?.answer(.success(Head(status: response.status, headers: response.headers)))
+        reader(of: dataTask)?.head.answer(.success(Head(status: response.status, headers: response.headers)))
         completionHandler(.allow)
     }
 
@@ -128,27 +128,36 @@ private final class Streams: NSObject, URLSessionDataDelegate, Sendable {
     }
 }
 
-/// One streamed request as its caller reads it: its head resumes whoever waits for it once, and
-/// every chunk of its body is queued as it arrives.
-private final class StreamReader: Sendable {
-    private enum Waiting {
-        case nobody
-        case caller(CheckedContinuation<Head, any Error>)
-        case answered(Result<Head, any Error>)
-    }
-
+/// One streamed request as its caller reads it: its head, handed over once, and the chunks of its
+/// body, queued as they arrive.
+private struct StreamReader: Sendable {
+    let head = Handoff<Head>()
     let chunks: ChunkBacklog
-    private let waiting = Mutex(Waiting.nobody)
 
-    init(chunks: ChunkBacklog) {
-        self.chunks = chunks
+    func finish(_ error: (any Error)?) {
+        head.answer(.failure(error ?? URLError(.badServerResponse)))
+        chunks.finish(error)
+    }
+}
+
+/// A value one side hands the other exactly once, whichever arrives first: the answer, or the
+/// caller waiting for it. An answer after the first is ignored.
+package final class Handoff<Value: Sendable>: Sendable {
+    private enum State {
+        case nobody
+        case caller(CheckedContinuation<Value, any Error>)
+        case answered(Result<Value, any Error>)
     }
 
-    func head() async throws -> Head {
+    private let state = Mutex(State.nobody)
+
+    package init() {}
+
+    package func value() async throws -> Value {
         try await withCheckedThrowingContinuation { caller in
-            let answered: Result<Head, any Error>? = waiting.withLock { waiting in
-                guard case let .answered(result) = waiting else {
-                    waiting = .caller(caller)
+            let answered: Result<Value, any Error>? = state.withLock { state in
+                guard case let .answered(result) = state else {
+                    state = .caller(caller)
                     return nil
                 }
                 return result
@@ -159,25 +168,20 @@ private final class StreamReader: Sendable {
         }
     }
 
-    func answer(_ result: Result<Head, any Error>) {
-        let caller: CheckedContinuation<Head, any Error>? = waiting.withLock { waiting in
-            switch waiting {
+    package func answer(_ result: Result<Value, any Error>) {
+        let caller: CheckedContinuation<Value, any Error>? = state.withLock { state in
+            switch state {
             case .nobody:
-                waiting = .answered(result)
+                state = .answered(result)
                 return nil
             case let .caller(caller):
-                waiting = .answered(result)
+                state = .answered(result)
                 return caller
             case .answered:
                 return nil
             }
         }
         caller?.resume(with: result)
-    }
-
-    func finish(_ error: (any Error)?) {
-        answer(.failure(error ?? URLError(.badServerResponse)))
-        chunks.finish(error)
     }
 }
 

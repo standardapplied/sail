@@ -276,6 +276,24 @@ func answer<Response>(
         }
     }
 
+    @Test func anAnswerItsModelRefusesForItsOwnReasonIsUndecodableAsAWhole() {
+        struct Unwilling: Decodable {
+            init(from decoder: any Decoder) throws {
+                throw CancellationError()
+            }
+        }
+        #expect(throws: SailError.undecodable(Undecodable(route: "GET /v1/whoami", field: "(body)", reason: "CancellationError()"))) {
+            try SailJSON.decode(Unwilling.self, from: Data("{}".utf8), route: "GET /v1/whoami")
+        }
+    }
+
+    @Test func aRefusalThatNamesNoFieldErrorsKeepsItsWords() throws {
+        let bare = try Exchange("refusal-room-not-found").altered(at: ["error", "field_errors"], to: nil)
+        #expect(throws: SailError.refused(Refusal(code: .known(.roomNotFound), message: "Room 'nowhere' was not found."))) {
+            try Endpoint.room("nowhere").decode(response(bare))
+        }
+    }
+
     @Test func aRefusalKeepsItsCodeMessageAndFix() async throws {
         let (result, _) = try await answer("refusal-read-only-credential") { client in
             try await client.send(.post(MessagePost(body: "hello"), room: "harbor-design"))

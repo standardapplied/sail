@@ -11,20 +11,13 @@ public enum JSONValue: Hashable, Sendable, Codable {
     case object([String: JSONValue])
 
     public init(from decoder: any Decoder) throws {
-        if var items = try? decoder.unkeyedContainer() {
-            var array: [JSONValue] = []
-            while !items.isAtEnd {
-                array.append(try items.decode(JSONValue.self))
-            }
-            self = .array(array)
-        } else if let fields = try? decoder.container(keyedBy: Key.self) {
-            var object: [String: JSONValue] = [:]
-            for key in fields.allKeys {
-                object[key.stringValue] = try fields.decode(JSONValue.self, forKey: key)
-            }
-            self = .object(object)
+        let value = try decoder.singleValueContainer()
+        if (try? decoder.unkeyedContainer()) != nil {
+            self = .array(try value.decode([JSONValue].self))
+        } else if (try? decoder.container(keyedBy: NoKey.self)) != nil {
+            self = .object(try value.decode([String: JSONValue].self))
         } else {
-            self = try Self.scalar(decoder.singleValueContainer())
+            self = try Self.scalar(value)
         }
     }
 
@@ -57,17 +50,6 @@ public enum JSONValue: Hashable, Sendable, Codable {
         }
     }
 
-    /// Any key an object holds.
-    private struct Key: CodingKey {
-        let stringValue: String
-        let intValue: Int? = nil
-
-        init(stringValue: String) {
-            self.stringValue = stringValue
-        }
-
-        init?(intValue: Int) {
-            nil
-        }
-    }
+    /// Asks whether a value is an object without naming any of its keys.
+    private enum NoKey: CodingKey {}
 }

@@ -49,10 +49,8 @@ package enum SailJSON {
     package static func decode<Value: Decodable>(_ type: Value.Type, from data: Data, route: String) throws(SailError) -> Value {
         do {
             return try decoder().decode(type, from: data)
-        } catch let error as DecodingError {
-            throw .undecodable(undecodable(error, route: route))
         } catch {
-            throw .undecodable(Undecodable(route: route, field: "(body)", reason: "\(error)"))
+            throw .undecodable(undecodable(error, route: route))
         }
     }
 
@@ -107,17 +105,17 @@ package enum SailJSON {
         return decoder
     }
 
-    private static func undecodable(_ error: DecodingError, route: String) -> Undecodable {
+    private static func undecodable(_ error: any Error, route: String) -> Undecodable {
         switch error {
-        case let .keyNotFound(key, context):
+        case let DecodingError.keyNotFound(key, context):
             Undecodable(route: route, field: field(context.codingPath + [key]), reason: "it is missing")
-        case let .valueNotFound(_, context):
+        case let DecodingError.valueNotFound(_, context):
             Undecodable(route: route, field: field(context.codingPath), reason: "it is null")
-        case let .typeMismatch(type, context):
+        case let DecodingError.typeMismatch(type, context):
             Undecodable(route: route, field: field(context.codingPath), reason: "it is not \(type)")
-        case let .dataCorrupted(context):
+        case let DecodingError.dataCorrupted(context):
             Undecodable(route: route, field: field(context.codingPath), reason: context.debugDescription)
-        @unknown default:
+        default:
             Undecodable(route: route, field: "(body)", reason: "\(error)")
         }
     }

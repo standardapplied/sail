@@ -152,6 +152,22 @@ import Testing
         #expect(requests.allSatisfy { $0.headers["Authorization"] == "Bearer tok" })
     }
 
+    @Test func aClientsStreamIsReadWithoutASeamUntilItsReaderIsCancelled() async throws {
+        let golden = try Goldens.bytes("events/room-stream.sse")
+        let server = try ScriptedStreams([.stream([Array(golden[..<(try #require(range(of: "id: 2\n", in: golden))).lowerBound])], .close)])
+        let stream = SailClient(transport: server, token: "tok").events()
+        let reader = Task {
+            var updates = stream.makeAsyncIterator()
+            let read = [try await updates.next(), try await updates.next(), try await updates.next()]
+            withUnsafeCurrentTask { $0?.cancel() }
+            return (read.compactMap(\.?.summary), try await updates.next())
+        }
+        let (read, after) = try await reader.value
+        #expect(read == ["connected after nil", "event unnumbered", "event 1"])
+        #expect(after == nil)
+        #expect(await server.requests.map(\.path) == ["/v1/events/stream"])
+    }
+
     @Test func theClientAsksForTheNewestEventsAndReadsTheServersAnswer() async throws {
         let exchange = try Exchange("events-recent")
         let server = RecordedServer([exchange])
@@ -176,7 +192,11 @@ import Testing
             type: .known(.agentSessionStopped), agent: "sail", host: "box",
             data: ["exit_code": .integer(2), "run_id": .string("run-1"), "source": .string("sync")]
         ))
-        let page = RecentEvents(limit: all.count, returned: all.count, events: all)
+        let nested = Event(
+            timestamp: stopped.timestamp, project: "harbor", type: .unknown("ferry_docked"), agent: "mast", host: "laptop",
+            data: ["berth": .object(["north": .integer(4), "tide": .null, "draft": .number(12.5)])]
+        )
+        let page = RecentEvents(limit: all.count + 1, returned: all.count + 1, events: all + [nested])
         #expect(try SailJSON.decode(RecentEvents.self, from: SailJSON.encode(page), route: "cache") == page)
     }
 }
