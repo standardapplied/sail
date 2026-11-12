@@ -71,22 +71,26 @@ public final class ApiRouter implements HttpHandler, RouteTable {
   private final ApiAuth auth;
   private final RateLimitGate rateLimits;
   private final AgentLogStreamer agentStreamer;
+  private final Optional<TerminalTickets> terminal;
   private final List<Route<Handler>> routes;
 
   /**
    * A router answering as the box {@code operations} stands for ({@link Operations#boxFde}): the
    * box the box gate decides on, and the box dispatch, the room seats and a run's provenance are
-   * local to.
+   * local to. {@code terminal} issues terminal tickets; with none, the ticket route answers as a
+   * path no route serves.
    */
   public ApiRouter(
       Operations operations,
       ApiAuth auth,
       RateLimitGate rateLimits,
-      AgentLogStreamer agentStreamer) {
+      AgentLogStreamer agentStreamer,
+      Optional<TerminalTickets> terminal) {
     this.operations = operations;
     this.auth = auth;
     this.rateLimits = rateLimits;
     this.agentStreamer = Objects.requireNonNull(agentStreamer, "agentStreamer");
+    this.terminal = Objects.requireNonNull(terminal, "terminal");
     this.routes = table();
   }
 
@@ -201,6 +205,8 @@ public final class ApiRouter implements HttpHandler, RouteTable {
         route(GET, "/v1/reviews/{review}", reads, this::reviewDetail),
         route(POST, "/v1/reviews/{review}/approve", journal, this::approveReview),
         route(POST, "/v1/reviews/{review}/dismiss/{finding}", journal, this::dismissFinding),
+        route(POST, "/v1/terminal/tickets", Gate.TERMINAL, this::terminalTicket),
+        route(Route.ANY, "/v1/terminal/tickets", unserved, ApiRouter::absent),
         route(GET, "/v1/runs", reads, this::runs),
         route(
             GET,
@@ -629,6 +635,15 @@ public final class ApiRouter implements HttpHandler, RouteTable {
     operations.projectFiles(call.project());
     sharedPath(call, call.project());
     throw methodNotAllowed();
+  }
+
+  /**
+   * A terminal ticket for the caller, issued for the credential it presented here; as a path no
+   * route serves on a box that offers no terminal over the network.
+   */
+  private ApiResponse terminalTicket(Call call) throws IOException {
+    var tickets = terminal.orElseThrow(ApiRouter::notFound);
+    return ApiResponse.created(tickets.issue(ApiAuth.credentialOf(call.exchange()), call.body()));
   }
 
   private ApiResponse dispatch(Call call) throws IOException {

@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.ListenConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.HandleChange;
@@ -210,6 +211,34 @@ class HostConfigSetCommandTest {
     var reloaded = HostYaml.fromMap(YamlUtil.parseMap(YamlUtil.dumpToString(updated.toMap())));
 
     assertEquals(10485760, reloaded.limits().fileMax());
+  }
+
+  @Test
+  void theListenAddressesAreSetEachBesideTheOtherAndAWildcardIsRefusedNamingItsKey() {
+    var api = HostConfigSetCommand.applyChange(BASE, "api-listen", "100.64.0.7:7071");
+    var both = HostConfigSetCommand.applyChange(api, "terminal-listen", "100.64.0.7:7072");
+
+    assertEquals(new ListenConfig("100.64.0.7:7071", "100.64.0.7:7072"), both.listen());
+    assertEquals("10.0.0.1", both.serverIp());
+    assertEquals(
+        new ListenConfig(null, "100.64.0.7:7072"),
+        HostConfigSetCommand.applyChange(both, "api-listen", "none").listen(),
+        "a door set to none is closed");
+    assertEquals(
+        "'api-listen' and 'terminal-listen' both name 100.64.0.7:7072; each door needs an address"
+            + " and port of its own.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> HostConfigSetCommand.applyChange(both, "api-listen", "100.64.0.7:7072"))
+            .getMessage());
+    HostConfigSetCommand.validate("terminal-listen", "none");
+    assertEquals(
+        "'terminal-listen' is '0.0.0.0:7072', a wildcard, which would listen on every network the"
+            + " box is on. Name the box's address on the private network, e.g. 100.64.0.7:7071.",
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> HostConfigSetCommand.validate("terminal-listen", "0.0.0.0:7072"))
+            .getMessage());
   }
 
   @Test

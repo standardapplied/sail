@@ -73,13 +73,15 @@ jobs:
       - name: Build native image
         run: mvn package -Pnative -DskipTests -Djacoco.skip=true -Dspotless.check.skip=true
 
-      # The pty probe runs on both systems: a release whose binary skips it, or fails it, stops here.
+      # The pty and TCP door probes run on both systems: a release whose binary skips either, or fails
+      # it, stops here.
       - name: Smoke test
         run: |
           ./sail-infra/target/sail -V
           selftest=$(./sail-infra/target/sail _pty-selftest)
           echo "$selftest"
           grep -qx 'pty-selftest: ok' <<< "$selftest"
+          grep -qx 'tcp-selftest: ok' <<< "$selftest"
 
       - name: Rename binary
         run: mv sail-infra/target/sail sail-infra/target/${{ matrix.binary-name }}

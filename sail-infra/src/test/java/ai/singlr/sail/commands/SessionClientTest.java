@@ -45,6 +45,9 @@ class SessionClientTest {
             token -> new PtyIdentity.Person(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
             new PtyAdmission() {
               @Override
+              public void box(PtyIdentity.Person who) {}
+
+              @Override
               public void project(String project, PtyIdentity.Person who) {}
 
               @Override
@@ -111,6 +114,9 @@ class SessionClientTest {
             64 * 1024,
             token -> new PtyIdentity.Person(new Actor("uday", Role.MEMBER, Actor.Lane.API)),
             new PtyAdmission() {
+              @Override
+              public void box(PtyIdentity.Person who) {}
+
               @Override
               public void project(String project, PtyIdentity.Person who) {}
 

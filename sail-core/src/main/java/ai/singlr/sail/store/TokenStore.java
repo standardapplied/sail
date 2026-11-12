@@ -7,12 +7,8 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Secrets;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -78,7 +74,14 @@ public final class TokenStore {
 
   /** Resolves a live token, or empty if unknown or expired. An expired row is pruned on lookup. */
   public Optional<TokenInfo> validate(String token) {
-    var hash = sha256(token);
+    return validateHash(sha256(token));
+  }
+
+  /**
+   * As {@link #validate}, for the token whose hash is {@code hash}: the terminal host keeps only a
+   * ticket's credential hash, and resolves it by that.
+   */
+  public Optional<TokenInfo> validateHash(String hash) {
     var result = db.queryOne(SELECT + " WHERE t.token_hash = ?", TokenStore::map, hash);
     if (result.isEmpty()) {
       return Optional.empty();
@@ -116,12 +119,6 @@ public final class TokenStore {
   }
 
   static String sha256(String input) {
-    try {
-      var digest = MessageDigest.getInstance("SHA-256");
-      var hash = digest.digest(input.getBytes(StandardCharsets.UTF_8));
-      return HexFormat.of().formatHex(hash);
-    } catch (NoSuchAlgorithmException e) {
-      throw new RuntimeException("SHA-256 not available", e);
-    }
+    return Secrets.hash(input);
   }
 }

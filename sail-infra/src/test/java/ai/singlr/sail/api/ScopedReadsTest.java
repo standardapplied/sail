@@ -350,7 +350,9 @@ class ScopedReadsTest {
     var streamer = new AgentLogStreamer(auth, runs::findById, specs::findById, () -> "main");
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext(
-        "/", new ApiRouter(recording(operations), auth, new RateLimitGate(), streamer));
+        "/",
+        new ApiRouter(
+            recording(operations), auth, new RateLimitGate(), streamer, Optional.empty()));
     server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
     server.start();
   }

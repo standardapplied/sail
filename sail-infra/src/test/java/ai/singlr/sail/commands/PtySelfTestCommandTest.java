@@ -25,6 +25,11 @@ class PtySelfTestCommandTest {
     assertDoesNotThrow(PtySelfTestCommand::ptyProbe);
   }
 
+  @Test
+  void theTcpProbeOpensASessionWithATicketOverLoopbackAndHearsItsEcho() {
+    assertDoesNotThrow(PtySelfTestCommand::tcpProbe);
+  }
+
   /** systemd's descriptor store, which only Linux has. */
   @Test
   @EnabledOnOs(OS.LINUX)

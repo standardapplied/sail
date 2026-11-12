@@ -33,7 +33,9 @@ Usage:
                                 resolves the same everywhere; different fields merge; a conversation
                                 reads the same on every box
   ci/fleet inside RUN           apply acme on client and observer; each role at the in-container spec
-                                CLI and at the HTTP API Mast calls
+                                CLI and at the HTTP API Mast calls; from main, over client's private address,
+                                a ticket from the API opens a session over TCP that echoes a line, and the
+                                same ticket is refused a second time
   ci/fleet rooms RUN            client opens a room over HTTP; who may post in it at each door, and the
                                 conversation reads the same on every box; no other project's room leaks
   ci/fleet access RUN           the access matrix's rows, at each door that offers them: client comments on
@@ -556,6 +558,92 @@ inside() {
     http_door "$run" client client 201 POST /v1/specs '{"project":"acme","id":"http-client","title":"over http"}'
   check "$run" "over HTTP, client cannot create a spec in beta" \
     http_door "$run" client client 404 POST /v1/specs '{"project":"beta","id":"http-beta","title":"over http"}'
+  check "$run" "from main, over client's private address, a ticket opens a session over TCP that echoes a line, and is refused a second time" \
+    direct_terminal "$run"
+}
+
+readonly LISTEN_PRIVATELY='set -eu
+ip=$1
+sudo sail host config set api-listen "$ip:7071" > /dev/null
+sudo sail host config set terminal-listen "$ip:7072" > /dev/null
+sudo systemctl restart sail-api sail-pty-host
+for attempt in $(seq 1 30); do
+  curl -sf "http://$ip:7071/v1/health" > /dev/null && break
+  sleep 1
+done
+sudo sail server token revoke direct-client > /dev/null 2>&1 || true
+sudo sail server token create direct-client member --fde client 2>/dev/null | sed -n 2p | tr -d " "'
+
+readonly DIRECT_TERMINAL='import json, socket, struct, sys, urllib.request
+ip, token = sys.argv[1], sys.stdin.readline().strip()
+def text(value):
+    raw = value.encode()
+    return struct.pack(">i", len(raw)) + raw
+def frame(kind, payload=b""):
+    return struct.pack(">i", 1 + len(payload)) + bytes([kind]) + payload
+def exactly(conn, count):
+    data = b""
+    while len(data) < count:
+        more = conn.recv(count - len(data))
+        if not more:
+            raise SystemExit("the host closed the connection")
+        data += more
+    return data
+def read(conn):
+    payload = exactly(conn, struct.unpack(">i", exactly(conn, 4))[0])
+    return payload[0], payload[1:]
+def present(ticket):
+    conn = socket.create_connection((ip, 7072), timeout=30)
+    conn.sendall(b"SAILPTY3")
+    if exactly(conn, 8) != b"SAILPTY3":
+        raise SystemExit("not a sail pty host")
+    conn.sendall(frame(9, text(ticket)))
+    return conn, read(conn)
+asked = urllib.request.Request(
+    "http://%s:7071/v1/terminal/tickets" % ip,
+    data=json.dumps({"action": "open", "project": "acme"}).encode(),
+    headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"})
+ticket = json.load(urllib.request.urlopen(asked, timeout=30))["ticket"]
+conn, (kind, _) = present(ticket)
+if kind != 32:
+    raise SystemExit("the ticket was not welcomed: frame %d" % kind)
+create = text("direct") + struct.pack(">i", 0) + text("/tmp") + text("acme") + text("")
+conn.sendall(frame(1, create + struct.pack(">ii", 80, 24)))
+conn.sendall(frame(2, text("direct") + b"\x01"))
+line = b"echo $((6*7))-over-tcp\r"
+conn.sendall(frame(3, struct.pack(">q", 1) + struct.pack(">i", len(line)) + line))
+seen = b""
+while b"42-over-tcp" not in seen:
+    kind, payload = read(conn)
+    if kind == 31:
+        raise SystemExit("refused: %r" % payload)
+    if kind == 20:
+        seen += payload[12:]
+print("the session echoed 42-over-tcp over TCP")
+again, (kind, payload) = present(ticket)
+if kind != 31 or b"presented already" not in payload:
+    raise SystemExit("the second presentation was not refused as used: frame %d" % kind)
+print("the same ticket, presented again, is refused")'
+
+readonly CLOSE_PRIVATELY='sudo sail host config set api-listen none > /dev/null
+sudo sail host config set terminal-listen none > /dev/null
+sudo systemctl restart sail-api sail-pty-host
+sudo sail server token revoke direct-client > /dev/null 2>&1 || true'
+
+direct_terminal() {
+  local run=$1 ip token status=0
+  ip=$(internal_ip "$run" client)
+  [[ -n $ip ]] || { echo "client has no address"; return 1; }
+  token=$(on "$run" client "cat > /tmp/sail-listen-privately && bash /tmp/sail-listen-privately $ip" <<< "$LISTEN_PRIVATELY")
+  if [[ -z $token ]]; then
+    echo "no token for client"
+    status=1
+  else
+    on "$run" main "cat > /tmp/sail-direct-terminal.py" <<< "$DIRECT_TERMINAL" || status=1
+    [[ $status == 0 ]] && { on "$run" main "python3 /tmp/sail-direct-terminal.py $ip" <<< "$token" || status=1; }
+  fi
+  on "$run" client "cat > /tmp/sail-close-privately && bash /tmp/sail-close-privately" <<< "$CLOSE_PRIVATELY" || status=1
+  return $status
 }
 
 says_in_order() {
