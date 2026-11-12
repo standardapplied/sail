@@ -442,6 +442,10 @@ class PtySessionHostHandoffTest {
     }
   }
 
+  /**
+   * The command waits for a line the test types once attached: an ended session cannot be attached,
+   * and a command that ended on its own could beat the attach.
+   */
   @Test
   void aCreateDiscardsAStaleExitFileAndSidecarFromAPreviousLife() throws Exception {
     var sessions = Files.createDirectories(dir.resolve("sessions"));
@@ -450,8 +454,9 @@ class PtySessionHostHandoffTest {
         var owner = connect("tok-uday")) {
       Files.writeString(files.exit(), "42");
       Files.writeString(files.meta(), "stale");
-      create(owner, "again", "exit 0");
+      create(owner, "again", "read a; exit 0");
       attach(owner, "again", true);
+      PtyWire.write(owner, new PtyMessage.Input(1, "\n".getBytes(StandardCharsets.UTF_8)));
       assertEquals("exited(0)", awaitEnd(owner).reason(), "never the previous life's 42");
       assertNotEquals("stale", Files.readString(files.meta()));
       PtyWire.write(owner, new PtyMessage.Kill("again"));
