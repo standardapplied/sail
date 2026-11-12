@@ -92,12 +92,8 @@ public final class SpecAuthority implements WriteAuthority {
         : WriteAuthority.refused(
             actor,
             Taking.of(
-                attribution.made(
-                    Resources.spec(
-                        id,
-                        projectOf(next),
-                        assigneeOf(held),
-                        Snapshots.text(held, Snapshots.CREATOR))),
+                Resources.spec(
+                    id, projectOf(next), assigneeOf(held), Snapshots.text(held, Snapshots.CREATOR)),
                 Action.CHANGE));
   }
 
