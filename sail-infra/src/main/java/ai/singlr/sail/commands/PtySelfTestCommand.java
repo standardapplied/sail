@@ -8,6 +8,8 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.SailVersion;
 import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.pty.Account;
+import ai.singlr.sail.pty.Locales;
 import ai.singlr.sail.pty.Pty;
 import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyEvents;
@@ -29,7 +31,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -253,8 +254,8 @@ public final class PtySelfTestCommand implements Callable<Integer> {
                   argv.addAll(List.of("sh", "-c", "exec cat", "selftest"));
                   return argv;
                 }),
-            new PtySessionHost.Network(
-                Optional.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0)),
+            PtySessionHost.Network.listening(
+                new InetSocketAddress(InetAddress.getLoopbackAddress(), 0),
                 System::nanoTime,
                 hash -> {
                   if (!Secrets.hash(credential).equals(hash)) {
@@ -304,16 +305,19 @@ public final class PtySelfTestCommand implements Callable<Integer> {
   }
 
   /**
-   * Starts the local host as {@code _pty-host --local} does, in a temporary directory, and opens a
-   * session in a temporary folder with no command, so the account's login shell runs; has it
-   * evaluate {@code local-$((6*7))}, which its terminal's echo of the typed line never reads as,
-   * detaches, attaches again from a new connection and finds the answer in the replay, then stops.
+   * Starts the local host as {@code _pty-host --local} does, for this account in a temporary home,
+   * and opens a session there with no command, so the account's login shell runs; has it evaluate
+   * {@code local-$((6*7))}, which its terminal's echo of the typed line never reads as, detaches,
+   * attaches again from a new connection and finds the answer in the replay, then stops.
    */
   static void localProbe() throws Exception {
     var dir = Files.createTempDirectory("sail-local");
-    var local = dir.resolve("local");
-    var socket = LocalPtyHost.socketIn(local);
-    try (var host = LocalPtyHost.start(local, LocalPtyAccess.here())) {
+    var account = Account.current();
+    var access =
+        new LocalPtyAccess(
+            new Account(account.name(), dir, account.shell()), System.getenv(), Locales::installed);
+    try (var host = LocalPtyHost.start(access, PtyHostCommand::shimCommand)) {
+      var socket = host.socket();
       try (var first = SocketChannel.open(UnixDomainSocketAddress.of(socket))) {
         converse(
             first,

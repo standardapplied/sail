@@ -32,16 +32,8 @@ import picocli.CommandLine.Help.Ansi;
 public final class RemoteCommandRunner {
 
   private static final Set<String> LOCAL_COMMANDS =
-      Set.of(
-          "--version",
-          "-V",
-          "upgrade",
-          "init",
-          "client",
-          "login",
-          "enroll",
-          "_pty-child",
-          "_pty-selftest");
+      Set.of("--version", "-V", "upgrade", "init", "client", "login", "enroll");
+  private static final Set<String> MACHINE_VERBS = Set.of("_pty-child", "_pty-selftest");
   private static final List<String> LOCAL_TERMINAL_HOST = List.of("_pty-host", "--local");
   private static final Set<String> INTERACTIVE_COMMANDS = Set.of("shell", "exec");
   private static final Set<String> HOST_ONLY_COMMANDS = Set.of("host");
@@ -188,7 +180,17 @@ public final class RemoteCommandRunner {
 
   /** Whether {@code args} run on this machine, never forwarded to the server. */
   static boolean isLocalCommand(String... args) {
-    return LOCAL_COMMANDS.contains(args[0]) || List.of(args).equals(LOCAL_TERMINAL_HOST);
+    return LOCAL_COMMANDS.contains(args[0]) || runsOnThisMachine(args);
+  }
+
+  /**
+   * Whether {@code args} name what only this machine can run, whoever else holds its state: its own
+   * terminal host ({@code _pty-host --local}), the shim that host spawns every session under and
+   * the binary's self-test.
+   */
+  public static boolean runsOnThisMachine(String... args) {
+    return args.length > 0
+        && (MACHINE_VERBS.contains(args[0]) || List.of(args).equals(LOCAL_TERMINAL_HOST));
   }
 
   /** Returns the classification of a command for testing. */

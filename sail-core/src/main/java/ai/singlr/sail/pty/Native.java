@@ -31,8 +31,9 @@ final class Native {
    * What differs between the systems the pty layer runs on: the open flag that keeps a terminal
    * from becoming the opener's controlling terminal, the {@code ioctl} requests that set a
    * terminal's size and claim it as the controlling terminal, the width of {@code poll}'s {@code
-   * nfds_t}, whether the service manager keeps descriptors across a restart (systemd's store), and
-   * where {@code struct passwd} keeps an account's home and login shell.
+   * nfds_t}, whether the service manager keeps descriptors across a restart (systemd's store),
+   * where {@code struct passwd} keeps an account's home and login shell, and {@code newlocale}'s
+   * mask for the character type.
    */
   record Platform(
       int oNoctty,
@@ -41,18 +42,29 @@ final class Native {
       ValueLayout nfdsT,
       boolean descriptorStore,
       long pwDir,
-      long pwShell) {}
+      long pwShell,
+      int lcCtypeMask) {}
 
-  /** glibc's {@code pwd.h}: name, passwd, uid, gid, gecos, dir, shell. */
+  /**
+   * glibc's {@code pwd.h}: name, passwd, uid, gid, gecos, dir, shell; {@code LC_CTYPE} is category
+   * 0.
+   */
   static final Platform LINUX =
-      new Platform(0x100, 0x5414L, 0x540EL, ValueLayout.JAVA_LONG, true, 32, 40);
+      new Platform(0x100, 0x5414L, 0x540EL, ValueLayout.JAVA_LONG, true, 32, 40, 1);
 
   /**
    * XNU's {@code fcntl.h} and {@code ttycom.h}: {@code _IOW('t', 103, struct winsize)}; Apple's
-   * {@code pwd.h} keeps a change time and a class before the gecos.
+   * {@code pwd.h} keeps a change time and a class before the gecos; {@code xlocale.h}'s {@code
+   * LC_CTYPE_MASK} is {@code 1 << 1}.
    */
   static final Platform DARWIN =
-      new Platform(0x20000, 0x80087467L, 0x20007461L, ValueLayout.JAVA_INT, false, 48, 56);
+      new Platform(0x20000, 0x80087467L, 0x20007461L, ValueLayout.JAVA_INT, false, 48, 56, 2);
+
+  /** {@code SIGHUP}, the same number on every system the pty layer runs on. */
+  static final int SIGHUP = 1;
+
+  /** {@code SIGTERM}, the same number on every system the pty layer runs on. */
+  static final int SIGTERM = 15;
 
   static final Platform PLATFORM = platform(System.getProperty("os.name", ""));
 
@@ -114,6 +126,23 @@ final class Native {
               ValueLayout.ADDRESS),
           Linker.Option.firstVariadicArg(2),
           CAPTURE_ERRNO);
+
+  private static final MethodHandle KILL =
+      downcall(
+          "kill",
+          FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
+
+  /**
+   * Sends {@code signal} to process {@code pid}; one that is already gone is no failure, since
+   * there is nothing left to tell.
+   */
+  static void kill(long pid, int signal) {
+    try {
+      var unused = (int) KILL.invokeExact((int) pid, signal);
+    } catch (Throwable t) {
+      throw new IllegalStateException("kill failed", t);
+    }
+  }
 
   /** Opens {@code terminal} read-write, never as the opener's controlling terminal. */
   static int openTerminal(String terminal) throws IOException {

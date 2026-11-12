@@ -28,14 +28,7 @@ import sun.misc.Signal;
  */
 public final class PtyChildShim {
 
-  private static final int SIGHUP = 1;
   private static final int SIGINT = 2;
-  private static final int SIGTERM = 15;
-
-  private static final MethodHandle KILL =
-      Native.downcall(
-          "kill",
-          FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
   private static final MethodHandle SIGNAL =
       Native.downcall(
           "signal",
@@ -57,11 +50,15 @@ public final class PtyChildShim {
   /**
    * {@code java -cp <this class path> PtyChildShim <exit file>}, the command {@code argv} follows:
    * the shim a host run from a class path spawns, as the native image's is its {@code _pty-child}.
+   * It keeps no perf-data file: writing one moves HotSpot through {@code /tmp} and back, and a
+   * folder its person may enter but not read is one it cannot come back to, so the session would
+   * run elsewhere.
    */
   public static List<String> onClassPath(Path exitFile) {
     return List.of(
         Path.of(System.getProperty("java.home"), "bin", "java").toString(),
         "--enable-native-access=ALL-UNNAMED",
+        "-XX:-UsePerfData",
         "-cp",
         System.getProperty("java.class.path"),
         PtyChildShim.class.getName(),
@@ -79,7 +76,10 @@ public final class PtyChildShim {
 
   /**
    * Claims the terminal the host named, or, when it named none, runs on the terminal already on
-   * standard input: hosts started before 0.67.0 hand the shim its terminal already claimed.
+   * standard input: hosts started before 0.67.0 hand the shim its terminal already claimed. A
+   * {@code SIGHUP} or {@code SIGTERM} is passed to the command through a future, since the command
+   * runs before {@code start()} has returned its {@link Process}: a signal that lands in that gap
+   * waits for the handle rather than being dropped.
    */
   public static int run(Path exitFile, List<String> argv) throws IOException {
     var terminal = System.getenv(Pty.TERMINAL);
@@ -92,9 +92,11 @@ public final class PtyChildShim {
               + ": the shim runs only as the pty host spawns it.");
     }
     var child = new CompletableFuture<Process>();
-    restoreDefault(SIGHUP, SIGINT, SIGTERM);
-    Signal.handle(new Signal("HUP"), signal -> child.thenAccept(p -> forward(p, SIGHUP)));
-    Signal.handle(new Signal("TERM"), signal -> child.thenAccept(p -> forward(p, SIGTERM)));
+    restoreDefault(Native.SIGHUP, SIGINT, Native.SIGTERM);
+    Signal.handle(
+        new Signal("HUP"), signal -> child.thenAccept(p -> Native.kill(p.pid(), Native.SIGHUP)));
+    Signal.handle(
+        new Signal("TERM"), signal -> child.thenAccept(p -> Native.kill(p.pid(), Native.SIGTERM)));
     Signal.handle(new Signal("INT"), signal -> {});
     try {
       var command = new ProcessBuilder(argv).inheritIO();
@@ -185,19 +187,6 @@ public final class PtyChildShim {
       }
     } catch (Throwable t) {
       throw new IllegalStateException("signal reset failed", t);
-    }
-  }
-
-  /**
-   * Passes {@code signal} to the child. The handler is bound through a future because the child is
-   * running before {@code start()} has returned its {@link Process}: a signal that lands in that
-   * gap waits for the handle rather than being dropped on the floor.
-   */
-  private static void forward(Process child, int signal) {
-    try {
-      var unused = (int) KILL.invokeExact((int) child.pid(), signal);
-    } catch (Throwable t) {
-      throw new IllegalStateException("kill failed", t);
     }
   }
 }

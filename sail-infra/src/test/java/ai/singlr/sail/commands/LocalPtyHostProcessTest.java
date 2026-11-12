@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Main;
 import ai.singlr.sail.pty.Account;
+import ai.singlr.sail.pty.Locales;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -22,7 +23,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -32,12 +32,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * {@code sail _pty-host --local} as the process a launchd agent runs: its own JVM, on a machine
- * whose {@code ~/.sail/config.yaml} names a server, with an environment as bare as a service's
- * ({@code SHELL} naming no shell, no {@code LANG}), {@code SAIL_DATA_DIR} an empty directory, and
- * {@code ssh}, {@code incus} and {@code systemctl} on its {@code PATH} recording any call. The home
- * is made under {@code /tmp}, since a macOS temporary directory leaves little of a socket path's
- * room.
+ * The local terminal host as the process a launchd agent runs: a JVM of its own, with an
+ * environment as bare as a service's ({@code SHELL} naming no shell, no locale), {@code
+ * SAIL_DATA_DIR} an empty directory, and {@code ssh}, {@code incus} and {@code systemctl} on its
+ * {@code PATH} recording any call. The host runs from {@link LocalHostProcess}, the command's own
+ * process shell in a home of the test's; the client-mode routing runs the real {@link Main} on a
+ * machine whose {@code ~/.sail/config.yaml} names a server. The home is made under {@code /tmp},
+ * since a macOS temporary directory leaves little of a socket path's room.
  */
 class LocalPtyHostProcessTest {
 
@@ -46,15 +47,12 @@ class LocalPtyHostProcessTest {
   private Path data;
   private Path calls;
   private final Instant began = Instant.now();
-  private final List<Process> hosts = new ArrayList<>();
+  private final List<Process> started = new ArrayList<>();
 
   @BeforeEach
-  void aClientMachine() throws IOException {
+  void aMachine() throws IOException {
     root = Files.createTempDirectory(Path.of("/tmp"), "sail-lh");
     home = Files.createDirectories(root.resolve("home"));
-    Files.writeString(
-        Files.createDirectories(home.resolve(".sail")).resolve("config.yaml"),
-        "host: server.invalid\n");
     data = Files.createDirectories(root.resolve("data"));
     calls = root.resolve("calls");
     var bin = Files.createDirectories(root.resolve("bin"));
@@ -67,9 +65,9 @@ class LocalPtyHostProcessTest {
 
   @AfterEach
   void leaveNothing() throws IOException {
-    for (var host : hosts) {
-      host.descendants().forEach(ProcessHandle::destroyForcibly);
-      host.destroyForcibly();
+    for (var process : started) {
+      process.descendants().forEach(ProcessHandle::destroyForcibly);
+      process.destroyForcibly();
     }
     LocalPtyHostTest.startedSince(began).forEach(ProcessHandle::destroyForcibly);
     try (var left = Files.walk(root)) {
@@ -83,8 +81,8 @@ class LocalPtyHostProcessTest {
     return home.resolve(".sail").resolve("local").resolve("pty.sock");
   }
 
-  /** A host started as the app's agent starts one; its standard error, line by line. */
-  private record Host(Process process, BlockingQueue<String> said) {
+  /** A process this test started; its standard error, line by line. */
+  private record Run(Process process, BlockingQueue<String> said) {
 
     String awaitLine(String prefix) throws InterruptedException {
       while (true) {
@@ -97,50 +95,74 @@ class LocalPtyHostProcessTest {
         }
       }
     }
+
+    /** Its exit status, once it exits within the step, and every line it said. */
+    List<String> ended() throws InterruptedException {
+      assertTrue(
+          process.waitFor(LocalPtyHostTest.STEP.toMillis(), TimeUnit.MILLISECONDS),
+          "it exited within the step");
+      var lines = new ArrayList<String>();
+      String line;
+      while ((line = said.poll(LocalPtyHostTest.STEP.toMillis(), TimeUnit.MILLISECONDS)) != null
+          && !line.equals(EOF)) {
+        lines.add(line);
+      }
+      return lines;
+    }
   }
 
-  private Host host() throws IOException {
-    var builder =
-        new ProcessBuilder(
-            Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-            "--enable-native-access=ALL-UNNAMED",
-            "-Duser.home=" + home,
-            "-cp",
-            System.getProperty("java.class.path"),
-            Main.class.getName(),
-            "_pty-host",
-            "--local");
+  private static final String EOF = "\u0000";
+
+  /** {@code main} of {@code entry} with {@code args}, in this machine's bare environment. */
+  private Run run(Class<?> entry, String... args) throws IOException {
+    var command =
+        new ArrayList<>(
+            List.of(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "--enable-native-access=ALL-UNNAMED",
+                "-Duser.home=" + home,
+                "-cp",
+                System.getProperty("java.class.path"),
+                entry.getName()));
+    command.addAll(List.of(args));
+    var builder = new ProcessBuilder(command);
     var env = builder.environment();
-    env.remove("LANG");
-    env.remove("LC_ALL");
+    for (var locale : List.of("LANG", "LC_ALL", "LC_CTYPE")) {
+      env.remove(locale);
+    }
     env.put("HOME", home.toString());
     env.put("SHELL", "/nonexistent/shell");
     env.put("SAIL_DATA_DIR", data.toString());
     env.put("PATH", root.resolve("bin") + ":" + System.getenv("PATH"));
     builder.redirectInput(ProcessBuilder.Redirect.from(Path.of("/dev/null").toFile()));
-    builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+    builder.redirectErrorStream(true);
     var process = builder.start();
-    hosts.add(process);
+    started.add(process);
     var said = new LinkedBlockingQueue<String>();
     Thread.ofVirtual()
         .start(
             () -> {
               try (var lines =
                   new BufferedReader(
-                      new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8))) {
+                      new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
                 lines.lines().forEach(said::add);
               } catch (IOException gone) {
                 var unused = gone;
+              } finally {
+                said.add(EOF);
               }
             });
-    return new Host(process, said);
+    return new Run(process, said);
   }
 
-  /** Scenarios 10 and 12, and scenario 1 under a service's bare environment. */
+  private Run host() throws IOException {
+    return run(LocalHostProcess.class, home.toString());
+  }
+
+  /** Scenario 12, and scenario 1 under a service's bare environment. */
   @Test
-  void onAMachineWithAClientConfigTheLocalHostRunsHereTouchingNoStoreIncusOrNetwork()
-      throws Exception {
-    var account = Account.current();
+  void theLocalHostRunsASessionTouchingNoStoreIncusOrNetwork() throws Exception {
+    var account = LocalPtyHostTest.at(home);
     var work = Files.createDirectories(root.resolve("work"));
     var host = host();
     assertEquals(
@@ -152,7 +174,7 @@ class LocalPtyHostProcessTest {
       client.attach("here");
       client.type(LocalPtyHostTest.Client.PROBE);
       assertEquals(
-          "@42@" + account.shell() + " -l@" + work.toRealPath() + "@xterm-256color@",
+          "@42@" + account.shell() + " -l@" + work.toRealPath() + "@xterm-256color@UTF-8@",
           client.probed());
     }
     try (var client = LocalPtyHostTest.Client.connect(socket())) {
@@ -167,7 +189,9 @@ class LocalPtyHostProcessTest {
               + account.name()
               + "@"
               + account.shell()
-              + "@en_US.UTF-8@",
+              + "@"
+              + (Locales.installed("C.UTF-8") ? "C.UTF-8" : "en_US.UTF-8")
+              + "@",
           client.probed());
 
       assertEquals(List.of(), internetSockets(host.process().pid()), "no port, no connection");
@@ -177,9 +201,9 @@ class LocalPtyHostProcessTest {
       }
       try (var sail = Files.list(home.resolve(".sail"))) {
         assertEquals(
-            Set.of(home.resolve(".sail/config.yaml"), home.resolve(".sail/local")),
-            Set.copyOf(sail.toList()),
-            "nothing but the client config and the local host's own directory");
+            List.of(home.resolve(".sail/local")),
+            sail.toList(),
+            "nothing but the local host's own directory");
       }
       try (var anywhere = Files.walk(root)) {
         assertEquals(
@@ -207,21 +231,51 @@ class LocalPtyHostProcessTest {
       boot = client.boot();
     }
 
-    var second = host();
-    assertTrue(second.process().waitFor(LocalPtyHostTest.STEP.toMillis(), TimeUnit.MILLISECONDS));
+    var second = host().ended();
 
-    assertEquals(1, second.process().exitValue());
     assertEquals(
-        "A terminal host already serves "
-            + Account.current().name()
-            + " on this machine, at "
-            + socket()
-            + ": connect to it there, or stop it before starting another.",
-        second.awaitLine("A terminal host"));
+        List.of(
+            "A terminal host already serves "
+                + Account.current().name()
+                + " on this machine, at "
+                + socket()
+                + ": connect to it there, or stop it before starting another."),
+        second);
     try (var client = LocalPtyHostTest.Client.connect(socket())) {
       assertEquals(boot, client.boot());
     }
     assertTrue(first.process().isAlive());
+  }
+
+  /**
+   * Scenario 10 through the real {@code sail}: on a machine whose client config names a server, the
+   * pty verbs run here and nothing reaches {@code ssh}. The shim's refusal outside a host is said
+   * as one sentence, not a stack trace, and the self-test, its local probe included, passes.
+   */
+  @Test
+  void onAMachineWithAClientConfigThePtyVerbsRunHereAndSendNothingToTheServer() throws Exception {
+    Files.writeString(
+        Files.createDirectories(home.resolve(".sail")).resolve("config.yaml"),
+        "host: server.invalid\n");
+
+    var shim =
+        run(Main.class, "_pty-child", "--exit", root.resolve("x.exit").toString(), "--", "true");
+    assertEquals(
+        List.of(
+            "No terminal is named in SAIL_PTY_TERMINAL: the shim runs only as the pty host spawns"
+                + " it."),
+        shim.ended());
+    assertEquals(1, shim.process().exitValue());
+
+    var selftest = run(Main.class, "_pty-selftest");
+    var said = selftest.ended();
+    assertEquals(0, selftest.process().exitValue(), said.toString());
+    assertTrue(said.contains("local-selftest: ok"), said.toString());
+
+    assertFalse(Files.exists(calls), "nothing was sent to the server");
+    try (var dataDir = Files.list(data)) {
+      assertEquals(List.of(), dataDir.toList(), "the data directory stays empty");
+    }
   }
 
   /**

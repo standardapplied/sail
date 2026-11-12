@@ -32,7 +32,6 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -1569,10 +1568,8 @@ class PtySessionHostTest {
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void everyTcpConnectionReleasesItsSlotSoTheDoorServesForAsLongAsItRuns() throws Exception {
     network =
-        new PtySessionHost.Network(
-            Optional.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0)),
-            now::get,
-            holders);
+        PtySessionHost.Network.listening(
+            new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), now::get, holders);
     try (var host = startHost(new PtySessionHost.Limits(32, 16, 4, 256))) {
       for (var i = 0; i < 300; i++) {
         try (var tcp = presentTcp(host, "tkt_" + "0".repeat(64))) {
@@ -1590,10 +1587,8 @@ class PtySessionHostTest {
   @Timeout(value = 120, unit = TimeUnit.SECONDS)
   void aTcpConnectionReleasesItsSlotExactlyOnceWhateverStageItEndsAt() throws Exception {
     network =
-        new PtySessionHost.Network(
-            Optional.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0)),
-            now::get,
-            holders);
+        PtySessionHost.Network.listening(
+            new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), now::get, holders);
     try (var host = startHost(new PtySessionHost.Limits(32, 16, 4, 256));
         var asker = connect("")) {
       var address = host.tcpAddress().orElseThrow();
@@ -1672,10 +1667,8 @@ class PtySessionHostTest {
   @Timeout(value = 60, unit = TimeUnit.SECONDS)
   void connectionsFromTheNetworkNeverLiftOrCrowdOutTheUnixSocketsCap() throws Exception {
     network =
-        new PtySessionHost.Network(
-            Optional.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0)),
-            now::get,
-            holders);
+        PtySessionHost.Network.listening(
+            new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), now::get, holders);
     try (var host = startHost(new PtySessionHost.Limits(32, 16, 2, 256))) {
       for (var i = 0; i < 10; i++) {
         try (var tcp = presentTcp(host, "tkt_" + "0".repeat(64))) {
@@ -1754,10 +1747,8 @@ class PtySessionHostTest {
 
   private PtySessionHost startTcpHost() throws IOException {
     network =
-        new PtySessionHost.Network(
-            Optional.of(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0)),
-            now::get,
-            holders);
+        PtySessionHost.Network.listening(
+            new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), now::get, holders);
     return startHost();
   }
 

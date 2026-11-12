@@ -273,14 +273,6 @@ public final class SailPaths {
     return sailDir().resolve("sessions");
   }
 
-  /**
-   * Where the terminal host that serves this machine's own person ({@code sail _pty-host --local})
-   * keeps its socket and its sessions: {@code ~/.sail/local}, apart from the server's.
-   */
-  public static Path localHostDir() {
-    return sailDir().resolve("local");
-  }
-
   /** Returns true when the current process runs as root — the single privilege check. */
   public static boolean isRoot() {
     return "root".equals(ProcessHandle.current().info().user().orElse(""));

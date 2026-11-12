@@ -14,14 +14,17 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.Account;
+import ai.singlr.sail.pty.Locales;
 import ai.singlr.sail.pty.PtyAdmission;
 import ai.singlr.sail.pty.PtyIdentity;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Predicate;
 
 /**
  * The terminal host's door on a person's own machine ({@link LocalPtyHost}): its one person, and
@@ -39,8 +42,8 @@ import java.util.Map;
  * absolute path and run in once resolved. With no command it runs the account's login shell as a
  * login shell, whose own start-up builds {@code PATH}, in the environment a terminal emulator's
  * login gives it, since a service starts with almost none: {@code HOME}, {@code USER}, {@code
- * LOGNAME} and {@code SHELL} from the account database, and a UTF-8 {@code LANG}, the host's own
- * when it names one.
+ * LOGNAME} and {@code SHELL} from the account database, and a UTF-8 character type ({@link
+ * #locale}).
  */
 final class LocalPtyAccess implements PtyIdentity.Resolver, PtyAdmission {
 
@@ -52,42 +55,68 @@ final class LocalPtyAccess implements PtyIdentity.Resolver, PtyAdmission {
       "The local terminal host opens folders, not projects or rooms: open the session with"
           + " neither, in the folder it runs in.";
 
-  /** The locale a session runs in when the host's own names no UTF-8 one, as Terminal sets. */
-  static final String FALLBACK_LANG = "en_US.UTF-8";
+  /** What decides a program's character type, the first that is set winning. */
+  static final List<String> CHARACTER_TYPE = List.of("LC_ALL", "LC_CTYPE", "LANG");
 
   private final Account account;
   private final PtyIdentity.Person person;
   private final Map<String, String> environment;
 
-  /** The door for {@code account}, whose sessions take {@code hostLang} when it is UTF-8. */
-  LocalPtyAccess(Account account, String hostLang) {
+  /**
+   * The door for {@code account}, whose host runs in {@code hostEnvironment} on a system that has
+   * the locales {@code installed} names.
+   */
+  LocalPtyAccess(
+      Account account, Map<String, String> hostEnvironment, Predicate<String> installed) {
     this.account = account;
     this.person =
         new PtyIdentity.Person(
             new RoleRule(() -> new SyncConfig(null, null, account.name()), null)
                 .principal(RoleRule.Credential.box())
                 .orElseThrow());
-    this.environment =
-        Map.of(
-            "HOME", account.home().toString(),
-            "USER", account.name(),
-            "LOGNAME", account.name(),
-            "SHELL", account.shell().toString(),
-            "LANG", utf8(hostLang));
+    var environment = new HashMap<String, String>();
+    environment.put("HOME", account.home().toString());
+    environment.put("USER", account.name());
+    environment.put("LOGNAME", account.name());
+    environment.put("SHELL", account.shell().toString());
+    environment.putAll(locale(hostEnvironment, installed));
+    this.environment = Map.copyOf(environment);
   }
 
-  /** The door for the account this process runs as, in this process's locale. */
+  /** The door for the account this process runs as, in this process's environment. */
   static LocalPtyAccess here() throws IOException {
-    return new LocalPtyAccess(Account.current(), System.getenv("LANG"));
+    return new LocalPtyAccess(Account.current(), System.getenv(), Locales::installed);
+  }
+
+  /**
+   * What a session's environment adds so that its character type is UTF-8. Nothing when the host's
+   * already is: the first of {@link #CHARACTER_TYPE} it sets names UTF-8. Otherwise {@code C.UTF-8}
+   * where the system has it, else {@code en_US.UTF-8}, as {@code LANG} and as each of the others
+   * the host sets, which would mask it.
+   */
+  static Map<String, String> locale(Map<String, String> host, Predicate<String> installed) {
+    var set = CHARACTER_TYPE.stream().filter(name -> Strings.isNotBlank(host.get(name))).toList();
+    if (!set.isEmpty() && utf8(host.get(set.getFirst()))) {
+      return Map.of();
+    }
+    var chosen = installed.test("C.UTF-8") ? "C.UTF-8" : "en_US.UTF-8";
+    var locale = new HashMap<String, String>();
+    locale.put("LANG", chosen);
+    set.forEach(name -> locale.put(name, chosen));
+    return Map.copyOf(locale);
+  }
+
+  /**
+   * Whether {@code locale} names UTF-8: {@code en_US.UTF-8}, {@code C.utf8}, macOS's bare {@code
+   * UTF-8}.
+   */
+  private static boolean utf8(String locale) {
+    var charset = locale.split("@")[0].toUpperCase(Locale.ROOT).replace("-", "");
+    return charset.equals("UTF8") || charset.endsWith(".UTF8");
   }
 
   Account account() {
     return account;
-  }
-
-  private static String utf8(String lang) {
-    var named = Strings.isBlank(lang) ? "" : lang.toUpperCase(Locale.ROOT).replace("-", "");
-    return named.endsWith(".UTF8") ? lang : FALLBACK_LANG;
   }
 
   @Override

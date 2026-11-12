@@ -50,7 +50,11 @@ public final class PtyHostCommand implements Callable<Integer> {
 
   @Override
   public Integer call() throws Exception {
-    var stop = local ? serveThisMachine() : serveTheBox();
+    return untilTerminated(local ? serveThisMachine(LocalPtyAccess.here()) : serveTheBox());
+  }
+
+  /** Runs until this process is terminated, then {@code stop}s and returns. */
+  static int untilTerminated(Runnable stop) throws InterruptedException {
     var done = new CountDownLatch(1);
     Runtime.getRuntime()
         .addShutdownHook(
@@ -93,13 +97,10 @@ public final class PtyHostCommand implements Callable<Integer> {
     };
   }
 
-  /** This machine's own person's host, which its {@code SIGTERM} stops. */
-  private static Runnable serveThisMachine() throws IOException {
-    var access = LocalPtyAccess.here();
-    var dir = SailPaths.localHostDir();
-    var host = LocalPtyHost.start(dir, access);
-    System.err.println(
-        "pty-host: serving " + access.account().name() + " at " + LocalPtyHost.socketIn(dir));
+  /** The host of {@code access}'s person on this machine, which its {@code SIGTERM} stops. */
+  static Runnable serveThisMachine(LocalPtyAccess access) throws IOException {
+    var host = LocalPtyHost.start(access, PtyHostCommand::shimCommand);
+    System.err.println("pty-host: serving " + access.account().name() + " at " + host.socket());
     return host::close;
   }
 

@@ -948,7 +948,7 @@ class DirectTerminalTest {
   }
 
   private PtySessionHost.Network network(InetSocketAddress address) {
-    return new PtySessionHost.Network(Optional.of(address), clock::get, operations.pty()::holder);
+    return PtySessionHost.Network.listening(address, clock::get, operations.pty()::holder);
   }
 
   /**

@@ -397,8 +397,7 @@ class PtySessionTest {
 
   @Test
   void whatAChildSaysAsItIsEndedReachesItsClientBeforeTheEnding() throws Exception {
-    var session =
-        session("trap 'echo farewell; exit 0' TERM; echo ready; while :; do read x; done");
+    var session = session("trap 'echo farewell; exit 0' HUP; echo ready; while :; do read x; done");
     var client = new Collector();
     session.attach(client, true, "uday");
     client.awaitOutput("ready");
@@ -406,6 +405,43 @@ class PtySessionTest {
     session.close();
 
     assertTrue(client.outputText().contains("farewell"), client.outputText());
+    assertEquals("exited(0)", session.endedReason());
+  }
+
+  /** What a closing terminal does first: a hangup, which an interactive shell ends on at once. */
+  @Test
+  void endingASessionHangsItUpSoAnInteractiveShellEndsAtOnceWithItsHistoryWritten()
+      throws Exception {
+    var history = dir.resolve("history");
+    var session = session("exec bash --norc --noprofile -i");
+    var client = new Collector();
+    var id = session.attach(client, true, "uday");
+    session.input(
+        id,
+        1,
+        ("HISTFILE=" + history + "; echo \"@$((6*7))@\"\n").getBytes(StandardCharsets.UTF_8));
+    client.awaitOutput("@42@");
+
+    session.close();
+
+    assertEquals("exited(129)", session.endedReason(), "the hangup ended it, not a kill");
+    assertTrue(Files.readString(history).contains("echo"), "bash wrote its history");
+  }
+
+  /** A child that rides out the hangup is asked to terminate once the grace has passed. */
+  @Test
+  void aChildThatIgnoresTheHangupIsSentTerminateAfterTheGrace() throws Exception {
+    var session =
+        session(
+            "trap '' HUP; trap 'echo terminated; exit 0' TERM; echo ready; while :; do read x;"
+                + " done");
+    var client = new Collector();
+    session.attach(client, true, "uday");
+    client.awaitOutput("ready");
+
+    session.close();
+
+    assertTrue(client.outputText().contains("terminated"), client.outputText());
     assertEquals("exited(0)", session.endedReason());
   }
 

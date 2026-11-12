@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.pty.Account;
+import ai.singlr.sail.pty.Locales;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyWire;
 import java.io.IOException;
@@ -23,16 +24,18 @@ import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -40,8 +43,10 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * The terminal host wired for this machine's own person ({@code sail _pty-host --local}), through
  * the real {@code PtySessionHost} on a real unix socket and real ptys: one test per scenario of
- * {@code sail-a-terminal-host-on-your-own-machine}. Every wait is bounded by {@link #STEP}, and
- * every process a test starts is gone when it ends, killed if a failure left it.
+ * {@code sail-a-terminal-host-on-your-own-machine}, and one per finding of its first review. The
+ * person is this account, in a home of the test's own, so nothing of the account's real home is
+ * read or written. Every wait is bounded by {@link #STEP}, and every process a test starts is gone
+ * when it ends, killed if a failure left it.
  */
 class LocalPtyHostTest {
 
@@ -51,6 +56,7 @@ class LocalPtyHostTest {
 
   private final Instant began = Instant.now();
   private final List<LocalPtyHost> running = new ArrayList<>();
+  private final AtomicInteger spawns = new AtomicInteger();
 
   @AfterEach
   void leaveNothingRunning() {
@@ -58,12 +64,32 @@ class LocalPtyHostTest {
     startedSince(began).forEach(ProcessHandle::destroyForcibly);
   }
 
-  private LocalPtyHost start() throws IOException {
-    return start(dir.resolve("local"));
+  /** This account, at home in {@code home}. */
+  static Account at(Path home) throws IOException {
+    var account = Account.current();
+    return new Account(account.name(), Files.createDirectories(home), account.shell());
   }
 
-  private LocalPtyHost start(Path where) throws IOException {
-    var host = LocalPtyHost.start(where, new LocalPtyAccess(Account.current(), "C.UTF-8"));
+  private Account person() throws IOException {
+    return at(dir.resolve("home"));
+  }
+
+  private static LocalPtyAccess access(Account account) {
+    return new LocalPtyAccess(account, System.getenv(), Locales::installed);
+  }
+
+  /** The host for {@link #person()}, every spawn it makes counted in {@link #spawns}. */
+  private LocalPtyHost start() throws IOException {
+    return start(person());
+  }
+
+  private LocalPtyHost start(Account account) throws IOException {
+    Function<Path, List<String>> counted =
+        exit -> {
+          spawns.incrementAndGet();
+          return PtyHostCommand.shimCommand(exit);
+        };
+    var host = LocalPtyHost.start(access(account), counted);
     running.add(host);
     return host;
   }
@@ -73,19 +99,35 @@ class LocalPtyHostTest {
     host.close();
   }
 
-  private Path socket() {
-    return LocalPtyHost.socketIn(dir.resolve("local"));
+  private Path socket() throws IOException {
+    return LocalPtyHost.socketOf(person());
+  }
+
+  private Path local() throws IOException {
+    return LocalPtyHost.dirOf(person());
   }
 
   private Path folder(String name) throws IOException {
     return Files.createDirectories(dir.resolve(name));
   }
 
-  /** Scenario 1. */
+  /** {@code ~/.sail} and {@code ~/.sail/local} made as the host makes them. */
+  private Path privateLocal() throws IOException {
+    var owner = PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------"));
+    Files.createDirectory(local().getParent(), owner);
+    return Files.createDirectory(local(), owner);
+  }
+
+  /**
+   * Scenario 1. The login shell answers its command line, its folder, its terminal and its
+   * character set; it runs in a home of the test's own, so no profile of the account's real one
+   * speaks. A {@code sh -c} session, which reads no profile at all, answers the environment the
+   * host gives.
+   */
   @Test
   void aSessionWithNoCommandRunsThePersonsLoginShellInItsFolderWithTheTerminalsEnvironment()
       throws Exception {
-    var account = Account.current();
+    var account = person();
     var work = folder("work");
     start();
     try (var client = Client.connect(socket())) {
@@ -94,7 +136,7 @@ class LocalPtyHostTest {
       client.type(Client.PROBE);
 
       assertEquals(
-          "@42@" + account.shell() + " -l@" + work.toRealPath() + "@xterm-256color@",
+          "@42@" + account.shell() + " -l@" + work.toRealPath() + "@xterm-256color@UTF-8@",
           client.probed());
     }
     try (var client = Client.connect(socket())) {
@@ -110,7 +152,10 @@ class LocalPtyHostTest {
               + account.name()
               + "@"
               + account.shell()
-              + "@C.UTF-8@",
+              + "@"
+              + LocalPtyAccess.locale(System.getenv(), Locales::installed)
+                  .getOrDefault("LANG", System.getenv("LANG"))
+              + "@",
           client.probed());
     }
   }
@@ -151,10 +196,11 @@ class LocalPtyHostTest {
           client.refused(
               new PtyMessage.Create("t", List.of(), work.toString(), "", "design-talk", 80, 24)));
       assertEquals(List.of(), client.list());
+      assertEquals(0, spawns.get(), "nothing was spawned");
     }
   }
 
-  /** Scenario 4, and L2: the socket and its directory are the owner's alone. */
+  /** Scenario 4, and L2: the socket and the directories above it are the owner's alone. */
   @Test
   void aConnectionThatPresentsAnyTokenIsRefusedBeforeASessionIsTouched() throws Exception {
     var work = folder("work");
@@ -173,11 +219,15 @@ class LocalPtyHostTest {
           List.of(new PtyMessage.SessionInfo("mine", "", true, 0, "", "", List.of())),
           owner.list().stream().map(Client::shape).toList());
     }
-    assertEquals("rwx------", permissions(dir.resolve("local")));
+    assertEquals("rwx------", permissions(local().getParent()));
+    assertEquals("rwx------", permissions(local()));
     assertEquals("rwx------", permissions(socket()));
   }
 
-  /** Scenario 5: no folder, a file, a relative path, a blank one, one the person cannot enter. */
+  /**
+   * Scenario 5: no folder, not a folder, a relative path, a blank one, one the person cannot enter.
+   * Every spawn the host makes goes through its shim, which counts them: none is made.
+   */
   @Test
   void aFolderThatIsNotAnExistingDirectoryThePersonMayEnterIsRefusedAndStartsNoProcess()
       throws Exception {
@@ -186,7 +236,6 @@ class LocalPtyHostTest {
     Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
     start();
     try (var client = Client.connect(socket())) {
-      var before = children();
       assertEquals(
           "Refusing folder for session 's': There is no folder '"
               + dir.resolve("gone")
@@ -210,8 +259,11 @@ class LocalPtyHostTest {
               + locked
               + "': name one you may open.",
           client.refused(open(locked.toString())));
-      assertEquals(before, children(), "no process was started");
+      assertEquals(0, spawns.get(), "no process was started");
       assertEquals(List.of(), client.list());
+
+      client.open("there", folder("work"), List.of("sh", "-c", "exec cat"));
+      assertEquals(1, spawns.get(), "the shim counts what the host spawns");
     } finally {
       Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rwx------"));
     }
@@ -222,21 +274,21 @@ class LocalPtyHostTest {
   }
 
   /**
-   * Scenario 6. A cycle of the host first opens what the JDK opens once (its pollers, its process
-   * reaper), so the count after the measured cycle is exact.
+   * Scenario 6. Stopping hangs every session up, as a closing terminal does, so an interactive
+   * shell ends at once and writes its history; a cycle of the host first opens what the JDK opens
+   * once (its pollers, its process reaper), so the count after the measured cycle is exact.
    */
   @Test
-  void stoppingTheHostEndsBothSessionsWithinItsBoundAndLeavesNoProcessOrDescriptor()
+  void stoppingTheHostEndsBothSessionsAtOnceWithTheirHistoryAndLeavesNoProcessOrDescriptor()
       throws Exception {
     var work = folder("work");
-    var warmUp = cycle(work, 1);
+    var warmUp = cycle(work, "warm", 1);
     stop(warmUp.host());
     warmUp.clients().forEach(Client::close);
     var descriptors = openDescriptors();
 
-    var measured = cycle(work, 2);
+    var measured = cycle(work, "shell", 2);
     var processes = startedSince(began);
-    assertFalse(processes.isEmpty(), "the sessions run");
     var stopping = System.nanoTime();
     stop(measured.host());
     var stopped = Duration.ofNanos(System.nanoTime() - stopping);
@@ -248,8 +300,12 @@ class LocalPtyHostTest {
       }
     }
     assertTrue(
-        stopped.compareTo(Duration.ofSeconds(12)) < 0,
-        "an interactive shell ignores SIGTERM, so it is killed at the 5 s escalation: " + stopped);
+        stopped.compareTo(Duration.ofSeconds(3)) < 0,
+        "a hangup ends an interactive shell at once, where SIGTERM waited for the kill: "
+            + stopped);
+    for (var i = 0; i < 2; i++) {
+      assertTrue(Files.exists(dir.resolve("shell-" + i + ".history")), "shell-" + i + " saved");
+    }
     assertEquals(
         List.of(), processes.stream().filter(ProcessHandle::isAlive).toList(), "nothing is left");
     assertEquals(descriptors, openDescriptors());
@@ -257,22 +313,26 @@ class LocalPtyHostTest {
 
   private record Cycle(LocalPtyHost host, List<Client> clients) {}
 
-  /** A host serving {@code sessions} login shells, each with a client attached that saw it run. */
-  private Cycle cycle(Path work, int sessions) throws Exception {
+  /**
+   * A host serving {@code sessions} interactive shells named after {@code name}, each with a client
+   * attached that saw it run and pointed its history at a file of its own.
+   */
+  private Cycle cycle(Path work, String name, int sessions) throws Exception {
     var host = start();
     var clients = new ArrayList<Client>();
     for (var i = 0; i < sessions; i++) {
       var client = Client.connect(socket());
       clients.add(client);
-      client.open("shell-" + i, work, List.of());
-      client.attach("shell-" + i);
-      client.type("echo \"@$((6*7))@\"\n");
+      client.open(name + "-" + i, work, List.of("bash", "--norc", "--noprofile", "-i"));
+      client.attach(name + "-" + i);
+      client.type(
+          "HISTFILE=" + dir.resolve(name + "-" + i + ".history") + "; echo \"@$((6*7))@\"\n");
       client.awaitText("@42@");
     }
     return new Cycle(host, clients);
   }
 
-  /** Scenario 7. */
+  /** Scenario 7: the child floods its terminal as it is hung up. */
   @Test
   void stoppingTheHostAsAChildFloodsItsTerminalOnTheWayOutDoesNotHang() throws Exception {
     var work = folder("work");
@@ -284,7 +344,7 @@ class LocalPtyHostTest {
           List.of(
               "sh",
               "-c",
-              "trap 'yes burst | head -c 1000000; exit 0' TERM; echo ready; while :; do sleep"
+              "trap 'yes burst | head -c 1000000; exit 0' HUP TERM; echo ready; while :; do sleep"
                   + " 0.05; done"));
       client.attach("burst");
       client.awaitText("ready");
@@ -296,11 +356,14 @@ class LocalPtyHostTest {
 
     assertTrue(
         stopped.compareTo(Duration.ofSeconds(4)) < 0,
-        "the stop reads the burst to its end, well inside the 5 s escalation: " + stopped);
+        "the stop reads the burst to its end, well inside the escalation: " + stopped);
     assertEquals(List.of(), processes.stream().filter(ProcessHandle::isAlive).toList());
   }
 
-  /** Scenario 8, within one process; across two, {@code LocalPtyHostProcessTest}. */
+  /**
+   * Scenario 8, within one process, and the lock as another process sees it after the refusal:
+   * still held. Across two processes it is {@code LocalPtyHostProcessTest}'s.
+   */
   @Test
   void aSecondHostForTheSamePersonIsRefusedSayingOneIsRunningAndTheFirstIsUntouched()
       throws Exception {
@@ -314,11 +377,12 @@ class LocalPtyHostTest {
 
       assertEquals(
           "A terminal host already serves "
-              + Account.current().name()
+              + person().name()
               + " on this machine, at "
               + socket()
               + ": connect to it there, or stop it before starting another.",
           refused.getMessage());
+      assertEquals("HELD", LockProbe.from(local().resolve(LocalPtyHost.LOCK)));
       try (var again = Client.connect(socket())) {
         assertEquals(boot, again.boot());
         assertEquals(first.host().bootId(), again.boot());
@@ -327,14 +391,46 @@ class LocalPtyHostTest {
     }
   }
 
+  /**
+   * The lock is let go only after the socket is gone: a successor started while its predecessor is
+   * still stopping is refused, so it never binds a socket the predecessor then deletes.
+   */
+  @Test
+  void aSuccessorCannotStartWhileItsPredecessorIsStillStopping() throws Exception {
+    var first = start();
+    running.remove(first);
+    var closer = new AtomicReference<Thread>();
+    Object successor;
+    synchronized (first.host()) {
+      closer.set(Thread.ofPlatform().start(first::close));
+      var deadline = System.nanoTime() + STEP.toNanos();
+      while (closer.get().getState() != Thread.State.BLOCKED) {
+        assertTrue(System.nanoTime() < deadline, "the stop never reached the host");
+        Thread.onSpinWait();
+      }
+      try {
+        successor = start();
+      } catch (IOException refused) {
+        successor = refused;
+      }
+    }
+    assertTrue(closer.get().join(STEP), "the predecessor stopped");
+
+    assertInstanceOf(IOException.class, successor, "a successor waits for the lock");
+    var next = start();
+    try (var client = Client.connect(next.socket())) {
+      assertEquals(List.of(), client.list());
+    }
+  }
+
   /** Scenario 9. */
   @Test
   void aHostReplacesTheSocketAndLockADeadHostLeftAndServes() throws Exception {
-    var local = Files.createDirectories(dir.resolve("local"));
+    var local = privateLocal();
     try (var dead = ServerSocketChannel.open(StandardProtocolFamily.UNIX)) {
       dead.bind(UnixDomainSocketAddress.of(socket()));
     }
-    Files.writeString(local.resolve("pty.lock"), "");
+    Files.writeString(local.resolve(LocalPtyHost.LOCK), "");
     assertTrue(Files.exists(socket()), "the dead host's socket is left behind");
     assertThrows(IOException.class, () -> SocketChannel.open(UnixDomainSocketAddress.of(socket())));
 
@@ -343,6 +439,24 @@ class LocalPtyHostTest {
     try (var client = Client.connect(socket())) {
       client.open("fresh", folder("work"), List.of("sh", "-c", "exec cat"));
       assertEquals(List.of("fresh"), client.list().stream().map(i -> i.name()).toList());
+    }
+  }
+
+  /** A clean stop leaves no transcript: of the host's directory only its lock remains. */
+  @Test
+  void aCleanStopRemovesEverySessionsTranscriptAndSidecar() throws Exception {
+    var work = folder("work");
+    var host = start();
+    try (var client = Client.connect(socket())) {
+      client.open("one", work, List.of("sh", "-c", "echo ready; exec cat"));
+      client.open("two", work, List.of("sh", "-c", "echo ready; exec cat"));
+    }
+    assertTrue(Files.exists(local().resolve("sessions/one.ring")), "a ring while it runs");
+
+    stop(host);
+
+    try (var left = Files.list(local())) {
+      assertEquals(List.of(local().resolve(LocalPtyHost.LOCK)), left.toList());
     }
   }
 
@@ -368,6 +482,7 @@ class LocalPtyHostTest {
 
   @Test
   void aHostThatCannotStartLetsGoOfThePersonsLockSoTheNextStartIsNotRefused() throws Exception {
+    privateLocal();
     Files.createDirectories(socket().resolve("in-the-way"));
 
     assertThrows(IOException.class, this::start);
@@ -380,43 +495,191 @@ class LocalPtyHostTest {
     }
   }
 
+  /** L2 checked: a link in place of the host's directory is refused, and nothing is made there. */
+  @Test
+  void aLinkInPlaceOfTheHostsDirectoryIsRefusedAndNothingIsMadeWhereItPoints() throws Exception {
+    var elsewhere = folder("elsewhere");
+    Files.setPosixFilePermissions(elsewhere, PosixFilePermissions.fromString("rwxrwxrwx"));
+    Files.createDirectories(local().getParent());
+    Files.setPosixFilePermissions(
+        local().getParent(), PosixFilePermissions.fromString("rwx------"));
+    Files.createSymbolicLink(local(), elsewhere);
+
+    var refused = assertThrows(IOException.class, this::start);
+
+    assertEquals(
+        "This machine's terminal host keeps its socket in "
+            + local()
+            + ", so "
+            + local()
+            + " must be a directory that "
+            + person().name()
+            + " owns and no one else may open, and it is a symbolic link owned by "
+            + person().name()
+            + " with mode "
+            + permissions(local())
+            + ". Remove it, and the host makes the directory itself.",
+        refused.getMessage());
+    try (var made = Files.list(elsewhere)) {
+      assertEquals(List.of(), made.toList(), "nothing was made where the link points");
+    }
+  }
+
+  /** L2 checked: a directory others may open, the host's own or the one above it, is refused. */
+  @Test
+  void aDirectoryOthersMayOpenIsRefusedNamingItsModeAndNothingIsMadeInIt() throws Exception {
+    var sail = Files.createDirectories(local().getParent());
+    Files.setPosixFilePermissions(sail, PosixFilePermissions.fromString("rwxr-xr-x"));
+
+    var above = assertThrows(IOException.class, this::start);
+
+    assertEquals(
+        "This machine's terminal host keeps its socket in "
+            + local()
+            + ", so "
+            + sail
+            + " must be a directory that "
+            + person().name()
+            + " owns and no one else may open, and it is a directory owned by "
+            + person().name()
+            + " with mode rwxr-xr-x. Run 'chmod 700 "
+            + sail
+            + "'.",
+        above.getMessage());
+    assertFalse(Files.exists(local(), LinkOption.NOFOLLOW_LINKS), "nothing was made in it");
+
+    Files.setPosixFilePermissions(sail, PosixFilePermissions.fromString("rwx------"));
+    Files.createDirectory(local());
+    Files.setPosixFilePermissions(local(), PosixFilePermissions.fromString("rwxrwxrwx"));
+
+    var own = assertThrows(IOException.class, this::start);
+
+    assertTrue(own.getMessage().contains("with mode rwxrwxrwx. Run 'chmod 700 "), own.getMessage());
+    try (var made = Files.list(local())) {
+      assertEquals(List.of(), made.toList(), "no socket and no lock in a directory others open");
+    }
+  }
+
+  /** L2 checked: a file in place of the host's directory is refused. */
+  @Test
+  void aFileInPlaceOfTheHostsDirectoryIsRefused() throws Exception {
+    privateLocal();
+    Files.delete(local());
+    Files.writeString(local(), "not a directory");
+
+    var refused = assertThrows(IOException.class, this::start);
+
+    assertTrue(
+        refused.getMessage().endsWith(". Remove it, and the host makes the directory itself."),
+        refused.getMessage());
+    assertTrue(refused.getMessage().contains("it is a file owned by"), refused.getMessage());
+  }
+
+  /** A login shell that cannot be run is refused at start, before any session spawns it. */
+  @Test
+  void aLoginShellThatCannotBeRunIsRefusedAtStartNamingTheAccountDatabase() throws Exception {
+    var account = person();
+    for (var shell : List.of(Path.of("/nonexistent/shell"), Path.of("/etc/passwd"))) {
+      var broken = new Account(account.name(), account.home(), shell);
+
+      var refused = assertThrows(IOException.class, () -> start(broken));
+
+      assertEquals(
+          account.name()
+              + "'s login shell, "
+              + shell
+              + " as the account database names it, is not a program that can be run, so this"
+              + " machine's terminal host has nothing to open a session with. Set one with 'chsh"
+              + " -s <shell>'.",
+          refused.getMessage());
+    }
+    assertEquals(0, spawns.get());
+  }
+
+  /** A ticket is a server's: the local host has no network door to issue one for. */
+  @Test
+  void aTicketRequestHearsThatTicketsComeFromAServer() throws Exception {
+    start();
+    try (var client = Client.connect(socket())) {
+      client.send(new PtyMessage.IssueTicket(PtyMessage.TicketAction.OPEN, "acme", "credential"));
+
+      assertEquals(
+          new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.UNAVAILABLE, LocalPtyHost.NO_DOOR),
+          client.read());
+    }
+  }
+
+  /**
+   * L2's one other credential: the dispatch token the host mints beside its socket lists every
+   * session and ends one, and may neither open nor kill; only the person can read it.
+   */
+  @Test
+  void theDispatchCredentialListsAndEndsSessionsAndNothingMore() throws Exception {
+    var work = folder("work");
+    start();
+    var token = local().resolve("pty-dispatch.token");
+    assertEquals("rw-------", permissions(token));
+    try (var owner = Client.connect(socket())) {
+      owner.open("victim", work, List.of("sh", "-c", "echo ready; exec cat"));
+    }
+    try (var dispatch = Client.raw(socket())) {
+      assertInstanceOf(PtyMessage.Welcome.class, dispatch.hello(Files.readString(token)));
+      assertEquals(
+          List.of("victim"), dispatch.list().stream().map(PtyMessage.SessionInfo::name).toList());
+      for (var refused :
+          List.of(
+              new PtyMessage.Create("x", List.of(), work.toString(), "", "", 80, 24),
+              new PtyMessage.Kill("victim"))) {
+        dispatch.send(refused);
+        assertEquals(
+            "The dispatch authority may only yield and list sessions.",
+            assertInstanceOf(PtyMessage.Err.class, dispatch.answer()).message(),
+            refused.toString());
+      }
+      dispatch.send(new PtyMessage.Yield("victim", "displaced"));
+      assertEquals(new PtyMessage.Ok(), dispatch.answer());
+    }
+    try (var owner = Client.connect(socket())) {
+      assertEquals(List.of(), owner.list());
+    }
+  }
+
   /** Scenario 11, at the limit and one byte past it. */
   @Test
   void aSocketPathLongerThanEverySystemTakesIsRefusedAtStartNamingThePathAndTheLimit()
       throws Exception {
-    var past = localDirWithSocketOf(LocalPtyHost.MAX_SOCKET_PATH_BYTES + 1);
+    var past = homeWithSocketOf(LocalPtyHost.MAX_SOCKET_PATH_BYTES + 1);
 
-    var refused = assertThrows(IOException.class, () -> start(past));
+    var refused = assertThrows(IOException.class, () -> start(at(past)));
 
     assertEquals(
         "This machine's terminal host cannot listen at "
-            + LocalPtyHost.socketIn(past)
+            + LocalPtyHost.socketOf(at(past))
             + ": the path is 103 bytes, and a unix socket's path may be at most 102 bytes on"
             + " every system the host runs on. Run it as an account whose home directory is"
             + " shorter.",
         refused.getMessage());
-    assertFalse(Files.exists(past), "nothing was made");
+    try (var made = Files.list(past)) {
+      assertEquals(List.of(), made.toList(), "nothing was made");
+    }
 
-    var limit = localDirWithSocketOf(LocalPtyHost.MAX_SOCKET_PATH_BYTES);
+    var limit = at(homeWithSocketOf(LocalPtyHost.MAX_SOCKET_PATH_BYTES));
     start(limit);
-    try (var client = Client.connect(LocalPtyHost.socketIn(limit))) {
+    try (var client = Client.connect(LocalPtyHost.socketOf(limit))) {
       assertEquals(List.of(), client.list());
     }
   }
 
-  private Path localDirWithSocketOf(int bytes) {
-    var pad = bytes - dir.toString().length() - "/".length() - "/local/pty.sock".length();
-    var local = dir.resolve("h".repeat(pad)).resolve("local");
-    assertEquals(bytes, LocalPtyHost.socketIn(local).toString().length());
-    return local;
+  private Path homeWithSocketOf(int bytes) {
+    var pad = bytes - dir.toString().length() - "/".length() - "/.sail/local/pty.sock".length();
+    var home = dir.resolve("h".repeat(pad));
+    assertEquals(bytes, home.resolve(".sail/local/pty.sock").toString().length());
+    return home;
   }
 
   private static String permissions(Path path) throws IOException {
-    return PosixFilePermissions.toString(Files.getPosixFilePermissions(path));
-  }
-
-  private static Set<Long> children() {
-    return ProcessHandle.current().children().map(ProcessHandle::pid).collect(Collectors.toSet());
+    return PosixFilePermissions.toString(
+        Files.getPosixFilePermissions(path, LinkOption.NOFOLLOW_LINKS));
   }
 
   /** What this JVM started since {@code instant} and still runs, its children's children too. */
@@ -441,10 +704,11 @@ class LocalPtyHostTest {
 
     /**
      * A line typed into a session's shell that answers who runs it and where: the shell's own
-     * command line, its folder and its terminal, after {@code @42@}, which only an evaluated line
-     * holds, never the terminal's echo of the typed one.
+     * command line, its folder, its terminal and its character set, after {@code @42@}, which only
+     * an evaluated line holds, never the terminal's echo of the typed one.
      */
-    static final String PROBE = "echo \"@$((6*7))@$(ps -o args= -p $$)@$(pwd)@$TERM@\"\n";
+    static final String PROBE =
+        "echo \"@$((6*7))@$(ps -o args= -p $$)@$(pwd)@$TERM@$(locale charmap)@\"\n";
 
     /**
      * A session's command that says what the host put in its environment. {@code sh -c} reads no

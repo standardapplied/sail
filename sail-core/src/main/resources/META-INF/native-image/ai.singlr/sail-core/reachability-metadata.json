@@ -90,6 +90,20 @@
         "parameterTypes": []
       },
       {
+        "returnType": "void*",
+        "parameterTypes": [
+          "jint",
+          "void*",
+          "void*"
+        ]
+      },
+      {
+        "returnType": "void",
+        "parameterTypes": [
+          "void*"
+        ]
+      },
+      {
         "returnType": "jint",
         "parameterTypes": [
           "jint"

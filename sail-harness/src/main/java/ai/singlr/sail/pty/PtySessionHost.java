@@ -148,20 +148,42 @@ public final class PtySessionHost implements AutoCloseable {
 
   /**
    * Where the host listens beside its unix socket, if anywhere, the clock its tickets and its
-   * deadline for connections that present none run on, and who resolves a ticket's credential.
-   * {@link #NONE} listens nowhere else.
+   * deadline for connections that present none run on, who resolves a ticket's credential, and what
+   * a ticket request hears when it listens nowhere else ({@code closed}). {@link #NONE} is a box
+   * that listens nowhere else.
    */
   public record Network(
-      Optional<InetSocketAddress> tcp, LongSupplier clock, PtyIdentity.Holders holders) {
+      Optional<InetSocketAddress> tcp,
+      LongSupplier clock,
+      PtyIdentity.Holders holders,
+      Remedy closed) {
     public static final Network NONE =
-        new Network(Optional.empty(), System::nanoTime, PtyIdentity.Holders.NONE);
+        closed(
+            Remedy.of(
+                "This host listens for no terminal over the network. Name an address with '",
+                Remedy.sail("host config set terminal-listen", "<address>:<port>"),
+                "' and restart the sail-pty-host service."));
+
+    /** Listening nowhere else, a ticket request hearing {@code why}. */
+    public static Network closed(Remedy why) {
+      return new Network(Optional.empty(), System::nanoTime, PtyIdentity.Holders.NONE, why);
+    }
 
     /**
      * Listening on {@code tcp} too, on the system's clock, its tickets' credentials resolved by
      * {@code holders}.
      */
     public static Network on(InetSocketAddress tcp, PtyIdentity.Holders holders) {
-      return new Network(Optional.of(tcp), System::nanoTime, holders);
+      return listening(tcp, System::nanoTime, holders);
+    }
+
+    /**
+     * Listening on {@code tcp} too, on {@code clock}, its tickets' credentials resolved by {@code
+     * holders}.
+     */
+    public static Network listening(
+        InetSocketAddress tcp, LongSupplier clock, PtyIdentity.Holders holders) {
+      return new Network(Optional.of(tcp), clock, holders, NONE.closed());
     }
   }
 
@@ -561,20 +583,16 @@ public final class PtySessionHost implements AutoCloseable {
 
   /**
    * Restricts {@code path} to owner-only. The socket is the identity boundary's only door — a
-   * blank-token connection resolves to the box owner — so no group or other principal may reach it.
-   * A best-effort no-op on a filesystem without POSIX permissions (never the provisioned box).
+   * blank-token connection resolves to the box owner — so no group or other principal may reach it,
+   * and a host that cannot make it so does not start.
    */
-  private static void ownerOnly(java.nio.file.Path path) {
-    try {
-      Files.setPosixFilePermissions(
-          path,
-          EnumSet.of(
-              PosixFilePermission.OWNER_READ,
-              PosixFilePermission.OWNER_WRITE,
-              PosixFilePermission.OWNER_EXECUTE));
-    } catch (UnsupportedOperationException | IOException ignored) {
-      var unused = ignored;
-    }
+  private static void ownerOnly(Path path) throws IOException {
+    Files.setPosixFilePermissions(
+        path,
+        EnumSet.of(
+            PosixFilePermission.OWNER_READ,
+            PosixFilePermission.OWNER_WRITE,
+            PosixFilePermission.OWNER_EXECUTE));
   }
 
   private void acceptLoop() {
@@ -840,12 +858,7 @@ public final class PtySessionHost implements AutoCloseable {
    */
   private PtyMessage issueTicket(PtyMessage.IssueTicket request) {
     if (door.isEmpty()) {
-      return new PtyMessage.TicketRefused(
-          PtyMessage.TicketRefusal.UNAVAILABLE,
-          Remedy.of(
-              "This host listens for no terminal over the network. Name an address with '",
-              Remedy.sail("host config set terminal-listen", "<address>:<port>"),
-              "' and restart the sail-pty-host service."));
+      return new PtyMessage.TicketRefused(PtyMessage.TicketRefusal.UNAVAILABLE, network.closed());
     }
     if (!door.get().listening()) {
       return new PtyMessage.TicketRefused(
